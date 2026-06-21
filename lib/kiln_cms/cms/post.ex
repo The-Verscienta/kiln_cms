@@ -19,6 +19,10 @@ defmodule KilnCMS.CMS.Post do
     type :post
   end
 
+  json_api do
+    type "post"
+  end
+
   paper_trail do
     change_tracking_mode(:changes_only)
     store_action_name?(true)
@@ -35,10 +39,6 @@ defmodule KilnCMS.CMS.Post do
       transition :unpublish, from: :published, to: :draft
       transition :archive, from: [:draft, :in_review, :published], to: :archived
     end
-  end
-
-  json_api do
-    type "post"
   end
 
   postgres do

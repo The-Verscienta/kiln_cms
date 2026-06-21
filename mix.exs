@@ -56,6 +56,7 @@ defmodule KilnCMS.MixProject do
       {:ash_admin, "~> 1.0"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:igniter, "~> 0.5", only: [:dev, :test]},
+      {:usage_rules, "~> 0.1", only: [:dev], runtime: false},
       {:ash_phoenix, "~> 2.0"},
       {:ash_postgres, "~> 2.0"},
       {:ash, "~> 3.0"},

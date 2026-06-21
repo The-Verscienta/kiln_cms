@@ -45,329 +45,254 @@ custom classes must fully style the input
 
 
 <!-- usage-rules-start -->
+<!-- usage-rules-header -->
+# Usage Rules
 
+**IMPORTANT**: Consult these usage rules early and often when working with the packages listed below.
+Before attempting to use any of these packages or to discover if you should use them, review their
+usage rules to understand the correct patterns, conventions, and best practices.
+<!-- usage-rules-header-end -->
+
+<!-- ash_authentication-start -->
+## ash_authentication usage
+_Authentication extension for the Ash Framework._
+
+[ash_authentication usage rules](deps/ash_authentication/usage-rules.md)
+<!-- ash_authentication-end -->
+<!-- ash_json_api-start -->
+## ash_json_api usage
+_The JSON:API extension for the Ash Framework._
+
+[ash_json_api usage rules](deps/ash_json_api/usage-rules.md)
+<!-- ash_json_api-end -->
+<!-- ash_postgres-start -->
+## ash_postgres usage
+_The PostgreSQL data layer for Ash Framework_
+
+[ash_postgres usage rules](deps/ash_postgres/usage-rules.md)
+<!-- ash_postgres-end -->
+<!-- ash_postgres:advanced_features-start -->
+## ash_postgres:advanced_features usage
+[ash_postgres:advanced_features usage rules](deps/ash_postgres/usage-rules/advanced_features.md)
+<!-- ash_postgres:advanced_features-end -->
+<!-- ash_postgres:best_practices-start -->
+## ash_postgres:best_practices usage
+[ash_postgres:best_practices usage rules](deps/ash_postgres/usage-rules/best_practices.md)
+<!-- ash_postgres:best_practices-end -->
+<!-- ash_postgres:check_constraints-start -->
+## ash_postgres:check_constraints usage
+[ash_postgres:check_constraints usage rules](deps/ash_postgres/usage-rules/check_constraints.md)
+<!-- ash_postgres:check_constraints-end -->
+<!-- ash_postgres:configuration-start -->
+## ash_postgres:configuration usage
+[ash_postgres:configuration usage rules](deps/ash_postgres/usage-rules/configuration.md)
+<!-- ash_postgres:configuration-end -->
+<!-- ash_postgres:custom_indexes-start -->
+## ash_postgres:custom_indexes usage
+[ash_postgres:custom_indexes usage rules](deps/ash_postgres/usage-rules/custom_indexes.md)
+<!-- ash_postgres:custom_indexes-end -->
+<!-- ash_postgres:custom_sql_statements-start -->
+## ash_postgres:custom_sql_statements usage
+[ash_postgres:custom_sql_statements usage rules](deps/ash_postgres/usage-rules/custom_sql_statements.md)
+<!-- ash_postgres:custom_sql_statements-end -->
+<!-- ash_postgres:foreign_keys-start -->
+## ash_postgres:foreign_keys usage
+[ash_postgres:foreign_keys usage rules](deps/ash_postgres/usage-rules/foreign_keys.md)
+<!-- ash_postgres:foreign_keys-end -->
+<!-- ash_postgres:migrations-start -->
+## ash_postgres:migrations usage
+[ash_postgres:migrations usage rules](deps/ash_postgres/usage-rules/migrations.md)
+<!-- ash_postgres:migrations-end -->
+<!-- ash_postgres:multitenancy-start -->
+## ash_postgres:multitenancy usage
+[ash_postgres:multitenancy usage rules](deps/ash_postgres/usage-rules/multitenancy.md)
+<!-- ash_postgres:multitenancy-end -->
+<!-- igniter-start -->
+## igniter usage
+_A code generation and project patching framework_
+
+[igniter usage rules](deps/igniter/usage-rules.md)
+<!-- igniter-end -->
+<!-- ash_oban-start -->
+## ash_oban usage
+_The extension for integrating Ash resources with Oban._
+
+[ash_oban usage rules](deps/ash_oban/usage-rules.md)
+<!-- ash_oban-end -->
+<!-- ash_oban:best_practices-start -->
+## ash_oban:best_practices usage
+[ash_oban:best_practices usage rules](deps/ash_oban/usage-rules/best_practices.md)
+<!-- ash_oban:best_practices-end -->
+<!-- ash_oban:debugging_and_error_handling-start -->
+## ash_oban:debugging_and_error_handling usage
+[ash_oban:debugging_and_error_handling usage rules](deps/ash_oban/usage-rules/debugging_and_error_handling.md)
+<!-- ash_oban:debugging_and_error_handling-end -->
+<!-- ash_oban:defining_triggers-start -->
+## ash_oban:defining_triggers usage
+[ash_oban:defining_triggers usage rules](deps/ash_oban/usage-rules/defining_triggers.md)
+<!-- ash_oban:defining_triggers-end -->
+<!-- ash_oban:multi_tenancy_support-start -->
+## ash_oban:multi_tenancy_support usage
+[ash_oban:multi_tenancy_support usage rules](deps/ash_oban/usage-rules/multi_tenancy_support.md)
+<!-- ash_oban:multi_tenancy_support-end -->
+<!-- ash_oban:scheduled_actions-start -->
+## ash_oban:scheduled_actions usage
+[ash_oban:scheduled_actions usage rules](deps/ash_oban/usage-rules/scheduled_actions.md)
+<!-- ash_oban:scheduled_actions-end -->
+<!-- ash_oban:setting_up_ash_oban-start -->
+## ash_oban:setting_up_ash_oban usage
+[ash_oban:setting_up_ash_oban usage rules](deps/ash_oban/usage-rules/setting_up_ash_oban.md)
+<!-- ash_oban:setting_up_ash_oban-end -->
+<!-- ash_oban:triggering_jobs_programmatically-start -->
+## ash_oban:triggering_jobs_programmatically usage
+[ash_oban:triggering_jobs_programmatically usage rules](deps/ash_oban/usage-rules/triggering_jobs_programmatically.md)
+<!-- ash_oban:triggering_jobs_programmatically-end -->
+<!-- ash_oban:working_with_actors-start -->
+## ash_oban:working_with_actors usage
+[ash_oban:working_with_actors usage rules](deps/ash_oban/usage-rules/working_with_actors.md)
+<!-- ash_oban:working_with_actors-end -->
+<!-- phoenix:ecto-start -->
+## phoenix:ecto usage
+[phoenix:ecto usage rules](deps/phoenix/usage-rules/ecto.md)
+<!-- phoenix:ecto-end -->
 <!-- phoenix:elixir-start -->
-## Elixir guidelines
-
-- Elixir lists **do not support index based access via the access syntax**
-
-  **Never do this (invalid)**:
-
-      i = 0
-      mylist = ["blue", "green"]
-      mylist[i]
-
-  Instead, **always** use `Enum.at`, pattern matching, or `List` for index based list access, ie:
-
-      i = 0
-      mylist = ["blue", "green"]
-      Enum.at(mylist, i)
-
-- Elixir variables are immutable, but can be rebound, so for block expressions like `if`, `case`, `cond`, etc
-  you *must* bind the result of the expression to a variable if you want to use it and you CANNOT rebind the result inside the expression, ie:
-
-      # INVALID: we are rebinding inside the `if` and the result never gets assigned
-      if connected?(socket) do
-        socket = assign(socket, :val, val)
-      end
-
-      # VALID: we rebind the result of the `if` to a new variable
-      socket =
-        if connected?(socket) do
-          assign(socket, :val, val)
-        end
-
-- **Never** nest multiple modules in the same file as it can cause cyclic dependencies and compilation errors
-- **Never** use map access syntax (`changeset[:field]`) on structs as they do not implement the Access behaviour by default. For regular structs, you **must** access the fields directly, such as `my_struct.field` or use higher level APIs that are available on the struct if they exist, `Ecto.Changeset.get_field/2` for changesets
-- Elixir's standard library has everything necessary for date and time manipulation. Familiarize yourself with the common `Time`, `Date`, `DateTime`, and `Calendar` interfaces by accessing their documentation as necessary. **Never** install additional dependencies unless asked or for date/time parsing (which you can use the `date_time_parser` package)
-- Don't use `String.to_atom/1` on user input (memory leak risk)
-- Predicate function names should not start with `is_` and should end in a question mark. Names like `is_thing` should be reserved for guards
-- Elixir's builtin OTP primitives like `DynamicSupervisor` and `Registry`, require names in the child spec, such as `{DynamicSupervisor, name: MyApp.MyDynamicSup}`, then you can use `DynamicSupervisor.start_child(MyApp.MyDynamicSup, child_spec)`
-- Use `Task.async_stream(collection, callback, options)` for concurrent enumeration with back-pressure. The majority of times you will want to pass `timeout: :infinity` as option
-
-## Mix guidelines
-
-- Read the docs and options before using tasks (by using `mix help task_name`)
-- To debug test failures, run tests in a specific file with `mix test test/my_test.exs` or run all previously failed tests with `mix test --failed`
-- `mix deps.clean --all` is **almost never needed**. **Avoid** using it unless you have good reason
-
-## Test guidelines
-
-- **Always use `start_supervised!/1`** to start processes in tests as it guarantees cleanup between tests
-- **Avoid** `Process.sleep/1` and `Process.alive?/1` in tests
-  - Instead of sleeping to wait for a process to finish, **always** use `Process.monitor/1` and assert on the DOWN message:
-
-      ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
-
-   - Instead of sleeping to synchronize before the next call, **always** use `_ = :sys.get_state/1` to ensure the process has handled prior messages
+## phoenix:elixir usage
+[phoenix:elixir usage rules](deps/phoenix/usage-rules/elixir.md)
 <!-- phoenix:elixir-end -->
-
-<!-- phoenix:phoenix-start -->
-## Phoenix guidelines
-
-- Remember Phoenix router `scope` blocks include an optional alias which is prefixed for all routes within the scope. **Always** be mindful of this when creating routes within a scope to avoid duplicate module prefixes.
-
-- You **never** need to create your own `alias` for route definitions! The `scope` provides the alias, ie:
-
-      scope "/admin", AppWeb.Admin do
-        pipe_through :browser
-
-        live "/users", UserLive, :index
-      end
-
-  the UserLive route would point to the `AppWeb.Admin.UserLive` module
-
-- `Phoenix.View` no longer is needed or included with Phoenix, don't use it
-<!-- phoenix:phoenix-end -->
-
-
 <!-- phoenix:html-start -->
-## Phoenix HTML guidelines
-
-- Phoenix templates **always** use `~H` or .html.heex files (known as HEEx), **never** use `~E`
-- **Always** use the imported `Phoenix.Component.form/1` and `Phoenix.Component.inputs_for/1` function to build forms. **Never** use `Phoenix.HTML.form_for` or `Phoenix.HTML.inputs_for` as they are outdated
-- When building forms **always** use the already imported `Phoenix.Component.to_form/2` (`assign(socket, form: to_form(...))` and `<.form for={@form} id="msg-form">`), then access those forms in the template via `@form[:field]`
-- **Always** add unique DOM IDs to key elements (like forms, buttons, etc) when writing templates, these IDs can later be used in tests (`<.form for={@form} id="product-form">`)
-- For "app wide" template imports, you can import/alias into the `my_app_web.ex`'s `html_helpers` block, so they will be available to all LiveViews, LiveComponent's, and all modules that do `use MyAppWeb, :html` (replace "my_app" by the actual app name)
-
-- Elixir supports `if/else` but **does NOT support `if/else if` or `if/elsif`**. **Never use `else if` or `elseif` in Elixir**, **always** use `cond` or `case` for multiple conditionals.
-
-  **Never do this (invalid)**:
-
-      <%= if condition do %>
-        ...
-      <% else if other_condition %>
-        ...
-      <% end %>
-
-  Instead **always** do this:
-
-      <%= cond do %>
-        <% condition -> %>
-          ...
-        <% condition2 -> %>
-          ...
-        <% true -> %>
-          ...
-      <% end %>
-
-- HEEx require special tag annotation if you want to insert literal curly's like `{` or `}`. If you want to show a textual code snippet on the page in a `<pre>` or `<code>` block you *must* annotate the parent tag with `phx-no-curly-interpolation`:
-
-      <code phx-no-curly-interpolation>
-        let obj = {key: "val"}
-      </code>
-
-  Within `phx-no-curly-interpolation` annotated tags, you can use `{` and `}` without escaping them, and dynamic Elixir expressions can still be used with `<%= ... %>` syntax
-
-- HEEx class attrs support lists, but you must **always** use list `[...]` syntax. You can use the class list syntax to conditionally add classes, **always do this for multiple class values**:
-
-      <a class={[
-        "px-2 text-white",
-        @some_flag && "py-5",
-        if(@other_condition, do: "border-red-500", else: "border-blue-100"),
-        ...
-      ]}>Text</a>
-
-  and **always** wrap `if`'s inside `{...}` expressions with parens, like done above (`if(@other_condition, do: "...", else: "...")`)
-
-  and **never** do this, since it's invalid (note the missing `[` and `]`):
-
-      <a class={
-        "px-2 text-white",
-        @some_flag && "py-5"
-      }> ...
-      => Raises compile syntax error on invalid HEEx attr syntax
-
-- **Never** use `<% Enum.each %>` or non-for comprehensions for generating template content, instead **always** use `<%= for item <- @collection do %>`
-- HEEx HTML comments use `<%!-- comment --%>`. **Always** use the HEEx HTML comment syntax for template comments (`<%!-- comment --%>`)
-- HEEx allows interpolation via `{...}` and `<%= ... %>`, but the `<%= %>` **only** works within tag bodies. **Always** use the `{...}` syntax for interpolation within tag attributes, and for interpolation of values within tag bodies. **Always** interpolate block constructs (if, cond, case, for) within tag bodies using `<%= ... %>`.
-
-  **Always** do this:
-
-      <div id={@id}>
-        {@my_assign}
-        <%= if @some_block_condition do %>
-          {@another_assign}
-        <% end %>
-      </div>
-
-  and **Never** do this – the program will terminate with a syntax error:
-
-      <%!-- THIS IS INVALID NEVER EVER DO THIS --%>
-      <div id="<%= @invalid_interpolation %>">
-        {if @invalid_block_construct do}
-        {end}
-      </div>
+## phoenix:html usage
+[phoenix:html usage rules](deps/phoenix/usage-rules/html.md)
 <!-- phoenix:html-end -->
-
 <!-- phoenix:liveview-start -->
-## Phoenix LiveView guidelines
+## phoenix:liveview usage
+[phoenix:liveview usage rules](deps/phoenix/usage-rules/liveview.md)
+<!-- phoenix:liveview-end -->
+<!-- phoenix:phoenix-start -->
+## phoenix:phoenix usage
+[phoenix:phoenix usage rules](deps/phoenix/usage-rules/phoenix.md)
+<!-- phoenix:phoenix-end -->
+<!-- usage_rules-start -->
+## usage_rules usage
+_A dev tool for Elixir projects to gather LLM usage rules from dependencies_
 
-- **Never** use the deprecated `live_redirect` and `live_patch` functions, instead **always** use the `<.link navigate={href}>` and  `<.link patch={href}>` in templates, and `push_navigate` and `push_patch` functions LiveViews
-- **Avoid LiveComponent's** unless you have a strong, specific need for them
-- LiveViews should be named like `AppWeb.WeatherLive`, with a `Live` suffix. When you go to add LiveView routes to the router, the default `:browser` scope is **already aliased** with the `AppWeb` module, so you can just do `live "/weather", WeatherLive`
+[usage_rules usage rules](deps/usage_rules/usage-rules.md)
+<!-- usage_rules-end -->
+<!-- usage_rules:elixir-start -->
+## usage_rules:elixir usage
+[usage_rules:elixir usage rules](deps/usage_rules/usage-rules/elixir.md)
+<!-- usage_rules:elixir-end -->
+<!-- usage_rules:otp-start -->
+## usage_rules:otp usage
+[usage_rules:otp usage rules](deps/usage_rules/usage-rules/otp.md)
+<!-- usage_rules:otp-end -->
+<!-- ash_graphql-start -->
+## ash_graphql usage
+_The extension for building GraphQL APIs with Ash_
 
-### LiveView streams
+[ash_graphql usage rules](deps/ash_graphql/usage-rules.md)
+<!-- ash_graphql-end -->
+<!-- ash_graphql:custom_types-start -->
+## ash_graphql:custom_types usage
+[ash_graphql:custom_types usage rules](deps/ash_graphql/usage-rules/custom_types.md)
+<!-- ash_graphql:custom_types-end -->
+<!-- ash_graphql:domain_configuration-start -->
+## ash_graphql:domain_configuration usage
+[ash_graphql:domain_configuration usage rules](deps/ash_graphql/usage-rules/domain_configuration.md)
+<!-- ash_graphql:domain_configuration-end -->
+<!-- ash_graphql:resource_configuration-start -->
+## ash_graphql:resource_configuration usage
+[ash_graphql:resource_configuration usage rules](deps/ash_graphql/usage-rules/resource_configuration.md)
+<!-- ash_graphql:resource_configuration-end -->
+<!-- ash_phoenix-start -->
+## ash_phoenix usage
+_Utilities for integrating Ash and Phoenix_
 
-- **Always** use LiveView streams for collections for assigning regular lists to avoid memory ballooning and runtime termination with the following operations:
-  - basic append of N items - `stream(socket, :messages, [new_msg])`
-  - resetting stream with new items - `stream(socket, :messages, [new_msg], reset: true)` (e.g. for filtering items)
-  - prepend to stream - `stream(socket, :messages, [new_msg], at: -1)`
-  - deleting items - `stream_delete(socket, :messages, msg)`
+[ash_phoenix usage rules](deps/ash_phoenix/usage-rules.md)
+<!-- ash_phoenix-end -->
+<!-- ash_phoenix:best_practices-start -->
+## ash_phoenix:best_practices usage
+[ash_phoenix:best_practices usage rules](deps/ash_phoenix/usage-rules/best_practices.md)
+<!-- ash_phoenix:best_practices-end -->
+<!-- ash_phoenix:debugging_form_submissions-start -->
+## ash_phoenix:debugging_form_submissions usage
+[ash_phoenix:debugging_form_submissions usage rules](deps/ash_phoenix/usage-rules/debugging_form_submissions.md)
+<!-- ash_phoenix:debugging_form_submissions-end -->
+<!-- ash_phoenix:error_handling-start -->
+## ash_phoenix:error_handling usage
+[ash_phoenix:error_handling usage rules](deps/ash_phoenix/usage-rules/error_handling.md)
+<!-- ash_phoenix:error_handling-end -->
+<!-- ash_phoenix:form_integration-start -->
+## ash_phoenix:form_integration usage
+[ash_phoenix:form_integration usage rules](deps/ash_phoenix/usage-rules/form_integration.md)
+<!-- ash_phoenix:form_integration-end -->
+<!-- ash_phoenix:nested_forms-start -->
+## ash_phoenix:nested_forms usage
+[ash_phoenix:nested_forms usage rules](deps/ash_phoenix/usage-rules/nested_forms.md)
+<!-- ash_phoenix:nested_forms-end -->
+<!-- ash_phoenix:union_forms-start -->
+## ash_phoenix:union_forms usage
+[ash_phoenix:union_forms usage rules](deps/ash_phoenix/usage-rules/union_forms.md)
+<!-- ash_phoenix:union_forms-end -->
+<!-- ash-start -->
+## ash usage
+_A declarative, extensible framework for building Elixir applications._
 
-- When using the `stream/3` interfaces in the LiveView, the LiveView template must 1) always set `phx-update="stream"` on the parent element, with a DOM id on the parent element like `id="messages"` and 2) consume the `@streams.stream_name` collection and use the id as the DOM id for each child. For a call like `stream(socket, :messages, [new_msg])` in the LiveView, the template would be:
-
-      <div id="messages" phx-update="stream">
-        <div :for={{id, msg} <- @streams.messages} id={id}>
-          {msg.text}
-        </div>
-      </div>
-
-- LiveView streams are *not* enumerable, so you cannot use `Enum.filter/2` or `Enum.reject/2` on them. Instead, if you want to filter, prune, or refresh a list of items on the UI, you **must refetch the data and re-stream the entire stream collection, passing reset: true**:
-
-      def handle_event("filter", %{"filter" => filter}, socket) do
-        # re-fetch the messages based on the filter
-        messages = list_messages(filter)
-
-        {:noreply,
-         socket
-         |> assign(:messages_empty?, messages == [])
-         # reset the stream with the new messages
-         |> stream(:messages, messages, reset: true)}
-      end
-
-- LiveView streams *do not support counting or empty states*. If you need to display a count, you must track it using a separate assign. For empty states, you can use Tailwind classes:
-
-      <div id="tasks" phx-update="stream">
-        <div class="hidden only:block">No tasks yet</div>
-        <div :for={{id, task} <- @streams.tasks} id={id}>
-          {task.name}
-        </div>
-      </div>
-
-  The above only works if the empty state is the only HTML block alongside the stream for-comprehension.
-
-- When updating an assign that should change content inside any streamed item(s), you MUST re-stream the items
-  along with the updated assign:
-
-      def handle_event("edit_message", %{"message_id" => message_id}, socket) do
-        message = Chat.get_message!(message_id)
-        edit_form = to_form(Chat.change_message(message, %{content: message.content}))
-
-        # re-insert message so @editing_message_id toggle logic takes effect for that stream item
-        {:noreply,
-         socket
-         |> stream_insert(:messages, message)
-         |> assign(:editing_message_id, String.to_integer(message_id))
-         |> assign(:edit_form, edit_form)}
-      end
-
-  And in the template:
-
-      <div id="messages" phx-update="stream">
-        <div :for={{id, message} <- @streams.messages} id={id} class="flex group">
-          {message.username}
-          <%= if @editing_message_id == message.id do %>
-            <%!-- Edit mode --%>
-            <.form for={@edit_form} id="edit-form-#{message.id}" phx-submit="save_edit">
-              ...
-            </.form>
-          <% end %>
-        </div>
-      </div>
-
-- **Never** use the deprecated `phx-update="append"` or `phx-update="prepend"` for collections
-
-### LiveView JavaScript interop
-
-- Remember anytime you use `phx-hook="MyHook"` and that JS hook manages its own DOM, you **must** also set the `phx-update="ignore"` attribute
-- **Always** provide an unique DOM id alongside `phx-hook` otherwise a compiler error will be raised
-
-LiveView hooks come in two flavors, 1) colocated js hooks for "inline" scripts defined inside HEEx,
-and 2) external `phx-hook` annotations where JavaScript object literals are defined and passed to the `LiveSocket` constructor.
-
-#### Inline colocated js hooks
-
-**Never** write raw embedded `<script>` tags in heex as they are incompatible with LiveView.
-Instead, **always use a colocated js hook script tag (`:type={Phoenix.LiveView.ColocatedHook}`)
-when writing scripts inside the template**:
-
-    <input type="text" name="user[phone_number]" id="user-phone-number" phx-hook=".PhoneNumber" />
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".PhoneNumber">
-      export default {
-        mounted() {
-          this.el.addEventListener("input", e => {
-            let match = this.el.value.replace(/\D/g, "").match(/^(\d{3})(\d{3})(\d{4})$/)
-            if(match) {
-              this.el.value = `${match[1]}-${match[2]}-${match[3]}`
-            }
-          })
-        }
-      }
-    </script>
-
-- colocated hooks are automatically integrated into the app.js bundle
-- colocated hooks names **MUST ALWAYS** start with a `.` prefix, i.e. `.PhoneNumber`
-
-#### External phx-hook
-
-External JS hooks (`<div id="myhook" phx-hook="MyHook">`) must be placed in `assets/js/` and passed to the
-LiveSocket constructor:
-
-    const MyHook = {
-      mounted() { ... }
-    }
-    let liveSocket = new LiveSocket("/live", Socket, {
-      hooks: { MyHook }
-    });
-
-#### Pushing events between client and server
-
-Use LiveView's `push_event/3` when you need to push events/data to the client for a phx-hook to handle.
-**Always** return or rebind the socket on `push_event/3` when pushing events:
-
-    # re-bind socket so we maintain event state to be pushed
-    socket = push_event(socket, "my_event", %{...})
-
-    # or return the modified socket directly:
-    def handle_event("some_event", _, socket) do
-      {:noreply, push_event(socket, "my_event", %{...})}
-    end
-
-Pushed events can then be picked up in a JS hook with `this.handleEvent`:
-
-    mounted() {
-      this.handleEvent("my_event", data => console.log("from server:", data));
-    }
-
-Clients can also push an event to the server and receive a reply with `this.pushEvent`:
-
-    mounted() {
-      this.el.addEventListener("click", e => {
-        this.pushEvent("my_event", { one: 1 }, reply => console.log("got reply from server:", reply));
-      })
-    }
-
-Where the server handled it via:
-
-    def handle_event("my_event", %{"one" => 1}, socket) do
-      {:reply, %{two: 2}, socket}
-    end
-
-### LiveView tests
-
-- `Phoenix.LiveViewTest` module and `LazyHTML` (included) for making your assertions
-- Form tests are driven by `Phoenix.LiveViewTest`'s `render_submit/2` and `render_change/2` functions
-- Come up with a step-by-step test plan that splits major test cases into small, isolated files. You may start with simpler tests that verify content exists, gradually add interaction tests
-- **Always reference the key element IDs you added in the LiveView templates in your tests** for `Phoenix.LiveViewTest` functions like `element/2`, `has_element/2`, selectors, etc
-- **Never** tests again raw HTML, **always** use `element/2`, `has_element/2`, and similar: `assert has_element?(view, "#my-form")`
-- Instead of relying on testing text content, which can change, favor testing for the presence of key elements
-- Focus on testing outcomes rather than implementation details
-- Be aware that `Phoenix.Component` functions like `<.form>` might produce different HTML than expected. Test against the output HTML structure, not your mental model of what you expect it to be
-- When facing test failures with element selectors, add debug statements to print the actual HTML, but use `LazyHTML` selectors to limit the output, ie:
-
-      html = render(view)
-      document = LazyHTML.from_fragment(html)
-      matches = LazyHTML.filter(document, "your-complex-selector")
-      IO.inspect(matches, label: "Matches")
+[ash usage rules](deps/ash/usage-rules.md)
+<!-- ash-end -->
+<!-- ash:actions-start -->
+## ash:actions usage
+[ash:actions usage rules](deps/ash/usage-rules/actions.md)
+<!-- ash:actions-end -->
+<!-- ash:aggregates-start -->
+## ash:aggregates usage
+[ash:aggregates usage rules](deps/ash/usage-rules/aggregates.md)
+<!-- ash:aggregates-end -->
+<!-- ash:authorization-start -->
+## ash:authorization usage
+[ash:authorization usage rules](deps/ash/usage-rules/authorization.md)
+<!-- ash:authorization-end -->
+<!-- ash:calculations-start -->
+## ash:calculations usage
+[ash:calculations usage rules](deps/ash/usage-rules/calculations.md)
+<!-- ash:calculations-end -->
+<!-- ash:code_interfaces-start -->
+## ash:code_interfaces usage
+[ash:code_interfaces usage rules](deps/ash/usage-rules/code_interfaces.md)
+<!-- ash:code_interfaces-end -->
+<!-- ash:code_structure-start -->
+## ash:code_structure usage
+[ash:code_structure usage rules](deps/ash/usage-rules/code_structure.md)
+<!-- ash:code_structure-end -->
+<!-- ash:data_layers-start -->
+## ash:data_layers usage
+[ash:data_layers usage rules](deps/ash/usage-rules/data_layers.md)
+<!-- ash:data_layers-end -->
+<!-- ash:exist_expressions-start -->
+## ash:exist_expressions usage
+[ash:exist_expressions usage rules](deps/ash/usage-rules/exist_expressions.md)
+<!-- ash:exist_expressions-end -->
+<!-- ash:generating_code-start -->
+## ash:generating_code usage
+[ash:generating_code usage rules](deps/ash/usage-rules/generating_code.md)
+<!-- ash:generating_code-end -->
+<!-- ash:migrations-start -->
+## ash:migrations usage
+[ash:migrations usage rules](deps/ash/usage-rules/migrations.md)
+<!-- ash:migrations-end -->
+<!-- ash:query_filter-start -->
+## ash:query_filter usage
+[ash:query_filter usage rules](deps/ash/usage-rules/query_filter.md)
+<!-- ash:query_filter-end -->
+<!-- ash:querying_data-start -->
+## ash:querying_data usage
+[ash:querying_data usage rules](deps/ash/usage-rules/querying_data.md)
+<!-- ash:querying_data-end -->
+<!-- ash:relationships-start -->
+## ash:relationships usage
+[ash:relationships usage rules](deps/ash/usage-rules/relationships.md)
+<!-- ash:relationships-end -->
+<!-- ash:testing-start -->
+## ash:testing usage
+[ash:testing usage rules](deps/ash/usage-rules/testing.md)
+<!-- ash:testing-end -->
+<!-- usage-rules-end -->

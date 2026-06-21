@@ -9,12 +9,14 @@
 #
 # Credentials default to dev-only values and can be overridden with the
 # ADMIN_EMAIL / ADMIN_PASSWORD / EDITOR_EMAIL / EDITOR_PASSWORD env vars.
+#
+# Per the Ash usage rules, all data access goes through the domain code
+# interfaces (`Accounts.*` / `CMS.*`) rather than raw `Ash.create!/read!`.
 
-require Ash.Query
-import Ash.Expr
-
+alias KilnCMS.Accounts
 alias KilnCMS.Accounts.User
-alias KilnCMS.CMS.{Page, Post}
+
+alias KilnCMS.CMS
 
 # --- Users -----------------------------------------------------------------
 
@@ -22,8 +24,8 @@ alias KilnCMS.CMS.{Page, Post}
 # :viewer so self-registration can't escalate), and we want the demo accounts
 # pre-confirmed, so seed them directly via Ash.Seed.
 seed_user = fn email, password, role ->
-  case User |> Ash.Query.filter(email == ^email) |> Ash.read_one!(authorize?: false) do
-    nil ->
+  case Accounts.get_user_by_email(email, not_found_error?: false, authorize?: false) do
+    {:ok, nil} ->
       user =
         Ash.Seed.seed!(User, %{
           email: email,
@@ -35,7 +37,7 @@ seed_user = fn email, password, role ->
       IO.puts("  created #{role} user: #{email}")
       user
 
-    user ->
+    {:ok, user} ->
       IO.puts("  #{role} user already exists: #{email}")
       user
   end
@@ -52,80 +54,91 @@ _editor = seed_user.(editor_email, editor_password, :editor)
 
 # --- Demo content ----------------------------------------------------------
 
-# Content goes through the real Ash actions as the admin actor so it exercises
-# the same policies, validations, paper-trail versioning, and publish workflow
-# the app uses at runtime.
-ensure_content = fn resource, slug, create_attrs, publish? ->
-  case resource |> Ash.Query.filter(slug == ^slug) |> Ash.read_one!(authorize?: false) do
-    nil ->
-      record = Ash.create!(resource, create_attrs, actor: admin)
+# Content goes through the real domain actions as the admin actor so it
+# exercises the same policies, validations, paper-trail versioning, and publish
+# workflow the app uses at runtime. `list`/`create`/`publish` are the resource's
+# code interfaces, captured per content item so each call uses the correct one.
+ensure_content = fn label, list, create, publish ->
+  case list.() do
+    [] ->
+      record = create.()
+      record = if publish, do: publish.(record), else: record
+      IO.puts("  created #{label}: #{record.slug} (#{record.state})")
 
-      record =
-        if publish? do
-          Ash.update!(record, %{}, action: :publish, actor: admin)
-        else
-          record
-        end
-
-      IO.puts("  created #{inspect(resource)}: #{slug} (#{record.state})")
-
-    _existing ->
-      IO.puts("  #{inspect(resource)} already exists: #{slug}")
+    [_existing | _] ->
+      IO.puts("  #{label} already exists")
   end
 end
 
 IO.puts("Seeding demo content…")
 
 ensure_content.(
-  Page,
-  "welcome",
-  %{
-    title: "Welcome to KilnCMS",
-    slug: "welcome",
-    seo_title: "Welcome to KilnCMS",
-    seo_description: "A world-class, Elixir-native headless CMS.",
-    blocks: [
-      %{type: :heading, content: "Welcome to KilnCMS", data: %{"level" => 1}, order: 0},
+  "page welcome",
+  fn -> CMS.list_pages!(query: [filter: [slug: "welcome"]], authorize?: false) end,
+  fn ->
+    CMS.create_page!(
       %{
-        type: :rich_text,
-        content: "<p>This page was created by the seed script and published via the workflow.</p>",
-        order: 1
-      }
-    ]
-  },
-  true
+        title: "Welcome to KilnCMS",
+        slug: "welcome",
+        seo_title: "Welcome to KilnCMS",
+        seo_description: "A world-class, Elixir-native headless CMS.",
+        blocks: [
+          %{type: :heading, content: "Welcome to KilnCMS", data: %{"level" => 1}, order: 0},
+          %{
+            type: :rich_text,
+            content:
+              "<p>This page was created by the seed script and published via the workflow.</p>",
+            order: 1
+          }
+        ]
+      },
+      actor: admin
+    )
+  end,
+  fn page -> CMS.publish_page!(page, %{}, actor: admin) end
 )
 
 ensure_content.(
-  Page,
-  "about",
-  %{
-    title: "About",
-    slug: "about",
-    blocks: [
-      %{type: :rich_text, content: "<p>This is an unpublished draft page.</p>", order: 0}
-    ]
-  },
-  false
+  "page about",
+  fn -> CMS.list_pages!(query: [filter: [slug: "about"]], authorize?: false) end,
+  fn ->
+    CMS.create_page!(
+      %{
+        title: "About",
+        slug: "about",
+        blocks: [
+          %{type: :rich_text, content: "<p>This is an unpublished draft page.</p>", order: 0}
+        ]
+      },
+      actor: admin
+    )
+  end,
+  nil
 )
 
 ensure_content.(
-  Post,
-  "hello-world",
-  %{
-    title: "Hello, World",
-    slug: "hello-world",
-    excerpt: "The first post on a KilnCMS-powered site.",
-    blocks: [
-      %{type: :heading, content: "Hello, World", data: %{"level" => 1}, order: 0},
+  "post hello-world",
+  fn -> CMS.list_posts!(query: [filter: [slug: "hello-world"]], authorize?: false) end,
+  fn ->
+    CMS.create_post!(
       %{
-        type: :rich_text,
-        content: "<p>KilnCMS pairs Ash's declarative modeling with LiveView's real-time UX.</p>",
-        order: 1
-      }
-    ]
-  },
-  true
+        title: "Hello, World",
+        slug: "hello-world",
+        excerpt: "The first post on a KilnCMS-powered site.",
+        blocks: [
+          %{type: :heading, content: "Hello, World", data: %{"level" => 1}, order: 0},
+          %{
+            type: :rich_text,
+            content:
+              "<p>KilnCMS pairs Ash's declarative modeling with LiveView's real-time UX.</p>",
+            order: 1
+          }
+        ]
+      },
+      actor: admin
+    )
+  end,
+  fn post -> CMS.publish_post!(post, %{}, actor: admin) end
 )
 
 IO.puts("Seeding complete.")
