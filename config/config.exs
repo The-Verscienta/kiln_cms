@@ -17,7 +17,10 @@ config :kiln_cms, Oban,
   plugins: [{Oban.Plugins.Cron, []}]
 
 config :kiln_cms,
-  ash_domains: [KilnCMS.Accounts, KilnCMS.CMS]
+  ash_domains: [KilnCMS.Accounts, KilnCMS.CMS],
+  # Default "from" address for transactional email (auth confirmation/reset).
+  # Override per environment in runtime.exs for production.
+  email_from: {"KilnCMS", "noreply@kilncms.dev"}
 
 config :ash_graphql, authorize_update_destroy_with_error?: true
 

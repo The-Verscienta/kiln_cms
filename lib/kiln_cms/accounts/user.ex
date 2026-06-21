@@ -1,4 +1,9 @@
 defmodule KilnCMS.Accounts.User do
+  @moduledoc """
+  A user account. Authenticates via AshAuthentication (email + password) and
+  carries the `role` attribute (`:admin`/`:editor`/`:viewer`) that the CMS
+  resource policies authorize against.
+  """
   use Ash.Resource,
     otp_app: :kiln_cms,
     domain: KilnCMS.Accounts,

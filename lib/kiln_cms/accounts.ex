@@ -1,4 +1,11 @@
 defmodule KilnCMS.Accounts do
+  @moduledoc """
+  The Accounts domain — authentication and identity (`User`, `Token`).
+
+  Authentication is handled by AshAuthentication (password strategy). The
+  `User.role` attribute (`:admin`/`:editor`/`:viewer`) drives RBAC across the
+  CMS domain.
+  """
   use Ash.Domain,
     otp_app: :kiln_cms
 

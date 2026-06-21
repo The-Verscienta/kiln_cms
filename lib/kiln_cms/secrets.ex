@@ -1,4 +1,8 @@
 defmodule KilnCMS.Secrets do
+  @moduledoc """
+  Resolves AshAuthentication secrets (the token signing secret) from
+  application config, which is loaded from the environment in `runtime.exs`.
+  """
   use AshAuthentication.Secret
 
   def secret_for(

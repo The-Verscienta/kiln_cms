@@ -13,8 +13,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail do
   @impl true
   def send(user, token, opts) do
     new()
-    # TODO: Replace with your email
-    |> from({"noreply", "noreply@example.com"})
+    |> from(Application.fetch_env!(:kiln_cms, :email_from))
     |> to(to_string(user.email))
     |> subject(subject(opts))
     |> html_body(body(token, opts))

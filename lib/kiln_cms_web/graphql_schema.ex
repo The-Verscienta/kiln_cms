@@ -1,4 +1,5 @@
 defmodule KilnCMSWeb.GraphqlSchema do
+  @moduledoc false
   use Absinthe.Schema
 
   use AshGraphql,

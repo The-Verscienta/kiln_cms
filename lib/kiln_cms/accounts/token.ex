@@ -1,4 +1,8 @@
 defmodule KilnCMS.Accounts.Token do
+  @moduledoc """
+  Stores AshAuthentication tokens (sign-in/confirmation/reset JWTs) so they
+  can be verified and revoked. Managed entirely by AshAuthentication.
+  """
   use Ash.Resource,
     otp_app: :kiln_cms,
     domain: KilnCMS.Accounts,

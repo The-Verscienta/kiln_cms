@@ -1,4 +1,9 @@
 defmodule KilnCMSWeb.AuthOverrides do
+  @moduledoc """
+  UI overrides for the AshAuthentication Phoenix components (sign-in,
+  register, reset). Temporary scaffolding alongside the DaisyUI overrides —
+  to be replaced with custom Tailwind/HEEx components (see project plan).
+  """
   use AshAuthentication.Phoenix.Overrides
 
   # configure your UI overrides here

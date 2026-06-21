@@ -5,6 +5,17 @@ defmodule KilnCMSWeb.Router do
 
   import AshAuthentication.Plug.Helpers
 
+  # Baseline Content-Security-Policy. Deliberately permissive for now so it
+  # doesn't break LiveView (ws connections) or the dev admin/GraphiQL tooling
+  # (which use inline scripts/styles); tighten in the security-hardening phase.
+  @content_security_policy "default-src 'self'; " <>
+                             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " <>
+                             "style-src 'self' 'unsafe-inline'; " <>
+                             "img-src 'self' data: blob:; " <>
+                             "font-src 'self' data:; " <>
+                             "connect-src 'self' ws: wss:; " <>
+                             "frame-ancestors 'self'; base-uri 'self'"
+
   pipeline :graphql do
     plug :load_from_bearer
     plug :set_actor, :user
@@ -17,7 +28,7 @@ defmodule KilnCMSWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers
+    plug :put_secure_browser_headers, %{"content-security-policy" => @content_security_policy}
     plug :load_from_session
   end
 

@@ -1,0 +1,10 @@
+# Sobelow config (read by `mix sobelow --config`, run in `mix precommit`/CI).
+# exit: "low" makes the scan return a non-zero status on any finding at or
+# above Low confidence, so it fails the build.
+[
+  exit: "low",
+  threshold: :low,
+  verbose: false,
+  ignore: [],
+  ignore_files: []
+]
