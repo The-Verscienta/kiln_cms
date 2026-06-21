@@ -7,8 +7,17 @@
 # General application configuration
 import Config
 
+config :ash_oban, pro?: false
+
+config :kiln_cms, Oban,
+  engine: Oban.Engines.Basic,
+  notifier: Oban.Notifiers.Postgres,
+  queues: [default: 10],
+  repo: KilnCMS.Repo,
+  plugins: [{Oban.Plugins.Cron, []}]
+
 config :kiln_cms,
-  ash_domains: [KilnCMS.CMS]
+  ash_domains: [KilnCMS.Accounts, KilnCMS.CMS]
 
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
@@ -39,6 +48,9 @@ config :spark,
     remove_parens?: true,
     "Ash.Resource": [
       section_order: [
+        :authentication,
+        :token,
+        :user_identity,
         :graphql,
         :json_api,
         :admin,

@@ -15,15 +15,14 @@ defmodule KilnCMS.CMS.Page do
       AshAdmin.Resource
     ]
 
-  postgres do
-    table "pages"
-    repo KilnCMS.Repo
+  graphql do
+    type :page
   end
 
   paper_trail do
-    change_tracking_mode :changes_only
-    store_action_name? true
-    ignore_attributes [:inserted_at, :updated_at]
+    change_tracking_mode(:changes_only)
+    store_action_name?(true)
+    ignore_attributes([:inserted_at, :updated_at])
   end
 
   state_machine do
@@ -42,8 +41,9 @@ defmodule KilnCMS.CMS.Page do
     type "page"
   end
 
-  graphql do
-    type :page
+  postgres do
+    table "pages"
+    repo KilnCMS.Repo
   end
 
   actions do

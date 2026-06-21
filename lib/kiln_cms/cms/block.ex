@@ -11,11 +11,26 @@ defmodule KilnCMS.CMS.Block do
     data_layer: :embedded,
     embed_nil_values?: false
 
+  actions do
+    defaults [:read, :create, :update, :destroy]
+    default_accept [:type, :content, :data, :order, :children]
+  end
+
   attributes do
     uuid_primary_key :id, writable?: true
 
     attribute :type, :atom do
-      constraints one_of: [:rich_text, :heading, :image, :quote, :embed, :divider, :columns, :custom]
+      constraints one_of: [
+                    :rich_text,
+                    :heading,
+                    :image,
+                    :quote,
+                    :embed,
+                    :divider,
+                    :columns,
+                    :custom
+                  ]
+
       allow_nil? false
       default :rich_text
       public? true
@@ -32,10 +47,5 @@ defmodule KilnCMS.CMS.Block do
 
     # Nested blocks for composable slices (Storyblok-style).
     attribute :children, {:array, :map}, default: [], public?: true
-  end
-
-  actions do
-    defaults [:read, :create, :update, :destroy]
-    default_accept [:type, :content, :data, :order, :children]
   end
 end

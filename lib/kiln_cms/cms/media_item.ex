@@ -8,17 +8,17 @@ defmodule KilnCMS.CMS.MediaItem do
     data_layer: AshPostgres.DataLayer,
     extensions: [AshJsonApi.Resource, AshGraphql.Resource, AshAdmin.Resource]
 
-  postgres do
-    table "media_items"
-    repo KilnCMS.Repo
+  graphql do
+    type :media_item
   end
 
   json_api do
     type "media_item"
   end
 
-  graphql do
-    type :media_item
+  postgres do
+    table "media_items"
+    repo KilnCMS.Repo
   end
 
   actions do

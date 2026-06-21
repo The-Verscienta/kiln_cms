@@ -12,7 +12,7 @@
 - Minimal ops (Postgres-centric; optional Dragonfly + Meilisearch only when scale demands)
 - Built for teams, agencies, and products like Verscienta Health
 
-**Status:** Skeleton Bootstrapped (June 2026) — Phoenix 1.8 + Ash 3 core (ash, ash_postgres, ash_phoenix), CMS domain with **Page/Post** (embedded `Block` tree per D3) + **MediaItem**, **AshPaperTrail** versioning, **AshStateMachine** publishing workflow, **AshJsonApi + AshGraphql + AshAdmin** wired and serving, Postgres via Docker Compose (Dragonfly/Meilisearch/MinIO behind optional profiles), multi-stage Dockerfile with libvips. Verified compiling, migrating, and serving (home/admin/GraphQL/JSON:API all 200). **Not yet wired:** AshAuthentication, Oban, media upload pipeline, TipTap editor + live preview, DaisyUI removal.
+**Status:** Skeleton Bootstrapped (June 2026) — Phoenix 1.8 + Ash 3 core (ash, ash_postgres, ash_phoenix), CMS domain with **Page/Post** (embedded `Block` tree per D3) + **MediaItem**, **AshPaperTrail** versioning, **AshStateMachine** publishing workflow, **AshJsonApi + AshGraphql + AshAdmin** wired and serving, Postgres via Docker Compose (Dragonfly/Meilisearch/MinIO behind optional profiles), multi-stage Dockerfile with libvips. **AshAuthentication** (Accounts domain, User/Token, password strategy, `/sign-in` + `/register`, `role` attribute for RBAC) and **Oban + AshOban** (Postgres-backed) are wired and verified booting. Verified compiling, migrating, and serving (home/sign-in/register/admin/GraphQL/JSON:API all 200). Repo lives at a **spaceless path** (`~/Github/kiln_cms`) — native deps (bcrypt, libvips) build via `make`, which fails on spaced/iCloud paths. **Not yet wired:** magic-link strategy, Ash policies enforcing RBAC, media upload pipeline, TipTap editor + live preview, DaisyUI removal.
 
 ---
 
@@ -247,8 +247,8 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 
 ### Phase 0: Project Bootstrap & Environment (P0)
 - [x] Create GitHub repo + initial `mix phx.new kiln_cms --live --database postgres` (generated in-place)
-- [x] Add core Ash dependencies (`ash`, `ash_postgres`, `ash_phoenix`, `ash_admin`, `ash_paper_trail`, `ash_state_machine`, `ash_json_api`, `ash_graphql`) via Igniter. **Still to add:** `ash_authentication`, `ash_authentication_phoenix`
-- [ ] Add Oban, Image/Mogrify, ex_aws (or similar), TipTap assets or CDN strategy, SortableJS
+- [x] Add core Ash dependencies (`ash`, `ash_postgres`, `ash_phoenix`, `ash_admin`, `ash_paper_trail`, `ash_state_machine`, `ash_json_api`, `ash_graphql`, `ash_authentication`, `ash_authentication_phoenix`, `ash_oban`/`oban`) via Igniter
+- [ ] Add Image/Mogrify, ex_aws (or similar), TipTap assets or CDN strategy, SortableJS
 - [x] Set up Docker Compose: Postgres + **Dragonfly** + (optional Meilisearch + MinIO). See `docker-compose.yml` with health checks.
 - [x] Configure native `Phoenix.PubSub` (PG2, Phoenix default). Dragonfly kept as an *optional* Compose profile only (D1/D2). In-BEAM caching: TODO when needed
 - [x] Set up `.env.example` / config for local dev
@@ -260,8 +260,8 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [x] Define core Ash Resources: `MediaItem`, `Page`, `Post`, with **embedded `Block` resources** (D3) + version resources (via PaperTrail). **Still to add:** `Account`, `User` (with auth). Tenancy strategy (D6): TODO before auth lands
 - [x] Database migrations via Ash (`mix ash.codegen` → `mix ash.migrate`); verified against Postgres
 - [ ] Implement relationships, calculations (e.g., published version, word count), aggregates
-- [ ] Set up AshAuthentication (email/password + magic links) + registration flows in LiveView
-- [ ] Ash Policies for RBAC (Admin can everything, Editor limited, Viewer read-only)
+- [x] Set up AshAuthentication (email/password + registration/sign-in LiveViews at `/register`, `/sign-in`). **Still to add:** magic-link strategy
+- [ ] Ash Policies for RBAC — `role` attribute added to User (`:admin`/`:editor`/`:viewer`, defaults `:viewer`); policies enforcing it across CMS resources still TODO
 - [ ] Basic seeds for demo content + admin user
 - [x] AshAdmin wired (domain + resources exposed at `/admin`); custom content-focused overrides still TODO
 

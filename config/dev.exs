@@ -69,7 +69,7 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :kiln_cms, dev_routes: true
+config :kiln_cms, dev_routes: true, token_signing_secret: "DYgVqiH9UCH9+tNBUTSxpjj9sjIclKww"
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

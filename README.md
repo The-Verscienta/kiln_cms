@@ -72,10 +72,22 @@ in the runtime image for image processing. Target: Coolify (RackNerd VPS) or Fly
 
 ## Status & next steps
 
-Bootstrapped: Phoenix 1.8 + Ash core, CMS domain (Page/Post/MediaItem + embedded blocks),
-paper-trail, state-machine workflow, JSON:API + GraphQL + admin, Docker infra. Verified
-compiling, migrating, and serving.
+Bootstrapped & verified (compiling, migrating, serving):
 
-Not yet wired (next): **AshAuthentication** (auth + RBAC), **Oban**/**AshOban** (jobs),
-media upload/variant pipeline (`Image`/libvips), the **TipTap LiveView editor** + real-time
-visual preview, and removing the default DaisyUI assets (the plan specifies no DaisyUI).
+- Phoenix 1.8 + Ash 3 core, CMS domain (Page/Post/MediaItem + embedded blocks)
+- AshPaperTrail history + AshStateMachine publishing workflow
+- JSON:API + GraphQL + AshAdmin
+- **AshAuthentication** — Accounts domain, User/Token, password strategy, `/sign-in`
+  + `/register`, plus a `role` attribute (`:admin`/`:editor`/`:viewer`, defaults to
+  `:viewer`) for RBAC
+- **Oban** (Postgres-backed, no Redis) + **AshOban** wired into the supervision tree
+- Docker infra (Postgres default; Dragonfly/Meilisearch/MinIO optional profiles)
+
+Not yet wired (next): **magic-link** auth strategy, **Ash policies** enforcing the RBAC
+roles, media upload/variant pipeline (`Image`/libvips), the **TipTap LiveView editor** +
+real-time visual preview, and removing the default DaisyUI assets (the plan specifies no
+DaisyUI).
+
+> **Note:** keep this project at a path **without spaces** (it lives at
+> `~/Github/kiln_cms`). Native deps (`bcrypt_elixir`, `libvips`) build via `make`, which
+> fails on spaced paths such as iCloud Drive's `Mobile Documents`.

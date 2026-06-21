@@ -41,6 +41,12 @@ defmodule KilnCMS.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:oban, "~> 2.0"},
+      {:ash_oban, "~> 0.8"},
+      {:bcrypt_elixir, "~> 3.0"},
+      {:picosat_elixir, "~> 0.2"},
+      {:ash_authentication, "~> 4.0"},
+      {:ash_authentication_phoenix, "~> 2.0"},
       {:absinthe_phoenix, "~> 2.0"},
       {:open_api_spex, "~> 3.0"},
       {:ash_state_machine, "~> 0.2"},

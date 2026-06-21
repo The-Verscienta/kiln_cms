@@ -11,13 +11,19 @@ defmodule KilnCMS.Application do
       KilnCMSWeb.Telemetry,
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
+      {Oban,
+       AshOban.config(
+         Application.fetch_env!(:kiln_cms, :ash_domains),
+         Application.fetch_env!(:kiln_cms, Oban)
+       )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry
       KilnCMSWeb.Endpoint,
       {Absinthe.Subscription, KilnCMSWeb.Endpoint},
-      AshGraphql.Subscription.Batcher
+      AshGraphql.Subscription.Batcher,
+      {AshAuthentication.Supervisor, [otp_app: :kiln_cms]}
     ]
 
     # See https://elixir.hexdocs.pm/Supervisor.html
