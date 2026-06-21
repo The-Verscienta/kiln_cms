@@ -225,8 +225,24 @@ defmodule KilnCMS.Accounts.User do
   end
 
   policies do
+    # Let AshAuthentication run its sign-in/registration/reset machinery.
     bypass AshAuthentication.Checks.AshAuthenticationInteraction do
       authorize_if always()
+    end
+
+    # Admins manage all users — listing accounts and assigning roles (RBAC
+    # promotion happens here, never via self-registration).
+    bypass actor_attribute_equals(:role, :admin) do
+      authorize_if always()
+    end
+
+    # A signed-in user may read their own record and change their own password.
+    policy action_type(:read) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
+    policy action(:change_password) do
+      authorize_if expr(id == ^actor(:id))
     end
   end
 

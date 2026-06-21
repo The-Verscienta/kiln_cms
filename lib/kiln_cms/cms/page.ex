@@ -7,6 +7,7 @@ defmodule KilnCMS.CMS.Page do
   use Ash.Resource,
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
     extensions: [
       AshPaperTrail.Resource,
       AshStateMachine,
@@ -78,6 +79,32 @@ defmodule KilnCMS.CMS.Page do
     update :archive do
       require_atomic? false
       change transition_state(:archived)
+    end
+  end
+
+  policies do
+    # Admins may do anything.
+    bypass actor_attribute_equals(:role, :admin) do
+      authorize_if always()
+    end
+
+    # Published pages are world-readable (headless delivery / public site);
+    # unpublished content (draft/in_review/archived) is editors-only.
+    policy action_type(:read) do
+      authorize_if expr(state == :published)
+      authorize_if actor_attribute_equals(:role, :editor)
+    end
+
+    # Authoring and workflow transitions are reserved for editors (and admins
+    # via the bypass above). Every state-machine action is an update action.
+    policy action_type([:create, :update]) do
+      authorize_if actor_attribute_equals(:role, :editor)
+    end
+
+    # Hard deletes are admin-only (allowed by the bypass; denied here for all
+    # other roles).
+    policy action_type(:destroy) do
+      forbid_if always()
     end
   end
 
