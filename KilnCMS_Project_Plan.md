@@ -252,8 +252,8 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [x] Set up Docker Compose: Postgres + **Dragonfly** + (optional Meilisearch + MinIO). See `docker-compose.yml` with health checks.
 - [x] Configure native `Phoenix.PubSub` (PG2, Phoenix default). Dragonfly kept as an *optional* Compose profile only (D1/D2). In-BEAM caching: TODO when needed
 - [x] Set up `.env.example` / config for local dev
-- [ ] Add Credo, Dialyxir, Sobelow, ExDoc
-- [ ] Create basic README, this plan file, CONTRIBUTING.md, LICENSE
+- [x] Add Credo, Dialyxir, Sobelow, ExDoc — `credo --strict` + `sobelow` wired into `mix precommit` and CI; `.credo.exs`/`.sobelow-conf` configured; dialyzer PLT config in `mix.exs`
+- [x] Create basic README, this plan file, CONTRIBUTING.md, LICENSE — `CONTRIBUTING.md` added (workflow, Ash conventions, quality gate); README/LICENSE present
 - [ ] Set up Tailwind with custom component library (HEEx + Tailwind) for admin/editor UI. Start with clean, professional design system.
 
 ### Phase 1: Core Modeling & Auth (P0)
@@ -320,8 +320,8 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [ ] Comprehensive ExUnit tests for resources, policies, actions (Ash provides excellent support)
 - [ ] LiveView tests for editor flows
 - [ ] E2E with Wallaby or Playwright (critical for editor UX)
-- [ ] Security: Sobelow, dependency audit, policy coverage, rate limiting tests
-- [ ] GitHub Actions workflow (test on push/PR, dialyzer, credo, migration check)
+- [ ] Security: Sobelow (**done** — wired into precommit/CI, baseline CSP added), dependency audit, policy coverage, rate limiting tests
+- [x] GitHub Actions workflow (test on push/PR, dialyzer, credo, sobelow, format + unused-deps check) — `.github/workflows/ci.yml`. **TODO:** explicit migration-drift check
 - [ ] Full ExDoc documentation + guides (modeling, editor usage, API consumption, deployment)
 - [ ] This project plan kept up-to-date as living doc
 
