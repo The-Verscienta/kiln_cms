@@ -1,0 +1,90 @@
+# KilnCMS local development services.
+#
+# Default `docker compose up -d` starts ONLY Postgres — the single required
+# dependency (decision D2: minimal ops; native BEAM PubSub, no broker needed).
+#
+# Optional services live behind profiles, enable only what you need:
+#   docker compose --profile cache   up -d   # + Dragonfly (multi-node shared cache)
+#   docker compose --profile search  up -d   # + Meilisearch
+#   docker compose --profile storage up -d   # + MinIO (S3-compatible)
+#   docker compose --profile all     up -d   # everything
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: kiln_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-kiln_cms_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional: Redis-compatible shared cache for multi-node deployments only.
+  # NOT used for PubSub — KilnCMS uses native Phoenix.PubSub (D1).
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    container_name: kiln_dragonfly
+    profiles: ["cache", "all"]
+    ulimits:
+      memlock: -1
+    ports:
+      - "${DRAGONFLY_PORT:-6379}:6379"
+    volumes:
+      - dragonfly_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional: typo-tolerant faceted search (Postgres FTS is the default).
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    container_name: kiln_meilisearch
+    profiles: ["search", "all"]
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyChangeMe}
+      MEILI_ENV: development
+    ports:
+      - "${MEILI_PORT:-7700}:7700"
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional: S3-compatible object storage for media in local dev.
+  minio:
+    image: minio/minio:latest
+    container_name: kiln_minio
+    profiles: ["storage", "all"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  dragonfly_data:
+  meili_data:
+  minio_data:
