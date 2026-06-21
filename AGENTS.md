@@ -5,6 +5,20 @@ This is a web application written using the Phoenix web framework.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 
+### KilnCMS conventions
+
+- **The architecture is already decided — read `KilnCMS_Project_Plan.md` (decisions D1–D8) before adding infrastructure.** Real-time uses native `Phoenix.PubSub` (no Redis/Dragonfly on the hot path); content blocks are **embedded** Ash resources (D3 — one JSON tree per resource, *not* a `blocks` table); the stack is Postgres-centric. Don't pull in Redis/Dragonfly/Meilisearch/Beacon without a measured, documented need.
+- **Ash is the modeling layer — never hand-write migrations or Ecto schemas.** Edit the resource, then run `mix ash.codegen <descriptive_name>` to generate the migration + resource snapshot, then `mix ash.migrate` (`mix ash.setup` to bootstrap). Don't hand-edit files under `priv/repo/migrations` or `priv/resource_snapshots`.
+- **Every domain action gets a code interface.** Add `define :name, action: :name` on the domain (`CMS`/`Accounts`) and call `Domain.name!(...)` — never `Ash.create!/read!` in app code, seeds, or tests. Use the generated `can_*?/2` helpers for authorization-driven UI.
+- **Authorization is mandatory on every resource.** Domain/content resources use `Ash.Policy.Authorizer` with the `:admin`/`:editor`/`:viewer` role model: published content is world-readable, unpublished is editor-only, hard-deletes are admin-only, admins bypass. A new resource without policies is a bug.
+- **No DaisyUI** — build custom Tailwind/HEEx components. The `AshAuthentication.Phoenix.Overrides.DaisyUI` overrides in `router.ex` are temporary scaffolding slated for replacement.
+
+### Environment / toolchain
+
+- `mix` lives at `/opt/homebrew/bin` — make sure it's on `PATH` (`export PATH="/opt/homebrew/bin:$PATH"`).
+- The repo **must** live at a space-free, non-iCloud path (currently `~/Github/kiln_cms`): native deps (`bcrypt_elixir`, libvips) build via `make`, which fails on spaced/iCloud paths.
+- Keep the `igniter` dep — removing it triggers an Elixir 1.20.1 compiler crash.
+
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content
