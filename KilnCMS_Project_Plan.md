@@ -320,7 +320,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [ ] Comprehensive ExUnit tests for resources, policies, actions (Ash provides excellent support)
 - [ ] LiveView tests for editor flows
 - [ ] E2E with Wallaby or Playwright (critical for editor UX)
-- [ ] Security: Sobelow (**done** — wired into precommit/CI, baseline CSP added), dependency audit, policy coverage, rate limiting tests
+- [ ] Security: Sobelow (**done** — wired into precommit/CI), **nonce-based CSP** on the browser pipeline (strict `script-src 'self' 'nonce-…'`; relaxed for dev-only AshAdmin/LiveDashboard; browser-verified), dependency audit, policy coverage, rate limiting tests
 - [x] GitHub Actions workflow (test on push/PR, dialyzer, credo, sobelow, format + unused-deps check) — `.github/workflows/ci.yml`. **TODO:** explicit migration-drift check
 - [ ] Full ExDoc documentation + guides (modeling, editor usage, API consumption, deployment)
 - [ ] This project plan kept up-to-date as living doc

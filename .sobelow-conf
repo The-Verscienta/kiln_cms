@@ -5,6 +5,10 @@
   exit: "low",
   threshold: :low,
   verbose: false,
-  ignore: [],
+  # Config.CSP: the Content-Security-Policy is set dynamically (nonce-based)
+  # in the router's put_csp/put_dev_csp plugs, which Sobelow's static check
+  # can't follow. The header is present on every browser response and was
+  # verified in-browser, so this is a false positive.
+  ignore: ["Config.CSP"],
   ignore_files: []
 ]

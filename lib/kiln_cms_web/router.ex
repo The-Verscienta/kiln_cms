@@ -5,16 +5,17 @@ defmodule KilnCMSWeb.Router do
 
   import AshAuthentication.Plug.Helpers
 
-  # Baseline Content-Security-Policy. Deliberately permissive for now so it
-  # doesn't break LiveView (ws connections) or the dev admin/GraphiQL tooling
-  # (which use inline scripts/styles); tighten in the security-hardening phase.
-  @content_security_policy "default-src 'self'; " <>
-                             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " <>
-                             "style-src 'self' 'unsafe-inline'; " <>
-                             "img-src 'self' data: blob:; " <>
-                             "font-src 'self' data:; " <>
-                             "connect-src 'self' ws: wss:; " <>
-                             "frame-ancestors 'self'; base-uri 'self'"
+  # Content-Security-Policy. Directives shared by every browser response; the
+  # `script-src` directive is added per-pipeline (see `put_csp`/`put_dev_csp`).
+  # `style-src` keeps 'unsafe-inline' because inline `style=` attributes can't
+  # carry a nonce; everything else is locked to same-origin.
+  @base_csp "default-src 'self'; " <>
+              "style-src 'self' 'unsafe-inline'; " <>
+              "img-src 'self' data: blob:; " <>
+              "font-src 'self' data:; " <>
+              "connect-src 'self' ws: wss:; " <>
+              "object-src 'none'; base-uri 'self'; " <>
+              "frame-ancestors 'self'; form-action 'self'"
 
   pipeline :graphql do
     plug :load_from_bearer
@@ -28,7 +29,22 @@ defmodule KilnCMSWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers, %{"content-security-policy" => @content_security_policy}
+    plug :put_secure_browser_headers
+    plug :put_csp
+    plug :load_from_session
+  end
+
+  # Dev-only tooling (AshAdmin, LiveDashboard) ships its own inline
+  # scripts/styles, so it gets a relaxed `script-src`. These routes only exist
+  # when `dev_routes` is enabled, never in production.
+  pipeline :browser_dev_tools do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+    plug :put_dev_csp
     plug :load_from_session
   end
 
@@ -127,7 +143,7 @@ defmodule KilnCMSWeb.Router do
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
-      pipe_through :browser
+      pipe_through :browser_dev_tools
 
       live_dashboard "/dashboard", metrics: KilnCMSWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
@@ -138,9 +154,39 @@ defmodule KilnCMSWeb.Router do
     import AshAdmin.Router
 
     scope "/admin" do
-      pipe_through :browser
+      pipe_through :browser_dev_tools
 
       ash_admin "/"
     end
   end
+
+  # --- Content-Security-Policy plugs ----------------------------------------
+
+  # Strict CSP for first-party pages: scripts must be same-origin or carry the
+  # per-request nonce assigned here (the only inline script is the theme setup
+  # in root.html.heex, which uses `nonce={@csp_nonce}`).
+  defp put_csp(conn, _opts) do
+    nonce = generate_csp_nonce()
+
+    conn
+    |> Plug.Conn.assign(:csp_nonce, nonce)
+    |> Plug.Conn.put_resp_header(
+      "content-security-policy",
+      "script-src 'self' 'nonce-#{nonce}'; #{@base_csp}"
+    )
+  end
+
+  # Relaxed CSP for dev-only tooling that injects its own inline scripts. The
+  # nonce is still assigned so the shared root layout renders identically.
+  defp put_dev_csp(conn, _opts) do
+    conn
+    |> Plug.Conn.assign(:csp_nonce, generate_csp_nonce())
+    |> Plug.Conn.put_resp_header(
+      "content-security-policy",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; #{@base_csp}"
+    )
+  end
+
+  defp generate_csp_nonce,
+    do: 18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
 end
