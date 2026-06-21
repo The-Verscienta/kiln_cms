@@ -58,6 +58,31 @@ defmodule KilnCMS.Accounts.User do
     repo KilnCMS.Repo
   end
 
+  # Field-level policies are defense-in-depth on top of the resource policies
+  # above (which already restrict *which* user rows an actor can read). They
+  # cap *which fields* are visible, so if user reads are ever broadened (e.g. an
+  # editor picking an author), the role still isn't leaked. Non-public
+  # attributes (`hashed_password`, `confirmed_at`) are never returned by reads
+  # at all, so they need no field policy here.
+  field_policies do
+    # AshAuthentication needs every field during its own
+    # sign-in/registration/reset flows.
+    field_policy_bypass :*, AshAuthentication.Checks.AshAuthenticationInteraction do
+      authorize_if always()
+    end
+
+    # The role is visible only to admins or the user themselves.
+    field_policy :role do
+      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if expr(id == ^actor(:id))
+    end
+
+    # Everything else (id, email, timestamps) follows the resource read policy.
+    field_policy :* do
+      authorize_if always()
+    end
+  end
+
   actions do
     defaults [:read]
 
