@@ -17,7 +17,9 @@ defmodule KilnCMSWeb do
   those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+  # robots.txt is served dynamically by SitemapController (so it can reference
+  # the environment's sitemap URL).
+  def static_paths, do: ~w(assets fonts images favicon.ico)
 
   def router do
     quote do

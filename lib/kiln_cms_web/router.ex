@@ -113,6 +113,12 @@ defmodule KilnCMSWeb.Router do
     get "/:token", PreviewController, :show
   end
 
+  # Public SEO files (fixed content types; no pipeline needed).
+  scope "/", KilnCMSWeb do
+    get "/sitemap.xml", SitemapController, :index
+    get "/robots.txt", SitemapController, :robots
+  end
+
   scope "/", KilnCMSWeb do
     pipe_through :browser
 

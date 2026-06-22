@@ -25,6 +25,10 @@ config :kiln_cms,
 # Media blob storage. Swap the adapter for S3/MinIO in production.
 config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.Local
 
+# Public base URL of the delivery frontend — used to build sitemap/robots URLs.
+# Override in runtime.exs for production.
+config :kiln_cms, :public_base_url, "http://localhost:4000"
+
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
 config :mime,

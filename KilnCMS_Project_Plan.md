@@ -310,7 +310,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 ### Phase 7: Polish, i18n, SEO & World-Class Features (P1/P2)
 - [ ] Gettext + locale switching for UI and content
 - [~] SEO fields — `seo_title`, `seo_description`, **`seo_image` (og:image)**, **`canonical_url`** on Page/Post (exposed via the content serializer to preview/webhooks). **Still TODO:** structured data (JSON-LD)
-- [ ] Auto-generated sitemap.xml and robots.txt
+- [x] Auto-generated sitemap.xml and robots.txt — `SitemapController` (`/sitemap.xml`, `/robots.txt`) lists published pages (`<base>/<slug>`) + posts (`<base>/blog/<slug>`) off the `:public_base_url` config; robots is now served dynamically (removed the static file). Covered by `sitemap_controller_test.exs`
 - [ ] Basic analytics (page view tracking via telemetry + simple dashboard)
 - [ ] Email notifications (Swoosh + Oban) for workflow events
 - [ ] Accessibility audit (admin UI)
