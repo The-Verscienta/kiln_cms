@@ -144,6 +144,54 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  describe "decoupled preview (PubSub)" do
+    alias KilnCMSWeb.PreviewLive
+
+    test "renders the current content", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "PreviewTitle",
+          blocks: [%{type: :heading, content: "PreviewHeading", order: 0}]
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/preview/page/#{page.id}")
+
+      assert html =~ "PreviewTitle"
+      assert html =~ "PreviewHeading"
+    end
+
+    test "updates live when a preview event is broadcast", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/preview/page/#{page.id}")
+
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        PreviewLive.topic("page", page.id),
+        {:preview_update,
+         %{title: "LiveTitle", blocks: [%{type: "heading", content: "LiveBlock"}]}}
+      )
+
+      html = render(lv)
+      assert html =~ "LiveTitle"
+      assert html =~ "LiveBlock"
+    end
+
+    test "the editor broadcasts preview updates on change", %{conn: conn} do
+      page = draft_page()
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "Broadcasted"}) |> render_change()
+
+      assert_receive {:preview_update, %{title: "Broadcasted"}}
+    end
+  end
+
   describe "/editor/pages/:id (block editor)" do
     test "saves an edited title", %{conn: conn} do
       page = draft_page(%{title: "Old title"})

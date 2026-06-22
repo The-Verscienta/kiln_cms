@@ -92,6 +92,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor", EditorLive, :index
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post
+      live "/editor/preview/:kind/:id", PreviewLive, :show
     end
   end
 

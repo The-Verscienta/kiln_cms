@@ -81,7 +81,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @impl true
   def handle_event("validate", %{"form" => params}, socket) do
-    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+    socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    broadcast_preview(socket)
+    {:noreply, socket}
   end
 
   def handle_event("add_block", %{"type" => type}, socket) do
@@ -150,6 +152,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp run_workflow(socket, _action), do: socket
 
+  # Push the current title + blocks to any open decoupled preview windows.
+  defp broadcast_preview(socket) do
+    payload = %{
+      title: AshPhoenix.Form.value(socket.assigns.form, :title) || "",
+      blocks: preview_blocks(socket.assigns.form)
+    }
+
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      KilnCMSWeb.PreviewLive.topic(socket.assigns.kind, socket.assigns.record.id),
+      {:preview_update, payload}
+    )
+
+    socket
+  end
+
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
   defp preview_blocks(form) do
     case AshPhoenix.Form.value(form, :blocks) do
@@ -187,6 +205,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
+            <.link
+              href={~p"/editor/preview/#{@kind}/#{@record.id}"}
+              target="_blank"
+              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+            >
+              Preview &nearr;
+            </.link>
             <.workflow_buttons state={@record.state} />
             <.button type="submit" variant="primary">Save</.button>
           </div>
