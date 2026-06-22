@@ -309,7 +309,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 
 ### Phase 7: Polish, i18n, SEO & World-Class Features (P1/P2)
 - [ ] Gettext + locale switching for UI and content
-- [ ] SEO fields (title, meta description, og:image, canonical, structured data)
+- [~] SEO fields — `seo_title`, `seo_description`, **`seo_image` (og:image)**, **`canonical_url`** on Page/Post (exposed via the content serializer to preview/webhooks). **Still TODO:** structured data (JSON-LD)
 - [ ] Auto-generated sitemap.xml and robots.txt
 - [ ] Basic analytics (page view tracking via telemetry + simple dashboard)
 - [ ] Email notifications (Swoosh + Oban) for workflow events

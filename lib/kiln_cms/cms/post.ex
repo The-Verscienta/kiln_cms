@@ -83,6 +83,8 @@ defmodule KilnCMS.CMS.Post do
       :blocks,
       :seo_title,
       :seo_description,
+      :seo_image,
+      :canonical_url,
       :locale,
       :scheduled_at
     ]
@@ -203,6 +205,9 @@ defmodule KilnCMS.CMS.Post do
 
     attribute :seo_title, :string, public?: true
     attribute :seo_description, :string, public?: true
+    # og:image URL and rel=canonical for SEO/social.
+    attribute :seo_image, :string, public?: true
+    attribute :canonical_url, :string, public?: true
     attribute :locale, :string, default: "en", public?: true
     attribute :published_at, :utc_datetime_usec, public?: true
 

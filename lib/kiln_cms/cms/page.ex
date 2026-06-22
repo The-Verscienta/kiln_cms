@@ -76,7 +76,18 @@ defmodule KilnCMS.CMS.Page do
 
   actions do
     defaults [:read, :destroy]
-    default_accept [:title, :slug, :blocks, :seo_title, :seo_description, :locale, :scheduled_at]
+
+    default_accept [
+      :title,
+      :slug,
+      :blocks,
+      :seo_title,
+      :seo_description,
+      :seo_image,
+      :canonical_url,
+      :locale,
+      :scheduled_at
+    ]
 
     create :create do
       primary? true
@@ -193,6 +204,9 @@ defmodule KilnCMS.CMS.Page do
 
     attribute :seo_title, :string, public?: true
     attribute :seo_description, :string, public?: true
+    # og:image URL and rel=canonical for SEO/social.
+    attribute :seo_image, :string, public?: true
+    attribute :canonical_url, :string, public?: true
     attribute :locale, :string, default: "en", public?: true
     attribute :published_at, :utc_datetime_usec, public?: true
 

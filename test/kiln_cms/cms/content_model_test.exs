@@ -19,6 +19,26 @@ defmodule KilnCMS.CMS.ContentModelTest do
 
   defp slug, do: "cm-#{System.unique_integer([:positive])}"
 
+  describe "SEO fields" do
+    test "create accepts and persists seo_image and canonical_url" do
+      admin = user(:admin)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "SEO",
+            slug: slug(),
+            seo_image: "https://cdn.example/og.png",
+            canonical_url: "https://example.com/seo"
+          },
+          actor: admin
+        )
+
+      assert page.seo_image == "https://cdn.example/og.png"
+      assert page.canonical_url == "https://example.com/seo"
+    end
+  end
+
   describe "author relationship" do
     test "create stamps the acting user as the author" do
       editor = user(:editor)

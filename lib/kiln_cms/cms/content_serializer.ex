@@ -13,6 +13,8 @@ defmodule KilnCMS.CMS.ContentSerializer do
     :blocks,
     :seo_title,
     :seo_description,
+    :seo_image,
+    :canonical_url,
     :locale,
     :state,
     :published_at,
