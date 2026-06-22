@@ -29,7 +29,12 @@ defmodule KilnCMSWeb.BlockComponents do
           <img
             :if={src = HTMLSanitizer.safe_image_src(@block.content)}
             src={src}
-            alt=""
+            srcset={@block[:srcset]}
+            sizes={@block[:srcset] && "(max-width: 768px) 100vw, 768px"}
+            alt={@block[:alt] || ""}
+            width={@block[:width]}
+            height={@block[:height]}
+            loading="lazy"
             class="max-w-full rounded"
           />
         <% @type == "divider" -> %>

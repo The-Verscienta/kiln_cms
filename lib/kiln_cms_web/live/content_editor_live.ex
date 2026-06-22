@@ -43,6 +43,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> assign(:editors, Presence.editors(kind, id))
      |> assign(:cursors, %{})
      |> assign(:self_field, nil)
+     |> assign(:picking, nil)
+     |> assign(:media, CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]]))
      |> assign_record(record)}
   end
 
@@ -132,6 +134,29 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("field_blur", _params, socket) do
     broadcast_cursor(socket, nil)
     {:noreply, assign(socket, :self_field, nil)}
+  end
+
+  def handle_event("open_picker", %{"index" => index}, socket),
+    do: {:noreply, assign(socket, :picking, String.to_integer(index))}
+
+  def handle_event("close_picker", _params, socket),
+    do: {:noreply, assign(socket, :picking, nil)}
+
+  # Insert a library image into the image block at `index`: its URL becomes the
+  # block content and its id is stashed in `data` so delivery can build srcset.
+  def handle_event("pick_image", %{"index" => index, "id" => media_id, "url" => url}, socket) do
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> put_block(index, %{"content" => url, "data" => %{"media_id" => media_id}})
+
+    socket =
+      socket
+      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+      |> assign(:picking, nil)
+
+    broadcast_preview(socket)
+    {:noreply, socket}
   end
 
   def handle_event("add_block", %{"type" => type}, socket) do
@@ -232,6 +257,74 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
+
+  # Merge `fields` into the block at `index`, tolerating params where blocks are
+  # an indexed map (the usual LiveView shape) or a list.
+  defp put_block(params, index, fields) do
+    Map.update(params, "blocks", %{to_string(index) => fields}, fn
+      blocks when is_map(blocks) ->
+        Map.update(blocks, to_string(index), fields, &Map.merge(&1, fields))
+
+      blocks when is_list(blocks) ->
+        List.update_at(blocks, String.to_integer(index), &Map.merge(&1 || %{}, fields))
+    end)
+  end
+
+  # The media id currently stored on an image block's `data`, if any.
+  defp media_id_of(bf) do
+    case bf[:data].value do
+      %{"media_id" => id} -> id
+      %{media_id: id} -> id
+      _ -> nil
+    end
+  end
+
+  attr :index, :integer, required: true
+  attr :media, :list, required: true
+
+  # Modal grid for picking a library image into image block `index`.
+  defp image_picker(assigns) do
+    ~H"""
+    <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
+      <div class="absolute inset-0 bg-black/40" phx-click="close_picker" aria-hidden="true"></div>
+      <div class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-lg font-medium">Choose an image</h2>
+          <button
+            type="button"
+            phx-click="close_picker"
+            aria-label="Close"
+            class="text-base-content/50 hover:text-base-content"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <p :if={@media == []} class="text-sm text-base-content/60">
+          No media yet — upload some in the <.link navigate={~p"/media"} class="underline">media library</.link>.
+        </p>
+
+        <div class="grid grid-cols-3 gap-3 sm:grid-cols-4">
+          <button
+            :for={item <- @media}
+            type="button"
+            phx-click="pick_image"
+            phx-value-index={@index}
+            phx-value-id={item.id}
+            phx-value-url={item.url}
+            class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
+          >
+            <img
+              src={item.url}
+              alt={item.alt || item.filename}
+              class="aspect-square w-full object-cover"
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
 
   defp color_for(id),
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
@@ -407,8 +500,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-input
                       />
                     </div>
+                    <div :if={to_string(bf[:type].value) == "image"} class="space-y-2">
+                      <img
+                        :if={bf[:content].value not in [nil, ""]}
+                        src={bf[:content].value}
+                        alt=""
+                        class="max-h-40 rounded border border-base-content/10"
+                      />
+                      <input
+                        type="hidden"
+                        name={"#{bf.name}[data][media_id]"}
+                        value={media_id_of(bf)}
+                      />
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          phx-click="open_picker"
+                          phx-value-index={bf.index}
+                          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                        >
+                          <.icon name="hero-photo" class="mr-1 size-4" />Choose from library
+                        </button>
+                      </div>
+                      <.input field={bf[:content]} label="Image URL" placeholder="…or paste a URL" />
+                    </div>
                     <div
-                      :if={to_string(bf[:type].value) != "rich_text"}
+                      :if={to_string(bf[:type].value) not in ["rich_text", "image"]}
                       class={["relative", lock_ring(@locked_fields, bf[:content].name)]}
                     >
                       <.input
@@ -527,6 +644,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </div>
         </div>
       </.form>
+
+      <.image_picker :if={@picking != nil} index={@picking} media={@media} />
     </Layouts.app>
     """
   end

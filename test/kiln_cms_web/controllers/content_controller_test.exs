@@ -47,6 +47,43 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "Hello Heading"
     end
 
+    test "image blocks render a responsive srcset + alt from the media library", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "p.jpg",
+          url: "/uploads/orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          alt: "A described image",
+          variants: %{
+            "thumb" => %{"key" => "t", "url" => "/uploads/thumb", "width" => 400, "height" => 267},
+            "medium" => %{
+              "key" => "m",
+              "url" => "/uploads/medium",
+              "width" => 1024,
+              "height" => 683
+            }
+          }
+        })
+
+      page =
+        page(%{
+          title: "Img Page",
+          blocks: [
+            %{type: :image, content: "/uploads/orig", data: %{"media_id" => media.id}, order: 0}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "/uploads/thumb 400w"
+      assert html =~ "/uploads/medium 1024w"
+      assert html =~ "/uploads/orig 1600w"
+      assert html =~ ~s(alt="A described image")
+      assert html =~ ~s(width="1600")
+    end
+
     test "sets SEO metadata in the document head", %{conn: conn} do
       page = page(%{seo_title: "Meta Title", seo_description: "A great page."})
 

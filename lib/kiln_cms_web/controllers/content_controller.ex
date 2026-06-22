@@ -49,9 +49,57 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   defp blocks(record) do
-    record.blocks
-    |> List.wrap()
-    |> Enum.map(&%{type: to_string(&1.type), content: &1.content})
+    raw = List.wrap(record.blocks)
+    media = load_block_media(raw)
+    Enum.map(raw, &enrich_block(&1, media))
+  end
+
+  # Batch-load the media items referenced by image blocks (so we render one
+  # query, not one per image).
+  defp load_block_media(blocks) do
+    ids =
+      for b <- blocks,
+          to_string(b.type) == "image",
+          id = b.data["media_id"],
+          is_binary(id),
+          uniq: true,
+          do: id
+
+    case ids do
+      [] -> %{}
+      ids -> CMS.list_media_items!(authorize?: false, query: [filter: [id: [in: ids]]]) |> Map.new(&{&1.id, &1})
+    end
+  end
+
+  defp enrich_block(block, media) do
+    base = %{type: to_string(block.type), content: block.content}
+
+    case media[block.data["media_id"]] do
+      %{} = item when block.type == :image ->
+        Map.merge(base, %{
+          srcset: srcset(item),
+          alt: item.alt,
+          width: item.width,
+          height: item.height
+        })
+
+      _ ->
+        base
+    end
+  end
+
+  # Builds an `srcset` value from a media item's variants plus the original,
+  # e.g. "/uploads/thumb 400w, /uploads/medium 1024w, /uploads/orig 1600w".
+  defp srcset(item) do
+    variant_parts =
+      for {_label, %{"url" => url, "width" => w}} <- item.variants || %{}, do: "#{url} #{w}w"
+
+    original = if item.width, do: ["#{item.url} #{item.width}w"], else: []
+
+    case variant_parts ++ original do
+      [] -> nil
+      parts -> Enum.join(parts, ", ")
+    end
   end
 
   defp not_found(conn) do

@@ -298,6 +298,29 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  describe "image block picker" do
+    test "picking a library image sets the block's url and media_id", %{conn: conn} do
+      media = Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
+      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Open the picker for block 0, then pick the seeded image.
+      lv |> element("button[phx-click='open_picker'][phx-value-index='0']") |> render_click()
+
+      lv
+      |> element("button[phx-click='pick_image'][phx-value-id='#{media.id}']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      [block] = CMS.get_page!(page.id, authorize?: false).blocks
+      assert block.content == "/uploads/x"
+      assert block.data["media_id"] == media.id
+    end
+  end
+
   describe "live cursors (collaborative field focus)" do
     alias KilnCMSWeb.Presence
 
