@@ -97,6 +97,36 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   @doc """
+  Minimal chrome for the public delivery frontend (published Pages/Posts and the
+  blog index). Deliberately free of the authoring nav.
+  """
+  slot :inner_block, required: true
+
+  def public(assigns) do
+    ~H"""
+    <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
+      <div class="mx-auto flex max-w-3xl items-center justify-between gap-4">
+        <a href="/" class="flex items-center gap-3">
+          <img src={~p"/images/logo.svg"} width="28" alt="" />
+          <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
+        </a>
+        <nav class="flex items-center gap-4 text-sm text-base-content/70">
+          <a href="/blog" class="hover:text-base-content">Blog</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+      {render_slot(@inner_block)}
+    </main>
+
+    <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/50 sm:px-6 lg:px-8">
+      Powered by KilnCMS.
+    </footer>
+    """
+  end
+
+  @doc """
   Shows the flash group with standard titles and content.
 
   ## Examples

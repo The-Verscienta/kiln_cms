@@ -1,0 +1,19 @@
+<Layouts.public>
+  <h1 class="text-3xl font-bold tracking-tight">Blog</h1>
+
+  <p :if={@posts == []} class="mt-6 text-base-content/60">
+    No posts yet.
+  </p>
+
+  <ul class="mt-8 space-y-8">
+    <li :for={post <- @posts}>
+      <a href={~p"/blog/#{post.slug}"} class="group block">
+        <h2 class="text-xl font-semibold group-hover:underline">{post.title}</h2>
+        <p :if={post.published_at} class="mt-1 text-sm text-base-content/50">
+          {Calendar.strftime(post.published_at, "%B %-d, %Y")}
+        </p>
+        <p :if={post.excerpt} class="mt-2 text-base-content/70">{post.excerpt}</p>
+      </a>
+    </li>
+  </ul>
+</Layouts.public>

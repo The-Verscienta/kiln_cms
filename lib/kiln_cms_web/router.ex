@@ -174,6 +174,17 @@ defmodule KilnCMSWeb.Router do
     )
   end
 
+  # Public content delivery (HTML). Defined last among "/" routes so the
+  # root-level `/:slug` page route can't shadow auth/editor/SEO paths above.
+  # Only published content is reachable (see ContentController).
+  scope "/", KilnCMSWeb do
+    pipe_through :browser
+
+    get "/blog", ContentController, :blog_index
+    get "/blog/:slug", ContentController, :show_post
+    get "/:slug", ContentController, :show_page
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", KilnCMSWeb do
   #   pipe_through :api

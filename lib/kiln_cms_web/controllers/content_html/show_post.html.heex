@@ -1,0 +1,16 @@
+<Layouts.public>
+  <article class="prose max-w-none">
+    <header class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
+      <p :if={@record.published_at} class="mt-2 text-sm text-base-content/50">
+        {Calendar.strftime(@record.published_at, "%B %-d, %Y")}
+      </p>
+      <p :if={@record.excerpt} class="mt-3 text-lg text-base-content/70">
+        {@record.excerpt}
+      </p>
+    </header>
+    <div class="space-y-4">
+      <BlockComponents.render_block :for={block <- @blocks} block={block} />
+    </div>
+  </article>
+</Layouts.public>

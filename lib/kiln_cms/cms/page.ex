@@ -192,6 +192,15 @@ defmodule KilnCMS.CMS.Page do
       change transition_state(:archived)
     end
 
+    # Public delivery: fetch a single published page by slug. The `state ==
+    # :published` filter is the security boundary, so it's safe to call without
+    # an actor (anonymous site visitors).
+    read :public_by_slug do
+      get? true
+      argument :slug, :string, allow_nil?: false
+      filter expr(state == :published and slug == ^arg(:slug))
+    end
+
     # Soft-deleted ("trashed") pages — the only read that bypasses AshArchival's
     # automatic `is_nil(archived_at)` filter (see the `archive` block).
     read :trashed do
