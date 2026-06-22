@@ -13,7 +13,7 @@ defmodule KilnCMSWeb.TrashLive do
     actor = socket.assigns.current_user
 
     if actor.role == :admin do
-      {:ok, socket |> assign(:actor, actor) |> load_items()}
+      {:ok, socket |> assign(:actor, actor) |> assign(:confirming_empty, false) |> load_items()}
     else
       {:ok, push_navigate(socket, to: ~p"/editor")}
     end
@@ -50,6 +50,38 @@ defmodule KilnCMSWeb.TrashLive do
     end
   end
 
+  # Emptying the trash permanently deletes everything in it, so it goes through
+  # a two-step confirmation rather than a single click.
+  def handle_event("request_empty", _params, socket) do
+    {:noreply, assign(socket, :confirming_empty, socket.assigns.items != [])}
+  end
+
+  def handle_event("cancel_empty", _params, socket),
+    do: {:noreply, assign(socket, :confirming_empty, false)}
+
+  def handle_event("confirm_empty", _params, socket) do
+    actor = socket.assigns.actor
+
+    {ok, skipped} =
+      Enum.reduce(socket.assigns.items, {0, 0}, fn {kind, record}, {ok, skipped} ->
+        case do_purge(to_string(kind), record, actor) do
+          :ok -> {ok + 1, skipped}
+          _ -> {ok, skipped + 1}
+        end
+      end)
+
+    flash = "Permanently deleted #{ok}" <> if(skipped > 0, do: ", #{skipped} skipped", else: "")
+
+    {:noreply,
+     socket
+     |> load_items()
+     |> assign(:confirming_empty, false)
+     |> put_flash(:info, flash)}
+  end
+
+  defp do_purge("page", r, a), do: CMS.purge_page(r, actor: a)
+  defp do_purge("post", r, a), do: CMS.purge_post(r, actor: a)
+
   defp find_item(items, kind, id) do
     Enum.find_value(items, fn {k, r} ->
       if to_string(k) == kind and r.id == id, do: r
@@ -72,7 +104,41 @@ defmodule KilnCMSWeb.TrashLive do
             <h1 class="mt-1 text-2xl font-semibold">Trash</h1>
             <p class="text-sm text-base-content/60">
               Soft-deleted content. Restore brings it back to where it was.
+              Trash is purged automatically after 30 days.
             </p>
+          </div>
+          <button
+            :if={@items != []}
+            type="button"
+            phx-click="request_empty"
+            class="rounded border border-error/40 px-3 py-1.5 text-sm text-error hover:bg-error/10"
+          >
+            Empty trash
+          </button>
+        </div>
+
+        <div
+          :if={@confirming_empty}
+          class="flex flex-wrap items-center gap-3 rounded border border-error/40 bg-error/10 px-3 py-2 text-sm"
+        >
+          <span>
+            Permanently delete everything in the trash? This can't be undone.
+          </span>
+          <div class="ml-auto flex gap-2">
+            <button
+              type="button"
+              phx-click="confirm_empty"
+              class="rounded bg-error px-3 py-1 text-xs font-medium text-error-content hover:opacity-90"
+            >
+              Delete everything
+            </button>
+            <button
+              type="button"
+              phx-click="cancel_empty"
+              class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
+            >
+              Cancel
+            </button>
           </div>
         </div>
 

@@ -72,7 +72,7 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("toggle_select_all", _params, socket) do
     keys = visible_keys(socket)
-    all_selected? = keys != MapSet.new() and MapSet.subset?(keys, socket.assigns.selected)
+    all_selected? = MapSet.size(keys) > 0 and MapSet.subset?(keys, socket.assigns.selected)
 
     selected =
       if all_selected?,
@@ -193,7 +193,7 @@ defmodule KilnCMSWeb.EditorLive do
       |> assign(:selected_count, MapSet.size(assigns.selected))
       |> assign(
         :all_selected?,
-        visible_keys != MapSet.new() and MapSet.subset?(visible_keys, assigns.selected)
+        MapSet.size(visible_keys) > 0 and MapSet.subset?(visible_keys, assigns.selected)
       )
 
     ~H"""

@@ -29,6 +29,9 @@ defmodule KilnCMS.CMS.Post do
     change_tracking_mode(:changes_only)
     store_action_name?(true)
     ignore_attributes([:inserted_at, :updated_at])
+    # No FK from version -> post, so a `:purge` can hard-delete a post whose
+    # history exists. Versions of purged content are left as audit records.
+    reference_source?(false)
     mixin({KilnCMS.CMS.VersionPolicies, :policies, []})
     version_extensions(authorizers: [Ash.Policy.Authorizer])
   end
@@ -65,13 +68,30 @@ defmodule KilnCMS.CMS.Post do
         worker_module_name KilnCMS.CMS.Post.Workers.PublishScheduled
         scheduler_module_name KilnCMS.CMS.Post.Schedulers.PublishScheduled
       end
+
+      # Permanently delete posts that have sat in the trash for 30+ days, so
+      # soft-deleted content doesn't accumulate forever. Runs nightly.
+      trigger :purge_trashed do
+        action :purge
+        read_action :trashed
+        worker_read_action :trashed
+        queue :default
+        scheduler_cron "0 3 * * *"
+
+        where expr(archived_at <= ago(30, :day))
+
+        worker_module_name KilnCMS.CMS.Post.Workers.PurgeTrashed
+        scheduler_module_name KilnCMS.CMS.Post.Schedulers.PurgeTrashed
+      end
     end
   end
 
   # Let the `:trashed` read action see soft-deleted rows (every other read
-  # keeps AshArchival's automatic `is_nil(archived_at)` filter).
+  # keeps AshArchival's automatic `is_nil(archived_at)` filter), and let
+  # `:purge` actually hard-delete instead of re-archiving.
   archive do
     exclude_read_actions([:trashed])
+    exclude_destroy_actions([:purge])
   end
 
   postgres do
@@ -168,6 +188,9 @@ defmodule KilnCMS.CMS.Post do
     # Soft-deleted ("trashed") posts — the only read that bypasses AshArchival's
     # automatic `is_nil(archived_at)` filter (see the `archive` block).
     read :trashed do
+      # Keyset pagination is required for the AshOban auto-purge trigger;
+      # `required?: false` keeps plain `list_trashed_*` calls returning lists.
+      pagination keyset?: true, required?: false
       filter expr(not is_nil(archived_at))
     end
 
@@ -176,6 +199,12 @@ defmodule KilnCMS.CMS.Post do
       accept []
       require_atomic? false
       change set_attribute(:archived_at, nil)
+    end
+
+    # Permanent hard delete (bypasses archival — see the `archive` block). Used
+    # by "Empty trash" and the nightly auto-purge trigger; admin/system only
+    # via the destroy policy.
+    destroy :purge do
     end
   end
 

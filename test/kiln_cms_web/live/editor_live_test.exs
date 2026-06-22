@@ -239,6 +239,24 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
+    test "empty trash asks for confirmation, then permanently deletes everything", %{conn: conn} do
+      page = draft_page(%{title: "PurgeMe"})
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_page(page, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/trash")
+
+      # First click only opens the guard; nothing is purged yet.
+      confirm_html = lv |> element("button[phx-click='request_empty']") |> render_click()
+      assert confirm_html =~ "This can&#39;t be undone"
+      assert Enum.any?(CMS.list_trashed_pages!(authorize?: false), &(&1.id == page.id))
+
+      # Confirming hard-deletes everything in the trash.
+      lv |> element("button[phx-click='confirm_empty']") |> render_click()
+      refute Enum.any?(CMS.list_trashed_pages!(authorize?: false), &(&1.id == page.id))
+      assert render(lv) =~ "Trash is empty"
+    end
+
     test "the trash link is shown to admins only", %{conn: conn} do
       {:ok, _lv, editor_html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
       refute editor_html =~ "/editor/trash"

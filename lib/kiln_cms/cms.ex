@@ -34,6 +34,7 @@ defmodule KilnCMS.CMS do
       define :destroy_page, action: :destroy
       define :list_trashed_pages, action: :trashed
       define :restore_page, action: :restore
+      define :purge_page, action: :purge
     end
 
     resource KilnCMS.CMS.Page.Version do
@@ -55,6 +56,7 @@ defmodule KilnCMS.CMS do
       define :destroy_post, action: :destroy
       define :list_trashed_posts, action: :trashed
       define :restore_post, action: :restore
+      define :purge_post, action: :purge
     end
 
     resource KilnCMS.CMS.Post.Version do
