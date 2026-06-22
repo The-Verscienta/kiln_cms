@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:statuses, @statuses)
      |> assign(:status, "all")
      |> assign(:query, "")
+     |> assign(:selected, MapSet.new())
      |> load_items()}
   end
 
@@ -57,6 +58,49 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, :query, q)}
 
+  def handle_event("toggle_select", %{"key" => key}, socket) do
+    selected = socket.assigns.selected
+
+    selected =
+      if MapSet.member?(selected, key),
+        do: MapSet.delete(selected, key),
+        else: MapSet.put(selected, key)
+
+    {:noreply, assign(socket, :selected, selected)}
+  end
+
+  def handle_event("toggle_select_all", _params, socket) do
+    keys = visible_keys(socket)
+    all_selected? = keys != MapSet.new() and MapSet.subset?(keys, socket.assigns.selected)
+
+    selected =
+      if all_selected?,
+        do: MapSet.difference(socket.assigns.selected, keys),
+        else: MapSet.union(socket.assigns.selected, keys)
+
+    {:noreply, assign(socket, :selected, selected)}
+  end
+
+  def handle_event("bulk", %{"action" => verb}, socket)
+      when verb in ~w(publish unpublish archive) do
+    actor = socket.assigns.actor
+
+    {ok, skipped} =
+      Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {ok, skipped} ->
+        [kind, id] = String.split(key, ":", parts: 2)
+
+        case do_transition(kind, verb, get!(kind, id, actor), actor) do
+          {:ok, _} -> {ok + 1, skipped}
+          _ -> {ok, skipped + 1}
+        end
+      end)
+
+    flash = "#{verb}: #{ok} updated" <> if(skipped > 0, do: ", #{skipped} skipped", else: "")
+
+    {:noreply,
+     socket |> load_items() |> assign(:selected, MapSet.new()) |> put_flash(:info, flash)}
+  end
+
   def handle_event("publish", params, socket),
     do: {:noreply, transition(socket, params, "publish")}
 
@@ -83,6 +127,16 @@ defmodule KilnCMSWeb.EditorLive do
   defp do_transition("post", "publish", r, a), do: CMS.publish_post(r, %{}, actor: a)
   defp do_transition("page", "unpublish", r, a), do: CMS.unpublish_page(r, %{}, actor: a)
   defp do_transition("post", "unpublish", r, a), do: CMS.unpublish_post(r, %{}, actor: a)
+  defp do_transition("page", "archive", r, a), do: CMS.archive_page(r, %{}, actor: a)
+  defp do_transition("post", "archive", r, a), do: CMS.archive_post(r, %{}, actor: a)
+
+  # The set of selection keys ("kind:id") for the items currently visible under
+  # the active status/title filter.
+  defp visible_keys(socket) do
+    socket.assigns.items
+    |> visible_items(socket.assigns.status, socket.assigns.query)
+    |> MapSet.new(fn {kind, r} -> "#{kind}:#{r.id}" end)
+  end
 
   defp kind_atom("page"), do: :page
   defp kind_atom("post"), do: :post
@@ -92,8 +146,17 @@ defmodule KilnCMSWeb.EditorLive do
 
   @impl true
   def render(assigns) do
+    visible = visible_items(assigns.items, assigns.status, assigns.query)
+    visible_keys = MapSet.new(visible, fn {kind, r} -> "#{kind}:#{r.id}" end)
+
     assigns =
-      assign(assigns, :visible, visible_items(assigns.items, assigns.status, assigns.query))
+      assigns
+      |> assign(:visible, visible)
+      |> assign(:selected_count, MapSet.size(assigns.selected))
+      |> assign(
+        :all_selected?,
+        visible_keys != MapSet.new() and MapSet.subset?(visible_keys, assigns.selected)
+      )
 
     ~H"""
     <Layouts.app flash={@flash}>
@@ -134,6 +197,37 @@ defmodule KilnCMSWeb.EditorLive do
           </form>
         </div>
 
+        <div
+          :if={@visible != []}
+          class="flex flex-wrap items-center gap-3 rounded border border-base-content/10 bg-base-200/40 px-3 py-2"
+        >
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={@all_selected?} phx-click="toggle_select_all" />
+            Select all
+          </label>
+          <span class="text-sm text-base-content/60">
+            {if @selected_count > 0, do: "#{@selected_count} selected", else: "None selected"}
+          </span>
+          <div class="ml-auto flex gap-2">
+            <button
+              :for={
+                {verb, label} <- [
+                  {"publish", "Publish"},
+                  {"unpublish", "Unpublish"},
+                  {"archive", "Archive"}
+                ]
+              }
+              type="button"
+              phx-click="bulk"
+              phx-value-action={verb}
+              disabled={@selected_count == 0}
+              class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {label}
+            </button>
+          </div>
+        </div>
+
         <p :if={@items == []} class="text-sm text-base-content/60">
           No content yet. Create your first page or post.
         </p>
@@ -150,6 +244,12 @@ defmodule KilnCMSWeb.EditorLive do
             id={"#{kind}-#{record.id}"}
             class="flex items-center gap-4 p-3"
           >
+            <input
+              type="checkbox"
+              checked={MapSet.member?(@selected, "#{kind}:#{record.id}")}
+              phx-click="toggle_select"
+              phx-value-key={"#{kind}:#{record.id}"}
+            />
             <span class="w-12 shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
             <div class="min-w-0 flex-1">
               <.link navigate={edit_path(kind, record.id)} class="font-medium hover:underline">

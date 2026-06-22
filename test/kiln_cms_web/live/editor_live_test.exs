@@ -101,6 +101,33 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert path =~ ~r"^/editor/pages/"
     end
 
+    test "bulk publish transitions the selected page and post", %{conn: conn} do
+      page = draft_page(%{title: "BulkPage", state: :draft})
+      post = draft_post(%{title: "BulkPost", state: :draft})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
+      lv |> element(~s(input[phx-value-key="post:#{post.id}"])) |> render_click()
+      lv |> element("button[phx-value-action='publish']") |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :published
+      assert CMS.get_post!(post.id, authorize?: false).state == :published
+    end
+
+    test "select-all then bulk archive archives every visible item", %{conn: conn} do
+      page = draft_page(%{title: "ArchPage"})
+      post = draft_post(%{title: "ArchPost"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      lv |> element("input[phx-click='toggle_select_all']") |> render_click()
+      lv |> element("button[phx-value-action='archive']") |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :archived
+      assert CMS.get_post!(post.id, authorize?: false).state == :archived
+    end
+
     test "lists posts and New post opens the post editor", %{conn: conn} do
       draft_post(%{title: "FindablePost"})
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
