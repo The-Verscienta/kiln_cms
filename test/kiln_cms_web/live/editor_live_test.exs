@@ -267,16 +267,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
   end
 
   describe "who's editing (presence)" do
-    test "a lone editor sees no 'Also editing' indicator", %{conn: conn} do
+    test "a lone editor sees no presence roster", %{conn: conn} do
       page = draft_page()
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      refute render(lv) =~ "Also editing"
+      refute render(lv) =~ "editing"
     end
 
-    test "two editors on the same item see each other", %{conn: _conn} do
+    test "the roster shows a count and names everyone editing", %{conn: _conn} do
       page = draft_page()
       user_a = authed_user(:editor)
       user_b = authed_user(:editor)
@@ -285,14 +285,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv_a, _html} =
         build_conn() |> log_in(user_a) |> live(~p"/editor/pages/#{page.id}")
 
-      refute render(lv_a) =~ "Also editing"
+      refute render(lv_a) =~ "editing"
 
       {:ok, _lv_b, _html} =
         build_conn() |> log_in(user_b) |> live(~p"/editor/pages/#{page.id}")
 
-      # lv_a receives the presence_diff and re-renders with user_b listed.
-      assert render(lv_a) =~ "Also editing"
-      assert render(lv_a) =~ name_b
+      # lv_a receives the presence_diff and re-renders with both editors.
+      html = render(lv_a)
+      assert html =~ "2 editing"
+      # user_b appears in their avatar's tooltip.
+      assert html =~ name_b
     end
   end
 

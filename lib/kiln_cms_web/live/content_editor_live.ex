@@ -284,7 +284,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <p class="text-sm text-base-content/60">
               State: <span class="font-medium">{@record.state}</span>
             </p>
-            <.editing_indicator editors={@editors} current_id={@actor.id} />
+            <.presence_roster editors={@editors} current_id={@actor.id} />
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <.link
@@ -512,21 +512,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :editors, :list, required: true
   attr :current_id, :string, required: true
 
-  # Live "who's editing" indicator. Shows the *other* editors currently on this
-  # item (the current user is omitted — they know they're here).
-  defp editing_indicator(assigns) do
+  # Live "who's editing" roster — overlapping colored avatar chips (one per
+  # collaborator, in the same color as their cursor/lock badges) plus a count.
+  # Hidden when you're the only one here. Self is sorted first and tagged
+  # "(you)".
+  defp presence_roster(assigns) do
+    others = Enum.reject(assigns.editors, &(&1.id == assigns.current_id))
+    roster = Enum.sort_by(assigns.editors, &{&1.id != assigns.current_id, &1.name})
+
     assigns =
-      assign(assigns, :others, Enum.reject(assigns.editors, &(&1.id == assigns.current_id)))
+      assign(assigns, others: others, roster: roster, count: length(assigns.editors))
 
     ~H"""
-    <div :if={@others != []} class="mt-2 flex items-center gap-2 text-xs text-warning">
-      <span class="relative flex h-2 w-2">
-        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75"></span>
-        <span class="relative inline-flex h-2 w-2 rounded-full bg-warning"></span>
-      </span>
-      <span>
-        Also editing: <span class="font-medium">{Enum.map_join(@others, ", ", & &1.name)}</span>
-      </span>
+    <div :if={@others != []} class="mt-2 flex items-center gap-2">
+      <div class="flex">
+        <span
+          :for={e <- @roster}
+          title={e.name <> if(e.id == @current_id, do: " (you)", else: "")}
+          class={[
+            "-ml-1.5 flex size-6 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-base-100 first:ml-0",
+            color_for(e.id)
+          ]}
+        >
+          {e.name |> String.first() |> Kernel.||("?") |> String.upcase()}
+        </span>
+      </div>
+      <span class="text-xs text-base-content/60">{@count} editing</span>
     </div>
     """
   end
