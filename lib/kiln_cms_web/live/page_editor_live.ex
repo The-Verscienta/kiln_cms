@@ -221,6 +221,22 @@ defmodule KilnCMSWeb.PageEditorLive do
                 </button>
               </div>
             </div>
+
+            <details class="rounded border border-base-content/15 p-3">
+              <summary class="cursor-pointer text-sm font-medium">SEO &amp; scheduling</summary>
+              <div class="mt-3 space-y-3">
+                <.input field={@form[:seo_title]} label="SEO title" />
+                <.input field={@form[:seo_description]} type="textarea" label="SEO description" />
+                <.input field={@form[:seo_image]} label="OG image URL" />
+                <.input field={@form[:canonical_url]} label="Canonical URL" />
+                <.input field={@form[:locale]} label="Locale" />
+                <.input
+                  field={@form[:scheduled_at]}
+                  type="datetime-local"
+                  label="Scheduled publish at"
+                />
+              </div>
+            </details>
           </div>
 
           <div class="lg:sticky lg:top-4 lg:self-start">

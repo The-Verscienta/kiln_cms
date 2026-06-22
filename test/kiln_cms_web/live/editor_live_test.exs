@@ -151,6 +151,28 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html2 =~ ~s(text-xl font-bold">Updated Heading)
     end
 
+    test "saves SEO & scheduling fields", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv
+      |> form("#page-editor",
+        form: %{
+          seo_title: "Meta Title",
+          seo_description: "Meta description",
+          canonical_url: "https://example.com/p"
+        }
+      )
+      |> render_submit()
+
+      saved = CMS.get_page!(page.id, authorize?: false)
+      assert saved.seo_title == "Meta Title"
+      assert saved.seo_description == "Meta description"
+      assert saved.canonical_url == "https://example.com/p"
+    end
+
     test "runs the publish workflow", %{conn: conn} do
       page = draft_page()
 
