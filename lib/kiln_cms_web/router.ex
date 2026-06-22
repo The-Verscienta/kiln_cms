@@ -64,6 +64,11 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
   end
 
+  # Preview endpoint — authorized by a signed token, not a session/bearer.
+  pipeline :preview do
+    plug :accepts, ["json"]
+  end
+
   scope "/", KilnCMSWeb do
     pipe_through :browser
 
@@ -106,6 +111,12 @@ defmodule KilnCMSWeb.Router do
       default_model_expand_depth: 4
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
+  end
+
+  scope "/preview", KilnCMSWeb do
+    pipe_through :preview
+
+    get "/:token", PreviewController, :show
   end
 
   scope "/", KilnCMSWeb do
