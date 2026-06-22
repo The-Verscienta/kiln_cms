@@ -1,7 +1,9 @@
 # KilnCMS
 
 A modern, high-performance headless + traditional CMS built on the **STAPLE stack**
-(Phoenix · Elixir · Tailwind · Alpine.js · LiveView) with the **Ash Framework** at its core.
+(Phoenix · Tailwind · LiveView · Elixir) with the **Ash Framework** at its core. Client
+interactivity is handled by LiveView + colocated JS hooks; Alpine.js (the *A* in STAPLE)
+is optional and not currently wired in.
 
 See [`KilnCMS_Project_Plan.md`](KilnCMS_Project_Plan.md) for the full vision, architecture, and
 the resolved architectural decisions (D1–D8).

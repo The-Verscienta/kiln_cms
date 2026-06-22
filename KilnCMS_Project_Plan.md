@@ -1,6 +1,6 @@
 # KilnCMS: A World-Class CMS on the STAPLE Ecosystem
 
-**Project Goal:** Build a modern, high-performance, developer- and editor-friendly Content Management System (headless + traditional) that rivals or exceeds Strapi, Sanity, and even parts of enterprise DXPs like Sitecore/AEM — but built natively on Elixir/Phoenix with the **STAPLE stack** (Phoenix + Elixir + Tailwind + Alpine.js + LiveView + **Ash Framework**).
+**Project Goal:** Build a modern, high-performance, developer- and editor-friendly Content Management System (headless + traditional) that rivals or exceeds Strapi, Sanity, and even parts of enterprise DXPs like Sitecore/AEM — but built natively on Elixir/Phoenix with the **STAPLE stack** (Phoenix + Elixir + Tailwind + LiveView + **Ash Framework**; the *A* in STAPLE — Alpine.js — is kept optional and isn't currently wired in, since LiveView + colocated JS hooks have covered all client interactivity so far).
 
 **Why this exists:** Strapi is flexible but Node.js-based and limited in real-time/typing/performance. Beacon is great but lighter on modeling. Sitecore/AEM are bloated and expensive. KilnCMS leverages Ash's declarative power for the best content models, LiveView for instant real-time editing/preview, PostgreSQL + Ecto (via Ash) for reliability, and a deliberately minimal ops footprint — **native BEAM `Phoenix.PubSub`** for real-time, **Oban** (Postgres) for jobs, and in-process caching/rate-limiting — with **DragonflyDB** available as an *optional* multi-node shared cache rather than a hard dependency (see **Architectural Decisions** below).
 
@@ -32,7 +32,7 @@
 | Language           | Elixir 1.19+ / OTP                  | Concurrency, fault-tolerance, DX |
 | Web Framework      | Phoenix 1.8+ + LiveView (latest)    | Real-time UIs, channels, PubSub, HEEx components |
 | Styling            | Tailwind CSS (latest) + custom HEEx components / design system | Full control, lightweight, consistent with STAPLE philosophy. No DaisyUI by default. |
-| Light JS           | Alpine.js + Phoenix JS hooks        | Minimal client JS |
+| Light JS           | Phoenix LiveView + colocated JS hooks (Sortable, TipTap) | Minimal client JS. **No Alpine.js currently** — LiveView + hooks cover interactivity; add Alpine only for a specific need |
 | Domain Modeling    | **Ash Framework** (core + AshPostgres + AshPhoenix) | Declarative resources, actions, policies, calculations — best content models possible |
 | Admin UI           | **AshAdmin** + custom LiveView pages | Instant super-admin + tailored content editor |
 | Database           | PostgreSQL + Ecto (via AshPostgres) | Reliable, JSONB, full-text, strong consistency |
