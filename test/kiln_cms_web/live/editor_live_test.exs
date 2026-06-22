@@ -7,6 +7,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Page
+  alias KilnCMS.CMS.Post
 
   @password "password123456"
 
@@ -42,6 +43,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Page,
       Map.merge(
         %{title: "A page", slug: "ed-#{System.unique_integer([:positive])}", state: :draft},
+        attrs
+      )
+    )
+  end
+
+  defp draft_post(attrs \\ %{}) do
+    Ash.Seed.seed!(
+      Post,
+      Map.merge(
+        %{title: "A post", slug: "po-#{System.unique_integer([:positive])}", state: :draft},
         attrs
       )
     )
@@ -88,6 +99,48 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert {path, _flash} = assert_redirect(lv)
       assert path =~ ~r"^/editor/pages/"
+    end
+
+    test "lists posts and New post opens the post editor", %{conn: conn} do
+      draft_post(%{title: "FindablePost"})
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ "FindablePost"
+
+      lv |> element("button", "New post") |> render_click()
+      assert {path, _flash} = assert_redirect(lv)
+      assert path =~ ~r"^/editor/posts/"
+    end
+  end
+
+  describe "/editor/posts/:id (post editor)" do
+    test "saves an edited title and excerpt", %{conn: conn} do
+      post = draft_post(%{title: "Old post"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "Edit post"
+      # Excerpt is a post-only field.
+      assert html =~ "Excerpt"
+
+      lv
+      |> form("#post-editor", form: %{title: "New post", excerpt: "A lead-in."})
+      |> render_submit()
+
+      saved = CMS.get_post!(post.id, authorize?: false)
+      assert saved.title == "New post"
+      assert saved.excerpt == "A lead-in."
+    end
+
+    test "runs the publish workflow for a post", %{conn: conn} do
+      post = draft_post()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      lv |> element("button", "Publish") |> render_click()
+
+      assert CMS.get_post!(post.id, authorize?: false).state == :published
     end
   end
 

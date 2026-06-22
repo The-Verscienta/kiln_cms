@@ -1,8 +1,8 @@
 defmodule KilnCMSWeb.EditorLive do
   @moduledoc """
-  Content list / editor home (`/editor`) — browse pages with their workflow
-  state, create a new page, jump into the block editor, and publish/unpublish
-  inline. Editor/admin only. (Posts get an editor in a follow-up increment.)
+  Content list / editor home (`/editor`) — browse pages and posts with their
+  workflow state, create new content, jump into the block editor, and
+  publish/unpublish inline, with status + title filtering. Editor/admin only.
   """
   use KilnCMSWeb, :live_view
 
@@ -18,35 +18,38 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:statuses, @statuses)
      |> assign(:status, "all")
      |> assign(:query, "")
-     |> load_pages()}
+     |> load_items()}
   end
 
-  defp visible_pages(pages, status, query) do
+  # Pages and posts merged into `{kind, record}` tuples, newest first.
+  defp load_items(socket) do
+    actor = socket.assigns.actor
+
+    pages = Enum.map(CMS.list_pages!(actor: actor), &{:page, &1})
+    posts = Enum.map(CMS.list_posts!(actor: actor), &{:post, &1})
+
+    items = Enum.sort_by(pages ++ posts, fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
+    assign(socket, :items, items)
+  end
+
+  defp visible_items(items, status, query) do
     q = String.downcase(query)
 
-    Enum.filter(pages, fn page ->
-      (status == "all" or to_string(page.state) == status) and
-        (q == "" or String.contains?(String.downcase(page.title), q))
+    Enum.filter(items, fn {_kind, r} ->
+      (status == "all" or to_string(r.state) == status) and
+        (q == "" or String.contains?(String.downcase(r.title), q))
     end)
   end
 
-  defp load_pages(socket) do
-    assign(
-      socket,
-      :pages,
-      CMS.list_pages!(actor: socket.assigns.actor, query: [sort: [updated_at: :desc]])
-    )
-  end
-
   @impl true
-  def handle_event("new_page", _params, socket) do
-    page =
-      CMS.create_page!(
-        %{title: "Untitled page", slug: "untitled-#{System.unique_integer([:positive])}"},
-        actor: socket.assigns.actor
-      )
+  def handle_event("new", %{"kind" => kind}, socket) do
+    attrs = %{
+      title: "Untitled #{kind}",
+      slug: "untitled-#{System.unique_integer([:positive])}"
+    }
 
-    {:noreply, push_navigate(socket, to: ~p"/editor/pages/#{page.id}")}
+    record = create!(kind, attrs, socket.assigns.actor)
+    {:noreply, push_navigate(socket, to: edit_path(kind_atom(kind), record.id))}
   end
 
   def handle_event("filter", %{"status" => status}, socket),
@@ -54,42 +57,60 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, :query, q)}
 
-  def handle_event("publish", %{"id" => id}, socket),
-    do: {:noreply, transition(socket, id, :publish)}
+  def handle_event("publish", params, socket),
+    do: {:noreply, transition(socket, params, "publish")}
 
-  def handle_event("unpublish", %{"id" => id}, socket),
-    do: {:noreply, transition(socket, id, :unpublish)}
+  def handle_event("unpublish", params, socket),
+    do: {:noreply, transition(socket, params, "unpublish")}
 
-  defp transition(socket, id, action) do
+  defp transition(socket, %{"kind" => kind, "id" => id}, verb) do
     actor = socket.assigns.actor
-    page = CMS.get_page!(id, actor: actor)
+    record = get!(kind, id, actor)
 
-    result =
-      case action do
-        :publish -> CMS.publish_page(page, %{}, actor: actor)
-        :unpublish -> CMS.unpublish_page(page, %{}, actor: actor)
-      end
-
-    case result do
-      {:ok, _} -> socket |> load_pages() |> put_flash(:info, "Updated.")
+    case do_transition(kind, verb, record, actor) do
+      {:ok, _} -> socket |> load_items() |> put_flash(:info, "Updated.")
       _ -> put_flash(socket, :error, "That action isn't allowed right now.")
     end
   end
 
+  defp create!("page", attrs, actor), do: CMS.create_page!(attrs, actor: actor)
+  defp create!("post", attrs, actor), do: CMS.create_post!(attrs, actor: actor)
+
+  defp get!("page", id, actor), do: CMS.get_page!(id, actor: actor)
+  defp get!("post", id, actor), do: CMS.get_post!(id, actor: actor)
+
+  defp do_transition("page", "publish", r, a), do: CMS.publish_page(r, %{}, actor: a)
+  defp do_transition("post", "publish", r, a), do: CMS.publish_post(r, %{}, actor: a)
+  defp do_transition("page", "unpublish", r, a), do: CMS.unpublish_page(r, %{}, actor: a)
+  defp do_transition("post", "unpublish", r, a), do: CMS.unpublish_post(r, %{}, actor: a)
+
+  defp kind_atom("page"), do: :page
+  defp kind_atom("post"), do: :post
+
+  defp edit_path(:page, id), do: ~p"/editor/pages/#{id}"
+  defp edit_path(:post, id), do: ~p"/editor/posts/#{id}"
+
   @impl true
   def render(assigns) do
     assigns =
-      assign(assigns, :visible, visible_pages(assigns.pages, assigns.status, assigns.query))
+      assign(assigns, :visible, visible_items(assigns.items, assigns.status, assigns.query))
 
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-6">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-4">
           <h1 class="text-2xl font-semibold">Content</h1>
-          <.button type="button" phx-click="new_page" variant="primary">New page</.button>
+          <div class="flex gap-2">
+            <.button type="button" phx-click="new" phx-value-kind="page" variant="primary">
+              New page
+            </.button>
+            <.button type="button" phx-click="new" phx-value-kind="post" variant="primary">
+              New post
+            </.button>
+          </div>
         </div>
 
-        <div :if={@pages != []} class="flex flex-wrap items-center gap-3">
+        <div :if={@items != []} class="flex flex-wrap items-center gap-3">
           <form id="content-filter" phx-change="filter">
             <select
               name="status"
@@ -113,46 +134,53 @@ defmodule KilnCMSWeb.EditorLive do
           </form>
         </div>
 
-        <p :if={@pages == []} class="text-sm text-base-content/60">
-          No pages yet. Create your first one.
+        <p :if={@items == []} class="text-sm text-base-content/60">
+          No content yet. Create your first page or post.
         </p>
-        <p :if={@pages != [] and @visible == []} class="text-sm text-base-content/60">
-          No pages match the current filter.
+        <p :if={@items != [] and @visible == []} class="text-sm text-base-content/60">
+          Nothing matches the current filter.
         </p>
 
         <ul
           :if={@visible != []}
           class="divide-y divide-base-content/10 rounded border border-base-content/10"
         >
-          <li :for={page <- @visible} id={"page-#{page.id}"} class="flex items-center gap-4 p-3">
+          <li
+            :for={{kind, record} <- @visible}
+            id={"#{kind}-#{record.id}"}
+            class="flex items-center gap-4 p-3"
+          >
+            <span class="w-12 shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
             <div class="min-w-0 flex-1">
-              <.link navigate={~p"/editor/pages/#{page.id}"} class="font-medium hover:underline">
-                {page.title}
+              <.link navigate={edit_path(kind, record.id)} class="font-medium hover:underline">
+                {record.title}
               </.link>
-              <p class="truncate text-xs text-base-content/50">/{page.slug}</p>
+              <p class="truncate text-xs text-base-content/50">/{record.slug}</p>
             </div>
-            <.state_badge state={page.state} />
+            <.state_badge state={record.state} />
             <div class="flex items-center gap-2">
               <button
-                :if={page.state in [:draft, :in_review]}
+                :if={record.state in [:draft, :in_review]}
                 type="button"
                 phx-click="publish"
-                phx-value-id={page.id}
+                phx-value-kind={kind}
+                phx-value-id={record.id}
                 class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
               >
                 Publish
               </button>
               <button
-                :if={page.state == :published}
+                :if={record.state == :published}
                 type="button"
                 phx-click="unpublish"
-                phx-value-id={page.id}
+                phx-value-kind={kind}
+                phx-value-id={record.id}
                 class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
               >
                 Unpublish
               </button>
               <.link
-                navigate={~p"/editor/pages/#{page.id}"}
+                navigate={edit_path(kind, record.id)}
                 class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
               >
                 Edit

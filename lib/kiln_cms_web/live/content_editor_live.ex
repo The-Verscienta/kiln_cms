@@ -1,14 +1,14 @@
-defmodule KilnCMSWeb.PageEditorLive do
+defmodule KilnCMSWeb.ContentEditorLive do
   @moduledoc """
-  Block editor for a single Page — edit title/slug and the embedded block tree
-  (add/remove blocks, edit type + content, **drag-and-drop reorder** via the
-  `Sortable` JS hook) through an `AshPhoenix.Form` with nested forms, and run
-  the publishing workflow, with **TipTap rich text** for `rich_text` blocks and
-  a **side-by-side live preview** (rendered from the form state via
-  `KilnCMSWeb.BlockComponents`). Editor/admin only.
+  Block editor for a single Page **or** Post (the `live_action` — `:page` /
+  `:post` — selects which). Edit title/slug (+ excerpt for posts) and the
+  embedded block tree (add/remove/reorder via the `Sortable` hook), with
+  **TipTap rich text** for `rich_text` blocks, a **side-by-side live preview**
+  (`KilnCMSWeb.BlockComponents`), SEO & scheduling, version history + restore,
+  and the publishing workflow. Editor/admin only.
 
-  A PubSub-decoupled preview (pop-out window / signed iframe for full
-  public-site fidelity + Presence for collaboration) is a later increment.
+  Page/Post differences are dispatched through the uniform `*_page` / `*_post`
+  domain code interfaces.
   """
   use KilnCMSWeb, :live_view
 
@@ -19,42 +19,65 @@ defmodule KilnCMSWeb.PageEditorLive do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
+    kind = socket.assigns.live_action
     actor = socket.assigns.current_user
-    page = CMS.get_page!(id, actor: actor)
 
     {:ok,
      socket
+     |> assign(:kind, kind)
      |> assign(:actor, actor)
      |> assign(:block_types, @block_types)
-     |> assign_page(page)}
+     |> assign_record(fetch!(kind, id, actor))}
   end
 
-  defp assign_page(socket, page) do
+  defp assign_record(socket, record) do
     socket
-    |> assign(:page, page)
-    |> assign(:form, build_form(page, socket.assigns.actor))
+    |> assign(:record, record)
+    |> assign(:form, build_form(record, socket.assigns.actor))
     |> load_versions()
   end
 
   defp load_versions(socket) do
-    versions =
-      CMS.list_page_versions!(
-        actor: socket.assigns.actor,
-        query: [
-          filter: [version_source_id: socket.assigns.page.id],
-          sort: [version_inserted_at: :desc],
-          limit: 15
-        ]
-      )
+    opts = [
+      actor: socket.assigns.actor,
+      query: [
+        filter: [version_source_id: socket.assigns.record.id],
+        sort: [version_inserted_at: :desc],
+        limit: 15
+      ]
+    ]
 
-    assign(socket, :versions, versions)
+    assign(socket, :versions, list_versions(socket.assigns.kind, opts))
   end
 
-  defp build_form(page, actor) do
-    page
+  defp build_form(record, actor) do
+    record
     |> AshPhoenix.Form.for_update(:update, actor: actor, forms: [auto?: true])
     |> to_form()
   end
+
+  # --- Page/Post dispatch to the per-kind code interfaces --------------------
+
+  defp fetch!(:page, id, actor), do: CMS.get_page!(id, actor: actor)
+  defp fetch!(:post, id, actor), do: CMS.get_post!(id, actor: actor)
+
+  defp list_versions(:page, opts), do: CMS.list_page_versions!(opts)
+  defp list_versions(:post, opts), do: CMS.list_post_versions!(opts)
+
+  defp restore_version(:page, record, vid, actor),
+    do: CMS.restore_page_version(record, %{version_id: vid}, actor: actor)
+
+  defp restore_version(:post, record, vid, actor),
+    do: CMS.restore_post_version(record, %{version_id: vid}, actor: actor)
+
+  defp do_workflow(:page, "publish", r, a), do: CMS.publish_page(r, %{}, actor: a)
+  defp do_workflow(:post, "publish", r, a), do: CMS.publish_post(r, %{}, actor: a)
+  defp do_workflow(:page, "unpublish", r, a), do: CMS.unpublish_page(r, %{}, actor: a)
+  defp do_workflow(:post, "unpublish", r, a), do: CMS.unpublish_post(r, %{}, actor: a)
+  defp do_workflow(:page, "submit", r, a), do: CMS.submit_page_for_review(r, %{}, actor: a)
+  defp do_workflow(:post, "submit", r, a), do: CMS.submit_post_for_review(r, %{}, actor: a)
+  defp do_workflow(:page, "archive", r, a), do: CMS.archive_page(r, %{}, actor: a)
+  defp do_workflow(:post, "archive", r, a), do: CMS.archive_post(r, %{}, actor: a)
 
   @impl true
   def handle_event("validate", %{"form" => params}, socket) do
@@ -81,17 +104,12 @@ defmodule KilnCMSWeb.PageEditorLive do
 
   def handle_event("save", %{"form" => params}, socket) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
-      {:ok, page} ->
-        {:noreply,
-         socket
-         |> assign_page(page)
-         |> put_flash(:info, "Saved.")}
+      {:ok, record} ->
+        {:noreply, socket |> assign_record(record) |> put_flash(:info, "Saved.")}
 
       {:error, form} ->
         {:noreply,
-         socket
-         |> assign(:form, form)
-         |> put_flash(:error, "Please fix the errors below.")}
+         socket |> assign(:form, form) |> put_flash(:error, "Please fix the errors below.")}
     end
   end
 
@@ -100,38 +118,39 @@ defmodule KilnCMSWeb.PageEditorLive do
   end
 
   def handle_event("restore", %{"version_id" => version_id}, socket) do
-    case CMS.restore_page_version(socket.assigns.page, %{version_id: version_id},
-           actor: socket.assigns.actor
-         ) do
-      {:ok, page} ->
-        {:noreply, socket |> assign_page(page) |> put_flash(:info, "Restored that version.")}
+    result =
+      restore_version(
+        socket.assigns.kind,
+        socket.assigns.record,
+        version_id,
+        socket.assigns.actor
+      )
+
+    case result do
+      {:ok, record} ->
+        {:noreply, socket |> assign_record(record) |> put_flash(:info, "Restored that version.")}
 
       _ ->
         {:noreply, put_flash(socket, :error, "Couldn't restore that version.")}
     end
   end
 
-  defp run_workflow(socket, action) do
-    page = socket.assigns.page
-    actor = socket.assigns.actor
-
+  defp run_workflow(socket, action) when action in ~w(submit publish unpublish archive) do
     result =
-      case action do
-        "submit" -> CMS.submit_page_for_review(page, %{}, actor: actor)
-        "publish" -> CMS.publish_page(page, %{}, actor: actor)
-        "unpublish" -> CMS.unpublish_page(page, %{}, actor: actor)
-        "archive" -> CMS.archive_page(page, %{}, actor: actor)
-        _ -> {:error, :unknown_action}
-      end
+      do_workflow(socket.assigns.kind, action, socket.assigns.record, socket.assigns.actor)
 
     case result do
-      {:ok, page} -> socket |> assign_page(page) |> put_flash(:info, "Updated to #{page.state}.")
-      _ -> put_flash(socket, :error, "That action isn't allowed right now.")
+      {:ok, record} ->
+        socket |> assign_record(record) |> put_flash(:info, "Updated to #{record.state}.")
+
+      _ ->
+        put_flash(socket, :error, "That action isn't allowed right now.")
     end
   end
 
+  defp run_workflow(socket, _action), do: socket
+
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
-  # `value(:blocks)` returns the nested block forms.
   defp preview_blocks(form) do
     case AshPhoenix.Form.value(form, :blocks) do
       forms when is_list(forms) -> Enum.map(forms, &block_map/1)
@@ -150,19 +169,25 @@ defmodule KilnCMSWeb.PageEditorLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
-      <.form for={@form} phx-change="validate" phx-submit="save" id="page-editor" class="space-y-6">
+      <.form
+        for={@form}
+        phx-change="validate"
+        phx-submit="save"
+        id={"#{@kind}-editor"}
+        class="space-y-6"
+      >
         <div class="flex items-start justify-between gap-4">
           <div>
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
               &larr; All content
             </.link>
-            <h1 class="mt-1 text-2xl font-semibold">Edit page</h1>
+            <h1 class="mt-1 text-2xl font-semibold">Edit {@kind}</h1>
             <p class="text-sm text-base-content/60">
-              State: <span class="font-medium">{@page.state}</span>
+              State: <span class="font-medium">{@record.state}</span>
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <.workflow_buttons state={@page.state} />
+            <.workflow_buttons state={@record.state} />
             <.button type="submit" variant="primary">Save</.button>
           </div>
         </div>
@@ -173,6 +198,8 @@ defmodule KilnCMSWeb.PageEditorLive do
               <.input field={@form[:title]} label="Title" />
               <.input field={@form[:slug]} label="Slug" />
             </div>
+
+            <.input :if={@kind == :post} field={@form[:excerpt]} type="textarea" label="Excerpt" />
 
             <div class="space-y-3">
               <h2 class="text-lg font-medium">Blocks</h2>
@@ -301,10 +328,7 @@ defmodule KilnCMSWeb.PageEditorLive do
             <h2 class="mb-2 text-lg font-medium">Preview</h2>
             <article class="space-y-3 rounded border border-base-content/15 p-5">
               <h1 class="text-2xl font-bold">{@form[:title].value}</h1>
-              <BlockComponents.render_block
-                :for={block <- preview_blocks(@form)}
-                block={block}
-              />
+              <BlockComponents.render_block :for={block <- preview_blocks(@form)} block={block} />
             </article>
           </div>
         </div>
