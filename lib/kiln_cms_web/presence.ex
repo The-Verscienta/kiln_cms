@@ -43,8 +43,9 @@ defmodule KilnCMSWeb.Presence do
 
   # `email` is an `Ash.CiString`, so normalise via `to_string/1` rather than
   # guarding on `is_binary/1`.
-  defp display_name(%{email: email}) when not is_nil(email),
+  @doc "A short display name for a user — the local part of their email."
+  def display_name(%{email: email}) when not is_nil(email),
     do: email |> to_string() |> String.split("@") |> hd()
 
-  defp display_name(_), do: "Someone"
+  def display_name(_), do: "Someone"
 end

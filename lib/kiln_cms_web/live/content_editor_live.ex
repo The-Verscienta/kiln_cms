@@ -18,6 +18,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @block_types ~w(rich_text heading quote image embed divider)
 
+  # Stable per-collaborator colors for live focus cursors. Static class strings
+  # so Tailwind keeps them.
+  @cursor_colors ~w(
+    bg-rose-500 bg-amber-500 bg-emerald-500 bg-sky-500 bg-violet-500 bg-pink-500
+  )
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     kind = socket.assigns.live_action
@@ -35,13 +41,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> assign(:actor, actor)
      |> assign(:block_types, @block_types)
      |> assign(:editors, Presence.editors(kind, id))
+     |> assign(:cursors, %{})
      |> assign_record(record)}
   end
 
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     editors = Presence.editors(socket.assigns.kind, socket.assigns.record.id)
-    {:noreply, assign(socket, :editors, editors)}
+    # Drop cursors for anyone who has left, so stale focus badges disappear.
+    present = MapSet.new(editors, & &1.id)
+    cursors = Map.filter(socket.assigns.cursors, fn {id, _} -> MapSet.member?(present, id) end)
+    {:noreply, assign(socket, editors: editors, cursors: cursors)}
+  end
+
+  # A collaborator focused (field set) or left (field nil) a field. Ignore our
+  # own echo — we only render *other* people's cursors.
+  def handle_info({:cursor, %{id: id} = cursor}, socket) do
+    cursors =
+      cond do
+        id == socket.assigns.actor.id -> socket.assigns.cursors
+        is_nil(cursor.field) -> Map.delete(socket.assigns.cursors, id)
+        true -> Map.put(socket.assigns.cursors, id, put_color(cursor))
+      end
+
+    {:noreply, assign(socket, :cursors, cursors)}
   end
 
   defp assign_record(socket, record) do
@@ -97,6 +120,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("validate", %{"form" => params}, socket) do
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
+    {:noreply, socket}
+  end
+
+  def handle_event("field_focus", %{"field" => field}, socket) do
+    broadcast_cursor(socket, field)
+    {:noreply, socket}
+  end
+
+  def handle_event("field_blur", _params, socket) do
+    broadcast_cursor(socket, nil)
     {:noreply, socket}
   end
 
@@ -182,6 +215,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
   end
 
+  # Tell other editors of this item which field we just focused (or left, when
+  # `field` is nil). Reuses the Presence editing topic.
+  defp broadcast_cursor(socket, field) do
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      Presence.topic(socket.assigns.kind, socket.assigns.record.id),
+      {:cursor,
+       %{
+         id: socket.assigns.actor.id,
+         name: Presence.display_name(socket.assigns.actor),
+         field: field
+       }}
+    )
+  end
+
+  defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
+
+  defp color_for(id),
+    do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
+
+  # Focus-tracking attributes for an input; `field` keys the cursor badge.
+  defp field_attrs(field) do
+    %{"phx-focus" => "field_focus", "phx-blur" => "field_blur", "phx-value-field" => field}
+  end
+
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
   defp preview_blocks(form) do
     case AshPhoenix.Form.value(form, :blocks) do
@@ -235,11 +293,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <div class="grid gap-6 lg:grid-cols-2">
           <div class="space-y-6">
             <div class="grid gap-4 sm:grid-cols-2">
-              <.input field={@form[:title]} label="Title" />
-              <.input field={@form[:slug]} label="Slug" />
+              <div class="relative">
+                <.input field={@form[:title]} label="Title" {field_attrs("title")} />
+                <.field_cursors field="title" cursors={@cursors} />
+              </div>
+              <div class="relative">
+                <.input field={@form[:slug]} label="Slug" {field_attrs("slug")} />
+                <.field_cursors field="slug" cursors={@cursors} />
+              </div>
             </div>
 
-            <.input :if={@kind == :post} field={@form[:excerpt]} type="textarea" label="Excerpt" />
+            <div :if={@kind == :post} class="relative">
+              <.input
+                field={@form[:excerpt]}
+                type="textarea"
+                label="Excerpt"
+                {field_attrs("excerpt")}
+              />
+              <.field_cursors field="excerpt" cursors={@cursors} />
+            </div>
 
             <div class="space-y-3">
               <h2 class="text-lg font-medium">Blocks</h2>
@@ -293,12 +365,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-input
                       />
                     </div>
-                    <.input
-                      :if={to_string(bf[:type].value) != "rich_text"}
-                      field={bf[:content]}
-                      type="textarea"
-                      placeholder="Block content…"
-                    />
+                    <div :if={to_string(bf[:type].value) != "rich_text"} class="relative">
+                      <.input
+                        field={bf[:content]}
+                        type="textarea"
+                        placeholder="Block content…"
+                        {field_attrs(bf[:content].name)}
+                      />
+                      <.field_cursors field={bf[:content].name} cursors={@cursors} />
+                    </div>
                   </div>
                 </.inputs_for>
               </div>
@@ -319,10 +394,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <details class="rounded border border-base-content/15 p-3">
               <summary class="cursor-pointer text-sm font-medium">SEO &amp; scheduling</summary>
               <div class="mt-3 space-y-3">
-                <.input field={@form[:seo_title]} label="SEO title" />
-                <.input field={@form[:seo_description]} type="textarea" label="SEO description" />
-                <.input field={@form[:seo_image]} label="OG image URL" />
-                <.input field={@form[:canonical_url]} label="Canonical URL" />
+                <div class="relative">
+                  <.input field={@form[:seo_title]} label="SEO title" {field_attrs("seo_title")} />
+                  <.field_cursors field="seo_title" cursors={@cursors} />
+                </div>
+                <div class="relative">
+                  <.input
+                    field={@form[:seo_description]}
+                    type="textarea"
+                    label="SEO description"
+                    {field_attrs("seo_description")}
+                  />
+                  <.field_cursors field="seo_description" cursors={@cursors} />
+                </div>
+                <div class="relative">
+                  <.input field={@form[:seo_image]} label="OG image URL" {field_attrs("seo_image")} />
+                  <.field_cursors field="seo_image" cursors={@cursors} />
+                </div>
+                <div class="relative">
+                  <.input
+                    field={@form[:canonical_url]}
+                    label="Canonical URL"
+                    {field_attrs("canonical_url")}
+                  />
+                  <.field_cursors field="canonical_url" cursors={@cursors} />
+                </div>
                 <.input field={@form[:locale]} label="Locale" />
                 <.input
                   field={@form[:scheduled_at]}
@@ -394,6 +490,29 @@ defmodule KilnCMSWeb.ContentEditorLive do
       </span>
       <span>
         Also editing: <span class="font-medium">{Enum.map_join(@others, ", ", & &1.name)}</span>
+      </span>
+    </div>
+    """
+  end
+
+  attr :field, :string, required: true
+  attr :cursors, :map, required: true
+
+  # Floating badges naming the collaborators currently focused on `field`.
+  defp field_cursors(assigns) do
+    others = for {_id, c} <- assigns.cursors, c.field == assigns.field, do: c
+    assigns = assign(assigns, :others, others)
+
+    ~H"""
+    <div
+      :if={@others != []}
+      class="pointer-events-none absolute right-1 top-0 z-10 flex gap-1"
+    >
+      <span
+        :for={c <- @others}
+        class={["rounded px-1.5 py-0.5 text-[10px] font-medium text-white shadow", c.color]}
+      >
+        {c.name}
       </span>
     </div>
     """

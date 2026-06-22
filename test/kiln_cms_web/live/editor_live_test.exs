@@ -296,6 +296,40 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  describe "live cursors (collaborative field focus)" do
+    alias KilnCMSWeb.Presence
+
+    test "focusing and leaving a field broadcasts cursor events", %{conn: conn} do
+      page = draft_page()
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.topic("page", page.id))
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element(~s(input[name="form[title]"])) |> render_focus()
+      assert_receive {:cursor, %{field: "title"}}
+
+      lv |> element(~s(input[name="form[title]"])) |> render_blur()
+      assert_receive {:cursor, %{field: nil}}
+    end
+
+    test "renders a badge for another editor's focused field, and clears it", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      topic = Presence.topic("page", page.id)
+      cursor = %{id: "other-editor", name: "bob", field: "title"}
+
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      assert render(lv) =~ "bob"
+
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      refute render(lv) =~ "bob"
+    end
+  end
+
   describe "decoupled preview (PubSub)" do
     alias KilnCMSWeb.PreviewLive
 
