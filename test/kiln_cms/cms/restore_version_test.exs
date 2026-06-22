@@ -41,7 +41,9 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     page =
       CMS.update_page!(
         page,
-        %{title: "Beta", blocks: [%{type: :heading, content: "Changed", order: 0}]}, actor: admin)
+        %{title: "Beta", blocks: [%{type: :heading, content: "Changed", order: 0}]},
+        actor: admin
+      )
 
     page = CMS.update_page!(page, %{title: "Gamma"}, actor: admin)
     assert page.title == "Gamma"

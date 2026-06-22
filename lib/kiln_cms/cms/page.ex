@@ -12,6 +12,7 @@ defmodule KilnCMS.CMS.Page do
       AshPaperTrail.Resource,
       AshStateMachine,
       AshOban,
+      AshArchival.Resource,
       AshJsonApi.Resource,
       AshGraphql.Resource,
       AshAdmin.Resource

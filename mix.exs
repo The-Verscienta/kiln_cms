@@ -55,6 +55,7 @@ defmodule KilnCMS.MixProject do
       {:absinthe_phoenix, "~> 2.0"},
       {:open_api_spex, "~> 3.0"},
       {:ash_state_machine, "~> 0.2"},
+      {:ash_archival, "~> 2.0"},
       {:ash_paper_trail, "~> 0.6"},
       {:ash_graphql, "~> 1.0"},
       {:ash_json_api, "~> 1.0"},
