@@ -279,7 +279,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [ ] Image processing pipeline (`Image` lib or Mogrify + Oban job for variants)
 - [x] Storage backend — pluggable `KilnCMS.Storage` behaviour + `Local` adapter (priv/uploads, served at `/uploads`), traversal-guarded; **S3/MinIO adapter for production still TODO**
 - [ ] Media browser modal/picker usable from editor (lands with the editor, Phase 3)
-- [~] Bulk upload (**done** — multi-file), deletion (**done** — admin, removes blob). **Soft-delete (AshArchival)** is wired on **Page/Post** (destroy → `archived_at`, excluded from reads; also fixes hard-deleting versioned content). **Still TODO:** media search/filtering, MediaItem soft-delete
+- [~] Bulk upload (**done** — multi-file), deletion (**done** — admin, removes blob). **Soft-delete (AshArchival)** is wired on **Page/Post** (destroy → `archived_at`, excluded from reads; also fixes hard-deleting versioned content). **Media filename filter** in the library (done). **Still TODO:** MediaItem soft-delete
 
 ### Phase 3: Content Editor & Blocks (P1 — Hardest)
 - [ ] Research & implement **TipTap** LiveView integration (use existing community examples as base)

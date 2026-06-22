@@ -62,6 +62,30 @@ defmodule KilnCMSWeb.MediaLiveTest do
     end
   end
 
+  describe "library filter" do
+    defp seed_media(filename) do
+      Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+        filename: filename,
+        url: "/uploads/#{System.unique_integer([:positive])}"
+      })
+    end
+
+    test "filters the library by filename", %{conn: conn} do
+      seed_media("sunset.png")
+      seed_media("logo.svg")
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      # Match the filename text node (the navbar also references logo.svg).
+      assert html =~ ">sunset.png<"
+      assert html =~ ">logo.svg<"
+
+      filtered = lv |> form("#media-filter", %{q: "sunset"}) |> render_change()
+
+      assert filtered =~ ">sunset.png<"
+      refute filtered =~ ">logo.svg<"
+    end
+  end
+
   describe "upload" do
     setup do
       root = Path.join(System.tmp_dir!(), "kiln_media_#{System.unique_integer([:positive])}")

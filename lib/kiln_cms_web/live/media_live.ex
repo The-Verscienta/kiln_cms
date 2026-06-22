@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.MediaLive do
     {:ok,
      socket
      |> assign(:actor, actor)
+     |> assign(:query, "")
      |> assign(:media, list_media(actor))
      |> allow_upload(:media,
        accept: @accept,
@@ -29,6 +30,8 @@ defmodule KilnCMSWeb.MediaLive do
 
   @impl true
   def handle_event("validate", _params, socket), do: {:noreply, socket}
+
+  def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, :query, q)}
 
   def handle_event("cancel", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :media, ref)}
@@ -105,6 +108,13 @@ defmodule KilnCMSWeb.MediaLive do
     CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]])
   end
 
+  defp visible_media(media, ""), do: media
+
+  defp visible_media(media, query) do
+    q = String.downcase(query)
+    Enum.filter(media, &String.contains?(String.downcase(&1.filename), q))
+  end
+
   defp flash_for_upload(socket, ok, 0) when ok > 0,
     do: put_flash(socket, :info, "Uploaded #{ok} #{pluralize(ok, "file")}.")
 
@@ -126,6 +136,8 @@ defmodule KilnCMSWeb.MediaLive do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :visible, visible_media(assigns.media, assigns.query))
+
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-8">
@@ -187,16 +199,32 @@ defmodule KilnCMSWeb.MediaLive do
         </form>
 
         <div>
-          <h2 class="mb-3 text-lg font-medium">Library ({length(@media)})</h2>
+          <div class="mb-3 flex items-center justify-between gap-4">
+            <h2 class="text-lg font-medium">Library ({length(@visible)})</h2>
+            <form :if={@media != []} id="media-filter" phx-change="search">
+              <input
+                type="text"
+                name="q"
+                value={@query}
+                placeholder="Filter by filename"
+                phx-debounce="200"
+                autocomplete="off"
+                class="rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+              />
+            </form>
+          </div>
           <p :if={@media == []} class="text-sm text-base-content/60">No media yet.</p>
+          <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+            No media matches “{@query}”.
+          </p>
           <ul
-            :if={@media != []}
+            :if={@visible != []}
             class="grid grid-cols-2 gap-4 sm:grid-cols-3"
             id="media-grid"
             phx-update="replace"
           >
             <li
-              :for={item <- @media}
+              :for={item <- @visible}
               id={"media-#{item.id}"}
               class="group relative overflow-hidden rounded border border-base-content/10"
             >
