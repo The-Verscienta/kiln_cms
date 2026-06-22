@@ -8,12 +8,19 @@ defmodule KilnCMSWeb.TrashLive do
 
   alias KilnCMS.CMS
 
+  @retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
+
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
     if actor.role == :admin do
-      {:ok, socket |> assign(:actor, actor) |> assign(:confirming_empty, false) |> load_items()}
+      {:ok,
+       socket
+       |> assign(:actor, actor)
+       |> assign(:confirming_empty, false)
+       |> assign(:retention_days, @retention_days)
+       |> load_items()}
     else
       {:ok, push_navigate(socket, to: ~p"/editor")}
     end
@@ -104,7 +111,7 @@ defmodule KilnCMSWeb.TrashLive do
             <h1 class="mt-1 text-2xl font-semibold">Trash</h1>
             <p class="text-sm text-base-content/60">
               Soft-deleted content. Restore brings it back to where it was.
-              Trash is purged automatically after 30 days.
+              Trash is purged automatically after {@retention_days} days.
             </p>
           </div>
           <button

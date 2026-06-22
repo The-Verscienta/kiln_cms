@@ -29,6 +29,10 @@ config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.Local
 # Override in runtime.exs for production.
 config :kiln_cms, :public_base_url, "http://localhost:4000"
 
+# How many days soft-deleted (trashed) content is retained before the nightly
+# AshOban `purge_trashed` trigger hard-deletes it.
+config :kiln_cms, :trash, retention_days: 30
+
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
 config :mime,

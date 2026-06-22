@@ -3,6 +3,10 @@ defmodule KilnCMS.CMS.Post do
   A Post — blog/article content. Same embedded-block model and publishing
   workflow as `Page`, plus an `excerpt` for listings/feeds.
   """
+  # Days trashed content is retained before the nightly auto-purge (see the
+  # `purge_trashed` trigger). Configurable via `config :kiln_cms, :trash`.
+  @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
+
   use Ash.Resource,
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
@@ -78,7 +82,7 @@ defmodule KilnCMS.CMS.Post do
         queue :default
         scheduler_cron "0 3 * * *"
 
-        where expr(archived_at <= ago(30, :day))
+        where expr(archived_at <= ago(^@trash_retention_days, :day))
 
         worker_module_name KilnCMS.CMS.Post.Workers.PurgeTrashed
         scheduler_module_name KilnCMS.CMS.Post.Schedulers.PurgeTrashed
