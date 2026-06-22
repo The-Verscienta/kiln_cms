@@ -282,7 +282,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [~] Bulk upload (**done** — multi-file), deletion (**done** — admin, removes blob). **Soft-delete (AshArchival)** is wired on **Page/Post** (destroy → `archived_at`, excluded from reads; also fixes hard-deleting versioned content). **Media filename filter** in the library (done). **Still TODO:** MediaItem soft-delete
 
 ### Phase 3: Content Editor & Blocks (P1 — Hardest)
-- [ ] Research & implement **TipTap** LiveView integration (use existing community examples as base)
+- [x] **TipTap** LiveView integration — `rich_text` blocks use a TipTap editor via a `RichText` JS hook (StarterKit + a B/I/H2/list/quote toolbar); the editor HTML mirrors into a hidden input bound to the block's `content`, so it saves through the normal form. Requires Node (`npm install` in `assets/`, bundled by esbuild; Dockerfile installs node/npm + `npm ci`). Browser-verified (mounts, toolbar formats, content round-trips).
 - [x] Define **embedded `Block` resources** (D3) with typed variants (rich_text, heading, image, quote, embed, divider, columns, custom)
 - [x] Build drag-and-drop sortable interface — vendored SortableJS + a `Sortable` LiveView hook in `PageEditorLive`; drop pushes the new order, the server reorders the nested block forms via `AshPhoenix.Form.sort_forms`. Reorder→persist covered by `editor_live_test.exs` + browser-verified (hook mounts, no JS errors).
 - [ ] **Real-time Visual Preview** (implement full architecture: Editor LiveView → native `Phoenix.PubSub` → Preview LiveView/iframe with signed tokens, optimistic updates, Presence foundation) — P1 core differentiator (D1)

@@ -157,7 +157,28 @@ defmodule KilnCMSWeb.PageEditorLive do
                     <.icon name="hero-trash" class="size-5" />
                   </button>
                 </div>
-                <.input field={bf[:content]} type="textarea" placeholder="Block content…" />
+                <div
+                  :if={to_string(bf[:type].value) == "rich_text"}
+                  id={"rt-#{bf.index}"}
+                  phx-hook="RichText"
+                  phx-update="ignore"
+                  data-content={bf[:content].value || ""}
+                >
+                  <div data-toolbar class="mb-1 flex flex-wrap gap-1"></div>
+                  <div data-editor></div>
+                  <input
+                    type="hidden"
+                    name={bf[:content].name}
+                    value={bf[:content].value}
+                    data-input
+                  />
+                </div>
+                <.input
+                  :if={to_string(bf[:type].value) != "rich_text"}
+                  field={bf[:content]}
+                  type="textarea"
+                  placeholder="Block content…"
+                />
               </div>
             </.inputs_for>
           </div>

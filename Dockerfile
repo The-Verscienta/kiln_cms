@@ -11,8 +11,10 @@ ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 # ---- Build stage ----
 FROM ${BUILDER_IMAGE} AS builder
 
+# build-essential/git for native deps, libvips for image processing, and
+# nodejs/npm to install the JS deps (TipTap) that esbuild bundles into app.js.
 RUN apt-get update -y \
-  && apt-get install -y build-essential git libvips-dev \
+  && apt-get install -y build-essential git libvips-dev nodejs npm \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 WORKDIR /app
@@ -31,6 +33,9 @@ RUN mix deps.compile
 COPY priv priv
 COPY lib lib
 COPY assets assets
+
+# Install JS dependencies (TipTap, etc.) before bundling.
+RUN npm --prefix assets ci
 
 RUN mix assets.deploy
 RUN mix compile

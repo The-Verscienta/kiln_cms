@@ -117,6 +117,25 @@ defmodule KilnCMSWeb.EditorLiveTest do
                CMS.get_page!(page.id, authorize?: false).blocks
     end
 
+    test "a rich_text block's HTML content round-trips through save", %{conn: conn} do
+      # TipTap mirrors its HTML into a hidden input (server-rendered value); a
+      # save round-trips it. (The live editing itself is browser-verified.)
+      page =
+        draft_page(%{
+          blocks: [%{type: :rich_text, content: "<p>Hi <strong>there</strong></p>", order: 0}]
+        })
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # The rich_text block renders the TipTap mount + hidden input, not a textarea.
+      assert html =~ ~s(phx-hook="RichText")
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [%{type: :rich_text, content: "<p>Hi <strong>there</strong></p>"}] =
+               CMS.get_page!(page.id, authorize?: false).blocks
+    end
+
     test "runs the publish workflow", %{conn: conn} do
       page = draft_page()
 

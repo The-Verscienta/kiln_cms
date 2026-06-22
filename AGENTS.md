@@ -18,6 +18,7 @@ This is a web application written using the Phoenix web framework.
 - `mix` lives at `/opt/homebrew/bin` — make sure it's on `PATH` (`export PATH="/opt/homebrew/bin:$PATH"`).
 - The repo **must** live at a space-free, non-iCloud path (currently `~/Github/kiln_cms`): native deps (`bcrypt_elixir`, libvips) build via `make`, which fails on spaced/iCloud paths.
 - Keep the `igniter` dep — removing it triggers an Elixir 1.20.1 compiler crash.
+- **Node.js is required for assets** — the editor bundles JS deps (TipTap) from `assets/node_modules`. Run `npm install` in `assets/` (or `mix setup`) after pulling JS dep changes; `assets/package-lock.json` is committed, `node_modules` is gitignored.
 
 ### Phoenix v1.8 guidelines
 

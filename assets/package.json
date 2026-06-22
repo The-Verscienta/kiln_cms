@@ -1,0 +1,11 @@
+{
+  "name": "kiln_cms_assets",
+  "version": "0.0.0",
+  "private": true,
+  "description": "JS dependencies bundled into app.js by esbuild. Run `npm install` in this directory after cloning.",
+  "dependencies": {
+    "@tiptap/core": "^2.11.5",
+    "@tiptap/pm": "^2.11.5",
+    "@tiptap/starter-kit": "^2.11.5"
+  }
+}

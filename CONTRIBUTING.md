@@ -18,6 +18,10 @@ notes that bite people:
   paths.
 - **Keep the `igniter` dependency** — removing it triggers an Elixir 1.20.1
   compiler crash locally.
+- **Node.js is required for assets** — the editor bundles JS deps (TipTap) that
+  esbuild pulls from `assets/node_modules`. `mix setup` runs `npm install` for
+  you; otherwise run `npm install` in `assets/`. `assets/node_modules` is
+  gitignored; `assets/package-lock.json` is committed.
 
 `mix setup` seeds a demo admin (`admin@kiln.test` / `kilnadmin123`) and editor
 (`editor@kiln.test` / `kilneditor123`); override with the `ADMIN_*` / `EDITOR_*`
