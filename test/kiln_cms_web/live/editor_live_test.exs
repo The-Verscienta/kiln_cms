@@ -59,6 +59,28 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Findable Page"
     end
 
+    test "filters the list by status", %{conn: conn} do
+      draft_page(%{title: "AlphaDraft", state: :draft})
+      draft_page(%{title: "BetaPub", state: :published})
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ "AlphaDraft"
+      assert html =~ "BetaPub"
+
+      filtered = lv |> form("form[phx-change=filter]", %{status: "published"}) |> render_change()
+      assert filtered =~ "BetaPub"
+      refute filtered =~ "AlphaDraft"
+    end
+
+    test "searches the list by title", %{conn: conn} do
+      draft_page(%{title: "UniqueSearchable"})
+      draft_page(%{title: "HiddenOne"})
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      searched = lv |> form("form[phx-change=search]", %{q: "Searchable"}) |> render_change()
+      assert searched =~ "UniqueSearchable"
+      refute searched =~ "HiddenOne"
+    end
+
     test "New page creates a draft and navigates to the editor", %{conn: conn} do
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 

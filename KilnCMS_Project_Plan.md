@@ -289,7 +289,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [~] Block library / inserter UI — `PageEditorLive` has add-block buttons per type + per-block type selector; richer inserter (slash menu) TODO
 - [ ] Rich text formatting toolbar, keyboard shortcuts, slash commands (TipTap extensions)
 - [x] Save/publish actions with error handling — `PageEditorLive` saves via `AshPhoenix.Form` (nested block forms) and runs the publish/submit/unpublish workflow; covered by `editor_live_test.exs` + browser-verified
-- [~] Content listing page — `EditorLive` at `/editor`: lists pages with status badges, create-new, inline publish/unpublish, edit links. **TODO:** posts, filters/search, bulk actions
+- [~] Content listing page — `EditorLive` at `/editor`: lists pages with status badges, create-new, inline publish/unpublish, edit links, **status filter + title search**. **TODO:** posts, bulk actions
 
 ### Phase 4: Workflows, Versioning & Publishing (P1)
 - [x] Integrate **AshPaperTrail** on Page/Post for full history (embedded Blocks are versioned with the parent — D3). Restore action still TODO

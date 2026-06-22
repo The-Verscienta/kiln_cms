@@ -8,9 +8,26 @@ defmodule KilnCMSWeb.EditorLive do
 
   alias KilnCMS.CMS
 
+  @statuses ~w(all draft in_review published archived)
+
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(:actor, socket.assigns.current_user) |> load_pages()}
+    {:ok,
+     socket
+     |> assign(:actor, socket.assigns.current_user)
+     |> assign(:statuses, @statuses)
+     |> assign(:status, "all")
+     |> assign(:query, "")
+     |> load_pages()}
+  end
+
+  defp visible_pages(pages, status, query) do
+    q = String.downcase(query)
+
+    Enum.filter(pages, fn page ->
+      (status == "all" or to_string(page.state) == status) and
+        (q == "" or String.contains?(String.downcase(page.title), q))
+    end)
   end
 
   defp load_pages(socket) do
@@ -31,6 +48,11 @@ defmodule KilnCMSWeb.EditorLive do
 
     {:noreply, push_navigate(socket, to: ~p"/editor/pages/#{page.id}")}
   end
+
+  def handle_event("filter", %{"status" => status}, socket),
+    do: {:noreply, assign(socket, :status, status)}
+
+  def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, :query, q)}
 
   def handle_event("publish", %{"id" => id}, socket),
     do: {:noreply, transition(socket, id, :publish)}
@@ -56,6 +78,9 @@ defmodule KilnCMSWeb.EditorLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assign(assigns, :visible, visible_pages(assigns.pages, assigns.status, assigns.query))
+
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-6">
@@ -64,15 +89,42 @@ defmodule KilnCMSWeb.EditorLive do
           <.button type="button" phx-click="new_page" variant="primary">New page</.button>
         </div>
 
+        <div :if={@pages != []} class="flex flex-wrap items-center gap-3">
+          <form id="content-filter" phx-change="filter">
+            <select
+              name="status"
+              class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+            >
+              <option :for={status <- @statuses} value={status} selected={status == @status}>
+                {status}
+              </option>
+            </select>
+          </form>
+          <form id="content-search" phx-change="search" class="flex-1">
+            <input
+              type="text"
+              name="q"
+              value={@query}
+              placeholder="Search by title"
+              phx-debounce="200"
+              autocomplete="off"
+              class="w-full max-w-xs rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+            />
+          </form>
+        </div>
+
         <p :if={@pages == []} class="text-sm text-base-content/60">
           No pages yet. Create your first one.
         </p>
+        <p :if={@pages != [] and @visible == []} class="text-sm text-base-content/60">
+          No pages match the current filter.
+        </p>
 
         <ul
-          :if={@pages != []}
+          :if={@visible != []}
           class="divide-y divide-base-content/10 rounded border border-base-content/10"
         >
-          <li :for={page <- @pages} id={"page-#{page.id}"} class="flex items-center gap-4 p-3">
+          <li :for={page <- @visible} id={"page-#{page.id}"} class="flex items-center gap-4 p-3">
             <div class="min-w-0 flex-1">
               <.link navigate={~p"/editor/pages/#{page.id}"} class="font-medium hover:underline">
                 {page.title}
