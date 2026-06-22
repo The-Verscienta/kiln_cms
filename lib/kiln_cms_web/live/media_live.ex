@@ -104,38 +104,89 @@ defmodule KilnCMSWeb.MediaLive do
 
   defp store_entry(path, entry, actor) do
     key = Storage.generate_key(entry.client_name)
+    ext = entry.client_name |> Path.extname() |> String.downcase()
 
-    with {:ok, ^key} <- Storage.store(key, path),
-         {:ok, _item} <-
-           CMS.create_media_item(
-             %{
-               filename: entry.client_name,
-               content_type: entry.client_type,
-               byte_size: entry.client_size,
-               storage_key: key,
-               url: Storage.url(key)
-             },
-             actor: actor
-           ) do
-      :ok
-    else
+    case Storage.store(key, path) do
+      {:ok, ^key} ->
+        create_from_upload(key, ext, path, entry, actor)
+
       _error ->
-        # Roll back the stored blob if the record couldn't be created.
         Storage.delete(key)
         :error
     end
+  end
+
+  defp create_from_upload(key, ext, path, entry, actor) do
+    meta = build_metadata(path, ext)
+
+    attrs =
+      Map.merge(
+        %{
+          filename: entry.client_name,
+          content_type: entry.client_type,
+          byte_size: entry.client_size,
+          storage_key: key,
+          url: Storage.url(key)
+        },
+        meta
+      )
+
+    case CMS.create_media_item(attrs, actor: actor) do
+      {:ok, _item} ->
+        :ok
+
+      _ ->
+        # Roll back the original and any variant blobs.
+        Storage.delete(key)
+        delete_variant_blobs(meta.variants)
+        :error
+    end
+  end
+
+  # Dimensions + persisted responsive variants. Falls back to original-only when
+  # the upload isn't a processable raster image.
+  defp build_metadata(path, ext) do
+    case KilnCMS.ImageProcessor.process(path, ext) do
+      {:ok, %{width: width, height: height, variants: files}} ->
+        %{width: width, height: height, variants: store_variants(files, ext)}
+
+      {:error, _} ->
+        %{width: nil, height: nil, variants: %{}}
+    end
+  end
+
+  # `tmp` is an ImageProcessor-built path (System.tmp_dir! + a UUID), never user
+  # input — so the File.rm traversal warning is a false positive.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp store_variants(files, ext) do
+    Map.new(files, fn %{label: label, path: tmp, width: w, height: h} ->
+      key = Storage.generate_key("#{label}#{ext}")
+      {:ok, ^key} = Storage.store(key, tmp)
+      File.rm(tmp)
+      {label, %{"key" => key, "url" => Storage.url(key), "width" => w, "height" => h}}
+    end)
+  end
+
+  defp delete_variant_blobs(variants) do
+    for {_label, %{"key" => key}} <- variants || %{}, do: Storage.delete(key)
   end
 
   defp delete_item(socket, item, actor) do
     case CMS.destroy_media_item(item, actor: actor) do
       :ok ->
         if item.storage_key, do: Storage.delete(item.storage_key)
+        delete_variant_blobs(item.variants)
         put_flash(socket, :info, "Deleted #{item.filename}.")
 
       _ ->
         put_flash(socket, :error, "You don't have permission to delete media.")
     end
   end
+
+  # The thumbnail to show in the grid — the small variant when available, else
+  # the original.
+  defp thumb_src(%{variants: %{"thumb" => %{"url" => url}}}), do: url
+  defp thumb_src(item), do: item.url
 
   defp list_media(actor) do
     CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]])
@@ -267,16 +318,18 @@ defmodule KilnCMSWeb.MediaLive do
               class="group relative overflow-hidden rounded border border-base-content/10"
             >
               <img
-                src={item.url}
+                src={thumb_src(item)}
                 alt={item.alt || item.filename}
                 phx-click="select"
                 phx-value-id={item.id}
+                loading="lazy"
                 class="aspect-square w-full cursor-pointer object-cover"
               />
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
                 <p class="flex items-center gap-1 text-[10px] text-base-content/50">
-                  {humanize_bytes(item.byte_size)}
+                  <span :if={item.width}>{item.width}×{item.height}</span>
+                  <span>{humanize_bytes(item.byte_size)}</span>
                   <span :if={!item.alt} class="text-warning" title="Missing alt text">· no alt</span>
                 </p>
               </div>
@@ -331,9 +384,25 @@ defmodule KilnCMSWeb.MediaLive do
           <dd>{@item.content_type || "—"}</dd>
           <dt class="text-base-content/50">Size</dt>
           <dd>{humanize_bytes(@item.byte_size)}</dd>
+          <dt :if={@item.width} class="text-base-content/50">Dimensions</dt>
+          <dd :if={@item.width}>{@item.width} × {@item.height} px</dd>
           <dt class="text-base-content/50">Uploaded</dt>
           <dd>{Calendar.strftime(@item.inserted_at, "%Y-%m-%d %H:%M")}</dd>
         </dl>
+
+        <div :if={@item.variants not in [nil, %{}]} class="mt-4">
+          <p class="text-xs text-base-content/50">Responsive variants</p>
+          <ul class="mt-1 space-y-1">
+            <li
+              :for={{label, v} <- @item.variants}
+              class="flex items-center justify-between gap-2 text-xs"
+            >
+              <span class="font-medium capitalize">{label}</span>
+              <span class="text-base-content/50">{v["width"]} × {v["height"]}</span>
+              <a href={v["url"]} target="_blank" class="text-primary hover:underline">open</a>
+            </li>
+          </ul>
+        </div>
 
         <div class="mt-4">
           <label class="text-xs text-base-content/50">URL</label>

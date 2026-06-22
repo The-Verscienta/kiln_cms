@@ -29,7 +29,9 @@ defmodule KilnCMS.MixProject do
   def application do
     [
       mod: {KilnCMS.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      # `:image` (and its libvips NIF backend) is listed explicitly so it starts
+      # and is included in the Dialyzer PLT.
+      extra_applications: [:logger, :runtime_tools, :image]
     ]
   end
 
@@ -78,6 +80,7 @@ defmodule KilnCMS.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
       {:html_sanitize_ex, "~> 1.4"},
+      {:image, "~> 0.69"},
       {:hammer, "~> 7.0"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.2.0"},

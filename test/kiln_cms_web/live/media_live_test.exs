@@ -93,7 +93,12 @@ defmodule KilnCMSWeb.MediaLiveTest do
           filename: "photo.png",
           url: "/uploads/photo",
           content_type: "image/png",
-          byte_size: 2048
+          byte_size: 2048,
+          width: 1200,
+          height: 800,
+          variants: %{
+            "thumb" => %{"key" => "k", "url" => "/uploads/thumb", "width" => 400, "height" => 267}
+          }
         })
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
@@ -102,6 +107,10 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert panel =~ "Alt text"
       assert panel =~ "2.0 KB"
       assert panel =~ "image/png"
+      # Dimensions + responsive variants are surfaced.
+      assert panel =~ "1200"
+      assert panel =~ "Responsive variants"
+      assert panel =~ "thumb"
 
       lv
       |> form("form[phx-submit=save_meta]", %{alt: "A nice photo", caption: "At dusk"})

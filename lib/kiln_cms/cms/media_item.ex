@@ -29,6 +29,9 @@ defmodule KilnCMS.CMS.MediaItem do
       :filename,
       :content_type,
       :byte_size,
+      :width,
+      :height,
+      :variants,
       :alt,
       :caption,
       :storage_key,
@@ -72,6 +75,14 @@ defmodule KilnCMS.CMS.MediaItem do
     attribute :filename, :string, allow_nil?: false, public?: true
     attribute :content_type, :string, public?: true
     attribute :byte_size, :integer, public?: true
+
+    # Intrinsic pixel dimensions of the original (nil for non-raster uploads).
+    attribute :width, :integer, public?: true
+    attribute :height, :integer, public?: true
+
+    # Generated responsive variants, keyed by label:
+    # %{"thumb" => %{"key" => ..., "url" => ..., "width" => ..., "height" => ...}}
+    attribute :variants, :map, default: %{}, public?: true
 
     attribute :alt, :string, public?: true
     attribute :caption, :string, public?: true
