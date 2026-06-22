@@ -117,6 +117,9 @@ defmodule KilnCMSWeb.Router do
   scope "/", KilnCMSWeb do
     get "/sitemap.xml", SitemapController, :index
     get "/robots.txt", SitemapController, :robots
+
+    # Health probe for load balancers / uptime monitors / Coolify.
+    get "/up", HealthController, :show
   end
 
   scope "/", KilnCMSWeb do

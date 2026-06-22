@@ -12,7 +12,15 @@
 - Minimal ops (Postgres-centric; optional Dragonfly + Meilisearch only when scale demands)
 - Built for teams, agencies, and products like Verscienta Health
 
-**Status:** Skeleton Bootstrapped (June 2026) — Phoenix 1.8 + Ash 3 core (ash, ash_postgres, ash_phoenix), CMS domain with **Page/Post** (embedded `Block` tree per D3) + **MediaItem**, **AshPaperTrail** versioning, **AshStateMachine** publishing workflow, **AshJsonApi + AshGraphql + AshAdmin** wired and serving, Postgres via Docker Compose (Dragonfly/Meilisearch/MinIO behind optional profiles), multi-stage Dockerfile with libvips. **AshAuthentication** (Accounts domain, User/Token, password strategy, `/sign-in` + `/register`, `role` attribute for RBAC) and **Oban + AshOban** (Postgres-backed) are wired and verified booting. **RBAC policies** enforced via `Ash.Policy.Authorizer` on Page/Post/MediaItem (published-public reads, editor authoring, admin-only deletes) + User (admin-managed, self-read), covered by tests. **Magic-link** passwordless sign-in, **author** relationship + `published`/`word_count` calculations + authored-count aggregates, and **RBAC on PaperTrail version resources** are all wired and tested. Verified compiling, migrating, and serving (home/sign-in/register/admin/GraphQL/JSON:API all 200). Repo lives at a **spaceless path** (`~/Github/kiln_cms`) — native deps (bcrypt, libvips) build via `make`, which fails on spaced/iCloud paths. **Not yet wired:** AshAdmin actor wiring (dev-only, low priority), media upload pipeline, TipTap editor + live preview, DaisyUI removal.
+**Status:** MVP backend largely complete (June 2026), ~69 tests passing, CI + static-analysis (credo/sobelow/dialyzer) + nonce-based CSP in place. Built on Phoenix 1.8 + Ash 3.
+
+- **Modeling & auth (Phase 1, done):** CMS domain — `Page`/`Post` (embedded `Block` tree, D3) + `MediaItem` + `WebhookEndpoint`; AshPaperTrail versioning, AshStateMachine workflow. AshAuthentication password + **magic-link** sign-in, `role` RBAC enforced by `Ash.Policy.Authorizer` (resource + field + version-resource policies). `author` relationship, `published`/`word_count` calcs, authored-count aggregates. Domain code interfaces throughout.
+- **Media (Phase 2):** LiveView upload library at `/media` (editor-gated) + pluggable `KilnCMS.Storage` (local adapter). Image variants (libvips) + S3 adapter remain.
+- **Workflow (Phase 4):** publish/unpublish/archive, **scheduled publishing** (AshOban cron trigger), **restore-from-version**, **soft-delete** (AshArchival) on Page/Post.
+- **Headless (Phase 5):** AshJsonApi + AshGraphql + **signed preview tokens** (`/preview/:token`) + **HMAC-signed outbound webhooks** (Oban-delivered) on publish/unpublish.
+- **Search/SEO (Phase 6/7):** Postgres full-text `search` action; `seo_image`/`canonical_url`; dynamic `sitemap.xml` + `robots.txt`; `/up` health probe.
+
+**Biggest remaining piece:** Phase 3 content editor (TipTap + drag-and-drop blocks + real-time live preview). Other TODOs: AshAdmin actor wiring (dev-only), image variants/S3, DaisyUI removal. Repo lives at a **spaceless path** (`~/Github/kiln_cms`) — native deps (bcrypt, libvips) build via `make`, which fails on spaced/iCloud paths.
 
 ---
 
