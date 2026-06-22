@@ -66,8 +66,12 @@ defmodule KilnCMSWeb.ContentController do
           do: id
 
     case ids do
-      [] -> %{}
-      ids -> CMS.list_media_items!(authorize?: false, query: [filter: [id: [in: ids]]]) |> Map.new(&{&1.id, &1})
+      [] ->
+        %{}
+
+      ids ->
+        CMS.list_media_items!(authorize?: false, query: [filter: [id: [in: ids]]])
+        |> Map.new(&{&1.id, &1})
     end
   end
 
