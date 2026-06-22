@@ -1,0 +1,81 @@
+defmodule KilnCMS.HTMLSanitizerTest do
+  use ExUnit.Case, async: true
+
+  alias KilnCMS.HTMLSanitizer
+
+  @quote <<34>>
+  @colon <<58>>
+
+  describe "sanitize_rich_text/1" do
+    test "preserves TipTap StarterKit markup" do
+      html = "<p>Hi <strong>there</strong></p><ul><li>one</li></ul>"
+
+      assert HTMLSanitizer.sanitize_rich_text(html) == html
+    end
+
+    test "strips script tags and event handlers" do
+      html =
+        [
+          "<p onclick=",
+          @quote,
+          "alert(1)",
+          @quote,
+          ">Hi</p><script>alert(",
+          @quote,
+          "xss",
+          @quote,
+          ")</script>"
+        ]
+        |> Enum.join()
+
+      sanitized = HTMLSanitizer.sanitize_rich_text(html)
+
+      assert sanitized =~ "<p>Hi</p>"
+      refute sanitized =~ "<script"
+      refute sanitized =~ "onclick"
+    end
+
+    test "strips disallowed tags like iframe" do
+      src = URI.to_string(%URI{scheme: "https", host: "evil.example"})
+
+      html =
+        ["<p>Safe</p><iframe src=", @quote, src, @quote, "></iframe>"]
+        |> Enum.join()
+
+      assert HTMLSanitizer.sanitize_rich_text(html) == "<p>Safe</p>"
+    end
+
+    test "handles nil and empty input" do
+      assert HTMLSanitizer.sanitize_rich_text(nil) == ""
+      assert HTMLSanitizer.sanitize_rich_text("") == ""
+    end
+  end
+
+  describe "safe_image_src/1" do
+    test "allows relative upload paths" do
+      assert HTMLSanitizer.safe_image_src("/uploads/abc.jpg") == "/uploads/abc.jpg"
+    end
+
+    test "allows https URLs" do
+      url = URI.to_string(%URI{scheme: "https", host: "cdn.example.com", path: "/photo.png"})
+
+      assert HTMLSanitizer.safe_image_src(url) == url
+    end
+
+    test "rejects unsafe and traversal URLs" do
+      assert HTMLSanitizer.safe_image_src(["javascript", @colon, "alert(1)"] |> Enum.join()) ==
+               nil
+
+      assert HTMLSanitizer.safe_image_src(["data", @colon, "image/png;base64,abc"] |> Enum.join()) ==
+               nil
+
+      assert HTMLSanitizer.safe_image_src("/uploads/../etc/passwd") == nil
+      assert HTMLSanitizer.safe_image_src("//evil.example/img.png") == nil
+    end
+
+    test "rejects nil and blank input" do
+      assert HTMLSanitizer.safe_image_src(nil) == nil
+      assert HTMLSanitizer.safe_image_src(<<32, 32>>) == nil
+    end
+  end
+end

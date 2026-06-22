@@ -4,10 +4,12 @@ defmodule KilnCMSWeb.BlockComponents do
   (later) public delivery. Each block is a plain map with `:type` (string) and
   `:content`.
 
-  Note: `rich_text` content is rendered raw (authored by trusted editors).
-  Sanitize before using this for untrusted/public input.
+  Rich-text HTML and image URLs are sanitized via `KilnCMS.HTMLSanitizer`
+  before rendering.
   """
   use Phoenix.Component
+
+  alias KilnCMS.HTMLSanitizer
 
   attr :block, :map, required: true
 
@@ -20,11 +22,16 @@ defmodule KilnCMSWeb.BlockComponents do
         <% @type == "heading" -> %>
           <h2 class="text-xl font-bold">{@block.content}</h2>
         <% @type == "rich_text" -> %>
-          <div class="space-y-2">{Phoenix.HTML.raw(@block.content)}</div>
+          <div class="space-y-2">{HTMLSanitizer.rich_text_raw(@block.content)}</div>
         <% @type == "quote" -> %>
           <blockquote class="border-l-4 border-base-300 pl-3 italic">{@block.content}</blockquote>
         <% @type == "image" -> %>
-          <img src={@block.content} alt="" class="max-w-full rounded" />
+          <img
+            :if={src = HTMLSanitizer.safe_image_src(@block.content)}
+            src={src}
+            alt=""
+            class="max-w-full rounded"
+          />
         <% @type == "divider" -> %>
           <hr class="border-base-300" />
         <% @type == "embed" -> %>
