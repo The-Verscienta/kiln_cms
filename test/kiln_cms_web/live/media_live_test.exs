@@ -86,6 +86,33 @@ defmodule KilnCMSWeb.MediaLiveTest do
     end
   end
 
+  describe "detail panel" do
+    test "opens a panel with metadata and saves alt text + caption", %{conn: conn} do
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "photo.png",
+          url: "/uploads/photo",
+          content_type: "image/png",
+          byte_size: 2048
+        })
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      panel = lv |> element(~s(img[phx-value-id="#{item.id}"])) |> render_click()
+      assert panel =~ "Alt text"
+      assert panel =~ "2.0 KB"
+      assert panel =~ "image/png"
+
+      lv
+      |> form("form[phx-submit=save_meta]", %{alt: "A nice photo", caption: "At dusk"})
+      |> render_submit()
+
+      saved = CMS.get_media_item!(item.id, authorize?: false)
+      assert saved.alt == "A nice photo"
+      assert saved.caption == "At dusk"
+    end
+  end
+
   describe "upload" do
     setup do
       root = Path.join(System.tmp_dir!(), "kiln_media_#{System.unique_integer([:positive])}")

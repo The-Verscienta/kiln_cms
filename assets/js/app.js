@@ -46,6 +46,15 @@ const richTextButton = (editor, label, isActive, run) => {
 }
 
 const Hooks = {
+  Clipboard: {
+    mounted() {
+      this.el.addEventListener("click", () => {
+        navigator.clipboard
+          .writeText(this.el.dataset.clipboardText || "")
+          .then(() => this.pushEvent("copied", {}))
+      })
+    },
+  },
   RichText: {
     mounted() {
       const input = this.el.querySelector("[data-input]")

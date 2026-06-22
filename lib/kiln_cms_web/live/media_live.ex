@@ -20,6 +20,7 @@ defmodule KilnCMSWeb.MediaLive do
      socket
      |> assign(:actor, actor)
      |> assign(:query, "")
+     |> assign(:selected, nil)
      |> assign(:media, list_media(actor))
      |> allow_upload(:media,
        accept: @accept,
@@ -64,8 +65,40 @@ defmodule KilnCMSWeb.MediaLive do
         _ -> put_flash(socket, :error, "That item no longer exists.")
       end
 
-    {:noreply, assign(socket, :media, list_media(actor))}
+    {:noreply, socket |> assign(:selected, nil) |> assign(:media, list_media(actor))}
   end
+
+  def handle_event("select", %{"id" => id}, socket) do
+    case CMS.get_media_item(id, actor: socket.assigns.actor) do
+      {:ok, item} -> {:noreply, assign(socket, :selected, item)}
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("close", _params, socket), do: {:noreply, assign(socket, :selected, nil)}
+
+  def handle_event("save_meta", %{"alt" => alt, "caption" => caption}, socket) do
+    actor = socket.assigns.actor
+
+    socket =
+      case CMS.update_media_item(socket.assigns.selected, %{alt: alt, caption: caption},
+             actor: actor
+           ) do
+        {:ok, item} ->
+          socket
+          |> assign(:selected, item)
+          |> assign(:media, list_media(actor))
+          |> put_flash(:info, "Saved details.")
+
+        _ ->
+          put_flash(socket, :error, "Couldn't save those details.")
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("copied", _params, socket),
+    do: {:noreply, put_flash(socket, :info, "URL copied to clipboard.")}
 
   # --- helpers ---------------------------------------------------------------
 
@@ -128,6 +161,11 @@ defmodule KilnCMSWeb.MediaLive do
 
   defp pluralize(1, word), do: word
   defp pluralize(_, word), do: word <> "s"
+
+  defp humanize_bytes(nil), do: "—"
+  defp humanize_bytes(b) when b < 1_024, do: "#{b} B"
+  defp humanize_bytes(b) when b < 1_048_576, do: "#{Float.round(b / 1_024, 1)} KB"
+  defp humanize_bytes(b), do: "#{Float.round(b / 1_048_576, 1)} MB"
 
   defp error_to_string(:too_large), do: "too large (max 10 MB)"
   defp error_to_string(:too_many_files), do: "too many files (max 10)"
@@ -231,10 +269,16 @@ defmodule KilnCMSWeb.MediaLive do
               <img
                 src={item.url}
                 alt={item.alt || item.filename}
-                class="aspect-square w-full object-cover"
+                phx-click="select"
+                phx-value-id={item.id}
+                class="aspect-square w-full cursor-pointer object-cover"
               />
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
+                <p class="flex items-center gap-1 text-[10px] text-base-content/50">
+                  {humanize_bytes(item.byte_size)}
+                  <span :if={!item.alt} class="text-warning" title="Missing alt text">· no alt</span>
+                </p>
               </div>
               <button
                 phx-click="delete"
@@ -249,7 +293,93 @@ defmodule KilnCMSWeb.MediaLive do
           </ul>
         </div>
       </div>
+
+      <.media_detail :if={@selected} item={@selected} />
     </Layouts.app>
+    """
+  end
+
+  attr :item, :map, required: true
+
+  # Detail drawer for a single media item: preview, metadata, copyable URL, and
+  # an alt-text / caption editor (accessibility + SEO).
+  defp media_detail(assigns) do
+    ~H"""
+    <div class="fixed inset-0 z-40" phx-window-keydown="close" phx-key="Escape">
+      <div class="absolute inset-0 bg-black/40" phx-click="close" aria-hidden="true"></div>
+      <div class="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-xl">
+        <div class="flex items-start justify-between gap-4">
+          <h2 class="truncate text-lg font-medium">{@item.filename}</h2>
+          <button
+            type="button"
+            phx-click="close"
+            aria-label="Close"
+            class="text-base-content/50 hover:text-base-content"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <img
+          src={@item.url}
+          alt={@item.alt || @item.filename}
+          class="mt-4 max-h-64 w-full rounded object-contain"
+        />
+
+        <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-base-content/70">
+          <dt class="text-base-content/50">Type</dt>
+          <dd>{@item.content_type || "—"}</dd>
+          <dt class="text-base-content/50">Size</dt>
+          <dd>{humanize_bytes(@item.byte_size)}</dd>
+          <dt class="text-base-content/50">Uploaded</dt>
+          <dd>{Calendar.strftime(@item.inserted_at, "%Y-%m-%d %H:%M")}</dd>
+        </dl>
+
+        <div class="mt-4">
+          <label class="text-xs text-base-content/50">URL</label>
+          <div class="mt-1 flex gap-2">
+            <input
+              type="text"
+              value={@item.url}
+              readonly
+              class="min-w-0 flex-1 rounded border border-base-content/20 bg-base-200/40 px-2 py-1 text-xs"
+            />
+            <button
+              type="button"
+              id="copy-url"
+              phx-hook="Clipboard"
+              data-clipboard-text={@item.url}
+              class="shrink-0 rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+
+        <form phx-submit="save_meta" class="mt-5 space-y-3">
+          <div>
+            <label for="media-alt" class="text-sm font-medium">Alt text</label>
+            <input
+              id="media-alt"
+              name="alt"
+              value={@item.alt}
+              placeholder="Describe the image for screen readers"
+              class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+            />
+          </div>
+          <div>
+            <label for="media-caption" class="text-sm font-medium">Caption</label>
+            <textarea
+              id="media-caption"
+              name="caption"
+              rows="2"
+              class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+            >{@item.caption}</textarea>
+          </div>
+          <.button type="submit" variant="primary">Save details</.button>
+        </form>
+      </div>
+    </div>
     """
   end
 end
