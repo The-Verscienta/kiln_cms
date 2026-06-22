@@ -49,6 +49,19 @@ defmodule KilnCMS.Accounts.User do
         end
       end
 
+      magic_link :magic_link do
+        identity_field :email
+        # Magic links sign in existing users only; new accounts are created via
+        # password registration (which deliberately defaults to the :viewer
+        # role). This avoids passwordless self-provisioning.
+        registration_enabled? false
+        # Require a click on the sign-in page (`magic_sign_in_route`) to
+        # complete sign-in, so email link-scanners can't consume the one-time
+        # token.
+        require_interaction? true
+        sender KilnCMS.Accounts.User.Senders.SendMagicLink
+      end
+
       remember_me :remember_me
     end
   end
