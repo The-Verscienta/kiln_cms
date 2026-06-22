@@ -81,5 +81,32 @@ defmodule KilnCMS.CMS do
       define :update_webhook_endpoint, action: :update
       define :destroy_webhook_endpoint, action: :destroy
     end
+
+    # Taxonomy: categories (one-to-many to content) and tags (many-to-many).
+    resource KilnCMS.CMS.Category do
+      define :list_categories, action: :read
+      define :get_category, action: :read, get_by: [:id]
+      define :get_category_by_slug, action: :by_slug, args: [:slug]
+      define :create_category, action: :create
+      define :update_category, action: :update
+      define :destroy_category, action: :destroy
+    end
+
+    resource KilnCMS.CMS.Tag do
+      define :list_tags, action: :read
+      define :get_tag, action: :read, get_by: [:id]
+      define :get_tag_by_slug, action: :by_slug, args: [:slug]
+      define :create_tag, action: :create
+      define :update_tag, action: :update
+      define :destroy_tag, action: :destroy
+    end
+
+    # Join resources for the many-to-many relationships. No code interfaces —
+    # the links are managed through `manage_relationship` on the parent content
+    # resources — but they must be registered on the domain.
+    resource KilnCMS.CMS.PageTag
+    resource KilnCMS.CMS.PostTag
+    resource KilnCMS.CMS.RelatedPage
+    resource KilnCMS.CMS.RelatedPost
   end
 end

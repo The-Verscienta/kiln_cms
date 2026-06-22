@@ -116,7 +116,10 @@ defmodule KilnCMS.CMS.Post do
       :seo_image,
       :canonical_url,
       :locale,
-      :scheduled_at
+      :scheduled_at,
+      # Many-to-one foreign keys (category + lead image).
+      :category_id,
+      :featured_image_id
     ]
 
     create :create do
@@ -124,6 +127,11 @@ defmodule KilnCMS.CMS.Post do
       # Stamp the acting user as the author (system/seed creates with no actor
       # simply leave it nil).
       change relate_actor(:author, allow_nil?: true)
+      # Set the many-to-many links from lists of ids (nil/omitted = no change).
+      argument :tag_ids, {:array, :uuid}
+      argument :related_post_ids, {:array, :uuid}
+      change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+      change manage_relationship(:related_post_ids, :related_posts, type: :append_and_remove)
       change KilnCMS.CMS.Changes.SanitizeBlocks
       change KilnCMS.CMS.Changes.SetSearchText
     end
@@ -131,6 +139,10 @@ defmodule KilnCMS.CMS.Post do
     update :update do
       primary? true
       require_atomic? false
+      argument :tag_ids, {:array, :uuid}
+      argument :related_post_ids, {:array, :uuid}
+      change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+      change manage_relationship(:related_post_ids, :related_posts, type: :append_and_remove)
       change KilnCMS.CMS.Changes.SanitizeBlocks
       change KilnCMS.CMS.Changes.SetSearchText
     end
@@ -304,6 +316,38 @@ defmodule KilnCMS.CMS.Post do
     # GraphQL/JSON:API type).
     belongs_to :author, KilnCMS.Accounts.User do
       allow_nil? true
+      public? true
+    end
+
+    # Many-to-one: a post belongs to at most one category (one-to-many from the
+    # category's side). Set via `category_id` in `default_accept`.
+    belongs_to :category, KilnCMS.CMS.Category do
+      allow_nil? true
+      public? true
+    end
+
+    # Many-to-one: the post's lead/hero image. Formalizes what was previously a
+    # loose media id buried in block `data`. Set via `featured_image_id`.
+    belongs_to :featured_image, KilnCMS.CMS.MediaItem do
+      allow_nil? true
+      public? true
+    end
+
+    # Many-to-many: free-form tags, linked through the `PostTag` join resource.
+    # Managed via the `tag_ids` argument on create/update.
+    many_to_many :tags, KilnCMS.CMS.Tag do
+      through KilnCMS.CMS.PostTag
+      source_attribute_on_join_resource :post_id
+      destination_attribute_on_join_resource :tag_id
+      public? true
+    end
+
+    # Self-referential many-to-many: editor-curated "related posts", linked
+    # through the `RelatedPost` join resource. Managed via `related_post_ids`.
+    many_to_many :related_posts, KilnCMS.CMS.Post do
+      through KilnCMS.CMS.RelatedPost
+      source_attribute_on_join_resource :source_id
+      destination_attribute_on_join_resource :related_id
       public? true
     end
   end

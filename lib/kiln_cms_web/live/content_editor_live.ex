@@ -43,8 +43,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> assign(:editors, Presence.editors(kind, id))
      |> assign(:cursors, %{})
      |> assign(:self_field, nil)
+     # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
      |> assign(:picking, nil)
      |> assign(:media, CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]]))
+     |> assign(:categories, CMS.list_categories!(actor: actor))
+     |> assign(:tags, CMS.list_tags!(actor: actor))
+     |> assign(:siblings, siblings(kind, id, actor))
      |> assign_record(record)}
   end
 
@@ -98,8 +102,41 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # --- Page/Post dispatch to the per-kind code interfaces --------------------
 
-  defp fetch!(:page, id, actor), do: CMS.get_page!(id, actor: actor)
-  defp fetch!(:post, id, actor), do: CMS.get_post!(id, actor: actor)
+  defp fetch!(:page, id, actor),
+    do: CMS.get_page!(id, actor: actor, load: [:category, :featured_image, :tags, :related_pages])
+
+  defp fetch!(:post, id, actor),
+    do: CMS.get_post!(id, actor: actor, load: [:category, :featured_image, :tags, :related_posts])
+
+  # Other content of the same kind, for the "related content" picker.
+  defp siblings(:page, id, actor),
+    do: CMS.list_pages!(actor: actor) |> Enum.reject(&(&1.id == id))
+
+  defp siblings(:post, id, actor),
+    do: CMS.list_posts!(actor: actor) |> Enum.reject(&(&1.id == id))
+
+  # The self-referential m2m argument + its currently-linked records differ by
+  # kind (related_post_ids/related_posts vs related_page_ids/related_pages).
+  defp related_field(:page), do: :related_page_ids
+  defp related_field(:post), do: :related_post_ids
+
+  defp related_current(:page, record), do: Map.get(record, :related_pages)
+  defp related_current(:post, record), do: Map.get(record, :related_posts)
+
+  # Current ids for a (possibly unloaded) relationship list.
+  defp current_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
+  defp current_ids(_), do: []
+
+  # Selected values for a multi-select: the in-progress form value once the user
+  # has touched it, otherwise the record's currently-linked ids. Without this
+  # fallback an untouched submit would send an empty list and wipe the links.
+  defp selected_ids(form, field, fallback) do
+    case form[field].value do
+      nil -> fallback
+      list when is_list(list) -> list
+      other -> [other]
+    end
+  end
 
   defp list_versions(:page, opts), do: CMS.list_page_versions!(opts)
   defp list_versions(:post, opts), do: CMS.list_post_versions!(opts)
@@ -180,7 +217,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("save", %{"form" => params}, socket) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, record} ->
-        {:noreply, socket |> assign_record(record) |> put_flash(:info, "Saved.")}
+        # Re-fetch so the relationship pickers reflect the saved links (the
+        # submit result doesn't carry loaded relationships).
+        reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
+        {:noreply, socket |> assign_record(reloaded) |> put_flash(:info, "Saved.")}
 
       {:error, form} ->
         {:noreply,
@@ -375,11 +415,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   @impl true
   def render(assigns) do
     assigns =
-      assign(
-        assigns,
+      assigns
+      |> assign(
         :locked_fields,
         locked_fields(assigns.cursors, assigns.self_field, assigns.actor.id)
       )
+      |> assign(:related_field, related_field(assigns.kind))
+      |> assign(:related_current, related_current(assigns.kind, assigns.record))
 
     ~H"""
     <Layouts.app flash={@flash}>
@@ -553,6 +595,50 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 </button>
               </div>
             </div>
+
+            <details class="rounded border border-base-content/15 p-3" open>
+              <summary class="cursor-pointer text-sm font-medium">
+                Organization &amp; relationships
+              </summary>
+              <div class="mt-3 space-y-3">
+                <.input
+                  field={@form[:category_id]}
+                  type="select"
+                  label="Category"
+                  prompt="— None —"
+                  options={Enum.map(@categories, &{&1.name, &1.id})}
+                />
+
+                <.input
+                  field={@form[:tag_ids]}
+                  type="select"
+                  multiple
+                  label="Tags"
+                  value={selected_ids(@form, :tag_ids, current_ids(@record.tags))}
+                  options={Enum.map(@tags, &{&1.name, &1.id})}
+                />
+                <p class="-mt-1 text-xs text-base-content/50">
+                  Hold ⌘/Ctrl to select multiple.
+                </p>
+
+                <.input
+                  field={@form[:featured_image_id]}
+                  type="select"
+                  label="Featured image"
+                  prompt="— None —"
+                  options={Enum.map(@media, &{&1.filename, &1.id})}
+                />
+
+                <.input
+                  field={@form[@related_field]}
+                  type="select"
+                  multiple
+                  label={"Related #{@kind}s"}
+                  value={selected_ids(@form, @related_field, current_ids(@related_current))}
+                  options={Enum.map(@siblings, &{&1.title, &1.id})}
+                />
+              </div>
+            </details>
 
             <details class="rounded border border-base-content/15 p-3">
               <summary class="cursor-pointer text-sm font-medium">SEO &amp; scheduling</summary>
