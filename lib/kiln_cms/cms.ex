@@ -22,6 +22,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Page do
       define :list_pages, action: :read
       define :get_page, action: :read, get_by: [:id]
+      define :search_pages, action: :search, args: [:query]
       define :create_page, action: :create
       define :update_page, action: :update
       define :submit_page_for_review, action: :submit_for_review
@@ -39,6 +40,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Post do
       define :list_posts, action: :read
       define :get_post, action: :read, get_by: [:id]
+      define :search_posts, action: :search, args: [:query]
       define :create_post, action: :create
       define :update_post, action: :update
       define :submit_post_for_review, action: :submit_for_review

@@ -301,7 +301,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [ ] API documentation (OpenAPI/Swagger via ash_json_api or manual)
 
 ### Phase 6: Search & Performance (P1)
-- [ ] PostgreSQL full-text search on content (Ash calculations or custom)
+- [x] PostgreSQL full-text search on content — a denormalized `search_text` (title + SEO + extracted block text, maintained by `Changes.SetSearchText`) + a `search` read action using `to_tsvector`/`plainto_tsquery`, exposed as `CMS.search_pages`/`search_posts`. Visibility-aware (goes through the read policy). Shared `CMS.BlockText` helper (also powers `word_count`). Covered by `content_search_test.exs`. **Perf TODO:** add a GIN functional index on the tsvector; optionally extend matching to rank/highlight.
 - [ ] Optional: Meilisearch integration + indexing jobs (Oban)
 - [ ] Caching strategy (Cachex/Nebulex in-BEAM), rate limiting on APIs (Hammer/ETS); native PubSub for admin real-time updates. Introduce Dragonfly **only** if a multi-node shared cache is measured as necessary (D2)
 - [ ] Performance profiling (LiveDashboard, Telemetry metrics for editor actions)

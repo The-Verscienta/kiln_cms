@@ -91,11 +91,28 @@ defmodule KilnCMS.CMS.Post do
       # Stamp the acting user as the author (system/seed creates with no actor
       # simply leave it nil).
       change relate_actor(:author, allow_nil?: true)
+      change KilnCMS.CMS.Changes.SetSearchText
     end
 
     update :update do
       primary? true
       require_atomic? false
+      change KilnCMS.CMS.Changes.SetSearchText
+    end
+
+    # Full-text search over the denormalized `search_text` (title + excerpt +
+    # SEO + block text). Goes through the read policy, so anonymous callers
+    # only match published posts.
+    read :search do
+      argument :query, :string, allow_nil?: false
+
+      filter expr(
+               fragment(
+                 "to_tsvector('english', coalesce(?, '')) @@ plainto_tsquery('english', ?)",
+                 search_text,
+                 ^arg(:query)
+               )
+             )
     end
 
     update :submit_for_review do
@@ -179,6 +196,10 @@ defmodule KilnCMS.CMS.Post do
     # When set in the future, the AshOban scheduler publishes this post once the
     # time passes (cleared on publish).
     attribute :scheduled_at, :utc_datetime_usec, public?: true
+
+    # Denormalized plain-text (title + excerpt + SEO + block text) maintained by
+    # `Changes.SetSearchText` and queried by the `search` action. Internal.
+    attribute :search_text, :string
 
     timestamps()
   end
