@@ -13,7 +13,9 @@ defmodule KilnCMS.CMS.Block do
 
   actions do
     defaults [:read, :create, :update, :destroy]
-    default_accept [:type, :content, :data, :order, :children]
+    # `:id` is accepted so block ids stay stable across version restores
+    # (and round-trips); it still defaults to a generated UUID when omitted.
+    default_accept [:id, :type, :content, :data, :order, :children]
   end
 
   attributes do

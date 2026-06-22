@@ -136,6 +136,15 @@ defmodule KilnCMS.CMS.Post do
       change KilnCMS.CMS.Changes.NotifyWebhooks
     end
 
+    update :restore_version do
+      # Reverts content fields to a previous PaperTrail version (captured as a
+      # new version itself). Workflow state is left unchanged.
+      require_atomic? false
+      accept []
+      argument :version_id, :uuid, allow_nil?: false
+      change KilnCMS.CMS.Changes.RestoreVersion
+    end
+
     update :unpublish do
       require_atomic? false
       change transition_state(:draft)
