@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.PreviewController do
     end
   end
 
+  # `PreviewToken.verify/1` only ever yields `:page` or `:post`.
   defp fetch(:page, id), do: CMS.get_page(id, authorize?: false)
   defp fetch(:post, id), do: CMS.get_post(id, authorize?: false)
-  defp fetch(_, _), do: {:error, :not_found}
 end
