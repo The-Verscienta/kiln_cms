@@ -171,6 +171,36 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  describe "who's editing (presence)" do
+    test "a lone editor sees no 'Also editing' indicator", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute render(lv) =~ "Also editing"
+    end
+
+    test "two editors on the same item see each other", %{conn: _conn} do
+      page = draft_page()
+      user_a = authed_user(:editor)
+      user_b = authed_user(:editor)
+      name_b = user_b.email |> to_string() |> String.split("@") |> hd()
+
+      {:ok, lv_a, _html} =
+        build_conn() |> log_in(user_a) |> live(~p"/editor/pages/#{page.id}")
+
+      refute render(lv_a) =~ "Also editing"
+
+      {:ok, _lv_b, _html} =
+        build_conn() |> log_in(user_b) |> live(~p"/editor/pages/#{page.id}")
+
+      # lv_a receives the presence_diff and re-renders with user_b listed.
+      assert render(lv_a) =~ "Also editing"
+      assert render(lv_a) =~ name_b
+    end
+  end
+
   describe "decoupled preview (PubSub)" do
     alias KilnCMSWeb.PreviewLive
 

@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   alias KilnCMS.CMS
   alias KilnCMSWeb.BlockComponents
+  alias KilnCMSWeb.Presence
 
   @block_types ~w(rich_text heading quote image embed divider)
 
@@ -21,13 +22,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def mount(%{"id" => id}, _session, socket) do
     kind = socket.assigns.live_action
     actor = socket.assigns.current_user
+    record = fetch!(kind, id, actor)
+
+    if connected?(socket) do
+      topic = Presence.track_editor(self(), kind, id, actor)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+    end
 
     {:ok,
      socket
      |> assign(:kind, kind)
      |> assign(:actor, actor)
      |> assign(:block_types, @block_types)
-     |> assign_record(fetch!(kind, id, actor))}
+     |> assign(:editors, Presence.editors(kind, id))
+     |> assign_record(record)}
+  end
+
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
+    editors = Presence.editors(socket.assigns.kind, socket.assigns.record.id)
+    {:noreply, assign(socket, :editors, editors)}
   end
 
   defp assign_record(socket, record) do
@@ -203,6 +217,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <p class="text-sm text-base-content/60">
               State: <span class="font-medium">{@record.state}</span>
             </p>
+            <.editing_indicator editors={@editors} current_id={@actor.id} />
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <.link
@@ -359,6 +374,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </div>
       </.form>
     </Layouts.app>
+    """
+  end
+
+  attr :editors, :list, required: true
+  attr :current_id, :string, required: true
+
+  # Live "who's editing" indicator. Shows the *other* editors currently on this
+  # item (the current user is omitted — they know they're here).
+  defp editing_indicator(assigns) do
+    assigns =
+      assign(assigns, :others, Enum.reject(assigns.editors, &(&1.id == assigns.current_id)))
+
+    ~H"""
+    <div :if={@others != []} class="mt-2 flex items-center gap-2 text-xs text-warning">
+      <span class="relative flex h-2 w-2">
+        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75"></span>
+        <span class="relative inline-flex h-2 w-2 rounded-full bg-warning"></span>
+      </span>
+      <span>
+        Also editing: <span class="font-medium">{Enum.map_join(@others, ", ", & &1.name)}</span>
+      </span>
+    </div>
     """
   end
 
