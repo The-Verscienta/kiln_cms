@@ -124,12 +124,14 @@ defmodule KilnCMS.CMS.Post do
       # Stamp the acting user as the author (system/seed creates with no actor
       # simply leave it nil).
       change relate_actor(:author, allow_nil?: true)
+      change KilnCMS.CMS.Changes.SanitizeBlocks
       change KilnCMS.CMS.Changes.SetSearchText
     end
 
     update :update do
       primary? true
       require_atomic? false
+      change KilnCMS.CMS.Changes.SanitizeBlocks
       change KilnCMS.CMS.Changes.SetSearchText
     end
 
@@ -176,6 +178,7 @@ defmodule KilnCMS.CMS.Post do
       accept []
       argument :version_id, :uuid, allow_nil?: false
       change KilnCMS.CMS.Changes.RestoreVersion
+      change KilnCMS.CMS.Changes.SanitizeBlocks
     end
 
     update :unpublish do

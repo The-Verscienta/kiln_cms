@@ -78,6 +78,7 @@ defmodule KilnCMS.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
       {:html_sanitize_ex, "~> 1.4"},
+      {:hammer, "~> 7.0"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.2.0"},
       {:lazy_html, ">= 0.1.0", only: :test},

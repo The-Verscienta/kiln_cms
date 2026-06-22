@@ -101,11 +101,16 @@ defmodule KilnCMSWeb.CoreComponents do
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
-    variants = %{"primary" => "btn-primary", nil => "btn-primary btn-soft"}
+    variants = %{
+      "primary" =>
+        "rounded-lg bg-base-content px-4 py-2 text-sm font-semibold text-base-100 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50",
+      nil =>
+        "rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
+    }
 
     assigns =
       assign_new(assigns, :class, fn ->
-        ["btn", Map.fetch!(variants, assigns[:variant])]
+        Map.fetch!(variants, assigns[:variant])
       end)
 
     if rest[:href] || rest[:navigate] || rest[:patch] do

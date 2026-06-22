@@ -9,6 +9,7 @@ defmodule KilnCMS.Application do
   def start(_type, _args) do
     children = [
       KilnCMSWeb.Telemetry,
+      KilnCMSWeb.RateLimit,
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
       {Oban,

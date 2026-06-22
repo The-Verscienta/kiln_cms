@@ -35,8 +35,14 @@ defmodule KilnCMSWeb.BlockComponents do
         <% @type == "divider" -> %>
           <hr class="border-base-300" />
         <% @type == "embed" -> %>
-          <div class="rounded bg-base-200 p-2 text-sm text-base-content/60">
-            Embed: {@block.content}
+          <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
+            <iframe
+              src={embed}
+              title="Embedded media"
+              class="h-full w-full rounded"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            />
           </div>
         <% true -> %>
           <p>{@block.content}</p>

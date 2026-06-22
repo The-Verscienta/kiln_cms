@@ -38,9 +38,9 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
     conn =
       build_conn()
       |> put_req_header("content-type", "application/json")
-      |> post("/gql", ~s({"query": "{ sayHello }"}))
+      |> post("/gql", ~s({"query": "{ health }"}))
 
-    assert %{"data" => %{"sayHello" => _}} = json_response(conn, 200)
+    assert %{"data" => %{"health" => "ok"}} = json_response(conn, 200)
   end
 
   defp dev_routes?, do: Application.get_env(:kiln_cms, :dev_routes, false)

@@ -51,6 +51,30 @@ defmodule KilnCMS.HTMLSanitizerTest do
     end
   end
 
+  describe "safe_embed_url/1" do
+    test "normalizes YouTube watch URLs to embed src" do
+      url =
+        URI.to_string(%URI{
+          scheme: "https",
+          host: "www.youtube.com",
+          path: "/watch",
+          query: "v=abc123"
+        })
+
+      assert HTMLSanitizer.safe_embed_url(url) == "https://www.youtube.com/embed/abc123"
+    end
+
+    test "allows Vimeo player URLs" do
+      url = URI.to_string(%URI{scheme: "https", host: "player.vimeo.com", path: "/video/12345"})
+
+      assert HTMLSanitizer.safe_embed_url(url) == "https://player.vimeo.com/video/12345"
+    end
+
+    test "rejects unknown embed hosts" do
+      assert HTMLSanitizer.safe_embed_url("https://evil.example/embed") == nil
+    end
+  end
+
   describe "safe_image_src/1" do
     test "allows relative upload paths" do
       assert HTMLSanitizer.safe_image_src("/uploads/abc.jpg") == "/uploads/abc.jpg"

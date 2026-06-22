@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.Router do
               "img-src 'self' data: blob:; " <>
               "font-src 'self' data:; " <>
               "connect-src 'self' ws: wss:; " <>
+              "frame-src 'self' https://www.youtube.com https://player.vimeo.com; " <>
               "object-src 'none'; base-uri 'self'; " <>
               "frame-ancestors 'self'; form-action 'self'"
 
@@ -28,6 +29,7 @@ defmodule KilnCMSWeb.Router do
   }
 
   pipeline :graphql do
+    plug KilnCMSWeb.Plugs.RateLimit, :gql
     plug :load_from_bearer
     plug :set_actor, :user
     plug AshGraphql.Plug
@@ -60,8 +62,22 @@ defmodule KilnCMSWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug KilnCMSWeb.Plugs.RateLimit, :api
     plug :load_from_bearer
     plug :set_actor, :user
+  end
+
+  # Auth pages get a tighter per-IP limit to slow credential stuffing.
+  pipeline :browser_auth do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers, @browser_csp_headers
+    plug :put_browser_csp
+    plug KilnCMSWeb.Plugs.RateLimit, :auth
+    plug :load_from_session
   end
 
   # Preview endpoint — authorized by a signed token, not a session/bearer.
@@ -131,35 +147,30 @@ defmodule KilnCMSWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+  end
+
+  scope "/", KilnCMSWeb do
+    pipe_through :browser_auth
+
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     sign_out_route AuthController
 
-    # Remove these if you'd like to use your own authentication views
     sign_in_route register_path: "/register",
                   reset_path: "/reset",
                   auth_routes_prefix: "/auth",
                   on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
-                  overrides: [
-                    KilnCMSWeb.AuthOverrides,
-                    Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI
-                  ]
+                  overrides: [KilnCMSWeb.AuthOverrides]
 
-    # Remove this if you do not want to use the reset password feature
     reset_route auth_routes_prefix: "/auth",
-                overrides: [
-                  KilnCMSWeb.AuthOverrides,
-                  Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI
-                ]
+                overrides: [KilnCMSWeb.AuthOverrides]
 
-    # Remove this if you do not use the confirmation strategy
     confirm_route KilnCMS.Accounts.User, :confirm_new_user,
       auth_routes_prefix: "/auth",
-      overrides: [KilnCMSWeb.AuthOverrides, Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI]
+      overrides: [KilnCMSWeb.AuthOverrides]
 
-    # Remove this if you do not use the magic link strategy.
     magic_sign_in_route(KilnCMS.Accounts.User, :magic_link,
       auth_routes_prefix: "/auth",
-      overrides: [KilnCMSWeb.AuthOverrides, Elixir.AshAuthentication.Phoenix.Overrides.DaisyUI]
+      overrides: [KilnCMSWeb.AuthOverrides]
     )
   end
 

@@ -31,39 +31,63 @@ defmodule KilnCMSWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
+  attr :current_user, :map, default: nil, doc: "the signed-in user, if any"
+
+  attr :container_class, :string,
+    default: "mx-auto max-w-5xl space-y-4",
+    doc: "classes for the main content container"
+
   slot :inner_block, required: true
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
+    <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
+      <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
+        <a href="/" class="flex items-center gap-3">
+          <img src={~p"/images/logo.svg"} width="32" alt="" />
+          <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
-      </div>
-      <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://phoenix.hexdocs.pm/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
-          </li>
-        </ul>
+        <nav class="flex items-center gap-2 sm:gap-3">
+          <a
+            href="/gql"
+            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
+          >
+            GraphQL
+          </a>
+          <a
+            href="/api/json"
+            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
+          >
+            JSON:API
+          </a>
+          <a
+            :if={@current_user && @current_user.role in [:editor, :admin]}
+            href={~p"/editor"}
+            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
+          >
+            Editor
+          </a>
+          <.theme_toggle />
+          <a
+            :if={is_nil(@current_user)}
+            href={~p"/sign-in"}
+            class="rounded-lg bg-base-content px-3 py-1.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
+          >
+            Sign in
+          </a>
+          <a
+            :if={@current_user}
+            href={~p"/sign-out"}
+            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
+          >
+            Sign out
+          </a>
+        </nav>
       </div>
     </header>
 
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
+    <main class="px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+      <div class={@container_class}>
         {render_slot(@inner_block)}
       </div>
     </main>

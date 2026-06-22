@@ -8,15 +8,9 @@ defmodule KilnCMSWeb.GraphqlSchema do
   import_types Absinthe.Plug.Types
 
   query do
-    # Custom Absinthe queries can be placed here
-    @desc """
-    Hello! This is a sample query to verify that AshGraphql has been set up correctly.
-    Remove me once you have a query of your own!
-    """
-    field :say_hello, :string do
-      resolve fn _, _, _ ->
-        {:ok, "Hello from AshGraphql!"}
-      end
+    @desc "Lightweight GraphQL health probe"
+    field :health, :string do
+      resolve fn _, _, _ -> {:ok, "ok"} end
     end
   end
 

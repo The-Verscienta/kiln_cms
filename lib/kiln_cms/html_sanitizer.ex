@@ -7,6 +7,14 @@ defmodule KilnCMS.HTMLSanitizer do
 
   @image_schemes ~w(http https)
 
+  @embed_hosts ~w(
+    www.youtube.com
+    youtube.com
+    youtu.be
+    player.vimeo.com
+    vimeo.com
+  )
+
   @doc """
   Strips unsafe markup from rich-text block HTML while preserving TipTap output.
   """
@@ -50,6 +58,56 @@ defmodule KilnCMS.HTMLSanitizer do
       not String.starts_with?(url, "//") and
       not String.contains?(url, "..")
   end
+
+  @doc """
+  Returns a safe embed iframe `src` for supported providers (YouTube, Vimeo),
+  or `nil` when the URL is rejected.
+  """
+  def safe_embed_url(nil), do: nil
+  def safe_embed_url(""), do: nil
+
+  def safe_embed_url(url) when is_binary(url) do
+    url = String.trim(url)
+
+    with %URI{} = uri <- URI.parse(url),
+         host when host in @embed_hosts <- uri.host,
+         embed when is_binary(embed) <- to_embed_src(uri, host) do
+      embed
+    else
+      _ -> nil
+    end
+  end
+
+  @doc "Hosts allowed in Content-Security-Policy `frame-src` for embed blocks."
+  def embed_csp_hosts, do: ~w(https://www.youtube.com https://player.vimeo.com)
+
+  defp to_embed_src(%URI{query: query} = uri, host)
+       when host in ["www.youtube.com", "youtube.com"] do
+    case URI.decode_query(query || "") do
+      %{"v" => id} when is_binary(id) and id != "" ->
+        "https://www.youtube.com/embed/" <> id
+
+      _ ->
+        case uri.path do
+          "/embed/" <> id when id != "" -> "https://www.youtube.com/embed/" <> id
+          _ -> nil
+        end
+    end
+  end
+
+  defp to_embed_src(%URI{path: "/" <> id}, "youtu.be") when id != "" do
+    "https://www.youtube.com/embed/" <> id
+  end
+
+  defp to_embed_src(%URI{path: "/video/" <> id}, "player.vimeo.com") when id != "" do
+    "https://player.vimeo.com/video/" <> id
+  end
+
+  defp to_embed_src(%URI{path: "/" <> id}, "vimeo.com") when id != "" do
+    "https://player.vimeo.com/video/" <> id
+  end
+
+  defp to_embed_src(_, _), do: nil
 
   defp safe_absolute_url?(url) do
     case URI.parse(url) do
