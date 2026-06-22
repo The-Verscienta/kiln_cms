@@ -283,13 +283,13 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 
 ### Phase 3: Content Editor & Blocks (P1 — Hardest)
 - [ ] Research & implement **TipTap** LiveView integration (use existing community examples as base)
-- [ ] Define **embedded `Block` resources** (D3) with typed variants (text, heading, image, quote, embed, custom component, etc.)
+- [x] Define **embedded `Block` resources** (D3) with typed variants (rich_text, heading, image, quote, embed, divider, columns, custom)
 - [ ] Build drag-and-drop sortable interface (SortableJS hook + LiveView streams or assigns)
 - [ ] **Real-time Visual Preview** (implement full architecture: Editor LiveView → native `Phoenix.PubSub` → Preview LiveView/iframe with signed tokens, optimistic updates, Presence foundation) — P1 core differentiator (D1)
-- [ ] Block library / inserter UI
+- [~] Block library / inserter UI — `PageEditorLive` has add-block buttons per type + per-block type selector; richer inserter (slash menu) TODO
 - [ ] Rich text formatting toolbar, keyboard shortcuts, slash commands (TipTap extensions)
-- [ ] Save/publish actions with optimistic UI + error handling
-- [ ] Content listing page with filters, search, bulk actions, status badges
+- [x] Save/publish actions with error handling — `PageEditorLive` saves via `AshPhoenix.Form` (nested block forms) and runs the publish/submit/unpublish workflow; covered by `editor_live_test.exs` + browser-verified
+- [~] Content listing page — `EditorLive` at `/editor`: lists pages with status badges, create-new, inline publish/unpublish, edit links. **TODO:** posts, filters/search, bulk actions
 
 ### Phase 4: Workflows, Versioning & Publishing (P1)
 - [x] Integrate **AshPaperTrail** on Page/Post for full history (embedded Blocks are versioned with the parent — D3). Restore action still TODO

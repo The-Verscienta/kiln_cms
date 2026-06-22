@@ -89,6 +89,8 @@ defmodule KilnCMSWeb.Router do
     ash_authentication_live_session :editor_routes,
       on_mount: [{KilnCMSWeb.LiveUserAuth, :live_editor_required}] do
       live "/media", MediaLive, :index
+      live "/editor", EditorLive, :index
+      live "/editor/pages/:id", PageEditorLive, :edit
     end
   end
 
