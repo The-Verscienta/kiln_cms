@@ -203,6 +203,12 @@ defmodule KilnCMSWeb.EditorLive do
           <h1 class="text-2xl font-semibold">Content</h1>
           <div class="flex items-center gap-2">
             <.link
+              navigate={~p"/editor/taxonomy"}
+              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+            >
+              Taxonomy
+            </.link>
+            <.link
               :if={@actor.role == :admin}
               navigate={~p"/editor/trash"}
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
