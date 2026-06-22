@@ -128,6 +128,50 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_post!(post.id, authorize?: false).state == :archived
     end
 
+    test "the bulk Delete button is admin-only", %{conn: conn} do
+      draft_page()
+
+      {:ok, _lv, editor_html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      refute editor_html =~ "request_delete"
+
+      {:ok, _lv, admin_html} =
+        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      assert admin_html =~ "request_delete"
+    end
+
+    test "admin bulk delete asks for confirmation, then removes the items", %{conn: conn} do
+      page = draft_page(%{title: "DeleteMe"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
+
+      # First click only opens the guard; nothing is deleted yet.
+      confirm_html = lv |> element("button[phx-click='request_delete']") |> render_click()
+      assert confirm_html =~ "This can&#39;t be undone"
+      assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
+
+      # Confirming performs the delete.
+      lv |> element("button[phx-click='confirm_delete']") |> render_click()
+      refute Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
+    end
+
+    test "cancelling the guard dismisses it without deleting", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
+      lv |> element("button[phx-click='request_delete']") |> render_click()
+      cancelled = lv |> element("button[phx-click='cancel_delete']") |> render_click()
+
+      refute cancelled =~ "This can&#39;t be undone"
+      assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
+    end
+
     test "lists posts and New post opens the post editor", %{conn: conn} do
       draft_post(%{title: "FindablePost"})
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")

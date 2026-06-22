@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:status, "all")
      |> assign(:query, "")
      |> assign(:selected, MapSet.new())
+     |> assign(:confirming_delete, false)
      |> load_items()}
   end
 
@@ -101,6 +102,38 @@ defmodule KilnCMSWeb.EditorLive do
      socket |> load_items() |> assign(:selected, MapSet.new()) |> put_flash(:info, flash)}
   end
 
+  # Deletes are destructive (and admin-only), so they go through a two-step
+  # confirmation rather than firing on the first click.
+  def handle_event("request_delete", _params, socket) do
+    {:noreply, assign(socket, :confirming_delete, MapSet.size(socket.assigns.selected) > 0)}
+  end
+
+  def handle_event("cancel_delete", _params, socket),
+    do: {:noreply, assign(socket, :confirming_delete, false)}
+
+  def handle_event("confirm_delete", _params, socket) do
+    actor = socket.assigns.actor
+
+    {ok, skipped} =
+      Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {ok, skipped} ->
+        [kind, id] = String.split(key, ":", parts: 2)
+
+        case destroy(kind, id, actor) do
+          :ok -> {ok + 1, skipped}
+          _ -> {ok, skipped + 1}
+        end
+      end)
+
+    flash = "Deleted #{ok}" <> if(skipped > 0, do: ", #{skipped} skipped", else: "")
+
+    {:noreply,
+     socket
+     |> load_items()
+     |> assign(:selected, MapSet.new())
+     |> assign(:confirming_delete, false)
+     |> put_flash(:info, flash)}
+  end
+
   def handle_event("publish", params, socket),
     do: {:noreply, transition(socket, params, "publish")}
 
@@ -129,6 +162,11 @@ defmodule KilnCMSWeb.EditorLive do
   defp do_transition("post", "unpublish", r, a), do: CMS.unpublish_post(r, %{}, actor: a)
   defp do_transition("page", "archive", r, a), do: CMS.archive_page(r, %{}, actor: a)
   defp do_transition("post", "archive", r, a), do: CMS.archive_post(r, %{}, actor: a)
+
+  # Hard delete (soft via archival). Admin-only; the policy rejects others, in
+  # which case the item is counted as skipped.
+  defp destroy("page", id, a), do: CMS.destroy_page(get!("page", id, a), actor: a)
+  defp destroy("post", id, a), do: CMS.destroy_post(get!("post", id, a), actor: a)
 
   # The set of selection keys ("kind:id") for the items currently visible under
   # the active status/title filter.
@@ -224,6 +262,41 @@ defmodule KilnCMSWeb.EditorLive do
               class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {label}
+            </button>
+            <button
+              :if={@actor.role == :admin}
+              type="button"
+              phx-click="request_delete"
+              disabled={@selected_count == 0}
+              class="rounded border border-error/40 px-3 py-1 text-xs text-error hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+
+        <div
+          :if={@confirming_delete}
+          class="flex flex-wrap items-center gap-3 rounded border border-error/40 bg-error/10 px-3 py-2 text-sm"
+        >
+          <span>
+            Permanently delete <span class="font-medium">{@selected_count}</span>
+            item(s)? This can't be undone.
+          </span>
+          <div class="ml-auto flex gap-2">
+            <button
+              type="button"
+              phx-click="confirm_delete"
+              class="rounded bg-error px-3 py-1 text-xs font-medium text-error-content hover:opacity-90"
+            >
+              Delete
+            </button>
+            <button
+              type="button"
+              phx-click="cancel_delete"
+              class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
+            >
+              Cancel
             </button>
           </div>
         </div>
