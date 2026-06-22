@@ -351,6 +351,36 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
       refute render(lv) =~ "ring-warning"
     end
+
+    test "simultaneous focus is broken by id — the lower id keeps the field", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # We focus the title ourselves (sets self_field). Our id is a UUID (hex),
+      # so it sorts between "0000…" and "zzzz…".
+      lv |> element(~s(input[name="form[title]"])) |> render_focus()
+      topic = Presence.topic("page", page.id)
+
+      # A collaborator with a HIGHER id also on title -> we outrank them -> ours.
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        topic,
+        {:cursor, %{id: "zzzz-higher", name: "zoe", field: "title"}}
+      )
+
+      refute render(lv) =~ "ring-warning"
+
+      # A collaborator with a LOWER id also on title -> they win -> locked for us.
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        topic,
+        {:cursor, %{id: "0000-lower", name: "abe", field: "title"}}
+      )
+
+      assert render(lv) =~ "ring-warning"
+    end
   end
 
   describe "decoupled preview (PubSub)" do
