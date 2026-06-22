@@ -30,6 +30,14 @@ defmodule KilnCMSWeb.Endpoint do
     only: KilnCMSWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
+  # User-uploaded media (KilnCMS.Storage.Local). Served from priv/uploads,
+  # which the Local adapter writes to (the app-dir paths stay in sync). In
+  # production a remote adapter (S3/MinIO) would serve these instead.
+  plug Plug.Static,
+    at: "/uploads",
+    from: {:kiln_cms, "priv/uploads"},
+    gzip: false
+
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
   if code_reloading? do

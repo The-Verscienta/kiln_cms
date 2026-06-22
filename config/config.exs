@@ -22,6 +22,9 @@ config :kiln_cms,
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
 
+# Media blob storage. Swap the adapter for S3/MinIO in production.
+config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.Local
+
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
 config :mime,

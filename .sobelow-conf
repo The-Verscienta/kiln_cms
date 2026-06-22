@@ -5,6 +5,8 @@
   exit: "low",
   threshold: :low,
   verbose: false,
+  # Honour inline `# sobelow_skip [...]` annotations for reviewed findings.
+  skip: true,
   ignore: [],
   ignore_files: []
 ]
