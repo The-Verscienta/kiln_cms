@@ -54,6 +54,30 @@ defmodule KilnCMS.WebhooksTest do
              Jason.decode!(body)
   end
 
+  test "unpublishing dispatches an unpublished event" do
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Live", slug: slug()}, actor: admin)
+    page = CMS.publish_page!(page, %{}, actor: admin)
+    CMS.unpublish_page!(page, %{}, actor: admin)
+    Oban.drain_queue(queue: :default, with_recursion: true)
+
+    events =
+      Stream.repeatedly(fn ->
+        receive do
+          {:delivered, _, _, headers, _} -> headers["x-kilncms-event"]
+        after
+          0 -> nil
+        end
+      end)
+      |> Enum.take_while(&(&1 != nil))
+
+    assert "page.published" in events
+    assert "page.unpublished" in events
+  end
+
   test "inactive endpoints receive nothing" do
     stub_capture()
     admin = admin()

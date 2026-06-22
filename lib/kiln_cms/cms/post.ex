@@ -149,6 +149,7 @@ defmodule KilnCMS.CMS.Post do
     update :unpublish do
       require_atomic? false
       change transition_state(:draft)
+      change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
     end
 
     update :archive do

@@ -11,7 +11,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshAdmin.Resource]
 
-  @events ~w(page.published post.published)
+  @events ~w(page.published page.unpublished post.published post.unpublished)
 
   def events, do: @events
 
