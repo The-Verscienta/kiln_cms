@@ -26,6 +26,7 @@ defmodule KilnCMS.CMS do
       define :update_page, action: :update
       define :submit_page_for_review, action: :submit_for_review
       define :publish_page, action: :publish
+      define :publish_scheduled_page, action: :publish_scheduled
       define :unpublish_page, action: :unpublish
       define :archive_page, action: :archive
       define :destroy_page, action: :destroy
@@ -42,6 +43,7 @@ defmodule KilnCMS.CMS do
       define :update_post, action: :update
       define :submit_post_for_review, action: :submit_for_review
       define :publish_post, action: :publish
+      define :publish_scheduled_post, action: :publish_scheduled
       define :unpublish_post, action: :unpublish
       define :archive_post, action: :archive
       define :destroy_post, action: :destroy

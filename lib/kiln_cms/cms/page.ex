@@ -11,6 +11,7 @@ defmodule KilnCMS.CMS.Page do
     extensions: [
       AshPaperTrail.Resource,
       AshStateMachine,
+      AshOban,
       AshJsonApi.Resource,
       AshGraphql.Resource,
       AshAdmin.Resource
@@ -39,8 +40,31 @@ defmodule KilnCMS.CMS.Page do
     transitions do
       transition :submit_for_review, from: :draft, to: :in_review
       transition :publish, from: [:draft, :in_review], to: :published
+      transition :publish_scheduled, from: [:draft, :in_review], to: :published
       transition :unpublish, from: :published, to: :draft
       transition :archive, from: [:draft, :in_review, :published], to: :archived
+    end
+  end
+
+  # Background publishing of scheduled content. The `AshOban`-generated
+  # scheduler runs every minute and triggers `publish_scheduled` on each page
+  # whose `scheduled_at` has passed.
+  oban do
+    triggers do
+      trigger :publish_scheduled do
+        action :publish_scheduled
+        queue :default
+        scheduler_cron "* * * * *"
+
+        where expr(
+                state in [:draft, :in_review] and not is_nil(scheduled_at) and
+                  scheduled_at <= now()
+              )
+
+        worker_read_action :read
+        worker_module_name KilnCMS.CMS.Page.Workers.PublishScheduled
+        scheduler_module_name KilnCMS.CMS.Page.Schedulers.PublishScheduled
+      end
     end
   end
 
@@ -51,7 +75,7 @@ defmodule KilnCMS.CMS.Page do
 
   actions do
     defaults [:read, :destroy]
-    default_accept [:title, :slug, :blocks, :seo_title, :seo_description, :locale]
+    default_accept [:title, :slug, :blocks, :seo_title, :seo_description, :locale, :scheduled_at]
 
     create :create do
       primary? true
@@ -76,6 +100,14 @@ defmodule KilnCMS.CMS.Page do
       change set_attribute(:published_at, &DateTime.utc_now/0)
     end
 
+    update :publish_scheduled do
+      # Run by the AshOban scheduler for content whose `scheduled_at` has passed.
+      require_atomic? false
+      change transition_state(:published)
+      change set_attribute(:published_at, &DateTime.utc_now/0)
+      change set_attribute(:scheduled_at, nil)
+    end
+
     update :unpublish do
       require_atomic? false
       change transition_state(:draft)
@@ -88,6 +120,11 @@ defmodule KilnCMS.CMS.Page do
   end
 
   policies do
+    # The AshOban scheduler publishes scheduled content as a trusted system job.
+    bypass AshOban.Checks.AshObanInteraction do
+      authorize_if always()
+    end
+
     # Admins may do anything.
     bypass actor_attribute_equals(:role, :admin) do
       authorize_if always()
@@ -128,6 +165,10 @@ defmodule KilnCMS.CMS.Page do
     attribute :seo_description, :string, public?: true
     attribute :locale, :string, default: "en", public?: true
     attribute :published_at, :utc_datetime_usec, public?: true
+
+    # When set in the future, the AshOban scheduler publishes this page once the
+    # time passes (cleared on publish).
+    attribute :scheduled_at, :utc_datetime_usec, public?: true
 
     timestamps()
   end

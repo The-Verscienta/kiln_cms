@@ -289,7 +289,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [ ] Publishing action that creates immutable published version + updates live version
 - [ ] Approval workflow (simple: editor submits → admin approves)
 - [ ] Restore previous version from history
-- [ ] Scheduled publishing (Oban + cron)
+- [x] Scheduled publishing (Oban + cron) — `scheduled_at` on Page/Post + an **AshOban** trigger (`publish_scheduled`, every-minute cron) that publishes content whose time has passed, authorized as a system job via an `AshOban.Checks.AshObanInteraction` policy bypass. Covered by `scheduled_publishing_test.exs`. First real use of the wired Oban/AshOban infra.
 - [ ] Draft autosave (debounced LiveView save)
 
 ### Phase 5: Headless APIs & Preview (P1)
