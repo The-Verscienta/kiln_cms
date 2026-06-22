@@ -33,6 +33,21 @@ defmodule KilnCMSWeb.PageEditorLive do
     socket
     |> assign(:page, page)
     |> assign(:form, build_form(page, socket.assigns.actor))
+    |> load_versions()
+  end
+
+  defp load_versions(socket) do
+    versions =
+      CMS.list_page_versions!(
+        actor: socket.assigns.actor,
+        query: [
+          filter: [version_source_id: socket.assigns.page.id],
+          sort: [version_inserted_at: :desc],
+          limit: 15
+        ]
+      )
+
+    assign(socket, :versions, versions)
   end
 
   defp build_form(page, actor) do
@@ -82,6 +97,18 @@ defmodule KilnCMSWeb.PageEditorLive do
 
   def handle_event("workflow", %{"action" => action}, socket) do
     {:noreply, run_workflow(socket, action)}
+  end
+
+  def handle_event("restore", %{"version_id" => version_id}, socket) do
+    case CMS.restore_page_version(socket.assigns.page, %{version_id: version_id},
+           actor: socket.assigns.actor
+         ) do
+      {:ok, page} ->
+        {:noreply, socket |> assign_page(page) |> put_flash(:info, "Restored that version.")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Couldn't restore that version.")}
+    end
   end
 
   defp run_workflow(socket, action) do
@@ -236,6 +263,37 @@ defmodule KilnCMSWeb.PageEditorLive do
                   label="Scheduled publish at"
                 />
               </div>
+            </details>
+
+            <details class="rounded border border-base-content/15 p-3">
+              <summary class="cursor-pointer text-sm font-medium">
+                Version history ({length(@versions)})
+              </summary>
+              <p :if={@versions == []} class="mt-3 text-sm text-base-content/60">
+                No saved versions yet.
+              </p>
+              <ul :if={@versions != []} class="mt-3 space-y-2">
+                <li
+                  :for={version <- @versions}
+                  class="flex items-center justify-between gap-3 text-sm"
+                >
+                  <span class="text-base-content/70">
+                    {version.version_action_name} · {Calendar.strftime(
+                      version.version_inserted_at,
+                      "%Y-%m-%d %H:%M"
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    phx-click="restore"
+                    phx-value-version_id={version.id}
+                    data-confirm="Restore content to this version?"
+                    class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+                  >
+                    Restore
+                  </button>
+                </li>
+              </ul>
             </details>
           </div>
 

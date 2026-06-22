@@ -173,6 +173,29 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert saved.canonical_url == "https://example.com/p"
     end
 
+    test "version history lists versions and restore reverts content", %{conn: conn} do
+      editor = authed_user(:editor)
+      # Create + update through the actions so PaperTrail records versions.
+      page =
+        CMS.create_page!(%{title: "Original", slug: "hist-#{System.unique_integer([:positive])}"},
+          actor: editor
+        )
+
+      CMS.update_page!(page, %{title: "Changed"}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      assert html =~ "Version history"
+
+      [create_version | _] =
+        CMS.list_page_versions!(actor: editor)
+        |> Enum.filter(&(&1.version_source_id == page.id))
+        |> Enum.sort_by(& &1.version_inserted_at, DateTime)
+
+      lv |> element("button[phx-value-version_id='#{create_version.id}']") |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).title == "Original"
+    end
+
     test "runs the publish workflow", %{conn: conn} do
       page = draft_page()
 
