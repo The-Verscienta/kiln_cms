@@ -301,6 +301,21 @@ defmodule KilnCMS.Accounts.User do
     end
   end
 
+  relationships do
+    has_many :authored_pages, KilnCMS.CMS.Page do
+      destination_attribute :author_id
+    end
+
+    has_many :authored_posts, KilnCMS.CMS.Post do
+      destination_attribute :author_id
+    end
+  end
+
+  aggregates do
+    count :authored_page_count, :authored_pages
+    count :authored_post_count, :authored_posts
+  end
+
   identities do
     identity :unique_email, [:email]
   end

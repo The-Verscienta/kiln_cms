@@ -55,6 +55,9 @@ defmodule KilnCMS.CMS.Page do
 
     create :create do
       primary? true
+      # Stamp the acting user as the author (system/seed creates with no actor
+      # simply leave it nil).
+      change relate_actor(:author, allow_nil?: true)
     end
 
     update :update do
@@ -127,6 +130,29 @@ defmodule KilnCMS.CMS.Page do
     attribute :published_at, :utc_datetime_usec, public?: true
 
     timestamps()
+  end
+
+  relationships do
+    # The user who authored this page. Nullable so existing/system content
+    # without an actor is valid. Not exposed via the public APIs (User has no
+    # GraphQL/JSON:API type).
+    belongs_to :author, KilnCMS.Accounts.User do
+      allow_nil? true
+      public? true
+    end
+  end
+
+  calculations do
+    # Convenience flag for the published state (no `?` suffix — GraphQL names
+    # can't contain it).
+    calculate :published, :boolean, expr(state == :published) do
+      public? true
+    end
+
+    # Total word count across the embedded block tree.
+    calculate :word_count, :integer, KilnCMS.CMS.Calculations.WordCount do
+      public? true
+    end
   end
 
   identities do
