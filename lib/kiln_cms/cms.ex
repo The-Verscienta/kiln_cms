@@ -31,7 +31,9 @@ defmodule KilnCMS.CMS do
       define :destroy_page, action: :destroy
     end
 
-    resource KilnCMS.CMS.Page.Version
+    resource KilnCMS.CMS.Page.Version do
+      define :list_page_versions, action: :read
+    end
 
     resource KilnCMS.CMS.Post do
       define :list_posts, action: :read
@@ -45,7 +47,9 @@ defmodule KilnCMS.CMS do
       define :destroy_post, action: :destroy
     end
 
-    resource KilnCMS.CMS.Post.Version
+    resource KilnCMS.CMS.Post.Version do
+      define :list_post_versions, action: :read
+    end
 
     resource KilnCMS.CMS.MediaItem do
       define :list_media_items, action: :read

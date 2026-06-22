@@ -28,6 +28,8 @@ defmodule KilnCMS.CMS.Page do
     change_tracking_mode(:changes_only)
     store_action_name?(true)
     ignore_attributes([:inserted_at, :updated_at])
+    mixin({KilnCMS.CMS.VersionPolicies, :policies, []})
+    version_extensions(authorizers: [Ash.Policy.Authorizer])
   end
 
   state_machine do

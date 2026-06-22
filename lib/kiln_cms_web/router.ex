@@ -6,7 +6,7 @@ defmodule KilnCMSWeb.Router do
   import AshAuthentication.Plug.Helpers
 
   # Content-Security-Policy. Directives shared by every browser response; the
-  # `script-src` directive is added per-pipeline (see `put_csp`/`put_dev_csp`).
+  # `script-src` directive is finalized per-pipeline (see `put_*_browser_csp`).
   # `style-src` keeps 'unsafe-inline' because inline `style=` attributes can't
   # carry a nonce; everything else is locked to same-origin.
   @base_csp "default-src 'self'; " <>
@@ -16,6 +16,16 @@ defmodule KilnCMSWeb.Router do
               "connect-src 'self' ws: wss:; " <>
               "object-src 'none'; base-uri 'self'; " <>
               "frame-ancestors 'self'; form-action 'self'"
+
+  # Static CSP placeholders for Sobelow / `put_secure_browser_headers`; the
+  # `put_*_browser_csp` plugs immediately replace these with per-request nonces.
+  @browser_csp_headers %{
+    "content-security-policy" => "script-src 'self'; #{@base_csp}"
+  }
+
+  @dev_browser_csp_headers %{
+    "content-security-policy" => "script-src 'self' 'unsafe-inline' 'unsafe-eval'; #{@base_csp}"
+  }
 
   pipeline :graphql do
     plug :load_from_bearer
@@ -29,8 +39,8 @@ defmodule KilnCMSWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers
-    plug :put_csp
+    plug :put_secure_browser_headers, @browser_csp_headers
+    plug :put_browser_csp
     plug :load_from_session
   end
 
@@ -43,8 +53,8 @@ defmodule KilnCMSWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers
-    plug :put_dev_csp
+    plug :put_secure_browser_headers, @dev_browser_csp_headers
+    plug :put_dev_browser_csp
     plug :load_from_session
   end
 
@@ -161,11 +171,11 @@ defmodule KilnCMSWeb.Router do
   end
 
   # --- Content-Security-Policy plugs ----------------------------------------
+  #
+  # Override the static CSP from `put_secure_browser_headers` above with a
+  # per-request nonce (strict) or a relaxed dev-only policy (AshAdmin tooling).
 
-  # Strict CSP for first-party pages: scripts must be same-origin or carry the
-  # per-request nonce assigned here (the only inline script is the theme setup
-  # in root.html.heex, which uses `nonce={@csp_nonce}`).
-  defp put_csp(conn, _opts) do
+  defp put_browser_csp(conn, _opts) do
     nonce = generate_csp_nonce()
 
     conn
@@ -176,9 +186,7 @@ defmodule KilnCMSWeb.Router do
     )
   end
 
-  # Relaxed CSP for dev-only tooling that injects its own inline scripts. The
-  # nonce is still assigned so the shared root layout renders identically.
-  defp put_dev_csp(conn, _opts) do
+  defp put_dev_browser_csp(conn, _opts) do
     conn
     |> Plug.Conn.assign(:csp_nonce, generate_csp_nonce())
     |> Plug.Conn.put_resp_header(
