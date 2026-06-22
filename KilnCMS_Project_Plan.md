@@ -284,7 +284,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 ### Phase 3: Content Editor & Blocks (P1 — Hardest)
 - [ ] Research & implement **TipTap** LiveView integration (use existing community examples as base)
 - [x] Define **embedded `Block` resources** (D3) with typed variants (rich_text, heading, image, quote, embed, divider, columns, custom)
-- [ ] Build drag-and-drop sortable interface (SortableJS hook + LiveView streams or assigns)
+- [x] Build drag-and-drop sortable interface — vendored SortableJS + a `Sortable` LiveView hook in `PageEditorLive`; drop pushes the new order, the server reorders the nested block forms via `AshPhoenix.Form.sort_forms`. Reorder→persist covered by `editor_live_test.exs` + browser-verified (hook mounts, no JS errors).
 - [ ] **Real-time Visual Preview** (implement full architecture: Editor LiveView → native `Phoenix.PubSub` → Preview LiveView/iframe with signed tokens, optimistic updates, Presence foundation) — P1 core differentiator (D1)
 - [~] Block library / inserter UI — `PageEditorLive` has add-block buttons per type + per-block type selector; richer inserter (slash menu) TODO
 - [ ] Rich text formatting toolbar, keyboard shortcuts, slash commands (TipTap extensions)

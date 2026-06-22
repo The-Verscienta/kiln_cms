@@ -24,12 +24,36 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
+import Sortable from "../vendor/sortable"
+
+// Drag-and-drop reordering for editor block lists. On drop it reads the new
+// order of `data-sort-id`s and pushes a "reorder" event to the LiveView.
+const Hooks = {
+  Sortable: {
+    mounted() {
+      this.sorter = Sortable.create(this.el, {
+        animation: 150,
+        handle: "[data-drag-handle]",
+        ghostClass: "opacity-40",
+        onEnd: () => {
+          const order = Array.from(this.el.children)
+            .map(c => c.dataset.sortId)
+            .filter(id => id !== undefined)
+          this.pushEvent("reorder", {order})
+        },
+      })
+    },
+    destroyed() {
+      this.sorter && this.sorter.destroy()
+    },
+  },
+}
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ...Hooks},
 })
 
 // Show progress bar on live navigation and form submits

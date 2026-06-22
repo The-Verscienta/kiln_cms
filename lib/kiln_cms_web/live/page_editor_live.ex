@@ -1,11 +1,12 @@
 defmodule KilnCMSWeb.PageEditorLive do
   @moduledoc """
   Block editor for a single Page — edit title/slug and the embedded block tree
-  (add/remove blocks, edit type + content) via an `AshPhoenix.Form` with nested
-  forms, and run the publishing workflow. Editor/admin only.
+  (add/remove blocks, edit type + content, **drag-and-drop reorder** via the
+  `Sortable` JS hook) through an `AshPhoenix.Form` with nested forms, and run
+  the publishing workflow. Editor/admin only.
 
-  Rich-text (TipTap), drag-and-drop reordering, and live preview land in later
-  increments; for now blocks are edited as type + plain content.
+  Rich-text (TipTap) and live preview land in later increments; for now block
+  content is edited as plain text.
   """
   use KilnCMSWeb, :live_view
 
@@ -53,6 +54,11 @@ defmodule KilnCMSWeb.PageEditorLive do
 
   def handle_event("remove_block", %{"path" => path}, socket) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.remove_form(socket.assigns.form, path))}
+  end
+
+  def handle_event("reorder", %{"order" => order}, socket) do
+    form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
+    {:noreply, assign(socket, :form, form)}
   end
 
   def handle_event("save", %{"form" => params}, socket) do
@@ -123,28 +129,38 @@ defmodule KilnCMSWeb.PageEditorLive do
         <div class="space-y-3">
           <h2 class="text-lg font-medium">Blocks</h2>
 
-          <.inputs_for :let={bf} field={@form[:blocks]}>
-            <div class="rounded border border-base-content/15 p-3">
-              <div class="mb-2 flex items-center justify-between gap-3">
-                <.input
-                  field={bf[:type]}
-                  type="select"
-                  options={@block_types}
-                  class="max-w-40"
-                />
-                <button
-                  type="button"
-                  phx-click="remove_block"
-                  phx-value-path={bf.name}
-                  aria-label="Remove block"
-                  class="text-base-content/50 hover:text-error"
-                >
-                  <.icon name="hero-trash" class="size-5" />
-                </button>
+          <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
+            <.inputs_for :let={bf} field={@form[:blocks]}>
+              <div
+                id={"block-#{bf.index}"}
+                data-sort-id={bf.index}
+                class="rounded border border-base-content/15 p-3"
+              >
+                <div class="mb-2 flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-2">
+                    <span
+                      data-drag-handle
+                      aria-label="Drag to reorder"
+                      class="cursor-grab text-base-content/40 hover:text-base-content/70"
+                    >
+                      <.icon name="hero-bars-3" class="size-5" />
+                    </span>
+                    <.input field={bf[:type]} type="select" options={@block_types} class="max-w-40" />
+                  </div>
+                  <button
+                    type="button"
+                    phx-click="remove_block"
+                    phx-value-path={bf.name}
+                    aria-label="Remove block"
+                    class="text-base-content/50 hover:text-error"
+                  >
+                    <.icon name="hero-trash" class="size-5" />
+                  </button>
+                </div>
+                <.input field={bf[:content]} type="textarea" placeholder="Block content…" />
               </div>
-              <.input field={bf[:content]} type="textarea" placeholder="Block content…" />
-            </div>
-          </.inputs_for>
+            </.inputs_for>
+          </div>
 
           <div class="flex flex-wrap gap-2">
             <button

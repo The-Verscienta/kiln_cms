@@ -97,6 +97,26 @@ defmodule KilnCMSWeb.EditorLiveTest do
                CMS.get_page!(page.id, authorize?: false).blocks
     end
 
+    test "reorders blocks via the sortable hook and persists the new order", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "A", order: 0},
+            %{type: :rich_text, content: "B", order: 1}
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Simulate the Sortable hook pushing the new order (B before A).
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [%{content: "B"}, %{content: "A"}] =
+               CMS.get_page!(page.id, authorize?: false).blocks
+    end
+
     test "runs the publish workflow", %{conn: conn} do
       page = draft_page()
 
