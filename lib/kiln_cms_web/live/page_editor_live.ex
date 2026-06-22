@@ -3,14 +3,17 @@ defmodule KilnCMSWeb.PageEditorLive do
   Block editor for a single Page — edit title/slug and the embedded block tree
   (add/remove blocks, edit type + content, **drag-and-drop reorder** via the
   `Sortable` JS hook) through an `AshPhoenix.Form` with nested forms, and run
-  the publishing workflow. Editor/admin only.
+  the publishing workflow, with **TipTap rich text** for `rich_text` blocks and
+  a **side-by-side live preview** (rendered from the form state via
+  `KilnCMSWeb.BlockComponents`). Editor/admin only.
 
-  Rich-text (TipTap) and live preview land in later increments; for now block
-  content is edited as plain text.
+  A PubSub-decoupled preview (pop-out window / signed iframe for full
+  public-site fidelity + Presence for collaboration) is a later increment.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMSWeb.BlockComponents
 
   @block_types ~w(rich_text heading quote image embed divider)
 
@@ -100,6 +103,22 @@ defmodule KilnCMSWeb.PageEditorLive do
     end
   end
 
+  # Effective blocks (data + unsaved edits) from the form, for the live preview.
+  # `value(:blocks)` returns the nested block forms.
+  defp preview_blocks(form) do
+    case AshPhoenix.Form.value(form, :blocks) do
+      forms when is_list(forms) -> Enum.map(forms, &block_map/1)
+      _ -> []
+    end
+  end
+
+  defp block_map(%AshPhoenix.Form{} = subform) do
+    %{
+      type: to_string(AshPhoenix.Form.value(subform, :type) || "rich_text"),
+      content: AshPhoenix.Form.value(subform, :content) || ""
+    }
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -121,78 +140,98 @@ defmodule KilnCMSWeb.PageEditorLive do
           </div>
         </div>
 
-        <div class="grid gap-4 sm:grid-cols-2">
-          <.input field={@form[:title]} label="Title" />
-          <.input field={@form[:slug]} label="Slug" />
-        </div>
+        <div class="grid gap-6 lg:grid-cols-2">
+          <div class="space-y-6">
+            <div class="grid gap-4 sm:grid-cols-2">
+              <.input field={@form[:title]} label="Title" />
+              <.input field={@form[:slug]} label="Slug" />
+            </div>
 
-        <div class="space-y-3">
-          <h2 class="text-lg font-medium">Blocks</h2>
+            <div class="space-y-3">
+              <h2 class="text-lg font-medium">Blocks</h2>
 
-          <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
-            <.inputs_for :let={bf} field={@form[:blocks]}>
-              <div
-                id={"block-#{bf.index}"}
-                data-sort-id={bf.index}
-                class="rounded border border-base-content/15 p-3"
-              >
-                <div class="mb-2 flex items-center justify-between gap-3">
-                  <div class="flex items-center gap-2">
-                    <span
-                      data-drag-handle
-                      aria-label="Drag to reorder"
-                      class="cursor-grab text-base-content/40 hover:text-base-content/70"
-                    >
-                      <.icon name="hero-bars-3" class="size-5" />
-                    </span>
-                    <.input field={bf[:type]} type="select" options={@block_types} class="max-w-40" />
-                  </div>
-                  <button
-                    type="button"
-                    phx-click="remove_block"
-                    phx-value-path={bf.name}
-                    aria-label="Remove block"
-                    class="text-base-content/50 hover:text-error"
+              <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
+                <.inputs_for :let={bf} field={@form[:blocks]}>
+                  <div
+                    id={"block-#{bf.index}"}
+                    data-sort-id={bf.index}
+                    class="rounded border border-base-content/15 p-3"
                   >
-                    <.icon name="hero-trash" class="size-5" />
-                  </button>
-                </div>
-                <div
-                  :if={to_string(bf[:type].value) == "rich_text"}
-                  id={"rt-#{bf.index}"}
-                  phx-hook="RichText"
-                  phx-update="ignore"
-                  data-content={bf[:content].value || ""}
-                >
-                  <div data-toolbar class="mb-1 flex flex-wrap gap-1"></div>
-                  <div data-editor></div>
-                  <input
-                    type="hidden"
-                    name={bf[:content].name}
-                    value={bf[:content].value}
-                    data-input
-                  />
-                </div>
-                <.input
-                  :if={to_string(bf[:type].value) != "rich_text"}
-                  field={bf[:content]}
-                  type="textarea"
-                  placeholder="Block content…"
-                />
+                    <div class="mb-2 flex items-center justify-between gap-3">
+                      <div class="flex items-center gap-2">
+                        <span
+                          data-drag-handle
+                          aria-label="Drag to reorder"
+                          class="cursor-grab text-base-content/40 hover:text-base-content/70"
+                        >
+                          <.icon name="hero-bars-3" class="size-5" />
+                        </span>
+                        <.input
+                          field={bf[:type]}
+                          type="select"
+                          options={@block_types}
+                          class="max-w-40"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        phx-click="remove_block"
+                        phx-value-path={bf.name}
+                        aria-label="Remove block"
+                        class="text-base-content/50 hover:text-error"
+                      >
+                        <.icon name="hero-trash" class="size-5" />
+                      </button>
+                    </div>
+                    <div
+                      :if={to_string(bf[:type].value) == "rich_text"}
+                      id={"rt-#{bf.index}"}
+                      phx-hook="RichText"
+                      phx-update="ignore"
+                      data-content={bf[:content].value || ""}
+                    >
+                      <div data-toolbar class="mb-1 flex flex-wrap gap-1"></div>
+                      <div data-editor></div>
+                      <input
+                        type="hidden"
+                        name={bf[:content].name}
+                        value={bf[:content].value}
+                        data-input
+                      />
+                    </div>
+                    <.input
+                      :if={to_string(bf[:type].value) != "rich_text"}
+                      field={bf[:content]}
+                      type="textarea"
+                      placeholder="Block content…"
+                    />
+                  </div>
+                </.inputs_for>
               </div>
-            </.inputs_for>
+
+              <div class="flex flex-wrap gap-2">
+                <button
+                  :for={type <- @block_types}
+                  type="button"
+                  phx-click="add_block"
+                  phx-value-type={type}
+                  class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                >
+                  <.icon name="hero-plus" class="mr-1 size-4" />{type}
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div class="flex flex-wrap gap-2">
-            <button
-              :for={type <- @block_types}
-              type="button"
-              phx-click="add_block"
-              phx-value-type={type}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
-              <.icon name="hero-plus" class="mr-1 size-4" />{type}
-            </button>
+          <div class="lg:sticky lg:top-4 lg:self-start">
+            <h2 class="mb-2 text-lg font-medium">Preview</h2>
+            <article class="space-y-3 rounded border border-base-content/15 p-5">
+              <h1 class="text-2xl font-bold">{@form[:title].value}</h1>
+              <BlockComponents.render_block
+                :for={block <- preview_blocks(@form)}
+                block={block}
+              />
+            </article>
           </div>
         </div>
       </.form>

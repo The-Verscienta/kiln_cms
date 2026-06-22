@@ -55,6 +55,11 @@ const Hooks = {
         content: this.el.dataset.content || "",
         onUpdate: ({editor}) => {
           input.value = editor.getHTML()
+          // Debounced phx-change so the live preview reflects rich-text edits.
+          clearTimeout(this._debounce)
+          this._debounce = setTimeout(() => {
+            input.dispatchEvent(new Event("input", {bubbles: true}))
+          }, 300)
         },
       })
       this.editor = editor

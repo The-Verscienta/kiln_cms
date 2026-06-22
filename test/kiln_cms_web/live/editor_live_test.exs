@@ -136,6 +136,21 @@ defmodule KilnCMSWeb.EditorLiveTest do
                CMS.get_page!(page.id, authorize?: false).blocks
     end
 
+    test "the live preview reflects block content and updates on change", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Preview renders the heading block (distinct from the editor's textarea).
+      assert html =~ ~s(text-xl font-bold">Original Heading)
+
+      html2 =
+        lv
+        |> form("#page-editor", form: %{blocks: %{"0" => %{content: "Updated Heading"}}})
+        |> render_change()
+
+      assert html2 =~ ~s(text-xl font-bold">Updated Heading)
+    end
+
     test "runs the publish workflow", %{conn: conn} do
       page = draft_page()
 
