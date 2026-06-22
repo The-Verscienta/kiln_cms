@@ -44,9 +44,9 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_session
   end
 
-  # Dev-only tooling (AshAdmin, LiveDashboard) ships its own inline
-  # scripts/styles, so it gets a relaxed `script-src`. These routes only exist
-  # when `dev_routes` is enabled, never in production.
+  # Dev-only browser tooling (AshAdmin, LiveDashboard, API explorers) ships its
+  # own inline scripts/styles, so it gets a relaxed `script-src`. These routes
+  # only exist when `dev_routes` is enabled, never in production.
   pipeline :browser_dev_tools do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -92,23 +92,17 @@ defmodule KilnCMSWeb.Router do
     end
   end
 
+  # Headless GraphQL — always available; the interactive playground is dev-only
+  # (see the `dev_routes` block below).
   scope "/gql" do
     pipe_through [:graphql]
-
-    forward "/playground", Absinthe.Plug.GraphiQL,
-      schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-      socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
-      interface: :simple
 
     forward "/", Absinthe.Plug, schema: Module.concat(["KilnCMSWeb.GraphqlSchema"])
   end
 
+  # Headless JSON:API — always available; Swagger UI + OpenAPI spec are dev-only.
   scope "/api/json" do
     pipe_through [:api]
-
-    forward "/swaggerui", OpenApiSpex.Plug.SwaggerUI,
-      path: "/api/json/open_api",
-      default_model_expand_depth: 4
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
   end
@@ -184,6 +178,27 @@ defmodule KilnCMSWeb.Router do
       pipe_through :browser_dev_tools
 
       ash_admin "/"
+    end
+  end
+
+  # API explorer UIs — dev/CI only (`config :kiln_cms, dev_routes: true` in
+  # dev.exs). Production keeps `/gql` and `/api/json` headless endpoints only.
+  if Application.compile_env(:kiln_cms, :dev_routes) do
+    scope "/gql" do
+      pipe_through [:graphql]
+
+      forward "/playground", Absinthe.Plug.GraphiQL,
+        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
+        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
+        interface: :simple
+    end
+
+    scope "/api/json" do
+      pipe_through :browser_dev_tools
+
+      forward "/swaggerui", OpenApiSpex.Plug.SwaggerUI,
+        path: "/api/json/open_api",
+        default_model_expand_depth: 4
     end
   end
 
