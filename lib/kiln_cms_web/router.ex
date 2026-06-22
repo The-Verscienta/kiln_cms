@@ -79,6 +79,12 @@ defmodule KilnCMSWeb.Router do
       # If an authenticated user must *not* be present:
       # on_mount {KilnCMSWeb.LiveUserAuth, :live_no_user}
     end
+
+    # Authoring UIs — editors and admins only.
+    ash_authentication_live_session :editor_routes,
+      on_mount: [{KilnCMSWeb.LiveUserAuth, :live_editor_required}] do
+      live "/media", MediaLive, :index
+    end
   end
 
   scope "/gql" do

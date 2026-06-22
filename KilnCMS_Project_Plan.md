@@ -266,12 +266,12 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [x] AshAdmin wired (domain + resources exposed at `/admin`); custom content-focused overrides still TODO
 
 ### Phase 2: Media Library & Uploads (P0/P1)
-- [ ] Phoenix LiveView upload handling with progress, preview, validation
-- [ ] `MediaItem` resource with metadata (alt, caption, focal point, variants)
+- [x] Phoenix LiveView upload handling with progress, preview, validation — `KilnCMSWeb.MediaLive` at `/media` (editor/admin only via `:live_editor_required`): drag-and-drop, multi-file, live previews, progress bars, accept/size validation. Covered by `media_live_test.exs` + browser-verified.
+- [x] `MediaItem` resource with metadata (alt, caption, focal point). **Still to add:** variants
 - [ ] Image processing pipeline (`Image` lib or Mogrify + Oban job for variants)
-- [ ] Storage backend (local dev + S3/MinIO production) — consider `waffle` or simple custom
-- [ ] Media browser modal/picker usable from editor
-- [ ] Bulk upload, search, filtering, deletion with soft-delete (AshArchival)
+- [x] Storage backend — pluggable `KilnCMS.Storage` behaviour + `Local` adapter (priv/uploads, served at `/uploads`), traversal-guarded; **S3/MinIO adapter for production still TODO**
+- [ ] Media browser modal/picker usable from editor (lands with the editor, Phase 3)
+- [~] Bulk upload (**done** — multi-file), deletion (**done** — admin, removes blob). **Still TODO:** search, filtering, soft-delete (AshArchival)
 
 ### Phase 3: Content Editor & Blocks (P1 — Hardest)
 - [ ] Research & implement **TipTap** LiveView integration (use existing community examples as base)

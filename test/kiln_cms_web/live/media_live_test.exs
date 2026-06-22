@@ -1,0 +1,99 @@
+defmodule KilnCMSWeb.MediaLiveTest do
+  @moduledoc false
+  # async: false — the upload test points Storage.Local at a temp dir via the
+  # global app env.
+  use KilnCMSWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias KilnCMS.Accounts.User
+  alias KilnCMS.CMS
+
+  # A minimal valid 1x1 PNG.
+  @png <<137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8,
+         6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 250, 207, 0, 0,
+         0, 7, 0, 1, 2, 254, 165, 53, 230, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130>>
+
+  @password "password123456"
+
+  # Seed a user and sign in so the returned struct carries the token metadata
+  # that `store_in_session/2` needs (token presence is required).
+  defp authed_user(role) do
+    email = "media-#{System.unique_integer([:positive])}@example.com"
+
+    Ash.Seed.seed!(User, %{
+      email: email,
+      hashed_password: Bcrypt.hash_pwd_salt(@password),
+      confirmed_at: DateTime.utc_now(),
+      role: role
+    })
+
+    strategy = AshAuthentication.Info.strategy!(User, :password)
+
+    {:ok, user} =
+      AshAuthentication.Strategy.action(strategy, :sign_in, %{
+        "email" => email,
+        "password" => @password
+      })
+
+    user
+  end
+
+  defp log_in(conn, user) do
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> AshAuthentication.Plug.Helpers.store_in_session(user)
+  end
+
+  describe "authorization" do
+    test "anonymous users are redirected to sign-in", %{conn: conn} do
+      assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/media")
+    end
+
+    test "viewers are redirected away", %{conn: conn} do
+      conn = log_in(conn, authed_user(:viewer))
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/media")
+    end
+
+    test "editors can load the media library", %{conn: conn} do
+      conn = log_in(conn, authed_user(:editor))
+      {:ok, _lv, html} = live(conn, ~p"/media")
+      assert html =~ "Media library"
+    end
+  end
+
+  describe "upload" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "kiln_media_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      Application.put_env(:kiln_cms, KilnCMS.Storage.Local, root: root, base_url: "/uploads")
+
+      on_exit(fn ->
+        File.rm_rf!(root)
+        Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+      end)
+
+      %{root: root}
+    end
+
+    test "uploading an image stores it and adds it to the library", %{conn: conn, root: root} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "pixel.png", content: @png, type: "image/png"}
+        ])
+
+      assert render_upload(input, "pixel.png")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "pixel.png"
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.filename == "pixel.png"
+      assert item.content_type == "image/png"
+      assert File.exists?(Path.join(root, item.storage_key))
+    end
+  end
+end
