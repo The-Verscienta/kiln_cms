@@ -62,5 +62,13 @@ defmodule KilnCMS.CMS do
       define :update_media_item, action: :update
       define :destroy_media_item, action: :destroy
     end
+
+    resource KilnCMS.CMS.WebhookEndpoint do
+      define :list_webhook_endpoints, action: :read
+      define :get_webhook_endpoint, action: :read, get_by: [:id]
+      define :create_webhook_endpoint, action: :create
+      define :update_webhook_endpoint, action: :update
+      define :destroy_webhook_endpoint, action: :destroy
+    end
   end
 end

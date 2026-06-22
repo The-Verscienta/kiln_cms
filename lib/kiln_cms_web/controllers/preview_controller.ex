@@ -7,28 +7,13 @@ defmodule KilnCMSWeb.PreviewController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentSerializer
   alias KilnCMS.CMS.PreviewToken
-
-  @public_fields [
-    :id,
-    :title,
-    :slug,
-    :excerpt,
-    :blocks,
-    :seo_title,
-    :seo_description,
-    :locale,
-    :state,
-    :published_at,
-    :scheduled_at,
-    :inserted_at,
-    :updated_at
-  ]
 
   def show(conn, %{"token" => token}) do
     with {:ok, %{type: type, id: id}} <- PreviewToken.verify(token),
          {:ok, record} <- fetch(type, id) do
-      json(conn, %{data: serialize(record)})
+      json(conn, %{data: ContentSerializer.to_map(record)})
     else
       _ ->
         conn
@@ -40,14 +25,4 @@ defmodule KilnCMSWeb.PreviewController do
   defp fetch(:page, id), do: CMS.get_page(id, authorize?: false)
   defp fetch(:post, id), do: CMS.get_post(id, authorize?: false)
   defp fetch(_, _), do: {:error, :not_found}
-
-  defp serialize(record) do
-    record
-    |> Map.take(@public_fields)
-    |> Map.update(
-      :blocks,
-      [],
-      &Enum.map(&1, fn block -> Map.take(block, [:type, :content, :data, :order, :children]) end)
-    )
-  end
 end

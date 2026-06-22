@@ -1,5 +1,7 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
+# Route outbound webhook HTTP through a Req.Test stub in tests.
+config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
 config :kiln_cms, token_signing_secret: "DxVOH7q7LauTIqk0KY8Mj2auM6QzdpHw"
 config :bcrypt_elixir, log_rounds: 1
 config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true

@@ -115,6 +115,7 @@ defmodule KilnCMS.CMS.Page do
       require_atomic? false
       change transition_state(:published)
       change set_attribute(:published_at, &DateTime.utc_now/0)
+      change KilnCMS.CMS.Changes.NotifyWebhooks
     end
 
     update :publish_scheduled do
@@ -123,6 +124,7 @@ defmodule KilnCMS.CMS.Page do
       change transition_state(:published)
       change set_attribute(:published_at, &DateTime.utc_now/0)
       change set_attribute(:scheduled_at, nil)
+      change KilnCMS.CMS.Changes.NotifyWebhooks
     end
 
     update :unpublish do

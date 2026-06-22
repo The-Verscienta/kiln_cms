@@ -295,7 +295,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 ### Phase 5: Headless APIs & Preview (P1)
 - [x] Enable **AshJsonApi** (router at `/api/json` + OpenAPI/Swagger UI) — exposed per resource (D7). Filtering/pagination tuning TODO
 - [x] Enable **AshGraphQL** (schema at `/gql` + playground) — types per resource (D7). Query/mutation surface tuning TODO
-- [ ] **Outbound webhooks** on publish/update — trigger downstream static rebuilds (Astro/Next); Oban-delivered, signed (HMAC), retried with backoff
+- [x] **Outbound webhooks** on publish — `WebhookEndpoint` resource (admin-managed; per-endpoint secret) + a `NotifyWebhooks` change on publish/publish_scheduled that dispatches `page.published`/`post.published` events. Delivered by an Oban `DeliveryWorker` (HMAC-SHA256 signature header, retried with backoff, inactive/unsubscribed endpoints skipped). Covered by `webhooks_test.exs` (signed delivery via Req.Test, inactive/unsubscribed skipping, admin-only). **TODO:** `*.updated`/`*.unpublished` events, per-event UI.
 - [x] Preview tokens / signed URLs for unpublished content — `KilnCMS.CMS.PreviewToken` (stateless `Phoenix.Token`, 1h expiry) + `GET /preview/:token` (`PreviewController`) returns the referenced draft Page/Post as JSON (curated public fields, no internal leakage). Covered by `preview_controller_test.exs`.
 - [ ] Example frontend consumers (Astro or simple Phoenix page)
 - [ ] API documentation (OpenAPI/Swagger via ash_json_api or manual)
