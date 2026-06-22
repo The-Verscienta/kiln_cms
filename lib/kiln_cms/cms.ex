@@ -32,6 +32,8 @@ defmodule KilnCMS.CMS do
       define :archive_page, action: :archive
       define :restore_page_version, action: :restore_version
       define :destroy_page, action: :destroy
+      define :list_trashed_pages, action: :trashed
+      define :restore_page, action: :restore
     end
 
     resource KilnCMS.CMS.Page.Version do
@@ -51,6 +53,8 @@ defmodule KilnCMS.CMS do
       define :archive_post, action: :archive
       define :restore_post_version, action: :restore_version
       define :destroy_post, action: :destroy
+      define :list_trashed_posts, action: :trashed
+      define :restore_post, action: :restore
     end
 
     resource KilnCMS.CMS.Post.Version do

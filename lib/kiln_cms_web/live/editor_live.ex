@@ -201,7 +201,14 @@ defmodule KilnCMSWeb.EditorLive do
       <div class="space-y-6">
         <div class="flex items-center justify-between gap-4">
           <h1 class="text-2xl font-semibold">Content</h1>
-          <div class="flex gap-2">
+          <div class="flex items-center gap-2">
+            <.link
+              :if={@actor.role == :admin}
+              navigate={~p"/editor/trash"}
+              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+            >
+              Trash
+            </.link>
             <.button type="button" phx-click="new" phx-value-kind="page" variant="primary">
               New page
             </.button>

@@ -68,6 +68,12 @@ defmodule KilnCMS.CMS.Post do
     end
   end
 
+  # Let the `:trashed` read action see soft-deleted rows (every other read
+  # keeps AshArchival's automatic `is_nil(archived_at)` filter).
+  archive do
+    exclude_read_actions([:trashed])
+  end
+
   postgres do
     table "posts"
     repo KilnCMS.Repo
@@ -158,6 +164,19 @@ defmodule KilnCMS.CMS.Post do
       require_atomic? false
       change transition_state(:archived)
     end
+
+    # Soft-deleted ("trashed") posts — the only read that bypasses AshArchival's
+    # automatic `is_nil(archived_at)` filter (see the `archive` block).
+    read :trashed do
+      filter expr(not is_nil(archived_at))
+    end
+
+    # Bring a soft-deleted post back by clearing its archival timestamp.
+    update :restore do
+      accept []
+      require_atomic? false
+      change set_attribute(:archived_at, nil)
+    end
   end
 
   policies do
@@ -187,6 +206,12 @@ defmodule KilnCMS.CMS.Post do
     # Hard deletes are admin-only (allowed by the bypass; denied here for all
     # other roles).
     policy action_type(:destroy) do
+      forbid_if always()
+    end
+
+    # Trash browsing and restore are admin-only too (mirrors delete). Admins
+    # pass via the bypass above; everyone else is denied here.
+    policy action([:trashed, :restore]) do
       forbid_if always()
     end
   end

@@ -215,6 +215,39 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  describe "/editor/trash" do
+    test "editors are redirected away", %{conn: conn} do
+      assert {:error, {:live_redirect, %{to: "/editor"}}} =
+               conn |> log_in(authed_user(:editor)) |> live(~p"/editor/trash")
+    end
+
+    test "admin sees trashed content and restores it", %{conn: conn} do
+      page = draft_page(%{title: "TrashedPage"})
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_page(page, actor: admin)
+
+      # Soft-deleted: hidden from the normal listing, visible in trash.
+      refute Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/trash")
+      assert html =~ "TrashedPage"
+
+      lv |> element("button[phx-value-id='#{page.id}']") |> render_click()
+
+      # Gone from trash, back in the main listing.
+      refute render(lv) =~ "TrashedPage"
+      assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
+    end
+
+    test "the trash link is shown to admins only", %{conn: conn} do
+      {:ok, _lv, editor_html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      refute editor_html =~ "/editor/trash"
+
+      {:ok, _lv, admin_html} = build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
+      assert admin_html =~ "/editor/trash"
+    end
+  end
+
   describe "who's editing (presence)" do
     test "a lone editor sees no 'Also editing' indicator", %{conn: conn} do
       page = draft_page()
