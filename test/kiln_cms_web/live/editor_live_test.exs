@@ -328,6 +328,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
       refute render(lv) =~ "bob"
     end
+
+    test "soft-locks a field (readonly + ring) while another editor holds it", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute html =~ "ring-warning"
+
+      topic = Presence.topic("page", page.id)
+      cursor = %{id: "other-editor", name: "bob", field: "title"}
+
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      locked = render(lv)
+      assert locked =~ "ring-warning"
+      assert locked =~ "readonly"
+
+      # Releases automatically when they leave the field.
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      refute render(lv) =~ "ring-warning"
+    end
   end
 
   describe "decoupled preview (PubSub)" do

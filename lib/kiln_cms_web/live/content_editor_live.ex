@@ -240,6 +240,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{"phx-focus" => "field_focus", "phx-blur" => "field_blur", "phx-value-field" => field}
   end
 
+  # A field is soft-locked for us while another editor is focused on it. The
+  # lock is advisory (the input goes readonly but still submits) and releases
+  # automatically when they blur or leave.
+  defp field_locked?(cursors, field), do: Enum.any?(cursors, fn {_id, c} -> c.field == field end)
+
+  defp lock_ring(cursors, field) do
+    if field_locked?(cursors, field), do: "rounded-md ring-2 ring-warning/50", else: ""
+  end
+
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
   defp preview_blocks(form) do
     case AshPhoenix.Form.value(form, :blocks) do
@@ -293,21 +302,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <div class="grid gap-6 lg:grid-cols-2">
           <div class="space-y-6">
             <div class="grid gap-4 sm:grid-cols-2">
-              <div class="relative">
-                <.input field={@form[:title]} label="Title" {field_attrs("title")} />
+              <div class={["relative", lock_ring(@cursors, "title")]}>
+                <.input
+                  field={@form[:title]}
+                  label="Title"
+                  readonly={field_locked?(@cursors, "title")}
+                  {field_attrs("title")}
+                />
                 <.field_cursors field="title" cursors={@cursors} />
               </div>
-              <div class="relative">
-                <.input field={@form[:slug]} label="Slug" {field_attrs("slug")} />
+              <div class={["relative", lock_ring(@cursors, "slug")]}>
+                <.input
+                  field={@form[:slug]}
+                  label="Slug"
+                  readonly={field_locked?(@cursors, "slug")}
+                  {field_attrs("slug")}
+                />
                 <.field_cursors field="slug" cursors={@cursors} />
               </div>
             </div>
 
-            <div :if={@kind == :post} class="relative">
+            <div :if={@kind == :post} class={["relative", lock_ring(@cursors, "excerpt")]}>
               <.input
                 field={@form[:excerpt]}
                 type="textarea"
                 label="Excerpt"
+                readonly={field_locked?(@cursors, "excerpt")}
                 {field_attrs("excerpt")}
               />
               <.field_cursors field="excerpt" cursors={@cursors} />
@@ -365,11 +385,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-input
                       />
                     </div>
-                    <div :if={to_string(bf[:type].value) != "rich_text"} class="relative">
+                    <div
+                      :if={to_string(bf[:type].value) != "rich_text"}
+                      class={["relative", lock_ring(@cursors, bf[:content].name)]}
+                    >
                       <.input
                         field={bf[:content]}
                         type="textarea"
                         placeholder="Block content…"
+                        readonly={field_locked?(@cursors, bf[:content].name)}
                         {field_attrs(bf[:content].name)}
                       />
                       <.field_cursors field={bf[:content].name} cursors={@cursors} />
@@ -394,27 +418,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <details class="rounded border border-base-content/15 p-3">
               <summary class="cursor-pointer text-sm font-medium">SEO &amp; scheduling</summary>
               <div class="mt-3 space-y-3">
-                <div class="relative">
-                  <.input field={@form[:seo_title]} label="SEO title" {field_attrs("seo_title")} />
+                <div class={["relative", lock_ring(@cursors, "seo_title")]}>
+                  <.input
+                    field={@form[:seo_title]}
+                    label="SEO title"
+                    readonly={field_locked?(@cursors, "seo_title")}
+                    {field_attrs("seo_title")}
+                  />
                   <.field_cursors field="seo_title" cursors={@cursors} />
                 </div>
-                <div class="relative">
+                <div class={["relative", lock_ring(@cursors, "seo_description")]}>
                   <.input
                     field={@form[:seo_description]}
                     type="textarea"
                     label="SEO description"
+                    readonly={field_locked?(@cursors, "seo_description")}
                     {field_attrs("seo_description")}
                   />
                   <.field_cursors field="seo_description" cursors={@cursors} />
                 </div>
-                <div class="relative">
-                  <.input field={@form[:seo_image]} label="OG image URL" {field_attrs("seo_image")} />
+                <div class={["relative", lock_ring(@cursors, "seo_image")]}>
+                  <.input
+                    field={@form[:seo_image]}
+                    label="OG image URL"
+                    readonly={field_locked?(@cursors, "seo_image")}
+                    {field_attrs("seo_image")}
+                  />
                   <.field_cursors field="seo_image" cursors={@cursors} />
                 </div>
-                <div class="relative">
+                <div class={["relative", lock_ring(@cursors, "canonical_url")]}>
                   <.input
                     field={@form[:canonical_url]}
                     label="Canonical URL"
+                    readonly={field_locked?(@cursors, "canonical_url")}
                     {field_attrs("canonical_url")}
                   />
                   <.field_cursors field="canonical_url" cursors={@cursors} />
@@ -510,9 +546,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     >
       <span
         :for={c <- @others}
-        class={["rounded px-1.5 py-0.5 text-[10px] font-medium text-white shadow", c.color]}
+        title={"#{c.name} is editing this field"}
+        class={[
+          "flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white shadow",
+          c.color
+        ]}
       >
-        {c.name}
+        <.icon name="hero-lock-closed-mini" class="size-3" />{c.name}
       </span>
     </div>
     """
