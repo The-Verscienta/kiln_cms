@@ -1,18 +1,21 @@
 defmodule KilnCMSWeb.ContentEditorLive do
   @moduledoc """
-  Block editor for a single Page **or** Post (the `live_action` — `:page` /
-  `:post` — selects which). Edit title/slug (+ excerpt for posts) and the
-  embedded block tree (add/remove/reorder via the `Sortable` hook), with
-  **TipTap rich text** for `rich_text` blocks, a **side-by-side live preview**
-  (`KilnCMSWeb.BlockComponents`), SEO & scheduling, version history + restore,
-  and the publishing workflow. Editor/admin only.
+  Block editor for a single content record of **any** content type. The type
+  comes from the `:type` param on `/editor/content/:type/:id` (or the
+  `live_action` on the legacy `/editor/pages|posts/:id` routes) and is resolved
+  through `KilnCMS.CMS.ContentTypes`, so types generated with
+  `mix kiln.gen.content` are editable here with no extra wiring.
 
-  Page/Post differences are dispatched through the uniform `*_page` / `*_post`
-  domain code interfaces.
+  Edit title/slug (+ excerpt where the type has one) and the embedded block tree
+  (add/remove/reorder via the `Sortable` hook), with **TipTap rich text** for
+  `rich_text` blocks, a **side-by-side live preview** (`KilnCMSWeb.BlockComponents`),
+  SEO & scheduling, version history + restore, and the publishing workflow.
+  Editor/admin only.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.Presence
 
@@ -25,32 +28,53 @@ defmodule KilnCMSWeb.ContentEditorLive do
   )
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
-    kind = socket.assigns.live_action
-    actor = socket.assigns.current_user
-    record = fetch!(kind, id, actor)
+  def mount(%{"id" => id} = params, _session, socket) do
+    case content_kind(params, socket) do
+      nil ->
+        {:ok, push_navigate(socket, to: ~p"/editor")}
 
-    if connected?(socket) do
-      topic = Presence.track_editor(self(), kind, id, actor)
-      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+      kind ->
+        actor = socket.assigns.current_user
+        record = fetch!(kind, id, actor)
+
+        if connected?(socket) do
+          topic = Presence.track_editor(self(), kind, id, actor)
+          Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+        end
+
+        {:ok,
+         socket
+         |> assign(:kind, kind)
+         |> assign(:has_excerpt, ContentTypes.get!(kind).excerpt?)
+         |> assign(:actor, actor)
+         |> assign(:block_types, @block_types)
+         |> assign(:editors, Presence.editors(kind, id))
+         |> assign(:cursors, %{})
+         |> assign(:self_field, nil)
+         # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
+         |> assign(:picking, nil)
+         |> assign(
+           :media,
+           CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]])
+         )
+         |> assign(:categories, CMS.list_categories!(actor: actor))
+         |> assign(:tags, CMS.list_tags!(actor: actor))
+         |> assign(:siblings, siblings(kind, id, actor))
+         |> assign_record(record)}
     end
-
-    {:ok,
-     socket
-     |> assign(:kind, kind)
-     |> assign(:actor, actor)
-     |> assign(:block_types, @block_types)
-     |> assign(:editors, Presence.editors(kind, id))
-     |> assign(:cursors, %{})
-     |> assign(:self_field, nil)
-     # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
-     |> assign(:picking, nil)
-     |> assign(:media, CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]]))
-     |> assign(:categories, CMS.list_categories!(actor: actor))
-     |> assign(:tags, CMS.list_tags!(actor: actor))
-     |> assign(:siblings, siblings(kind, id, actor))
-     |> assign_record(record)}
   end
+
+  # The content type being edited: from the `:type` param on the generic
+  # `/editor/content/:type/:id` route, or the `live_action` on the legacy
+  # `/editor/pages|posts/:id` routes. Returns nil for an unknown type.
+  defp content_kind(%{"type" => type}, _socket) do
+    case ContentTypes.get(type) do
+      nil -> nil
+      ct -> ct.type
+    end
+  end
+
+  defp content_kind(_params, socket), do: socket.assigns.live_action
 
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
@@ -100,28 +124,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> to_form()
   end
 
-  # --- Page/Post dispatch to the per-kind code interfaces --------------------
+  # --- generic dispatch to the per-kind code interfaces (via the registry) ---
 
-  defp fetch!(:page, id, actor),
-    do: CMS.get_page!(id, actor: actor, load: [:category, :featured_image, :tags, :related_pages])
-
-  defp fetch!(:post, id, actor),
-    do: CMS.get_post!(id, actor: actor, load: [:category, :featured_image, :tags, :related_posts])
+  defp fetch!(kind, id, actor) do
+    ContentTypes.get_record!(kind, id,
+      actor: actor,
+      load: [:category, :featured_image, :tags, related_name(kind)]
+    )
+  end
 
   # Other content of the same kind, for the "related content" picker.
-  defp siblings(:page, id, actor),
-    do: CMS.list_pages!(actor: actor) |> Enum.reject(&(&1.id == id))
+  defp siblings(kind, id, actor),
+    do: kind |> ContentTypes.list!(actor: actor) |> Enum.reject(&(&1.id == id))
 
-  defp siblings(:post, id, actor),
-    do: CMS.list_posts!(actor: actor) |> Enum.reject(&(&1.id == id))
-
-  # The self-referential m2m argument + its currently-linked records differ by
-  # kind (related_post_ids/related_posts vs related_page_ids/related_pages).
-  defp related_field(:page), do: :related_page_ids
-  defp related_field(:post), do: :related_post_ids
-
-  defp related_current(:page, record), do: Map.get(record, :related_pages)
-  defp related_current(:post, record), do: Map.get(record, :related_posts)
+  # The self-referential m2m relationship/argument names follow the convention
+  # `related_<type>s` / `related_<type>_ids`. `to_existing_atom` (rather than
+  # interpolating a new atom) keeps this safe even though `kind` originates from
+  # a route param — it's already registry-validated, and the atoms are defined
+  # at compile time by `KilnCMS.CMS.Content`.
+  defp related_name(kind), do: String.to_existing_atom("related_#{kind}s")
+  defp related_field(kind), do: String.to_existing_atom("related_#{kind}_ids")
+  defp related_current(kind, record), do: Map.get(record, related_name(kind))
 
   # Current ids for a (possibly unloaded) relationship list.
   defp current_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
@@ -138,23 +161,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  defp list_versions(:page, opts), do: CMS.list_page_versions!(opts)
-  defp list_versions(:post, opts), do: CMS.list_post_versions!(opts)
+  defp list_versions(kind, opts), do: ContentTypes.list_versions!(kind, opts)
 
-  defp restore_version(:page, record, vid, actor),
-    do: CMS.restore_page_version(record, %{version_id: vid}, actor: actor)
+  defp restore_version(kind, record, vid, actor),
+    do: ContentTypes.restore_version(kind, record, vid, actor: actor)
 
-  defp restore_version(:post, record, vid, actor),
-    do: CMS.restore_post_version(record, %{version_id: vid}, actor: actor)
-
-  defp do_workflow(:page, "publish", r, a), do: CMS.publish_page(r, %{}, actor: a)
-  defp do_workflow(:post, "publish", r, a), do: CMS.publish_post(r, %{}, actor: a)
-  defp do_workflow(:page, "unpublish", r, a), do: CMS.unpublish_page(r, %{}, actor: a)
-  defp do_workflow(:post, "unpublish", r, a), do: CMS.unpublish_post(r, %{}, actor: a)
-  defp do_workflow(:page, "submit", r, a), do: CMS.submit_page_for_review(r, %{}, actor: a)
-  defp do_workflow(:post, "submit", r, a), do: CMS.submit_post_for_review(r, %{}, actor: a)
-  defp do_workflow(:page, "archive", r, a), do: CMS.archive_page(r, %{}, actor: a)
-  defp do_workflow(:post, "archive", r, a), do: CMS.archive_post(r, %{}, actor: a)
+  defp do_workflow(kind, verb, record, actor),
+    do: ContentTypes.transition(kind, verb, record, actor: actor)
 
   @impl true
   def handle_event("validate", %{"form" => params}, socket) do
@@ -479,7 +492,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               </div>
             </div>
 
-            <div :if={@kind == :post} class={["relative", lock_ring(@locked_fields, "excerpt")]}>
+            <div :if={@has_excerpt} class={["relative", lock_ring(@locked_fields, "excerpt")]}>
               <.input
                 field={@form[:excerpt]}
                 type="textarea"

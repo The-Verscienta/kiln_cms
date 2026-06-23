@@ -10,30 +10,31 @@ defmodule KilnCMSWeb.PreviewLive do
   """
   use KilnCMSWeb, :live_view
 
-  alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.BlockComponents
 
   @doc "PubSub topic the editor broadcasts on for a given content item."
   def topic(kind, id), do: "content_preview:#{kind}:#{id}"
 
   @impl true
-  def mount(%{"kind" => kind, "id" => id}, _session, socket) when kind in ~w(page post) do
-    record = fetch!(kind, id, socket.assigns.current_user)
+  def mount(%{"kind" => kind, "id" => id}, _session, socket) do
+    if ContentTypes.type?(kind) do
+      record = ContentTypes.get_record!(kind, id, actor: socket.assigns.current_user)
 
-    if connected?(socket) do
-      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic(kind, id))
+      if connected?(socket) do
+        Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic(kind, id))
+      end
+
+      {:ok,
+       socket
+       |> assign(:title, record.title)
+       |> assign(:blocks, content_blocks(record))}
+    else
+      {:ok, push_navigate(socket, to: ~p"/editor")}
     end
-
-    {:ok,
-     socket
-     |> assign(:title, record.title)
-     |> assign(:blocks, content_blocks(record))}
   end
 
   def mount(_params, _session, socket), do: {:ok, push_navigate(socket, to: ~p"/editor")}
-
-  defp fetch!("page", id, actor), do: CMS.get_page!(id, actor: actor)
-  defp fetch!("post", id, actor), do: CMS.get_post!(id, actor: actor)
 
   defp content_blocks(record) do
     record.blocks

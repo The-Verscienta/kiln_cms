@@ -423,6 +423,12 @@ defmodule KilnCMS.CMS.Content do
       identities do
         identity :unique_slug, [:slug, :locale]
       end
+
+      # Marks this resource as a KilnCMS content type and records its singular
+      # type atom. `KilnCMS.CMS.ContentTypes` uses this to discover content types
+      # automatically, so generated types appear in the admin with no extra
+      # wiring.
+      def __kiln_content_type__, do: unquote(type)
     end
   end
 end

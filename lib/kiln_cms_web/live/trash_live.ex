@@ -6,7 +6,7 @@ defmodule KilnCMSWeb.TrashLive do
   """
   use KilnCMSWeb, :live_view
 
-  alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
 
   @retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
@@ -26,15 +26,18 @@ defmodule KilnCMSWeb.TrashLive do
     end
   end
 
-  # Soft-deleted pages and posts merged into `{kind, record}` tuples, newest
-  # deletion first.
+  # Soft-deleted records across every content type, merged into `{kind, record}`
+  # tuples, newest deletion first.
   defp load_items(socket) do
     actor = socket.assigns.actor
 
-    pages = Enum.map(CMS.list_trashed_pages!(actor: actor), &{:page, &1})
-    posts = Enum.map(CMS.list_trashed_posts!(actor: actor), &{:post, &1})
+    items =
+      ContentTypes.all()
+      |> Enum.flat_map(fn ct ->
+        ct.type |> ContentTypes.list_trashed!(actor: actor) |> Enum.map(&{ct.type, &1})
+      end)
+      |> Enum.sort_by(fn {_kind, r} -> r.archived_at end, {:desc, DateTime})
 
-    items = Enum.sort_by(pages ++ posts, fn {_kind, r} -> r.archived_at end, {:desc, DateTime})
     assign(socket, :items, items)
   end
 
@@ -86,8 +89,7 @@ defmodule KilnCMSWeb.TrashLive do
      |> put_flash(:info, flash)}
   end
 
-  defp do_purge("page", r, a), do: CMS.purge_page(r, actor: a)
-  defp do_purge("post", r, a), do: CMS.purge_post(r, actor: a)
+  defp do_purge(kind, record, actor), do: ContentTypes.purge(kind, record, actor: actor)
 
   defp find_item(items, kind, id) do
     Enum.find_value(items, fn {k, r} ->
@@ -95,8 +97,7 @@ defmodule KilnCMSWeb.TrashLive do
     end)
   end
 
-  defp do_restore("page", r, a), do: CMS.restore_page(r, %{}, actor: a)
-  defp do_restore("post", r, a), do: CMS.restore_post(r, %{}, actor: a)
+  defp do_restore(kind, record, actor), do: ContentTypes.restore(kind, record, actor: actor)
 
   @impl true
   def render(assigns) do

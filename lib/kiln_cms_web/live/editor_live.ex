@@ -6,7 +6,7 @@ defmodule KilnCMSWeb.EditorLive do
   """
   use KilnCMSWeb, :live_view
 
-  alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
 
   @statuses ~w(all draft in_review published archived)
 
@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.EditorLive do
     {:ok,
      socket
      |> assign(:actor, socket.assigns.current_user)
+     |> assign(:content_types, ContentTypes.all())
      |> assign(:statuses, @statuses)
      |> assign(:status, "all")
      |> assign(:query, "")
@@ -23,14 +24,18 @@ defmodule KilnCMSWeb.EditorLive do
      |> load_items()}
   end
 
-  # Pages and posts merged into `{kind, record}` tuples, newest first.
+  # Records of every content type merged into `{kind, record}` tuples, newest
+  # first.
   defp load_items(socket) do
     actor = socket.assigns.actor
 
-    pages = Enum.map(CMS.list_pages!(actor: actor), &{:page, &1})
-    posts = Enum.map(CMS.list_posts!(actor: actor), &{:post, &1})
+    items =
+      ContentTypes.all()
+      |> Enum.flat_map(fn ct ->
+        ct.type |> ContentTypes.list!(actor: actor) |> Enum.map(&{ct.type, &1})
+      end)
+      |> Enum.sort_by(fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
 
-    items = Enum.sort_by(pages ++ posts, fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
     assign(socket, :items, items)
   end
 
@@ -51,7 +56,7 @@ defmodule KilnCMSWeb.EditorLive do
     }
 
     record = create!(kind, attrs, socket.assigns.actor)
-    {:noreply, push_navigate(socket, to: edit_path(kind_atom(kind), record.id))}
+    {:noreply, push_navigate(socket, to: edit_path(kind, record.id))}
   end
 
   def handle_event("filter", %{"status" => status}, socket),
@@ -150,23 +155,17 @@ defmodule KilnCMSWeb.EditorLive do
     end
   end
 
-  defp create!("page", attrs, actor), do: CMS.create_page!(attrs, actor: actor)
-  defp create!("post", attrs, actor), do: CMS.create_post!(attrs, actor: actor)
+  defp create!(kind, attrs, actor), do: ContentTypes.create!(kind, attrs, actor: actor)
 
-  defp get!("page", id, actor), do: CMS.get_page!(id, actor: actor)
-  defp get!("post", id, actor), do: CMS.get_post!(id, actor: actor)
+  defp get!(kind, id, actor), do: ContentTypes.get_record!(kind, id, actor: actor)
 
-  defp do_transition("page", "publish", r, a), do: CMS.publish_page(r, %{}, actor: a)
-  defp do_transition("post", "publish", r, a), do: CMS.publish_post(r, %{}, actor: a)
-  defp do_transition("page", "unpublish", r, a), do: CMS.unpublish_page(r, %{}, actor: a)
-  defp do_transition("post", "unpublish", r, a), do: CMS.unpublish_post(r, %{}, actor: a)
-  defp do_transition("page", "archive", r, a), do: CMS.archive_page(r, %{}, actor: a)
-  defp do_transition("post", "archive", r, a), do: CMS.archive_post(r, %{}, actor: a)
+  defp do_transition(kind, verb, record, actor),
+    do: ContentTypes.transition(kind, verb, record, actor: actor)
 
   # Hard delete (soft via archival). Admin-only; the policy rejects others, in
   # which case the item is counted as skipped.
-  defp destroy("page", id, a), do: CMS.destroy_page(get!("page", id, a), actor: a)
-  defp destroy("post", id, a), do: CMS.destroy_post(get!("post", id, a), actor: a)
+  defp destroy(kind, id, actor),
+    do: ContentTypes.destroy(kind, get!(kind, id, actor), actor: actor)
 
   # The set of selection keys ("kind:id") for the items currently visible under
   # the active status/title filter.
@@ -176,11 +175,7 @@ defmodule KilnCMSWeb.EditorLive do
     |> MapSet.new(fn {kind, r} -> "#{kind}:#{r.id}" end)
   end
 
-  defp kind_atom("page"), do: :page
-  defp kind_atom("post"), do: :post
-
-  defp edit_path(:page, id), do: ~p"/editor/pages/#{id}"
-  defp edit_path(:post, id), do: ~p"/editor/posts/#{id}"
+  defp edit_path(type, id), do: ~p"/editor/content/#{type}/#{id}"
 
   @impl true
   def render(assigns) do
@@ -215,11 +210,14 @@ defmodule KilnCMSWeb.EditorLive do
             >
               Trash
             </.link>
-            <.button type="button" phx-click="new" phx-value-kind="page" variant="primary">
-              New page
-            </.button>
-            <.button type="button" phx-click="new" phx-value-kind="post" variant="primary">
-              New post
+            <.button
+              :for={ct <- @content_types}
+              type="button"
+              phx-click="new"
+              phx-value-kind={ct.type}
+              variant="primary"
+            >
+              New {String.downcase(ct.label)}
             </.button>
           </div>
         </div>

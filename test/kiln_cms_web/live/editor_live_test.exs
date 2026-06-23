@@ -101,7 +101,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> element("button", "New page") |> render_click()
 
       assert {path, _flash} = assert_redirect(lv)
-      assert path =~ ~r"^/editor/pages/"
+      assert path =~ ~r"^/editor/content/page/"
     end
 
     test "bulk publish transitions the selected page and post", %{conn: conn} do
@@ -182,7 +182,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element("button", "New post") |> render_click()
       assert {path, _flash} = assert_redirect(lv)
-      assert path =~ ~r"^/editor/posts/"
+      assert path =~ ~r"^/editor/content/post/"
     end
   end
 
@@ -669,6 +669,43 @@ defmodule KilnCMSWeb.EditorLiveTest do
       saved = CMS.get_post!(post.id, authorize?: false, load: [:related_posts])
       assert [%{id: rel_id}] = saved.related_posts
       assert rel_id == other.id
+    end
+  end
+
+  describe "generic content route (content-type registry)" do
+    test "the content list offers a New button per discovered content type", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ "New page"
+      assert html =~ "New post"
+    end
+
+    test "edits a page via the generic /editor/content/:type/:id route", %{conn: conn} do
+      page = draft_page(%{title: "Generic old"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ "Edit page"
+
+      lv |> form("#page-editor", form: %{title: "Generic new"}) |> render_submit()
+      assert CMS.get_page!(page.id, authorize?: false).title == "Generic new"
+    end
+
+    test "edits a post (excerpt field shown) via the generic route", %{conn: conn} do
+      post = draft_post()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
+
+      assert html =~ "Edit post"
+      assert html =~ "Excerpt"
+    end
+
+    test "an unknown content type redirects to the content list", %{conn: conn} do
+      id = Ecto.UUID.generate()
+
+      assert {:error, {:live_redirect, %{to: "/editor"}}} =
+               conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/widget/#{id}")
     end
   end
 end
