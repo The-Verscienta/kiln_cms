@@ -21,6 +21,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @block_types ~w(rich_text heading quote image embed divider)
 
+  # Idle delay before a draft is autosaved after the last edit. Configurable so
+  # tests can shorten it.
+  @autosave_debounce_ms Application.compile_env(
+                          :kiln_cms,
+                          [:editor, :autosave_debounce_ms],
+                          2_000
+                        )
+
   # Stable per-collaborator colors for live focus cursors. Static class strings
   # so Tailwind keeps them.
   @cursor_colors ~w(
@@ -51,6 +59,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:editors, Presence.editors(kind, id))
          |> assign(:cursors, %{})
          |> assign(:self_field, nil)
+         # Debounced draft autosave: pending timer ref + status indicator state.
+         |> assign(:autosave_timer, nil)
+         |> assign(:save_state, :saved)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          |> assign(:picking, nil)
          |> assign(
@@ -97,6 +108,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     {:noreply, assign(socket, :cursors, cursors)}
   end
+
+  # Debounced draft autosave fired by the timer scheduled in `validate`.
+  def handle_info(:autosave, socket), do: {:noreply, autosave(socket)}
 
   defp assign_record(socket, record) do
     socket
@@ -173,7 +187,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("validate", %{"form" => params}, socket) do
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
-    {:noreply, socket}
+    {:noreply, schedule_autosave(socket)}
   end
 
   def handle_event("field_focus", %{"field" => field}, socket) do
@@ -228,12 +242,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   def handle_event("save", %{"form" => params}, socket) do
+    socket = cancel_autosave_timer(socket)
+
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, record} ->
         # Re-fetch so the relationship pickers reflect the saved links (the
         # submit result doesn't carry loaded relationships).
         reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
-        {:noreply, socket |> assign_record(reloaded) |> put_flash(:info, "Saved.")}
+
+        {:noreply,
+         socket
+         |> assign_record(reloaded)
+         |> assign(:save_state, :saved)
+         |> put_flash(:info, "Saved.")}
 
       {:error, form} ->
         {:noreply,
@@ -269,7 +290,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     case result do
       {:ok, record} ->
-        socket |> assign_record(record) |> put_flash(:info, "Updated to #{record.state}.")
+        socket
+        |> cancel_autosave_timer()
+        |> assign_record(record)
+        |> assign(:save_state, :saved)
+        |> put_flash(:info, "Updated to #{record.state}.")
 
       _ ->
         put_flash(socket, :error, "That action isn't allowed right now.")
@@ -277,6 +302,53 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp run_workflow(socket, _action), do: socket
+
+  # --- draft autosave --------------------------------------------------------
+
+  # Only drafts autosave; published/in-review/archived content is changed
+  # deliberately via the explicit Save button. Each edit (re)starts the idle
+  # timer, so we save once the editor pauses rather than on every keystroke.
+  defp schedule_autosave(socket) do
+    if draft?(socket) do
+      socket
+      |> cancel_autosave_timer()
+      |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
+      |> assign(:save_state, :unsaved)
+    else
+      socket
+    end
+  end
+
+  defp autosave(%{assigns: %{save_state: :unsaved}} = socket) do
+    if draft?(socket) do
+      socket = assign(socket, :autosave_timer, nil)
+
+      case AshPhoenix.Form.submit(socket.assigns.form,
+             params: AshPhoenix.Form.params(socket.assigns.form)
+           ) do
+        {:ok, record} ->
+          reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
+          socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+
+        {:error, _form} ->
+          # Leave the inline validation errors from `validate` in place and keep
+          # the draft marked unsaved; the next edit reschedules a retry.
+          assign(socket, :save_state, :unsaved)
+      end
+    else
+      assign(socket, :autosave_timer, nil)
+    end
+  end
+
+  # Nothing pending (a stale timer, or already saved) — no-op.
+  defp autosave(socket), do: assign(socket, :autosave_timer, nil)
+
+  defp cancel_autosave_timer(socket) do
+    if ref = socket.assigns.autosave_timer, do: Process.cancel_timer(ref)
+    assign(socket, :autosave_timer, nil)
+  end
+
+  defp draft?(socket), do: socket.assigns.record.state == :draft
 
   # Push the current title + blocks to any open decoupled preview windows.
   defp broadcast_preview(socket) do
@@ -464,6 +536,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             >
               Preview &nearr;
             </.link>
+            <.autosave_status :if={@record.state == :draft} state={@save_state} />
             <.workflow_buttons state={@record.state} />
             <.button type="submit" variant="primary">Save</.button>
           </div>
@@ -806,6 +879,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <.icon name="hero-lock-closed-mini" class="size-3" />{c.name}
       </span>
     </div>
+    """
+  end
+
+  attr :state, :atom, required: true
+
+  # Draft autosave indicator shown next to the workflow/Save buttons.
+  defp autosave_status(assigns) do
+    ~H"""
+    <span class="text-xs text-base-content/50" aria-live="polite">
+      {if @state == :unsaved, do: "Unsaved changes", else: "Saved"}
+    </span>
     """
   end
 

@@ -299,7 +299,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [ ] Approval workflow (simple: editor submits → admin approves)
 - [x] Restore previous version from history — `restore_version` action (Page/Post) reverts content fields to a chosen PaperTrail version, reconstructing the full state by replaying the `changes_only` versions up to it; workflow state is untouched and the restore is itself versioned. Block `:id`s are now accepted so they stay stable across restores. Exposed as `CMS.restore_page_version`/`restore_post_version`; covered by `restore_version_test.exs`.
 - [x] Scheduled publishing (Oban + cron) — `scheduled_at` on Page/Post + an **AshOban** trigger (`publish_scheduled`, every-minute cron) that publishes content whose time has passed, authorized as a system job via an `AshOban.Checks.AshObanInteraction` policy bypass. Covered by `scheduled_publishing_test.exs`. First real use of the wired Oban/AshOban infra.
-- [ ] Draft autosave (debounced LiveView save)
+- [x] Draft autosave (debounced LiveView save) — `ContentEditorLive` schedules a debounced timer (`:editor, :autosave_debounce_ms`, default 2s) on each edit and persists the draft via `AshPhoenix.Form.submit` when the editor pauses. **Drafts only** (published/in-review/archived change only via the explicit Save); a "Saved / Unsaved changes" indicator tracks status. Manual save / workflow transitions cancel the pending timer. Covered by `editor_live_test.exs`. **Follow-up:** autosave currently writes a PaperTrail version per save — consider coalescing autosave versions.
 
 ### Phase 5: Headless APIs & Preview (P1)
 - [x] Enable **AshJsonApi** (router at `/api/json` + OpenAPI/Swagger UI) — exposed per resource (D7). Filtering/pagination tuning TODO

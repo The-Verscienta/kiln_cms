@@ -218,6 +218,45 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  describe "draft autosave" do
+    test "a draft is autosaved after editing, without submitting", %{conn: conn} do
+      page = draft_page(%{title: "Old"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Editing marks the draft unsaved and schedules the debounced autosave.
+      changed = lv |> form("#page-editor", form: %{title: "Autosaved title"}) |> render_change()
+      assert changed =~ "Unsaved changes"
+      assert CMS.get_page!(page.id, authorize?: false).title == "Old"
+
+      # Fire the debounce timer.
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      assert CMS.get_page!(page.id, authorize?: false).title == "Autosaved title"
+      assert html =~ "Saved"
+      refute html =~ "Unsaved changes"
+    end
+
+    test "published content is not autosaved", %{conn: conn} do
+      page = draft_page(%{title: "Live", state: :published})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # No autosave indicator for non-drafts.
+      refute html =~ "Unsaved changes"
+
+      lv |> form("#page-editor", form: %{title: "Sneaky edit"}) |> render_change()
+      send(lv.pid, :autosave)
+      render(lv)
+
+      # The published record is only changed via the explicit Save button.
+      assert CMS.get_page!(page.id, authorize?: false).title == "Live"
+    end
+  end
+
   describe "/editor/trash" do
     test "editors are redirected away", %{conn: conn} do
       assert {:error, {:live_redirect, %{to: "/editor"}}} =
