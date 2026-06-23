@@ -142,6 +142,12 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("publish", params, socket),
     do: {:noreply, transition(socket, params, "publish")}
 
+  def handle_event("submit", params, socket),
+    do: {:noreply, transition(socket, params, "submit")}
+
+  def handle_event("return", params, socket),
+    do: {:noreply, transition(socket, params, "return")}
+
   def handle_event("unpublish", params, socket),
     do: {:noreply, transition(socket, params, "unpublish")}
 
@@ -176,6 +182,21 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   defp edit_path(type, id), do: ~p"/editor/content/#{type}/#{id}"
+
+  defp bulk_actions(%{role: :admin}) do
+    [
+      {"publish", "Publish"},
+      {"unpublish", "Unpublish"},
+      {"archive", "Archive"}
+    ]
+  end
+
+  defp bulk_actions(_actor) do
+    [
+      {"unpublish", "Unpublish"},
+      {"archive", "Archive"}
+    ]
+  end
 
   @impl true
   def render(assigns) do
@@ -265,13 +286,7 @@ defmodule KilnCMSWeb.EditorLive do
           </span>
           <div class="ml-auto flex gap-2">
             <button
-              :for={
-                {verb, label} <- [
-                  {"publish", "Publish"},
-                  {"unpublish", "Unpublish"},
-                  {"archive", "Archive"}
-                ]
-              }
+              :for={{verb, label} <- bulk_actions(@actor)}
               type="button"
               phx-click="bulk"
               phx-value-action={verb}
@@ -350,14 +365,34 @@ defmodule KilnCMSWeb.EditorLive do
             <.state_badge state={record.state} />
             <div class="flex items-center gap-2">
               <button
-                :if={record.state in [:draft, :in_review]}
+                :if={record.state == :draft and @actor.role == :editor}
+                type="button"
+                phx-click="submit"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+              >
+                Submit
+              </button>
+              <button
+                :if={record.state in [:draft, :in_review] and @actor.role == :admin}
                 type="button"
                 phx-click="publish"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
                 class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
               >
-                Publish
+                {if record.state == :in_review, do: "Approve", else: "Publish"}
+              </button>
+              <button
+                :if={record.state == :in_review and @actor.role == :admin}
+                type="button"
+                phx-click="return"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+              >
+                Return
               </button>
               <button
                 :if={record.state == :published}

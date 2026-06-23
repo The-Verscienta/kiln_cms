@@ -284,7 +284,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  defp run_workflow(socket, action) when action in ~w(submit publish unpublish archive) do
+  defp run_workflow(socket, action) when action in ~w(submit return publish unpublish archive) do
     result =
       do_workflow(socket.assigns.kind, action, socket.assigns.record, socket.assigns.actor)
 
@@ -537,7 +537,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               Preview &nearr;
             </.link>
             <.autosave_status :if={@record.state == :draft} state={@save_state} />
-            <.workflow_buttons state={@record.state} />
+            <.workflow_buttons state={@record.state} actor={@actor} />
             <.button type="submit" variant="primary">Save</.button>
           </div>
         </div>
@@ -792,6 +792,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       version.version_inserted_at,
                       "%Y-%m-%d %H:%M"
                     )}
+                    <span
+                      :if={version.id == @record.published_version_id}
+                      class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
+                    >
+                      Live published
+                    </span>
                   </span>
                   <button
                     type="button"
@@ -894,20 +900,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   attr :state, :atom, required: true
+  attr :actor, :map, required: true
 
   defp workflow_buttons(assigns) do
     ~H"""
     <button
-      :if={@state in [:draft, :in_review]}
-      type="button"
-      phx-click="workflow"
-      phx-value-action="publish"
-      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-    >
-      Publish
-    </button>
-    <button
-      :if={@state == :draft}
+      :if={@state == :draft and @actor.role == :editor}
       type="button"
       phx-click="workflow"
       phx-value-action="submit"
@@ -915,6 +913,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
     >
       Submit for review
     </button>
+    <button
+      :if={@state in [:draft, :in_review] and @actor.role == :admin}
+      type="button"
+      phx-click="workflow"
+      phx-value-action="publish"
+      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+    >
+      {if @state == :in_review, do: "Approve & publish", else: "Publish"}
+    </button>
+    <button
+      :if={@state == :in_review and @actor.role == :admin}
+      type="button"
+      phx-click="workflow"
+      phx-value-action="return"
+      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+    >
+      Request changes
+    </button>
+    <span
+      :if={@state == :in_review and @actor.role == :editor}
+      class="text-xs text-base-content/50"
+    >
+      Awaiting admin approval
+    </span>
     <button
       :if={@state == :published}
       type="button"

@@ -110,7 +110,7 @@ defmodule KilnCMS.CMS.Content do
         ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at])
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
-        ignore_actions([:set_embedding])
+        ignore_actions([:set_embedding, :set_published_version_id])
         # No FK from version -> source, so a `:purge` can hard-delete a record
         # whose history exists. Versions of purged content are kept as audit rows.
         reference_source?(false)
@@ -124,6 +124,7 @@ defmodule KilnCMS.CMS.Content do
 
         transitions do
           transition :submit_for_review, from: :draft, to: :in_review
+          transition :return_to_draft, from: :in_review, to: :draft
           transition :publish, from: [:draft, :in_review], to: :published
           transition :publish_scheduled, from: [:draft, :in_review], to: :published
           transition :unpublish, from: :published, to: :draft
@@ -287,10 +288,17 @@ defmodule KilnCMS.CMS.Content do
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :submitted_for_review}
         end
 
+        update :return_to_draft do
+          require_atomic? false
+          change transition_state(:draft)
+          change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :returned_to_draft}
+        end
+
         update :publish do
           require_atomic? false
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
+          change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
@@ -301,6 +309,7 @@ defmodule KilnCMS.CMS.Content do
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
+          change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
@@ -318,6 +327,7 @@ defmodule KilnCMS.CMS.Content do
         update :unpublish do
           require_atomic? false
           change transition_state(:draft)
+          change KilnCMS.CMS.Changes.ClearPublishedVersion
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
         end
 
@@ -381,6 +391,13 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:embedding, arg(:embedding))
           change set_attribute(:embedded_at, &DateTime.utc_now/0)
         end
+
+        # Internal: wire `published_version_id` after publish without a new
+        # PaperTrail row (see `ignore_actions` above).
+        update :set_published_version_id do
+          require_atomic? false
+          accept [:published_version_id]
+        end
       end
 
       # Invalidate the public delivery cache whenever published content changes
@@ -414,6 +431,16 @@ defmodule KilnCMS.CMS.Content do
           authorize_if actor_attribute_equals(:role, :editor)
         end
 
+        # Publishing is an admin approval step — editors submit for review instead.
+        policy action([:publish, :publish_scheduled]) do
+          authorize_if actor_attribute_equals(:role, :admin)
+        end
+
+        # Sending reviewed content back to the author is admin-only.
+        policy action(:return_to_draft) do
+          authorize_if actor_attribute_equals(:role, :admin)
+        end
+
         # Hard deletes are admin-only.
         policy action_type(:destroy) do
           forbid_if always()
@@ -445,6 +472,10 @@ defmodule KilnCMS.CMS.Content do
         attribute :canonical_url, :string, public?: true
         attribute :locale, :string, default: "en", public?: true
         attribute :published_at, :utc_datetime_usec, public?: true
+
+        # PaperTrail version id of the immutable snapshot taken at the last
+        # publish. Internal — not exposed via the public APIs.
+        attribute :published_version_id, :uuid
 
         # When set in the future, the AshOban scheduler publishes this record once
         # the time passes (cleared on publish).

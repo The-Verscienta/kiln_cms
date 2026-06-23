@@ -89,6 +89,7 @@ if Code.ensure_loaded?(Igniter) do
         {:"update_#{type}", "define :update_#{type}, action: :update"},
         {:"submit_#{type}_for_review",
          "define :submit_#{type}_for_review, action: :submit_for_review"},
+        {:"return_#{type}_to_draft", "define :return_#{type}_to_draft, action: :return_to_draft"},
         {:"publish_#{type}", "define :publish_#{type}, action: :publish"},
         {:"publish_scheduled_#{type}",
          "define :publish_scheduled_#{type}, action: :publish_scheduled"},

@@ -44,6 +44,18 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     """)
   end
 
+  defp build_email(%{"event" => "returned_to_draft"} = args) do
+    %{"to" => to, "title" => title, "kind" => kind, "id" => id, "actor_name" => who} = args
+
+    base(to)
+    |> subject("Changes requested: #{title}")
+    |> html_body("""
+    <p>#{reviewer(who)} requested changes on your #{kind} <strong>#{title}</strong>.</p>
+    <p>It has been moved back to draft so you can revise and resubmit.</p>
+    <p><a href="#{editor_url(kind, id)}">Open it in the editor</a>.</p>
+    """)
+  end
+
   defp base(to) do
     new()
     |> from(Application.fetch_env!(:kiln_cms, :email_from))
@@ -53,6 +65,10 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   defp submitter(nil), do: "An editor"
   defp submitter(who), do: who
 
+  defp reviewer(nil), do: "A reviewer"
+  defp reviewer(who), do: who
+
   defp editor_url("page", id), do: url(~p"/editor/pages/#{id}")
   defp editor_url("post", id), do: url(~p"/editor/posts/#{id}")
+  defp editor_url(kind, id), do: url(~p"/editor/content/#{kind}/#{id}")
 end
