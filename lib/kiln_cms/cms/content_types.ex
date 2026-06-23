@@ -142,6 +142,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   defp transition_fun(type, "publish"), do: "publish_#{type}"
   defp transition_fun(type, "unpublish"), do: "unpublish_#{type}"
   defp transition_fun(type, "submit"), do: "submit_#{type}_for_review"
+  defp transition_fun(type, "return"), do: "return_#{type}_to_draft"
   defp transition_fun(type, "archive"), do: "archive_#{type}"
 
   defp atom(%{type: type}), do: type

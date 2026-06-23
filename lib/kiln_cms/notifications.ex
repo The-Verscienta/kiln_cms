@@ -15,6 +15,7 @@ defmodule KilnCMS.Notifications do
       someone can approve it.
     * `:published` — content went live; the author is notified. This also covers
       scheduled publishing, where there is no acting user.
+    * `:returned_to_draft` — an admin sent reviewed content back to the author.
   """
   require Ash.Query
 
@@ -22,7 +23,11 @@ defmodule KilnCMS.Notifications do
   alias KilnCMS.CMS.{Page, Post}
   alias KilnCMS.Notifications.WorkflowMailWorker
 
-  @spec dispatch(:submitted_for_review | :published, Page.t() | Post.t(), map() | nil) :: :ok
+  @spec dispatch(
+          :submitted_for_review | :published | :returned_to_draft,
+          Page.t() | Post.t(),
+          map() | nil
+        ) :: :ok
   def dispatch(:submitted_for_review, record, actor) do
     User
     |> Ash.Query.filter(role == :admin)
@@ -37,6 +42,14 @@ defmodule KilnCMS.Notifications do
     |> Map.get(:author)
     |> email_of()
     |> enqueue(:published, record, nil)
+  end
+
+  def dispatch(:returned_to_draft, record, actor) do
+    record
+    |> Ash.load!(:author, authorize?: false)
+    |> Map.get(:author)
+    |> email_of()
+    |> enqueue(:returned_to_draft, record, actor)
   end
 
   defp enqueue(nil, _event, _record, _actor), do: :ok

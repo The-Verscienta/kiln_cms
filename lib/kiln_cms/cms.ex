@@ -29,6 +29,7 @@ defmodule KilnCMS.CMS do
       define :create_page, action: :create
       define :update_page, action: :update
       define :submit_page_for_review, action: :submit_for_review
+      define :return_page_to_draft, action: :return_to_draft
       define :publish_page, action: :publish
       define :publish_scheduled_page, action: :publish_scheduled
       define :unpublish_page, action: :unpublish
@@ -55,6 +56,7 @@ defmodule KilnCMS.CMS do
       define :create_post, action: :create
       define :update_post, action: :update
       define :submit_post_for_review, action: :submit_for_review
+      define :return_post_to_draft, action: :return_to_draft
       define :publish_post, action: :publish
       define :publish_scheduled_post, action: :publish_scheduled
       define :unpublish_post, action: :unpublish
