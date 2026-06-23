@@ -38,13 +38,9 @@ defmodule KilnCMS.CMS.Content do
     published? = Keyword.get(opts, :published?, false)
 
     # Derive the per-type names from `type` by the project's naming convention.
-    mod = type |> Atom.to_string() |> Macro.camelize()
     resource = __CALLER__.module
-    tag_join = Module.concat(KilnCMS.CMS, :"#{mod}Tag")
-    related_join = Module.concat(KilnCMS.CMS, :"Related#{mod}")
     related_name = :"related_#{type}s"
     related_arg = :"related_#{type}_ids"
-    tag_source_attr = :"#{type}_id"
 
     # AshOban worker/scheduler module names (kept identical to hand-written ones).
     pub_worker = Module.concat([resource, Workers, PublishScheduled])
@@ -389,19 +385,21 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
-        # Many-to-many: free-form tags via the per-type join resource.
+        # Many-to-many: free-form tags via the shared polymorphic `Tagging` join
+        # (one table for every content type — no per-type join resource).
         many_to_many :tags, KilnCMS.CMS.Tag do
-          through unquote(tag_join)
-          source_attribute_on_join_resource unquote(tag_source_attr)
+          through KilnCMS.CMS.Tagging
+          source_attribute_on_join_resource :subject_id
           destination_attribute_on_join_resource :tag_id
           public? true
         end
 
-        # Self-referential many-to-many: editor-curated "related" content.
+        # Self-referential many-to-many: editor-curated "related" content via the
+        # shared polymorphic `ContentLink` (new rows default to `kind: :related`).
         many_to_many unquote(related_name), unquote(resource) do
-          through unquote(related_join)
+          through KilnCMS.CMS.ContentLink
           source_attribute_on_join_resource :source_id
-          destination_attribute_on_join_resource :related_id
+          destination_attribute_on_join_resource :target_id
           public? true
         end
       end

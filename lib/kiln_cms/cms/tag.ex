@@ -68,18 +68,21 @@ defmodule KilnCMS.CMS.Tag do
   end
 
   relationships do
-    # Many-to-many inverse of the `many_to_many :tags` on each content type.
+    # Many-to-many inverse of each content type's `tags`, through the shared
+    # polymorphic `Tagging` join (one table for all content types). Joining on
+    # `subject_id` returns only records of the destination type, since ids are
+    # globally unique.
     many_to_many :pages, KilnCMS.CMS.Page do
-      through KilnCMS.CMS.PageTag
+      through KilnCMS.CMS.Tagging
       source_attribute_on_join_resource :tag_id
-      destination_attribute_on_join_resource :page_id
+      destination_attribute_on_join_resource :subject_id
       public? true
     end
 
     many_to_many :posts, KilnCMS.CMS.Post do
-      through KilnCMS.CMS.PostTag
+      through KilnCMS.CMS.Tagging
       source_attribute_on_join_resource :tag_id
-      destination_attribute_on_join_resource :post_id
+      destination_attribute_on_join_resource :subject_id
       public? true
     end
   end

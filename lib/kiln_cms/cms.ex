@@ -101,12 +101,21 @@ defmodule KilnCMS.CMS do
       define :destroy_tag, action: :destroy
     end
 
-    # Join resources for the many-to-many relationships. No code interfaces —
-    # the links are managed through `manage_relationship` on the parent content
-    # resources — but they must be registered on the domain.
-    resource KilnCMS.CMS.PageTag
-    resource KilnCMS.CMS.PostTag
-    resource KilnCMS.CMS.RelatedPage
-    resource KilnCMS.CMS.RelatedPost
+    # Polymorphic join resources backing the many-to-many relationships — one
+    # `Tagging` table for tags across all content types, one `ContentLink` table
+    # for content-to-content links.
+    #
+    # `Tagging` is managed entirely through `manage_relationship` on the parent
+    # content resources, so it needs no code interface. `ContentLink` also backs
+    # the per-type `related_*` relationships that way, but gets interfaces too so
+    # app code can create arbitrary *cross-type*, named (`kind`) links between
+    # any two content records without a new join table.
+    resource KilnCMS.CMS.Tagging
+
+    resource KilnCMS.CMS.ContentLink do
+      define :list_content_links, action: :read
+      define :create_content_link, action: :create
+      define :destroy_content_link, action: :destroy
+    end
   end
 end
