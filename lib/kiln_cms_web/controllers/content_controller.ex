@@ -12,21 +12,30 @@ defmodule KilnCMSWeb.ContentController do
   """
   use KilnCMSWeb, :controller
 
+  alias KilnCMS.Analytics
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.StructuredData
 
   def show_page(conn, %{"slug" => slug}) do
     case CMS.get_published_page_by_slug!(slug, not_found_error?: false, authorize?: false) do
-      nil -> not_found(conn)
-      page -> render_content(conn, :show_page, page, ContentTypes.get(:page))
+      nil ->
+        not_found(conn)
+
+      page ->
+        track_view("page", page.id)
+        render_content(conn, :show_page, page, ContentTypes.get(:page))
     end
   end
 
   def show_post(conn, %{"slug" => slug}) do
     case CMS.get_published_post_by_slug!(slug, not_found_error?: false, authorize?: false) do
-      nil -> not_found(conn)
-      post -> render_content(conn, :show_post, post, ContentTypes.get(:post))
+      nil ->
+        not_found(conn)
+
+      post ->
+        track_view("post", post.id)
+        render_content(conn, :show_post, post, ContentTypes.get(:post))
     end
   end
 
@@ -39,6 +48,7 @@ defmodule KilnCMSWeb.ContentController do
              not_found_error?: false,
              authorize?: false
            ) do
+      track_view(to_string(ct.type), record.id)
       render_content(conn, :show, record, ct)
     else
       _ -> not_found(conn)
@@ -133,6 +143,14 @@ defmodule KilnCMSWeb.ContentController do
       [] -> nil
       parts -> Enum.join(parts, ", ")
     end
+  end
+
+  # Record a privacy-first page view. Best-effort: analytics must never break or
+  # slow content delivery, so failures are swallowed.
+  defp track_view(type, id) do
+    Analytics.record_view(type, id, authorize?: false)
+  rescue
+    _ -> :ok
   end
 
   defp not_found(conn) do
