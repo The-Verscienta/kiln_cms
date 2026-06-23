@@ -170,6 +170,15 @@ defmodule KilnCMS.CMS.Content do
       postgres do
         table unquote(table)
         repo KilnCMS.Repo
+
+        # GIN functional index backing the `:search` action — its expression
+        # matches the `to_tsvector(...)` in that action's filter exactly so the
+        # planner can use it instead of scanning every row.
+        custom_indexes do
+          index ["to_tsvector('english', coalesce(search_text, ''))"],
+            name: unquote("#{table}_search_text_gin_index"),
+            using: "gin"
+        end
       end
 
       actions do

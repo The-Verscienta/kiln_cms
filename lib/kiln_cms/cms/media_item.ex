@@ -2,12 +2,23 @@ defmodule KilnCMS.CMS.MediaItem do
   @moduledoc """
   A media library item. Metadata only — the binary lives in object storage
   (local dev or S3/MinIO). Variants/focal-point/processing pipeline land in v1.0.
+
+  Deletes are soft (AshArchival): `destroy` stamps `archived_at` and hides the
+  row from reads, but keeps both the record and its storage blobs intact. That
+  preserves referential integrity for published content still pointing at the
+  item (`featured_image` FKs, block image URLs) until an admin restores it or
+  permanently `:purge`s it.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshJsonApi.Resource, AshGraphql.Resource, AshAdmin.Resource]
+    extensions: [
+      AshArchival.Resource,
+      AshJsonApi.Resource,
+      AshGraphql.Resource,
+      AshAdmin.Resource
+    ]
 
   graphql do
     type :media_item
@@ -15,6 +26,12 @@ defmodule KilnCMS.CMS.MediaItem do
 
   json_api do
     type "media_item"
+  end
+
+  # Let `:trashed` see soft-deleted rows and `:purge` actually hard-delete.
+  archive do
+    exclude_read_actions([:trashed])
+    exclude_destroy_actions([:purge])
   end
 
   postgres do
@@ -42,6 +59,24 @@ defmodule KilnCMS.CMS.MediaItem do
 
     create :create, primary?: true
     update :update, primary?: true
+
+    # Soft-deleted ("trashed") media — the only read that bypasses AshArchival's
+    # automatic `is_nil(archived_at)` filter.
+    read :trashed do
+      filter expr(not is_nil(^ref(:archived_at)))
+    end
+
+    # Bring a soft-deleted item back by clearing its archival timestamp.
+    update :restore do
+      accept []
+      require_atomic? false
+      change set_attribute(:archived_at, nil)
+    end
+
+    # Permanent hard delete (bypasses archival). The caller is responsible for
+    # removing the storage blobs; admin-only via the destroy policy.
+    destroy :purge do
+    end
   end
 
   policies do
@@ -62,9 +97,14 @@ defmodule KilnCMS.CMS.MediaItem do
       authorize_if actor_attribute_equals(:role, :editor)
     end
 
-    # Hard deletes are admin-only (allowed by the bypass; denied here for all
-    # other roles).
+    # Deletes are admin-only (allowed by the bypass; denied here for all other
+    # roles). Covers both the soft `:destroy` and the permanent `:purge`.
     policy action_type(:destroy) do
+      forbid_if always()
+    end
+
+    # Trash browsing and restore are admin-only too (mirrors delete).
+    policy action([:trashed, :restore]) do
       forbid_if always()
     end
   end

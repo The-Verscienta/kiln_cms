@@ -122,6 +122,42 @@ defmodule KilnCMSWeb.MediaLiveTest do
     end
   end
 
+  describe "trash" do
+    test "admin can soft-delete from the library, then restore from trash", %{conn: conn} do
+      item = seed_media("doomed.png")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/media")
+
+      # Soft-delete: the item leaves the library but the row survives.
+      lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="delete"])) |> render_click()
+      refute render(lv) =~ ">doomed.png<"
+      assert CMS.list_trashed_media_items!(authorize?: false) |> Enum.any?(&(&1.id == item.id))
+
+      # Trash view lists it; restoring returns it to the library.
+      trash = lv |> element("button", "Trash") |> render_click()
+      assert trash =~ ">doomed.png<"
+
+      lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="restore"])) |> render_click()
+      assert CMS.get_media_item!(item.id, authorize?: false)
+      refute CMS.list_trashed_media_items!(authorize?: false) |> Enum.any?(&(&1.id == item.id))
+    end
+
+    test "purge permanently removes a trashed item", %{conn: conn} do
+      item = seed_media("gone.png")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/media")
+
+      lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="delete"])) |> render_click()
+      lv |> element("button", "Trash") |> render_click()
+      lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="purge"])) |> render_click()
+
+      assert {:error, _} = CMS.get_media_item(item.id, authorize?: false)
+    end
+
+    test "non-admins don't see the trash toggle", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+      refute html =~ ~s(phx-click="show_trash")
+    end
+  end
+
   describe "upload" do
     setup do
       root = Path.join(System.tmp_dir!(), "kiln_media_#{System.unique_integer([:positive])}")
