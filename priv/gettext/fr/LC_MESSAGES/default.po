@@ -16,8 +16,8 @@ msgstr ""
 msgid "Actions"
 msgstr "Actions"
 
-#: lib/kiln_cms_web/components/layouts.ex:176
-#: lib/kiln_cms_web/components/layouts.ex:191
+#: lib/kiln_cms_web/components/layouts.ex:180
+#: lib/kiln_cms_web/components/layouts.ex:195
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr "Tentative de reconnexion"
@@ -33,17 +33,17 @@ msgstr "Blogue"
 msgid "No posts yet."
 msgstr "Aucun article pour le moment."
 
-#: lib/kiln_cms_web/components/layouts.ex:144
+#: lib/kiln_cms_web/components/layouts.ex:148
 #, elixir-autogen, elixir-format
 msgid "Powered by KilnCMS."
 msgstr "Propulsé par KilnCMS."
 
-#: lib/kiln_cms_web/components/layouts.ex:183
+#: lib/kiln_cms_web/components/layouts.ex:187
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr "Une erreur s'est produite !"
 
-#: lib/kiln_cms_web/components/layouts.ex:168
+#: lib/kiln_cms_web/components/layouts.ex:172
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr "Connexion Internet introuvable"
@@ -872,6 +872,7 @@ msgid "Block editor"
 msgstr "Éditeur de blocs"
 
 #: lib/kiln_cms_web/live/editor_live.ex:143
+#, elixir-autogen, elixir-format
 msgid "Deleted %{count}"
 msgstr "%{count} supprimé(s)"
 
@@ -900,8 +901,8 @@ msgstr "Diffusion headless"
 msgid "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
 msgstr "KilnCMS associe les ressources Ash, un éditeur de blocs LiveView, l'historique des versions et une diffusion headless GraphQL + JSON:API — centré sur Postgres, temps réel par défaut, et conçu pour les équipes qui veulent le contrôle sans la charge d'exploitation."
 
-#: lib/kiln_cms_web/components/layouts.ex:119
-#: lib/kiln_cms_web/components/layouts.ex:210
+#: lib/kiln_cms_web/components/layouts.ex:122
+#: lib/kiln_cms_web/components/layouts.ex:217
 #, elixir-autogen, elixir-format
 msgid "Language"
 msgstr "Langue"
@@ -932,6 +933,7 @@ msgid "Published content is world-readable; drafts stay editor-only. Admins bypa
 msgstr "Le contenu publié est lisible par tous ; les brouillons restent réservés aux éditeurs. Les administrateurs passent outre ; les suppressions définitives et les webhooks sont verrouillés."
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex:38
+#, elixir-autogen, elixir-format
 msgid "Sign in to edit"
 msgstr "Connectez-vous pour modifier"
 
@@ -950,7 +952,7 @@ msgstr "Mis à jour."
 msgid "You are now signed out"
 msgstr "Vous êtes maintenant déconnecté"
 
-#: lib/kiln_cms_web/live_user_auth.ex:54
+#: lib/kiln_cms_web/live_user_auth.ex:58
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."

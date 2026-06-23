@@ -16,8 +16,8 @@ msgstr ""
 msgid "Actions"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:176
-#: lib/kiln_cms_web/components/layouts.ex:191
+#: lib/kiln_cms_web/components/layouts.ex:180
+#: lib/kiln_cms_web/components/layouts.ex:195
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr ""
@@ -33,17 +33,17 @@ msgstr ""
 msgid "No posts yet."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:144
+#: lib/kiln_cms_web/components/layouts.ex:148
 #, elixir-autogen, elixir-format
 msgid "Powered by KilnCMS."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:183
+#: lib/kiln_cms_web/components/layouts.ex:187
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:168
+#: lib/kiln_cms_web/components/layouts.ex:172
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr ""
@@ -901,8 +901,8 @@ msgstr ""
 msgid "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:119
-#: lib/kiln_cms_web/components/layouts.ex:210
+#: lib/kiln_cms_web/components/layouts.ex:122
+#: lib/kiln_cms_web/components/layouts.ex:217
 #, elixir-autogen, elixir-format
 msgid "Language"
 msgstr ""
@@ -952,7 +952,7 @@ msgstr ""
 msgid "You are now signed out"
 msgstr ""
 
-#: lib/kiln_cms_web/live_user_auth.ex:54
+#: lib/kiln_cms_web/live_user_auth.ex:58
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr ""
