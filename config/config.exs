@@ -22,8 +22,14 @@ config :kiln_cms,
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
 
-# Media blob storage. Swap the adapter for S3/MinIO in production.
+# Media blob storage. Swap the adapter for S3/MinIO in production (configure
+# the bucket/endpoint/credentials in runtime.exs).
 config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.Local
+
+# ExAws (used by KilnCMS.Storage.S3) routes HTTP through Req rather than hackney.
+config :ex_aws,
+  json_codec: Jason,
+  http_client: KilnCMS.Storage.S3.ReqClient
 
 # Public base URL of the delivery frontend — used to build sitemap/robots URLs.
 # Override in runtime.exs for production.

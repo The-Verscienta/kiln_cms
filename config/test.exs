@@ -2,6 +2,16 @@ import Config
 config :kiln_cms, Oban, testing: :manual
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
+
+# S3 storage adapter: dummy credentials + route ExAws HTTP through a Req.Test
+# stub, so the adapter is exercised end-to-end (signing included) with no live S3.
+config :ex_aws, access_key_id: "test", secret_access_key: "test", region: "us-east-1"
+
+config :kiln_cms, KilnCMS.Storage.S3,
+  bucket: "kiln-test",
+  public_base_url: "https://cdn.test/kiln-test",
+  req_options: [plug: {Req.Test, KilnCMS.Storage.S3}]
+
 config :kiln_cms, token_signing_secret: "DxVOH7q7LauTIqk0KY8Mj2auM6QzdpHw"
 config :bcrypt_elixir, log_rounds: 1
 config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true

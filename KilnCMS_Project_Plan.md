@@ -277,7 +277,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [x] Phoenix LiveView upload handling with progress, preview, validation — `KilnCMSWeb.MediaLive` at `/media` (editor/admin only via `:live_editor_required`): drag-and-drop, multi-file, live previews, progress bars, accept/size validation. Covered by `media_live_test.exs` + browser-verified.
 - [x] `MediaItem` resource with metadata (alt, caption, focal point). **Still to add:** variants
 - [ ] Image processing pipeline (`Image` lib or Mogrify + Oban job for variants)
-- [x] Storage backend — pluggable `KilnCMS.Storage` behaviour + `Local` adapter (priv/uploads, served at `/uploads`), traversal-guarded; **S3/MinIO adapter for production still TODO**
+- [x] Storage backend — pluggable `KilnCMS.Storage` behaviour + `Local` adapter (priv/uploads, served at `/uploads`), traversal-guarded. **`S3` adapter** (`KilnCMS.Storage.S3`) for production: ExAws-backed (`put_object`/`delete_object`, `public-read`, config-driven bucket + `public_base_url`), works with AWS S3 / MinIO / R2 (opt-in via `S3_BUCKET` env in `runtime.exs`; MinIO already in `docker-compose` storage profile). HTTP goes through a Req-backed ExAws client (`Storage.S3.ReqClient`) instead of hackney. Covered by `storage/s3_test.exs` (signing exercised end-to-end via `Req.Test`)
 - [ ] Media browser modal/picker usable from editor (lands with the editor, Phase 3)
 - [~] Bulk upload (**done** — multi-file), deletion (**done** — admin, removes blob). **Soft-delete (AshArchival)** is wired on **Page/Post** (destroy → `archived_at`, excluded from reads; also fixes hard-deleting versioned content). **Media filename filter** in the library (done). **Still TODO:** MediaItem soft-delete
 
