@@ -254,11 +254,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          socket
          |> assign_record(reloaded)
          |> assign(:save_state, :saved)
-         |> put_flash(:info, "Saved.")}
+         |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
         {:noreply,
-         socket |> assign(:form, form) |> put_flash(:error, "Please fix the errors below.")}
+         socket
+         |> assign(:form, form)
+         |> put_flash(:error, gettext("Please fix the errors below."))}
     end
   end
 
@@ -277,10 +279,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     case result do
       {:ok, record} ->
-        {:noreply, socket |> assign_record(record) |> put_flash(:info, "Restored that version.")}
+        {:noreply,
+         socket |> assign_record(record) |> put_flash(:info, gettext("Restored that version."))}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "Couldn't restore that version.")}
+        {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
     end
   end
 
@@ -294,10 +297,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> cancel_autosave_timer()
         |> assign_record(record)
         |> assign(:save_state, :saved)
-        |> put_flash(:info, "Updated to #{record.state}.")
+        |> put_flash(:info, gettext("Updated to %{state}.", state: record.state))
 
       _ ->
-        put_flash(socket, :error, "That action isn't allowed right now.")
+        put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
   end
 
@@ -414,11 +417,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <div class="absolute inset-0 bg-black/40" phx-click="close_picker" aria-hidden="true"></div>
       <div class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl">
         <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-lg font-medium">Choose an image</h2>
+          <h2 class="text-lg font-medium">{gettext("Choose an image")}</h2>
           <button
             type="button"
             phx-click="close_picker"
-            aria-label="Close"
+            aria-label={gettext("Close")}
             class="text-base-content/50 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
@@ -520,11 +523,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <div class="flex items-start justify-between gap-4">
           <div>
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-              &larr; All content
+              &larr; {gettext("All content")}
             </.link>
-            <h1 class="mt-1 text-2xl font-semibold">Edit {@kind}</h1>
+            <h1 class="mt-1 text-2xl font-semibold">{gettext("Edit %{kind}", kind: @kind)}</h1>
             <p class="text-sm text-base-content/60">
-              State: <span class="font-medium">{@record.state}</span>
+              {gettext("State:")} <span class="font-medium">{@record.state}</span>
             </p>
             <.presence_roster editors={@editors} current_id={@actor.id} />
           </div>
@@ -534,11 +537,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
               target="_blank"
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
             >
-              Preview &nearr;
+              {gettext("Preview")} &nearr;
             </.link>
             <.autosave_status :if={@record.state == :draft} state={@save_state} />
             <.workflow_buttons state={@record.state} actor={@actor} />
-            <.button type="submit" variant="primary">Save</.button>
+            <.button type="submit" variant="primary">{gettext("Save")}</.button>
           </div>
         </div>
 
@@ -548,7 +551,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <div class={["relative", lock_ring(@locked_fields, "title")]}>
                 <.input
                   field={@form[:title]}
-                  label="Title"
+                  label={gettext("Title")}
                   readonly={field_locked?(@locked_fields, "title")}
                   {field_attrs("title")}
                 />
@@ -557,7 +560,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <div class={["relative", lock_ring(@locked_fields, "slug")]}>
                 <.input
                   field={@form[:slug]}
-                  label="Slug"
+                  label={gettext("Slug")}
                   readonly={field_locked?(@locked_fields, "slug")}
                   {field_attrs("slug")}
                 />
@@ -569,7 +572,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <.input
                 field={@form[:excerpt]}
                 type="textarea"
-                label="Excerpt"
+                label={gettext("Excerpt")}
                 readonly={field_locked?(@locked_fields, "excerpt")}
                 {field_attrs("excerpt")}
               />
@@ -577,7 +580,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </div>
 
             <div class="space-y-3">
-              <h2 class="text-lg font-medium">Blocks</h2>
+              <h2 class="text-lg font-medium">{gettext("Blocks")}</h2>
 
               <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
                 <.inputs_for :let={bf} field={@form[:blocks]}>
@@ -590,7 +593,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <div class="flex items-center gap-2">
                         <span
                           data-drag-handle
-                          aria-label="Drag to reorder"
+                          aria-label={gettext("Drag to reorder")}
                           class="cursor-grab text-base-content/40 hover:text-base-content/70"
                         >
                           <.icon name="hero-bars-3" class="size-5" />
@@ -606,7 +609,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         type="button"
                         phx-click="remove_block"
                         phx-value-path={bf.name}
-                        aria-label="Remove block"
+                        aria-label={gettext("Remove block")}
                         class="text-base-content/50 hover:text-error"
                       >
                         <.icon name="hero-trash" class="size-5" />
@@ -647,10 +650,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           phx-value-index={bf.index}
                           class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
                         >
-                          <.icon name="hero-photo" class="mr-1 size-4" />Choose from library
+                          <.icon name="hero-photo" class="mr-1 size-4" />{gettext(
+                            "Choose from library"
+                          )}
                         </button>
                       </div>
-                      <.input field={bf[:content]} label="Image URL" placeholder="…or paste a URL" />
+                      <.input
+                        field={bf[:content]}
+                        label={gettext("Image URL")}
+                        placeholder={gettext("…or paste a URL")}
+                      />
                     </div>
                     <div
                       :if={to_string(bf[:type].value) not in ["rich_text", "image"]}
@@ -659,7 +668,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <.input
                         field={bf[:content]}
                         type="textarea"
-                        placeholder="Block content…"
+                        placeholder={gettext("Block content…")}
                         readonly={field_locked?(@locked_fields, bf[:content].name)}
                         {field_attrs(bf[:content].name)}
                       />
@@ -684,13 +693,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
             <details class="rounded border border-base-content/15 p-3" open>
               <summary class="cursor-pointer text-sm font-medium">
-                Organization &amp; relationships
+                {gettext("Organization & relationships")}
               </summary>
               <div class="mt-3 space-y-3">
                 <.input
                   field={@form[:category_id]}
                   type="select"
-                  label="Category"
+                  label={gettext("Category")}
                   prompt="— None —"
                   options={Enum.map(@categories, &{&1.name, &1.id})}
                 />
@@ -699,18 +708,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   field={@form[:tag_ids]}
                   type="select"
                   multiple
-                  label="Tags"
+                  label={gettext("Tags")}
                   value={selected_ids(@form, :tag_ids, current_ids(@record.tags))}
                   options={Enum.map(@tags, &{&1.name, &1.id})}
                 />
                 <p class="-mt-1 text-xs text-base-content/50">
-                  Hold ⌘/Ctrl to select multiple.
+                  {gettext("Hold ⌘/Ctrl to select multiple.")}
                 </p>
 
                 <.input
                   field={@form[:featured_image_id]}
                   type="select"
-                  label="Featured image"
+                  label={gettext("Featured image")}
                   prompt="— None —"
                   options={Enum.map(@media, &{&1.filename, &1.id})}
                 />
@@ -719,7 +728,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   field={@form[@related_field]}
                   type="select"
                   multiple
-                  label={"Related #{@kind}s"}
+                  label={gettext("Related %{kind}s", kind: @kind)}
                   value={selected_ids(@form, @related_field, current_ids(@related_current))}
                   options={Enum.map(@siblings, &{&1.title, &1.id})}
                 />
@@ -727,12 +736,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </details>
 
             <details class="rounded border border-base-content/15 p-3">
-              <summary class="cursor-pointer text-sm font-medium">SEO &amp; scheduling</summary>
+              <summary class="cursor-pointer text-sm font-medium">
+                {gettext("SEO & scheduling")}
+              </summary>
               <div class="mt-3 space-y-3">
                 <div class={["relative", lock_ring(@locked_fields, "seo_title")]}>
                   <.input
                     field={@form[:seo_title]}
-                    label="SEO title"
+                    label={gettext("SEO title")}
                     readonly={field_locked?(@locked_fields, "seo_title")}
                     {field_attrs("seo_title")}
                   />
@@ -742,7 +753,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.input
                     field={@form[:seo_description]}
                     type="textarea"
-                    label="SEO description"
+                    label={gettext("SEO description")}
                     readonly={field_locked?(@locked_fields, "seo_description")}
                     {field_attrs("seo_description")}
                   />
@@ -751,7 +762,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <div class={["relative", lock_ring(@locked_fields, "seo_image")]}>
                   <.input
                     field={@form[:seo_image]}
-                    label="OG image URL"
+                    label={gettext("OG image URL")}
                     readonly={field_locked?(@locked_fields, "seo_image")}
                     {field_attrs("seo_image")}
                   />
@@ -760,27 +771,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <div class={["relative", lock_ring(@locked_fields, "canonical_url")]}>
                   <.input
                     field={@form[:canonical_url]}
-                    label="Canonical URL"
+                    label={gettext("Canonical URL")}
                     readonly={field_locked?(@locked_fields, "canonical_url")}
                     {field_attrs("canonical_url")}
                   />
                   <.field_cursors field="canonical_url" cursors={@cursors} />
                 </div>
-                <.input field={@form[:locale]} label="Locale" />
+                <.input field={@form[:locale]} label={gettext("Locale")} />
                 <.input
                   field={@form[:scheduled_at]}
                   type="datetime-local"
-                  label="Scheduled publish at"
+                  label={gettext("Scheduled publish at")}
                 />
               </div>
             </details>
 
             <details class="rounded border border-base-content/15 p-3">
               <summary class="cursor-pointer text-sm font-medium">
-                Version history ({length(@versions)})
+                {gettext("Version history (%{count})", count: length(@versions))}
               </summary>
               <p :if={@versions == []} class="mt-3 text-sm text-base-content/60">
-                No saved versions yet.
+                {gettext("No saved versions yet.")}
               </p>
               <ul :if={@versions != []} class="mt-3 space-y-2">
                 <li
@@ -803,10 +814,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     type="button"
                     phx-click="restore"
                     phx-value-version_id={version.id}
-                    data-confirm="Restore content to this version?"
+                    data-confirm={gettext("Restore content to this version?")}
                     class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
                   >
-                    Restore
+                    {gettext("Restore")}
                   </button>
                 </li>
               </ul>
@@ -814,7 +825,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </div>
 
           <div class="lg:sticky lg:top-4 lg:self-start">
-            <h2 class="mb-2 text-lg font-medium">Preview</h2>
+            <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
             <article class="space-y-3 rounded border border-base-content/15 p-5">
               <h1 class="text-2xl font-bold">{@form[:title].value}</h1>
               <BlockComponents.render_block :for={block <- preview_blocks(@form)} block={block} />
@@ -847,7 +858,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <div class="flex">
         <span
           :for={e <- @roster}
-          title={e.name <> if(e.id == @current_id, do: " (you)", else: "")}
+          title={e.name <> if(e.id == @current_id, do: gettext(" (you)"), else: "")}
           class={[
             "-ml-1.5 flex size-6 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-base-100 first:ml-0",
             color_for(e.id)
@@ -856,7 +867,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {e.name |> String.first() |> Kernel.||("?") |> String.upcase()}
         </span>
       </div>
-      <span class="text-xs text-base-content/60">{@count} editing</span>
+      <span class="text-xs text-base-content/60">{gettext("%{count} editing", count: @count)}</span>
     </div>
     """
   end
@@ -876,7 +887,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     >
       <span
         :for={c <- @others}
-        title={"#{c.name} is editing this field"}
+        title={gettext("%{name} is editing this field", name: c.name)}
         class={[
           "flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white shadow",
           c.color
@@ -894,7 +905,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp autosave_status(assigns) do
     ~H"""
     <span class="text-xs text-base-content/50" aria-live="polite">
-      {if @state == :unsaved, do: "Unsaved changes", else: "Saved"}
+      {if @state == :unsaved, do: gettext("Unsaved changes"), else: gettext("Saved")}
     </span>
     """
   end
@@ -911,7 +922,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-value-action="submit"
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
-      Submit for review
+      {gettext("Submit for review")}
     </button>
     <button
       :if={@state in [:draft, :in_review] and @actor.role == :admin}
@@ -920,7 +931,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-value-action="publish"
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
-      {if @state == :in_review, do: "Approve & publish", else: "Publish"}
+      {if @state == :in_review, do: gettext("Approve & publish"), else: gettext("Publish")}
     </button>
     <button
       :if={@state == :in_review and @actor.role == :admin}
@@ -929,13 +940,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-value-action="return"
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
-      Request changes
+      {gettext("Request changes")}
     </button>
     <span
       :if={@state == :in_review and @actor.role == :editor}
       class="text-xs text-base-content/50"
     >
-      Awaiting admin approval
+      {gettext("Awaiting admin approval")}
     </span>
     <button
       :if={@state == :published}
@@ -944,7 +955,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-value-action="unpublish"
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
-      Unpublish
+      {gettext("Unpublish")}
     </button>
     """
   end

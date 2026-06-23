@@ -81,7 +81,16 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:locale, locale)
     |> assign(:page_title, "Blog")
     |> assign(:meta_description, "Latest posts.")
+    |> assign(:locale_links, blog_locale_links(locale))
     |> render(:blog_index, posts: posts)
+  end
+
+  # Language-switcher links to the blog index in each supported locale.
+  defp blog_locale_links(current) do
+    for locale <- I18n.locales() do
+      prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
+      %{locale: locale, href: "#{base_url()}#{prefix}/blog", current: locale == current}
+    end
   end
 
   # The requested locale (set by `KilnCMSWeb.Plugs.SetLocale`).
@@ -101,6 +110,8 @@ defmodule KilnCMSWeb.ContentController do
   # then render. `record` is a published content struct and `ct` its
   # `ContentTypes` entry.
   defp render_content(conn, template, record, ct) do
+    translations = translations(ct, record.slug)
+
     conn
     |> assign(:locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
@@ -108,16 +119,23 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:canonical_url, record.canonical_url || locale_url(ct, record.slug, record.locale))
     |> assign(:og_image, record.seo_image)
     |> assign(:og_type, "article")
-    |> assign(:hreflang, hreflang_alternates(ct, record.slug))
+    |> assign(:hreflang, hreflang_alternates(ct, translations))
+    |> assign(:locale_links, locale_links(ct, translations, record.locale))
     |> assign(:json_ld, json_ld_script(record, ct))
     |> render(template, record: record, blocks: blocks(record))
   end
 
-  # `rel="alternate" hreflang` entries for every published locale variant of the
-  # slug, plus an `x-default` pointing at the default locale. Best-effort: a
-  # content type without a translations interface simply gets none.
-  defp hreflang_alternates(ct, slug) do
-    translations = ContentTypes.list_translations(ct.type, slug, authorize?: false)
+  # Published locale variants of `slug`. Best-effort: a content type without a
+  # translations interface simply yields none.
+  defp translations(ct, slug) do
+    ContentTypes.list_translations(ct.type, slug, authorize?: false)
+  rescue
+    _ -> []
+  end
+
+  # `rel="alternate" hreflang` entries for every published locale variant, plus
+  # an `x-default` pointing at the default locale.
+  defp hreflang_alternates(ct, translations) do
     default = I18n.default_locale()
 
     alternates =
@@ -127,8 +145,19 @@ defmodule KilnCMSWeb.ContentController do
       nil -> alternates
       t -> alternates ++ [%{hreflang: "x-default", href: locale_url(ct, t.slug, default)}]
     end
-  rescue
-    _ -> []
+  end
+
+  # Language-switcher links to each published translation of this record.
+  defp locale_links(ct, translations, current) do
+    translations
+    |> Enum.map(
+      &%{
+        locale: &1.locale,
+        href: locale_url(ct, &1.slug, &1.locale),
+        current: &1.locale == current
+      }
+    )
+    |> Enum.sort_by(& &1.locale)
   end
 
   # Absolute public URL for `slug` in `locale` (non-default locales are prefixed).

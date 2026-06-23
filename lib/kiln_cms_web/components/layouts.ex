@@ -65,22 +65,23 @@ defmodule KilnCMSWeb.Layouts do
             href={~p"/editor"}
             class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
           >
-            Editor
+            {gettext("Editor")}
           </a>
+          <.locale_switcher />
           <.theme_toggle />
           <a
             :if={is_nil(@current_user)}
             href={~p"/sign-in"}
             class="rounded-lg bg-base-content px-3 py-1.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
           >
-            Sign in
+            {gettext("Sign in")}
           </a>
           <a
             :if={@current_user}
             href={~p"/sign-out"}
             class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
           >
-            Sign out
+            {gettext("Sign out")}
           </a>
         </nav>
       </div>
@@ -100,6 +101,9 @@ defmodule KilnCMSWeb.Layouts do
   Minimal chrome for the public delivery frontend (published Pages/Posts and the
   blog index). Deliberately free of the authoring nav.
   """
+  # Links to the current page in each available locale (`%{locale, href,
+  # current}`); rendered as a language switcher when there's more than one.
+  attr :locale_links, :list, default: []
   slot :inner_block, required: true
 
   def public(assigns) do
@@ -111,7 +115,23 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
-          <a href="/blog" class="hover:text-base-content">Blog</a>
+          <a href="/blog" class="hover:text-base-content">{gettext("Blog")}</a>
+          <span :if={length(@locale_links) > 1} class="flex items-center gap-2" aria-label="Language">
+            <a
+              :for={link <- @locale_links}
+              href={link.href}
+              hreflang={link.locale}
+              class={[
+                "uppercase",
+                if(link.current,
+                  do: "font-semibold text-base-content",
+                  else: "hover:text-base-content"
+                )
+              ]}
+            >
+              {link.locale}
+            </a>
+          </span>
         </nav>
       </div>
     </header>
@@ -121,7 +141,7 @@ defmodule KilnCMSWeb.Layouts do
     </main>
 
     <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/50 sm:px-6 lg:px-8">
-      Powered by KilnCMS.
+      {gettext("Powered by KilnCMS.")}
     </footer>
     """
   end
@@ -172,6 +192,36 @@ defmodule KilnCMSWeb.Layouts do
         <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
       </.flash>
     </div>
+    """
+  end
+
+  @doc """
+  Admin UI language switcher. Each link persists the chosen locale in the
+  session (`LocaleController`); LiveViews then restore it via the
+  `:restore_locale` on_mount hook. Hidden when only one locale is configured.
+  """
+  def locale_switcher(assigns) do
+    assigns =
+      assigns
+      |> assign(:locales, KilnCMS.I18n.locales())
+      |> assign(:current, Gettext.get_locale(KilnCMSWeb.Gettext))
+
+    ~H"""
+    <span :if={length(@locales) > 1} class="flex items-center gap-1 text-xs" aria-label="Language">
+      <.link
+        :for={loc <- @locales}
+        href={~p"/locale/#{loc}"}
+        class={[
+          "rounded px-1.5 py-1 uppercase",
+          if(loc == @current,
+            do: "font-semibold text-base-content",
+            else: "text-base-content/60 hover:text-base-content"
+          )
+        ]}
+      >
+        {loc}
+      </.link>
+    </span>
     """
   end
 

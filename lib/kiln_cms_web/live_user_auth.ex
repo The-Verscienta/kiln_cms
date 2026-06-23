@@ -6,11 +6,22 @@ defmodule KilnCMSWeb.LiveUserAuth do
   import Phoenix.Component
   use KilnCMSWeb, :verified_routes
 
+  alias KilnCMS.I18n
+
   # This is used for nested liveviews to fetch the current user.
   # To use, place the following at the top of that liveview:
   # on_mount {KilnCMSWeb.LiveUserAuth, :current_user}
   def on_mount(:current_user, _params, session, socket) do
     {:cont, AshAuthentication.Phoenix.LiveSession.assign_new_resources(socket, session)}
+  end
+
+  # Restore the UI locale from the session into the LiveView process. LiveViews
+  # mount in their own process, so the request-time `SetLocale` plug doesn't
+  # carry over — set the Gettext locale here (and expose it as an assign).
+  def on_mount(:restore_locale, _params, session, socket) do
+    locale = I18n.normalize(session["locale"])
+    Gettext.put_locale(KilnCMSWeb.Gettext, locale)
+    {:cont, assign(socket, :locale, locale)}
   end
 
   def on_mount(:live_user_optional, _params, _session, socket) do
