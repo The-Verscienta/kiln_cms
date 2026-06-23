@@ -192,9 +192,16 @@ defmodule KilnCMS.CMS.Content do
       end
 
       actions do
-        defaults [:read, :destroy]
+        defaults [:read]
 
         default_accept unquote(accept)
+
+        # Soft-delete (AshArchival). Non-atomic so the cache-busting after_action
+        # change can run.
+        destroy :destroy do
+          primary? true
+          require_atomic? false
+        end
 
         create :create do
           primary? true
@@ -349,6 +356,7 @@ defmodule KilnCMS.CMS.Content do
         # Permanent hard delete (bypasses archival). Used by "Empty trash" and the
         # nightly auto-purge; admin/system only via the destroy policy.
         destroy :purge do
+          require_atomic? false
         end
 
         # Background-maintained semantic embedding, written by
@@ -361,6 +369,13 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:embedding, arg(:embedding))
           change set_attribute(:embedded_at, &DateTime.utc_now/0)
         end
+      end
+
+      # Invalidate the public delivery cache whenever published content changes
+      # (applies to every create/update/destroy action; no-ops for draft-only
+      # writes — see the change module).
+      changes do
+        change KilnCMS.CMS.Changes.BustContentCache, on: [:create, :update, :destroy]
       end
 
       policies do

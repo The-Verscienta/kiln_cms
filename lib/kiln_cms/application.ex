@@ -10,6 +10,7 @@ defmodule KilnCMS.Application do
     children = [
       KilnCMSWeb.Telemetry,
       KilnCMSWeb.RateLimit,
+      {Cachex, name: KilnCMS.Cache.cache_name()},
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
       {Oban,
