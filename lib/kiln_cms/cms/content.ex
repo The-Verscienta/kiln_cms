@@ -107,7 +107,10 @@ defmodule KilnCMS.CMS.Content do
       paper_trail do
         change_tracking_mode(:changes_only)
         store_action_name?(true)
-        ignore_attributes([:inserted_at, :updated_at])
+        ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at])
+        # Background embedding writes aren't editorial changes — keep the
+        # `:set_embedding` action out of the version history.
+        ignore_actions([:set_embedding])
         # No FK from version -> source, so a `:purge` can hard-delete a record
         # whose history exists. Versions of purged content are kept as audit rows.
         reference_source?(false)
@@ -178,6 +181,13 @@ defmodule KilnCMS.CMS.Content do
           index ["to_tsvector('english', coalesce(search_text, ''))"],
             name: unquote("#{table}_search_text_gin_index"),
             using: "gin"
+
+          # HNSW index for approximate nearest-neighbour search over embeddings,
+          # using cosine distance (`<=>`). The `embedding vector_cosine_ops`
+          # column string carries the opclass through to the generated DDL.
+          index ["embedding vector_cosine_ops"],
+            name: unquote("#{table}_embedding_hnsw_index"),
+            using: "hnsw"
         end
       end
 
@@ -201,6 +211,7 @@ defmodule KilnCMS.CMS.Content do
 
           change KilnCMS.CMS.Changes.SanitizeBlocks
           change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
         end
 
         update :update do
@@ -216,6 +227,7 @@ defmodule KilnCMS.CMS.Content do
 
           change KilnCMS.CMS.Changes.SanitizeBlocks
           change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
         end
 
         # Full-text search over the denormalized `search_text`. Goes through the
@@ -316,6 +328,17 @@ defmodule KilnCMS.CMS.Content do
         # nightly auto-purge; admin/system only via the destroy policy.
         destroy :purge do
         end
+
+        # Background-maintained semantic embedding, written by
+        # `KilnCMS.Search.EmbeddingWorker`. Kept separate from `:update` so it
+        # neither re-runs the content changes nor enqueues another embedding, and
+        # it's excluded from PaperTrail (see the `paper_trail` block).
+        update :set_embedding do
+          require_atomic? false
+          argument :embedding, KilnCMS.Search.Vector, allow_nil?: false
+          change set_attribute(:embedding, arg(:embedding))
+          change set_attribute(:embedded_at, &DateTime.utc_now/0)
+        end
       end
 
       policies do
@@ -381,6 +404,13 @@ defmodule KilnCMS.CMS.Content do
         # Denormalized plain-text maintained by `Changes.SetSearchText` and
         # queried by the `search` action. Internal.
         attribute :search_text, :string
+
+        # Semantic-search embedding of `search_text`, plus when it was last
+        # computed. Maintained by `KilnCMS.Search.EmbeddingWorker`; internal
+        # (never exposed via the APIs, ignored by PaperTrail). `nil` until first
+        # embedded, or always when semantic search is disabled.
+        attribute :embedding, KilnCMS.Search.Vector
+        attribute :embedded_at, :utc_datetime_usec
 
         timestamps()
       end

@@ -35,6 +35,23 @@ config :ex_aws,
 # and JSON-LD canonical URLs. Override in runtime.exs for production.
 config :kiln_cms, :public_base_url, "http://localhost:4000"
 
+# Semantic search — pgvector storage + local Bumblebee embeddings. Disabled by
+# default: with `semantic: false` the model/serving never start and content
+# writes skip embedding work, so the lean install pays nothing. Flip `semantic`
+# to true (and run `mix kiln.embed_all` once) to enable it. See
+# docs/semantic-search-plan.md.
+config :kiln_cms, KilnCMS.Search,
+  semantic: false,
+  embedder: KilnCMS.Search.Embedder.Bumblebee,
+  model: "BAAI/bge-small-en-v1.5",
+  dim: 384
+
+# Register pgvector's Postgrex extension so `vector` columns encode/decode.
+config :kiln_cms, KilnCMS.Repo, types: KilnCMS.PostgrexTypes
+
+# EXLA backs Nx — only exercised when the embedding serving runs.
+config :nx, default_backend: EXLA.Backend
+
 # Organization name used as the JSON-LD publisher. Override in runtime.exs.
 config :kiln_cms, :site_name, "KilnCMS"
 

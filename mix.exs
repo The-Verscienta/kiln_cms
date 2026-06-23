@@ -84,6 +84,17 @@ defmodule KilnCMS.MixProject do
       {:ex_aws, "~> 2.5"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},
+      # Semantic search: pgvector storage + local embeddings (Bumblebee/Nx/EXLA).
+      # The model + Nx.Serving only start when semantic search is enabled in
+      # config; the deps compile regardless. See docs/semantic-search-plan.md.
+      {:pgvector, "~> 0.3"},
+      {:bumblebee, "~> 0.7"},
+      {:nx, "~> 0.12"},
+      {:exla, "~> 0.12"},
+      # Bumblebee's `progress_bar` still caps `decimal ~> 2.0`, but Ash/ecto 3.14
+      # need `decimal ~> 3.0`. progress_bar only uses decimal for CLI download
+      # progress formatting, so forcing 3.x is safe. Override resolves the clash.
+      {:decimal, "~> 3.0", override: true},
       {:hammer, "~> 7.0"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.2.0"},

@@ -1,9 +1,11 @@
 # Semantic / Hybrid Search — Implementation Plan
 
-**Status:** in progress (Phase 0). **Decisions locked (2026-06-23):** pgvector
-available in production Postgres; **local Bumblebee** embeddings (no hosted API);
-in-Postgres (pgvector + HNSW) preferred over the Meilisearch already in
-`docker-compose.yml`.
+**Status:** Phase 0 ✅ and Phase 1 ✅ done; Phase 2 next. **Decisions locked
+(2026-06-23):** pgvector available in production Postgres; **local Bumblebee**
+embeddings (no hosted API), model `BAAI/bge-small-en-v1.5` (384-d, CLS pooling +
+L2 norm); Bumblebee/Nx/EXLA included in the build but the serving only starts
+when `semantic: true`; in-Postgres (pgvector + HNSW) preferred over the
+Meilisearch already in `docker-compose.yml`.
 
 ## Goal
 Add meaning-based search alongside the existing `ts_rank` keyword search
