@@ -11,7 +11,6 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   use Ash.Resource.Change
 
   alias KilnCMS.CMS.ContentSerializer
-  alias KilnCMS.CMS.{Page, Post}
   alias KilnCMS.Webhooks
 
   @impl true
@@ -24,6 +23,10 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
     end)
   end
 
-  defp event_prefix(%Page{}), do: "page"
-  defp event_prefix(%Post{}), do: "post"
+  # Derive the event namespace from the content type's module name
+  # (`KilnCMS.CMS.Page` -> `"page"`), so every content type — including ones
+  # generated via `mix kiln.gen.content` — dispatches webhooks without changes
+  # here.
+  defp event_prefix(%resource{}),
+    do: resource |> Module.split() |> List.last() |> Macro.underscore()
 end
