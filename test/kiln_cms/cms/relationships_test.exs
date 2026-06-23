@@ -1,9 +1,10 @@
 defmodule KilnCMS.CMS.RelationshipsTest do
   @moduledoc """
   Coverage for the content-type relationships: `Category` (many-to-one /
-  one-to-many), `Tag` (many-to-many), self-referential related content
-  (many-to-many back to the same type), and the formal `featured_image`
-  (many-to-one) link to `MediaItem`.
+  one-to-many), `Tag` (many-to-many via the shared polymorphic `Tagging`
+  table), related content (via the shared polymorphic `ContentLink` table,
+  including cross-type links), and the formal `featured_image` (many-to-one)
+  link to `MediaItem`.
   """
   use KilnCMS.DataCase, async: true
 
@@ -155,6 +156,77 @@ defmodule KilnCMS.CMS.RelationshipsTest do
       tag = CMS.create_tag!(%{name: "public", slug: slug()}, actor: editor)
       # No actor / anonymous read still succeeds.
       assert CMS.get_tag!(tag.id, authorize?: false).id == tag.id
+    end
+  end
+
+  describe "polymorphic tagging (one table for every content type)" do
+    test "the same tag applies to a page and a post through a single join table" do
+      editor = user(:editor)
+      tag = CMS.create_tag!(%{name: "shared", slug: slug()}, actor: editor)
+
+      page = CMS.create_page!(%{title: "Pg", slug: slug(), tag_ids: [tag.id]}, actor: editor)
+      post = CMS.create_post!(%{title: "Po", slug: slug(), tag_ids: [tag.id]}, actor: editor)
+
+      # The tag's reverse relationships resolve the right type from the shared
+      # `taggings` table purely by id.
+      loaded =
+        CMS.get_tag!(tag.id, load: [:pages, :posts, :page_count, :post_count], actor: editor)
+
+      assert [%{id: pid}] = loaded.pages
+      assert [%{id: poid}] = loaded.posts
+      assert pid == page.id
+      assert poid == post.id
+      assert loaded.page_count == 1
+      assert loaded.post_count == 1
+    end
+  end
+
+  describe "content links (relate any two content types, no new join table)" do
+    test "a page can be linked to a post with a named kind" do
+      editor = user(:editor)
+      page = CMS.create_page!(%{title: "Src", slug: slug()}, actor: editor)
+      post = CMS.create_post!(%{title: "Dst", slug: slug()}, actor: editor)
+
+      {:ok, link} =
+        CMS.create_content_link(
+          %{source_id: page.id, target_id: post.id, kind: :see_also},
+          actor: editor
+        )
+
+      assert link.kind == :see_also
+
+      # The link is queryable from the source record's id, across types.
+      links =
+        CMS.list_content_links!(
+          actor: editor,
+          query: [filter: [source_id: page.id]]
+        )
+
+      assert [%{target_id: target_id, kind: :see_also}] = links
+      assert target_id == post.id
+    end
+
+    test "same-type related content still works via ContentLink" do
+      editor = user(:editor)
+      a = CMS.create_post!(%{title: "A", slug: slug()}, actor: editor)
+      b = CMS.create_post!(%{title: "B", slug: slug()}, actor: editor)
+
+      a = CMS.update_post!(a, %{related_post_ids: [b.id]}, actor: editor, load: [:related_posts])
+      assert [%{id: rel_id}] = a.related_posts
+      assert rel_id == b.id
+    end
+
+    test "links are editor-gated" do
+      viewer = user(:viewer)
+      editor = user(:editor)
+      page = CMS.create_page!(%{title: "P", slug: slug()}, actor: editor)
+      post = CMS.create_post!(%{title: "Q", slug: slug()}, actor: editor)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.create_content_link(
+                 %{source_id: page.id, target_id: post.id},
+                 actor: viewer
+               )
     end
   end
 end
