@@ -18,6 +18,29 @@ defmodule KilnCMS.ImageProcessor do
   @type variant :: %{label: String.t(), path: Path.t(), width: pos_integer, height: pos_integer}
 
   @doc """
+  Returns `:ok` when `path` is a readable raster image with non-zero dimensions.
+
+  Used to reject uploads whose extension or MIME type does not match their
+  content before they are persisted.
+  """
+  @spec validate_upload(Path.t()) :: :ok | {:error, term}
+  def validate_upload(path) when is_binary(path) do
+    case Image.open(path) do
+      {:ok, image} ->
+        if Image.width(image) > 0 and Image.height(image) > 0,
+          do: :ok,
+          else: {:error, :invalid_image}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  rescue
+    e ->
+      Logger.warning("ImageProcessor.validate_upload failed for #{path}: #{inspect(e)}")
+      {:error, :invalid_image}
+  end
+
+  @doc """
   Analyzes `path` and writes any applicable variants (with extension `ext`,
   e.g. `".png"`) to the temp dir. Returns the dimensions and variant temp files.
   """

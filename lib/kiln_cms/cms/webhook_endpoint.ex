@@ -28,10 +28,13 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       primary? true
       # A receiver-shared signing secret, generated once.
       change set_attribute(:secret, &__MODULE__.generate_secret/0)
+      validate KilnCMS.CMS.Validations.WebhookUrl
     end
 
     update :update do
       primary? true
+      require_atomic? false
+      validate KilnCMS.CMS.Validations.WebhookUrl
     end
   end
 

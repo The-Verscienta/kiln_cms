@@ -6,6 +6,7 @@ defmodule KilnCMSWeb.MediaLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.ImageProcessor
   alias KilnCMS.Storage
 
   @accept ~w(.jpg .jpeg .png .webp .gif)
@@ -155,13 +156,11 @@ defmodule KilnCMSWeb.MediaLive do
     key = Storage.generate_key(entry.client_name)
     ext = entry.client_name |> Path.extname() |> String.downcase()
 
-    case Storage.store(key, path) do
-      {:ok, ^key} ->
-        create_from_upload(key, ext, path, entry, actor)
-
-      _error ->
-        Storage.delete(key)
-        :error
+    with :ok <- ImageProcessor.validate_upload(path),
+         {:ok, ^key} <- Storage.store(key, path) do
+      create_from_upload(key, ext, path, entry, actor)
+    else
+      _ -> :error
     end
   end
 
