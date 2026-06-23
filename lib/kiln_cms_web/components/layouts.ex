@@ -65,22 +65,23 @@ defmodule KilnCMSWeb.Layouts do
             href={~p"/editor"}
             class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
           >
-            Editor
+            {gettext("Editor")}
           </a>
+          <.locale_switcher />
           <.theme_toggle />
           <a
             :if={is_nil(@current_user)}
             href={~p"/sign-in"}
             class="rounded-lg bg-base-content px-3 py-1.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
           >
-            Sign in
+            {gettext("Sign in")}
           </a>
           <a
             :if={@current_user}
             href={~p"/sign-out"}
             class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
           >
-            Sign out
+            {gettext("Sign out")}
           </a>
         </nav>
       </div>
@@ -191,6 +192,36 @@ defmodule KilnCMSWeb.Layouts do
         <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
       </.flash>
     </div>
+    """
+  end
+
+  @doc """
+  Admin UI language switcher. Each link persists the chosen locale in the
+  session (`LocaleController`); LiveViews then restore it via the
+  `:restore_locale` on_mount hook. Hidden when only one locale is configured.
+  """
+  def locale_switcher(assigns) do
+    assigns =
+      assigns
+      |> assign(:locales, KilnCMS.I18n.locales())
+      |> assign(:current, Gettext.get_locale(KilnCMSWeb.Gettext))
+
+    ~H"""
+    <span :if={length(@locales) > 1} class="flex items-center gap-1 text-xs" aria-label="Language">
+      <.link
+        :for={loc <- @locales}
+        href={~p"/locale/#{loc}"}
+        class={[
+          "rounded px-1.5 py-1 uppercase",
+          if(loc == @current,
+            do: "font-semibold text-base-content",
+            else: "text-base-content/60 hover:text-base-content"
+          )
+        ]}
+      >
+        {loc}
+      </.link>
+    </span>
     """
   end
 

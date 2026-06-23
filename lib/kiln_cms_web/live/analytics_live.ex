@@ -69,32 +69,32 @@ defmodule KilnCMSWeb.AnalyticsLive do
       <div class="space-y-6">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; All content
+            &larr; {gettext("All content")}
           </.link>
-          <h1 class="mt-1 text-2xl font-semibold">Analytics</h1>
+          <h1 class="mt-1 text-2xl font-semibold">{gettext("Analytics")}</h1>
           <p class="text-sm text-base-content/60">
-            Privacy-first content views — aggregate counts only, no visitor tracking.
+            {gettext("Privacy-first content views — aggregate counts only, no visitor tracking.")}
           </p>
         </div>
 
         <div class="rounded-lg border border-base-content/10 p-4">
-          <p class="text-xs uppercase tracking-wide text-base-content/50">Total views</p>
+          <p class="text-xs uppercase tracking-wide text-base-content/50">{gettext("Total views")}</p>
           <p class="mt-1 text-3xl font-semibold">{@total}</p>
         </div>
 
         <div>
-          <h2 class="mb-3 text-lg font-medium">Most viewed</h2>
+          <h2 class="mb-3 text-lg font-medium">{gettext("Most viewed")}</h2>
           <p :if={@rows == []} class="text-sm text-base-content/60">
-            No views recorded yet.
+            {gettext("No views recorded yet.")}
           </p>
 
           <table :if={@rows != []} class="w-full text-sm">
             <thead class="text-left text-xs uppercase tracking-wide text-base-content/50">
               <tr class="border-b border-base-content/10">
-                <th class="py-2">Content</th>
-                <th class="py-2">Type</th>
-                <th class="py-2 text-right">Views</th>
-                <th class="py-2 text-right">Last viewed</th>
+                <th class="py-2">{gettext("Content")}</th>
+                <th class="py-2">{gettext("Type")}</th>
+                <th class="py-2 text-right">{gettext("Views")}</th>
+                <th class="py-2 text-right">{gettext("Last viewed")}</th>
               </tr>
             </thead>
             <tbody>

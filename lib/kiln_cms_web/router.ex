@@ -103,7 +103,10 @@ defmodule KilnCMSWeb.Router do
 
     # Authoring UIs — editors and admins only.
     ash_authentication_live_session :editor_routes,
-      on_mount: [{KilnCMSWeb.LiveUserAuth, :live_editor_required}] do
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :live_editor_required},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
       live "/media", MediaLive, :index
       live "/editor", EditorLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
@@ -153,6 +156,8 @@ defmodule KilnCMSWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    # UI locale switcher — persists the chosen locale in the session.
+    get "/locale/:locale", LocaleController, :update
   end
 
   scope "/", KilnCMSWeb do
