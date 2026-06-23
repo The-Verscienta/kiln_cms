@@ -117,54 +117,37 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   defp create_from_upload(key, ext, path, entry, actor) do
-    meta = build_metadata(path, ext)
-
-    attrs =
-      Map.merge(
-        %{
-          filename: entry.client_name,
-          content_type: entry.client_type,
-          byte_size: entry.client_size,
-          storage_key: key,
-          url: Storage.url(key)
-        },
-        meta
-      )
+    attrs = %{
+      filename: entry.client_name,
+      content_type: entry.client_type,
+      byte_size: entry.client_size,
+      storage_key: key,
+      url: Storage.url(key)
+    }
 
     case CMS.create_media_item(attrs, actor: actor) do
-      {:ok, _item} ->
+      {:ok, item} ->
+        enqueue_processing(item, path, ext)
         :ok
 
       _ ->
-        # Roll back the original and any variant blobs.
         Storage.delete(key)
-        delete_variant_blobs(meta.variants)
         :error
     end
   end
 
-  # Dimensions + persisted responsive variants. Falls back to original-only when
-  # the upload isn't a processable raster image.
-  defp build_metadata(path, ext) do
-    case KilnCMS.ImageProcessor.process(path, ext) do
-      {:ok, %{width: width, height: height, variants: files}} ->
-        %{width: width, height: height, variants: store_variants(files, ext)}
-
-      {:error, _} ->
-        %{width: nil, height: nil, variants: %{}}
-    end
-  end
-
-  # `tmp` is an ImageProcessor-built path (System.tmp_dir! + a UUID), never user
-  # input — so the File.rm traversal warning is a false positive.
+  # Hand the original off to a background worker for dimension/variant
+  # processing, keeping libvips work off the upload request. The upload temp
+  # file is consumed once this request returns, so copy it to a stable temp path
+  # the worker can read.
   # sobelow_skip ["Traversal.FileModule"]
-  defp store_variants(files, ext) do
-    Map.new(files, fn %{label: label, path: tmp, width: w, height: h} ->
-      key = Storage.generate_key("#{label}#{ext}")
-      {:ok, ^key} = Storage.store(key, tmp)
-      File.rm(tmp)
-      {label, %{"key" => key, "url" => Storage.url(key), "width" => w, "height" => h}}
-    end)
+  defp enqueue_processing(item, source_path, ext) do
+    tmp = Path.join(System.tmp_dir!(), "kiln-process-#{Ecto.UUID.generate()}#{ext}")
+    File.cp!(source_path, tmp)
+
+    %{media_item_id: item.id, source_path: tmp, ext: ext}
+    |> KilnCMS.Media.VariantWorker.new()
+    |> Oban.insert!()
   end
 
   defp delete_variant_blobs(variants) do
