@@ -1,0 +1,54 @@
+## This file is a PO Template file.
+##
+## "msgid"s here are often extracted from source code.
+## Add new messages manually only if they're dynamic
+## messages that can't be statically extracted.
+##
+## Run "mix gettext.extract" to bring this file up to
+## date. Leave "msgstr"s empty as changing them here has no
+## effect: edit them in PO (.po) files instead.
+#
+msgid ""
+msgstr ""
+
+#: lib/kiln_cms_web/components/core_components.ex:380
+#, elixir-autogen, elixir-format
+msgid "Actions"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:172
+#: lib/kiln_cms_web/components/layouts.ex:187
+#, elixir-autogen, elixir-format
+msgid "Attempting to reconnect"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:117
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
+#, elixir-autogen, elixir-format
+msgid "Blog"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "No posts yet."
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:140
+#, elixir-autogen, elixir-format
+msgid "Powered by KilnCMS."
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:179
+#, elixir-autogen, elixir-format
+msgid "Something went wrong!"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:164
+#, elixir-autogen, elixir-format
+msgid "We can't find the internet"
+msgstr ""
+
+#: lib/kiln_cms_web/components/core_components.ex:81
+#, elixir-autogen, elixir-format
+msgid "close"
+msgstr ""
