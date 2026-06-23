@@ -19,8 +19,11 @@ defmodule KilnCMSWeb.MediaLive do
     {:ok,
      socket
      |> assign(:actor, actor)
+     |> assign(:is_admin, actor.role == :admin)
      |> assign(:query, "")
      |> assign(:selected, nil)
+     |> assign(:view, :library)
+     |> assign(:trashed, [])
      |> assign(:media, list_media(actor))
      |> allow_upload(:media,
        accept: @accept,
@@ -66,6 +69,52 @@ defmodule KilnCMSWeb.MediaLive do
       end
 
     {:noreply, socket |> assign(:selected, nil) |> assign(:media, list_media(actor))}
+  end
+
+  # --- trash -----------------------------------------------------------------
+
+  def handle_event("show_trash", _params, socket) do
+    actor = socket.assigns.actor
+
+    if socket.assigns.is_admin do
+      {:noreply, socket |> assign(:view, :trash) |> assign(:trashed, list_trashed(actor))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("show_library", _params, socket),
+    do: {:noreply, assign(socket, :view, :library)}
+
+  def handle_event("restore", %{"id" => id}, socket) do
+    actor = socket.assigns.actor
+
+    socket =
+      case find_trashed(socket, id) do
+        nil ->
+          put_flash(socket, :error, "That item no longer exists.")
+
+        item ->
+          case CMS.restore_media_item(item, actor: actor) do
+            {:ok, _} -> put_flash(socket, :info, "Restored #{item.filename}.")
+            _ -> put_flash(socket, :error, "You don't have permission to restore media.")
+          end
+      end
+
+    {:noreply,
+     socket |> assign(:trashed, list_trashed(actor)) |> assign(:media, list_media(actor))}
+  end
+
+  def handle_event("purge", %{"id" => id}, socket) do
+    actor = socket.assigns.actor
+
+    socket =
+      case find_trashed(socket, id) do
+        nil -> put_flash(socket, :error, "That item no longer exists.")
+        item -> purge_item(socket, item, actor)
+      end
+
+    {:noreply, assign(socket, :trashed, list_trashed(actor))}
   end
 
   def handle_event("select", %{"id" => id}, socket) do
@@ -154,16 +203,32 @@ defmodule KilnCMSWeb.MediaLive do
     for {_label, %{"key" => key}} <- variants || %{}, do: Storage.delete(key)
   end
 
+  # Soft delete: stamp `archived_at` but keep the row and blobs, so content still
+  # referencing the item keeps working and an admin can restore it from trash.
   defp delete_item(socket, item, actor) do
     case CMS.destroy_media_item(item, actor: actor) do
+      :ok -> put_flash(socket, :info, "Moved #{item.filename} to trash.")
+      _ -> put_flash(socket, :error, "You don't have permission to delete media.")
+    end
+  end
+
+  # Permanent delete: drop the row and reclaim the original + variant blobs.
+  defp purge_item(socket, item, actor) do
+    case CMS.purge_media_item(item, actor: actor) do
       :ok ->
         if item.storage_key, do: Storage.delete(item.storage_key)
         delete_variant_blobs(item.variants)
-        put_flash(socket, :info, "Deleted #{item.filename}.")
+        put_flash(socket, :info, "Permanently deleted #{item.filename}.")
 
       _ ->
         put_flash(socket, :error, "You don't have permission to delete media.")
     end
+  end
+
+  defp find_trashed(socket, id), do: Enum.find(socket.assigns.trashed, &(&1.id == id))
+
+  defp list_trashed(actor) do
+    CMS.list_trashed_media_items!(actor: actor, query: [sort: [updated_at: :desc]])
   end
 
   # The thumbnail to show in the grid — the small variant when available, else
@@ -213,12 +278,46 @@ defmodule KilnCMSWeb.MediaLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-8">
-        <div>
-          <h1 class="text-2xl font-semibold">Media library</h1>
-          <p class="text-sm text-base-content/70">Upload and manage images.</p>
+        <div class="flex items-end justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-semibold">Media library</h1>
+            <p class="text-sm text-base-content/70">Upload and manage images.</p>
+          </div>
+          <div :if={@is_admin} class="flex gap-1 text-sm">
+            <button
+              type="button"
+              phx-click="show_library"
+              class={[
+                "rounded px-3 py-1.5",
+                @view == :library && "bg-base-200 font-medium",
+                @view != :library && "text-base-content/60 hover:bg-base-200"
+              ]}
+            >
+              Library
+            </button>
+            <button
+              type="button"
+              phx-click="show_trash"
+              class={[
+                "rounded px-3 py-1.5",
+                @view == :trash && "bg-base-200 font-medium",
+                @view != :trash && "text-base-content/60 hover:bg-base-200"
+              ]}
+            >
+              Trash
+            </button>
+          </div>
         </div>
 
-        <form id="upload-form" phx-change="validate" phx-submit="save" class="space-y-4">
+        <.trash_panel :if={@view == :trash} items={@trashed} />
+
+        <form
+          :if={@view == :library}
+          id="upload-form"
+          phx-change="validate"
+          phx-submit="save"
+          class="space-y-4"
+        >
           <div
             class="rounded-lg border-2 border-dashed border-base-content/20 p-8 text-center"
             phx-drop-target={@uploads.media.ref}
@@ -270,7 +369,7 @@ defmodule KilnCMSWeb.MediaLive do
           </.button>
         </form>
 
-        <div>
+        <div :if={@view == :library}>
           <div class="mb-3 flex items-center justify-between gap-4">
             <h2 class="text-lg font-medium">Library ({length(@visible)})</h2>
             <form :if={@media != []} id="media-filter" phx-change="search">
@@ -332,6 +431,55 @@ defmodule KilnCMSWeb.MediaLive do
 
       <.media_detail :if={@selected} item={@selected} />
     </Layouts.app>
+    """
+  end
+
+  attr :items, :list, required: true
+
+  # Trashed (soft-deleted) media: restore brings an item back to the library;
+  # delete permanently purges the row and reclaims its storage blobs.
+  defp trash_panel(assigns) do
+    ~H"""
+    <div>
+      <h2 class="mb-3 text-lg font-medium">Trash ({length(@items)})</h2>
+      <p :if={@items == []} class="text-sm text-base-content/60">Trash is empty.</p>
+      <ul
+        :if={@items != []}
+        class="divide-y divide-base-content/10 rounded border border-base-content/10"
+      >
+        <li :for={item <- @items} id={"trash-#{item.id}"} class="flex items-center gap-4 p-3">
+          <img
+            src={thumb_src(item)}
+            alt={item.alt || item.filename}
+            loading="lazy"
+            class="size-12 shrink-0 rounded object-cover"
+          />
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-medium">{item.filename}</p>
+            <p class="text-xs text-base-content/50">
+              deleted {Calendar.strftime(item.updated_at, "%Y-%m-%d %H:%M")}
+            </p>
+          </div>
+          <button
+            type="button"
+            phx-click="restore"
+            phx-value-id={item.id}
+            class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
+          >
+            Restore
+          </button>
+          <button
+            type="button"
+            phx-click="purge"
+            phx-value-id={item.id}
+            data-confirm={"Permanently delete #{item.filename}? This can't be undone."}
+            class="rounded border border-error/40 px-3 py-1 text-xs text-error hover:bg-error/10"
+          >
+            Delete permanently
+          </button>
+        </li>
+      </ul>
+    </div>
     """
   end
 

@@ -170,6 +170,15 @@ defmodule KilnCMS.CMS.Content do
       postgres do
         table unquote(table)
         repo KilnCMS.Repo
+
+        # GIN functional index backing the `:search` action — its expression
+        # matches the `to_tsvector(...)` in that action's filter exactly so the
+        # planner can use it instead of scanning every row.
+        custom_indexes do
+          index ["to_tsvector('english', coalesce(search_text, ''))"],
+            name: unquote("#{table}_search_text_gin_index"),
+            using: "gin"
+        end
       end
 
       actions do
@@ -221,6 +230,14 @@ defmodule KilnCMS.CMS.Content do
                      ^arg(:query)
                    )
                  )
+
+          # Most relevant first (ts_rank), newest as the tiebreak. The rank
+          # calculation takes the same query, threaded through at runtime.
+          prepare fn query, _context ->
+            q = Ash.Query.get_argument(query, :query)
+
+            Ash.Query.sort(query, [{:search_rank, {%{query: q}, :desc}}, {:inserted_at, :desc}])
+          end
         end
 
         update :submit_for_review do
@@ -417,6 +434,21 @@ defmodule KilnCMS.CMS.Content do
         # Total word count across the embedded block tree.
         calculate :word_count, :integer, KilnCMS.CMS.Calculations.WordCount do
           public? true
+        end
+
+        # Full-text relevance of a row against a query — higher is more
+        # relevant. Used to order the `:search` action; the `query` argument is
+        # the same term that action filters on. Internal (sorting only).
+        calculate :search_rank,
+                  :float,
+                  expr(
+                    fragment(
+                      "ts_rank(to_tsvector('english', coalesce(?, '')), plainto_tsquery('english', ?))",
+                      ^ref(:search_text),
+                      ^arg(:query)
+                    )
+                  ) do
+          argument :query, :string, allow_nil?: false
         end
       end
 

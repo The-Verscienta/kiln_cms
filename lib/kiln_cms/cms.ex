@@ -72,6 +72,9 @@ defmodule KilnCMS.CMS do
       define :create_media_item, action: :create
       define :update_media_item, action: :update
       define :destroy_media_item, action: :destroy
+      define :list_trashed_media_items, action: :trashed
+      define :restore_media_item, action: :restore
+      define :purge_media_item, action: :purge
     end
 
     resource KilnCMS.CMS.WebhookEndpoint do
