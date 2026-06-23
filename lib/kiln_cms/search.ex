@@ -45,24 +45,31 @@ defmodule KilnCMS.Search do
   """
   @spec hybrid(:page | :post, String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
-    {keyword_fun, semantic_fun} = legs(type)
+    resource = resource_for(type)
     read_opts = Keyword.take(opts, [:actor, :authorize?])
+    locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     limit = Keyword.get(opts, :limit, 20)
     k = Keyword.get(opts, :k, @rrf_k)
 
-    keyword = query |> keyword_fun.(read_opts) |> Enum.take(@hybrid_candidates)
-    semantic = query |> semantic_fun.(read_opts) |> Enum.take(@hybrid_candidates)
+    keyword = run_leg(resource, :search, query, locale, read_opts)
+    semantic = run_leg(resource, :search_semantic, query, locale, read_opts)
 
     [keyword, semantic]
     |> reciprocal_rank_fusion(k)
     |> Enum.take(limit)
   end
 
-  defp legs(:page),
-    do: {&KilnCMS.CMS.search_pages!/2, &KilnCMS.CMS.semantic_search_pages!/2}
+  defp resource_for(:page), do: KilnCMS.CMS.Page
+  defp resource_for(:post), do: KilnCMS.CMS.Post
 
-  defp legs(:post),
-    do: {&KilnCMS.CMS.search_posts!/2, &KilnCMS.CMS.semantic_search_posts!/2}
+  # Run one search leg via `for_read` so both the query and locale arguments can
+  # be passed (the code interfaces only take `query` positionally).
+  defp run_leg(resource, action, query, locale, read_opts) do
+    resource
+    |> Ash.Query.for_read(action, %{query: query, locale: locale})
+    |> Ash.read!(read_opts)
+    |> Enum.take(@hybrid_candidates)
+  end
 
   # RRF: each list contributes 1/(k + rank) to a record's score; records are
   # deduplicated by id and returned sorted by summed score, highest first.
