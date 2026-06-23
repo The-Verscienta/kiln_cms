@@ -45,6 +45,30 @@ defmodule KilnCMS.CMS.ContentSearchTest do
     assert page.id in ids
   end
 
+  test "orders results by relevance (ts_rank), strongest match first" do
+    admin = admin()
+    term = "otter#{System.unique_integer([:positive])}"
+
+    # Weak match: the term appears once.
+    weak = CMS.create_page!(%{title: "A page mentioning an #{term}", slug: slug()}, actor: admin)
+
+    # Strong match: the term saturates the title and body.
+    strong =
+      CMS.create_page!(
+        %{
+          title: "#{term} #{term} #{term}",
+          slug: slug(),
+          blocks: [
+            %{type: :rich_text, content: "<p>#{term} #{term} #{term} #{term}</p>", order: 0}
+          ]
+        },
+        actor: admin
+      )
+
+    # The unique term matches only these two pages, ranked by ts_rank.
+    assert [strong.id, weak.id] == CMS.search_pages!(term, actor: admin) |> Enum.map(& &1.id)
+  end
+
   test "returns nothing for a non-matching query" do
     admin = admin()
     CMS.create_page!(%{title: "Ordinary page", slug: slug()}, actor: admin)
