@@ -254,6 +254,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SanitizeBlocks
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+
+          # Edits to already-published content fire a `<type>.updated` webhook;
+          # `only_when: :published` keeps draft edits and autosaves silent.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
         end
 
         # Full-text search over the denormalized `search_text`. Goes through the

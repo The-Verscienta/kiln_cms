@@ -7,6 +7,11 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
       change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
 
   Defaults to `"published"`.
+
+  Pass `only_when: :published` to dispatch only when the resulting record is in
+  the `:published` state. This is used by the generic `update` action so edits
+  to drafts (and autosaves) stay silent, while edits to live content emit a
+  `<type>.updated` event.
   """
   use Ash.Resource.Change
 
@@ -16,12 +21,20 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   @impl true
   def change(changeset, opts, _context) do
     event = Keyword.get(opts, :event, "published")
+    only_when = Keyword.get(opts, :only_when)
 
     Ash.Changeset.after_action(changeset, fn _changeset, record ->
-      Webhooks.dispatch("#{event_prefix(record)}.#{event}", ContentSerializer.to_map(record))
+      if dispatch?(only_when, record) do
+        Webhooks.dispatch("#{event_prefix(record)}.#{event}", ContentSerializer.to_map(record))
+      end
+
       {:ok, record}
     end)
   end
+
+  defp dispatch?(nil, _record), do: true
+  defp dispatch?(:published, %{state: :published}), do: true
+  defp dispatch?(:published, _record), do: false
 
   # Derive the event namespace from the content type's module name
   # (`KilnCMS.CMS.Page` -> `"page"`), so every content type — including ones

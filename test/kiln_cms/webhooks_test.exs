@@ -78,6 +78,42 @@ defmodule KilnCMS.WebhooksTest do
     assert "page.unpublished" in events
   end
 
+  test "editing published content dispatches an updated event" do
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Live", slug: slug()}, actor: admin)
+    page = CMS.publish_page!(page, %{}, actor: admin)
+    CMS.update_page!(page, %{title: "Live (edited)"}, actor: admin)
+    Oban.drain_queue(queue: :default, with_recursion: true)
+
+    events =
+      Stream.repeatedly(fn ->
+        receive do
+          {:delivered, _, _, headers, _} -> headers["x-kilncms-event"]
+        after
+          0 -> nil
+        end
+      end)
+      |> Enum.take_while(&(&1 != nil))
+
+    assert "page.published" in events
+    assert "page.updated" in events
+  end
+
+  test "editing a draft does not dispatch an updated event" do
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Draft", slug: slug()}, actor: admin)
+    CMS.update_page!(page, %{title: "Draft (edited)"}, actor: admin)
+    Oban.drain_queue(queue: :default, with_recursion: true)
+
+    refute_received {:delivered, _, _, _, _}
+  end
+
   test "inactive endpoints receive nothing" do
     stub_capture()
     admin = admin()
@@ -99,6 +135,15 @@ defmodule KilnCMS.WebhooksTest do
     publish_page(admin)
 
     refute_received {:delivered, _, _, _, _}
+  end
+
+  test "selectable events include every content type crossed with each verb" do
+    events = KilnCMS.CMS.WebhookEndpoint.events()
+
+    for verb <- ~w(published unpublished updated) do
+      assert "page.#{verb}" in events
+      assert "post.#{verb}" in events
+    end
   end
 
   test "webhook endpoints are admin-only" do
