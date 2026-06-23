@@ -108,6 +108,10 @@ defmodule KilnCMSWeb.Router do
       live "/editor", EditorLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
       live "/editor/trash", TrashLive, :index
+      # Generic editor route — works for any content type (incl. ones generated
+      # by `mix kiln.gen.content`). The `:page`/`:post` routes are kept as
+      # backward-compatible aliases.
+      live "/editor/content/:type/:id", ContentEditorLive, :content
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post
       live "/editor/preview/:kind/:id", PreviewLive, :show
