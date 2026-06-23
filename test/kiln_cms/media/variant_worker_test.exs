@@ -1,7 +1,8 @@
 defmodule KilnCMS.Media.VariantWorkerTest do
   @moduledoc """
-  The background worker reads an uploaded original, generates + stores responsive
-  variants, and writes the dimensions/variant map back onto the MediaItem.
+  The background worker re-fetches the stored original (`Storage.fetch/1`),
+  generates + stores responsive variants, writes the dimensions/variant map back
+  onto the MediaItem, and broadcasts so the library can refresh.
   """
   # async: false — points Storage.Local at a temp dir via the global app env.
   use KilnCMS.DataCase, async: false
@@ -9,6 +10,7 @@ defmodule KilnCMS.Media.VariantWorkerTest do
 
   alias KilnCMS.CMS
   alias KilnCMS.Media.VariantWorker
+  alias KilnCMS.Storage
 
   setup do
     root = Path.join(System.tmp_dir!(), "kiln_variants_#{System.unique_integer([:positive])}")
@@ -23,31 +25,39 @@ defmodule KilnCMS.Media.VariantWorkerTest do
     %{root: root}
   end
 
-  defp png(width, height) do
-    path = Path.join(System.tmp_dir!(), "vw-#{System.unique_integer([:positive])}.png")
-    {:ok, image} = Image.new(width, height, color: :green)
-    {:ok, _} = Image.write(image, path)
-    path
+  # Write `content` to a temp file, store it under a fresh key, return the key.
+  defp store(write_fun, ext) do
+    src = Path.join(System.tmp_dir!(), "vw-src-#{System.unique_integer([:positive])}#{ext}")
+    write_fun.(src)
+    key = "orig-#{System.unique_integer([:positive])}#{ext}"
+    {:ok, ^key} = Storage.store(key, src)
+    File.rm(src)
+    key
   end
 
-  defp media_item do
+  defp store_png(width, height) do
+    store(
+      fn path ->
+        {:ok, image} = Image.new(width, height, color: :green)
+        {:ok, _} = Image.write(image, path)
+      end,
+      ".png"
+    )
+  end
+
+  defp media_item(key) do
     Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
       filename: "orig.png",
-      url: "/uploads/orig.png",
-      storage_key: "orig.png"
+      url: "/uploads/#{key}",
+      storage_key: key
     })
   end
 
-  test "generates and stores variants, writing dimensions back", %{root: root} do
-    item = media_item()
-    source = png(1200, 800)
+  test "fetches the original, stores variants, writes dimensions, broadcasts", %{root: root} do
+    item = media_item(store_png(1200, 800))
+    Phoenix.PubSub.subscribe(KilnCMS.PubSub, VariantWorker.topic())
 
-    assert :ok =
-             perform_job(VariantWorker, %{
-               media_item_id: item.id,
-               source_path: source,
-               ext: ".png"
-             })
+    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
 
     reloaded = CMS.get_media_item!(item.id, authorize?: false)
     assert reloaded.width == 1200
@@ -60,38 +70,29 @@ defmodule KilnCMS.Media.VariantWorkerTest do
     assert File.exists?(Path.join(root, thumb["key"]))
     assert File.exists?(Path.join(root, medium["key"]))
 
-    # The temp source is cleaned up.
-    refute File.exists?(source)
+    assert_receive {:media_processed, processed_id}
+    assert processed_id == item.id
   end
 
-  test "is a graceful no-op for a non-raster upload" do
-    item = media_item()
-    source = Path.join(System.tmp_dir!(), "vw-#{System.unique_integer([:positive])}.txt")
-    File.write!(source, "not an image")
+  test "is a graceful no-op for a non-raster original" do
+    item = media_item(store(&File.write!(&1, "not an image"), ".txt"))
 
-    assert :ok =
-             perform_job(VariantWorker, %{
-               media_item_id: item.id,
-               source_path: source,
-               ext: ".txt"
-             })
+    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
 
     reloaded = CMS.get_media_item!(item.id, authorize?: false)
     assert reloaded.width == nil
     assert reloaded.variants == %{}
-    refute File.exists?(source)
   end
 
-  test "discards the job (and temp file) when the MediaItem is gone" do
-    source = png(1200, 800)
+  test "discards the job when the MediaItem is gone" do
+    assert :ok = perform_job(VariantWorker, %{media_item_id: Ecto.UUID.generate()})
+  end
 
-    assert :ok =
-             perform_job(VariantWorker, %{
-               media_item_id: Ecto.UUID.generate(),
-               source_path: source,
-               ext: ".png"
-             })
+  test "is a no-op when the stored original is missing" do
+    # MediaItem points at a key that was never stored.
+    item = media_item("orig-#{System.unique_integer([:positive])}.png")
 
-    refute File.exists?(source)
+    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
   end
 end

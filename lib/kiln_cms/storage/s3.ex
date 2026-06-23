@@ -53,6 +53,14 @@ defmodule KilnCMS.Storage.S3 do
   end
 
   @impl true
+  def fetch(key) do
+    case bucket() |> ExAws.S3.get_object(key) |> ExAws.request() do
+      {:ok, %{body: body}} -> {:ok, body}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
   def delete(key) do
     # S3 deletes are idempotent — a missing object still returns 2xx.
     case bucket() |> ExAws.S3.delete_object(key) |> ExAws.request() do
