@@ -37,6 +37,16 @@ defmodule KilnCMS.CMS.MediaItem do
   postgres do
     table "media_items"
     repo KilnCMS.Repo
+
+    # GIN index backing the `:search` action — its expression matches the
+    # `to_tsvector(...)` over filename/alt/caption in that action's filter.
+    custom_indexes do
+      index [
+              "to_tsvector('english', coalesce(filename, '') || ' ' || coalesce(alt, '') || ' ' || coalesce(caption, ''))"
+            ],
+            name: "media_items_search_gin_index",
+            using: "gin"
+    end
   end
 
   actions do
@@ -76,6 +86,31 @@ defmodule KilnCMS.CMS.MediaItem do
     # Permanent hard delete (bypasses archival). The caller is responsible for
     # removing the storage blobs; admin-only via the destroy policy.
     destroy :purge do
+    end
+
+    # Full-text search over filename + alt + caption. World-readable like the
+    # default read (media is referenced by published content).
+    read :search do
+      argument :query, :string, allow_nil?: false
+
+      filter expr(
+               fragment(
+                 "to_tsvector('english', coalesce(?, '') || ' ' || coalesce(?, '') || ' ' || coalesce(?, '')) @@ plainto_tsquery('english', ?)",
+                 ^ref(:filename),
+                 ^ref(:alt),
+                 ^ref(:caption),
+                 ^arg(:query)
+               )
+             )
+
+      prepare fn query, _context ->
+        q = Ash.Query.get_argument(query, :query)
+
+        Ash.Query.sort(query, [
+          {:search_rank, {%{query: q}, :desc}},
+          {:inserted_at, :desc}
+        ])
+      end
     end
   end
 
@@ -149,6 +184,24 @@ defmodule KilnCMS.CMS.MediaItem do
     has_many :featured_posts, KilnCMS.CMS.Post do
       destination_attribute :featured_image_id
       public? true
+    end
+  end
+
+  calculations do
+    # Full-text relevance for the `:search` action — ts_rank over the same
+    # filename/alt/caption tsvector the action filters on. Internal.
+    calculate :search_rank,
+              :float,
+              expr(
+                fragment(
+                  "ts_rank(to_tsvector('english', coalesce(?, '') || ' ' || coalesce(?, '') || ' ' || coalesce(?, '')), plainto_tsquery('english', ?))",
+                  ^ref(:filename),
+                  ^ref(:alt),
+                  ^ref(:caption),
+                  ^arg(:query)
+                )
+              ) do
+      argument :query, :string, allow_nil?: false
     end
   end
 end

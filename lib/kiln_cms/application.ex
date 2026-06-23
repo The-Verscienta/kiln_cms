@@ -32,7 +32,7 @@ defmodule KilnCMS.Application do
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
-    Supervisor.start_link(children ++ embedding_children(), opts)
+    Supervisor.start_link(children ++ embedding_children() ++ reranker_children(), opts)
   end
 
   # The embedding serving is only started when semantic search is enabled with
@@ -45,6 +45,22 @@ defmodule KilnCMS.Application do
         {Nx.Serving,
          serving: KilnCMS.Search.Serving.build(),
          name: KilnCMS.Search.Serving.name(),
+         batch_timeout: 50}
+      ]
+    else
+      []
+    end
+  end
+
+  # The reranker serving is only started when reranking is enabled with the
+  # local Bumblebee adapter (same gating as the embedder).
+  defp reranker_children do
+    if KilnCMS.Search.rerank?() and
+         KilnCMS.Search.reranker() == KilnCMS.Search.Reranker.Bumblebee do
+      [
+        {Nx.Serving,
+         serving: KilnCMS.Search.RerankerServing.build(),
+         name: KilnCMS.Search.RerankerServing.name(),
          batch_timeout: 50}
       ]
     else
