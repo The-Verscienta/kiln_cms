@@ -3,11 +3,20 @@ defmodule KilnCMSWeb.StructuredData do
   Builds schema.org JSON-LD for published content, embedded in the page head by
   `ContentController` for richer search/social results.
 
-  Posts map to `BlogPosting`, every other content type to `WebPage`. The map is
-  serialized with `Jason.encode!(escape: :html_safe)` at the call site so it is
-  safe to inline in a `<script type="application/ld+json">` block.
+  Posts map to `BlogPosting`, every other content type to `WebPage`. A content
+  page emits the main entity plus a `BreadcrumbList`; the blog index emits a
+  `CollectionPage`. The result is serialized with
+  `Jason.encode!(escape: :html_safe)` at the call site so it is safe to inline in
+  a `<script type="application/ld+json">` block.
   """
   alias KilnCMS.CMS.ContentTypes
+
+  @doc """
+  The JSON-LD for a content page: the main entity (`BlogPosting`/`WebPage`) plus
+  a `BreadcrumbList`, as a list of schema.org objects.
+  """
+  @spec document(struct(), ContentTypes.t()) :: [map()]
+  def document(record, ct), do: [build(record, ct), breadcrumbs(record, ct)]
 
   @doc """
   Returns the schema.org map for `record` (a published content struct) given its
@@ -29,6 +38,62 @@ defmodule KilnCMSWeb.StructuredData do
     |> maybe_put("image", record.seo_image)
     |> maybe_put("datePublished", iso8601(record.published_at))
     |> maybe_put("dateModified", iso8601(record.updated_at))
+    |> maybe_put("author", author(record))
+  end
+
+  @doc "schema.org `CollectionPage` (+ `ItemList`) for the blog index `posts`."
+  @spec blog([struct()]) :: map()
+  def blog(posts) do
+    blog_url = "#{base_url()}/blog"
+
+    %{
+      "@context" => "https://schema.org",
+      "@type" => "CollectionPage",
+      "name" => "Blog",
+      "url" => blog_url,
+      "mainEntity" => %{
+        "@type" => "ItemList",
+        "itemListElement" => list_items(posts, &"#{base_url()}/blog/#{&1.slug}")
+      }
+    }
+  end
+
+  # Author Person, only when the (loaded) author has a display name.
+  defp author(%{author: %{name: name}}) when is_binary(name) and name != "",
+    do: %{"@type" => "Person", "name" => name}
+
+  defp author(_record), do: nil
+
+  # Home › [Blog ›] Title — search-engine breadcrumb trail, not localized UI.
+  defp breadcrumbs(record, ct) do
+    crumbs =
+      [{"Home", base_url()}] ++
+        if(ct.type == :post, do: [{"Blog", "#{base_url()}/blog"}], else: []) ++
+        [{record.title, url(record, ct)}]
+
+    %{
+      "@context" => "https://schema.org",
+      "@type" => "BreadcrumbList",
+      "itemListElement" =>
+        crumbs
+        |> Enum.with_index(1)
+        |> Enum.map(fn {{name, url}, position} ->
+          %{"@type" => "ListItem", "position" => position, "name" => name, "item" => url}
+        end)
+    }
+  end
+
+  defp list_items(records, url_fun) do
+    records
+    |> Enum.with_index(1)
+    |> Enum.map(fn {record, position} ->
+      %{
+        "@type" => "ListItem",
+        "position" => position,
+        "name" => record.title,
+        "url" => url_fun.(record)
+      }
+    end)
   end
 
   defp schema_type(%{type: :post}), do: "BlogPosting"

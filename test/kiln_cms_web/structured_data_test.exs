@@ -66,4 +66,41 @@ defmodule KilnCMSWeb.StructuredDataTest do
     assert rich["description"] == "Desc"
     assert rich["image"] == "https://cdn/x.png"
   end
+
+  test "includes a Person author only when the loaded author has a name" do
+    named = StructuredData.build(post(%{author: %{name: "Jane Doe"}}), ContentTypes.get(:post))
+    assert named["author"] == %{"@type" => "Person", "name" => "Jane Doe"}
+
+    # Unloaded author (struct default) and a blank name are both omitted.
+    refute Map.has_key?(StructuredData.build(post(), ContentTypes.get(:post)), "author")
+
+    refute Map.has_key?(
+             StructuredData.build(post(%{author: %{name: nil}}), ContentTypes.get(:post)),
+             "author"
+           )
+  end
+
+  test "document/2 appends a BreadcrumbList; posts carry a Blog crumb" do
+    [main, crumbs] = StructuredData.document(post(), ContentTypes.get(:post))
+    assert main["@type"] == "BlogPosting"
+    assert crumbs["@type"] == "BreadcrumbList"
+    assert Enum.map(crumbs["itemListElement"], & &1["name"]) == ["Home", "Blog", "Hello"]
+    assert Enum.map(crumbs["itemListElement"], & &1["position"]) == [1, 2, 3]
+
+    [_main, page_crumbs] = StructuredData.document(page(), ContentTypes.get(:page))
+    assert Enum.map(page_crumbs["itemListElement"], & &1["name"]) == ["Home", "About"]
+  end
+
+  test "blog/1 emits a CollectionPage with a positioned ItemList" do
+    data =
+      StructuredData.blog([post(%{title: "P1", slug: "p1"}), post(%{title: "P2", slug: "p2"})])
+
+    assert data["@type"] == "CollectionPage"
+    assert data["url"] == "http://localhost:4000/blog"
+
+    items = data["mainEntity"]["itemListElement"]
+    assert Enum.map(items, & &1["name"]) == ["P1", "P2"]
+    assert Enum.map(items, & &1["position"]) == [1, 2]
+    assert hd(items)["url"] == "http://localhost:4000/blog/p1"
+  end
 end
