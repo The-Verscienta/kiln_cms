@@ -100,6 +100,9 @@ defmodule KilnCMSWeb.Layouts do
   Minimal chrome for the public delivery frontend (published Pages/Posts and the
   blog index). Deliberately free of the authoring nav.
   """
+  # Links to the current page in each available locale (`%{locale, href,
+  # current}`); rendered as a language switcher when there's more than one.
+  attr :locale_links, :list, default: []
   slot :inner_block, required: true
 
   def public(assigns) do
@@ -111,7 +114,23 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
-          <a href="/blog" class="hover:text-base-content">Blog</a>
+          <a href="/blog" class="hover:text-base-content">{gettext("Blog")}</a>
+          <span :if={length(@locale_links) > 1} class="flex items-center gap-2" aria-label="Language">
+            <a
+              :for={link <- @locale_links}
+              href={link.href}
+              hreflang={link.locale}
+              class={[
+                "uppercase",
+                if(link.current,
+                  do: "font-semibold text-base-content",
+                  else: "hover:text-base-content"
+                )
+              ]}
+            >
+              {link.locale}
+            </a>
+          </span>
         </nav>
       </div>
     </header>
@@ -121,7 +140,7 @@ defmodule KilnCMSWeb.Layouts do
     </main>
 
     <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/50 sm:px-6 lg:px-8">
-      Powered by KilnCMS.
+      {gettext("Powered by KilnCMS.")}
     </footer>
     """
   end

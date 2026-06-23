@@ -73,4 +73,33 @@ defmodule KilnCMSWeb.ContentI18nTest do
     assert xml =~ "/#{s}</loc>"
     assert xml =~ "/fr/#{s}</loc>"
   end
+
+  test "the UI chrome is localized via Gettext for a non-default locale", %{conn: conn} do
+    s = slug()
+    page(%{title: "À propos", slug: s, locale: "fr"})
+
+    html = conn |> get("/fr/#{s}") |> html_response(200)
+
+    # Translations from priv/gettext/fr.
+    assert html =~ "Blogue"
+    assert html =~ "Propulsé par KilnCMS."
+    refute html =~ "Powered by KilnCMS."
+  end
+
+  test "a language switcher is shown when translations exist", %{conn: conn} do
+    s = slug()
+    page(%{title: "About", slug: s, locale: "en"})
+    page(%{title: "À propos", slug: s, locale: "fr"})
+
+    html = conn |> get(~p"/#{s}") |> html_response(200)
+    assert html =~ ~s(aria-label="Language")
+  end
+
+  test "no language switcher for single-locale content", %{conn: conn} do
+    s = slug()
+    page(%{title: "About", slug: s, locale: "en"})
+
+    html = conn |> get(~p"/#{s}") |> html_response(200)
+    refute html =~ ~s(aria-label="Language")
+  end
 end
