@@ -12,6 +12,9 @@ config :kiln_cms, KilnCMS.Storage.S3,
   public_base_url: "https://cdn.test/kiln-test",
   req_options: [plug: {Req.Test, KilnCMS.Storage.S3}]
 
+# Extra locales so the locale-aware delivery tests have something to switch to.
+config :kiln_cms, :i18n, default_locale: "en", locales: ["en", "fr", "es"]
+
 config :kiln_cms, token_signing_secret: "DxVOH7q7LauTIqk0KY8Mj2auM6QzdpHw"
 config :bcrypt_elixir, log_rounds: 1
 config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true

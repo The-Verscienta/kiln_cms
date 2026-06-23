@@ -22,7 +22,8 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Page do
       define :list_pages, action: :read
       define :get_page, action: :read, get_by: [:id]
-      define :get_published_page_by_slug, action: :public_by_slug, args: [:slug]
+      define :get_published_page_by_slug, action: :public_by_slug, args: [:slug, :locale]
+      define :list_page_translations, action: :published_translations, args: [:slug]
       define :search_pages, action: :search, args: [:query]
       define :semantic_search_pages, action: :search_semantic, args: [:query]
       define :create_page, action: :create
@@ -46,7 +47,8 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Post do
       define :list_posts, action: :read
       define :get_post, action: :read, get_by: [:id]
-      define :get_published_post_by_slug, action: :public_by_slug, args: [:slug]
+      define :get_published_post_by_slug, action: :public_by_slug, args: [:slug, :locale]
+      define :list_post_translations, action: :published_translations, args: [:slug]
       define :list_published_posts, action: :published
       define :search_posts, action: :search, args: [:query]
       define :semantic_search_posts, action: :search_semantic, args: [:query]

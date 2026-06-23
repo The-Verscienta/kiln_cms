@@ -100,10 +100,15 @@ defmodule KilnCMS.CMS.ContentTypes do
   # Non-bang fetch by id (`{:ok, record} | {:error, _}`), e.g. for preview links.
   def get_record(type, id, opts \\ []), do: call("get_#{atom(type)}", [id, opts])
 
-  # Public delivery: fetch a single published record by slug (returns nil rather
-  # than raising on a miss).
-  def get_published_by_slug(type, slug, opts \\ []) do
-    call("get_published_#{atom(type)}_by_slug!", [slug, opts])
+  # Public delivery: fetch a single published record by slug + locale (returns
+  # nil rather than raising on a miss).
+  def get_published_by_slug(type, slug, locale, opts \\ []) do
+    call("get_published_#{atom(type)}_by_slug!", [slug, locale, opts])
+  end
+
+  # Every published locale variant of a slug (for hreflang / language switching).
+  def list_translations(type, slug, opts \\ []) do
+    call("list_#{atom(type)}_translations!", [slug, opts])
   end
 
   def create!(type, attrs, opts \\ []), do: call("create_#{atom(type)}!", [attrs, opts])

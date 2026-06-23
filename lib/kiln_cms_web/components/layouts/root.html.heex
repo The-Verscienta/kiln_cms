@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang={assigns[:locale] || "en"}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -11,6 +11,13 @@
     <meta :if={assigns[:meta_description]} property="og:description" content={@meta_description} />
     <meta :if={assigns[:og_image]} property="og:image" content={@og_image} />
     <meta property="og:type" content={assigns[:og_type] || "website"} />
+    <meta :if={assigns[:locale]} property="og:locale" content={@locale} />
+    <link
+      :for={alt <- assigns[:hreflang] || []}
+      rel="alternate"
+      hreflang={alt.hreflang}
+      href={alt.href}
+    />
     {assigns[:json_ld]}
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
