@@ -132,7 +132,7 @@ defmodule KilnCMS.MixProject do
       precommit: [
         "compile --warnings-as-errors",
         "deps.unlock --unused",
-        "format",
+        "format --check-formatted",
         "credo --strict",
         "sobelow --config",
         "test"
