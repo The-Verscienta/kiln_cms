@@ -9,8 +9,6 @@ defmodule KilnCMSWeb.LiveUserAuth do
 
   alias KilnCMS.I18n
 
-  alias KilnCMS.I18n
-
   # This is used for nested liveviews to fetch the current user.
   # To use, place the following at the top of that liveview:
   # on_mount {KilnCMSWeb.LiveUserAuth, :current_user}
