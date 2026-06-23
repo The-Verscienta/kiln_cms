@@ -98,10 +98,24 @@ defmodule KilnCMS.CMS.Content do
 
       graphql do
         type unquote(type)
+
+        # Headless search surface (D7 — exposed deliberately). Keyword + semantic
+        # search and typo-tolerant title autocomplete, per content type.
+        queries do
+          list unquote(:"search_#{type}s"), :search
+          list unquote(:"semantic_search_#{type}s"), :search_semantic
+          list unquote(:"autocomplete_#{type}s"), :autocomplete
+        end
       end
 
       json_api do
         type unquote(Atom.to_string(type))
+
+        routes do
+          base unquote("/#{type}s")
+          index :search, route: "/search"
+          index :autocomplete, route: "/autocomplete"
+        end
       end
 
       paper_trail do
@@ -185,6 +199,13 @@ defmodule KilnCMS.CMS.Content do
           index ["embedding vector_cosine_ops"],
             name: unquote("#{table}_embedding_hnsw_index"),
             using: "hnsw"
+
+          # Trigram GIN index on title for typo-tolerant autocomplete (the `%`
+          # similarity operator + `similarity(...)`). `gin_trgm_ops` opclass is
+          # carried through via the column string.
+          index ["title gin_trgm_ops"],
+            name: unquote("#{table}_title_trgm_index"),
+            using: "gin"
         end
       end
 
@@ -307,6 +328,30 @@ defmodule KilnCMS.CMS.Content do
               # Disabled, or the query couldn't be embedded — no semantic results.
               _ -> Ash.Query.limit(query, 0)
             end
+          end
+        end
+
+        # Typo-tolerant title autocomplete: same-locale rows whose title matches
+        # the prefix (case-insensitive) or is trigram-similar (handles typos),
+        # ordered by similarity, capped at 10. Goes through the read policy.
+        read :autocomplete do
+          argument :prefix, :string, allow_nil?: false
+          argument :locale, :string
+
+          filter expr(
+                   ^ref(:locale) == ^arg(:locale) and
+                     (fragment("? ILIKE ? || '%'", ^ref(:title), ^arg(:prefix)) or
+                        fragment("? <% ?", ^arg(:prefix), ^ref(:title)))
+                 )
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+            prefix = Ash.Query.get_argument(query, :prefix)
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([{:title_similarity, {%{prefix: prefix}, :desc}}])
+            |> Ash.Query.limit(10)
           end
         end
 
@@ -579,6 +624,15 @@ defmodule KilnCMS.CMS.Content do
           argument :locale, :string, allow_nil?: false
           argument :query, :string, allow_nil?: false
           public? true
+        end
+
+        # Word-level trigram similarity of the autocomplete prefix to the title
+        # (0–1, higher is closer) — matches a short query against any word in the
+        # title. Orders the `:autocomplete` action. Internal.
+        calculate :title_similarity,
+                  :float,
+                  expr(fragment("word_similarity(?, ?)", ^arg(:prefix), ^ref(:title))) do
+          argument :prefix, :string, allow_nil?: false
         end
 
         # Cosine distance (pgvector `<=>`) between a row's embedding and the
