@@ -321,7 +321,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [~] SEO fields — `seo_title`, `seo_description`, **`seo_image` (og:image)**, **`canonical_url`** on Page/Post (exposed via the content serializer to preview/webhooks). **Still TODO:** structured data (JSON-LD)
 - [x] Auto-generated sitemap.xml and robots.txt — `SitemapController` (`/sitemap.xml`, `/robots.txt`) lists published pages (`<base>/<slug>`) + posts (`<base>/blog/<slug>`) off the `:public_base_url` config; robots is now served dynamically (removed the static file). Covered by `sitemap_controller_test.exs`
 - [ ] Basic analytics (page view tracking via telemetry + simple dashboard)
-- [ ] Email notifications (Swoosh + Oban) for workflow events
+- [x] Email notifications (Swoosh + Oban) for workflow events — `KilnCMS.Notifications` mirrors the webhook pipeline: a `Changes.NotifyWorkflowEmail` change (on `submit_for_review`/`publish`/`publish_scheduled` for Page+Post) resolves recipients as a system read and enqueues `Notifications.WorkflowMailWorker` Oban jobs. **Submit-for-review** emails every admin (minus the submitter); **publish** emails the author (covers scheduled, actor-less publishing). Swoosh via the existing `KilnCMS.Mailer`. Covered by `notifications_test.exs`. **TODO:** approval-granted/changes-requested events; per-user notification prefs.
 - [ ] Accessibility audit (admin UI)
 - [ ] Theming / white-label potential
 
