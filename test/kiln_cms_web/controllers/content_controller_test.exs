@@ -135,6 +135,23 @@ defmodule KilnCMSWeb.ContentControllerTest do
       # URL is present (slashes are \/-escaped by escape: :html_safe).
       assert html =~ post.slug
     end
+
+    test "emits a Person author and a BreadcrumbList for an authored post", %{conn: conn} do
+      author =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "byline-#{uniq()}@example.com",
+          hashed_password: "x",
+          name: "Jane Doe"
+        })
+
+      post = post(%{title: "Bylined", author_id: author.id})
+
+      html = conn |> get(~p"/blog/#{post.slug}") |> html_response(200)
+
+      assert html =~ ~s("@type":"Person")
+      assert html =~ ~s("name":"Jane Doe")
+      assert html =~ ~s("@type":"BreadcrumbList")
+    end
   end
 
   describe "/blog index" do
@@ -145,6 +162,14 @@ defmodule KilnCMSWeb.ContentControllerTest do
       html = conn |> get(~p"/blog") |> html_response(200)
       assert html =~ "ShownPost"
       refute html =~ "HiddenDraft"
+    end
+
+    test "emits CollectionPage JSON-LD", %{conn: conn} do
+      post(%{title: "Indexed"})
+
+      html = conn |> get(~p"/blog") |> html_response(200)
+      assert html =~ ~s("@type":"CollectionPage")
+      assert html =~ ~s("@type":"ItemList")
     end
   end
 

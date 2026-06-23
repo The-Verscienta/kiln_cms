@@ -23,7 +23,11 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
 
     fetch =
-      &CMS.get_published_page_by_slug!(slug, &1, not_found_error?: false, authorize?: false)
+      &CMS.get_published_page_by_slug!(slug, &1,
+        not_found_error?: false,
+        authorize?: false,
+        load: [:author]
+      )
 
     case Cache.fetch_published("page", slug, locale, fn -> localized(fetch, locale) end) do
       nil ->
@@ -39,7 +43,11 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
 
     fetch =
-      &CMS.get_published_post_by_slug!(slug, &1, not_found_error?: false, authorize?: false)
+      &CMS.get_published_post_by_slug!(slug, &1,
+        not_found_error?: false,
+        authorize?: false,
+        load: [:author]
+      )
 
     case Cache.fetch_published("post", slug, locale, fn -> localized(fetch, locale) end) do
       nil ->
@@ -60,7 +68,8 @@ defmodule KilnCMSWeb.ContentController do
          fetch =
            &ContentTypes.get_published_by_slug(ct.type, slug, &1,
              not_found_error?: false,
-             authorize?: false
+             authorize?: false,
+             load: [:author]
            ),
          record when not is_nil(record) <-
            Cache.fetch_published(to_string(ct.type), slug, locale, fn ->
@@ -82,6 +91,7 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:page_title, "Blog")
     |> assign(:meta_description, "Latest posts.")
     |> assign(:locale_links, blog_locale_links(locale))
+    |> assign(:json_ld, json_ld_script(StructuredData.blog(posts)))
     |> render(:blog_index, posts: posts)
   end
 
@@ -121,7 +131,7 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:og_type, "article")
     |> assign(:hreflang, hreflang_alternates(ct, translations))
     |> assign(:locale_links, locale_links(ct, translations, record.locale))
-    |> assign(:json_ld, json_ld_script(record, ct))
+    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct)))
     |> render(template, record: record, blocks: blocks(record))
   end
 
@@ -172,8 +182,8 @@ defmodule KilnCMSWeb.ContentController do
   # inside a literal <script> element, so the layout injects this with `{...}`.
   # `escape: :html_safe` escapes `<`/`>`/`&`, so the JSON can't break out of the
   # tag.
-  defp json_ld_script(record, ct) do
-    json = Jason.encode!(StructuredData.build(record, ct), escape: :html_safe)
+  defp json_ld_script(data) do
+    json = Jason.encode!(data, escape: :html_safe)
     Phoenix.HTML.raw(~s(<script type="application/ld+json">#{json}</script>))
   end
 
