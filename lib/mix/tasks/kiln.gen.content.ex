@@ -152,8 +152,11 @@ if Code.ensure_loaded?(Igniter) do
         1. Generate and apply the migration:
              mix ash.codegen add_#{plural} && mix ash.migrate
 
-      It is already taggable and linkable to any other content type (via the
-      shared Tagging / ContentLink tables) — no join tables needed.
+      Then it just works, no further wiring:
+        * Editable in the admin (auto-discovered — appears as "New #{plural}").
+        * Served publicly at /#{plural}/<slug> (and listed in sitemap.xml).
+        * Taggable and linkable to any other content type (shared Tagging /
+          ContentLink tables) — no join tables needed.
 
       Optional follow-ups (reverse navigation + taxonomy counts), if you want
       them, add by hand:
@@ -162,7 +165,6 @@ if Code.ensure_loaded?(Igniter) do
           (source `:tag_id`, destination `:subject_id`) + a `count :#{String.trim_trailing(plural, "s")}_count` aggregate
         * KilnCMS.CMS.MediaItem — `has_many :featured_#{plural}, #{inspect(module)}`
           (destination_attribute `:featured_image_id`)
-        * Wire the type into KilnCMSWeb.ContentEditorLive to edit it in the admin UI.
       """
     end
   end

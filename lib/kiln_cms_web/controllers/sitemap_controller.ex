@@ -1,17 +1,24 @@
 defmodule KilnCMSWeb.SitemapController do
   @moduledoc """
   Auto-generated `sitemap.xml` and `robots.txt` for the public delivery
-  frontend. Lists published Pages (at `<base>/<slug>`) and Posts (at
-  `<base>/blog/<slug>`). The base URL is `:public_base_url` config.
+  frontend. Lists every published content record at its public URL — pages at
+  `<base>/<slug>`, posts at `<base>/blog/<slug>`, and other content types at
+  `<base>/<plural>/<slug>` — discovered through `KilnCMS.CMS.ContentTypes`. The
+  base URL is `:public_base_url` config.
   """
   use KilnCMSWeb, :controller
 
-  alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
 
   def index(conn, _params) do
+    # No actor + `authorize?: true` ⇒ the read policy returns published records
+    # only, which is exactly what belongs in a public sitemap.
     urls =
-      page_entries(CMS.list_pages!(authorize?: true), "") ++
-        page_entries(CMS.list_posts!(authorize?: true), "/blog")
+      Enum.flat_map(ContentTypes.all(), fn ct ->
+        ct.type
+        |> ContentTypes.list!(authorize?: true)
+        |> page_entries(ContentTypes.public_prefix(ct))
+      end)
 
     conn
     |> put_resp_content_type("application/xml")
