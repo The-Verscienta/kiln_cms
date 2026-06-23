@@ -332,6 +332,18 @@ defmodule KilnCMS.CMS.Content do
         read :public_by_slug do
           get? true
           argument :slug, :string, allow_nil?: false
+          argument :locale, :string, allow_nil?: false
+
+          filter expr(
+                   ^ref(:state) == :published and ^ref(:slug) == ^arg(:slug) and
+                     ^ref(:locale) == ^arg(:locale)
+                 )
+        end
+
+        # Every published locale variant of a slug, for hreflang alternates and
+        # the language switcher.
+        read :published_translations do
+          argument :slug, :string, allow_nil?: false
           filter expr(^ref(:state) == :published and ^ref(:slug) == ^arg(:slug))
         end
 

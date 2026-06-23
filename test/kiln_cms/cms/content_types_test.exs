@@ -62,14 +62,14 @@ defmodule KilnCMS.CMS.ContentTypesTest do
       post = CMS.create_post!(%{title: "P", slug: s}, authorize?: false)
 
       # Draft: not delivered.
-      assert ContentTypes.get_published_by_slug(:post, s,
+      assert ContentTypes.get_published_by_slug(:post, s, "en",
                authorize?: false,
                not_found_error?: false
              ) == nil
 
       CMS.publish_post!(post, %{}, authorize?: false)
 
-      assert ContentTypes.get_published_by_slug(:post, s,
+      assert ContentTypes.get_published_by_slug(:post, s, "en",
                authorize?: false,
                not_found_error?: false
              ).id == post.id

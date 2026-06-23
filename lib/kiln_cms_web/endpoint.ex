@@ -63,5 +63,7 @@ defmodule KilnCMSWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+  # Strip a `/<locale>/…` prefix and set the locale before routing.
+  plug KilnCMSWeb.Plugs.SetLocale
   plug KilnCMSWeb.Router
 end

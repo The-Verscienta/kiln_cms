@@ -15,31 +15,33 @@ defmodule KilnCMS.CacheTest do
   test "caches a computed value and serves it on the next fetch" do
     s = slug()
 
-    assert :first = Cache.fetch_published("page", s, fn -> :first end)
+    assert :first = Cache.fetch_published("page", s, "en", fn -> :first end)
     # The fallback would return :second, but the cached :first wins.
-    assert :first = Cache.fetch_published("page", s, fn -> :second end)
+    assert :first = Cache.fetch_published("page", s, "en", fn -> :second end)
   end
 
   test "does not cache a nil (not-found) result" do
     s = slug()
 
-    assert nil == Cache.fetch_published("page", s, fn -> nil end)
+    assert nil == Cache.fetch_published("page", s, "en", fn -> nil end)
     # Still recomputed, so newly published content shows up immediately.
-    assert :now_here = Cache.fetch_published("page", s, fn -> :now_here end)
+    assert :now_here = Cache.fetch_published("page", s, "en", fn -> :now_here end)
   end
 
   test "bust_published clears cached entries" do
     s = slug()
 
-    assert :v1 = Cache.fetch_published("page", s, fn -> :v1 end)
+    assert :v1 = Cache.fetch_published("page", s, "en", fn -> :v1 end)
     Cache.bust_published()
-    assert :v2 = Cache.fetch_published("page", s, fn -> :v2 end)
+    assert :v2 = Cache.fetch_published("page", s, "en", fn -> :v2 end)
   end
 
-  test "keys are namespaced by type" do
+  test "keys are namespaced by type and locale" do
     s = slug()
 
-    assert :page = Cache.fetch_published("page", s, fn -> :page end)
-    assert :post = Cache.fetch_published("post", s, fn -> :post end)
+    assert :page = Cache.fetch_published("page", s, "en", fn -> :page end)
+    assert :post = Cache.fetch_published("post", s, "en", fn -> :post end)
+    # Same type+slug, different locale → a separate entry.
+    assert :fr = Cache.fetch_published("page", s, "fr", fn -> :fr end)
   end
 end

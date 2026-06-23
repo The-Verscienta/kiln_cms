@@ -41,10 +41,15 @@ defmodule KilnCMSWeb.SitemapController do
   defp page_entries(records, prefix) do
     Enum.map(records, fn record ->
       %{
-        loc: "#{base_url()}#{prefix}/#{record.slug}",
+        loc: "#{base_url()}#{locale_prefix(record.locale)}#{prefix}/#{record.slug}",
         lastmod: DateTime.to_iso8601(record.updated_at)
       }
     end)
+  end
+
+  # Non-default locales are served under a `/<locale>` URL prefix.
+  defp locale_prefix(locale) do
+    if locale == KilnCMS.I18n.default_locale(), do: "", else: "/#{locale}"
   end
 
   defp sitemap_xml(urls) do

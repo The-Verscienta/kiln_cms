@@ -55,6 +55,11 @@ config :nx, default_backend: EXLA.Backend
 # Organization name used as the JSON-LD publisher. Override in runtime.exs.
 config :kiln_cms, :site_name, "KilnCMS"
 
+# Content locales. Content is modelled per-locale (unique [slug, locale]); the
+# delivery layer serves the requested locale with a fallback to the default.
+# Non-default locales are served under a `/<locale>/…` URL prefix.
+config :kiln_cms, :i18n, default_locale: "en", locales: ["en"]
+
 # How many days soft-deleted (trashed) content is retained before the nightly
 # AshOban `purge_trashed` trigger hard-deletes it.
 config :kiln_cms, :trash, retention_days: 30

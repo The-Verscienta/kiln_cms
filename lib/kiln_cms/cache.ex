@@ -22,15 +22,16 @@ defmodule KilnCMS.Cache do
   def cache_name, do: @cache
 
   @doc """
-  Return the cached published record for `{type, slug}`, or compute it with
-  `fun`, caching a non-nil result. A `nil` (not found) is never cached, so newly
-  published content appears immediately. Falls back to `fun` if the cache is
-  disabled or the backend errors.
+  Return the cached published record for `{type, slug, locale}`, or compute it
+  with `fun`, caching a non-nil result. Keyed by locale so each locale variant
+  (and the default-locale fallback served for a missing one) caches separately.
+  A `nil` (not found) is never cached, so newly published content appears
+  immediately. Falls back to `fun` if the cache is disabled or the backend errors.
   """
-  @spec fetch_published(String.t(), String.t(), (-> any())) :: any()
-  def fetch_published(type, slug, fun) when is_function(fun, 0) do
+  @spec fetch_published(String.t(), String.t(), String.t(), (-> any())) :: any()
+  def fetch_published(type, slug, locale, fun) when is_function(fun, 0) do
     if enabled?() do
-      key = key(type, slug)
+      key = key(type, slug, locale)
 
       case Cachex.get(@cache, key) do
         {:ok, nil} -> compute_and_cache(key, fun)
@@ -55,7 +56,7 @@ defmodule KilnCMS.Cache do
     value
   end
 
-  defp key(type, slug), do: "published:#{type}:#{slug}"
+  defp key(type, slug, locale), do: "published:#{type}:#{locale}:#{slug}"
 
   defp enabled? do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:enabled, true)
