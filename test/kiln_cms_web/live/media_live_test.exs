@@ -154,6 +154,13 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert item.filename == "pixel.png"
       assert item.content_type == "image/png"
       assert File.exists?(Path.join(root, item.storage_key))
+
+      # Dimensions are filled in asynchronously by the variant worker (the 1x1
+      # pixel is too small for any responsive variant, so none are produced).
+      Oban.drain_queue(queue: :default, with_recursion: true)
+      processed = CMS.get_media_item!(item.id, actor: editor)
+      assert processed.width == 1
+      assert processed.height == 1
     end
   end
 end
