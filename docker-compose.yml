@@ -11,7 +11,10 @@
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # pgvector/pgvector:pg17 = official Postgres 17 + the `vector` extension,
+    # required for semantic-search embeddings (KilnCMS.Search). Drop-in
+    # replacement for postgres:17 on the same PG 17 data volume.
+    image: pgvector/pgvector:pg17
     container_name: kiln_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}

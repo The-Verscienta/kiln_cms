@@ -5,7 +5,9 @@ defmodule KilnCMS.Repo do
   @impl true
   def installed_extensions do
     # Add extensions here, and the migration generator will install them.
-    ["ash-functions", "citext"]
+    # `vector` (pgvector) backs semantic-search embeddings — see
+    # docs/semantic-search-plan.md. Requires the pgvector/pgvector Postgres image.
+    ["ash-functions", "citext", "vector"]
   end
 
   # Don't open unnecessary transactions

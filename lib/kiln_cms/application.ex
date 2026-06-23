@@ -31,7 +31,24 @@ defmodule KilnCMS.Application do
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
-    Supervisor.start_link(children, opts)
+    Supervisor.start_link(children ++ embedding_children(), opts)
+  end
+
+  # The embedding serving is only started when semantic search is enabled with
+  # the local Bumblebee adapter — loading the model is expensive, so the default
+  # install (and any deployment using a remote embedder) skips it entirely.
+  defp embedding_children do
+    if KilnCMS.Search.semantic?() and
+         KilnCMS.Search.embedder() == KilnCMS.Search.Embedder.Bumblebee do
+      [
+        {Nx.Serving,
+         serving: KilnCMS.Search.Serving.build(),
+         name: KilnCMS.Search.Serving.name(),
+         batch_timeout: 50}
+      ]
+    else
+      []
+    end
   end
 
   # Tell Phoenix to update the endpoint configuration
