@@ -38,6 +38,9 @@ defmodule KilnCMSWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    # Refine the locale from session/Accept-Language (the endpoint already
+    # handled any `/<locale>/` path prefix). Needs the session, so it runs here.
+    plug KilnCMSWeb.Plugs.RefineLocale
     plug :fetch_live_flash
     plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
     plug :protect_from_forgery

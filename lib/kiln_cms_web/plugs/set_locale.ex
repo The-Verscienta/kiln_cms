@@ -22,20 +22,25 @@ defmodule KilnCMSWeb.Plugs.SetLocale do
 
   @impl true
   def call(conn, _opts) do
-    {locale, conn} = pop_locale(conn)
+    {locale, pinned?, conn} = pop_locale(conn)
     Gettext.put_locale(KilnCMSWeb.Gettext, locale)
-    assign(conn, :locale, locale)
+
+    conn
+    |> assign(:locale, locale)
+    |> assign(:locale_pinned, pinned?)
   end
 
   # Strip a leading supported-locale segment (only when something follows it, so
   # a one-segment path like `/fr` is still treated as a slug, not a bare locale).
+  # A stripped prefix pins the locale; otherwise it's the default (refined later
+  # from the session/Accept-Language by `RefineLocale`).
   defp pop_locale(%Plug.Conn{path_info: [seg | rest]} = conn) when rest != [] do
     if I18n.supported?(seg) do
-      {seg, %{conn | path_info: rest, request_path: "/" <> Enum.join(rest, "/")}}
+      {seg, true, %{conn | path_info: rest, request_path: "/" <> Enum.join(rest, "/")}}
     else
-      {I18n.default_locale(), conn}
+      {I18n.default_locale(), false, conn}
     end
   end
 
-  defp pop_locale(conn), do: {I18n.default_locale(), conn}
+  defp pop_locale(conn), do: {I18n.default_locale(), false, conn}
 end
