@@ -101,7 +101,15 @@ defmodule KilnCMSWeb.EditorLive do
         end
       end)
 
-    flash = "#{verb}: #{ok} updated" <> if(skipped > 0, do: ", #{skipped} skipped", else: "")
+    flash =
+      if skipped > 0,
+        do:
+          gettext("%{action}: %{count} updated, %{skipped} skipped",
+            action: verb,
+            count: ok,
+            skipped: skipped
+          ),
+        else: gettext("%{action}: %{count} updated", action: verb, count: ok)
 
     {:noreply,
      socket |> load_items() |> assign(:selected, MapSet.new()) |> put_flash(:info, flash)}
@@ -129,7 +137,10 @@ defmodule KilnCMSWeb.EditorLive do
         end
       end)
 
-    flash = "Deleted #{ok}" <> if(skipped > 0, do: ", #{skipped} skipped", else: "")
+    flash =
+      if skipped > 0,
+        do: gettext("Deleted %{count}, %{skipped} skipped", count: ok, skipped: skipped),
+        else: gettext("Deleted %{count}", count: ok)
 
     {:noreply,
      socket
@@ -156,8 +167,8 @@ defmodule KilnCMSWeb.EditorLive do
     record = get!(kind, id, actor)
 
     case do_transition(kind, verb, record, actor) do
-      {:ok, _} -> socket |> load_items() |> put_flash(:info, "Updated.")
-      _ -> put_flash(socket, :error, "That action isn't allowed right now.")
+      {:ok, _} -> socket |> load_items() |> put_flash(:info, gettext("Updated."))
+      _ -> put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
   end
 

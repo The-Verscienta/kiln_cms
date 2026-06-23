@@ -807,7 +807,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       :if={version.id == @record.published_version_id}
                       class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
                     >
-                      Live published
+                      {gettext("Live published")}
                     </span>
                   </span>
                   <button

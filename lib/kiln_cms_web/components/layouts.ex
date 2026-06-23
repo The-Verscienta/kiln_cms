@@ -116,7 +116,11 @@ defmodule KilnCMSWeb.Layouts do
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
           <a href="/blog" class="hover:text-base-content">{gettext("Blog")}</a>
-          <span :if={length(@locale_links) > 1} class="flex items-center gap-2" aria-label="Language">
+          <span
+            :if={length(@locale_links) > 1}
+            class="flex items-center gap-2"
+            aria-label={gettext("Language")}
+          >
             <a
               :for={link <- @locale_links}
               href={link.href}
@@ -207,7 +211,11 @@ defmodule KilnCMSWeb.Layouts do
       |> assign(:current, Gettext.get_locale(KilnCMSWeb.Gettext))
 
     ~H"""
-    <span :if={length(@locales) > 1} class="flex items-center gap-1 text-xs" aria-label="Language">
+    <span
+      :if={length(@locales) > 1}
+      class="flex items-center gap-1 text-xs"
+      aria-label={gettext("Language")}
+    >
       <.link
         :for={loc <- @locales}
         href={~p"/locale/#{loc}"}
