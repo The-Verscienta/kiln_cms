@@ -252,6 +252,28 @@ defmodule KilnCMS.CMS.Content do
           end
         end
 
+        # Semantic search: embed the query and return embedded content ordered by
+        # cosine distance (nearest first), backed by the HNSW index. Goes through
+        # the read policy, so anonymous callers only match published content.
+        # Returns nothing when semantic search is disabled or the query can't be
+        # embedded.
+        read :search_semantic do
+          argument :query, :string, allow_nil?: false
+
+          # Only rows that have an embedding are candidates.
+          filter expr(not is_nil(^ref(:embedding)))
+
+          prepare fn query, _context ->
+            with true <- KilnCMS.Search.semantic?(),
+                 {:ok, vector} <- KilnCMS.Search.embed(Ash.Query.get_argument(query, :query)) do
+              Ash.Query.sort(query, [{:semantic_distance, {%{query_vector: vector}, :asc}}])
+            else
+              # Disabled, or the query couldn't be embedded — no semantic results.
+              _ -> Ash.Query.limit(query, 0)
+            end
+          end
+        end
+
         update :submit_for_review do
           require_atomic? false
           change transition_state(:in_review)
@@ -479,6 +501,17 @@ defmodule KilnCMS.CMS.Content do
                     )
                   ) do
           argument :query, :string, allow_nil?: false
+        end
+
+        # Cosine distance (pgvector `<=>`) between a row's embedding and the
+        # query vector — smaller is more similar. Used to order the
+        # `:search_semantic` action. Internal (sorting only).
+        # The query vector is inlined as a float array, so cast it to `vector`
+        # for pgvector's `<=>` cosine-distance operator.
+        calculate :semantic_distance,
+                  :float,
+                  expr(fragment("? <=> ?::vector", ^ref(:embedding), ^arg(:query_vector))) do
+          argument :query_vector, KilnCMS.Search.Vector, allow_nil?: false
         end
       end
 

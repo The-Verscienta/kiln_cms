@@ -1,6 +1,7 @@
 # Semantic / Hybrid Search — Implementation Plan
 
-**Status:** Phase 0 ✅ and Phase 1 ✅ done; Phase 2 next. **Decisions locked
+**Status:** Phases 0 ✅, 1 ✅, 2 ✅ done (semantic search is usable); Phase 3
+(hybrid RRF) next. **Decisions locked
 (2026-06-23):** pgvector available in production Postgres; **local Bumblebee**
 embeddings (no hosted API), model `BAAI/bge-small-en-v1.5` (384-d, CLS pooling +
 L2 norm); Bumblebee/Nx/EXLA included in the build but the serving only starts

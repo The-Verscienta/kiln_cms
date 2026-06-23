@@ -24,6 +24,7 @@ defmodule KilnCMS.CMS do
       define :get_page, action: :read, get_by: [:id]
       define :get_published_page_by_slug, action: :public_by_slug, args: [:slug]
       define :search_pages, action: :search, args: [:query]
+      define :semantic_search_pages, action: :search_semantic, args: [:query]
       define :create_page, action: :create
       define :update_page, action: :update
       define :submit_page_for_review, action: :submit_for_review
@@ -48,6 +49,7 @@ defmodule KilnCMS.CMS do
       define :get_published_post_by_slug, action: :public_by_slug, args: [:slug]
       define :list_published_posts, action: :published
       define :search_posts, action: :search, args: [:query]
+      define :semantic_search_posts, action: :search_semantic, args: [:query]
       define :create_post, action: :create
       define :update_post, action: :update
       define :submit_post_for_review, action: :submit_for_review
