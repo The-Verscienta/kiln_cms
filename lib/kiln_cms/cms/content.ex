@@ -175,14 +175,11 @@ defmodule KilnCMS.CMS.Content do
         table unquote(table)
         repo KilnCMS.Repo
 
-        # GIN functional index backing the `:search` action — its expression
-        # matches the `to_tsvector(...)` in that action's filter exactly so the
-        # planner can use it instead of scanning every row.
+        # The `:search` action's GIN index is on the trigger-maintained
+        # `search_vector` column (locale-weighted tsvector) — created in the
+        # `add_locale_weighted_search` migration alongside the trigger, since the
+        # column isn't an Ash-managed attribute.
         custom_indexes do
-          index ["to_tsvector('english', coalesce(search_text, ''))"],
-            name: unquote("#{table}_search_text_gin_index"),
-            using: "gin"
-
           # HNSW index for approximate nearest-neighbour search over embeddings,
           # using cosine distance (`<=>`). The `embedding vector_cosine_ops`
           # column string carries the opclass through to the generated DDL.
@@ -240,23 +237,39 @@ defmodule KilnCMS.CMS.Content do
 
         # Full-text search over the denormalized `search_text`. Goes through the
         # read policy, so anonymous callers only match published content.
+        # Locale-aware full-text search over the trigger-maintained, weighted
+        # `search_vector`. Scopes results to one `locale` (default: the
+        # configured default) and stems with that locale's text-search config
+        # (`kiln_regconfig/1`), so French content is matched with French rules,
+        # etc. Goes through the read policy — anonymous callers match published
+        # content only.
         read :search do
           argument :query, :string, allow_nil?: false
+          argument :locale, :string
 
           filter expr(
-                   fragment(
-                     "to_tsvector('english', coalesce(?, '')) @@ plainto_tsquery('english', ?)",
-                     ^ref(:search_text),
-                     ^arg(:query)
-                   )
+                   ^ref(:locale) == ^arg(:locale) and
+                     fragment(
+                       "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
+                       ^arg(:locale),
+                       ^arg(:query)
+                     )
                  )
 
-          # Most relevant first (ts_rank), newest as the tiebreak. The rank
-          # calculation takes the same query, threaded through at runtime.
+          # Resolve the locale (defaulting to the configured default) and set it
+          # back so the filter sees it too, then order by relevance (ts_rank over
+          # the weighted vector — title hits outrank body hits), newest to break
+          # ties.
           prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
             q = Ash.Query.get_argument(query, :query)
 
-            Ash.Query.sort(query, [{:search_rank, {%{query: q}, :desc}}, {:inserted_at, :desc}])
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([
+              {:search_rank, {%{locale: locale, query: q}, :desc}},
+              {:inserted_at, :desc}
+            ])
           end
         end
 
@@ -267,11 +280,15 @@ defmodule KilnCMS.CMS.Content do
         # embedded.
         read :search_semantic do
           argument :query, :string, allow_nil?: false
+          argument :locale, :string
 
-          # Only rows that have an embedding are candidates.
-          filter expr(not is_nil(^ref(:embedding)))
+          # Candidates: same-locale rows that have an embedding.
+          filter expr(not is_nil(^ref(:embedding)) and ^ref(:locale) == ^arg(:locale))
 
           prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+            query = Ash.Query.set_argument(query, :locale, locale)
+
             with true <- KilnCMS.Search.semantic?(),
                  {:ok, vector} <- KilnCMS.Search.embed(Ash.Query.get_argument(query, :query)) do
               Ash.Query.sort(query, [{:semantic_distance, {%{query_vector: vector}, :asc}}])
@@ -547,17 +564,19 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # Full-text relevance of a row against a query — higher is more
-        # relevant. Used to order the `:search` action; the `query` argument is
-        # the same term that action filters on. Internal (sorting only).
+        # relevant. Used to order the `:search` action; `query`/`locale` are the
+        # same values that action filters on, so the weighted `search_vector` is
+        # ranked with the matching locale's text-search config. Internal.
         calculate :search_rank,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(to_tsvector('english', coalesce(?, '')), plainto_tsquery('english', ?))",
-                      ^ref(:search_text),
+                      "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?))",
+                      ^arg(:locale),
                       ^arg(:query)
                     )
                   ) do
+          argument :locale, :string, allow_nil?: false
           argument :query, :string, allow_nil?: false
         end
 
