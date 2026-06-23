@@ -106,6 +106,7 @@ defmodule KilnCMSWeb.Router do
       on_mount: [{KilnCMSWeb.LiveUserAuth, :live_editor_required}] do
       live "/media", MediaLive, :index
       live "/editor", EditorLive, :index
+      live "/editor/taxonomy", TaxonomyLive, :index
       live "/editor/trash", TrashLive, :index
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post

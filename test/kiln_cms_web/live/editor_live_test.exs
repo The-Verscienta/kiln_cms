@@ -6,8 +6,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Category
+  alias KilnCMS.CMS.MediaItem
   alias KilnCMS.CMS.Page
   alias KilnCMS.CMS.Post
+  alias KilnCMS.CMS.Tag
 
   @password "password123456"
 
@@ -590,6 +593,82 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> element("button", "Publish") |> render_click()
 
       assert CMS.get_page!(page.id, authorize?: false).state == :published
+    end
+  end
+
+  describe "relationship pickers" do
+    defp uniq, do: System.unique_integer([:positive])
+
+    test "the editor renders the organization & relationships section", %{conn: conn} do
+      post = draft_post()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "Organization &amp; relationships"
+      assert html =~ "Category"
+      assert html =~ "Tags"
+      assert html =~ "Featured image"
+      assert html =~ "Related posts"
+    end
+
+    test "assigns a category, tags and a featured image on save", %{conn: conn} do
+      post = draft_post()
+      cat = Ash.Seed.seed!(Category, %{name: "News", slug: "c-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "elixir", slug: "t-#{uniq()}"})
+      img = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      # The seeded taxonomy/media appear as options.
+      assert html =~ "News"
+      assert html =~ "elixir"
+      assert html =~ "hero.jpg"
+
+      lv
+      |> form("#post-editor",
+        form: %{category_id: cat.id, featured_image_id: img.id, tag_ids: [tag.id]}
+      )
+      |> render_submit()
+
+      saved = CMS.get_post!(post.id, authorize?: false, load: [:tags])
+      assert saved.category_id == cat.id
+      assert saved.featured_image_id == img.id
+      assert [%{id: tag_id}] = saved.tags
+      assert tag_id == tag.id
+    end
+
+    test "an existing tag link is pre-selected in the picker", %{conn: conn} do
+      tag = Ash.Seed.seed!(Tag, %{name: "preselected", slug: "t-#{uniq()}"})
+      editor = authed_user(:editor)
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # The tag's <option> is rendered with the `selected` attribute even before
+      # the user touches the field (so an untouched save won't wipe the link).
+      assert html =~ ~r/<option selected[^>]*value="#{tag.id}"/
+    end
+
+    test "links a related post on save", %{conn: conn} do
+      post = draft_post(%{title: "Main"})
+      other = draft_post(%{title: "SiblingPost"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "SiblingPost"
+
+      lv
+      |> form("#post-editor", form: %{related_post_ids: [other.id]})
+      |> render_submit()
+
+      saved = CMS.get_post!(post.id, authorize?: false, load: [:related_posts])
+      assert [%{id: rel_id}] = saved.related_posts
+      assert rel_id == other.id
     end
   end
 end

@@ -116,7 +116,10 @@ defmodule KilnCMS.CMS.Page do
       :seo_image,
       :canonical_url,
       :locale,
-      :scheduled_at
+      :scheduled_at,
+      # Many-to-one foreign keys (category + lead image).
+      :category_id,
+      :featured_image_id
     ]
 
     create :create do
@@ -124,6 +127,11 @@ defmodule KilnCMS.CMS.Page do
       # Stamp the acting user as the author (system/seed creates with no actor
       # simply leave it nil).
       change relate_actor(:author, allow_nil?: true)
+      # Set the many-to-many links from lists of ids (nil/omitted = no change).
+      argument :tag_ids, {:array, :uuid}
+      argument :related_page_ids, {:array, :uuid}
+      change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+      change manage_relationship(:related_page_ids, :related_pages, type: :append_and_remove)
       change KilnCMS.CMS.Changes.SanitizeBlocks
       change KilnCMS.CMS.Changes.SetSearchText
     end
@@ -131,6 +139,10 @@ defmodule KilnCMS.CMS.Page do
     update :update do
       primary? true
       require_atomic? false
+      argument :tag_ids, {:array, :uuid}
+      argument :related_page_ids, {:array, :uuid}
+      change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+      change manage_relationship(:related_page_ids, :related_pages, type: :append_and_remove)
       change KilnCMS.CMS.Changes.SanitizeBlocks
       change KilnCMS.CMS.Changes.SetSearchText
     end
@@ -297,6 +309,37 @@ defmodule KilnCMS.CMS.Page do
     # GraphQL/JSON:API type).
     belongs_to :author, KilnCMS.Accounts.User do
       allow_nil? true
+      public? true
+    end
+
+    # Many-to-one: a page belongs to at most one category (one-to-many from the
+    # category's side). Set via `category_id` in `default_accept`.
+    belongs_to :category, KilnCMS.CMS.Category do
+      allow_nil? true
+      public? true
+    end
+
+    # Many-to-one: the page's lead/hero image. Set via `featured_image_id`.
+    belongs_to :featured_image, KilnCMS.CMS.MediaItem do
+      allow_nil? true
+      public? true
+    end
+
+    # Many-to-many: free-form tags, linked through the `PageTag` join resource.
+    # Managed via the `tag_ids` argument on create/update.
+    many_to_many :tags, KilnCMS.CMS.Tag do
+      through KilnCMS.CMS.PageTag
+      source_attribute_on_join_resource :page_id
+      destination_attribute_on_join_resource :tag_id
+      public? true
+    end
+
+    # Self-referential many-to-many: editor-curated "related pages", linked
+    # through the `RelatedPage` join resource. Managed via `related_page_ids`.
+    many_to_many :related_pages, KilnCMS.CMS.Page do
+      through KilnCMS.CMS.RelatedPage
+      source_attribute_on_join_resource :source_id
+      destination_attribute_on_join_resource :related_id
       public? true
     end
   end

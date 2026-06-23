@@ -97,4 +97,18 @@ defmodule KilnCMS.CMS.MediaItem do
 
     timestamps()
   end
+
+  relationships do
+    # One-to-many inverse of `belongs_to :featured_image` — the content items
+    # using this media item as their lead image.
+    has_many :featured_pages, KilnCMS.CMS.Page do
+      destination_attribute :featured_image_id
+      public? true
+    end
+
+    has_many :featured_posts, KilnCMS.CMS.Post do
+      destination_attribute :featured_image_id
+      public? true
+    end
+  end
 end
