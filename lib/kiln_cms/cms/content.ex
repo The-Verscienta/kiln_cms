@@ -226,6 +226,7 @@ defmodule KilnCMS.CMS.Content do
         update :submit_for_review do
           require_atomic? false
           change transition_state(:in_review)
+          change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :submitted_for_review}
         end
 
         update :publish do
@@ -233,6 +234,7 @@ defmodule KilnCMS.CMS.Content do
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.NotifyWebhooks
+          change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
 
         update :publish_scheduled do
@@ -242,6 +244,7 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
           change KilnCMS.CMS.Changes.NotifyWebhooks
+          change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
 
         update :restore_version do
