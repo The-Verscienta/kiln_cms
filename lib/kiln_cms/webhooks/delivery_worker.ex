@@ -8,6 +8,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
 
   alias KilnCMS.CMS
   alias KilnCMS.Webhooks
+  alias KilnCMS.Webhooks.SafeUrl
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"endpoint_id" => id, "event" => event, "payload" => payload}}) do
@@ -18,6 +19,13 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   end
 
   defp deliver(endpoint, event, payload) do
+    case SafeUrl.validate(endpoint.url) do
+      :ok -> post_delivery(endpoint, event, payload)
+      {:error, reason} -> {:error, "blocked webhook URL: #{reason}"}
+    end
+  end
+
+  defp post_delivery(endpoint, event, payload) do
     body = Jason.encode!(%{event: event, data: payload})
 
     headers = [
@@ -27,7 +35,14 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
     ]
 
     options =
-      [url: endpoint.url, method: :post, body: body, headers: headers, retry: false] ++
+      [
+        url: endpoint.url,
+        method: :post,
+        body: body,
+        headers: headers,
+        retry: false,
+        redirect: false
+      ] ++
         Webhooks.req_options()
 
     case Req.request(Req.new(options)) do

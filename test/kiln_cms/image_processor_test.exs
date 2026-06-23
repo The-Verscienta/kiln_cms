@@ -30,6 +30,18 @@ defmodule KilnCMS.ImageProcessorTest do
     Enum.each(variants, &File.rm(&1.path))
   end
 
+  test "validate_upload/1 accepts a readable raster image", %{path: path} do
+    assert :ok = ImageProcessor.validate_upload(path)
+  end
+
+  test "validate_upload/1 rejects non-image content" do
+    fake = Path.join(System.tmp_dir!(), "fake-#{System.unique_integer([:positive])}.png")
+    File.write!(fake, "not an image")
+    on_exit(fn -> File.rm(fake) end)
+
+    assert {:error, _} = ImageProcessor.validate_upload(fake)
+  end
+
   test "skips variants wider than the source (no upscaling)" do
     small = Path.join(System.tmp_dir!(), "small-#{System.unique_integer([:positive])}.png")
     {:ok, image} = Image.new(150, 100, color: :red)
