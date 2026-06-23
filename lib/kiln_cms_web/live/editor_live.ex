@@ -101,7 +101,15 @@ defmodule KilnCMSWeb.EditorLive do
         end
       end)
 
-    flash = "#{verb}: #{ok} updated" <> if(skipped > 0, do: ", #{skipped} skipped", else: "")
+    flash =
+      if skipped > 0,
+        do:
+          gettext("%{action}: %{count} updated, %{skipped} skipped",
+            action: verb,
+            count: ok,
+            skipped: skipped
+          ),
+        else: gettext("%{action}: %{count} updated", action: verb, count: ok)
 
     {:noreply,
      socket |> load_items() |> assign(:selected, MapSet.new()) |> put_flash(:info, flash)}
@@ -129,7 +137,10 @@ defmodule KilnCMSWeb.EditorLive do
         end
       end)
 
-    flash = "Deleted #{ok}" <> if(skipped > 0, do: ", #{skipped} skipped", else: "")
+    flash =
+      if skipped > 0,
+        do: gettext("Deleted %{count}, %{skipped} skipped", count: ok, skipped: skipped),
+        else: gettext("Deleted %{count}", count: ok)
 
     {:noreply,
      socket
@@ -142,6 +153,12 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("publish", params, socket),
     do: {:noreply, transition(socket, params, "publish")}
 
+  def handle_event("submit", params, socket),
+    do: {:noreply, transition(socket, params, "submit")}
+
+  def handle_event("return", params, socket),
+    do: {:noreply, transition(socket, params, "return")}
+
   def handle_event("unpublish", params, socket),
     do: {:noreply, transition(socket, params, "unpublish")}
 
@@ -150,8 +167,8 @@ defmodule KilnCMSWeb.EditorLive do
     record = get!(kind, id, actor)
 
     case do_transition(kind, verb, record, actor) do
-      {:ok, _} -> socket |> load_items() |> put_flash(:info, "Updated.")
-      _ -> put_flash(socket, :error, "That action isn't allowed right now.")
+      {:ok, _} -> socket |> load_items() |> put_flash(:info, gettext("Updated."))
+      _ -> put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
   end
 
@@ -176,6 +193,21 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   defp edit_path(type, id), do: ~p"/editor/content/#{type}/#{id}"
+
+  defp bulk_actions(%{role: :admin}) do
+    [
+      {"publish", gettext("Publish")},
+      {"unpublish", gettext("Unpublish")},
+      {"archive", gettext("Archive")}
+    ]
+  end
+
+  defp bulk_actions(_actor) do
+    [
+      {"unpublish", gettext("Unpublish")},
+      {"archive", gettext("Archive")}
+    ]
+  end
 
   @impl true
   def render(assigns) do
@@ -267,13 +299,7 @@ defmodule KilnCMSWeb.EditorLive do
           </span>
           <div class="ml-auto flex gap-2">
             <button
-              :for={
-                {verb, label} <- [
-                  {"publish", gettext("Publish")},
-                  {"unpublish", gettext("Unpublish")},
-                  {"archive", gettext("Archive")}
-                ]
-              }
+              :for={{verb, label} <- bulk_actions(@actor)}
               type="button"
               phx-click="bulk"
               phx-value-action={verb}
@@ -353,14 +379,34 @@ defmodule KilnCMSWeb.EditorLive do
             <.state_badge state={record.state} />
             <div class="flex items-center gap-2">
               <button
-                :if={record.state in [:draft, :in_review]}
+                :if={record.state == :draft and @actor.role == :editor}
+                type="button"
+                phx-click="submit"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+              >
+                {gettext("Submit")}
+              </button>
+              <button
+                :if={record.state in [:draft, :in_review] and @actor.role == :admin}
                 type="button"
                 phx-click="publish"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
                 class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
               >
-                {gettext("Publish")}
+                {if record.state == :in_review, do: gettext("Approve"), else: gettext("Publish")}
+              </button>
+              <button
+                :if={record.state == :in_review and @actor.role == :admin}
+                type="button"
+                phx-click="return"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+              >
+                {gettext("Return")}
               </button>
               <button
                 :if={record.state == :published}

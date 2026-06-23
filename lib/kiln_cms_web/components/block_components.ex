@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.BlockComponents do
   before rendering.
   """
   use Phoenix.Component
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   alias KilnCMS.HTMLSanitizer
 
@@ -43,7 +44,7 @@ defmodule KilnCMSWeb.BlockComponents do
           <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
             <iframe
               src={embed}
-              title="Embedded media"
+              title={gettext("Embedded media")}
               class="h-full w-full rounded"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowfullscreen

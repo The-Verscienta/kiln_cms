@@ -3,6 +3,9 @@ config :kiln_cms, Oban, testing: :manual
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
 
+# Webhook URL validation: skip DNS resolution for Req.Test stub hosts.
+config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: false, resolve_dns: false
+
 # S3 storage adapter: dummy credentials + route ExAws HTTP through a Req.Test
 # stub, so the adapter is exercised end-to-end (signing included) with no live S3.
 config :ex_aws, access_key_id: "test", secret_access_key: "test", region: "us-east-1"

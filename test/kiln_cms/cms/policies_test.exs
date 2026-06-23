@@ -128,6 +128,15 @@ defmodule KilnCMS.CMS.PoliciesTest do
       assert CMS.can_destroy_page?(admin, draft)
       refute CMS.can_destroy_page?(editor, draft)
     end
+
+    test "only admins may publish", %{admin: admin, editor: editor, draft: draft} do
+      assert CMS.can_publish_page?(admin, draft)
+      refute CMS.can_publish_page?(editor, draft)
+    end
+
+    test "editors may submit for review", %{editor: editor, draft: draft} do
+      assert CMS.can_submit_page_for_review?(editor, draft)
+    end
   end
 
   describe "Post read visibility by role" do

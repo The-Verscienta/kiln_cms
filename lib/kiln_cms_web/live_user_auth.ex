@@ -5,6 +5,9 @@ defmodule KilnCMSWeb.LiveUserAuth do
 
   import Phoenix.Component
   use KilnCMSWeb, :verified_routes
+  use Gettext, backend: KilnCMSWeb.Gettext
+
+  alias KilnCMS.I18n
 
   alias KilnCMS.I18n
 
@@ -50,7 +53,10 @@ defmodule KilnCMSWeb.LiveUserAuth do
       %{} ->
         {:halt,
          socket
-         |> Phoenix.LiveView.put_flash(:error, "You need editor access to view that page.")
+         |> Phoenix.LiveView.put_flash(
+           :error,
+           gettext("You need editor access to view that page.")
+         )
          |> Phoenix.LiveView.redirect(to: ~p"/")}
 
       _ ->

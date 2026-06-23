@@ -172,6 +172,23 @@ defmodule KilnCMSWeb.MediaLiveTest do
       %{root: root}
     end
 
+    test "rejects a file whose content is not a real image", %{conn: conn, root: root} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "fake.png", content: "not-a-png", type: "image/png"}
+        ])
+
+      assert render_upload(input, "fake.png")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "failed"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+      refute File.exists?(Path.join(root, "fake.png"))
+    end
+
     test "uploading an image stores it and adds it to the library", %{conn: conn, root: root} do
       editor = authed_user(:editor)
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")

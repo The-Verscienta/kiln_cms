@@ -106,6 +106,12 @@ defmodule KilnCMS.Accounts.User do
       prepare AshAuthentication.Preparations.FilterBySubject
     end
 
+    # Set the public display name (used as the JSON-LD author byline). A user can
+    # edit their own; admins can edit anyone's (via the policy bypass).
+    update :update_profile do
+      accept [:name]
+    end
+
     update :change_password do
       # Use this action to allow users to change their password by providing
       # their current password and a new password.
@@ -287,6 +293,10 @@ defmodule KilnCMS.Accounts.User do
     policy action(:change_password) do
       authorize_if expr(id == ^actor(:id))
     end
+
+    policy action(:update_profile) do
+      authorize_if expr(id == ^actor(:id))
+    end
   end
 
   attributes do
@@ -294,6 +304,12 @@ defmodule KilnCMS.Accounts.User do
 
     attribute :email, :ci_string do
       allow_nil? false
+      public? true
+    end
+
+    # Public display name — used as the JSON-LD author on content this user
+    # authored. Optional; falls back to no author when blank.
+    attribute :name, :string do
       public? true
     end
 

@@ -104,11 +104,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert path =~ ~r"^/editor/content/page/"
     end
 
-    test "bulk publish transitions the selected page and post", %{conn: conn} do
+    test "bulk publish transitions the selected page and post (admin only)", %{conn: conn} do
       page = draft_page(%{title: "BulkPage", state: :draft})
       post = draft_post(%{title: "BulkPost", state: :draft})
 
-      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
 
       lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
       lv |> element(~s(input[phx-value-key="post:#{post.id}"])) |> render_click()
@@ -116,6 +116,46 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert CMS.get_page!(page.id, authorize?: false).state == :published
       assert CMS.get_post!(post.id, authorize?: false).state == :published
+    end
+
+    test "the bulk Publish button is admin-only", %{conn: conn} do
+      draft_page()
+
+      {:ok, _lv, editor_html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      refute editor_html =~ ~s(phx-value-action="publish")
+
+      {:ok, _lv, admin_html} =
+        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      assert admin_html =~ ~s(phx-value-action="publish")
+    end
+
+    test "editor submits a draft for review from the list", %{conn: conn} do
+      page = draft_page(%{title: "SubmitMe"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      lv
+      |> element("button[phx-click='submit'][phx-value-id='#{page.id}']")
+      |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :in_review
+    end
+
+    test "admin approves in-review content from the list", %{conn: conn} do
+      page = draft_page(%{title: "ApproveMe", state: :in_review})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      lv
+      |> element("button[phx-click='publish'][phx-value-id='#{page.id}']")
+      |> render_click()
+
+      published = CMS.get_page!(page.id, authorize?: false)
+      assert published.state == :published
+      assert published.published_version_id
     end
 
     test "select-all then bulk archive archives every visible item", %{conn: conn} do
@@ -206,15 +246,25 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert saved.excerpt == "A lead-in."
     end
 
-    test "runs the publish workflow for a post", %{conn: conn} do
+    test "runs the publish workflow for a post (admin only)", %{conn: conn} do
       post = draft_post()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/posts/#{post.id}")
 
       lv |> element("button", "Publish") |> render_click()
 
       assert CMS.get_post!(post.id, authorize?: false).state == :published
+    end
+
+    test "editor sees Submit for review, not Publish", %{conn: conn} do
+      post = draft_post()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "Submit for review"
+      refute html =~ ">Publish<"
     end
   end
 
@@ -623,15 +673,28 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_page!(page.id, authorize?: false).title == "Original"
     end
 
-    test "runs the publish workflow", %{conn: conn} do
+    test "runs the publish workflow (admin only)", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button", "Publish") |> render_click()
+
+      published = CMS.get_page!(page.id, authorize?: false)
+      assert published.state == :published
+      assert published.published_version_id
+    end
+
+    test "editor submits a page for review from the editor", %{conn: conn} do
       page = draft_page()
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button", "Publish") |> render_click()
+      lv |> element("button", "Submit for review") |> render_click()
 
-      assert CMS.get_page!(page.id, authorize?: false).state == :published
+      assert CMS.get_page!(page.id, authorize?: false).state == :in_review
     end
   end
 

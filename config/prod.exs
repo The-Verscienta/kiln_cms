@@ -28,5 +28,8 @@ config :swoosh, local: false
 # Do not print debug messages in production
 config :logger, level: :info
 
+# Webhook targets must be HTTPS and must not resolve to private addresses.
+config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: true, resolve_dns: true
+
 # Runtime production configuration, including reading
 # of environment variables, is done on config/runtime.exs.

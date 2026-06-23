@@ -41,7 +41,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
          socket
          |> assign(:cat_form, create_form(:category, socket.assigns.actor))
          |> load_taxonomy()
-         |> put_flash(:info, "Category added.")}
+         |> put_flash(:info, gettext("Category added."))}
 
       {:error, form} ->
         {:noreply, assign(socket, :cat_form, form)}
@@ -60,7 +60,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
          socket
          |> assign(:tag_form, create_form(:tag, socket.assigns.actor))
          |> load_taxonomy()
-         |> put_flash(:info, "Tag added.")}
+         |> put_flash(:info, gettext("Tag added."))}
 
       {:error, form} ->
         {:noreply, assign(socket, :tag_form, form)}
@@ -88,7 +88,8 @@ defmodule KilnCMSWeb.TaxonomyLive do
   def handle_event("save_edit", %{"taxonomy" => params}, socket) do
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: with_slug(params)) do
       {:ok, _record} ->
-        {:noreply, socket |> assign(:edit, nil) |> load_taxonomy() |> put_flash(:info, "Saved.")}
+        {:noreply,
+         socket |> assign(:edit, nil) |> load_taxonomy() |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
         {:noreply, assign(socket, :edit, %{socket.assigns.edit | form: form})}
@@ -100,8 +101,15 @@ defmodule KilnCMSWeb.TaxonomyLive do
   def handle_event("delete", %{"type" => type, "id" => id}, socket) do
     socket =
       case destroy(type, id, socket.assigns.actor) do
-        :ok -> socket |> load_taxonomy() |> put_flash(:info, "Deleted.")
-        _ -> put_flash(socket, :error, "Couldn't delete that — you may not have permission.")
+        :ok ->
+          socket |> load_taxonomy() |> put_flash(:info, gettext("Deleted."))
+
+        _ ->
+          put_flash(
+            socket,
+            :error,
+            gettext("Couldn't delete that — you may not have permission.")
+          )
       end
 
     {:noreply, assign(socket, :edit, nil)}
@@ -183,19 +191,19 @@ defmodule KilnCMSWeb.TaxonomyLive do
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; All content
+            &larr; {gettext("All content")}
           </.link>
-          <h1 class="mt-1 text-2xl font-semibold">Taxonomy</h1>
+          <h1 class="mt-1 text-2xl font-semibold">{gettext("Taxonomy")}</h1>
           <p class="text-sm text-base-content/70">
-            Manage the categories and tags content can be organized by.
+            {gettext("Manage the categories and tags content can be organized by.")}
           </p>
         </div>
 
         <div class="grid gap-8 lg:grid-cols-2">
           <.taxonomy_column
             kind="category"
-            heading="Categories"
-            blurb="A piece of content belongs to one category."
+            heading={gettext("Categories")}
+            blurb={gettext("A piece of content belongs to one category.")}
             form={@cat_form}
             validate="validate_cat"
             submit="create_cat"
@@ -206,8 +214,8 @@ defmodule KilnCMSWeb.TaxonomyLive do
           />
           <.taxonomy_column
             kind="tag"
-            heading="Tags"
-            blurb="Content can carry any number of tags."
+            heading={gettext("Tags")}
+            blurb={gettext("Content can carry any number of tags.")}
             form={@tag_form}
             validate="validate_tag"
             submit="create_tag"
@@ -249,19 +257,29 @@ defmodule KilnCMSWeb.TaxonomyLive do
         class="space-y-3 rounded-lg border border-base-content/15 p-4"
       >
         <div class="grid gap-3 sm:grid-cols-2">
-          <.input field={@form[:name]} label="Name" placeholder={"New #{@kind} name"} />
-          <.input field={@form[:slug]} label="Slug" placeholder="Auto from name" />
+          <.input
+            field={@form[:name]}
+            label={gettext("Name")}
+            placeholder={gettext("New %{kind} name", kind: @kind)}
+          />
+          <.input
+            field={@form[:slug]}
+            label={gettext("Slug")}
+            placeholder={gettext("Auto from name")}
+          />
         </div>
         <.input
           :if={@with_description}
           field={@form[:description]}
           type="textarea"
-          label="Description"
+          label={gettext("Description")}
         />
-        <.button type="submit" variant="primary">Add {@kind}</.button>
+        <.button type="submit" variant="primary">{gettext("Add %{kind}", kind: @kind)}</.button>
       </.form>
 
-      <p :if={@records == []} class="text-sm text-base-content/60">No {@kind}s yet.</p>
+      <p :if={@records == []} class="text-sm text-base-content/60">
+        {gettext("No %{kind}s yet.", kind: @kind)}
+      </p>
 
       <ul
         :if={@records != []}
@@ -287,7 +305,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
                 phx-value-id={record.id}
                 class="rounded px-2 py-1 text-xs hover:bg-base-200"
               >
-                Edit
+                {gettext("Edit")}
               </button>
               <button
                 :if={@actor.role == :admin}
@@ -296,7 +314,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
                 phx-value-type={@kind}
                 phx-value-id={record.id}
                 data-confirm={delete_confirm(record)}
-                aria-label={"Delete #{record.name}"}
+                aria-label={gettext("Delete %{name}", name: record.name)}
                 class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
               >
                 <.icon name="hero-trash" class="size-4" />
@@ -313,23 +331,23 @@ defmodule KilnCMSWeb.TaxonomyLive do
             class="space-y-3"
           >
             <div class="grid gap-3 sm:grid-cols-2">
-              <.input field={@edit.form[:name]} label="Name" />
-              <.input field={@edit.form[:slug]} label="Slug" />
+              <.input field={@edit.form[:name]} label={gettext("Name")} />
+              <.input field={@edit.form[:slug]} label={gettext("Slug")} />
             </div>
             <.input
               :if={@with_description}
               field={@edit.form[:description]}
               type="textarea"
-              label="Description"
+              label={gettext("Description")}
             />
             <div class="flex gap-2">
-              <.button type="submit" variant="primary">Save</.button>
+              <.button type="submit" variant="primary">{gettext("Save")}</.button>
               <button
                 type="button"
                 phx-click="cancel_edit"
                 class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
               >
-                Cancel
+                {gettext("Cancel")}
               </button>
             </div>
           </.form>
@@ -342,10 +360,14 @@ defmodule KilnCMSWeb.TaxonomyLive do
   defp delete_confirm(record) do
     case record.page_count + record.post_count do
       0 ->
-        "Delete “#{record.name}”?"
+        gettext("Delete “%{name}”?", name: record.name)
 
       n ->
-        "“#{record.name}” is used by #{n} item(s). Delete it anyway? The links will be removed."
+        gettext(
+          "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed.",
+          name: record.name,
+          count: n
+        )
     end
   end
 
