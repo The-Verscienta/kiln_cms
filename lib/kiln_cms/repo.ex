@@ -7,7 +7,8 @@ defmodule KilnCMS.Repo do
     # Add extensions here, and the migration generator will install them.
     # `vector` (pgvector) backs semantic-search embeddings — see
     # docs/semantic-search-plan.md. Requires the pgvector/pgvector Postgres image.
-    ["ash-functions", "citext", "vector"]
+    # `pg_trgm` backs typo-tolerant autocomplete (trigram similarity on titles).
+    ["ash-functions", "citext", "vector", "pg_trgm"]
   end
 
   # Don't open unnecessary transactions

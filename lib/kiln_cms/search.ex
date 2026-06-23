@@ -28,6 +28,18 @@ defmodule KilnCMS.Search do
   @spec embed(String.t()) :: {:ok, [float()]} | {:error, term()}
   def embed(text) when is_binary(text), do: embedder().embed(text)
 
+  @doc "Whether reranking is enabled (a reranker model is loaded)."
+  @spec rerank?() :: boolean()
+  def rerank?, do: cfg(:rerank, false)
+
+  @doc "The configured reranker adapter module."
+  @spec reranker() :: module()
+  def reranker, do: cfg(:reranker, KilnCMS.Search.Reranker.Bumblebee)
+
+  @doc "Hugging Face model id used for reranking."
+  @spec rerank_model() :: String.t()
+  def rerank_model, do: cfg(:rerank_model, "BAAI/bge-reranker-base")
+
   # Top-N taken from each leg before fusion, and the RRF rank constant (the
   # standard k=60 dampens the contribution of low-ranked results).
   @hybrid_candidates 50
@@ -54,9 +66,96 @@ defmodule KilnCMS.Search do
     keyword = run_leg(resource, :search, query, locale, read_opts)
     semantic = run_leg(resource, :search_semantic, query, locale, read_opts)
 
-    [keyword, semantic]
-    |> reciprocal_rank_fusion(k)
-    |> Enum.take(limit)
+    fused =
+      [keyword, semantic]
+      |> reciprocal_rank_fusion(k)
+      |> Enum.take(limit)
+
+    if Keyword.get(opts, :rerank, false) and rerank?() do
+      rerank(query, fused)
+    else
+      fused
+    end
+  end
+
+  # Rerank fused results by a stronger (query, doc) relevance model, falling back
+  # to the fused order if the reranker errors.
+  defp rerank(query, records) do
+    case reranker().scores(query, Enum.map(records, &rerank_text/1)) do
+      {:ok, scores} when length(scores) == length(records) ->
+        records
+        |> Enum.zip(scores)
+        |> Enum.sort_by(&elem(&1, 1), :desc)
+        |> Enum.map(&elem(&1, 0))
+
+      _ ->
+        records
+    end
+  end
+
+  # Text handed to the reranker — title plus excerpt when present.
+  defp rerank_text(%{title: title} = record) do
+    case Map.get(record, :excerpt) do
+      excerpt when is_binary(excerpt) and excerpt != "" -> title <> " — " <> excerpt
+      _ -> title
+    end
+  end
+
+  @doc """
+  Global keyword search across content types and media, returning sectioned
+  results: `%{pages: [...], posts: [...], media: [...]}`. Pages/posts are
+  locale-scoped (via `:locale`, default configured); media is locale-agnostic.
+  Read options (`:actor`, `:authorize?`) pass through; `:limit` caps each
+  section (default 10).
+  """
+  @spec global(String.t(), keyword()) :: %{
+          pages: [struct()],
+          posts: [struct()],
+          media: [struct()]
+        }
+  def global(query, opts \\ []) when is_binary(query) do
+    read_opts = Keyword.take(opts, [:actor, :authorize?])
+    locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+    limit = Keyword.get(opts, :limit, 10)
+
+    %{
+      pages:
+        section(KilnCMS.CMS.Page, :search, %{query: query, locale: locale}, read_opts, limit),
+      posts:
+        section(KilnCMS.CMS.Post, :search, %{query: query, locale: locale}, read_opts, limit),
+      media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit)
+    }
+  end
+
+  @doc """
+  Record a user-initiated search for analytics (normalized, privacy-first):
+  trimmed + downcased query, its locale, and how many results it returned.
+  Fire-and-forget — failures are swallowed so analytics never breaks search, and
+  blank queries are ignored.
+  """
+  @spec record_query(String.t(), non_neg_integer(), keyword()) :: :ok
+  def record_query(query, result_count, opts \\ []) when is_binary(query) do
+    normalized = query |> String.trim() |> String.downcase()
+
+    if normalized != "" do
+      locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+
+      KilnCMS.Analytics.record_search(
+        %{query: normalized, locale: locale, result_count: result_count},
+        authorize?: false
+      )
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp section(resource, action, params, read_opts, limit) do
+    resource
+    |> Ash.Query.for_read(action, params)
+    |> Ash.Query.limit(limit)
+    |> Ash.read!(read_opts)
   end
 
   defp resource_for(:page), do: KilnCMS.CMS.Page

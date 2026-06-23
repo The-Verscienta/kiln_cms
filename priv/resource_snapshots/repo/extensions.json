@@ -3,6 +3,7 @@
   "installed": [
     "ash-functions",
     "citext",
-    "vector"
+    "vector",
+    "pg_trgm"
   ]
 }

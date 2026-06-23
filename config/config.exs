@@ -44,7 +44,13 @@ config :kiln_cms, KilnCMS.Search,
   semantic: false,
   embedder: KilnCMS.Search.Embedder.Bumblebee,
   model: "BAAI/bge-small-en-v1.5",
-  dim: 384
+  dim: 384,
+  # Optional reranking of `hybrid/3` results by a local cross-encoder. Off by
+  # default — the model only loads when `rerank: true`, and even then only the
+  # `hybrid(..., rerank: true)` calls use it.
+  rerank: false,
+  reranker: KilnCMS.Search.Reranker.Bumblebee,
+  rerank_model: "BAAI/bge-reranker-base"
 
 # Register pgvector's Postgrex extension so `vector` columns encode/decode.
 config :kiln_cms, KilnCMS.Repo, types: KilnCMS.PostgrexTypes
