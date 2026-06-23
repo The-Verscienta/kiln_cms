@@ -58,7 +58,7 @@ defmodule KilnCMSWeb.AuthController do
 
     conn
     |> clear_session(:kiln_cms)
-    |> put_flash(:info, "You are now signed out")
+    |> put_flash(:info, gettext("You are now signed out"))
     |> redirect(to: return_to)
   end
 end

@@ -53,7 +53,7 @@ msgstr "Connexion Internet introuvable"
 msgid "close"
 msgstr "fermer"
 
-#: lib/kiln_cms_web/live/editor_live.ex:286
+#: lib/kiln_cms_web/live/editor_live.ex:297
 #, elixir-autogen, elixir-format
 msgid "%{count} selected"
 msgstr "%{count} sélectionné(s)"
@@ -67,18 +67,18 @@ msgid "All content"
 msgstr "Tout le contenu"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:74
-#: lib/kiln_cms_web/live/editor_live.ex:231
+#: lib/kiln_cms_web/live/editor_live.ex:242
 #, elixir-autogen, elixir-format
 msgid "Analytics"
 msgstr "Statistiques"
 
-#: lib/kiln_cms_web/live/editor_live.ex:190
-#: lib/kiln_cms_web/live/editor_live.ex:197
+#: lib/kiln_cms_web/live/editor_live.ex:201
+#: lib/kiln_cms_web/live/editor_live.ex:208
 #, elixir-autogen, elixir-format
 msgid "Archive"
 msgstr "Archiver"
 
-#: lib/kiln_cms_web/live/editor_live.ex:334
+#: lib/kiln_cms_web/live/editor_live.ex:345
 #: lib/kiln_cms_web/live/taxonomy_live.ex:350
 #: lib/kiln_cms_web/live/trash_live.ex:154
 #, elixir-autogen, elixir-format
@@ -86,19 +86,19 @@ msgid "Cancel"
 msgstr "Annuler"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:94
-#: lib/kiln_cms_web/live/editor_live.ex:219
+#: lib/kiln_cms_web/live/editor_live.ex:230
 #, elixir-autogen, elixir-format
 msgid "Content"
 msgstr "Contenu"
 
-#: lib/kiln_cms_web/live/editor_live.ex:307
-#: lib/kiln_cms_web/live/editor_live.ex:327
+#: lib/kiln_cms_web/live/editor_live.ex:318
+#: lib/kiln_cms_web/live/editor_live.ex:338
 #: lib/kiln_cms_web/live/media_live.ex:444
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Supprimer"
 
-#: lib/kiln_cms_web/live/editor_live.ex:414
+#: lib/kiln_cms_web/live/editor_live.ex:425
 #: lib/kiln_cms_web/live/taxonomy_live.ex:308
 #, elixir-autogen, elixir-format
 msgid "Edit"
@@ -119,12 +119,12 @@ msgstr "Dernière vue"
 msgid "Most viewed"
 msgstr "Les plus vues"
 
-#: lib/kiln_cms_web/live/editor_live.ex:247
+#: lib/kiln_cms_web/live/editor_live.ex:258
 #, elixir-autogen, elixir-format
 msgid "New %{type}"
 msgstr "Nouveau %{type}"
 
-#: lib/kiln_cms_web/live/editor_live.ex:340
+#: lib/kiln_cms_web/live/editor_live.ex:351
 #, elixir-autogen, elixir-format
 msgid "No content yet. Create your first page or post."
 msgstr "Aucun contenu pour le moment. Créez votre première page ou article."
@@ -134,17 +134,17 @@ msgstr "Aucun contenu pour le moment. Créez votre première page ou article."
 msgid "No views recorded yet."
 msgstr "Aucune vue enregistrée pour le moment."
 
-#: lib/kiln_cms_web/live/editor_live.ex:287
+#: lib/kiln_cms_web/live/editor_live.ex:298
 #, elixir-autogen, elixir-format
 msgid "None selected"
 msgstr "Aucun sélectionné"
 
-#: lib/kiln_cms_web/live/editor_live.ex:343
+#: lib/kiln_cms_web/live/editor_live.ex:354
 #, elixir-autogen, elixir-format
 msgid "Nothing matches the current filter."
 msgstr "Aucun résultat pour ce filtre."
 
-#: lib/kiln_cms_web/live/editor_live.ex:317
+#: lib/kiln_cms_web/live/editor_live.ex:328
 #, elixir-autogen, elixir-format
 msgid "Permanently delete %{count} item(s)? This can't be undone."
 msgstr "Supprimer définitivement %{count} élément(s) ? Cette action est irréversible."
@@ -155,18 +155,18 @@ msgid "Privacy-first content views — aggregate counts only, no visitor trackin
 msgstr "Vues respectueuses de la vie privée — comptages agrégés uniquement, aucun suivi des visiteurs."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:934
-#: lib/kiln_cms_web/live/editor_live.ex:188
-#: lib/kiln_cms_web/live/editor_live.ex:388
+#: lib/kiln_cms_web/live/editor_live.ex:199
+#: lib/kiln_cms_web/live/editor_live.ex:399
 #, elixir-autogen, elixir-format
 msgid "Publish"
 msgstr "Publier"
 
-#: lib/kiln_cms_web/live/editor_live.ex:268
+#: lib/kiln_cms_web/live/editor_live.ex:279
 #, elixir-autogen, elixir-format
 msgid "Search by title"
 msgstr "Rechercher par titre"
 
-#: lib/kiln_cms_web/live/editor_live.ex:282
+#: lib/kiln_cms_web/live/editor_live.ex:293
 #, elixir-autogen, elixir-format
 msgid "Select all"
 msgstr "Tout sélectionner"
@@ -181,7 +181,7 @@ msgstr "Se connecter"
 msgid "Sign out"
 msgstr "Se déconnecter"
 
-#: lib/kiln_cms_web/live/editor_live.ex:225
+#: lib/kiln_cms_web/live/editor_live.ex:236
 #: lib/kiln_cms_web/live/taxonomy_live.ex:196
 #, elixir-autogen, elixir-format
 msgid "Taxonomy"
@@ -192,7 +192,7 @@ msgstr "Taxonomie"
 msgid "Total views"
 msgstr "Vues totales"
 
-#: lib/kiln_cms_web/live/editor_live.ex:238
+#: lib/kiln_cms_web/live/editor_live.ex:249
 #: lib/kiln_cms_web/live/media_live.ex:321
 #: lib/kiln_cms_web/live/trash_live.ex:116
 #, elixir-autogen, elixir-format
@@ -206,9 +206,9 @@ msgid "Type"
 msgstr "Type"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:958
-#: lib/kiln_cms_web/live/editor_live.ex:189
-#: lib/kiln_cms_web/live/editor_live.ex:196
-#: lib/kiln_cms_web/live/editor_live.ex:408
+#: lib/kiln_cms_web/live/editor_live.ex:200
+#: lib/kiln_cms_web/live/editor_live.ex:207
+#: lib/kiln_cms_web/live/editor_live.ex:419
 #, elixir-autogen, elixir-format
 msgid "Unpublish"
 msgstr "Dépublier"
@@ -682,6 +682,7 @@ msgid "Tags"
 msgstr "Étiquettes"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:303
+#: lib/kiln_cms_web/live/editor_live.ex:171
 #, elixir-autogen, elixir-format
 msgid "That action isn't allowed right now."
 msgstr "Cette action n'est pas autorisée pour le moment."
@@ -820,7 +821,7 @@ msgstr "« %{name} » est utilisé par %{count} élément(s). Le supprimer quand
 msgid "…or paste a URL"
 msgstr "…ou collez une URL"
 
-#: lib/kiln_cms_web/live/editor_live.ex:388
+#: lib/kiln_cms_web/live/editor_live.ex:399
 #, elixir-autogen, elixir-format
 msgid "Approve"
 msgstr "Approuver"
@@ -840,12 +841,116 @@ msgstr "En attente d'approbation"
 msgid "Request changes"
 msgstr "Demander des modifications"
 
-#: lib/kiln_cms_web/live/editor_live.ex:398
+#: lib/kiln_cms_web/live/editor_live.ex:409
 #, elixir-autogen, elixir-format
 msgid "Return"
 msgstr "Renvoyer"
 
-#: lib/kiln_cms_web/live/editor_live.ex:378
+#: lib/kiln_cms_web/live/editor_live.ex:389
 #, elixir-autogen, elixir-format
 msgid "Submit"
 msgstr "Soumettre"
+
+#: lib/kiln_cms_web/live/editor_live.ex:112
+#, elixir-autogen, elixir-format
+msgid "%{action}: %{count} updated"
+msgstr "%{action} : %{count} mis à jour"
+
+#: lib/kiln_cms_web/live/editor_live.ex:107
+#, elixir-autogen, elixir-format
+msgid "%{action}: %{count} updated, %{skipped} skipped"
+msgstr "%{action} : %{count} mis à jour, %{skipped} ignoré(s)"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:76
+#, elixir-autogen, elixir-format
+msgid "AshGraphql and AshJsonApi expose your content model to any frontend, with signed preview tokens for drafts."
+msgstr "AshGraphql et AshJsonApi exposent votre modèle de contenu à n'importe quel frontend, avec des jetons d'aperçu signés pour les brouillons."
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:58
+#, elixir-autogen, elixir-format
+msgid "Block editor"
+msgstr "Éditeur de blocs"
+
+#: lib/kiln_cms_web/live/editor_live.ex:143
+msgid "Deleted %{count}"
+msgstr "%{count} supprimé(s)"
+
+#: lib/kiln_cms_web/live/editor_live.ex:142
+#, elixir-autogen, elixir-format
+msgid "Deleted %{count}, %{skipped} skipped"
+msgstr "%{count} supprimé(s), %{skipped} ignoré(s)"
+
+#: lib/kiln_cms_web/components/block_components.ex:47
+#, elixir-autogen, elixir-format
+msgid "Embedded media"
+msgstr "Média intégré"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:14
+#, elixir-autogen, elixir-format
+msgid "Headless CMS on Phoenix + Ash"
+msgstr "CMS headless sur Phoenix + Ash"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:74
+#, elixir-autogen, elixir-format
+msgid "Headless delivery"
+msgstr "Diffusion headless"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:20
+#, elixir-autogen, elixir-format
+msgid "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
+msgstr "KilnCMS associe les ressources Ash, un éditeur de blocs LiveView, l'historique des versions et une diffusion headless GraphQL + JSON:API — centré sur Postgres, temps réel par défaut, et conçu pour les équipes qui veulent le contrôle sans la charge d'exploitation."
+
+#: lib/kiln_cms_web/components/layouts.ex:119
+#: lib/kiln_cms_web/components/layouts.ex:210
+#, elixir-autogen, elixir-format
+msgid "Language"
+msgstr "Langue"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex:810
+#, elixir-autogen, elixir-format
+msgid "Live published"
+msgstr "En ligne"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:17
+#, elixir-autogen, elixir-format
+msgid "Model content once. Publish everywhere."
+msgstr "Modélisez le contenu une fois. Publiez partout."
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:31
+#, elixir-autogen, elixir-format
+msgid "Open editor"
+msgstr "Ouvrir l'éditeur"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:66
+#, elixir-autogen, elixir-format
+msgid "Policy-driven RBAC"
+msgstr "RBAC piloté par politiques"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:68
+#, elixir-autogen, elixir-format
+msgid "Published content is world-readable; drafts stay editor-only. Admins bypass; hard deletes and webhooks are locked down."
+msgstr "Le contenu publié est lisible par tous ; les brouillons restent réservés aux éditeurs. Les administrateurs passent outre ; les suppressions définitives et les webhooks sont verrouillés."
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:38
+msgid "Sign in to edit"
+msgstr "Connectez-vous pour modifier"
+
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:60
+#, elixir-autogen, elixir-format
+msgid "TipTap rich text, drag-and-drop blocks, live preview, and version restore — all in LiveView."
+msgstr "Texte enrichi TipTap, blocs glisser-déposer, aperçu en direct et restauration de version — le tout en LiveView."
+
+#: lib/kiln_cms_web/live/editor_live.ex:170
+#, elixir-autogen, elixir-format
+msgid "Updated."
+msgstr "Mis à jour."
+
+#: lib/kiln_cms_web/controllers/auth_controller.ex:61
+#, elixir-autogen, elixir-format
+msgid "You are now signed out"
+msgstr "Vous êtes maintenant déconnecté"
+
+#: lib/kiln_cms_web/live_user_auth.ex:54
+#, elixir-autogen, elixir-format
+msgid "You need editor access to view that page."
+msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
