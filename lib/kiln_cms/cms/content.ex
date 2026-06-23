@@ -246,13 +246,25 @@ defmodule KilnCMS.CMS.Content do
           argument :query, :string, allow_nil?: false
           argument :locale, :string
 
+          # Optional facets — each is skipped when nil, so callers filter by any
+          # combination of category, tags (content carrying any of them), author,
+          # and workflow state.
+          argument :category_id, :uuid
+          argument :author_id, :uuid
+          argument :state, :atom
+          argument :tag_ids, {:array, :uuid}
+
           filter expr(
                    ^ref(:locale) == ^arg(:locale) and
                      fragment(
                        "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
                        ^arg(:locale),
                        ^arg(:query)
-                     )
+                     ) and
+                     (is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)) and
+                     (is_nil(^arg(:author_id)) or ^ref(:author_id) == ^arg(:author_id)) and
+                     (is_nil(^arg(:state)) or ^ref(:state) == ^arg(:state)) and
+                     (is_nil(^arg(:tag_ids)) or exists(tags, ^ref(:id) in ^arg(:tag_ids)))
                  )
 
           # Resolve the locale (defaulting to the configured default) and set it
@@ -547,6 +559,26 @@ defmodule KilnCMS.CMS.Content do
                   ) do
           argument :locale, :string, allow_nil?: false
           argument :query, :string, allow_nil?: false
+        end
+
+        # A highlighted snippet of the match — the surrounding text with the
+        # query terms wrapped in `<mark>`. Loaded on demand by passing the same
+        # `query`/`locale`, e.g. `load: [highlight: %{query: q, locale: loc}]`.
+        # NOTE: `ts_headline` does not HTML-escape the source, so renderers must
+        # escape everything except the `<mark>` tags before treating it as HTML.
+        calculate :highlight,
+                  :string,
+                  expr(
+                    fragment(
+                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), plainto_tsquery(kiln_regconfig(?), ?), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
+                      ^arg(:locale),
+                      ^arg(:locale),
+                      ^arg(:query)
+                    )
+                  ) do
+          argument :locale, :string, allow_nil?: false
+          argument :query, :string, allow_nil?: false
+          public? true
         end
 
         # Cosine distance (pgvector `<=>`) between a row's embedding and the
