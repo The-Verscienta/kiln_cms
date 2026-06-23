@@ -14,5 +14,11 @@ defmodule KilnCMS.Analytics do
       define :record_view, action: :record, args: [:content_type, :content_id]
       define :list_views, action: :top
     end
+
+    resource KilnCMS.Analytics.SearchQuery do
+      define :record_search, action: :record
+      define :top_searches, action: :top
+      define :zero_result_searches, action: :zero_result
+    end
   end
 end
