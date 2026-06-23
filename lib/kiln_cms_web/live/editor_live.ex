@@ -204,6 +204,12 @@ defmodule KilnCMSWeb.EditorLive do
               Taxonomy
             </.link>
             <.link
+              navigate={~p"/editor/analytics"}
+              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+            >
+              Analytics
+            </.link>
+            <.link
               :if={@actor.role == :admin}
               navigate={~p"/editor/trash"}
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
