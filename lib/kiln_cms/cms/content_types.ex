@@ -18,7 +18,8 @@ defmodule KilnCMS.CMS.ContentTypes do
           resource: module(),
           label: String.t(),
           plural: String.t(),
-          excerpt?: boolean()
+          excerpt?: boolean(),
+          path_segment: String.t() | nil
         }
 
   @doc "All content types, sorted by label."
@@ -33,15 +34,37 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   defp describe(resource) do
     type = resource.__kiln_content_type__()
+    plural = "#{type}s"
 
     %{
       type: type,
       resource: resource,
       label: resource |> Module.split() |> List.last(),
-      plural: "#{type}s",
-      excerpt?: not is_nil(Ash.Resource.Info.attribute(resource, :excerpt))
+      plural: plural,
+      excerpt?: not is_nil(Ash.Resource.Info.attribute(resource, :excerpt)),
+      path_segment: path_segment(type, plural)
     }
   end
+
+  # The first URL segment for public delivery. Pages live at the root
+  # (`/<slug>`), posts keep their historical `/blog/<slug>`, and every other
+  # type is served at `/<plural>/<slug>`.
+  defp path_segment(:page, _plural), do: nil
+  defp path_segment(:post, _plural), do: "blog"
+  defp path_segment(_type, plural), do: plural
+
+  @doc "Public URL prefix for a content type (`\"\"` for pages served at root)."
+  @spec public_prefix(t()) :: String.t()
+  def public_prefix(%{path_segment: nil}), do: ""
+  def public_prefix(%{path_segment: segment}), do: "/" <> segment
+
+  @doc ~S(Find a content type by its public URL segment, e.g. "blog" or "products".)
+  @spec get_by_path(String.t()) :: t() | nil
+  def get_by_path(segment), do: Enum.find(all(), &(&1.path_segment == segment))
+
+  @doc "The atom types of all content types."
+  @spec types() :: [atom()]
+  def types, do: Enum.map(all(), & &1.type)
 
   @doc "Look up a content type by its atom or string type. Returns nil if unknown."
   @spec get(atom() | String.t() | nil) :: t() | nil
@@ -73,6 +96,15 @@ defmodule KilnCMS.CMS.ContentTypes do
   def list!(type, opts \\ []), do: call("list_#{plural(type)}!", [opts])
 
   def get_record!(type, id, opts \\ []), do: call("get_#{atom(type)}!", [id, opts])
+
+  # Non-bang fetch by id (`{:ok, record} | {:error, _}`), e.g. for preview links.
+  def get_record(type, id, opts \\ []), do: call("get_#{atom(type)}", [id, opts])
+
+  # Public delivery: fetch a single published record by slug (returns nil rather
+  # than raising on a miss).
+  def get_published_by_slug(type, slug, opts \\ []) do
+    call("get_published_#{atom(type)}_by_slug!", [slug, opts])
+  end
 
   def create!(type, attrs, opts \\ []), do: call("create_#{atom(type)}!", [attrs, opts])
 

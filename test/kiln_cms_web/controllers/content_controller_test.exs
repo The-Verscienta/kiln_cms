@@ -135,4 +135,13 @@ defmodule KilnCMSWeb.ContentControllerTest do
       refute html =~ "HiddenDraft"
     end
   end
+
+  describe "generic /:type/:slug delivery" do
+    test "an unknown content type 404s", %{conn: conn} do
+      # `widgets` is not a registered content type's path segment. (The happy
+      # path — a generated type served at /<plural>/<slug> — is covered by the
+      # ContentTypes registry tests and verified end-to-end.)
+      assert conn |> get("/widgets/anything") |> response(404)
+    end
+  end
 end

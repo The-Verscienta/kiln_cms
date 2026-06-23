@@ -187,6 +187,10 @@ defmodule KilnCMSWeb.Router do
 
     get "/blog", ContentController, :blog_index
     get "/blog/:slug", ContentController, :show_post
+    # Generic delivery for any other content type at `/<plural>/<slug>`. Defined
+    # after the literal `/blog` routes (so posts win) and alongside the
+    # single-segment page route (different arity — no collision).
+    get "/:type/:slug", ContentController, :show_content
     get "/:slug", ContentController, :show_page
   end
 

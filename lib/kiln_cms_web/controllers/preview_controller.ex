@@ -6,8 +6,8 @@ defmodule KilnCMSWeb.PreviewController do
   """
   use KilnCMSWeb, :controller
 
-  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentSerializer
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.PreviewToken
 
   def show(conn, %{"token" => token}) do
@@ -22,7 +22,10 @@ defmodule KilnCMSWeb.PreviewController do
     end
   end
 
-  # `PreviewToken.verify/1` only ever yields `:page` or `:post`.
-  defp fetch(:page, id), do: CMS.get_page(id, authorize?: false)
-  defp fetch(:post, id), do: CMS.get_post(id, authorize?: false)
+  # The token carries the content type; resolve it generically via the registry.
+  defp fetch(type, id) do
+    if ContentTypes.type?(type),
+      do: ContentTypes.get_record(type, id, authorize?: false),
+      else: {:error, :unknown_type}
+  end
 end
