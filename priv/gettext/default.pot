@@ -16,13 +16,13 @@ msgstr ""
 msgid "Actions"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:172
-#: lib/kiln_cms_web/components/layouts.ex:187
+#: lib/kiln_cms_web/components/layouts.ex:176
+#: lib/kiln_cms_web/components/layouts.ex:191
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:117
+#: lib/kiln_cms_web/components/layouts.ex:118
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
 msgid "Blog"
@@ -33,17 +33,17 @@ msgstr ""
 msgid "No posts yet."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:140
+#: lib/kiln_cms_web/components/layouts.ex:144
 #, elixir-autogen, elixir-format
 msgid "Powered by KilnCMS."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:179
+#: lib/kiln_cms_web/components/layouts.ex:183
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:164
+#: lib/kiln_cms_web/components/layouts.ex:168
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr ""
@@ -51,4 +51,154 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex:81
 #, elixir-autogen, elixir-format
 msgid "close"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:265
+#, elixir-autogen, elixir-format
+msgid "%{count} selected"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:72
+#, elixir-autogen, elixir-format
+msgid "All content"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:74
+#: lib/kiln_cms_web/live/editor_live.ex:210
+#, elixir-autogen, elixir-format
+msgid "Analytics"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:274
+#, elixir-autogen, elixir-format
+msgid "Archive"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:319
+#, elixir-autogen, elixir-format
+msgid "Cancel"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:94
+#: lib/kiln_cms_web/live/editor_live.ex:198
+#, elixir-autogen, elixir-format
+msgid "Content"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:292
+#: lib/kiln_cms_web/live/editor_live.ex:312
+#, elixir-autogen, elixir-format
+msgid "Delete"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:379
+#, elixir-autogen, elixir-format
+msgid "Edit"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:68
+#, elixir-autogen, elixir-format
+msgid "Editor"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:97
+#, elixir-autogen, elixir-format
+msgid "Last viewed"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:86
+#, elixir-autogen, elixir-format
+msgid "Most viewed"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:226
+#, elixir-autogen, elixir-format
+msgid "New %{type}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:325
+#, elixir-autogen, elixir-format
+msgid "No content yet. Create your first page or post."
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:88
+#, elixir-autogen, elixir-format
+msgid "No views recorded yet."
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:266
+#, elixir-autogen, elixir-format
+msgid "None selected"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:328
+#, elixir-autogen, elixir-format
+msgid "Nothing matches the current filter."
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:302
+#, elixir-autogen, elixir-format
+msgid "Permanently delete %{count} item(s)? This can't be undone."
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:76
+#, elixir-autogen, elixir-format
+msgid "Privacy-first content views — aggregate counts only, no visitor tracking."
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:272
+#: lib/kiln_cms_web/live/editor_live.ex:363
+#, elixir-autogen, elixir-format
+msgid "Publish"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:247
+#, elixir-autogen, elixir-format
+msgid "Search by title"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:261
+#, elixir-autogen, elixir-format
+msgid "Select all"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:77
+#, elixir-autogen, elixir-format
+msgid "Sign in"
+msgstr ""
+
+#: lib/kiln_cms_web/components/layouts.ex:84
+#, elixir-autogen, elixir-format
+msgid "Sign out"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:204
+#, elixir-autogen, elixir-format
+msgid "Taxonomy"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:81
+#, elixir-autogen, elixir-format
+msgid "Total views"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:217
+#, elixir-autogen, elixir-format
+msgid "Trash"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:95
+#, elixir-autogen, elixir-format
+msgid "Type"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex:273
+#: lib/kiln_cms_web/live/editor_live.ex:373
+#, elixir-autogen, elixir-format
+msgid "Unpublish"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:96
+#, elixir-autogen, elixir-format
+msgid "Views"
 msgstr ""
