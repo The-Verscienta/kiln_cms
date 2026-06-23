@@ -127,6 +127,30 @@ defmodule KilnCMS.Search do
     }
   end
 
+  @doc """
+  Record a user-initiated search for analytics (normalized, privacy-first):
+  trimmed + downcased query, its locale, and how many results it returned.
+  Fire-and-forget — failures are swallowed so analytics never breaks search, and
+  blank queries are ignored.
+  """
+  @spec record_query(String.t(), non_neg_integer(), keyword()) :: :ok
+  def record_query(query, result_count, opts \\ []) when is_binary(query) do
+    normalized = query |> String.trim() |> String.downcase()
+
+    if normalized != "" do
+      locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+
+      KilnCMS.Analytics.record_search(
+        %{query: normalized, locale: locale, result_count: result_count},
+        authorize?: false
+      )
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
   defp section(resource, action, params, read_opts, limit) do
     resource
     |> Ash.Query.for_read(action, params)

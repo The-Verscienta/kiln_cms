@@ -115,6 +115,18 @@ const liveSocket = new LiveSocket("/live", Socket, {
   hooks: {...colocatedHooks, ...Hooks},
 })
 
+// ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
+// there). Skipped while typing in an input so it doesn't hijack the field.
+window.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    const tag = (e.target.tagName || "").toLowerCase()
+    if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return
+    if (window.location.pathname === "/editor/search") return
+    e.preventDefault()
+    window.location.href = "/editor/search"
+  }
+})
+
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
