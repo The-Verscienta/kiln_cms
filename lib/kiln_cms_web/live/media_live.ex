@@ -17,6 +17,11 @@ defmodule KilnCMSWeb.MediaLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
+    # Live-refresh the library when a background variant job finishes.
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, KilnCMS.Media.VariantWorker.topic())
+    end
+
     {:ok,
      socket
      |> assign(:actor, actor)
@@ -153,21 +158,27 @@ defmodule KilnCMSWeb.MediaLive do
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("URL copied to clipboard."))}
 
+  # A background variant job finished — refresh the library so the new
+  # dimensions/thumbnail show without a manual reload.
+  @impl true
+  def handle_info({:media_processed, _id}, socket) do
+    {:noreply, assign(socket, :media, list_media(socket.assigns.actor))}
+  end
+
   # --- helpers ---------------------------------------------------------------
 
   defp store_entry(path, entry, actor) do
     key = Storage.generate_key(entry.client_name)
-    ext = entry.client_name |> Path.extname() |> String.downcase()
 
     with :ok <- ImageProcessor.validate_upload(path),
          {:ok, ^key} <- Storage.store(key, path) do
-      create_from_upload(key, ext, path, entry, actor)
+      create_from_upload(key, entry, actor)
     else
       _ -> :error
     end
   end
 
-  defp create_from_upload(key, ext, path, entry, actor) do
+  defp create_from_upload(key, entry, actor) do
     attrs = %{
       filename: entry.client_name,
       content_type: entry.client_type,
@@ -178,7 +189,7 @@ defmodule KilnCMSWeb.MediaLive do
 
     case CMS.create_media_item(attrs, actor: actor) do
       {:ok, item} ->
-        enqueue_processing(item, path, ext)
+        enqueue_processing(item)
         :ok
 
       _ ->
@@ -187,16 +198,11 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  # Hand the original off to a background worker for dimension/variant
-  # processing, keeping libvips work off the upload request. The upload temp
-  # file is consumed once this request returns, so copy it to a stable temp path
-  # the worker can read.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp enqueue_processing(item, source_path, ext) do
-    tmp = Path.join(System.tmp_dir!(), "kiln-process-#{Ecto.UUID.generate()}#{ext}")
-    File.cp!(source_path, tmp)
-
-    %{media_item_id: item.id, source_path: tmp, ext: ext}
+  # Queue background dimension/variant processing (keeps libvips off the upload
+  # request). The worker re-fetches the original from storage, so there's no
+  # node-local temp hand-off.
+  defp enqueue_processing(item) do
+    %{media_item_id: item.id}
     |> KilnCMS.Media.VariantWorker.new()
     |> Oban.insert!()
   end

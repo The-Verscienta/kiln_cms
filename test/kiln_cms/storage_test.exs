@@ -45,6 +45,15 @@ defmodule KilnCMS.StorageTest do
     assert {:error, :invalid_key} = Storage.store("sub/dir.txt", src)
   end
 
+  test "fetch reads the stored bytes back, and errors for a missing/unsafe key" do
+    key = Storage.generate_key("c.txt")
+    {:ok, _} = Storage.store(key, tmp_source("the-bytes"))
+
+    assert {:ok, "the-bytes"} = Storage.fetch(key)
+    assert {:error, :enoent} = Storage.fetch(Storage.generate_key("missing.txt"))
+    assert {:error, :invalid_key} = Storage.fetch("../escape.txt")
+  end
+
   test "delete removes the file and is idempotent", %{root: root} do
     src = tmp_source("x")
     key = Storage.generate_key("b.txt")
