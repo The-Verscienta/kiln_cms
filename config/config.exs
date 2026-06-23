@@ -31,9 +31,12 @@ config :ex_aws,
   json_codec: Jason,
   http_client: KilnCMS.Storage.S3.ReqClient
 
-# Public base URL of the delivery frontend — used to build sitemap/robots URLs.
-# Override in runtime.exs for production.
+# Public base URL of the delivery frontend — used to build sitemap/robots URLs
+# and JSON-LD canonical URLs. Override in runtime.exs for production.
 config :kiln_cms, :public_base_url, "http://localhost:4000"
+
+# Organization name used as the JSON-LD publisher. Override in runtime.exs.
+config :kiln_cms, :site_name, "KilnCMS"
 
 # How many days soft-deleted (trashed) content is retained before the nightly
 # AshOban `purge_trashed` trigger hard-deletes it.
