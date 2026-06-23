@@ -123,6 +123,18 @@ defmodule KilnCMSWeb.ContentControllerTest do
       post = post(%{state: :draft, published_at: nil})
       assert conn |> get(~p"/blog/#{post.slug}") |> response(404)
     end
+
+    test "emits BlogPosting JSON-LD in the head", %{conn: conn} do
+      post = post(%{title: "Structured Post"})
+
+      html = conn |> get(~p"/blog/#{post.slug}") |> html_response(200)
+
+      assert html =~ ~s(<script type="application/ld+json">)
+      assert html =~ ~s("@type":"BlogPosting")
+      assert html =~ ~s("headline":"Structured Post")
+      # URL is present (slashes are \/-escaped by escape: :html_safe).
+      assert html =~ post.slug
+    end
   end
 
   describe "/blog index" do

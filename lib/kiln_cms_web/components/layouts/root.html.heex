@@ -11,6 +11,7 @@
     <meta :if={assigns[:meta_description]} property="og:description" content={@meta_description} />
     <meta :if={assigns[:og_image]} property="og:image" content={@og_image} />
     <meta property="og:type" content={assigns[:og_type] || "website"} />
+    {assigns[:json_ld]}
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>

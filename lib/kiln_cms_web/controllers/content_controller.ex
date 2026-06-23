@@ -14,18 +14,19 @@ defmodule KilnCMSWeb.ContentController do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMSWeb.StructuredData
 
   def show_page(conn, %{"slug" => slug}) do
     case CMS.get_published_page_by_slug!(slug, not_found_error?: false, authorize?: false) do
       nil -> not_found(conn)
-      page -> render_content(conn, :show_page, page)
+      page -> render_content(conn, :show_page, page, ContentTypes.get(:page))
     end
   end
 
   def show_post(conn, %{"slug" => slug}) do
     case CMS.get_published_post_by_slug!(slug, not_found_error?: false, authorize?: false) do
       nil -> not_found(conn)
-      post -> render_content(conn, :show_post, post)
+      post -> render_content(conn, :show_post, post, ContentTypes.get(:post))
     end
   end
 
@@ -38,7 +39,7 @@ defmodule KilnCMSWeb.ContentController do
              not_found_error?: false,
              authorize?: false
            ) do
-      render_content(conn, :show, record)
+      render_content(conn, :show, record, ct)
     else
       _ -> not_found(conn)
     end
@@ -54,15 +55,26 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   # Assign SEO metadata (read by the root layout) and the normalized blocks,
-  # then render. `record` is a published Page or Post.
-  defp render_content(conn, template, record) do
+  # then render. `record` is a published content struct and `ct` its
+  # `ContentTypes` entry.
+  defp render_content(conn, template, record, ct) do
     conn
     |> assign(:page_title, record.seo_title || record.title)
     |> assign(:meta_description, record.seo_description)
     |> assign(:canonical_url, record.canonical_url)
     |> assign(:og_image, record.seo_image)
     |> assign(:og_type, "article")
+    |> assign(:json_ld, json_ld_script(record, ct))
     |> render(template, record: record, blocks: blocks(record))
+  end
+
+  # Pre-render the JSON-LD as a safe <script> tag. HEEx doesn't interpolate
+  # inside a literal <script> element, so the layout injects this with `{...}`.
+  # `escape: :html_safe` escapes `<`/`>`/`&`, so the JSON can't break out of the
+  # tag.
+  defp json_ld_script(record, ct) do
+    json = Jason.encode!(StructuredData.build(record, ct), escape: :html_safe)
+    Phoenix.HTML.raw(~s(<script type="application/ld+json">#{json}</script>))
   end
 
   defp blocks(record) do
