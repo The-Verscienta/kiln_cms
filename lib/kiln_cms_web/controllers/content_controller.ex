@@ -13,12 +13,18 @@ defmodule KilnCMSWeb.ContentController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Analytics
+  alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.StructuredData
 
   def show_page(conn, %{"slug" => slug}) do
-    case CMS.get_published_page_by_slug!(slug, not_found_error?: false, authorize?: false) do
+    fetched =
+      Cache.fetch_published("page", slug, fn ->
+        CMS.get_published_page_by_slug!(slug, not_found_error?: false, authorize?: false)
+      end)
+
+    case fetched do
       nil ->
         not_found(conn)
 
@@ -29,7 +35,12 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   def show_post(conn, %{"slug" => slug}) do
-    case CMS.get_published_post_by_slug!(slug, not_found_error?: false, authorize?: false) do
+    fetched =
+      Cache.fetch_published("post", slug, fn ->
+        CMS.get_published_post_by_slug!(slug, not_found_error?: false, authorize?: false)
+      end)
+
+    case fetched do
       nil ->
         not_found(conn)
 
@@ -44,10 +55,12 @@ defmodule KilnCMSWeb.ContentController do
   def show_content(conn, %{"type" => type, "slug" => slug}) do
     with ct when not is_nil(ct) <- ContentTypes.get_by_path(type),
          record when not is_nil(record) <-
-           ContentTypes.get_published_by_slug(ct.type, slug,
-             not_found_error?: false,
-             authorize?: false
-           ) do
+           Cache.fetch_published(to_string(ct.type), slug, fn ->
+             ContentTypes.get_published_by_slug(ct.type, slug,
+               not_found_error?: false,
+               authorize?: false
+             )
+           end) do
       track_view(to_string(ct.type), record.id)
       render_content(conn, :show, record, ct)
     else

@@ -80,6 +80,7 @@ defmodule KilnCMS.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
       {:html_sanitize_ex, "~> 1.4"},
+      {:cachex, "~> 4.0"},
       {:image, "~> 0.69"},
       {:ex_aws, "~> 2.5"},
       {:ex_aws_s3, "~> 2.5"},
