@@ -103,6 +103,26 @@ afterwards).
 - Seed fixtures with `Ash.Seed.seed!` when you want to bypass the very
   policies/actions under test.
 
+### Browser E2E (Playwright)
+
+LiveView tests cover server-side events; the browser E2E suite (in `e2e/`)
+drives a real headless Chromium through the editor — TipTap rich text,
+SortableJS drag-reorder, and the create → edit → publish → view-live journey.
+It runs in a dedicated `MIX_ENV=e2e` against its own `kiln_cms_e2e` database
+(no SQL sandbox — the browser hits the server out-of-process).
+
+```bash
+cd e2e
+npm install
+npx playwright install chromium   # bundled browser; no system Chrome needed
+npx playwright test               # boots the server itself, then runs the suite
+```
+
+Playwright's `webServer` runs `mix e2e.setup` (build assets + create/migrate/seed
+the e2e DB) and then serves with `PHX_SERVER=true PORT=4002 mix phx.server`. To
+run against a server you started yourself, set `E2E_NO_WEBSERVER=1`. CI runs this
+suite as a separate `e2e` job (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
 ## Commits & pull requests
 
 - Branch off `main`; keep commits focused with a clear imperative subject line.

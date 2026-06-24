@@ -37,7 +37,11 @@ defmodule KilnCMS.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [
+        precommit: :test,
+        "e2e.setup": :e2e,
+        "e2e.reset": :e2e
+      ]
     ]
   end
 
@@ -133,6 +137,18 @@ defmodule KilnCMS.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ash.setup --quiet", "test"],
+      # Browser E2E (MIX_ENV=e2e). `e2e.setup` builds assets and prepares the DB
+      # + demo seeds; the server itself is then started in a *separate* VM with
+      # `PHX_SERVER=true mix phx.server` (see e2e/playwright.config.js). It can't
+      # be one alias: `mix run seeds.exs` halts the VM, so a trailing
+      # `phx.server` in the same chain would never run.
+      "e2e.setup": [
+        "assets.setup",
+        "assets.build",
+        "ash.setup --quiet",
+        "run priv/repo/seeds.exs"
+      ],
+      "e2e.reset": ["ecto.drop --quiet", "e2e.setup"],
       "assets.setup": [
         "tailwind.install --if-missing",
         "esbuild.install --if-missing",

@@ -328,7 +328,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 ### Phase 8: Testing, Security, CI/CD, Docs (P0 for v1)
 - [ ] Comprehensive ExUnit tests for resources, policies, actions (Ash provides excellent support)
 - [ ] LiveView tests for editor flows
-- [ ] E2E with Wallaby or Playwright (critical for editor UX)
+- [x] E2E with Playwright (#50) — headless-Chromium suite in `e2e/` driving the editor (TipTap rich text, SortableJS drag-reorder) through the create → edit → publish → view-live journey. Runs in a dedicated `MIX_ENV=e2e` against its own `kiln_cms_e2e` DB via `mix e2e.setup` + `PHX_SERVER=true mix phx.server`; a separate `e2e` CI job runs the headless browser suite. Documented in `CONTRIBUTING.md`.
 - [ ] Security: Sobelow (**done** — wired into precommit/CI), **nonce-based CSP** on the browser pipeline (strict `script-src 'self' 'nonce-…'`; relaxed for dev-only AshAdmin/LiveDashboard; browser-verified), dependency audit, policy coverage, rate limiting tests
 - [x] GitHub Actions workflow (test on push/PR, dialyzer, credo, sobelow, format + unused-deps check) — `.github/workflows/ci.yml`. **Migration-drift check (#52):** CI runs `mix ash.codegen --check`, failing the build when the committed migrations/resource snapshots diverge from the Ash resources; documented in `CONTRIBUTING.md`.
 - [ ] Full ExDoc documentation + guides (modeling, editor usage, API consumption, deployment)
