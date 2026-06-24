@@ -48,41 +48,27 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-2 sm:gap-3">
-          <a
-            href="/gql"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            GraphQL
-          </a>
-          <a
-            href="/api/json"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            JSON:API
-          </a>
-          <a
-            :if={@current_user && @current_user.role in [:editor, :admin]}
-            href={~p"/editor"}
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            {gettext("Editor")}
-          </a>
-          <.locale_switcher />
+          <%!-- Desktop: inline links --%>
+          <div class="hidden items-center gap-2 sm:flex sm:gap-3">
+            <.nav_links current_user={@current_user} />
+            <.locale_switcher />
+          </div>
+
           <.theme_toggle />
-          <a
-            :if={is_nil(@current_user)}
-            href={~p"/sign-in"}
-            class="rounded-lg bg-base-content px-3 py-1.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
-          >
-            {gettext("Sign in")}
-          </a>
-          <a
-            :if={@current_user}
-            href={~p"/sign-out"}
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            {gettext("Sign out")}
-          </a>
+
+          <%!-- Mobile: hamburger disclosure --%>
+          <details class="relative sm:hidden">
+            <summary class="flex cursor-pointer list-none items-center rounded-lg p-2 text-base-content/80 hover:bg-base-200 [&::-webkit-details-marker]:hidden">
+              <.icon name="hero-bars-3" class="size-5" />
+              <span class="sr-only">{gettext("Menu")}</span>
+            </summary>
+            <div class="absolute right-0 z-50 mt-2 flex w-52 flex-col gap-0.5 rounded-lg border border-base-content/10 bg-base-100 p-2 shadow-lg">
+              <.nav_links current_user={@current_user} />
+              <div class="mt-1 border-t border-base-content/10 px-1 pt-2">
+                <.locale_switcher />
+              </div>
+            </div>
+          </details>
         </nav>
       </div>
     </header>
@@ -230,6 +216,34 @@ defmodule KilnCMSWeb.Layouts do
         {loc}
       </.link>
     </span>
+    """
+  end
+
+  # Shared authoring-nav links — rendered inline on desktop and stacked in the
+  # mobile menu, so they're defined once.
+  attr :current_user, :map, default: nil
+
+  defp nav_links(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :item,
+        "rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition " <>
+          "hover:bg-base-200 hover:text-base-content"
+      )
+
+    ~H"""
+    <a href="/gql" class={@item}>GraphQL</a>
+    <a href="/api/json" class={@item}>JSON:API</a>
+    <a
+      :if={@current_user && @current_user.role in [:editor, :admin]}
+      href={~p"/editor"}
+      class={@item}
+    >
+      {gettext("Editor")}
+    </a>
+    <a :if={is_nil(@current_user)} href={~p"/sign-in"} class={@item}>{gettext("Sign in")}</a>
+    <a :if={@current_user} href={~p"/sign-out"} class={@item}>{gettext("Sign out")}</a>
     """
   end
 

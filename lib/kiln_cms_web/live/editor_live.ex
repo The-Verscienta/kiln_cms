@@ -226,9 +226,9 @@ defmodule KilnCMSWeb.EditorLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-6">
-        <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h1 class="text-2xl font-semibold">{gettext("Content")}</h1>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <.link
               navigate={~p"/editor/taxonomy"}
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
@@ -368,15 +368,16 @@ defmodule KilnCMSWeb.EditorLive do
           <li
             :for={{kind, record} <- @visible}
             id={"#{kind}-#{record.id}"}
-            class="flex items-center gap-4 p-3"
+            class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3"
           >
             <input
               type="checkbox"
               checked={MapSet.member?(@selected, "#{kind}:#{record.id}")}
               phx-click="toggle_select"
               phx-value-key={"#{kind}:#{record.id}"}
+              class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
             />
-            <span class="w-12 shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
+            <span class="shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
             <div class="min-w-0 flex-1">
               <.link navigate={edit_path(kind, record.id)} class="font-medium hover:underline">
                 {record.title}
@@ -384,7 +385,7 @@ defmodule KilnCMSWeb.EditorLive do
               <p class="truncate text-xs text-base-content/50">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
-            <div class="flex items-center gap-2">
+            <div class="flex w-full items-center justify-end gap-2 sm:w-auto">
               <button
                 :if={record.state == :draft and @actor.role == :editor}
                 type="button"

@@ -64,9 +64,15 @@ Common ad-hoc patterns used across LiveViews (compose with utilities + tokens):
 - Status pills go through `<.badge>`; primary surfaces/empty views through
   `<.empty_state>` — don't re-roll them inline.
 
-## Known limitation
+## Responsive
 
-The admin/editor UI is **desktop-first**. The header nav, content-list action
-bar, and list rows don't yet reflow below ~640px (they overlap on phones). The
-design tokens and components are responsive-ready; making the layouts reflow
-(stacking rows, a collapsible nav) is a separate, deliberate pass.
+The admin/editor UI works on phones and tablets. Conventions (`sm` = 640px):
+
+- **Nav** collapses to a hamburger disclosure (`<details>`) below `sm`; the theme
+  toggle stays visible. Inline links return at `sm+`.
+- **Page headers** (title + actions) stack with `flex flex-col gap-3 sm:flex-row
+  sm:items-center sm:justify-between`; action groups use `flex-wrap`.
+- **List rows** keep the title + badge on the first line and let the action
+  buttons wrap to a second line on mobile (`w-full sm:w-auto justify-end`).
+- **Two-column layouts** (editor form/preview, taxonomy) are `lg:grid-cols-2`
+  and single-column below; paired fields are `sm:grid-cols-2`.
