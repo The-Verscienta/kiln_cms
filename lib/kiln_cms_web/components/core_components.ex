@@ -9,11 +9,11 @@ defmodule KilnCMSWeb.CoreComponents do
   them in any way you want, based on your application growth and needs.
 
   The foundation for styling is Tailwind CSS, a utility-first CSS framework,
-  augmented with daisyUI, a Tailwind CSS plugin that provides UI components
-  and themes. Here are useful references:
-
-    * [daisyUI](https://daisyui.com/docs/intro/) - a good place to get
-      started and see the available components.
+  on top of KilnCMS's own semantic design tokens (defined in `assets/css/app.css`
+  via `@theme`): `base-100`/`base-200`/`base-300`/`base-content` for surfaces and
+  text, `primary`/`secondary`/`accent`/`neutral` for brand, and
+  `info`/`success`/`warning`/`error` for status — used as ordinary Tailwind color
+  utilities (`bg-base-100`, `text-error`, …). Here are useful references:
 
     * [Tailwind CSS](https://tailwindcss.com) - the foundational framework
       we build on. You will use it for layout, sizing, flexbox, grid, and
@@ -63,16 +63,20 @@ defmodule KilnCMSWeb.CoreComponents do
       id={@id}
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
-      class="toast toast-top toast-end z-50"
+      class="fixed top-3 right-3 z-50"
       {@rest}
     >
       <div class={[
-        "alert w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap",
-        @kind == :info && "alert-info",
-        @kind == :error && "alert-error"
+        "flex items-start gap-3 rounded-lg border bg-base-100 px-4 py-3 text-base-content shadow-lg w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap",
+        @kind == :info && "border-info/30",
+        @kind == :error && "border-error/30"
       ]}>
-        <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0" />
-        <.icon :if={@kind == :error} name="hero-exclamation-circle" class="size-5 shrink-0" />
+        <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0 text-info" />
+        <.icon
+          :if={@kind == :error}
+          name="hero-exclamation-circle"
+          class="size-5 shrink-0 text-error"
+        />
         <div>
           <p :if={@title} class="font-semibold">{@title}</p>
           <p>{msg}</p>
@@ -233,7 +237,7 @@ defmodule KilnCMSWeb.CoreComponents do
             name={@name}
             value="true"
             checked={@checked}
-            class={@class || "checkbox checkbox-sm"}
+            class={@class || "size-4 rounded border border-base-content/30 accent-primary"}
             {@rest}
           />{@label}
         </span>

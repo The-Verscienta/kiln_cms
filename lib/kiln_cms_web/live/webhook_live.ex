@@ -275,7 +275,7 @@ defmodule KilnCMSWeb.WebhookLive do
                     name="webhook[active]"
                     value="true"
                     checked={@edit.form[:active].value in [true, "true"]}
-                    class="checkbox checkbox-sm"
+                    class="size-4 rounded border border-base-content/30 accent-primary"
                   />
                   {gettext("Active")}
                 </label>
@@ -316,7 +316,7 @@ defmodule KilnCMSWeb.WebhookLive do
           name="webhook[events][]"
           value={event}
           checked={event_checked?(@form, event)}
-          class="checkbox checkbox-sm"
+          class="size-4 rounded border border-base-content/30 accent-primary"
         />
         <code class="text-xs">{event}</code>
       </label>
