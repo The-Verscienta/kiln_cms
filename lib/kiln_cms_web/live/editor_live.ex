@@ -354,9 +354,9 @@ defmodule KilnCMSWeb.EditorLive do
           </div>
         </div>
 
-        <p :if={@items == []} class="text-sm text-base-content/60">
-          {gettext("No content yet. Create your first page or post.")}
-        </p>
+        <.empty_state :if={@items == []} icon="hero-document-text" title={gettext("No content yet")}>
+          {gettext("Create your first page or post to get started.")}
+        </.empty_state>
         <p :if={@items != [] and @visible == []} class="text-sm text-base-content/60">
           {gettext("Nothing matches the current filter.")}
         </p>

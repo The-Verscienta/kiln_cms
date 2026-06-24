@@ -410,7 +410,9 @@ defmodule KilnCMSWeb.MediaLive do
               />
             </form>
           </div>
-          <p :if={@media == []} class="text-sm text-base-content/60">{gettext("No media yet.")}</p>
+          <.empty_state :if={@media == []} icon="hero-photo" title={gettext("No media yet")}>
+            {gettext("Upload an image above to start building your library.")}
+          </.empty_state>
           <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
             {gettext("No media matches “%{query}”.", query: @query)}
           </p>

@@ -31,6 +31,16 @@ defmodule KilnCMSWeb.CoreComponents do
 
   alias Phoenix.LiveView.JS
 
+  # Shared field styling (token-based; no DaisyUI). Used by input/select/textarea.
+  defp input_base do
+    "w-full rounded-lg border border-base-content/15 bg-base-100 px-3 py-2 text-sm " <>
+      "text-base-content transition placeholder:text-base-content/40 focus:border-primary/50 " <>
+      "focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+  end
+
+  defp input_error_class, do: "border-error/60 focus:border-error/60 focus:ring-error/20"
+  defp field_label_class, do: "mb-1 block text-sm font-medium text-base-content"
+
   @doc """
   Renders flash notices.
 
@@ -101,15 +111,25 @@ defmodule KilnCMSWeb.CoreComponents do
   """
   attr :rest, :global, include: ~w(href navigate patch method download name value disabled type)
   attr :class, :any
-  attr :variant, :string, values: ~w(primary)
+  attr :variant, :string, values: ~w(primary danger)
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
+    base =
+      "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition " <>
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-base-100 " <>
+        "disabled:cursor-not-allowed disabled:opacity-50"
+
     variants = %{
       "primary" =>
-        "rounded-lg bg-base-content px-4 py-2 text-sm font-semibold text-base-100 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50",
+        base <>
+          " bg-primary text-primary-content shadow-sm hover:bg-primary/90 focus-visible:ring-primary/40",
+      "danger" =>
+        base <>
+          " border border-error/40 text-error hover:bg-error/10 focus-visible:ring-error/30",
       nil =>
-        "rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
+        base <>
+          " border border-base-content/15 bg-base-100 hover:bg-base-200 hover:border-base-content/25 focus-visible:ring-base-content/20"
     }
 
     assigns =
@@ -130,6 +150,78 @@ defmodule KilnCMSWeb.CoreComponents do
       </button>
       """
     end
+  end
+
+  @doc """
+  Renders a small status pill.
+
+  ## Examples
+
+      <.badge>draft</.badge>
+      <.badge variant="success">published</.badge>
+  """
+  attr :variant, :string,
+    default: "neutral",
+    values: ~w(neutral primary success warning error info)
+
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  def badge(assigns) do
+    tones = %{
+      "neutral" => "bg-base-200 text-base-content/70",
+      "primary" => "bg-primary/12 text-primary",
+      "success" => "bg-success/15 text-success",
+      "warning" => "bg-warning/20 text-warning-content",
+      "error" => "bg-error/12 text-error",
+      "info" => "bg-info/12 text-info"
+    }
+
+    assigns = assign(assigns, :tone, Map.fetch!(tones, assigns.variant))
+
+    ~H"""
+    <span class={[
+      "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+      @tone,
+      @class
+    ]}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc """
+  Renders a centered empty-state: an icon, a message, optional body and action.
+
+  ## Examples
+
+      <.empty_state icon="hero-photo" title="No media yet">
+        Upload an image to get started.
+      </.empty_state>
+  """
+  attr :icon, :string, default: "hero-inbox"
+  attr :title, :string, required: true
+  attr :class, :any, default: nil
+  slot :inner_block
+  slot :action
+
+  def empty_state(assigns) do
+    ~H"""
+    <div class={[
+      "flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed",
+      "border-base-content/15 bg-base-100 px-6 py-12 text-center",
+      @class
+    ]}>
+      <.icon name={@icon} class="size-8 text-base-content/30" />
+      <div class="space-y-1">
+        <p class="text-sm font-medium text-base-content">{@title}</p>
+        <p :if={@inner_block != []} class="mx-auto max-w-sm text-sm text-base-content/55">
+          {render_slot(@inner_block)}
+        </p>
+      </div>
+      <div :if={@action != []} class="mt-1">{render_slot(@action)}</div>
+    </div>
+    """
   end
 
   @doc """
@@ -221,7 +313,7 @@ defmodule KilnCMSWeb.CoreComponents do
       end)
 
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="mb-2">
       <label for={@id}>
         <input
           type="hidden"
@@ -230,7 +322,7 @@ defmodule KilnCMSWeb.CoreComponents do
           disabled={@rest[:disabled]}
           form={@rest[:form]}
         />
-        <span class="label">
+        <span class="flex items-center gap-2 text-sm text-base-content">
           <input
             type="checkbox"
             id={@id}
@@ -249,13 +341,16 @@ defmodule KilnCMSWeb.CoreComponents do
 
   def input(%{type: "select"} = assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class={field_label_class()}>{@label}</span>
         <select
           id={@id}
           name={@name}
-          class={[@class || "w-full select", @errors != [] && (@error_class || "select-error")]}
+          class={[
+            @class || input_base() <> " cursor-pointer",
+            @errors != [] && (@error_class || input_error_class())
+          ]}
           multiple={@multiple}
           {@rest}
         >
@@ -270,15 +365,15 @@ defmodule KilnCMSWeb.CoreComponents do
 
   def input(%{type: "textarea"} = assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class={field_label_class()}>{@label}</span>
         <textarea
           id={@id}
           name={@name}
           class={[
-            @class || "w-full textarea",
-            @errors != [] && (@error_class || "textarea-error")
+            @class || input_base() <> " min-h-24",
+            @errors != [] && (@error_class || input_error_class())
           ]}
           {@rest}
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
@@ -291,17 +386,17 @@ defmodule KilnCMSWeb.CoreComponents do
   # All other inputs text, datetime-local, url, password, etc. are handled here...
   def input(assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class={field_label_class()}>{@label}</span>
         <input
           type={@type}
           name={@name}
           id={@id}
           value={Phoenix.HTML.Form.normalize_value(@type, @value)}
           class={[
-            @class || "w-full input",
-            @errors != [] && (@error_class || "input-error")
+            @class || input_base(),
+            @errors != [] && (@error_class || input_error_class())
           ]}
           {@rest}
         />
