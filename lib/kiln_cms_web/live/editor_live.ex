@@ -226,9 +226,9 @@ defmodule KilnCMSWeb.EditorLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="space-y-6">
-        <div class="flex items-center justify-between gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h1 class="text-2xl font-semibold">{gettext("Content")}</h1>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <.link
               navigate={~p"/editor/taxonomy"}
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
@@ -354,9 +354,9 @@ defmodule KilnCMSWeb.EditorLive do
           </div>
         </div>
 
-        <p :if={@items == []} class="text-sm text-base-content/60">
-          {gettext("No content yet. Create your first page or post.")}
-        </p>
+        <.empty_state :if={@items == []} icon="hero-document-text" title={gettext("No content yet")}>
+          {gettext("Create your first page or post to get started.")}
+        </.empty_state>
         <p :if={@items != [] and @visible == []} class="text-sm text-base-content/60">
           {gettext("Nothing matches the current filter.")}
         </p>
@@ -368,15 +368,16 @@ defmodule KilnCMSWeb.EditorLive do
           <li
             :for={{kind, record} <- @visible}
             id={"#{kind}-#{record.id}"}
-            class="flex items-center gap-4 p-3"
+            class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3"
           >
             <input
               type="checkbox"
               checked={MapSet.member?(@selected, "#{kind}:#{record.id}")}
               phx-click="toggle_select"
               phx-value-key={"#{kind}:#{record.id}"}
+              class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
             />
-            <span class="w-12 shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
+            <span class="shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
             <div class="min-w-0 flex-1">
               <.link navigate={edit_path(kind, record.id)} class="font-medium hover:underline">
                 {record.title}
@@ -384,7 +385,7 @@ defmodule KilnCMSWeb.EditorLive do
               <p class="truncate text-xs text-base-content/50">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
-            <div class="flex items-center gap-2">
+            <div class="flex w-full items-center justify-end gap-2 sm:w-auto">
               <button
                 :if={record.state == :draft and @actor.role == :editor}
                 type="button"
@@ -442,18 +443,18 @@ defmodule KilnCMSWeb.EditorLive do
   attr :state, :atom, required: true
 
   defp state_badge(assigns) do
-    color =
+    variant =
       case assigns.state do
-        :published -> "bg-success/15 text-success"
-        :in_review -> "bg-warning/15 text-warning"
-        :archived -> "bg-base-content/10 text-base-content/60"
-        _ -> "bg-info/15 text-info"
+        :published -> "success"
+        :in_review -> "warning"
+        :archived -> "neutral"
+        _ -> "info"
       end
 
-    assigns = assign(assigns, :color, color)
+    assigns = assign(assigns, :variant, variant)
 
     ~H"""
-    <span class={["rounded-full px-2 py-0.5 text-xs font-medium", @color]}>{@state}</span>
+    <.badge variant={@variant}>{@state}</.badge>
     """
   end
 end

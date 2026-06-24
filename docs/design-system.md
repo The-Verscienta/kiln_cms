@@ -4,6 +4,12 @@ A small, self-owned Tailwind design system for the admin/editor UI — **no
 DaisyUI**. Two pieces: semantic **color tokens** (in `assets/css/app.css`) and
 shared **HEEx component patterns** (in `lib/kiln_cms_web/components/`).
 
+**Visual identity — "kiln" (warm clay).** A fired-clay terracotta brand
+(`primary`) on warm bisque surfaces, with an ember `accent`, tuned to evoke the
+product name. Light and dark are both first-class. Type is a refined system
+stack (no web-font dependency); radii are slightly softened
+(`--radius-*`).
+
 ## Color tokens
 
 Defined once via Tailwind v4 `@theme` and consumed as ordinary color utilities
@@ -29,9 +35,13 @@ Theme selection happens before first paint in `root.html.heex` (it resolves
 
 `KilnCMSWeb.CoreComponents` holds the shared building blocks — all token-based:
 
-- `button/1` — `variant="primary"` (solid `base-content`) or default (bordered).
-- `input/1` — text/select/textarea/checkbox with label + inline errors; checkboxes
-  use a native `accent-primary` style.
+- `button/1` — `variant="primary"` (solid clay), `"danger"` (outlined error), or
+  default (bordered), all with a focus ring.
+- `input/1` — text/select/textarea/checkbox, token-styled with a clay focus ring,
+  label + inline errors; checkboxes use a native `accent-primary` style.
+- `badge/1` — status pill: `variant` of `neutral`/`primary`/`success`/`warning`/
+  `error`/`info`.
+- `empty_state/1` — centered icon + title + body + optional action slot.
 - `flash/1` — toast notice, `info`/`error` tinted via status tokens.
 - `header/1`, `table/1`, `list/1`, `icon/1` (heroicons).
 
@@ -51,3 +61,18 @@ Common ad-hoc patterns used across LiveViews (compose with utilities + tokens):
   patterns above.
 - `dark:` variants are available (`@custom-variant dark`) for the rare case a
   token swap isn't enough.
+- Status pills go through `<.badge>`; primary surfaces/empty views through
+  `<.empty_state>` — don't re-roll them inline.
+
+## Responsive
+
+The admin/editor UI works on phones and tablets. Conventions (`sm` = 640px):
+
+- **Nav** collapses to a hamburger disclosure (`<details>`) below `sm`; the theme
+  toggle stays visible. Inline links return at `sm+`.
+- **Page headers** (title + actions) stack with `flex flex-col gap-3 sm:flex-row
+  sm:items-center sm:justify-between`; action groups use `flex-wrap`.
+- **List rows** keep the title + badge on the first line and let the action
+  buttons wrap to a second line on mobile (`w-full sm:w-auto justify-end`).
+- **Two-column layouts** (editor form/preview, taxonomy) are `lg:grid-cols-2`
+  and single-column below; paired fields are `sm:grid-cols-2`.

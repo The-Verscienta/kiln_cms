@@ -394,11 +394,11 @@ defmodule KilnCMSWeb.MediaLive do
         </form>
 
         <div :if={@view == :library}>
-          <div class="mb-3 flex items-center justify-between gap-4">
+          <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <h2 class="text-lg font-medium">
               {gettext("Library (%{count})", count: length(@visible))}
             </h2>
-            <form :if={@media != []} id="media-filter" phx-change="search">
+            <form :if={@media != []} id="media-filter" phx-change="search" class="sm:w-auto">
               <input
                 type="text"
                 name="q"
@@ -406,11 +406,13 @@ defmodule KilnCMSWeb.MediaLive do
                 placeholder={gettext("Filter by filename")}
                 phx-debounce="200"
                 autocomplete="off"
-                class="rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+                class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm sm:w-auto"
               />
             </form>
           </div>
-          <p :if={@media == []} class="text-sm text-base-content/60">{gettext("No media yet.")}</p>
+          <.empty_state :if={@media == []} icon="hero-photo" title={gettext("No media yet")}>
+            {gettext("Upload an image above to start building your library.")}
+          </.empty_state>
           <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
             {gettext("No media matches “%{query}”.", query: @query)}
           </p>

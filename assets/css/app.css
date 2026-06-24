@@ -31,55 +31,68 @@
    `prefers-color-scheme` fallback is needed here. Retune the brand by editing
    `--color-primary` (and friends) — every utility follows automatically. */
 @theme {
-  --color-base-100: oklch(98% 0 0);
-  --color-base-200: oklch(96% 0.001 286.375);
-  --color-base-300: oklch(92% 0.004 286.32);
-  --color-base-content: oklch(21% 0.006 285.885);
+  /* Warm "kiln" palette — fired-clay brand on warm bisque surfaces. */
+  --color-base-100: oklch(98.2% 0.004 75);
+  --color-base-200: oklch(95% 0.008 73);
+  --color-base-300: oklch(90% 0.013 72);
+  --color-base-content: oklch(27% 0.012 60);
 
-  --color-primary: oklch(70% 0.213 47.604);
-  --color-primary-content: oklch(98% 0.016 73.684);
-  --color-secondary: oklch(55% 0.027 264.364);
-  --color-secondary-content: oklch(98% 0.002 247.839);
-  --color-accent: oklch(0% 0 0);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(44% 0.017 285.786);
-  --color-neutral-content: oklch(98% 0 0);
+  --color-primary: oklch(55% 0.135 42);
+  --color-primary-content: oklch(98% 0.012 60);
+  --color-secondary: oklch(52% 0.018 65);
+  --color-secondary-content: oklch(98% 0.004 75);
+  --color-accent: oklch(72% 0.115 64);
+  --color-accent-content: oklch(27% 0.012 60);
+  --color-neutral: oklch(34% 0.01 65);
+  --color-neutral-content: oklch(98% 0.004 75);
 
-  --color-info: oklch(62% 0.214 259.815);
-  --color-info-content: oklch(97% 0.014 254.604);
-  --color-success: oklch(70% 0.14 182.503);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
+  --color-info: oklch(55% 0.1 248);
+  --color-info-content: oklch(98% 0.01 250);
+  --color-success: oklch(56% 0.09 155);
+  --color-success-content: oklch(98% 0.02 150);
+  --color-warning: oklch(72% 0.13 72);
+  --color-warning-content: oklch(28% 0.04 70);
+  --color-error: oklch(54% 0.16 28);
+  --color-error-content: oklch(98% 0.015 20);
+
+  /* Corner radius scale — slightly softer than stock for a refined feel. */
+  --radius-sm: 0.3rem;
+  --radius-md: 0.45rem;
+  --radius-lg: 0.7rem;
+  --radius-xl: 1rem;
+
+  /* UI font stack (system — no web-font dependency / CSP changes). */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
 }
 
 /* Dark theme: a deeper, Elixir-leaning surface set with a violet brand. */
 @layer base {
   [data-theme="dark"] {
-    --color-base-100: oklch(30.33% 0.016 252.42);
-    --color-base-200: oklch(25.26% 0.014 253.1);
-    --color-base-300: oklch(20.15% 0.012 254.09);
-    --color-base-content: oklch(97.807% 0.029 256.847);
+    /* Warm charcoal surfaces; base-200/300 lift for visible raised
+       surfaces + borders. Brighter clay so the brand reads on dark. */
+    --color-base-100: oklch(25% 0.012 60);
+    --color-base-200: oklch(29% 0.012 60);
+    --color-base-300: oklch(34% 0.012 62);
+    --color-base-content: oklch(95% 0.012 70);
 
-    --color-primary: oklch(58% 0.233 277.117);
-    --color-primary-content: oklch(96% 0.018 272.314);
-    --color-secondary: oklch(58% 0.233 277.117);
-    --color-secondary-content: oklch(96% 0.018 272.314);
-    --color-accent: oklch(60% 0.25 292.717);
-    --color-accent-content: oklch(96% 0.016 293.756);
-    --color-neutral: oklch(37% 0.044 257.287);
-    --color-neutral-content: oklch(98% 0.003 247.858);
+    --color-primary: oklch(66% 0.13 45);
+    --color-primary-content: oklch(20% 0.03 45);
+    --color-secondary: oklch(72% 0.02 70);
+    --color-secondary-content: oklch(22% 0.01 60);
+    --color-accent: oklch(76% 0.12 65);
+    --color-accent-content: oklch(22% 0.02 60);
+    --color-neutral: oklch(75% 0.01 70);
+    --color-neutral-content: oklch(22% 0.01 60);
 
-    --color-info: oklch(58% 0.158 241.966);
-    --color-info-content: oklch(97% 0.013 236.62);
-    --color-success: oklch(60% 0.118 184.704);
-    --color-success-content: oklch(98% 0.014 180.72);
-    --color-warning: oklch(66% 0.179 58.318);
-    --color-warning-content: oklch(98% 0.022 95.277);
-    --color-error: oklch(58% 0.253 17.585);
-    --color-error-content: oklch(96% 0.015 12.422);
+    --color-info: oklch(70% 0.1 248);
+    --color-info-content: oklch(20% 0.03 250);
+    --color-success: oklch(70% 0.1 155);
+    --color-success-content: oklch(20% 0.03 150);
+    --color-warning: oklch(78% 0.12 72);
+    --color-warning-content: oklch(24% 0.04 70);
+    --color-error: oklch(68% 0.15 28);
+    --color-error-content: oklch(20% 0.03 20);
   }
 }
 
@@ -99,6 +112,17 @@
   body {
     background-color: var(--color-base-100);
     color: var(--color-base-content);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+    line-height: 1.55;
+  }
+
+  /* Tighter, more confident headings. */
+  h1, h2, h3 {
+    letter-spacing: -0.012em;
   }
 }
 

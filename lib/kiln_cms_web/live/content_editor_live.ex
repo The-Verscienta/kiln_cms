@@ -594,7 +594,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         id={"#{@kind}-editor"}
         class="space-y-6"
       >
-        <div class="flex items-start justify-between gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div>
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
               &larr; {gettext("All content")}

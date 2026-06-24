@@ -26,14 +26,14 @@
         <a
           :if={@current_user && @current_user.role in [:editor, :admin]}
           href={~p"/editor"}
-          class="rounded-lg bg-base-content px-5 py-2.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
+          class="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
         >
           {gettext("Open editor")}
         </a>
         <a
           :if={is_nil(@current_user)}
           href={~p"/sign-in"}
-          class="rounded-lg bg-base-content px-5 py-2.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
+          class="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
         >
           {gettext("Sign in to edit")}
         </a>
