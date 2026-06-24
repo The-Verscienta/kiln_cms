@@ -253,7 +253,7 @@ These patterns elevate KilnCMS from “another CMS” to a **modern, delightful,
 
 Use this as living checklist. Mark as you progress. Grouped by phase/category. Priority: **P0** (blocker/MVP), **P1** (v1.0), **P2** (nice-to-have).
 
-**GitHub tracking:** Remaining work is filed as issues labeled `roadmap` (phases `phase-0` … `phase-9`, `stretch`). Master checklist: [#67](https://github.com/The-Verscienta/kiln_cms/issues/67). Regenerate with `scripts/create_roadmap_issues.sh` (idempotent only for new items — edit existing issues by hand).
+**GitHub tracking:** Remaining work is filed as issues labeled `roadmap` (phases `phase-0` … `phase-9`, `stretch`). Master checklist: [#67](https://github.com/The-Verscienta/kiln_cms/issues/67). Project board: [KilnCMS Roadmap](https://github.com/users/The-Verscienta/projects/1). Regenerate with `scripts/create_roadmap_issues.sh` (idempotent only for new items — edit existing issues by hand).
 
 ### Phase 0: Project Bootstrap & Environment (P0)
 - [x] Create GitHub repo + initial `mix phx.new kiln_cms --live --database postgres` (generated in-place)
