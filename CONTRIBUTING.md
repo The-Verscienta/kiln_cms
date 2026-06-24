@@ -43,8 +43,17 @@ KilnCMS models its domain with Ash resources. To change the schema:
    mix ash.migrate
    ```
 
-Don't hand-edit files under `priv/repo/migrations/` or
+Commit the generated migration **and** snapshot together with the resource
+change. Don't hand-edit files under `priv/repo/migrations/` or
 `priv/resource_snapshots/` — they're generated and checked.
+
+CI runs `mix ash.codegen --check`, which fails the build if the committed
+migrations/snapshots don't match the resources (i.e. you edited a resource but
+forgot to run `mix ash.codegen`). Run the same check locally before pushing:
+
+```bash
+mix ash.codegen --check   # exits non-zero when codegen is pending
+```
 
 ### Every action gets a domain code interface
 
@@ -79,6 +88,7 @@ mix precommit
 It runs: `compile --warnings-as-errors`, `deps.unlock --unused`, `format`,
 `credo --strict`, `sobelow` (security scan), and the test suite. CI
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) additionally runs
+`mix ash.codegen --check` (migration/snapshot drift, see above) and
 `mix dialyzer` (the first local run builds a PLT and is slow; it's cached
 afterwards).
 

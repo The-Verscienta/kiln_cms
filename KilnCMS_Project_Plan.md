@@ -330,7 +330,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [ ] LiveView tests for editor flows
 - [ ] E2E with Wallaby or Playwright (critical for editor UX)
 - [ ] Security: Sobelow (**done** — wired into precommit/CI), **nonce-based CSP** on the browser pipeline (strict `script-src 'self' 'nonce-…'`; relaxed for dev-only AshAdmin/LiveDashboard; browser-verified), dependency audit, policy coverage, rate limiting tests
-- [x] GitHub Actions workflow (test on push/PR, dialyzer, credo, sobelow, format + unused-deps check) — `.github/workflows/ci.yml`. **TODO:** explicit migration-drift check
+- [x] GitHub Actions workflow (test on push/PR, dialyzer, credo, sobelow, format + unused-deps check) — `.github/workflows/ci.yml`. **Migration-drift check (#52):** CI runs `mix ash.codegen --check`, failing the build when the committed migrations/resource snapshots diverge from the Ash resources; documented in `CONTRIBUTING.md`.
 - [ ] Full ExDoc documentation + guides (modeling, editor usage, API consumption, deployment)
 - [ ] This project plan kept up-to-date as living doc
 
