@@ -256,7 +256,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 ### Phase 0: Project Bootstrap & Environment (P0)
 - [x] Create GitHub repo + initial `mix phx.new kiln_cms --live --database postgres` (generated in-place)
 - [x] Add core Ash dependencies (`ash`, `ash_postgres`, `ash_phoenix`, `ash_admin`, `ash_paper_trail`, `ash_state_machine`, `ash_json_api`, `ash_graphql`, `ash_authentication`, `ash_authentication_phoenix`, `ash_oban`/`oban`) via Igniter
-- [ ] Add Image/Mogrify, ex_aws (or similar), TipTap assets or CDN strategy, SortableJS
+- [x] Add Image/Mogrify, ex_aws (or similar), TipTap assets or CDN strategy, SortableJS — `:image` (libvips, not Mogrify), `ex_aws`/`ex_aws_s3` + swappable `KilnCMS.Storage` adapter, TipTap bundled via npm/esbuild (no CDN), SortableJS vendored. Strategy documented in `docs/frontend-assets.md`
 - [x] Set up Docker Compose: Postgres + **Dragonfly** + (optional Meilisearch + MinIO). See `docker-compose.yml` with health checks.
 - [x] Configure native `Phoenix.PubSub` (PG2, Phoenix default). Dragonfly kept as an *optional* Compose profile only (D1/D2). In-BEAM caching: TODO when needed
 - [x] Set up `.env.example` / config for local dev
