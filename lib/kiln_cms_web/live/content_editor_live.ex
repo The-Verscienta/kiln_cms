@@ -62,6 +62,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # Debounced draft autosave: pending timer ref + status indicator state.
          |> assign(:autosave_timer, nil)
          |> assign(:save_state, :saved)
+         # Set when an optimistic-lock conflict blocks saving until reload.
+         |> assign(:conflict, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          |> assign(:picking, nil)
          |> assign(
@@ -257,11 +259,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
-        {:noreply,
-         socket
-         |> assign(:form, form)
-         |> put_flash(:error, gettext("Please fix the errors below."))}
+        if stale_conflict?(form) do
+          {:noreply, flag_conflict(socket)}
+        else
+          {:noreply,
+           socket
+           |> assign(:form, form)
+           |> put_flash(:error, gettext("Please fix the errors below."))}
+        end
     end
+  end
+
+  # Discard local changes and reload the latest saved version, clearing the
+  # conflict. (The simplest safe resolution — a merge UI is future work.)
+  def handle_event("reload_conflict", _params, socket) do
+    record = fetch!(socket.assigns.kind, socket.assigns.record.id, socket.assigns.actor)
+
+    {:noreply,
+     socket
+     |> assign_record(record)
+     |> assign(:conflict, false)
+     |> assign(:save_state, :saved)
+     |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
   def handle_event("workflow", %{"action" => action}, socket) do
@@ -333,10 +352,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
           reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
           socket |> assign_record(reloaded) |> assign(:save_state, :saved)
 
-        {:error, _form} ->
-          # Leave the inline validation errors from `validate` in place and keep
-          # the draft marked unsaved; the next edit reschedules a retry.
-          assign(socket, :save_state, :unsaved)
+        {:error, form} ->
+          handle_autosave_error(socket, form)
       end
     else
       assign(socket, :autosave_timer, nil)
@@ -345,6 +362,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Nothing pending (a stale timer, or already saved) — no-op.
   defp autosave(socket), do: assign(socket, :autosave_timer, nil)
+
+  # Someone else saved first → stop autosaving and surface the conflict rather
+  # than retrying (which would keep losing). Otherwise leave the inline
+  # validation errors in place and keep the draft unsaved so the next edit
+  # reschedules a retry.
+  defp handle_autosave_error(socket, form) do
+    if stale_conflict?(form),
+      do: flag_conflict(socket),
+      else: assign(socket, :save_state, :unsaved)
+  end
+
+  # Stop autosaving and put the editor into a conflict state until the user
+  # reloads.
+  defp flag_conflict(socket) do
+    socket
+    |> cancel_autosave_timer()
+    |> assign(:conflict, true)
+    |> assign(:save_state, :unsaved)
+  end
+
+  # True when a failed submit was rejected by the optimistic lock (the record
+  # changed underneath us), as opposed to ordinary validation errors. The
+  # `StaleRecord` error has no form-field representation, so unwrap the
+  # Phoenix.HTML.Form → AshPhoenix.Form → Ash.Changeset to read its errors.
+  defp stale_conflict?(form), do: form |> changeset_errors() |> Enum.any?(&stale_error?/1)
+
+  defp changeset_errors(%Phoenix.HTML.Form{source: source}), do: changeset_errors(source)
+  defp changeset_errors(%AshPhoenix.Form{source: source}), do: changeset_errors(source)
+  defp changeset_errors(%Ash.Changeset{errors: errors}), do: errors
+  defp changeset_errors(_other), do: []
+
+  defp stale_error?(%Ash.Error.Changes.StaleRecord{}), do: true
+
+  defp stale_error?(%{errors: errors}) when is_list(errors),
+    do: Enum.any?(errors, &stale_error?/1)
+
+  defp stale_error?(_other), do: false
 
   defp cancel_autosave_timer(socket) do
     if ref = socket.assigns.autosave_timer, do: Process.cancel_timer(ref)
@@ -513,6 +567,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     ~H"""
     <Layouts.app flash={@flash}>
+      <div
+        :if={@conflict}
+        id="edit-conflict"
+        class="mb-4 flex flex-wrap items-center gap-3 rounded border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
+      >
+        <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
+        <span class="flex-1">
+          {gettext(
+            "Someone else saved changes to this content. Saving is paused so you don't overwrite their work."
+          )}
+        </span>
+        <button
+          type="button"
+          phx-click="reload_conflict"
+          data-confirm={gettext("Reload and discard your unsaved changes?")}
+          class="rounded bg-warning px-3 py-1.5 text-xs font-medium text-warning-content hover:opacity-90"
+        >
+          {gettext("Reload latest")}
+        </button>
+      </div>
       <.form
         for={@form}
         phx-change="validate"
