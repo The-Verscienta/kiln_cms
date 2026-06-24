@@ -61,3 +61,12 @@ Common ad-hoc patterns used across LiveViews (compose with utilities + tokens):
   patterns above.
 - `dark:` variants are available (`@custom-variant dark`) for the rare case a
   token swap isn't enough.
+- Status pills go through `<.badge>`; primary surfaces/empty views through
+  `<.empty_state>` — don't re-roll them inline.
+
+## Known limitation
+
+The admin/editor UI is **desktop-first**. The header nav, content-list action
+bar, and list rows don't yet reflow below ~640px (they overlap on phones). The
+design tokens and components are responsive-ready; making the layouts reflow
+(stacking rows, a collapsible nav) is a separate, deliberate pass.

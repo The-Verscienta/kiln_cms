@@ -442,18 +442,18 @@ defmodule KilnCMSWeb.EditorLive do
   attr :state, :atom, required: true
 
   defp state_badge(assigns) do
-    color =
+    variant =
       case assigns.state do
-        :published -> "bg-success/15 text-success"
-        :in_review -> "bg-warning/15 text-warning"
-        :archived -> "bg-base-content/10 text-base-content/60"
-        _ -> "bg-info/15 text-info"
+        :published -> "success"
+        :in_review -> "warning"
+        :archived -> "neutral"
+        _ -> "info"
       end
 
-    assigns = assign(assigns, :color, color)
+    assigns = assign(assigns, :variant, variant)
 
     ~H"""
-    <span class={["rounded-full px-2 py-0.5 text-xs font-medium", @color]}>{@state}</span>
+    <.badge variant={@variant}>{@state}</.badge>
     """
   end
 end

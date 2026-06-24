@@ -17,16 +17,16 @@ defmodule KilnCMSWeb.AuthOverrides do
   @card_root "mx-auto w-full max-w-sm lg:max-w-md"
   @title "text-2xl font-semibold tracking-tight text-base-content"
   @form_btn """
-  mt-4 mb-4 w-full rounded-lg bg-base-content px-4 py-2.5 text-sm font-semibold
-  text-base-100 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50
+  mt-4 mb-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-content
+  shadow-sm transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2
+  focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50
   """
   @field_label "block text-sm font-medium text-base-content mb-1"
   @input """
-  w-full rounded-lg border border-base-content/20 bg-transparent px-3 py-2 text-sm
-  transition focus:border-base-content/40 focus:outline-none focus:ring-2
-  focus:ring-base-content/10
+  w-full rounded-lg border border-base-content/15 bg-base-100 px-3 py-2 text-sm
+  transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20
   """
-  @input_error @input <> " border-red-500 focus:border-red-500 focus:ring-red-500/20"
+  @input_error @input <> " border-error/60 focus:border-error/60 focus:ring-error/20"
   @muted "text-sm text-base-content/60"
   @link "text-sm font-medium text-base-content underline decoration-base-content/30 hover:decoration-base-content"
 
