@@ -8,5 +8,8 @@
   # Honour inline `# sobelow_skip [...]` annotations for reviewed findings.
   skip: true,
   ignore: [],
-  ignore_files: []
+  # Non-production config holding throwaway local secrets — same rationale as
+  # Sobelow's built-in skipping of config/dev.exs and config/test.exs. The E2E
+  # env only ever runs the browser suite against a local database.
+  ignore_files: ["config/e2e.exs"]
 ]
