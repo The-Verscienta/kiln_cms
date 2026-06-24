@@ -121,7 +121,7 @@ defmodule KilnCMS.CMS.Content do
       paper_trail do
         change_tracking_mode(:changes_only)
         store_action_name?(true)
-        ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at])
+        ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at, :lock_version])
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
         ignore_actions([:set_embedding, :set_published_version_id])
@@ -243,6 +243,11 @@ defmodule KilnCMS.CMS.Content do
         update :update do
           primary? true
           require_atomic? false
+          # Optimistic concurrency: only apply if the in-memory `lock_version`
+          # still matches the row, incrementing it on success. Two editors saving
+          # the same draft no longer silently clobber each other — the loser gets
+          # a `StaleRecord` error and must reload.
+          change optimistic_lock(:lock_version)
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
@@ -569,6 +574,10 @@ defmodule KilnCMS.CMS.Content do
         # embedded, or always when semantic search is disabled.
         attribute :embedding, KilnCMS.Search.Vector
         attribute :embedded_at, :utc_datetime_usec
+
+        # Optimistic-concurrency version, bumped on every `:update` (see the
+        # action's `optimistic_lock`). Internal.
+        attribute :lock_version, :integer, allow_nil?: false, default: 1, public?: false
 
         timestamps()
       end
