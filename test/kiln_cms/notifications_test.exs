@@ -21,8 +21,11 @@ defmodule KilnCMS.NotificationsTest do
   defp drain, do: Oban.drain_queue(queue: :default, with_recursion: true)
 
   # Swoosh's test adapter delivers `{:email, email}` to this process; collect
-  # every one currently in the mailbox (order-independent assertions).
-  defp sent_emails do
+  # every one currently in the mailbox (order-independent assertions). Each test
+  # uses a unique content title and filters on it, so concurrently-running
+  # suites' emails (the mailbox is process-global under shared sandbox mode)
+  # don't leak into the assertion.
+  defp sent_emails(title_match) do
     Stream.repeatedly(fn ->
       receive do
         {:email, email} -> email
@@ -31,6 +34,7 @@ defmodule KilnCMS.NotificationsTest do
       end
     end)
     |> Enum.take_while(&(&1 != nil))
+    |> Enum.filter(&String.contains?(&1.subject, title_match))
   end
 
   defp recipients(email), do: Enum.map(email.to, fn {_name, addr} -> addr end)
@@ -43,7 +47,7 @@ defmodule KilnCMS.NotificationsTest do
     CMS.submit_page_for_review!(page, %{}, actor: editor)
     drain()
 
-    emails = sent_emails()
+    emails = sent_emails("My Draft")
 
     assert [review] = emails
     assert review.subject == "Review requested: My Draft"
@@ -59,7 +63,7 @@ defmodule KilnCMS.NotificationsTest do
     CMS.publish_page!(page, %{}, actor: admin)
     drain()
 
-    assert [published] = sent_emails()
+    assert [published] = sent_emails("Big News")
     assert published.subject == "Published: Big News"
     assert recipients(published) == [to_string(editor.email)]
     refute to_string(admin.email) in recipients(published)
@@ -74,7 +78,7 @@ defmodule KilnCMS.NotificationsTest do
     CMS.publish_post!(post, %{}, actor: admin)
     drain()
 
-    subjects = sent_emails() |> Enum.map(& &1.subject) |> Enum.sort()
+    subjects = sent_emails("Hello") |> Enum.map(& &1.subject) |> Enum.sort()
     assert subjects == ["Published: Hello", "Review requested: Hello"]
   end
 
@@ -84,6 +88,6 @@ defmodule KilnCMS.NotificationsTest do
     CMS.publish_page!(page, %{}, authorize?: false)
     drain()
 
-    assert sent_emails() == []
+    assert sent_emails("Orphan") == []
   end
 end
