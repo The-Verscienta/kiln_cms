@@ -77,6 +77,12 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
 
+      - name: Check for migration/snapshot drift
+        # Fails if the committed migrations + resource snapshots are out of sync
+        # with the Ash resources (someone edited a resource without running
+        # `mix ash.codegen`). Compares against the committed snapshots — no DB.
+        run: mix ash.codegen --check
+
       - name: Check formatting
         run: mix format --check-formatted
 
