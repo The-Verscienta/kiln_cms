@@ -20,6 +20,13 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
           KilnCMS.Firing.References.invalidate(type, record.id, [
             KilnCMS.Firing.References.key(type, record.id)
           ])
+
+          # Re-index per-block embeddings for the fired content (decision D16).
+          if KilnCMS.Search.semantic?() do
+            %{"type" => to_string(type), "id" => record.id}
+            |> KilnCMS.Search.BlockEmbeddingWorker.new()
+            |> Oban.insert()
+          end
         rescue
           error -> Logger.error("Firing failed for #{inspect(record.id)}: #{inspect(error)}")
         end

@@ -550,7 +550,27 @@ backfill; fired artifacts have a defined evolution path.
 
 ---
 
-## Phase I — Block-granular search + embeddings
+## Phase I — Block-granular search + embeddings — ✅ DONE
+
+> **Outcome.** Search moves to the block grain (decision D16).
+> `KilnCMS.Search.BlockEmbedding` (own domain `KilnCMS.SearchIndex`, HNSW cosine
+> index, unique per `{document, block_key}`) stores a per-block vector over the
+> block's `search_text` + ancestor context (the doc title — hierarchical
+> embeddings), with a `content_hash` for skip-unchanged dedupe. `BlockIndexer.reindex/1`
+> walks the typed tree and embeds (reusing the existing `KilnCMS.Search.embed/1` +
+> `Search.Vector`); `BlockEmbeddingWorker` runs it off the write path, enqueued on
+> fire when semantic is enabled. `BlockSearch.search/2` is nearest-neighbour with
+> `:block_type` faceting — the "find the relevant section" query. **4 new tests
+> (deterministic stub embedder, no model loaded); full suite 440 green; precommit
+> clean.**
+>
+> **Scoped:** semantic + faceting ships; keyword/RRF fusion over a block-level
+> tsvector (full hybrid) and deeper ancestor context (parent block type for nested
+> slices) are documented follow-ups.
+>
+> Files: `lib/kiln_cms/search_index.ex`, `lib/kiln_cms/search/{block_embedding,block_indexer,block_embedding_worker,block_search}.ex`,
+> enqueue in `changes/fire_artifacts.ex`, migration `add_block_embeddings`; test
+> `test/kiln_cms/search/block_search_test.exs`.
 
 **Goal.** Move from document-level embeddings to **per-block** embeddings with
 ancestor context, and add hybrid block-level search (keyword + filters + vector).

@@ -17,7 +17,14 @@ config :kiln_cms, Oban,
   plugins: [{Oban.Plugins.Cron, []}]
 
 config :kiln_cms,
-  ash_domains: [KilnCMS.Accounts, KilnCMS.CMS, KilnCMS.Analytics, KilnCMS.Firing, KilnCMS.History],
+  ash_domains: [
+    KilnCMS.Accounts,
+    KilnCMS.CMS,
+    KilnCMS.Analytics,
+    KilnCMS.Firing,
+    KilnCMS.History,
+    KilnCMS.SearchIndex
+  ],
   # Default "from" address for transactional email (auth confirmation/reset).
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
