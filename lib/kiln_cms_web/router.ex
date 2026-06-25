@@ -230,7 +230,11 @@ defmodule KilnCMSWeb.Router do
     scope "/admin" do
       pipe_through :browser_dev_tools
 
-      ash_admin "/"
+      # Default the AshAdmin actor to the signed-in user so policy-driven admin
+      # actions reflect real RBAC (issue #24). The `session:` MFA forwards the
+      # AshAuthentication session into AshAdmin's live_session; the actor itself
+      # is resolved by `KilnCMSWeb.AshAdmin.ActorPlug` (config/dev.exs).
+      ash_admin "/", session: {KilnCMSWeb.AshAdmin.ActorPlug, :admin_session, []}
     end
   end
 

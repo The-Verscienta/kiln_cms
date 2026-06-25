@@ -27,6 +27,13 @@ notes that bite people:
 (`editor@kiln.test` / `kilneditor123`); override with the `ADMIN_*` / `EDITOR_*`
 env vars. Sign in at `/sign-in`, or use AshAdmin at `/admin` (dev only).
 
+In dev, AshAdmin uses your signed-in user as its actor automatically, so admin
+actions run under real RBAC policies — sign in as the editor and you'll only see
+what an editor is allowed to do. You can still impersonate a specific record by
+picking an actor from the AshAdmin toolbar (that choice overrides the default).
+This wiring lives in `KilnCMSWeb.AshAdmin.ActorPlug` and is enabled only when
+`dev_routes` is on (`config :ash_admin, :actor_plug, ...` in `config/dev.exs`).
+
 ## Development workflow
 
 ### Modeling is done in Ash — never hand-write migrations

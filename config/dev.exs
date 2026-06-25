@@ -71,6 +71,11 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :kiln_cms, dev_routes: true, token_signing_secret: "DYgVqiH9UCH9+tNBUTSxpjj9sjIclKww"
 
+# Default the AshAdmin actor to the signed-in user so policy-driven admin
+# actions reflect real RBAC during inspection (issue #24). Dev-only: the
+# `/admin` routes themselves only exist when `dev_routes` is enabled.
+config :ash_admin, :actor_plug, KilnCMSWeb.AshAdmin.ActorPlug
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 
