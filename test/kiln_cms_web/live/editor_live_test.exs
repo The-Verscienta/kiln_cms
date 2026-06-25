@@ -392,7 +392,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   describe "image block picker" do
     test "picking a library image sets the block's url and media_id", %{conn: conn} do
-      media = Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
+      media = Ash.Seed.seed!(MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
       page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
 
       {:ok, lv, _html} =
@@ -410,6 +410,50 @@ defmodule KilnCMSWeb.EditorLiveTest do
       [block] = CMS.get_page!(page.id, authorize?: false).blocks
       assert block.content == "/uploads/x"
       assert block.data["media_id"] == media.id
+    end
+  end
+
+  describe "media library browser (editor chrome)" do
+    test "opening from chrome and picking inserts a new image block", %{conn: conn} do
+      media = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg", url: "/uploads/hero"})
+      # Start with no blocks at all — the browser is reachable without one.
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Reachable from the editor chrome (not a per-block button).
+      lv |> element("button[phx-click='open_media_browser']") |> render_click()
+
+      lv
+      |> element(
+        "button[phx-click='pick_image'][phx-value-index='new'][phx-value-id='#{media.id}']"
+      )
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      [block] = CMS.get_page!(page.id, authorize?: false).blocks
+      assert to_string(block.type) == "image"
+      assert block.content == "/uploads/hero"
+      assert block.data["media_id"] == media.id
+    end
+
+    test "searching filters the browser grid", %{conn: conn} do
+      keep = Ash.Seed.seed!(MediaItem, %{filename: "mountain.jpg", url: "/uploads/mountain"})
+      drop = Ash.Seed.seed!(MediaItem, %{filename: "ocean.jpg", url: "/uploads/ocean"})
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button[phx-click='open_media_browser']") |> render_click()
+
+      html =
+        lv |> form("#media-browser-filter", %{q: "mountain"}) |> render_change()
+
+      assert html =~ "phx-value-id=\"#{keep.id}\""
+      refute html =~ "phx-value-id=\"#{drop.id}\""
     end
   end
 
