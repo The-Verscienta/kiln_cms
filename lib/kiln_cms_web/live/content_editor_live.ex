@@ -140,8 +140,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp build_form(record, actor) do
+    # Blocks are stored as the typed union (Kiln v2), but the editor authors them
+    # through legacy `Block` sub-forms — so the whole block UI stays unchanged. We
+    # convert the stored union back to legacy `Block` structs for the form data;
+    # on save, legacy block params round-trip through `BlockUnion`'s tolerant cast
+    # back into the union. (The native-union authoring UI is a later refinement.)
+    legacy_blocks =
+      record.blocks
+      |> KilnCMS.CMS.TypedBlocks.to_typed()
+      |> KilnCMS.CMS.TypedBlocks.to_legacy()
+      |> Enum.map(&struct(KilnCMS.CMS.Block, &1))
+
+    # The changeset keeps the real (union) record so Ash's union change handling
+    # works; the legacy `Block` sub-forms get their initial values via `data:`.
     record
-    |> AshPhoenix.Form.for_update(:update, actor: actor, forms: [auto?: true])
+    |> AshPhoenix.Form.for_update(:update,
+      actor: actor,
+      forms: [
+        blocks: [
+          type: :list,
+          resource: KilnCMS.CMS.Block,
+          data: legacy_blocks,
+          create_action: :create,
+          update_action: :update
+        ]
+      ]
+    )
     |> to_form()
   end
 
@@ -638,7 +662,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp preview_html(form) do
     form
     |> preview_block_maps()
-    |> KilnCMS.CMS.TypedBlocks.from_legacy()
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
     |> Enum.map(&KilnCMS.Blocks.render(&1, :web))
     |> Phoenix.HTML.raw()
   end

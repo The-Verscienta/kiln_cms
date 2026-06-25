@@ -17,6 +17,148 @@ defmodule KilnCMS.CMS.TypedBlocks do
   """
 
   alias KilnCMS.Blocks.{Custom, Divider, Embed, Heading, Image, Quote, RichText}
+  alias KilnCMS.HTMLSanitizer
+
+  @block_modules [Heading, Image, RichText, Quote, Embed, Divider, Custom]
+
+  @doc """
+  Normalize any block representation to typed block structs.
+
+  Handles legacy maps/structs, typed maps (`_type`), typed structs, and the
+  `%Ash.Union{}` wrapper produced once `blocks` is stored as `BlockUnion`. This is
+  what firing/search/history/delivery call so they are agnostic to how a block was
+  obtained.
+  """
+  @spec to_typed([term()] | nil) :: [struct()]
+  def to_typed(blocks), do: blocks |> List.wrap() |> Enum.map(&one_to_typed/1)
+
+  defp one_to_typed(%Ash.Union{value: value}), do: one_to_typed(value)
+  defp one_to_typed(%mod{} = struct) when mod in @block_modules, do: struct
+  defp one_to_typed(%{} = map), do: one_from_typed_or_legacy(map)
+  defp one_to_typed(_other), do: %Custom{_type: "custom", data: %{}}
+
+  defp one_from_typed_or_legacy(map) do
+    if typed_map?(map), do: struct_from_typed_map(map), else: one_from_legacy(map)
+  end
+
+  # ── BlockUnion cast normalization (legacy/stored-shape tolerance) ──────────
+  # These keep `BlockUnion` accepting legacy block params (no test churn) and
+  # legacy stored rows (lazy conversion, no data migration).
+
+  @doc false
+  # cast_input target: a tag-shaped map (`%{"_type" => name, ...attrs}`) the union
+  # matches by its `_type` tag. Everything is sanitized (this is user input).
+  def to_union_input(nil), do: nil
+
+  def to_union_input(value) do
+    case typed_attrs(value) do
+      {nil, _attrs} -> value
+      {name, attrs} -> attrs |> Map.put("_type", name) |> sanitize_attrs() |> drop_nils()
+    end
+  end
+
+  @doc false
+  # cast_stored target: the `:type_and_value` envelope (`%{"type" => name,
+  # "value" => attrs}`). Stored data is already sanitized, so we don't re-sanitize.
+  def to_union_stored(nil), do: nil
+
+  def to_union_stored(value) do
+    if stored_envelope?(value) do
+      value
+    else
+      case typed_attrs(value) do
+        {nil, _attrs} -> value
+        {name, attrs} -> %{"type" => name, "value" => drop_nils(attrs)}
+      end
+    end
+  end
+
+  defp drop_nils(%{} = map), do: Map.reject(map, fn {_k, v} -> is_nil(v) end)
+
+  # Returns {type_name :: String.t() | nil, attrs :: %{String.t() => term()}}.
+  defp typed_attrs(%Ash.Union{type: type, value: %_{} = value}),
+    do: {to_string(type), attrs_of(value)}
+
+  defp typed_attrs(%mod{} = struct) when mod in @block_modules,
+    do: {struct._type, attrs_of(struct)}
+
+  defp typed_attrs(%mod{} = struct) when mod == KilnCMS.CMS.Block,
+    do: struct |> one_from_legacy() |> typed_attrs()
+
+  defp typed_attrs(%{} = map) do
+    cond do
+      typed_map?(map) -> {to_string(get(map, :_type)), stringify(map)}
+      stored_envelope?(map) -> {to_string(get(map, :type)), stringify(get(map, :value))}
+      legacy_map?(map) -> map |> one_from_legacy() |> typed_attrs()
+      true -> {nil, map}
+    end
+  end
+
+  defp typed_attrs(_other), do: {nil, %{}}
+
+  defp attrs_of(%mod{} = struct) do
+    keys = [:id, :_type, :_version | Enum.map(Kiln.Block.Info.fields(mod), & &1.name)]
+    Map.new(keys, fn key -> {to_string(key), Map.get(struct, key)} end)
+  end
+
+  defp typed_map?(map), do: not is_nil(get(map, :_type))
+
+  defp stored_envelope?(%{} = map),
+    do: not is_nil(get(map, :value)) and not is_nil(get(map, :type))
+
+  defp stored_envelope?(_), do: false
+
+  defp legacy_map?(%{} = map), do: not is_nil(get(map, :type))
+
+  defp stringify(%{} = map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  defp stringify(_), do: %{}
+
+  defp sanitize_attrs(%{"_type" => "rich_text"} = m),
+    do: Map.update(m, "legacy_html", nil, &HTMLSanitizer.sanitize_rich_text/1)
+
+  defp sanitize_attrs(%{"_type" => "image"} = m),
+    do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_image_src(&1) || ""))
+
+  defp sanitize_attrs(%{"_type" => "embed"} = m),
+    do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_embed_url(&1) || ""))
+
+  defp sanitize_attrs(m), do: m
+
+  # Build a typed struct from a typed map (string or atom keys), upcasting first.
+  defp struct_from_typed_map(map) do
+    map = map |> stringify() |> KilnCMS.Blocks.Upcaster.upcast_block_map()
+
+    case KilnCMS.Blocks.fetch(block_type_atom(map)) do
+      {:ok, mod} ->
+        struct(mod, typed_struct_kv(mod, map))
+
+      :error ->
+        %Custom{_type: "custom", content: get(map, :content), data: get(map, :data) || %{}}
+    end
+  end
+
+  @type_atoms %{
+    "heading" => :heading,
+    "image" => :image,
+    "rich_text" => :rich_text,
+    "quote" => :quote,
+    "embed" => :embed,
+    "divider" => :divider,
+    "custom" => :custom
+  }
+  defp block_type_atom(map), do: Map.get(@type_atoms, to_string(get(map, :_type)), :custom)
+
+  defp typed_struct_kv(mod, map) do
+    keys = [:id, :_type, :_version | Enum.map(Kiln.Block.Info.fields(mod), & &1.name)]
+    Enum.flat_map(keys, fn key -> kv_for(map, key) end)
+  end
+
+  defp kv_for(map, key) do
+    case Map.get(map, to_string(key)) do
+      nil -> []
+      value -> [{key, value}]
+    end
+  end
 
   @doc "Convert a stored legacy block list into typed block structs."
   @spec from_legacy([struct() | map()] | nil) :: [struct()]
@@ -50,7 +192,8 @@ defmodule KilnCMS.CMS.TypedBlocks do
       _type: "image",
       url: data_str(data, "url") || content,
       alt: data_str(data, "alt"),
-      caption: data_str(data, "caption")
+      caption: data_str(data, "caption"),
+      media_id: data_str(data, "media_id")
     }
   end
 
@@ -97,7 +240,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
     do: %{
       type: :image,
       content: b.url,
-      data: %{"url" => b.url, "alt" => b.alt, "caption" => b.caption},
+      data: %{"url" => b.url, "alt" => b.alt, "caption" => b.caption, "media_id" => b.media_id},
       id: b.id
     }
 

@@ -3,9 +3,13 @@ defmodule KilnCMS.Blocks.Image do
   use Kiln.Block
 
   block :image do
-    field :url, :string, required: true
+    # Not required — the editor inserts a placeholder image block, then fills the
+    # url from the media picker or a pasted URL.
+    field :url, :string
     field :alt, :string
     field :caption, :string
+    # Optional link to a MediaItem, so delivery can render responsive variants.
+    field :media_id, :string
   end
 
   @impl Kiln.Block.Renderer

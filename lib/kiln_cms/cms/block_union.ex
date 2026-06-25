@@ -29,4 +29,30 @@ defmodule KilnCMS.CMS.BlockUnion do
         custom: [type: KilnCMS.Blocks.Custom, tag: :_type, tag_value: "custom"]
       ]
     ]
+
+  alias KilnCMS.CMS.TypedBlocks
+
+  # Tolerant casts (Kiln v2 storage flip): accept legacy block params and legacy
+  # stored rows by normalizing them to the typed shape before the union cast. This
+  # keeps existing callers/tests working and converts old rows lazily on read — no
+  # data migration required.
+  @impl Ash.Type
+  def cast_input(value, constraints),
+    do: value |> TypedBlocks.to_union_input() |> super(constraints)
+
+  @impl Ash.Type
+  def cast_input_array(list, constraints) when is_list(list),
+    do: list |> Enum.map(&TypedBlocks.to_union_input/1) |> super(constraints)
+
+  def cast_input_array(other, constraints), do: super(other, constraints)
+
+  @impl Ash.Type
+  def cast_stored(value, constraints),
+    do: value |> TypedBlocks.to_union_stored() |> super(constraints)
+
+  @impl Ash.Type
+  def cast_stored_array(list, constraints) when is_list(list),
+    do: list |> Enum.map(&TypedBlocks.to_union_stored/1) |> super(constraints)
+
+  def cast_stored_array(other, constraints), do: super(other, constraints)
 end

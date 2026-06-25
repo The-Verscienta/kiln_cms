@@ -195,7 +195,34 @@ each renderable to web/json/json-ld. No change yet to how `Page.blocks` is store
 
 ---
 
-## Phase C — Polymorphic embeds + editor composition over typed blocks — ✅ CORE DONE
+## Phase C — Polymorphic embeds + editor composition over typed blocks — ✅ DONE (storage flipped)
+
+> **Storage flip complete.** `Page.blocks`/`Post.blocks` are now stored as the
+> `Ash.Type.Union` (`BlockUnion`) — the typed representation is canonical at rest,
+> not just via the bridge. The flip is **migration-free and low-churn** because
+> `BlockUnion`'s cast is legacy-tolerant: `cast_input`/`cast_stored` (and their
+> array variants) normalize legacy block params *and* legacy stored rows to the
+> typed shape before the union cast (sanitizing rich-text/media on input — this
+> replaced the `SanitizeBlocks` change). So old rows convert lazily on read, and
+> existing callers/tests that pass legacy block maps still work. Consumers read via
+> `TypedBlocks.to_typed/1` (handles `%Ash.Union{}`/typed/legacy). The editor keeps
+> its existing UI by authoring legacy `Block` sub-forms (supplied via the form's
+> `data:` option) that round-trip through the tolerant cast; delivery + preview
+> convert union→legacy at the boundary so `BlockComponents` (with media enrichment)
+> is unchanged. `blocks` is no longer `public?` (the union isn't a clean auto-API
+> type; the v2 API surface is fired artifacts via `Engine.read/3`).
+> **Verified in-browser:** edit heading text+level → save → reload reads back from
+> union storage (`<h4>` preview) and public delivery renders it. **456 tests green;
+> precommit clean; no migration needed (jsonb↔jsonb).**
+>
+> Files: `lib/kiln_cms/cms/block_union.ex` (tolerant cast), `lib/kiln_cms/cms/typed_blocks.ex`
+> (`to_typed` + cast normalizers), `content.ex` (union attribute, `SanitizeBlocks`
+> removed, `public? false`), `block_text.ex`, `content_controller.ex`/`preview_live.ex`
+> (union→legacy at delivery), `content_editor_live.ex` (`build_form` legacy sub-forms),
+> `blocks/{image,embed}.ex` (`media_id`; `url` optional). Remaining: a native-union
+> authoring UI and repointing public JSON/GraphQL onto `Engine.read/3` (optional polish).
+
+### (historical) Phase C — initial bridge step — ✅ CORE DONE
 
 > **Outcome.** `Ash.Type.Union` storage is implemented (decision D11):
 > `KilnCMS.CMS.BlockUnion` is a NewType union over the typed blocks tagged by

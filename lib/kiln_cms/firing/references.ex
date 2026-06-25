@@ -28,7 +28,7 @@ defmodule KilnCMS.Firing.References do
 
     document
     |> Map.get(:blocks)
-    |> TypedBlocks.from_legacy()
+    |> TypedBlocks.to_typed()
     |> extract()
     |> Enum.map(&%{from: from, to: &1})
   end

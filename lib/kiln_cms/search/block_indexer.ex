@@ -21,7 +21,7 @@ defmodule KilnCMS.Search.BlockIndexer do
     embedded =
       document
       |> Map.get(:blocks)
-      |> TypedBlocks.from_legacy()
+      |> TypedBlocks.to_typed()
       |> Enum.with_index()
       |> Enum.map(fn {block, index} -> index_block(type, document.id, block, index, context) end)
       |> Enum.count(&(&1 == :embedded))

@@ -23,7 +23,7 @@ defmodule KilnCMS.Firing.Engine do
   @spec fire(struct(), keyword()) :: {:ok, %{atom() => map()}}
   def fire(document, opts \\ []) do
     mode = Keyword.get(opts, :mode, :persist)
-    typed = document |> Map.get(:blocks) |> TypedBlocks.from_legacy()
+    typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
     type = document_type(document)
     artifacts = Map.new(@surfaces, fn surface -> {surface, compose(document, typed, surface)} end)
 

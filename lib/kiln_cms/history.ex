@@ -57,7 +57,7 @@ defmodule KilnCMS.History do
 
     html =
       blocks
-      |> TypedBlocks.from_legacy()
+      |> TypedBlocks.to_typed()
       |> Enum.map(&Blocks.render(&1, :web))
       |> IO.iodata_to_binary()
 

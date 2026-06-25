@@ -188,7 +188,15 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   defp blocks(record) do
-    raw = List.wrap(record.blocks)
+    # Blocks are stored as the typed union (Kiln v2); convert back to legacy block
+    # structs so the existing media-enriching renderer (`BlockComponents`) is
+    # unchanged. Public delivery still goes through the same shapes as before.
+    raw =
+      record.blocks
+      |> KilnCMS.CMS.TypedBlocks.to_typed()
+      |> KilnCMS.CMS.TypedBlocks.to_legacy()
+      |> Enum.map(&struct(KilnCMS.CMS.Block, &1))
+
     media = load_block_media(raw)
     Enum.map(raw, &enrich_block(&1, media))
   end

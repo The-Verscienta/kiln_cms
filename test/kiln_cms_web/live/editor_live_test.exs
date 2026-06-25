@@ -61,6 +61,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
     )
   end
 
+  # Blocks are stored as the typed union (Kiln v2); read them back as legacy maps
+  # (`%{type:, content:, data:}`) for assertions.
+  defp blocks_legacy(record) do
+    record.blocks
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+  end
+
   describe "/editor (content list)" do
     test "viewers are redirected away", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/"}}} =
@@ -407,7 +415,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#page-editor") |> render_submit()
 
-      [block] = CMS.get_page!(page.id, authorize?: false).blocks
+      [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert block.content == "/uploads/x"
       assert block.data["media_id"] == media.id
     end
@@ -433,7 +441,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#page-editor") |> render_submit()
 
-      [block] = CMS.get_page!(page.id, authorize?: false).blocks
+      [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert to_string(block.type) == "image"
       assert block.content == "/uploads/hero"
       assert block.data["media_id"] == media.id
@@ -615,7 +623,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> render_submit()
 
       assert [%{type: :heading, content: "A nice heading"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "reorders blocks via the sortable hook and persists the new order", %{conn: conn} do
@@ -635,7 +643,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor") |> render_submit()
 
       assert [%{content: "B"}, %{content: "A"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "a rich_text block's HTML content round-trips through save", %{conn: conn} do
@@ -654,7 +662,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor") |> render_submit()
 
       assert [%{type: :rich_text, content: "<p>Hi <strong>there</strong></p>"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "the live preview reflects block content and updates on change", %{conn: conn} do

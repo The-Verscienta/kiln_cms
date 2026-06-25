@@ -235,7 +235,6 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
-          change KilnCMS.CMS.Changes.SanitizeBlocks
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
         end
@@ -256,7 +255,6 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
-          change KilnCMS.CMS.Changes.SanitizeBlocks
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
 
@@ -406,7 +404,6 @@ defmodule KilnCMS.CMS.Content do
           accept []
           argument :version_id, :uuid, allow_nil?: false
           change KilnCMS.CMS.Changes.RestoreVersion
-          change KilnCMS.CMS.Changes.SanitizeBlocks
         end
 
         update :unpublish do
@@ -546,9 +543,18 @@ defmodule KilnCMS.CMS.Content do
 
         unquote(excerpt_attribute)
 
-        attribute :blocks, {:array, KilnCMS.CMS.Block} do
+        # Typed polymorphic block tree (Kiln v2 — decision D11). `BlockUnion`'s
+        # cast is legacy-tolerant: legacy stored rows convert lazily on read and
+        # legacy params still cast, so this flip needs no data migration. Rich-text
+        # HTML / media URLs are sanitized inside the cast (replacing SanitizeBlocks).
+        # Not `public?` — the auto JSON:API/GraphQL surface can't render a union of
+        # embedded resources cleanly, and the v2 API surface is the *fired*
+        # artifacts (`KilnCMS.Firing.Engine.read/3`), not the raw editable tree.
+        # Still accepted on create/update (see `accept`) and read internally by the
+        # editor/firing/delivery.
+        attribute :blocks, {:array, KilnCMS.CMS.BlockUnion} do
           default []
-          public? true
+          public? false
         end
 
         attribute :seo_title, :string, public?: true
