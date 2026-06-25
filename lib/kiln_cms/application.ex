@@ -21,6 +21,7 @@ defmodule KilnCMS.Application do
        )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
       KilnCMSWeb.Presence,
+      KilnCMS.Collab.Locks,
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry

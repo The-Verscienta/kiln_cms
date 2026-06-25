@@ -408,7 +408,26 @@ bounded and cycle-safe.
 
 ---
 
-## Phase F — Collaboration (presence + block locking + patch sync)
+## Phase F — Collaboration (presence + block locking + patch sync) — ✅ CORE DONE
+
+> **Outcome.** The server-side collaboration primitives ship, over the one event
+> substrate (decisions D5/D14, within the spike's locked single-editor + Presence
+> v1 scope). `KilnCMS.Collab.Locks` (supervised GenServer) provides soft block
+> locking — a block is held by at most one editor; conflicting acquires get a
+> friendly `{:error, {:locked, holder}}`. `KilnCMS.Collab.apply_op/4` applies block
+> ops (add/remove/update/reorder), **persists each as a `DocumentEvent`** (so collab
+> + history + audit share one mechanism), and broadcasts `{:block_op, …}` on the
+> `content:<type>:<id>` PubSub topic; `replay/3` reflects the ops.
+> `KilnCMS.Collab.Patch.apply_prose/2` is the last-write-wins prose patch (seam for
+> CRDT/OT later). **6 new tests; full suite 454 green (2 properties); precommit clean.**
+>
+> **Scoped (browser-bound increments):** Presence "who's editing" avatars, the JS
+> prose-sync hook wrapping TipTap, and wiring all of this into `ContentEditorLive`
+> land with the Phase C editor rewrite (they need browser iteration). CRDT/OT
+> remains explicitly post-v1.
+>
+> Files: `lib/kiln_cms/collab.ex`, `lib/kiln_cms/collab/{locks,patch}.ex`,
+> `application.ex` (Locks child); test `test/kiln_cms/collab/collab_test.exs`.
 
 **Goal.** The plan's hybrid model: coarse-grained block ops via LiveView server
 state + Presence; fine-grained prose via a thin client hook syncing PT patches.

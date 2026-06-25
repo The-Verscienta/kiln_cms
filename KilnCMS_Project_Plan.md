@@ -213,18 +213,32 @@ Each block is the natural unit for embedding and indexing. v2 moves from documen
 
 | Phase | Focus | Status |
 |-------|-------|--------|
-| **A** | Firing spike (throwaway): artifact format + serializer dispatch | ✅ **Done** (A1–A4 locked) |
-| **B** | `Kiln.Block` Spark DSL + 2–3 typed blocks + Portable Text shape | Next |
-| **C** | `Ash.Type.Union` storage + editor over typed blocks + data migration | |
-| **D** | Firing for real: `PublishedArtifact` + two-tier cache + read path | |
-| **E** | Reference-aware invalidation (dependency graph + re-fire waves) | |
-| **F** | Collaboration: Presence + block locking + prose patch sync | |
-| **G** | Event log + per-block history + time-travel | |
-| **H** | Block schema evolution / upcasting | |
-| **I** | Block-granular embeddings + hybrid search | |
-| **J** | Field/block policies, references UX, media usage, JSON-LD, APIs, serializer property tests | |
+| **A** | Firing spike (throwaway): artifact format + serializer dispatch | ✅ Done (A1–A4 locked) |
+| **B** | `Kiln.Block` Spark DSL + typed blocks + Portable Text shape | ✅ Done |
+| **C** | `Ash.Type.Union` storage + legacy↔typed bridge | ✅ Core done¹ |
+| **D** | Firing for real: `PublishedArtifact` + two-tier cache + read path | ✅ Done¹ |
+| **E** | Reference-aware invalidation (dependency graph + re-fire waves) | ✅ Done |
+| **F** | Collaboration: block locking + op broadcast + prose patch sync | ✅ Core done² |
+| **G** | Event log + per-block history + time-travel | ✅ Done |
+| **H** | Block schema evolution / upcasting | ✅ Done |
+| **I** | Block-granular embeddings + faceted semantic search | ✅ Done |
+| **J** | Field/block policies + JSON-LD graph + serializer property tests | ✅ Core done² |
 
-Each phase ships as its own PR, green under `mix precommit`, with Ash codegen (never hand-written migrations) and tests/acceptance criteria spelled out in the implementation guide.
+Each phase shipped as its own commit, green under `mix precommit` (**454 tests, 2
+property tests**), Ash codegen for every migration. The full server-side v2
+architecture is in place behind the existing app, which stays shippable throughout.
+
+¹ The typed-block representation is canonical and drives firing/search/history via
+the `KilnCMS.CMS.TypedBlocks` bridge; flipping the *stored* `Page.blocks` column to
+the union shape + rewriting `ContentEditorLive` to author native union blocks (and
+repointing public HTML/JSON/GraphQL delivery onto `Engine.read/3`) is the one
+remaining cross-cutting increment — UI/migration work that needs browser iteration.
+² Browser-bound layers (Presence avatars, the TipTap prose-sync JS hook, the
+reference-picker UX, media-usage UI) and editor policy-enforcement wiring land with
+that editor rewrite. Server-side primitives for all of them are built and tested.
+
+See `docs/kiln-v2-implementation-guide.md` for each phase's outcome, files, and the
+A1–A4 / C1–C2 / H1 decision ledger.
 
 ---
 
