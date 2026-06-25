@@ -106,7 +106,9 @@ defmodule KilnCMS.Search do
   results: `%{pages: [...], posts: [...], media: [...]}`. Pages/posts are
   locale-scoped (via `:locale`, default configured); media is locale-agnostic.
   Read options (`:actor`, `:authorize?`) pass through; `:limit` caps each
-  section (default 10).
+  section (default 10). Pass `highlight: true` to load the `highlight` snippet
+  calc on the page/post sections (rendered by the admin palette via
+  `KilnCMS.Search.Highlight.to_safe_html/1`); media has no such calc.
   """
   @spec global(String.t(), keyword()) :: %{
           pages: [struct()],
@@ -118,12 +120,31 @@ defmodule KilnCMS.Search do
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     limit = Keyword.get(opts, :limit, 10)
 
+    content_load =
+      if Keyword.get(opts, :highlight, false),
+        do: [highlight: %{query: query, locale: locale}],
+        else: []
+
     %{
       pages:
-        section(KilnCMS.CMS.Page, :search, %{query: query, locale: locale}, read_opts, limit),
+        section(
+          KilnCMS.CMS.Page,
+          :search,
+          %{query: query, locale: locale},
+          read_opts,
+          limit,
+          content_load
+        ),
       posts:
-        section(KilnCMS.CMS.Post, :search, %{query: query, locale: locale}, read_opts, limit),
-      media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit)
+        section(
+          KilnCMS.CMS.Post,
+          :search,
+          %{query: query, locale: locale},
+          read_opts,
+          limit,
+          content_load
+        ),
+      media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, [])
     }
   end
 
@@ -151,9 +172,10 @@ defmodule KilnCMS.Search do
     _ -> :ok
   end
 
-  defp section(resource, action, params, read_opts, limit) do
+  defp section(resource, action, params, read_opts, limit, load) do
     resource
     |> Ash.Query.for_read(action, params)
+    |> Ash.Query.load(load)
     |> Ash.Query.limit(limit)
     |> Ash.read!(read_opts)
   end

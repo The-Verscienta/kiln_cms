@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Search
+  alias KilnCMS.Search.Highlight
 
   @impl true
   def mount(_params, _session, socket) do
@@ -28,7 +29,9 @@ defmodule KilnCMSWeb.SearchPaletteLive do
       if query == "" do
         socket |> assign(:query, "") |> assign(:searched, false) |> assign(:results, empty())
       else
-        results = Search.global(query, actor: socket.assigns.current_user, limit: 8)
+        results =
+          Search.global(query, actor: socket.assigns.current_user, limit: 8, highlight: true)
+
         total = length(results.pages) + length(results.posts) + length(results.media)
         Search.record_query(query, total)
 
@@ -121,7 +124,17 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     >
       <span class="font-medium">{@record.title}</span>
       <span class="ml-2 text-xs text-base-content/50">/{@record.slug}</span>
+      <p
+        :if={snippet(@record)}
+        class="mt-0.5 line-clamp-2 text-xs text-base-content/60 [&_mark]:rounded-sm [&_mark]:bg-warning/30 [&_mark]:px-0.5 [&_mark]:text-base-content"
+      >
+        {Highlight.to_safe_html(snippet(@record))}
+      </p>
     </.link>
     """
   end
+
+  # The loaded `highlight` snippet for a result, or nil when absent/blank.
+  defp snippet(%{highlight: h}) when is_binary(h) and h != "", do: h
+  defp snippet(_), do: nil
 end
