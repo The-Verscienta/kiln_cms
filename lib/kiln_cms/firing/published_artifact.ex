@@ -1,0 +1,94 @@
+defmodule KilnCMS.Firing.PublishedArtifact do
+  @moduledoc """
+  An immutable, pre-serialized output of firing a document (Kiln v2 — decision D9).
+
+  One row per `{document, surface}`. `body` is the compiled artifact for that
+  surface (`web` → `%{"html" => …}`, `json`/`json_ld` → the structured map).
+  Public reads hit these (via `KilnCMS.Firing.Cache`), never the live block tree.
+  """
+  use Ash.Resource,
+    domain: KilnCMS.Firing,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "published_artifacts"
+    repo KilnCMS.Repo
+  end
+
+  actions do
+    defaults [:read, :destroy]
+
+    read :for_document do
+      argument :document_type, :atom, allow_nil?: false
+      argument :document_id, :uuid, allow_nil?: false
+      filter expr(document_type == ^arg(:document_type) and document_id == ^arg(:document_id))
+    end
+
+    read :get_surface do
+      get? true
+      argument :document_type, :atom, allow_nil?: false
+      argument :document_id, :uuid, allow_nil?: false
+      argument :surface, :atom, allow_nil?: false
+
+      filter expr(
+               document_type == ^arg(:document_type) and document_id == ^arg(:document_id) and
+                 surface == ^arg(:surface)
+             )
+    end
+
+    create :upsert do
+      upsert? true
+      upsert_identity :doc_surface
+
+      accept [
+        :document_type,
+        :document_id,
+        :surface,
+        :format_version,
+        :body,
+        :source_version_id,
+        :fired_at
+      ]
+    end
+  end
+
+  policies do
+    # Fired artifacts are public output; writes happen only via the firing engine
+    # (which runs authorize?: false), so they're forbidden through normal policy.
+    policy action_type(:read) do
+      authorize_if always()
+    end
+
+    policy action_type([:create, :update, :destroy]) do
+      forbid_if always()
+    end
+  end
+
+  attributes do
+    uuid_primary_key :id
+
+    attribute :document_type, :atom do
+      allow_nil? false
+      constraints one_of: [:page, :post]
+      public? true
+    end
+
+    attribute :document_id, :uuid, allow_nil?: false, public?: true
+
+    attribute :surface, :atom do
+      allow_nil? false
+      constraints one_of: [:web, :json, :json_ld]
+      public? true
+    end
+
+    attribute :format_version, :integer, allow_nil?: false, default: 1, public?: true
+    attribute :body, :map, allow_nil?: false, default: %{}, public?: true
+    attribute :source_version_id, :uuid, public?: true
+    attribute :fired_at, :utc_datetime_usec, allow_nil?: false, public?: true
+  end
+
+  identities do
+    identity :doc_surface, [:document_type, :document_id, :surface]
+  end
+end

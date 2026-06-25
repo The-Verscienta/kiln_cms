@@ -382,6 +382,7 @@ defmodule KilnCMS.CMS.Content do
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
+          change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
@@ -393,6 +394,7 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
+          change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
@@ -411,6 +413,7 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           change transition_state(:draft)
           change KilnCMS.CMS.Changes.ClearPublishedVersion
+          change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
         end
 

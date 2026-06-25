@@ -268,7 +268,31 @@ shared serializers.
 
 ---
 
-## Phase D — Firing for real (PublishedArtifact + two-tier cache)
+## Phase D — Firing for real (PublishedArtifact + two-tier cache) — ✅ DONE
+
+> **Outcome.** Publish now *fires* (decision D9). `KilnCMS.Firing.PublishedArtifact`
+> (own domain `KilnCMS.Firing`, unique on `{document_type, document_id, surface}`)
+> stores one immutable artifact per surface. `KilnCMS.Firing.Engine.fire/2` walks
+> the block tree via `TypedBlocks.from_legacy/1`, renders web/json/json_ld through
+> the typed serializers, upserts artifacts, warms the cache, and broadcasts
+> `{:fired, …}`; `mode: :preview` compiles to memory only. `KilnCMS.Firing.Cache`
+> is the two-tier read cache (ETS/Cachex default; Redis tier-2 a documented seam).
+> `Engine.read/3` serves cache→table, **never the live tree** — proven by a test
+> that edits the live draft post-publish and still reads the fired snapshot.
+> Hooked via `Changes.FireArtifacts` (publish/publish_scheduled) and
+> `Changes.DeleteArtifacts` (unpublish). **6 new tests; full suite 417 green;
+> precommit clean.**
+>
+> **Scoped:** public HTML delivery (`ContentController`) still renders from the
+> live record + legacy `BlockComponents` (it carries heavy SEO/structured-data
+> coupling). The artifact read path (`Engine.read/3`) is the supported v2 delivery
+> API and is tested; repointing the HTML/headless controllers onto it is a
+> follow-up that needs to preserve the existing SEO behavior.
+>
+> Files: `lib/kiln_cms/firing.ex`, `lib/kiln_cms/firing/{published_artifact,engine,cache}.ex`,
+> `lib/kiln_cms/cms/changes/{fire_artifacts,delete_artifacts}.ex`, publish/unpublish
+> hooks in `content.ex`, `config/config.exs` (domain), `application.ex` (Cachex child),
+> migration `add_published_artifacts`; test `test/kiln_cms/firing/firing_test.exs`.
 
 **Goal.** Make "publish" *fire* the document into immutable, pre-serialized
 artifacts and make all public reads hit artifacts, never the live tree.
