@@ -618,8 +618,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element("button[phx-value-type='heading']") |> render_click()
 
+      # Native union member field for a heading is `text` (not legacy `content`).
       lv
-      |> form("#page-editor", form: %{blocks: %{"0" => %{content: "A nice heading"}}})
+      |> form("#page-editor", form: %{blocks: %{"0" => %{text: "A nice heading"}}})
       |> render_submit()
 
       assert [%{type: :heading, content: "A nice heading"}] =
@@ -675,7 +676,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       html2 =
         lv
-        |> form("#page-editor", form: %{blocks: %{"0" => %{content: "Updated Heading"}}})
+        |> form("#page-editor", form: %{blocks: %{"0" => %{text: "Updated Heading"}}})
         |> render_change()
 
       assert html2 =~ "<h2>Updated Heading</h2>"
@@ -704,15 +705,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, editor_html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      assert editor_html =~ "[data][citation]"
-      refute editor_html =~ "[data][featured]"
+      # Native union member fields: form[blocks][0][citation], etc.
+      assert editor_html =~ "[citation]"
+      refute editor_html =~ "[featured]"
 
       # An admin additionally sees the featured field.
       {:ok, _lv, admin_html} =
         build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
 
-      assert admin_html =~ "[data][citation]"
-      assert admin_html =~ "[data][featured]"
+      assert admin_html =~ "[citation]"
+      assert admin_html =~ "[featured]"
     end
 
     test "saves SEO & scheduling fields", %{conn: conn} do

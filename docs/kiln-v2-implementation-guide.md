@@ -218,9 +218,26 @@ each renderable to web/json/json-ld. No change yet to how `Page.blocks` is store
 > Files: `lib/kiln_cms/cms/block_union.ex` (tolerant cast), `lib/kiln_cms/cms/typed_blocks.ex`
 > (`to_typed` + cast normalizers), `content.ex` (union attribute, `SanitizeBlocks`
 > removed, `public? false`), `block_text.ex`, `content_controller.ex`/`preview_live.ex`
-> (union→legacy at delivery), `content_editor_live.ex` (`build_form` legacy sub-forms),
-> `blocks/{image,embed}.ex` (`media_id`; `url` optional). Remaining: a native-union
-> authoring UI and repointing public JSON/GraphQL onto `Engine.read/3` (optional polish).
+> (union→legacy at delivery), `blocks/{image,embed}.ex` (`media_id`; `url` optional).
+>
+> **Polish (done):**
+> - **Native-union editor authoring** — `ContentEditorLive` now builds native
+>   `Ash.Type.Union` member sub-forms (`forms: [auto?: true]`); each block's inputs
+>   bind straight to its typed attributes (heading `text`/`level`, quote
+>   `text`/`citation`/`featured`, image `url`/`alt`/`caption`/`media_id`, rich_text
+>   `legacy_html`). `add_block` uses `_union_type`; the per-block type selector is a
+>   label (type fixed at insert); DSL fields are policy-filtered; the collab
+>   field-lock follows the primary field. The legacy-`Block`-sub-form bridge is gone.
+>   Verified in-browser (add quote → native `text`/`citation`, `featured` hidden for
+>   editors; edit heading text+level → save → reload `<h3>` from union storage).
+> - **Fired-artifact headless API** — `GET /api/content/:type/:slug?surface=json|json_ld|web`
+>   (`KilnCMSWeb.ArtifactController`) serves fired artifacts via `Engine.read/3`
+>   (falling back to preview firing), restoring headless content access the v2 way.
+>
+> Files: `lib/kiln_cms_web/controllers/artifact_controller.ex` + route,
+> `content_editor_live.ex` (native union forms); tests
+> `test/kiln_cms_web/controllers/artifact_controller_test.exs`. **459 tests green;
+> precommit clean.**
 
 ### (historical) Phase C — initial bridge step — ✅ CORE DONE
 
