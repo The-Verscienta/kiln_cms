@@ -64,6 +64,20 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
     assert String.downcase(term) in recorded
   end
 
+  test "highlights the matched term in the result snippet", %{conn: conn} do
+    editor = authed_user(:editor)
+    term = "lighthouse#{System.unique_integer([:positive])}"
+    CMS.create_page!(%{title: "Coastal #{term} guide", slug: slug()}, actor: editor)
+
+    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/search")
+
+    html = lv |> form("#palette-search", %{q: term}) |> render_change()
+
+    # The matching term is wrapped in a <mark> snippet, rendered safely.
+    assert html =~ "<mark>"
+    assert html =~ term
+  end
+
   test "shows an empty state for a non-matching query", %{conn: conn} do
     editor = authed_user(:editor)
     {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/search")
