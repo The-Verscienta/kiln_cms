@@ -206,12 +206,18 @@ each renderable to web/json/json-ld. No change yet to how `Page.blocks` is store
 > typed blocks landed for full legacy coverage: `Quote`, `Embed`, `Custom`. **7 new
 > tests; full suite 411 green; precommit clean.**
 >
+> **Editor progress:** `ContentEditorLive`'s live preview now renders through the
+> **typed serializers** (`TypedBlocks.from_legacy/1` → `Blocks.render(:web)`), so the
+> editor preview is exactly what firing/delivery produces (preview parity). Verified
+> in the browser (typed `<h2>`/`<p>` in the preview pane, no console errors) and by
+> `editor_live_test`.
+>
 > **Scoped (remaining Phase C increment):** the on-disk `Page.blocks`/`Post.blocks`
 > columns still hold the legacy `KilnCMS.CMS.Block` shape, and the editor still
-> authors legacy blocks. Flipping the stored column (data migration to union shape)
-> and rewriting `ContentEditorLive` to compose native union blocks from the registry
-> is UI/migration work deferred behind the bridge — it needs browser iteration and
-> is lower architectural risk. Downstream phases run on the typed representation via
+> *authors* legacy blocks (palette + nested AshPhoenix forms). Flipping the stored
+> column (data migration to union shape) and rewriting the editor's block palette +
+> forms to compose native union blocks from the registry is the remaining UI/migration
+> work behind the bridge. Downstream phases run on the typed representation via
 > `from_legacy/1`, so nothing is blocked.
 >
 > Files: `lib/kiln_cms/cms/{block_union,typed_blocks}.ex`,

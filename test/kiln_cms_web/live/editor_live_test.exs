@@ -661,15 +661,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Preview renders the heading block (distinct from the editor's textarea).
-      assert html =~ ~s(text-xl font-bold">Original Heading)
+      # Preview renders the heading block through the typed serializers — i.e.
+      # exactly what firing/delivery produces (Kiln v2 preview parity).
+      assert html =~ "<h2>Original Heading</h2>"
 
       html2 =
         lv
         |> form("#page-editor", form: %{blocks: %{"0" => %{content: "Updated Heading"}}})
         |> render_change()
 
-      assert html2 =~ ~s(text-xl font-bold">Updated Heading)
+      assert html2 =~ "<h2>Updated Heading</h2>"
     end
 
     test "saves SEO & scheduling fields", %{conn: conn} do

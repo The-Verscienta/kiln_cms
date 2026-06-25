@@ -16,7 +16,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.Presence
 
   @block_types ~w(rich_text heading quote image embed divider)
@@ -612,6 +611,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
+  # Thin `%{type, content}` maps — used by the decoupled (pop-out) preview window.
   defp preview_blocks(form) do
     case AshPhoenix.Form.value(form, :blocks) do
       forms when is_list(forms) -> Enum.map(forms, &block_map/1)
@@ -625,6 +625,46 @@ defmodule KilnCMSWeb.ContentEditorLive do
       content: AshPhoenix.Form.value(subform, :content) || ""
     }
   end
+
+  # Inline preview rendered through the **same typed serializers that firing
+  # uses** (Kiln v2) — what you preview is exactly what publishes/delivers. Full
+  # block maps (incl. `data`/`children`) go through the legacy→typed bridge and
+  # the per-block `render(:web)`. Rich-text HTML is sanitized first (mirroring the
+  # save-time `SanitizeBlocks` change), so the rendered output is safe.
+  # sobelow_skip ["XSS.Raw"]
+  defp preview_html(form) do
+    form
+    |> preview_block_maps()
+    |> KilnCMS.CMS.TypedBlocks.from_legacy()
+    |> Enum.map(&KilnCMS.Blocks.render(&1, :web))
+    |> Phoenix.HTML.raw()
+  end
+
+  defp preview_block_maps(form) do
+    case AshPhoenix.Form.value(form, :blocks) do
+      forms when is_list(forms) -> Enum.map(forms, &block_full_map/1)
+      _ -> []
+    end
+  end
+
+  defp block_full_map(%AshPhoenix.Form{} = subform) do
+    type = to_string(AshPhoenix.Form.value(subform, :type) || "rich_text")
+    content = AshPhoenix.Form.value(subform, :content) || ""
+
+    %{
+      "type" => type,
+      "content" => sanitize_preview_content(type, content),
+      "data" => AshPhoenix.Form.value(subform, :data) || %{},
+      "children" => AshPhoenix.Form.value(subform, :children) || []
+    }
+  end
+
+  # Sanitize in-progress rich-text HTML for the live preview (unsaved edits aren't
+  # sanitized until save). Other block types carry no raw markup.
+  defp sanitize_preview_content("rich_text", content),
+    do: KilnCMS.HTMLSanitizer.sanitize_rich_text(content)
+
+  defp sanitize_preview_content(_type, content), do: content
 
   @impl true
   def render(assigns) do
@@ -979,9 +1019,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
           <div class="lg:sticky lg:top-4 lg:self-start">
             <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-            <article class="space-y-3 rounded border border-base-content/15 p-5">
+            <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
               <h1 class="text-2xl font-bold">{@form[:title].value}</h1>
-              <BlockComponents.render_block :for={block <- preview_blocks(@form)} block={block} />
+              {preview_html(@form)}
             </article>
           </div>
         </div>
