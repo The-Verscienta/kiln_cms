@@ -61,6 +61,31 @@ defmodule KilnCMS.Firing.FiringTest do
       assert json["title"] == "Fired"
       assert [%{"_type" => "heading"} | _] = json["blocks"]
     end
+
+    test "the json_ld artifact is a schema.org graph derived from the blocks (Phase J)" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Graphed",
+            slug: slug(),
+            blocks: [
+              %{type: :heading, content: "T", order: 0},
+              %{type: :image, data: %{"url" => "/p.png", "alt" => "pic"}, order: 1}
+            ]
+          },
+          actor: actor
+        )
+
+      page = CMS.publish_page!(page, actor: actor)
+      {:ok, ld} = Engine.read(:page, page.id, :json_ld)
+
+      assert ld["@context"] == "https://schema.org"
+      types = Enum.map(ld["@graph"], & &1["@type"])
+      assert "Article" in types
+      assert "ImageObject" in types
+    end
   end
 
   describe "reads never touch the live tree" do

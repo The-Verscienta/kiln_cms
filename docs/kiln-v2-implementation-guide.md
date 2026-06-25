@@ -612,7 +612,31 @@ whole documents.
 
 ---
 
-## Phase J — Production polish (field/block policies, references UX, media, APIs, JSON-LD)
+## Phase J — Production polish — ✅ CORE DONE
+
+> **Outcome.** The architecture-completing, server-side pieces ship:
+> - **Field/block-level policy** (the plan's headline example): the `Kiln.Block`
+>   `field` DSL gains `editable_by: [roles]`; `Kiln.Block.Policy` enforces it
+>   (`can_edit_field?/3`, `editable_fields/2`, `authorize_changes/3`) — admins edit
+>   everything, an editor can edit a `Quote`'s text but not its `featured` flag.
+> - **JSON-LD as a graph** (D9 "structured data falls out of the types"): the firing
+>   engine composes a schema.org `@graph` from the `Article` node plus each block's
+>   `json_ld` contribution (e.g. `ImageObject`).
+> - **Serializer property tests** (the v2 headline guarantee, decision A4): a
+>   StreamData property asserts every serializer (`web`/`json`/`json_ld`/`search_text`)
+>   is **total** over arbitrary generated blocks of every type; web always yields a binary.
+>
+> **Full suite 448 green (2 properties); precommit clean.**
+>
+> **Scoped (remaining increments — mostly UI/integration needing browser work):**
+> reference-picker editor UX; media usage-tracking UI (the Phase E edge graph is the
+> backing data); repointing public JSON/GraphQL APIs onto `Engine.read/3` (the
+> artifact read path is the supported v2 surface and is tested). Policy *enforcement
+> wiring* into the live editor lands with the Phase C editor rewrite.
+>
+> Files: `lib/kiln/block/{dsl,policy}.ex`, `lib/kiln_cms/blocks/quote.ex` (`featured`),
+> JSON-LD graph in `firing/engine.ex`; tests `test/kiln/block/policy_test.exs`,
+> `test/kiln_cms/blocks/serializers_property_test.exs`, json_ld graph in `firing_test.exs`.
 
 **Goal.** Close the remaining v2 capabilities and harden.
 

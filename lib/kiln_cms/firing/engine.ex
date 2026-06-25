@@ -119,11 +119,16 @@ defmodule KilnCMS.Firing.Engine do
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n\n")
 
-    %{
-      "@context" => "https://schema.org",
+    article = %{
       "@type" => "Article",
       "headline" => Map.get(document, :title),
       "articleBody" => body
     }
+
+    # Structured data falls out of the typed blocks (decision D9): each block that
+    # has a schema.org representation contributes a node to the document @graph.
+    block_nodes = typed |> Enum.map(&Blocks.render(&1, :json_ld)) |> Enum.reject(&is_nil/1)
+
+    %{"@context" => "https://schema.org", "@graph" => [article | block_nodes]}
   end
 end

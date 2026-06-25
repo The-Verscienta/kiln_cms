@@ -5,6 +5,9 @@ defmodule KilnCMS.Blocks.Quote do
   block :quote do
     field :text, :string, required: true
     field :citation, :string
+    # Field-level policy (Phase J): editors may edit the quote, but only admins
+    # may toggle whether it is featured.
+    field :featured, :boolean, default: false, editable_by: [:admin]
   end
 
   @impl Kiln.Block.Renderer

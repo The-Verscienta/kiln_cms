@@ -1,7 +1,7 @@
 defmodule Kiln.Block.Field do
   @moduledoc "Target struct for a `field` DSL entry (Kiln v2 — D10)."
   # __spark_metadata__ is required by Spark for source annotations.
-  defstruct [:name, :type, :required, :default, :description, :__spark_metadata__]
+  defstruct [:name, :type, :required, :default, :description, :editable_by, :__spark_metadata__]
   @type t :: %__MODULE__{}
 end
 
@@ -54,7 +54,13 @@ defmodule Kiln.Block.Dsl do
       ],
       required: [type: :boolean, default: false, doc: "Sets allow_nil? false."],
       default: [type: :any, required: false, doc: "Attribute default."],
-      description: [type: :string, required: false, doc: "Attribute docs."]
+      description: [type: :string, required: false, doc: "Attribute docs."],
+      editable_by: [
+        type: {:list, :atom},
+        required: false,
+        doc:
+          "Roles allowed to edit this field (block-/field-level policy, D-J). nil = any editor."
+      ]
     ]
   }
 
