@@ -53,7 +53,12 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
 
     assert restored.title == "Alpha"
-    assert [%{content: "Original"}] = restored.blocks
+
+    # Blocks are stored as the typed union (Kiln v2); read back as legacy maps.
+    assert [%{content: "Original"}] =
+             restored.blocks
+             |> KilnCMS.CMS.TypedBlocks.to_typed()
+             |> KilnCMS.CMS.TypedBlocks.to_legacy()
   end
 
   test "restoring to an intermediate version reconstructs that state" do

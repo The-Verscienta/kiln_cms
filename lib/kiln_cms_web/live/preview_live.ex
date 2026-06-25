@@ -43,8 +43,11 @@ defmodule KilnCMSWeb.PreviewLive do
   def mount(_params, _session, socket), do: {:ok, push_navigate(socket, to: ~p"/editor")}
 
   defp content_blocks(record) do
+    # Blocks are the typed union (Kiln v2); convert to the thin {type, content}
+    # maps the shared BlockComponents preview renderer expects.
     record.blocks
-    |> List.wrap()
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
     |> Enum.map(&%{type: to_string(&1.type), content: &1.content})
   end
 

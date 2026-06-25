@@ -61,6 +61,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
     )
   end
 
+  # Blocks are stored as the typed union (Kiln v2); read them back as legacy maps
+  # (`%{type:, content:, data:}`) for assertions.
+  defp blocks_legacy(record) do
+    record.blocks
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+  end
+
   describe "/editor (content list)" do
     test "viewers are redirected away", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/"}}} =
@@ -407,7 +415,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#page-editor") |> render_submit()
 
-      [block] = CMS.get_page!(page.id, authorize?: false).blocks
+      [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert block.content == "/uploads/x"
       assert block.data["media_id"] == media.id
     end
@@ -433,7 +441,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#page-editor") |> render_submit()
 
-      [block] = CMS.get_page!(page.id, authorize?: false).blocks
+      [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert to_string(block.type) == "image"
       assert block.content == "/uploads/hero"
       assert block.data["media_id"] == media.id
@@ -640,12 +648,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element("button[phx-value-type='heading']") |> render_click()
 
+      # Native union member field for a heading is `text` (not legacy `content`).
       lv
-      |> form("#page-editor", form: %{blocks: %{"0" => %{content: "A nice heading"}}})
+      |> form("#page-editor", form: %{blocks: %{"0" => %{text: "A nice heading"}}})
       |> render_submit()
 
       assert [%{type: :heading, content: "A nice heading"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "reorders blocks via the sortable hook and persists the new order", %{conn: conn} do
@@ -665,7 +674,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor") |> render_submit()
 
       assert [%{content: "B"}, %{content: "A"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "a rich_text block's HTML content round-trips through save", %{conn: conn} do
@@ -684,22 +693,58 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor") |> render_submit()
 
       assert [%{type: :rich_text, content: "<p>Hi <strong>there</strong></p>"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "the live preview reflects block content and updates on change", %{conn: conn} do
       page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Preview renders the heading block (distinct from the editor's textarea).
-      assert html =~ ~s(text-xl font-bold">Original Heading)
+      # Preview renders the heading block through the typed serializers — i.e.
+      # exactly what firing/delivery produces (Kiln v2 preview parity).
+      assert html =~ "<h2>Original Heading</h2>"
 
       html2 =
         lv
-        |> form("#page-editor", form: %{blocks: %{"0" => %{content: "Updated Heading"}}})
+        |> form("#page-editor", form: %{blocks: %{"0" => %{text: "Updated Heading"}}})
         |> render_change()
 
-      assert html2 =~ ~s(text-xl font-bold">Updated Heading)
+      assert html2 =~ "<h2>Updated Heading</h2>"
+    end
+
+    test "the block palette is driven by the typed block registry", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Every registered typed block type is offered (incl. ones never in the old
+      # hardcoded palette, e.g. `custom`).
+      for type <- ~w(rich_text heading quote image embed divider custom) do
+        assert html =~ ~s(phx-value-type="#{type}")
+      end
+    end
+
+    test "renders DSL-declared fields per block, gated by field-level policy", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [%{type: :quote, content: "Q", data: %{"citation" => "me"}, order: 0}]
+        })
+
+      # An editor sees the quote's text + citation, but NOT the admin-only featured flag.
+      {:ok, _lv, editor_html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Native union member fields: form[blocks][0][citation], etc.
+      assert editor_html =~ "[citation]"
+      refute editor_html =~ "[featured]"
+
+      # An admin additionally sees the featured field.
+      {:ok, _lv, admin_html} =
+        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert admin_html =~ "[citation]"
+      assert admin_html =~ "[featured]"
     end
 
     test "saves SEO & scheduling fields", %{conn: conn} do

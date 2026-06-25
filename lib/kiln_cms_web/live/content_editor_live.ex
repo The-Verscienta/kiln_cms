@@ -6,20 +6,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   through `KilnCMS.CMS.ContentTypes`, so types generated with
   `mix kiln.gen.content` are editable here with no extra wiring.
 
-  Edit title/slug (+ excerpt where the type has one) and the embedded block tree
-  (add/remove/reorder via the `Sortable` hook), with **TipTap rich text** for
-  `rich_text` blocks, a **side-by-side live preview** (`KilnCMSWeb.BlockComponents`),
-  SEO & scheduling, version history + restore, and the publishing workflow.
-  Editor/admin only.
+  Edit title/slug (+ excerpt where the type has one) and the typed block tree —
+  blocks are authored as native `Ash.Type.Union` member sub-forms (Kiln v2), with
+  per-member fields generated from each block's `Kiln.Block` DSL (add/remove/reorder
+  via the `Sortable` hook, **TipTap rich text** for `rich_text`). A **side-by-side
+  live preview** renders through the same typed serializers as firing/delivery
+  (preview parity). Plus SEO & scheduling, version history + restore, and the
+  publishing workflow. Editor/admin only.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.Presence
 
-  @block_types ~w(rich_text heading quote image embed divider)
+  # Preferred display order for the block palette; any block type registered
+  # beyond these is appended automatically (the palette is registry-driven, so
+  # adding a `Kiln.Block` module needs no editor change).
+  @type_order ~w(rich_text heading quote image embed divider custom)
 
   # Idle delay before a draft is autosaved after the last edit. Configurable so
   # tests can shorten it.
@@ -55,7 +59,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:kind, kind)
          |> assign(:has_excerpt, ContentTypes.get!(kind).excerpt?)
          |> assign(:actor, actor)
-         |> assign(:block_types, @block_types)
+         |> assign(:block_types, block_types())
          |> assign(:editors, Presence.editors(kind, id))
          |> assign(:cursors, %{})
          |> assign(:self_field, nil)
@@ -138,10 +142,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp build_form(record, actor) do
+    # Blocks are authored as native `Ash.Type.Union` member sub-forms (Kiln v2):
+    # each block sub-form is a typed block resource (Heading/Image/…), so fields
+    # bind straight to the typed attributes.
     record
     |> AshPhoenix.Form.for_update(:update, actor: actor, forms: [auto?: true])
     |> to_form()
   end
+
+  # The typed block module backing a block sub-form (its union member resource).
+  # `inputs_for` yields a Phoenix.HTML.Form wrapping an AshPhoenix.Form; the
+  # preview path holds the AshPhoenix.Form directly.
+  defp block_member(%Phoenix.HTML.Form{source: source}), do: block_member(source)
+  defp block_member(%AshPhoenix.Form{resource: resource}), do: resource
 
   # --- generic dispatch to the per-kind code interfaces (via the registry) ---
 
@@ -226,7 +239,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
-        params: %{"type" => "image", "content" => url, "data" => %{"media_id" => media_id}}
+        params: %{"_union_type" => "image", "url" => url, "media_id" => media_id}
       )
 
     socket = socket |> assign(:form, form) |> reset_picker()
@@ -239,7 +252,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     params =
       socket.assigns.form
       |> AshPhoenix.Form.params()
-      |> put_block(index, %{"content" => url, "data" => %{"media_id" => media_id}})
+      |> put_block(index, %{"url" => url, "media_id" => media_id})
 
     socket =
       socket
@@ -253,7 +266,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("add_block", %{"type" => type}, socket) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
-        params: %{"type" => type, "content" => ""}
+        params: %{"_union_type" => type}
       )
 
     {:noreply, assign(socket, :form, form)}
@@ -480,14 +493,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end)
   end
 
-  # The media id currently stored on an image block's `data`, if any.
-  defp media_id_of(bf) do
-    case bf[:data].value do
-      %{"media_id" => id} -> id
-      %{media_id: id} -> id
-      _ -> nil
-    end
-  end
+  # The media id currently on an image block sub-form, if any.
+  defp media_id_of(bf), do: bf[:media_id].value
 
   defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
 
@@ -615,6 +622,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
+  # Thin `%{type, content}` maps — used by the decoupled (pop-out) preview window.
   defp preview_blocks(form) do
     case AshPhoenix.Form.value(form, :blocks) do
       forms when is_list(forms) -> Enum.map(forms, &block_map/1)
@@ -623,10 +631,148 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp block_map(%AshPhoenix.Form{} = subform) do
+    mod = block_member(subform)
+
     %{
-      type: to_string(AshPhoenix.Form.value(subform, :type) || "rich_text"),
-      content: AshPhoenix.Form.value(subform, :content) || ""
+      type: to_string(Kiln.Block.Info.name(mod)),
+      content: to_string(member_primary_value(subform, mod) || "")
     }
+  end
+
+  # The value of a member's primary (first string/rich_text) field — the closest
+  # analogue to the legacy `content`, for the thin decoupled-preview map.
+  defp member_primary_value(subform, mod) do
+    case primary_field_name(mod) do
+      nil -> nil
+      name -> AshPhoenix.Form.value(subform, name)
+    end
+  end
+
+  # Inline preview rendered through the **same typed serializers that firing
+  # uses** (Kiln v2) — what you preview is exactly what publishes/delivers. Full
+  # block maps (incl. `data`/`children`) go through the legacy→typed bridge and
+  # the per-block `render(:web)`. Rich-text HTML is sanitized first (mirroring the
+  # save-time `SanitizeBlocks` change), so the rendered output is safe.
+  # sobelow_skip ["XSS.Raw"]
+  defp preview_html(form) do
+    form
+    |> preview_block_maps()
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> Enum.map(&KilnCMS.Blocks.render(&1, :web))
+    |> Phoenix.HTML.raw()
+  end
+
+  defp preview_block_maps(form) do
+    case AshPhoenix.Form.value(form, :blocks) do
+      forms when is_list(forms) -> Enum.map(forms, &block_full_map/1)
+      _ -> []
+    end
+  end
+
+  # A typed block map (string keys, `_type`) read from a union member sub-form,
+  # for the inline typed preview. Rich-text HTML is sanitized (unsaved edits
+  # aren't sanitized until save).
+  defp block_full_map(%AshPhoenix.Form{} = subform) do
+    mod = block_member(subform)
+
+    mod
+    |> Kiln.Block.Info.fields()
+    |> Map.new(fn field ->
+      {to_string(field.name), AshPhoenix.Form.value(subform, field.name)}
+    end)
+    |> Map.put("_type", to_string(Kiln.Block.Info.name(mod)))
+    |> sanitize_preview_block()
+  end
+
+  defp sanitize_preview_block(%{"_type" => "rich_text"} = map),
+    do: Map.update(map, "legacy_html", nil, &KilnCMS.HTMLSanitizer.sanitize_rich_text/1)
+
+  defp sanitize_preview_block(map), do: map
+
+  # ── Registry-driven palette + DSL-metadata-driven block fields (Kiln v2) ──
+
+  # The block palette: registered block types in a friendly order, with any new
+  # ones appended — so adding a `Kiln.Block` module surfaces here automatically.
+  defp block_types do
+    available = KilnCMS.Blocks.registry() |> Map.keys() |> Enum.map(&to_string/1)
+    ordered = Enum.filter(@type_order, &(&1 in available))
+    ordered ++ Enum.sort(available -- ordered)
+  end
+
+  # The typed block name (string) for a sub-form's union member.
+  defp block_type_string(bf), do: bf |> block_member() |> Kiln.Block.Info.name() |> to_string()
+
+  # The first string/rich_text field — the block's primary text field.
+  defp primary_field_name(nil), do: nil
+
+  defp primary_field_name(module) do
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.find_value(fn f -> f.type in [:string, :rich_text] && f.name end)
+  end
+
+  # The scalar DSL fields a role may edit (field-level policy, Phase J), excluding
+  # types with bespoke UIs (rich_text/map/reference/array).
+  defp editable_scalar_fields(module, role) do
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.reject(&(&1.type in [:rich_text, :map, :reference] or match?({:array, _}, &1.type)))
+    |> Enum.filter(&Kiln.Block.Policy.can_edit_field?(module, &1.name, role))
+  end
+
+  defp dsl_input_type(:integer), do: "number"
+  defp dsl_input_type(:boolean), do: "checkbox"
+  defp dsl_input_type(_type), do: "text"
+
+  defp dsl_label(name), do: name |> to_string() |> Phoenix.Naming.humanize()
+
+  # Per-block editor body for non-rich-text/non-image blocks: labeled inputs bound
+  # directly to the union member's typed attributes (Kiln v2 native-union editor).
+  # The primary text field is a textarea carrying the collab field-lock; the rest
+  # render by their declared type. Role-filtered by field-level policy.
+  attr :bf, :any, required: true
+  attr :role, :atom, required: true
+  attr :locked_fields, :any, required: true
+  attr :cursors, :any, required: true
+
+  defp dsl_block_fields(assigns) do
+    module = block_member(assigns.bf)
+
+    assigns =
+      assigns
+      |> assign(:primary, primary_field_name(module))
+      |> assign(:fields, editable_scalar_fields(module, assigns.role))
+
+    ~H"""
+    <div class="space-y-2">
+      <p :if={@fields == []} class="text-sm text-base-content/50">
+        {gettext("Section break — no editable fields.")}
+      </p>
+
+      <div :for={field <- @fields}>
+        <div
+          :if={field.name == @primary}
+          class={["relative", lock_ring(@locked_fields, @bf[field.name].name)]}
+        >
+          <.input
+            field={@bf[field.name]}
+            type="textarea"
+            label={dsl_label(field.name)}
+            readonly={field_locked?(@locked_fields, @bf[field.name].name)}
+            {field_attrs(@bf[field.name].name)}
+          />
+          <.field_cursors field={@bf[field.name].name} cursors={@cursors} />
+        </div>
+
+        <.input
+          :if={field.name != @primary}
+          field={@bf[field.name]}
+          type={dsl_input_type(field.type)}
+          label={dsl_label(field.name)}
+        />
+      </div>
+    </div>
+    """
   end
 
   @impl true
@@ -754,12 +900,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         >
                           <.icon name="hero-bars-3" class="size-5" />
                         </span>
-                        <.input
-                          field={bf[:type]}
-                          type="select"
-                          options={@block_types}
-                          class="max-w-40"
-                        />
+                        <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
+                          {dsl_label(block_type_string(bf))}
+                        </span>
                       </div>
                       <button
                         type="button"
@@ -772,11 +915,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       </button>
                     </div>
                     <div
-                      :if={to_string(bf[:type].value) == "rich_text"}
+                      :if={block_type_string(bf) == "rich_text"}
                       id={"rt-#{bf.index}"}
                       phx-hook="RichText"
                       phx-update="ignore"
-                      data-content={bf[:content].value || ""}
+                      data-content={bf[:legacy_html].value || ""}
                     >
                       <div data-toolbar class="mb-1 flex flex-wrap gap-1"></div>
                       <div data-editor></div>
@@ -785,23 +928,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       </p>
                       <input
                         type="hidden"
-                        name={bf[:content].name}
-                        value={bf[:content].value}
+                        name={bf[:legacy_html].name}
+                        value={bf[:legacy_html].value}
                         data-input
                       />
                     </div>
-                    <div :if={to_string(bf[:type].value) == "image"} class="space-y-2">
+                    <div :if={block_type_string(bf) == "image"} class="space-y-2">
                       <img
-                        :if={bf[:content].value not in [nil, ""]}
-                        src={bf[:content].value}
+                        :if={bf[:url].value not in [nil, ""]}
+                        src={bf[:url].value}
                         alt=""
                         class="max-h-40 rounded border border-base-content/10"
                       />
-                      <input
-                        type="hidden"
-                        name={"#{bf.name}[data][media_id]"}
-                        value={media_id_of(bf)}
-                      />
+                      <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
                       <div class="flex items-center gap-2">
                         <button
                           type="button"
@@ -815,23 +954,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         </button>
                       </div>
                       <.input
-                        field={bf[:content]}
+                        field={bf[:url]}
                         label={gettext("Image URL")}
                         placeholder={gettext("…or paste a URL")}
                       />
+                      <.input field={bf[:alt]} label={gettext("Alt text")} />
+                      <.input field={bf[:caption]} label={gettext("Caption")} />
                     </div>
-                    <div
-                      :if={to_string(bf[:type].value) not in ["rich_text", "image"]}
-                      class={["relative", lock_ring(@locked_fields, bf[:content].name)]}
-                    >
-                      <.input
-                        field={bf[:content]}
-                        type="textarea"
-                        placeholder={gettext("Block content…")}
-                        readonly={field_locked?(@locked_fields, bf[:content].name)}
-                        {field_attrs(bf[:content].name)}
+                    <div :if={block_type_string(bf) not in ["rich_text", "image"]}>
+                      <.dsl_block_fields
+                        bf={bf}
+                        role={@actor.role}
+                        locked_fields={@locked_fields}
+                        cursors={@cursors}
                       />
-                      <.field_cursors field={bf[:content].name} cursors={@cursors} />
                     </div>
                   </div>
                 </.inputs_for>
@@ -985,9 +1121,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
           <div class="lg:sticky lg:top-4 lg:self-start">
             <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-            <article class="space-y-3 rounded border border-base-content/15 p-5">
+            <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
               <h1 class="text-2xl font-bold">{@form[:title].value}</h1>
-              <BlockComponents.render_block :for={block <- preview_blocks(@form)} block={block} />
+              {preview_html(@form)}
             </article>
           </div>
         </div>

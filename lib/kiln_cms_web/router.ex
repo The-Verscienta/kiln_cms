@@ -139,6 +139,14 @@ defmodule KilnCMSWeb.Router do
     forward "/", KilnCMSWeb.AshJsonApiRouter
   end
 
+  # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
+  # immutable per-surface artifacts, not the raw editable block tree.
+  scope "/api", KilnCMSWeb do
+    pipe_through :api
+
+    get "/content/:type/:slug", ArtifactController, :show
+  end
+
   scope "/preview", KilnCMSWeb do
     pipe_through :preview
 

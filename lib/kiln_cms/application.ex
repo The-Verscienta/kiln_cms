@@ -10,7 +10,8 @@ defmodule KilnCMS.Application do
     children = [
       KilnCMSWeb.Telemetry,
       KilnCMSWeb.RateLimit,
-      {Cachex, name: KilnCMS.Cache.cache_name()},
+      Supervisor.child_spec({Cachex, name: KilnCMS.Cache.cache_name()}, id: :content_cache),
+      Supervisor.child_spec({Cachex, name: KilnCMS.Firing.Cache.cache_name()}, id: :firing_cache),
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
       {Oban,
@@ -20,6 +21,7 @@ defmodule KilnCMS.Application do
        )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
       KilnCMSWeb.Presence,
+      KilnCMS.Collab.Locks,
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry

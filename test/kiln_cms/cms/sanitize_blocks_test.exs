@@ -1,7 +1,15 @@
 defmodule KilnCMS.CMS.SanitizeBlocksTest do
+  @moduledoc "Block sanitization now happens inside the BlockUnion cast (Kiln v2)."
   use KilnCMS.DataCase, async: true
 
   alias KilnCMS.CMS
+
+  # Blocks are stored as the typed union; read back as legacy maps for assertions.
+  defp legacy_blocks(record) do
+    record.blocks
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+  end
 
   setup do
     editor =
@@ -32,7 +40,7 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
         actor: editor
       )
 
-    assert [%{type: :rich_text, content: content}] = page.blocks
+    assert [%{type: :rich_text, content: content}] = legacy_blocks(page)
     assert content =~ "OK"
     refute content =~ "script"
   end
@@ -53,6 +61,9 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
         actor: editor
       )
 
-    assert [%{type: :image, content: ""}, %{type: :embed, content: ""}] = page.blocks
+    # Unsafe URLs are stripped during the cast, so the url/content is blank (nil).
+    assert [%{type: :image, content: img}, %{type: :embed, content: emb}] = legacy_blocks(page)
+    assert img in [nil, ""]
+    assert emb in [nil, ""]
   end
 end
