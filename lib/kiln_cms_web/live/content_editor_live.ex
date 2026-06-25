@@ -517,6 +517,82 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp pick_index(:new), do: "new"
   defp pick_index(index), do: index
 
+  attr :block_types, :list, required: true
+
+  # Notion-style slash-command block inserter (#29). The trigger button (or the
+  # `/` shortcut, handled by the `BlockInserter` JS hook) opens a filterable,
+  # keyboard-navigable menu listing every registered block type. Each option is a
+  # real `add_block` button, so it works without JS and is directly testable;
+  # the hook layers on filtering, arrow-key navigation, and ARIA wiring.
+  defp block_inserter(assigns) do
+    ~H"""
+    <div id="block-inserter" phx-hook="BlockInserter" class="relative">
+      <button
+        type="button"
+        data-inserter-trigger
+        aria-haspopup="listbox"
+        aria-expanded="false"
+        aria-controls="block-inserter-list"
+        class="inline-flex items-center gap-1.5 rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      >
+        <.icon name="hero-plus" class="size-4" />
+        {gettext("Add block")}
+        <kbd class="ml-1 rounded border border-base-content/20 px-1.5 text-xs opacity-60">/</kbd>
+      </button>
+
+      <div
+        data-inserter-menu
+        hidden
+        class="absolute left-0 z-20 mt-1 w-72 rounded-lg border border-base-content/15 bg-base-100 p-1 shadow-lg"
+      >
+        <div class="p-1">
+          <input
+            type="text"
+            data-inserter-search
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls="block-inserter-list"
+            placeholder={gettext("Filter blocks…")}
+            class="w-full rounded border border-base-content/20 bg-base-100 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+        </div>
+
+        <ul
+          id="block-inserter-list"
+          role="listbox"
+          aria-label={gettext("Insert block")}
+          class="max-h-72 overflow-y-auto"
+        >
+          <li :for={bt <- @block_types} role="presentation" data-inserter-option data-label={bt.label}>
+            <button
+              type="button"
+              id={"block-inserter-item-#{bt.type}"}
+              role="option"
+              aria-selected="false"
+              tabindex="-1"
+              phx-click="add_block"
+              phx-value-type={bt.type}
+              data-inserter-item
+              class="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-200 aria-selected:bg-base-200"
+            >
+              <.icon name={bt.icon} class="mt-0.5 size-5 shrink-0 opacity-70" />
+              <span class="min-w-0">
+                <span class="block font-medium">{bt.label}</span>
+                <span class="block truncate text-xs opacity-60">{bt.description}</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+
+        <p data-inserter-empty hidden class="px-3 py-2 text-sm opacity-60">
+          {gettext("No blocks match.")}
+        </p>
+      </div>
+    </div>
+    """
+  end
+
   attr :index, :any, required: true
   attr :media, :list, required: true
   attr :query, :string, required: true
@@ -693,11 +769,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # The block palette: registered block types in a friendly order, with any new
   # ones appended — so adding a `Kiln.Block` module surfaces here automatically.
+  # Each entry carries display metadata for the slash-command inserter menu.
   defp block_types do
     available = KilnCMS.Blocks.registry() |> Map.keys() |> Enum.map(&to_string/1)
     ordered = Enum.filter(@type_order, &(&1 in available))
-    ordered ++ Enum.sort(available -- ordered)
+
+    (ordered ++ Enum.sort(available -- ordered))
+    |> Enum.map(fn type ->
+      %{
+        type: type,
+        label: dsl_label(type),
+        icon: block_icon(type),
+        description: block_description(type)
+      }
+    end)
   end
+
+  # Heroicon for a block type in the inserter menu (generic fallback for any
+  # registry-discovered type without a bespoke icon).
+  defp block_icon("rich_text"), do: "hero-document-text"
+  defp block_icon("heading"), do: "hero-hashtag"
+  defp block_icon("quote"), do: "hero-chat-bubble-bottom-center-text"
+  defp block_icon("image"), do: "hero-photo"
+  defp block_icon("embed"), do: "hero-code-bracket"
+  defp block_icon("divider"), do: "hero-minus"
+  defp block_icon("portable_text"), do: "hero-bars-3"
+  defp block_icon("custom"), do: "hero-puzzle-piece"
+  defp block_icon(_), do: "hero-squares-2x2"
+
+  # One-line description shown under the label in the inserter menu.
+  defp block_description("rich_text"), do: gettext("Formatted text with bold, italic, and lists")
+  defp block_description("heading"), do: gettext("Section title")
+  defp block_description("quote"), do: gettext("Highlighted quotation")
+  defp block_description("image"), do: gettext("Picture with alt text and caption")
+  defp block_description("embed"), do: gettext("Embedded HTML or external content")
+  defp block_description("divider"), do: gettext("Visual separator between sections")
+  defp block_description("portable_text"), do: gettext("Portable Text rich content")
+  defp block_description("custom"), do: gettext("Custom block payload")
+  defp block_description(_), do: gettext("Insert a block")
 
   # The typed block name (string) for a sub-form's union member.
   defp block_type_string(bf), do: bf |> block_member() |> Kiln.Block.Info.name() |> to_string()
@@ -973,17 +1082,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 </.inputs_for>
               </div>
 
-              <div class="flex flex-wrap gap-2">
-                <button
-                  :for={type <- @block_types}
-                  type="button"
-                  phx-click="add_block"
-                  phx-value-type={type}
-                  class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-                >
-                  <.icon name="hero-plus" class="mr-1 size-4" />{type}
-                </button>
-              </div>
+              <.block_inserter block_types={@block_types} />
             </div>
 
             <details class="rounded border border-base-content/15 p-3" open>

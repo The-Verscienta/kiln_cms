@@ -421,6 +421,61 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  describe "block inserter (slash menu)" do
+    test "menu lists an option for every registered block type", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      html = render(lv)
+
+      for type <- Map.keys(KilnCMS.Blocks.registry()) do
+        assert has_element?(
+                 lv,
+                 "button[data-inserter-item][phx-value-type='#{type}']"
+               ),
+               "expected an inserter option for #{type}"
+      end
+
+      # Rendered as an accessible listbox the JS hook drives.
+      assert html =~ ~s(role="listbox")
+      assert html =~ ~s(phx-hook="BlockInserter")
+    end
+
+    test "selecting an option inserts a block sub-form into the editor", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute has_element?(lv, "button[phx-click='remove_block']")
+
+      lv
+      |> element("button[data-inserter-item][phx-value-type='heading']")
+      |> render_click()
+
+      assert has_element?(lv, "button[phx-click='remove_block']")
+    end
+
+    test "an inserted block persists on save", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # `divider` has no required fields, so it round-trips through save unedited.
+      lv
+      |> element("button[data-inserter-item][phx-value-type='divider']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert to_string(block.type) == "divider"
+    end
+  end
+
   describe "media library browser (editor chrome)" do
     test "opening from chrome and picking inserts a new image block", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg", url: "/uploads/hero"})
@@ -491,11 +546,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
       topic = Presence.topic("page", page.id)
       cursor = %{id: "other-editor", name: "bob", field: "title"}
 
+      # Scope to the cursor badge's title — a bare "bob" also matches unrelated
+      # markup (e.g. the inserter's `role="combobox"`).
       Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
-      assert render(lv) =~ "bob"
+      assert render(lv) =~ "bob is editing"
 
       Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
-      refute render(lv) =~ "bob"
+      refute render(lv) =~ "bob is editing"
     end
 
     test "soft-locks a field (readonly + ring) while another editor holds it", %{conn: conn} do
