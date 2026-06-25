@@ -65,7 +65,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # Set when an optimistic-lock conflict blocks saving until reload.
          |> assign(:conflict, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
+         # `picking` is nil (closed), a block index (fill that image block), or
+         # `:new` (insert a new image block — opened from the editor chrome).
          |> assign(:picking, nil)
+         |> assign(:media_query, "")
          |> assign(
            :media,
            CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]])
@@ -202,14 +205,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :self_field, nil)}
   end
 
+  # Open the media browser to fill a specific image block.
   def handle_event("open_picker", %{"index" => index}, socket),
     do: {:noreply, assign(socket, :picking, String.to_integer(index))}
 
-  def handle_event("close_picker", _params, socket),
-    do: {:noreply, assign(socket, :picking, nil)}
+  # Open the media browser from the editor chrome to insert a *new* image block.
+  def handle_event("open_media_browser", _params, socket),
+    do: {:noreply, assign(socket, :picking, :new)}
 
-  # Insert a library image into the image block at `index`: its URL becomes the
-  # block content and its id is stashed in `data` so delivery can build srcset.
+  def handle_event("close_picker", _params, socket),
+    do: {:noreply, reset_picker(socket)}
+
+  # Live-filter the browser grid as the user types.
+  def handle_event("search_media", %{"q" => q}, socket),
+    do: {:noreply, assign(socket, :media_query, q)}
+
+  # Insert a library image as a brand-new image block (browser opened from the
+  # editor chrome): the URL becomes the block content and its id is stashed in
+  # `data` so delivery can build srcset.
+  def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket) do
+    form =
+      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+        params: %{"type" => "image", "content" => url, "data" => %{"media_id" => media_id}}
+      )
+
+    socket = socket |> assign(:form, form) |> reset_picker()
+    broadcast_preview(socket)
+    {:noreply, socket}
+  end
+
+  # Insert a library image into the existing image block at `index`.
   def handle_event("pick_image", %{"index" => index, "id" => media_id, "url" => url}, socket) do
     params =
       socket.assigns.form
@@ -219,7 +244,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket =
       socket
       |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      |> assign(:picking, nil)
+      |> reset_picker()
 
     broadcast_preview(socket)
     {:noreply, socket}
@@ -461,17 +486,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  attr :index, :integer, required: true
-  attr :media, :list, required: true
+  defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
 
-  # Modal grid for picking a library image into image block `index`.
+  # Substring filter over filename/alt/caption — instant, no DB round-trip, and
+  # matches partial input as the user types (the library's `:search` action is
+  # whole-word tsquery, less forgiving for a live picker).
+  defp filter_media(media, ""), do: media
+
+  defp filter_media(media, query) do
+    q = String.downcase(query)
+
+    Enum.filter(media, fn item ->
+      [item.filename, item.alt, item.caption]
+      |> Enum.any?(fn v -> v && String.contains?(String.downcase(v), q) end)
+    end)
+  end
+
+  # The `phx-value-index` for a pick button: "new" inserts a fresh image block
+  # (browser opened from the chrome), an integer fills that existing block.
+  defp pick_index(:new), do: "new"
+  defp pick_index(index), do: index
+
+  attr :index, :any, required: true
+  attr :media, :list, required: true
+  attr :query, :string, required: true
+
+  # Full media-library browser modal. Reachable from the editor chrome (to
+  # insert a new image block, `index = :new`) and from each image block (to fill
+  # that block, `index` = its integer index). Browse + search + insert.
   defp image_picker(assigns) do
+    assigns = assign(assigns, :visible, filter_media(assigns.media, assigns.query))
+
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
       <div class="absolute inset-0 bg-black/40" phx-click="close_picker" aria-hidden="true"></div>
       <div class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-lg font-medium">{gettext("Choose an image")}</h2>
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <h2 class="text-lg font-medium">
+            {if @index == :new,
+              do: gettext("Insert image from library"),
+              else: gettext("Choose an image")}
+          </h2>
           <button
             type="button"
             phx-click="close_picker"
@@ -482,23 +537,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </button>
         </div>
 
+        <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename, alt or caption")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
+
         <p :if={@media == []} class="text-sm text-base-content/60">
           No media yet — upload some in the <.link navigate={~p"/media"} class="underline">media library</.link>.
         </p>
+        <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+          {gettext("No media matches “%{query}”.", query: @query)}
+        </p>
 
-        <div class="grid grid-cols-3 gap-3 sm:grid-cols-4">
+        <div :if={@visible != []} class="grid grid-cols-3 gap-3 sm:grid-cols-4">
           <button
-            :for={item <- @media}
+            :for={item <- @visible}
             type="button"
             phx-click="pick_image"
-            phx-value-index={@index}
+            phx-value-index={pick_index(@index)}
             phx-value-id={item.id}
             phx-value-url={item.url}
+            title={item.filename}
             class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
           >
             <img
               src={item.url}
               alt={item.alt || item.filename}
+              loading="lazy"
               class="aspect-square w-full object-cover"
             />
           </button>
@@ -606,6 +678,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <.presence_roster editors={@editors} current_id={@actor.id} />
           </div>
           <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              phx-click="open_media_browser"
+              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+            >
+              <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Media library")}
+            </button>
             <.link
               href={~p"/editor/preview/#{@kind}/#{@record.id}"}
               target="_blank"
@@ -908,7 +987,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </div>
       </.form>
 
-      <.image_picker :if={@picking != nil} index={@picking} media={@media} />
+      <.image_picker :if={@picking != nil} index={@picking} media={@media} query={@media_query} />
     </Layouts.app>
     """
   end
