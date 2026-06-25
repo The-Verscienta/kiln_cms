@@ -25,4 +25,13 @@ defmodule Kiln.Block.Info do
       _ -> []
     end
   end
+
+  @doc "The block's declared schema migrations (Phase H upcasting)."
+  @spec migrations(Ash.Resource.t() | map()) :: [Kiln.Block.Migration.t()]
+  def migrations(resource_or_dsl) do
+    case definition(resource_or_dsl) do
+      %{migrations: migrations} -> migrations
+      _ -> []
+    end
+  end
 end

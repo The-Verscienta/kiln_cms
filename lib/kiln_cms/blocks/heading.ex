@@ -3,9 +3,17 @@ defmodule KilnCMS.Blocks.Heading do
   use Kiln.Block
 
   block :heading do
+    version(2)
     field :text, :string, required: true
     field :level, :integer, default: 2
+
+    # v2 made `level` a first-class field; v1 headings stored it (if at all) only
+    # in a loose data map. Backfill a sensible default on read (decision D15).
+    migrate(from: 1, to: 2, fun: &__MODULE__.upcast_v1_to_v2/1)
   end
+
+  @doc false
+  def upcast_v1_to_v2(map), do: Map.put_new(map, "level", 2)
 
   @impl Kiln.Block.Renderer
   def render(%__MODULE__{} = block, :web) do

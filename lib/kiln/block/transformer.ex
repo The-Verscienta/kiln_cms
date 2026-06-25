@@ -14,10 +14,11 @@ defmodule Kiln.Block.Transformer do
 
   def transform(dsl_state) do
     case Transformer.get_entities(dsl_state, [:kiln_block]) do
-      [%Kiln.Block.Definition{name: name, fields: fields}] ->
+      [%Kiln.Block.Definition{name: name, version: version, fields: fields}] ->
         dsl_state =
           dsl_state
           |> add_discriminator(name)
+          |> add_version(version)
           |> then(&Enum.reduce(fields, &1, fn field, acc -> add_field(field, acc) end))
 
         {:ok, dsl_state}
@@ -36,6 +37,20 @@ defmodule Kiln.Block.Transformer do
     {:ok, dsl_state} =
       Ash.Resource.Builder.add_attribute(dsl_state, :_type, :string,
         default: to_string(name),
+        allow_nil?: false,
+        public?: true
+      )
+
+    dsl_state
+  end
+
+  # The stored schema version (decision D15). Defaults to the block's current
+  # version so freshly-built structs are already at head; older stored maps carry
+  # a lower `_version` and get upcast on read (`KilnCMS.Blocks.Upcaster`).
+  defp add_version(dsl_state, version) do
+    {:ok, dsl_state} =
+      Ash.Resource.Builder.add_attribute(dsl_state, :_version, :integer,
+        default: version,
         allow_nil?: false,
         public?: true
       )

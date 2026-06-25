@@ -7,7 +7,7 @@ defmodule Kiln.Block.DslTest do
   describe "Info introspection" do
     test "exposes the block name (the _type discriminator) and version" do
       assert Kiln.Block.Info.name(Heading) == :heading
-      assert Kiln.Block.Info.version(Heading) == 1
+      assert Kiln.Block.Info.version(Heading) == 2
     end
 
     test "exposes the declared fields" do

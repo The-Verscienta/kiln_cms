@@ -495,7 +495,27 @@ deferred to a later increment.)
 
 ---
 
-## Phase H — Block schema evolution / upcasting
+## Phase H — Block schema evolution / upcasting — ✅ DONE
+
+> **Outcome.** Blocks can evolve safely (decision D15). The `Kiln.Block` DSL gains
+> `version N` and `migrate from:, to:, fun:` entities; the transformer injects a
+> `_version` discriminator (default = current version) into every block.
+> `KilnCMS.Blocks.Upcaster` runs the declared migration chain — `upcast/2` (by
+> module), `upcast_block_map/1` (lazy-read, resolves module by `_type`),
+> `upcast_all/1` (eager backfill) — idempotent at head version. `Heading` is bumped
+> to v2 with a real `1→2` migration as the worked example. Fired-artifact strategy
+> on a bump = re-fire affected types (H1). **17 new tests incl. a StreamData
+> property test (upcast is total over generated v1 maps); full suite 436 green;
+> precommit clean.**
+>
+> **Scoped:** `upcast_all/1` is the eager-backfill primitive, tested; wrapping it
+> in an Oban worker that persists is trivial once the stored column is union
+> (Phase C flip), since legacy storage carries no `_version` to migrate yet. Lazy
+> upcast is centralized in `Upcaster` and ready to slot into the union cast path.
+>
+> Files: `lib/kiln/block/{dsl,transformer,info}.ex` (version/migrate),
+> `lib/kiln_cms/blocks/upcaster.ex`, `lib/kiln_cms/blocks/heading.ex` (v2 example);
+> test `test/kiln_cms/blocks/upcaster_test.exs`.
 
 **Goal.** Version block schemas in the DSL and run upcast functions on read
 (lazy) or via Oban backfill (eager), with a clear strategy for already-fired

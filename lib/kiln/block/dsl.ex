@@ -5,9 +5,15 @@ defmodule Kiln.Block.Field do
   @type t :: %__MODULE__{}
 end
 
+defmodule Kiln.Block.Migration do
+  @moduledoc "Target struct for a `migrate` DSL entry (Kiln v2 — D15 upcasting)."
+  defstruct [:from, :to, :fun, :__spark_metadata__]
+  @type t :: %__MODULE__{}
+end
+
 defmodule Kiln.Block.Definition do
   @moduledoc "Target struct for the `block` DSL entry (Kiln v2 — D10)."
-  defstruct [:name, :version, :__spark_metadata__, fields: []]
+  defstruct [:name, :version, :__spark_metadata__, fields: [], migrations: []]
   @type t :: %__MODULE__{}
 end
 
@@ -52,12 +58,27 @@ defmodule Kiln.Block.Dsl do
     ]
   }
 
+  @migration %Spark.Dsl.Entity{
+    name: :migrate,
+    describe: "An upcast from one schema version to the next (Kiln v2 — D15).",
+    target: Kiln.Block.Migration,
+    schema: [
+      from: [type: :pos_integer, required: true, doc: "Source version."],
+      to: [type: :pos_integer, required: true, doc: "Target version."],
+      fun: [
+        type: {:fun, 1},
+        required: true,
+        doc: "1-arity upcast: a stored block map (string keys) → the migrated map."
+      ]
+    ]
+  }
+
   @block %Spark.Dsl.Entity{
     name: :block,
     describe: "Defines the block type and its fields.",
     args: [:name],
     target: Kiln.Block.Definition,
-    entities: [fields: [@field]],
+    entities: [fields: [@field], migrations: [@migration]],
     schema: [
       name: [type: :atom, required: true, doc: "Block name / `_type` discriminator."],
       version: [type: :pos_integer, default: 1, doc: "Schema version (Phase H upcasting)."]
