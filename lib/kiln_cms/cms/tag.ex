@@ -21,6 +21,14 @@ defmodule KilnCMS.CMS.Tag do
     type "tag"
   end
 
+  # AshAdmin: group taxonomy together and label tags by name (issue #25).
+  admin do
+    resource_group :taxonomy
+    table_columns [:name, :slug, :inserted_at]
+    relationship_display_fields [:name]
+    label_field :name
+  end
+
   postgres do
     table "tags"
     repo KilnCMS.Repo

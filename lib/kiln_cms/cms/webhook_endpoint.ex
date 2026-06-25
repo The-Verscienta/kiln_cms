@@ -26,6 +26,13 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     for ct <- KilnCMS.CMS.ContentTypes.all(), verb <- @verbs, do: "#{ct.type}.#{verb}"
   end
 
+  # AshAdmin: keep system config out of the content groups (issue #25). The
+  # `secret` is sensitive? and stays redacted by default.
+  admin do
+    resource_group :system
+    table_columns [:url, :active, :inserted_at]
+  end
+
   postgres do
     table "webhook_endpoints"
     repo KilnCMS.Repo
