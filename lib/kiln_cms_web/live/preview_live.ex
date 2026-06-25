@@ -5,8 +5,11 @@ defmodule KilnCMSWeb.PreviewLive do
   `Phoenix.PubSub`) to the editor's preview topic and re-renders on every edit,
   with no page reload. Editor/admin only.
 
-  Renders without the editor chrome (no `Layouts.app`), via the shared
-  `KilnCMSWeb.BlockComponents`.
+  For **public-site fidelity** the content is rendered through the same
+  `Layouts.public` shell and `prose` article markup the live site uses (see
+  `content_html/show_page.html.heex` / `show_post.html.heex`) via the shared
+  `KilnCMSWeb.BlockComponents` — so the pop-out is a faithful preview, not just
+  the raw blocks. A thin ribbon marks it as a draft preview.
   """
   use KilnCMSWeb, :live_view
 
@@ -27,7 +30,10 @@ defmodule KilnCMSWeb.PreviewLive do
 
       {:ok,
        socket
+       |> assign(:kind, kind)
+       |> assign(:excerpt?, ContentTypes.get!(kind).excerpt?)
        |> assign(:title, record.title)
+       |> assign(:excerpt, Map.get(record, :excerpt))
        |> assign(:blocks, content_blocks(record))}
     else
       {:ok, push_navigate(socket, to: ~p"/editor")}
@@ -43,17 +49,32 @@ defmodule KilnCMSWeb.PreviewLive do
   end
 
   @impl true
-  def handle_info({:preview_update, %{title: title, blocks: blocks}}, socket) do
-    {:noreply, assign(socket, title: title, blocks: blocks)}
+  def handle_info({:preview_update, payload}, socket) do
+    {:noreply,
+     socket
+     |> assign(:title, payload.title)
+     |> assign(:blocks, payload.blocks)
+     |> assign(:excerpt, Map.get(payload, :excerpt, socket.assigns.excerpt))}
   end
 
   @impl true
   def render(assigns) do
     ~H"""
-    <article class="mx-auto max-w-3xl space-y-4 p-8">
-      <h1 class="text-3xl font-bold">{@title}</h1>
-      <BlockComponents.render_block :for={block <- @blocks} block={block} />
-    </article>
+    <div class="sticky top-0 z-10 bg-warning/90 px-4 py-1.5 text-center text-xs font-medium text-warning-content">
+      {gettext("Draft preview — not the published page")}
+    </div>
+    <Layouts.public>
+      <article class="prose max-w-none">
+        <header :if={@excerpt?} class="mb-6">
+          <h1 class="text-3xl font-bold tracking-tight">{@title}</h1>
+          <p :if={@excerpt} class="mt-3 text-lg text-base-content/70">{@excerpt}</p>
+        </header>
+        <h1 :if={!@excerpt?} class="text-3xl font-bold tracking-tight">{@title}</h1>
+        <div class="space-y-4" id="preview-blocks">
+          <BlockComponents.render_block :for={block <- @blocks} block={block} />
+        </div>
+      </article>
+    </Layouts.public>
     """
   end
 end
