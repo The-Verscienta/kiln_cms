@@ -777,6 +777,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     >
                       <div data-toolbar class="mb-1 flex flex-wrap gap-1"></div>
                       <div data-editor></div>
+                      <p class="mt-1 text-xs text-base-content/50">
+                        {gettext("Type / for commands.")}
+                      </p>
                       <input
                         type="hidden"
                         name={bf[:content].name}

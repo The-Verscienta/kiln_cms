@@ -61,6 +61,29 @@ test.describe("editor journey", () => {
     await expect(page.locator("article")).toContainText(body);
   });
 
+  test("slash command transforms a rich-text block", async ({ page }) => {
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Slash");
+    await page.fill('input[name$="[slug]"]', `e2e-slash-${Date.now()}`);
+
+    await page.click('button[phx-click="add_block"][phx-value-type="rich_text"]');
+    const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
+    await expect(editor).toBeVisible();
+    await editor.click();
+
+    // "/" opens the slash menu; the query filters it down to "Quote".
+    await page.keyboard.type("/quote");
+    const menu = page.locator(".rt-slash-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByText("Quote", { exact: true })).toBeVisible();
+
+    // Enter applies the highlighted command: the "/quote" text is removed and
+    // the block becomes a blockquote that swallows what we type next.
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Pearl of wisdom");
+    await expect(editor.locator("blockquote")).toContainText("Pearl of wisdom");
+  });
+
   test("reorder blocks via drag-and-drop (SortableJS)", async ({ page }) => {
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Reorder");

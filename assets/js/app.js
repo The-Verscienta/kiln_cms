@@ -25,25 +25,7 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
-import {Editor} from "@tiptap/core"
-import StarterKit from "@tiptap/starter-kit"
-
-// Drag-and-drop reordering for editor block lists. On drop it reads the new
-// order of `data-sort-id`s and pushes a "reorder" event to the LiveView.
-// TipTap rich-text editor for rich_text blocks. The editor's HTML is mirrored
-// into a hidden input bound to the block's `content` form field, so it saves
-// through the normal form submit.
-const richTextButton = (editor, label, isActive, run) => {
-  const b = document.createElement("button")
-  b.type = "button"
-  b.textContent = label
-  b.className = "rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
-  b.addEventListener("click", e => {
-    e.preventDefault()
-    run(editor.chain().focus()).run()
-  })
-  return b
-}
+import {RichText} from "./rich_text"
 
 const Hooks = {
   Clipboard: {
@@ -55,39 +37,9 @@ const Hooks = {
       })
     },
   },
-  RichText: {
-    mounted() {
-      const input = this.el.querySelector("[data-input]")
-      const editor = new Editor({
-        element: this.el.querySelector("[data-editor]"),
-        extensions: [StarterKit],
-        content: this.el.dataset.content || "",
-        onUpdate: ({editor}) => {
-          input.value = editor.getHTML()
-          // Debounced phx-change so the live preview reflects rich-text edits.
-          clearTimeout(this._debounce)
-          this._debounce = setTimeout(() => {
-            input.dispatchEvent(new Event("input", {bubbles: true}))
-          }, 300)
-        },
-      })
-      this.editor = editor
-      input.value = editor.getHTML()
-
-      const toolbar = this.el.querySelector("[data-toolbar]")
-      ;[
-        ["B", c => c.toggleBold()],
-        ["I", c => c.toggleItalic()],
-        ["H2", c => c.toggleHeading({level: 2})],
-        ["• List", c => c.toggleBulletList()],
-        ["1. List", c => c.toggleOrderedList()],
-        ["❝", c => c.toggleBlockquote()],
-      ].forEach(([label, run]) => toolbar.appendChild(richTextButton(editor, label, null, run)))
-    },
-    destroyed() {
-      this.editor && this.editor.destroy()
-    },
-  },
+  RichText,
+  // Drag-and-drop reordering for editor block lists. On drop it reads the new
+  // order of `data-sort-id`s and pushes a "reorder" event to the LiveView.
   Sortable: {
     mounted() {
       this.sorter = Sortable.create(this.el, {
