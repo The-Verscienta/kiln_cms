@@ -15,5 +15,11 @@ defmodule KilnCMS.Firing do
       define :get_artifact, action: :get_surface, args: [:document_type, :document_id, :surface]
       define :upsert_artifact, action: :upsert
     end
+
+    resource KilnCMS.Firing.ReferenceEdge do
+      define :edges_from, action: :from_source, args: [:from_type, :from_id]
+      define :edges_to, action: :to_target, args: [:to_type, :to_id]
+      define :upsert_edge, action: :upsert
+    end
   end
 end

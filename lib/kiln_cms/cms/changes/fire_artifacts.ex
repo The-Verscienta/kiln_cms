@@ -14,6 +14,12 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
       with {:ok, record} <- result do
         try do
           KilnCMS.Firing.Engine.fire(record)
+          # Re-fire downstream referrers whose embedded snapshot is now stale (D13).
+          type = KilnCMS.Firing.Engine.document_type(record)
+
+          KilnCMS.Firing.References.invalidate(type, record.id, [
+            KilnCMS.Firing.References.key(type, record.id)
+          ])
         rescue
           error -> Logger.error("Firing failed for #{inspect(record.id)}: #{inspect(error)}")
         end

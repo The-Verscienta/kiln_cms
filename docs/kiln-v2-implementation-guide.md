@@ -349,7 +349,22 @@ auditable compile step; the live tree is never read on the public path.
 
 ---
 
-## Phase E — Reference-aware invalidation (the graph walk)
+## Phase E — Reference-aware invalidation (the graph walk) — ✅ DONE
+
+> **Outcome.** Firing is now a graph walk (decision D13). `KilnCMS.Firing.References`
+> extracts reference edges from the typed block tree (DSL `:reference` fields, and
+> for bridged legacy content `Custom` blocks' `data["ref"]`/`["refs"]`),
+> `KilnCMS.Firing.ReferenceEdge` persists the dependency graph (rebuilt on every
+> fire), and `invalidate/3` enqueues **cycle-safe** `RefireWorker` (Oban) jobs for a
+> changed doc's referrers — each node fires at most once per wave via an
+> accumulating `visited` set. Wired: `Engine.fire` rebuilds outgoing edges; the
+> publish hook invalidates referrers. **5 new tests (incl. cycle-safety via
+> `Oban.drain_queue` success counts); full suite 422 green; precommit clean.**
+>
+> Files: `lib/kiln_cms/firing/{reference_edge,references,refire_worker}.ex`,
+> edge rebuild in `engine.ex`, invalidate in `changes/fire_artifacts.ex`, domain
+> interfaces in `firing.ex`, migration `add_reference_edges`; test
+> `test/kiln_cms/firing/references_test.exs`.
 
 **Goal.** When document B is referenced by document A and B changes, A's fired
 artifact is stale → re-fire A. Firing becomes a graph walk, not just a tree walk.

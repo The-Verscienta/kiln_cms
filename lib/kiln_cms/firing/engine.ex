@@ -27,7 +27,14 @@ defmodule KilnCMS.Firing.Engine do
     type = document_type(document)
     artifacts = Map.new(@surfaces, fn surface -> {surface, compose(document, typed, surface)} end)
 
-    if mode == :persist, do: persist(document, type, artifacts)
+    if mode == :persist do
+      persist(document, type, artifacts)
+      # Keep the dependency graph current (decision D13). Invalidation of
+      # referrers is enqueued by the caller (publish hook / re-fire worker), not
+      # here, to keep fire/2 free of recursion.
+      KilnCMS.Firing.References.rebuild(type, document.id, typed)
+    end
+
     {:ok, artifacts}
   end
 
