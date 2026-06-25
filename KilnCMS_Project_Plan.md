@@ -22,6 +22,8 @@
 
 **Biggest remaining piece:** Phase 3 content editor (TipTap + drag-and-drop blocks + real-time live preview). Other TODOs: AshAdmin actor wiring (dev-only), image variants/S3, DaisyUI removal. Repo lives at a **spaceless path** (`~/Github/kiln_cms`) — native deps (bcrypt, libvips) build via `make`, which fails on spaced/iCloud paths.
 
+> **Architecture north star — Kiln v2 (in progress).** Beyond the v1.0 feature list, KilnCMS is evolving toward a **typed, addressable content tree**: every block becomes a typed struct generated from one declarative Spark DSL, content is *fired* into immutable per-surface artifacts on publish, and history/search/migrations/structured-data all reduce to operations on that one tree. This **extends** (does not discard) the locked decisions below — the block model stays embedded + atomically versioned (D3), types stay compile-time (D4) — and is captured in **`kiln-cms-plan-v2.md`** (vision) and **`docs/kiln-v2-implementation-guide.md`** (step-by-step build). New decisions **D9–D16** and the **Kiln v2** section below record the direction. **Phase A (firing spike) is complete** — artifact format + serializer dispatch validated, decisions A1–A4 locked.
+
 ---
 
 ## Tech Stack (World-Class Edition)
@@ -146,11 +148,17 @@ With Oban on Postgres, Cachex/Nebulex for in-BEAM caching, Hammer (ETS) for rate
 ### D3. Block model: embedded JSONB via Ash embedded resources
 Blocks are **embedded resources** stored as a JSON tree on the parent (Page/Post), **not** a separate polymorphic table. Rationale: matches Storyblok/Payload/Prismic storage, makes nesting/ordering trivial, and lets **AshPaperTrail snapshot the whole document as one restorable version** (atomic page+blocks versioning is painful with a separate table). Per-block-type Ash embedded schemas preserve compile-time validation and pattern-matched render components. Cross-block querying (e.g., "images missing alt text") is served by a **derived search/index document**, not by normalizing the editor model.
 
+> **v2 evolution (see D10/D11).** Today's single `Block` embedded resource (a `type` atom + free-form `data` map) becomes **one typed embedded struct per block type**, stored as an `Ash.Type.Union` array tagged by `_type`. Still embedded, still atomically versioned — this *deepens* D3's "per-block-type embedded schemas" intent rather than reversing it.
+
 ### D4. Content types: compile-time, not a runtime meta-model
 Core types and block types are **compile-time Ash resources**. Avoid a runtime/dynamic meta-model — it forfeits the compile-time safety that is the core advantage over Strapi. Extensibility comes from *registered* embedded block types and the plugin system, not dynamic schemas.
 
+> **v2 evolution (see D10).** Block types are still compile-time, but defined through the **`Kiln.Block` Spark DSL** so one declarative definition fans out to schema, validation, editor form, renderers, search projection, and (D15) version/upcast functions. The plugin "register a custom block type" story becomes "add a `Kiln.Block` module."
+
 ### D5. Collaboration: locked editing + Presence for v1.0
 Ship single-active-editor with Phoenix Presence "who's editing" indicators. CRDT/Yjs collaborative editing fights LiveView's server-authoritative model and is firmly **post-v1** research.
+
+> **v2 evolution (see D14).** The hybrid collab model (block-level server state + Presence; prose patches over the socket) stays within D5's scope, but the **same block-level patches become append-only events** — so collaboration, per-block history, time-travel, and audit fall out of one substrate. CRDT/OT remains post-v1; the event log does not require it.
 
 ### D6. Multitenancy: decided day 0, even if unbuilt
 Choose Ash's tenancy strategy (attribute- or schema-based) **before** modeling, because retrofitting tenant scoping into policies later is painful. v1.0 may run effectively single-tenant, but the data model assumes a tenant boundary from the start.
@@ -160,6 +168,63 @@ Do **not** auto-enable AshJsonApi + AshGraphQL on every resource. Expose per res
 
 ### D8. i18n content is a modeling decision, not just Gettext
 Gettext covers **UI** strings. Translating **content** (per-locale field values + locale fallbacks) is built explicitly and interacts with the block model (D3). Decide the approach early if i18n is in scope — not in a late polish phase.
+
+---
+
+### Kiln v2 decisions (D9–D16) — the typed, addressable content tree
+
+These extend D1–D8 toward the v2 north star. Detail and build order live in `kiln-cms-plan-v2.md` and `docs/kiln-v2-implementation-guide.md`; the guide's decision ledger is the running record (A1–A4, C1–C2 already locked there).
+
+### D9. Firing: publish compiles immutable per-surface artifacts
+**Publish = firing.** The document tree is compiled **once** into pre-serialized, immutable artifacts — one per surface (`web` iodata, `json` structured-intent, `json_ld` schema.org; email deferred), each stamped with an integer `format_version`. Artifacts live in a `PublishedArtifact` resource and a **two-tier cache** (ETS default; optional Redis/Dragonfly second tier behind a behaviour — still honoring D2). **Public reads hit fired artifacts via the cache, never the live tree.** Artifact granularity is whole-document composed of per-block fragments (so partial re-fire is possible). This makes "published" an auditable compile event and keeps reads nearly free. *(Validated by the Phase A spike; decisions A1/A2.)*
+
+### D10. Typed blocks via the `Kiln.Block` Spark DSL
+One declarative definition per block type (a Spark DSL `block :name do field … end`) fans out at compile time to: the Ash embedded schema + changeset/validation, the LiveView editor form fields, the per-surface renderers, the search/embedding projection, and (D15) the version + upcast functions. Adding a block type touches primarily one file; the rest cascades. Serializer dispatch is **one pattern-matched function per block type per surface**, total over all types (unknown/`:custom` degrades, never raises — the guarantee Phase J property-tests). *(Decision A4.)*
+
+### D11. Block storage: `Ash.Type.Union`, not `polymorphic_embed`
+Typed blocks are stored as an **`Ash.Type.Union`** array over the registry's embedded resources, tagged by a `_type` discriminator — staying within Ash idioms (no extra dep), versus the `polymorphic_embed` library named in the vision doc. *(Locked — ledger C1.)*
+
+### D12. Prose: Portable Text canonical, TipTap interchange
+Rich text inside text blocks is stored as a **Portable Text–shaped structure (the canonical truth)** — formatting and annotations carried as data, not tags. TipTap JSON is an **interchange layer** converted at the editor boundary (`from_tiptap/1` / `to_html/1`). This unlocks structured marks, JSON-LD, and serializer property tests. *(Locked — ledger C2.)*
+
+### D13. Reference-aware invalidation: firing is a graph walk
+A `reference` field means a fired artifact may embed data owned by another document (references resolve **at fire time**, snapshotted). So changing a referenced document makes its referrers stale → firing tracks a **dependency graph** (a `ReferenceEdge` resource, rebuilt per fire) and enqueues bounded, **cycle-safe re-fire waves** (Oban) for downstream referrers. Firing is a graph walk, not just a tree walk. *(Decision A3; the question the vision doc flags as most worth resolving early.)*
+
+### D14. One event substrate: collaboration + history + audit
+Block-level patches (D5) are **also persisted to an append-only `DocumentEvent` log**; document state is a fold over the log. From one mechanism: realtime collab, full per-block history, time-travel preview, and a complete audit trail. **Coexists with AshPaperTrail** — PaperTrail snapshots remain the publish/restore anchor (`published_version_id`, `restore_version`); events power fine-grained history between snapshots.
+
+### D15. First-class block schema evolution (upcasting)
+Block schemas are **versioned in the DSL** (`version N`) with declared **upcast functions** (`migrate :hero, from: 1, to: 2`). Upcasts run **lazily on read** (centralized in the union cast/load path) and **eagerly via Oban backfill**, are composable and property-tested. For already-fired artifacts on a schema bump the default is **re-fire the affected types** (alternatives: keep old `format_version`, or lazy-migrate).
+
+### D16. Block-granular search & embeddings
+Each block is the natural unit for embedding and indexing. v2 moves from document-level to **per-block embeddings with ancestor context** (section title / parent block type — hierarchical embeddings) in a `BlockEmbedding` resource, plus **hybrid block-level search** (Postgres FTS / optional Meilisearch keyword + pgvector semantic + faceting by `block_type`, fused with RRF). "Find the relevant section" becomes a first-class, high-precision query. Builds on the shipped document-level pipeline (pgvector + Bumblebee `bge-small-en-v1.5`, HNSW; `docs/semantic-search-plan.md`).
+
+---
+
+## Kiln v2: The Typed, Addressable Content Tree (Architecture North Star)
+
+> Full vision: **`kiln-cms-plan-v2.md`**. Step-by-step build with file paths, codegen, tests, and acceptance criteria per phase: **`docs/kiln-v2-implementation-guide.md`**.
+
+**The central bet:** *content is a typed, addressable tree, not an HTML blob.* Almost every v2 advantage flows from that one decision. By modeling every piece of content as a recursive, discriminated union of typed blocks (with Portable Text inside text blocks), one block definition fans out across the entire vertical slice (schema → validation → editor → renderers → search → embeddings → APIs), and firing/history/migrations/structured-data all reduce to operations on that single tree.
+
+**How v2 relates to the current build.** v2 is an **evolution**, not a rewrite — it lands behind seams so the app stays shippable. Several v2 ideas are already partly built (embedded blocks D3, TipTap editor, pgvector + Bumblebee search, PaperTrail versioning, Cachex delivery cache, signed previews). v2 deepens these: single `Block` → typed union blocks (D10/D11), TipTap HTML → Portable Text (D12), PaperTrail-only → PaperTrail + event log (D14), document embeddings → block-granular (D16), and adds the genuinely new **firing/artifact** layer (D9) with **reference-aware invalidation** (D13) and **block schema upcasting** (D15).
+
+**Phased build (A–J).** Resequences the vision doc's Phase 0–5 so firing-for-real (which needs typed blocks) comes after the DSL, and the throwaway firing **spike** de-risks the format first:
+
+| Phase | Focus | Status |
+|-------|-------|--------|
+| **A** | Firing spike (throwaway): artifact format + serializer dispatch | ✅ **Done** (A1–A4 locked) |
+| **B** | `Kiln.Block` Spark DSL + 2–3 typed blocks + Portable Text shape | Next |
+| **C** | `Ash.Type.Union` storage + editor over typed blocks + data migration | |
+| **D** | Firing for real: `PublishedArtifact` + two-tier cache + read path | |
+| **E** | Reference-aware invalidation (dependency graph + re-fire waves) | |
+| **F** | Collaboration: Presence + block locking + prose patch sync | |
+| **G** | Event log + per-block history + time-travel | |
+| **H** | Block schema evolution / upcasting | |
+| **I** | Block-granular embeddings + hybrid search | |
+| **J** | Field/block policies, references UX, media usage, JSON-LD, APIs, serializer property tests | |
+
+Each phase ships as its own PR, green under `mix precommit`, with Ash codegen (never hand-written migrations) and tests/acceptance criteria spelled out in the implementation guide.
 
 ---
 
@@ -378,15 +443,19 @@ Full setup guide will live in `/docs/setup.md`.
 - **Timeline optimism**: "rival/exceed Strapi + Sanity + Sitecore/AEM" in ~6 months part-time solo is aggressive even with the 20-30% buffer. Cut MVP hard (see MVP section); the editor is the schedule.
 
 **Resolved (see Architectural Decisions)**:
-- Block data model → embedded JSONB via Ash embedded resources (**D3**).
-- Content Type dynamism → compile-time Ash resources, no runtime meta-model (**D4**).
-- Collaboration level → locked editing + Presence for v1.0 (**D5**).
+- Block data model → embedded JSONB via Ash embedded resources (**D3**); evolving to typed union blocks (**D10/D11**).
+- Content Type dynamism → compile-time Ash resources, no runtime meta-model (**D4**); block types via the `Kiln.Block` DSL (**D10**).
+- Collaboration level → locked editing + Presence for v1.0 (**D5**); block patches become the event substrate (**D14**).
 - Primary use case → general-purpose core; Verscienta Health as the *first plugin/consumer*, not a coupling.
+- **Preview transport** → shipped as a **side-by-side LiveView pane** in `ContentEditorLive`; a signed-iframe/pop-out for public-site fidelity is the remaining v2 increment (Phase F / D9 preview firing mode).
+- **Storage abstraction** → custom **`KilnCMS.Storage` behaviour** (Local + S3/MinIO/R2 adapters), not `waffle`.
+- **Firing / "published" semantics** → resolved by **D9** (compile to immutable per-surface artifacts) + **D13** (reference-aware invalidation); Phase A spike validated the format.
 
 **Still open**:
-- Preview transport: side-by-side LiveView pane vs. signed-iframe — spike both in Phase 3, pick by fidelity/effort.
-- Storage abstraction: custom uploader vs. `waffle` — decide in Phase 2.
-- Whether multitenancy ships in v1.0 or stays latent (the *model* is decided regardless — D6).
+- Whether multitenancy ships in v1.0 or stays latent (the *model* is decided regardless — **D6**).
+- Keep AshPaperTrail **and** the event log long-term, or fold snapshots into the log once Phase G proves out (**D14** assumes coexistence).
+- Block-to-block references in v1, or document-to-document first (**D13**).
+- Commit to Meilisearch now, or stay Postgres-FTS until a measured need (**D16**).
 
 **Success Metrics (v1.0)**:
 - Non-technical editor can create beautiful page with mixed blocks in < 5 minutes without training.
@@ -413,8 +482,9 @@ Full setup guide will live in `/docs/setup.md`.
 **Next Immediate Steps**:
 1. ~~Review this plan~~ — done; feedback folded into Architectural Decisions (D1–D8), leaner MVP, and Risks.
 2. ~~Decide on project name~~ — **KilnCMS** (repo: `kiln_cms`).
-3. Bootstrap the Phoenix + Ash project skeleton (`mix phx.new kiln_cms --live`).
-4. Set up Docker dev environment (Postgres + native PubSub; Dragonfly as an optional profile only — D2).
+3. ~~Bootstrap the Phoenix + Ash project skeleton~~ — done; MVP backend largely complete (see Status).
+4. ~~Set up Docker dev environment~~ — done (Postgres + native PubSub; Dragonfly optional profile — D2).
+5. **Kiln v2 build (current focus)** — Phase A (firing spike) ✅ done; **Phase B next** (`Kiln.Block` Spark DSL + typed blocks + Portable Text). Roadmap A–J in `docs/kiln-v2-implementation-guide.md`.
 
 This plan is designed to be actionable, realistic, and ambitious enough to create something genuinely world-class while staying true to the STAPLE philosophy of high productivity and joy in development.
 
