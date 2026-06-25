@@ -544,6 +544,36 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert_receive {:preview_update, %{title: "Broadcasted"}}
     end
+
+    test "renders with public-site fidelity (public shell + prose article)", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/preview/page/#{page.id}")
+
+      # The public layout chrome and prose typography wrap the content, so the
+      # preview matches the live site rather than rendering bare blocks.
+      assert html =~ "prose"
+      assert html =~ "Powered by KilnCMS."
+      assert html =~ "Draft preview"
+    end
+
+    test "a post preview shows the excerpt", %{conn: conn} do
+      post = draft_post(%{title: "PostTitle", excerpt: "A teaser line"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/preview/post/#{post.id}")
+
+      assert html =~ "A teaser line"
+
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        PreviewLive.topic("post", post.id),
+        {:preview_update, %{title: "PostTitle", excerpt: "Updated teaser", blocks: []}}
+      )
+
+      assert render(lv) =~ "Updated teaser"
+    end
   end
 
   describe "/editor/pages/:id (block editor)" do

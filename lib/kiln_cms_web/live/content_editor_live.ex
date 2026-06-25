@@ -409,9 +409,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Push the current title + blocks to any open decoupled preview windows.
   defp broadcast_preview(socket) do
+    form = socket.assigns.form
+
     payload = %{
-      title: AshPhoenix.Form.value(socket.assigns.form, :title) || "",
-      blocks: preview_blocks(socket.assigns.form)
+      title: AshPhoenix.Form.value(form, :title) || "",
+      excerpt: socket.assigns.has_excerpt && AshPhoenix.Form.value(form, :excerpt),
+      blocks: preview_blocks(form)
     }
 
     Phoenix.PubSub.broadcast(
