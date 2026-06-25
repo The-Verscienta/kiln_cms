@@ -118,6 +118,58 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+      # Content-focused AshAdmin overrides (issue #25). AshAdmin is the dev/CRUD
+      # inspector, not the editor — these just make it pleasant: group the content
+      # types together, show editorial columns at a glance instead of every raw
+      # attribute, surface only the meaningful actions (hiding the internal
+      # `:set_embedding` / `:set_published_version_id` / scheduler writes), and
+      # label content with its title wherever it's referenced.
+      admin do
+        resource_group :content
+
+        # Friendly datatable: identity + workflow + timing. Internal columns
+        # (search_text, embedding, embedded_at, lock_version, published_version_id)
+        # are deliberately omitted.
+        table_columns [:title, :slug, :state, :locale, :published_at, :updated_at]
+
+        format_fields published_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      scheduled_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      inserted_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      updated_at: {KilnCMS.CMS.Admin, :format_datetime, []}
+
+        # Show title (not the UUID) when this content appears as a relationship,
+        # and in relationship select/typeahead inputs on other resources.
+        relationship_display_fields [:title]
+        label_field :title
+
+        # Trim the action lists to what a developer actually drives by hand. The
+        # search/autocomplete reads and the scheduler/embedding writes are still
+        # callable in code — they're just noise in the admin.
+        read_actions [:read, :trashed]
+        create_actions [:create]
+
+        update_actions [
+          :update,
+          :submit_for_review,
+          :return_to_draft,
+          :publish,
+          :unpublish,
+          :archive,
+          :restore,
+          :restore_version
+        ]
+
+        destroy_actions [:destroy, :purge]
+
+        # Handy derived values on the show view.
+        show_calculations [:published, :word_count]
+
+        form do
+          field :seo_description, type: :long_text
+          field :canonical_url, type: :short_text
+        end
+      end
+
       paper_trail do
         change_tracking_mode(:changes_only)
         store_action_name?(true)

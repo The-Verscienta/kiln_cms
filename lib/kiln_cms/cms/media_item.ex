@@ -34,6 +34,32 @@ defmodule KilnCMS.CMS.MediaItem do
     exclude_destroy_actions([:purge])
   end
 
+  # Content-focused AshAdmin overrides (issue #25). Group media with the other
+  # content resources, show the columns a developer scanning the library cares
+  # about (and hide the raw `variants` map / `storage_key` / focal point), and
+  # label items by filename wherever they're referenced.
+  admin do
+    resource_group :content
+
+    table_columns [:filename, :content_type, :byte_size, :width, :height, :alt, :inserted_at]
+
+    format_fields inserted_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                  updated_at: {KilnCMS.CMS.Admin, :format_datetime, []}
+
+    relationship_display_fields [:filename]
+    label_field :filename
+
+    read_actions [:read, :search, :trashed]
+    create_actions [:create]
+    update_actions [:update, :restore]
+    destroy_actions [:destroy, :purge]
+
+    form do
+      field :caption, type: :long_text
+      field :alt, type: :short_text
+    end
+  end
+
   postgres do
     table "media_items"
     repo KilnCMS.Repo

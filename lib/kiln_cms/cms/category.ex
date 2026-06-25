@@ -22,6 +22,14 @@ defmodule KilnCMS.CMS.Category do
     type "category"
   end
 
+  # AshAdmin: group taxonomy together and label categories by name (issue #25).
+  admin do
+    resource_group :taxonomy
+    table_columns [:name, :slug, :description, :inserted_at]
+    relationship_display_fields [:name]
+    label_field :name
+  end
+
   postgres do
     table "categories"
     repo KilnCMS.Repo
