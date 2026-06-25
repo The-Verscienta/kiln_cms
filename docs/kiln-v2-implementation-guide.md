@@ -441,7 +441,24 @@ prose patches sync. No CRDT (explicitly deferred).
 
 ---
 
-## Phase G — Event log + history + time-travel
+## Phase G — Event log + history + time-travel — ✅ DONE
+
+> **Outcome.** The append-only event substrate ships (decision D14).
+> `KilnCMS.History.DocumentEvent` (own domain, unique `{document, seq}`) stores
+> block-level events (`snapshot`, `block_added/removed/updated`, `blocks_reordered`).
+> `KilnCMS.History.record/5` appends with a monotonic per-doc seq; `replay/3` folds
+> events into the block tree at any point (`upto_seq`/`upto` for time-travel);
+> `preview_at/3` renders a past state via the typed serializers. Coexists with
+> AshPaperTrail (snapshots stay the publish/restore anchor). **5 new tests; full
+> suite 427 green; precommit clean.**
+>
+> **Scoped:** event emission is the `History.record/5` API + fold engine, fully
+> tested; wiring the editor's block ops/prose patches to emit these events lands
+> with Phase F (the collaborative editor). Branching drafts remain a noted design
+> deferral.
+>
+> Files: `lib/kiln_cms/history.ex`, `lib/kiln_cms/history/document_event.ex`,
+> migration `add_document_events`; test `test/kiln_cms/history/history_test.exs`.
 
 **Goal.** Introduce the append-only event substrate: block-level patches broadcast
 over PubSub are *also* persisted to a log; document state = fold over the log.
