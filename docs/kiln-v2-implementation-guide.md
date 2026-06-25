@@ -206,19 +206,29 @@ each renderable to web/json/json-ld. No change yet to how `Page.blocks` is store
 > typed blocks landed for full legacy coverage: `Quote`, `Embed`, `Custom`. **7 new
 > tests; full suite 411 green; precommit clean.**
 >
-> **Editor progress:** `ContentEditorLive`'s live preview now renders through the
-> **typed serializers** (`TypedBlocks.from_legacy/1` → `Blocks.render(:web)`), so the
-> editor preview is exactly what firing/delivery produces (preview parity). Verified
-> in the browser (typed `<h2>`/`<p>` in the preview pane, no console errors) and by
-> `editor_live_test`.
+> **Editor progress (browser-verified):**
+> 1. **Preview parity** — `ContentEditorLive`'s live preview renders through the
+>    **typed serializers** (`TypedBlocks.from_legacy/1` → `Blocks.render(:web)`), so
+>    the preview is exactly what firing/delivery produces. In-progress rich text is
+>    sanitized for the preview.
+> 2. **Registry-driven palette** — the block palette + type selector are derived from
+>    `KilnCMS.Blocks.registry()` (friendly order, new types appended), so adding a
+>    `Kiln.Block` module surfaces in the editor automatically. Added a first-class
+>    `Divider` block so the registry is the complete author set.
+> 3. **DSL-metadata-driven per-field forms** — non-rich-text/non-image blocks render
+>    labeled inputs generated from each block's DSL fields (`Kiln.Block.Info.fields/1`):
+>    the primary string field → legacy `content`, extras → `data[name]`. Inputs are
+>    **role-filtered by the Phase J field policy** (`Kiln.Block.Policy`) — e.g. an
+>    editor sees a Quote's text + citation but not its admin-only `featured` flag; a
+>    Heading now exposes a `Level` input that flows through to the typed preview
+>    (`<h3>` live). Verified end-to-end in the browser; covered by `editor_live_test`.
 >
 > **Scoped (remaining Phase C increment):** the on-disk `Page.blocks`/`Post.blocks`
-> columns still hold the legacy `KilnCMS.CMS.Block` shape, and the editor still
-> *authors* legacy blocks (palette + nested AshPhoenix forms). Flipping the stored
-> column (data migration to union shape) and rewriting the editor's block palette +
-> forms to compose native union blocks from the registry is the remaining UI/migration
-> work behind the bridge. Downstream phases run on the typed representation via
-> `from_legacy/1`, so nothing is blocked.
+> columns still hold the legacy `KilnCMS.CMS.Block` shape (the DSL inputs persist via
+> the `content`/`data` bridge). Flipping the stored column to the union shape (data
+> migration) + repointing public HTML/JSON/GraphQL delivery onto `Engine.read/3` is
+> the remaining migration work; rich_text/image keep their bespoke TipTap/media UIs.
+> Downstream phases run on the typed representation via `from_legacy/1`, so nothing is blocked.
 >
 > Files: `lib/kiln_cms/cms/{block_union,typed_blocks}.ex`,
 > `lib/kiln_cms/blocks/{quote,embed,custom}.ex`, `lib/kiln/block/transformer.ex`

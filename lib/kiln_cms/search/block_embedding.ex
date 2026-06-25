@@ -15,7 +15,7 @@ defmodule KilnCMS.Search.BlockEmbedding do
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
-  @block_types [:heading, :image, :rich_text, :quote, :embed, :custom]
+  @block_types [:heading, :image, :rich_text, :quote, :embed, :divider, :custom]
 
   postgres do
     table "block_embeddings"

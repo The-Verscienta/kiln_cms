@@ -16,7 +16,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
   accessors tolerate both.
   """
 
-  alias KilnCMS.Blocks.{Custom, Embed, Heading, Image, Quote, RichText}
+  alias KilnCMS.Blocks.{Custom, Divider, Embed, Heading, Image, Quote, RichText}
 
   @doc "Convert a stored legacy block list into typed block structs."
   @spec from_legacy([struct() | map()] | nil) :: [struct()]
@@ -60,7 +60,10 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp typed(:embed, id, content, _data, _block),
     do: %Embed{id: id, _type: "embed", url: content}
 
-  # divider, columns, custom, and anything unmapped → the total fallback.
+  defp typed(:divider, id, _content, _data, _block),
+    do: %Divider{id: id, _type: "divider"}
+
+  # columns, custom, and anything unmapped → the total fallback.
   defp typed(other, id, content, data, _block) do
     %Custom{
       id: id,
@@ -102,6 +105,8 @@ defmodule KilnCMS.CMS.TypedBlocks do
     do: %{type: :quote, content: b.text, data: %{"citation" => b.citation}, id: b.id}
 
   defp one_to_legacy(%Embed{} = b), do: %{type: :embed, content: b.url, data: %{}, id: b.id}
+
+  defp one_to_legacy(%Divider{} = b), do: %{type: :divider, content: nil, data: %{}, id: b.id}
 
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}

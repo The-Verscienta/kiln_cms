@@ -48,7 +48,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
                %Blocks.Image{url: "/x.png", alt: "x"},
                %Blocks.Quote{text: "q", citation: "me"},
                %Blocks.Embed{url: "https://x"},
-               %Blocks.Custom{legacy_type: "divider"},
+               %Blocks.Divider{},
                %Blocks.Custom{legacy_type: "columns"}
              ] = typed
     end
@@ -68,8 +68,8 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
       assert [%Blocks.Heading{text: "Hi", level: 4}] = typed
     end
 
-    test "a divider Custom block renders as <hr/>" do
-      [divider] = TypedBlocks.from_legacy([%Block{type: :divider}])
+    test "a divider maps to the Divider block and renders as <hr/>" do
+      assert [%Blocks.Divider{} = divider] = TypedBlocks.from_legacy([%Block{type: :divider}])
       assert Blocks.render(divider, :web) |> IO.iodata_to_binary() == "<hr/>"
     end
   end

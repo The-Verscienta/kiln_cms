@@ -673,6 +673,40 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html2 =~ "<h2>Updated Heading</h2>"
     end
 
+    test "the block palette is driven by the typed block registry", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Every registered typed block type is offered (incl. ones never in the old
+      # hardcoded palette, e.g. `custom`).
+      for type <- ~w(rich_text heading quote image embed divider custom) do
+        assert html =~ ~s(phx-value-type="#{type}")
+      end
+    end
+
+    test "renders DSL-declared fields per block, gated by field-level policy", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [%{type: :quote, content: "Q", data: %{"citation" => "me"}, order: 0}]
+        })
+
+      # An editor sees the quote's text + citation, but NOT the admin-only featured flag.
+      {:ok, _lv, editor_html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert editor_html =~ "[data][citation]"
+      refute editor_html =~ "[data][featured]"
+
+      # An admin additionally sees the featured field.
+      {:ok, _lv, admin_html} =
+        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert admin_html =~ "[data][citation]"
+      assert admin_html =~ "[data][featured]"
+    end
+
     test "saves SEO & scheduling fields", %{conn: conn} do
       page = draft_page()
 

@@ -18,7 +18,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.Presence
 
-  @block_types ~w(rich_text heading quote image embed divider)
+  # Preferred display order for the block palette; any block type registered
+  # beyond these is appended automatically (the palette is registry-driven, so
+  # adding a `Kiln.Block` module needs no editor change).
+  @type_order ~w(rich_text heading quote image embed divider custom)
 
   # Idle delay before a draft is autosaved after the last edit. Configurable so
   # tests can shorten it.
@@ -54,7 +57,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:kind, kind)
          |> assign(:has_excerpt, ContentTypes.get!(kind).excerpt?)
          |> assign(:actor, actor)
-         |> assign(:block_types, @block_types)
+         |> assign(:block_types, block_types())
          |> assign(:editors, Presence.editors(kind, id))
          |> assign(:cursors, %{})
          |> assign(:self_field, nil)
@@ -666,6 +669,113 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp sanitize_preview_content(_type, content), do: content
 
+  # ── Registry-driven palette + DSL-metadata-driven block fields (Kiln v2) ──
+
+  # The block palette: registered block types in a friendly order, with any new
+  # ones appended — so adding a `Kiln.Block` module surfaces here automatically.
+  defp block_types do
+    available = KilnCMS.Blocks.registry() |> Map.keys() |> Enum.map(&to_string/1)
+    ordered = Enum.filter(@type_order, &(&1 in available))
+    ordered ++ Enum.sort(available -- ordered)
+  end
+
+  defp block_module(type) do
+    type = to_string(type)
+    Enum.find_value(KilnCMS.Blocks.registry(), fn {k, mod} -> to_string(k) == type && mod end)
+  end
+
+  # Whether to render DSL-generated per-field inputs (vs. the plain content
+  # textarea). The `Custom` fallback and unknown types keep the plain textarea.
+  defp dsl_driven?(nil), do: false
+  defp dsl_driven?(KilnCMS.Blocks.Custom), do: false
+  defp dsl_driven?(_module), do: true
+
+  # The field that maps to the legacy `content` column (first string/rich_text).
+  defp primary_field_name(nil), do: nil
+
+  defp primary_field_name(module) do
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.find_value(fn f -> f.type in [:string, :rich_text] && f.name end)
+  end
+
+  # DSL fields beyond the primary one, filtered to those the actor's role may edit
+  # (field-level policy, Phase J). These persist into the legacy `data` map.
+  defp dsl_extra_fields(nil, _role), do: []
+
+  defp dsl_extra_fields(module, role) do
+    primary = primary_field_name(module)
+
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.reject(&(&1.name == primary))
+    |> Enum.filter(&Kiln.Block.Policy.can_edit_field?(module, &1.name, role))
+  end
+
+  defp dsl_input_type(:integer), do: "number"
+  defp dsl_input_type(:boolean), do: "checkbox"
+  defp dsl_input_type(_type), do: "text"
+
+  defp dsl_field_value(bf, name) do
+    case bf[:data].value do
+      %{} = data -> Map.get(data, to_string(name))
+      _ -> nil
+    end
+  end
+
+  defp dsl_label(name), do: name |> to_string() |> Phoenix.Naming.humanize()
+
+  # Per-block editor body for non-rich-text/non-image blocks: a DSL-driven set of
+  # labeled inputs (primary field → `content`; extras → `data[name]`), or the
+  # plain content textarea for the `Custom` fallback.
+  attr :bf, :any, required: true
+  attr :role, :atom, required: true
+  attr :locked_fields, :any, required: true
+  attr :cursors, :any, required: true
+
+  defp dsl_block_fields(assigns) do
+    module = block_module(assigns.bf[:type].value)
+
+    assigns =
+      assigns
+      |> assign(:module, module)
+      |> assign(:dsl?, dsl_driven?(module))
+      |> assign(:primary, primary_field_name(module))
+      |> assign(:extra, dsl_extra_fields(module, assigns.role))
+
+    ~H"""
+    <div class="space-y-2">
+      <div
+        :if={!@dsl? or @primary}
+        class={["relative", lock_ring(@locked_fields, @bf[:content].name)]}
+      >
+        <.input
+          field={@bf[:content]}
+          type="textarea"
+          label={(@dsl? && @primary && dsl_label(@primary)) || gettext("Block content")}
+          placeholder={gettext("Block content…")}
+          readonly={field_locked?(@locked_fields, @bf[:content].name)}
+          {field_attrs(@bf[:content].name)}
+        />
+        <.field_cursors field={@bf[:content].name} cursors={@cursors} />
+      </div>
+
+      <.input
+        :for={field <- @extra}
+        id={"#{@bf.name}-#{field.name}"}
+        type={dsl_input_type(field.type)}
+        name={"#{@bf.name}[data][#{field.name}]"}
+        value={dsl_field_value(@bf, field.name)}
+        label={dsl_label(field.name)}
+      />
+
+      <p :if={@dsl? and is_nil(@primary) and @extra == []} class="text-sm text-base-content/50">
+        {gettext("Section break — no editable fields.")}
+      </p>
+    </div>
+    """
+  end
+
   @impl true
   def render(assigns) do
     assigns =
@@ -854,18 +964,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         placeholder={gettext("…or paste a URL")}
                       />
                     </div>
-                    <div
-                      :if={to_string(bf[:type].value) not in ["rich_text", "image"]}
-                      class={["relative", lock_ring(@locked_fields, bf[:content].name)]}
-                    >
-                      <.input
-                        field={bf[:content]}
-                        type="textarea"
-                        placeholder={gettext("Block content…")}
-                        readonly={field_locked?(@locked_fields, bf[:content].name)}
-                        {field_attrs(bf[:content].name)}
+                    <div :if={to_string(bf[:type].value) not in ["rich_text", "image"]}>
+                      <.dsl_block_fields
+                        bf={bf}
+                        role={@actor.role}
+                        locked_fields={@locked_fields}
+                        cursors={@cursors}
                       />
-                      <.field_cursors field={bf[:content].name} cursors={@cursors} />
                     </div>
                   </div>
                 </.inputs_for>

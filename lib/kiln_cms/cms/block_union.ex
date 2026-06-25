@@ -25,6 +25,7 @@ defmodule KilnCMS.CMS.BlockUnion do
         rich_text: [type: KilnCMS.Blocks.RichText, tag: :_type, tag_value: "rich_text"],
         quote: [type: KilnCMS.Blocks.Quote, tag: :_type, tag_value: "quote"],
         embed: [type: KilnCMS.Blocks.Embed, tag: :_type, tag_value: "embed"],
+        divider: [type: KilnCMS.Blocks.Divider, tag: :_type, tag_value: "divider"],
         custom: [type: KilnCMS.Blocks.Custom, tag: :_type, tag_value: "custom"]
       ]
     ]
