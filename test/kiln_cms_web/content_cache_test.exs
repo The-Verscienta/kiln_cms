@@ -117,4 +117,24 @@ defmodule KilnCMSWeb.ContentCacheTest do
     assert html =~ "/uploads/thumb 400w"
     assert html =~ ~s(alt="A described image")
   end
+
+  test "delivery cache hits carry locale translations (no per-hit translations query)", %{
+    conn: conn
+  } do
+    slug = "tr-#{System.unique_integer([:positive])}"
+    en = published_page("EN page", %{slug: slug, locale: "en"})
+    _fr = published_page("FR page", %{slug: slug, locale: "fr"})
+
+    # First request (default locale) resolves + caches the translations list.
+    html = conn |> get(~p"/#{en.slug}") |> html_response(200)
+    assert html =~ ~s(hreflang="fr")
+
+    # Drop the French variant directly (no cache bust). A re-resolved request would
+    # now find no French translation and omit its hreflang alternate.
+    raw_delete("pages", _fr.id)
+
+    # The fr alternate is still present — proving translations are cached, not
+    # re-queried on every delivery hit.
+    assert conn |> get(~p"/#{en.slug}") |> html_response(200) =~ ~s(hreflang="fr")
+  end
 end

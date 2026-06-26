@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ContentController do
 
   def show_page(conn, %{"slug" => slug}) do
     locale = locale(conn)
+    ct = ContentTypes.get(:page)
 
     fetch =
       &CMS.get_published_page_by_slug!(slug, &1,
@@ -29,18 +30,19 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published("page", slug, locale, fn -> payload(fetch, locale) end) do
+    case Cache.fetch_published("page", slug, locale, fn -> payload(fetch, locale, ct) end) do
       nil ->
         not_found(conn)
 
       payload ->
         track_view("page", payload.record.id)
-        render_content(conn, :show_page, payload, ContentTypes.get(:page))
+        render_content(conn, :show_page, payload, ct)
     end
   end
 
   def show_post(conn, %{"slug" => slug}) do
     locale = locale(conn)
+    ct = ContentTypes.get(:post)
 
     fetch =
       &CMS.get_published_post_by_slug!(slug, &1,
@@ -49,13 +51,13 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published("post", slug, locale, fn -> payload(fetch, locale) end) do
+    case Cache.fetch_published("post", slug, locale, fn -> payload(fetch, locale, ct) end) do
       nil ->
         not_found(conn)
 
       payload ->
         track_view("post", payload.record.id)
-        render_content(conn, :show_post, payload, ContentTypes.get(:post))
+        render_content(conn, :show_post, payload, ct)
     end
   end
 
@@ -73,7 +75,7 @@ defmodule KilnCMSWeb.ContentController do
            ),
          payload when not is_nil(payload) <-
            Cache.fetch_published(to_string(ct.type), slug, locale, fn ->
-             payload(fetch, locale)
+             payload(fetch, locale, ct)
            end) do
       track_view(to_string(ct.type), payload.record.id)
       render_content(conn, :show, payload, ct)
@@ -128,14 +130,19 @@ defmodule KilnCMSWeb.ContentController do
   # The requested locale (set by `KilnCMSWeb.Plugs.SetLocale`).
   defp locale(conn), do: conn.assigns[:locale] || I18n.default_locale()
 
-  # The cached delivery payload: the published record plus its media-enriched
-  # blocks. Enrichment (the per-image media lookup + `srcset`) happens here, at
-  # cache-miss time, so a cache hit already carries resolved media URLs and skips
-  # the media query entirely. Returns `nil` (not cached) when nothing is found.
-  defp payload(fetch, locale) do
+  # The cached delivery payload: the published record, its media-enriched blocks,
+  # and its published locale variants. All enrichment (the per-image media lookup
+  # + `srcset`, and the `translations` lookup for hreflang/locale links) happens
+  # here at cache-miss time, so a cache *hit* carries resolved media URLs and
+  # translations and issues no further DB queries. Returns `nil` (not cached)
+  # when nothing is found.
+  defp payload(fetch, locale, ct) do
     case localized(fetch, locale) do
-      nil -> nil
-      record -> %{record: record, blocks: blocks(record)}
+      nil ->
+        nil
+
+      record ->
+        %{record: record, blocks: blocks(record), translations: translations(ct, record.slug)}
     end
   end
 
@@ -152,9 +159,12 @@ defmodule KilnCMSWeb.ContentController do
   # Assign SEO metadata (read by the root layout) and the pre-enriched blocks,
   # then render. `payload` is a `%{record, blocks}` map (see `payload/2`) and
   # `ct` its `ContentTypes` entry.
-  defp render_content(conn, template, %{record: record, blocks: blocks}, ct) do
-    translations = translations(ct, record.slug)
-
+  defp render_content(
+         conn,
+         template,
+         %{record: record, blocks: blocks, translations: translations},
+         ct
+       ) do
     conn
     |> assign(:locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
