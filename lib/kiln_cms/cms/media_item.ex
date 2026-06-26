@@ -22,10 +22,26 @@ defmodule KilnCMS.CMS.MediaItem do
 
   graphql do
     type :media_item
+
+    # No top-level queries (D7 — deliberate). Media is resolved only as a nested
+    # `featuredImage` on content; the library itself isn't a public listing
+    # endpoint (that's an admin concern via AshAdmin / the JSON:API).
   end
 
   json_api do
     type "media_item"
+
+    routes do
+      base "/media-items"
+
+      # Collection + single-record reads + full-text search for headless
+      # consumers. Filtering/sorting/pagination are derived from the `:read`
+      # action and public fields — documented in `docs/json-api.md`.
+      index :read
+      index :search, route: "/search"
+      # `/:id` last so it can't shadow the static `/search` sub-path.
+      get :read
+    end
   end
 
   # Let `:trashed` see soft-deleted rows and `:purge` actually hard-delete.
@@ -34,13 +50,50 @@ defmodule KilnCMS.CMS.MediaItem do
     exclude_destroy_actions([:purge])
   end
 
+  # Content-focused AshAdmin overrides (issue #25). Group media with the other
+  # content resources, show the columns a developer scanning the library cares
+  # about (and hide the raw `variants` map / `storage_key` / focal point), and
+  # label items by filename wherever they're referenced.
+  admin do
+    resource_group :content
+
+    table_columns [:filename, :content_type, :byte_size, :width, :height, :alt, :inserted_at]
+
+    format_fields inserted_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                  updated_at: {KilnCMS.CMS.Admin, :format_datetime, []}
+
+    relationship_display_fields [:filename]
+    label_field :filename
+
+    read_actions [:read, :search, :trashed]
+    create_actions [:create]
+    update_actions [:update, :restore]
+    destroy_actions [:destroy, :purge]
+
+    form do
+      field :caption, type: :long_text
+      field :alt, type: :short_text
+    end
+  end
+
   postgres do
     table "media_items"
     repo KilnCMS.Repo
+
+    # GIN index backing the `:search` action — its expression matches the
+    # `to_tsvector(...)` over filename/alt/caption in that action's filter.
+    custom_indexes do
+      index [
+              "to_tsvector('english', coalesce(filename, '') || ' ' || coalesce(alt, '') || ' ' || coalesce(caption, ''))"
+            ],
+            name: "media_items_search_gin_index",
+            using: "gin"
+    end
   end
 
   actions do
-    defaults [:read, :destroy]
+    # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+    destroy :destroy, primary?: true, require_atomic?: false
 
     default_accept [
       :filename,
@@ -57,8 +110,28 @@ defmodule KilnCMS.CMS.MediaItem do
       :focal_y
     ]
 
+    # Primary read, paginated for the headless JSON:API media library (offset +
+    # keyset, bounded page size). `required?: false` keeps `CMS.list_media_items`
+    # returning a plain list for internal callers; only `page:`-passing callers
+    # (the JSON:API layer) get a paginator.
+    read :read do
+      primary? true
+
+      pagination offset?: true,
+                 keyset?: true,
+                 countable: true,
+                 required?: false,
+                 max_page_size: 100,
+                 default_limit: 25
+    end
+
     create :create, primary?: true
-    update :update, primary?: true
+
+    # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
 
     # Soft-deleted ("trashed") media — the only read that bypasses AshArchival's
     # automatic `is_nil(archived_at)` filter.
@@ -76,6 +149,33 @@ defmodule KilnCMS.CMS.MediaItem do
     # Permanent hard delete (bypasses archival). The caller is responsible for
     # removing the storage blobs; admin-only via the destroy policy.
     destroy :purge do
+      # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+      require_atomic? false
+    end
+
+    # Full-text search over filename + alt + caption. World-readable like the
+    # default read (media is referenced by published content).
+    read :search do
+      argument :query, :string, allow_nil?: false
+
+      filter expr(
+               fragment(
+                 "to_tsvector('english', coalesce(?, '') || ' ' || coalesce(?, '') || ' ' || coalesce(?, '')) @@ plainto_tsquery('english', ?)",
+                 ^ref(:filename),
+                 ^ref(:alt),
+                 ^ref(:caption),
+                 ^arg(:query)
+               )
+             )
+
+      prepare fn query, _context ->
+        q = Ash.Query.get_argument(query, :query)
+
+        Ash.Query.sort(query, [
+          {:search_rank, {%{query: q}, :desc}},
+          {:inserted_at, :desc}
+        ])
+      end
     end
   end
 
@@ -107,6 +207,13 @@ defmodule KilnCMS.CMS.MediaItem do
     policy action([:trashed, :restore]) do
       forbid_if always()
     end
+  end
+
+  # A media write can invalidate any page that embeds this item's enriched media
+  # (the delivery cache stores resolved srcset/alt/dimensions), so bust the
+  # published-content cache on every create/update/destroy.
+  changes do
+    change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :update, :destroy]
   end
 
   attributes do
@@ -149,6 +256,24 @@ defmodule KilnCMS.CMS.MediaItem do
     has_many :featured_posts, KilnCMS.CMS.Post do
       destination_attribute :featured_image_id
       public? true
+    end
+  end
+
+  calculations do
+    # Full-text relevance for the `:search` action — ts_rank over the same
+    # filename/alt/caption tsvector the action filters on. Internal.
+    calculate :search_rank,
+              :float,
+              expr(
+                fragment(
+                  "ts_rank(to_tsvector('english', coalesce(?, '') || ' ' || coalesce(?, '') || ' ' || coalesce(?, '')), plainto_tsquery('english', ?))",
+                  ^ref(:filename),
+                  ^ref(:alt),
+                  ^ref(:caption),
+                  ^arg(:query)
+                )
+              ) do
+      argument :query, :string, allow_nil?: false
     end
   end
 end

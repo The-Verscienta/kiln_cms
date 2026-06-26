@@ -158,6 +158,24 @@ defmodule KilnCMSWeb.MediaLiveTest do
     end
   end
 
+  describe "live refresh" do
+    test "the library refreshes when a variant job broadcasts completion", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      # An item created after mount isn't shown until a refresh.
+      item = seed_media("late-arrival.png")
+      refute render(lv) =~ ">late-arrival.png<"
+
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        KilnCMS.Media.VariantWorker.topic(),
+        {:media_processed, item.id}
+      )
+
+      assert render(lv) =~ ">late-arrival.png<"
+    end
+  end
+
   describe "upload" do
     setup do
       root = Path.join(System.tmp_dir!(), "kiln_media_#{System.unique_integer([:positive])}")

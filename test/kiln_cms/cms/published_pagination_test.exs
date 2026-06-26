@@ -1,7 +1,9 @@
 defmodule KilnCMS.CMS.PublishedPaginationTest do
   @moduledoc """
-  The public `:published` read is always paginated, so the anonymous blog index
-  can't be made to load an unbounded number of rows into memory per request.
+  The public `:published` read is paginated, so a paged request (e.g. the
+  anonymous blog index) can't be made to load an unbounded number of rows into
+  memory: an explicit `page:` is capped at `default_limit`, and `max_page_size`
+  rejects an oversized caller-supplied limit.
   """
   use KilnCMS.DataCase, async: true
 
@@ -22,19 +24,24 @@ defmodule KilnCMS.CMS.PublishedPaginationTest do
     end
   end
 
-  test "a page-less call is capped at the action's default limit" do
+  test "a limitless page request is still capped at the action's default_limit (25)" do
     locale = "pl-#{System.unique_integer([:positive])}"
-    seed_posts(25, locale)
+    seed_posts(30, locale)
 
-    page = CMS.list_published_posts!(authorize?: false, query: [filter: [locale: locale]])
+    page =
+      CMS.list_published_posts!(
+        authorize?: false,
+        query: [filter: [locale: locale]],
+        page: [offset: 0]
+      )
 
     assert %Ash.Page.Offset{results: results, more?: true} = page
-    assert length(results) == 20
+    assert length(results) == 25
   end
 
   test "an explicit smaller limit is honored, with offset paging the rest" do
     locale = "pl-#{System.unique_integer([:positive])}"
-    seed_posts(25, locale)
+    seed_posts(30, locale)
 
     first =
       CMS.list_published_posts!(
@@ -45,20 +52,20 @@ defmodule KilnCMS.CMS.PublishedPaginationTest do
 
     assert length(first.results) == 10
     assert first.more?
-    assert first.count == 25
+    assert first.count == 30
 
     last =
       CMS.list_published_posts!(
         authorize?: false,
         query: [filter: [locale: locale]],
-        page: [limit: 10, offset: 20]
+        page: [limit: 10, offset: 25]
       )
 
     assert length(last.results) == 5
     refute last.more?
   end
 
-  test "a limit above the action's max_page_size is rejected (can't request everything)" do
+  test "a limit above the action's max_page_size (100) is rejected" do
     assert {:error, _} =
              CMS.list_published_posts(authorize?: false, page: [limit: 100_000])
   end

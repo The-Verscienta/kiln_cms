@@ -15,6 +15,7 @@ defmodule KilnCMS.Accounts do
     resource KilnCMS.Accounts.User do
       define :list_users, action: :read
       define :get_user_by_email, action: :get_by_email, args: [:email]
+      define :update_notification_prefs, action: :update_notification_prefs
     end
   end
 end

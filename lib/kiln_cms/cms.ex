@@ -26,6 +26,7 @@ defmodule KilnCMS.CMS do
       define :list_page_translations, action: :published_translations, args: [:slug]
       define :search_pages, action: :search, args: [:query]
       define :semantic_search_pages, action: :search_semantic, args: [:query]
+      define :autocomplete_pages, action: :autocomplete, args: [:prefix]
       define :create_page, action: :create
       define :update_page, action: :update
       define :submit_page_for_review, action: :submit_for_review
@@ -53,6 +54,7 @@ defmodule KilnCMS.CMS do
       define :list_published_posts, action: :published
       define :search_posts, action: :search, args: [:query]
       define :semantic_search_posts, action: :search_semantic, args: [:query]
+      define :autocomplete_posts, action: :autocomplete, args: [:prefix]
       define :create_post, action: :create
       define :update_post, action: :update
       define :submit_post_for_review, action: :submit_for_review
@@ -74,6 +76,7 @@ defmodule KilnCMS.CMS do
 
     resource KilnCMS.CMS.MediaItem do
       define :list_media_items, action: :read
+      define :search_media, action: :search, args: [:query]
       define :get_media_item, action: :read, get_by: [:id]
       define :create_media_item, action: :create
       define :update_media_item, action: :update

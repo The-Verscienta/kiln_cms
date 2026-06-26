@@ -23,15 +23,19 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
 
     fetch =
-      &CMS.get_published_page_by_slug!(slug, &1, not_found_error?: false, authorize?: false)
+      &CMS.get_published_page_by_slug!(slug, &1,
+        not_found_error?: false,
+        authorize?: false,
+        load: [:author]
+      )
 
-    case Cache.fetch_published("page", slug, locale, fn -> localized(fetch, locale) end) do
+    case Cache.fetch_published("page", slug, locale, fn -> payload(fetch, locale) end) do
       nil ->
         not_found(conn)
 
-      page ->
-        track_view("page", page.id)
-        render_content(conn, :show_page, page, ContentTypes.get(:page))
+      payload ->
+        track_view("page", payload.record.id)
+        render_content(conn, :show_page, payload, ContentTypes.get(:page))
     end
   end
 
@@ -39,15 +43,19 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
 
     fetch =
-      &CMS.get_published_post_by_slug!(slug, &1, not_found_error?: false, authorize?: false)
+      &CMS.get_published_post_by_slug!(slug, &1,
+        not_found_error?: false,
+        authorize?: false,
+        load: [:author]
+      )
 
-    case Cache.fetch_published("post", slug, locale, fn -> localized(fetch, locale) end) do
+    case Cache.fetch_published("post", slug, locale, fn -> payload(fetch, locale) end) do
       nil ->
         not_found(conn)
 
-      post ->
-        track_view("post", post.id)
-        render_content(conn, :show_post, post, ContentTypes.get(:post))
+      payload ->
+        track_view("post", payload.record.id)
+        render_content(conn, :show_post, payload, ContentTypes.get(:post))
     end
   end
 
@@ -60,14 +68,15 @@ defmodule KilnCMSWeb.ContentController do
          fetch =
            &ContentTypes.get_published_by_slug(ct.type, slug, &1,
              not_found_error?: false,
-             authorize?: false
+             authorize?: false,
+             load: [:author]
            ),
-         record when not is_nil(record) <-
+         payload when not is_nil(payload) <-
            Cache.fetch_published(to_string(ct.type), slug, locale, fn ->
-             localized(fetch, locale)
+             payload(fetch, locale)
            end) do
-      track_view(to_string(ct.type), record.id)
-      render_content(conn, :show, record, ct)
+      track_view(to_string(ct.type), payload.record.id)
+      render_content(conn, :show, payload, ct)
     else
       _ -> not_found(conn)
     end
@@ -92,6 +101,8 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:locale, locale)
     |> assign(:page_title, "Blog")
     |> assign(:meta_description, "Latest posts.")
+    |> assign(:locale_links, blog_locale_links(locale))
+    |> assign(:json_ld, json_ld_script(StructuredData.blog(posts)))
     |> render(:blog_index, posts: posts, page: page, has_prev?: page > 0, has_next?: more?)
   end
 
@@ -106,8 +117,27 @@ defmodule KilnCMSWeb.ContentController do
 
   defp page_param(_params), do: 0
 
+  # Language-switcher links to the blog index in each supported locale.
+  defp blog_locale_links(current) do
+    for locale <- I18n.locales() do
+      prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
+      %{locale: locale, href: "#{base_url()}#{prefix}/blog", current: locale == current}
+    end
+  end
+
   # The requested locale (set by `KilnCMSWeb.Plugs.SetLocale`).
   defp locale(conn), do: conn.assigns[:locale] || I18n.default_locale()
+
+  # The cached delivery payload: the published record plus its media-enriched
+  # blocks. Enrichment (the per-image media lookup + `srcset`) happens here, at
+  # cache-miss time, so a cache hit already carries resolved media URLs and skips
+  # the media query entirely. Returns `nil` (not cached) when nothing is found.
+  defp payload(fetch, locale) do
+    case localized(fetch, locale) do
+      nil -> nil
+      record -> %{record: record, blocks: blocks(record)}
+    end
+  end
 
   # Fetch the record in `locale`, falling back to the default locale's version.
   defp localized(fetch, locale) do
@@ -119,10 +149,12 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  # Assign SEO metadata (read by the root layout) and the normalized blocks,
-  # then render. `record` is a published content struct and `ct` its
-  # `ContentTypes` entry.
-  defp render_content(conn, template, record, ct) do
+  # Assign SEO metadata (read by the root layout) and the pre-enriched blocks,
+  # then render. `payload` is a `%{record, blocks}` map (see `payload/2`) and
+  # `ct` its `ContentTypes` entry.
+  defp render_content(conn, template, %{record: record, blocks: blocks}, ct) do
+    translations = translations(ct, record.slug)
+
     conn
     |> assign(:locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
@@ -130,16 +162,23 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:canonical_url, record.canonical_url || locale_url(ct, record.slug, record.locale))
     |> assign(:og_image, record.seo_image)
     |> assign(:og_type, "article")
-    |> assign(:hreflang, hreflang_alternates(ct, record.slug))
-    |> assign(:json_ld, json_ld_script(record, ct))
-    |> render(template, record: record, blocks: blocks(record))
+    |> assign(:hreflang, hreflang_alternates(ct, translations))
+    |> assign(:locale_links, locale_links(ct, translations, record.locale))
+    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct)))
+    |> render(template, record: record, blocks: blocks)
   end
 
-  # `rel="alternate" hreflang` entries for every published locale variant of the
-  # slug, plus an `x-default` pointing at the default locale. Best-effort: a
-  # content type without a translations interface simply gets none.
-  defp hreflang_alternates(ct, slug) do
-    translations = ContentTypes.list_translations(ct.type, slug, authorize?: false)
+  # Published locale variants of `slug`. Best-effort: a content type without a
+  # translations interface simply yields none.
+  defp translations(ct, slug) do
+    ContentTypes.list_translations(ct.type, slug, authorize?: false)
+  rescue
+    _ -> []
+  end
+
+  # `rel="alternate" hreflang` entries for every published locale variant, plus
+  # an `x-default` pointing at the default locale.
+  defp hreflang_alternates(ct, translations) do
     default = I18n.default_locale()
 
     alternates =
@@ -149,8 +188,19 @@ defmodule KilnCMSWeb.ContentController do
       nil -> alternates
       t -> alternates ++ [%{hreflang: "x-default", href: locale_url(ct, t.slug, default)}]
     end
-  rescue
-    _ -> []
+  end
+
+  # Language-switcher links to each published translation of this record.
+  defp locale_links(ct, translations, current) do
+    translations
+    |> Enum.map(
+      &%{
+        locale: &1.locale,
+        href: locale_url(ct, &1.slug, &1.locale),
+        current: &1.locale == current
+      }
+    )
+    |> Enum.sort_by(& &1.locale)
   end
 
   # Absolute public URL for `slug` in `locale` (non-default locales are prefixed).
@@ -165,13 +215,21 @@ defmodule KilnCMSWeb.ContentController do
   # inside a literal <script> element, so the layout injects this with `{...}`.
   # `escape: :html_safe` escapes `<`/`>`/`&`, so the JSON can't break out of the
   # tag.
-  defp json_ld_script(record, ct) do
-    json = Jason.encode!(StructuredData.build(record, ct), escape: :html_safe)
+  defp json_ld_script(data) do
+    json = Jason.encode!(data, escape: :html_safe)
     Phoenix.HTML.raw(~s(<script type="application/ld+json">#{json}</script>))
   end
 
   defp blocks(record) do
-    raw = List.wrap(record.blocks)
+    # Blocks are stored as the typed union (Kiln v2); convert back to legacy block
+    # structs so the existing media-enriching renderer (`BlockComponents`) is
+    # unchanged. Public delivery still goes through the same shapes as before.
+    raw =
+      record.blocks
+      |> KilnCMS.CMS.TypedBlocks.to_typed()
+      |> KilnCMS.CMS.TypedBlocks.to_legacy()
+      |> Enum.map(&struct(KilnCMS.CMS.Block, &1))
+
     media = load_block_media(raw)
     Enum.map(raw, &enrich_block(&1, media))
   end

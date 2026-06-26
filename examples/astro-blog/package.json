@@ -1,0 +1,21 @@
+{
+  "name": "kiln-astro-blog",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference headless consumer for KilnCMS — a static Astro blog built from the published content API.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "astro": "^4.15.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.0",
+    "@types/node": "^22.20.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -16,6 +16,13 @@ defmodule KilnCMS.Storage do
   @callback store(key :: String.t(), source_path :: String.t()) ::
               {:ok, String.t()} | {:error, term()}
 
+  @doc """
+  Read the blob at `key` back into memory. Lets background work (e.g. variant
+  generation) re-fetch an original from storage on any node, rather than relying
+  on a node-local temp file.
+  """
+  @callback fetch(key :: String.t()) :: {:ok, binary()} | {:error, term()}
+
   @doc "Remove the blob at `key`. Missing blobs are treated as success."
   @callback delete(key :: String.t()) :: :ok | {:error, term()}
 
@@ -31,6 +38,9 @@ defmodule KilnCMS.Storage do
 
   @spec store(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def store(key, source_path), do: adapter().store(key, source_path)
+
+  @spec fetch(String.t()) :: {:ok, binary()} | {:error, term()}
+  def fetch(key), do: adapter().fetch(key)
 
   @spec delete(String.t()) :: :ok | {:error, term()}
   def delete(key), do: adapter().delete(key)

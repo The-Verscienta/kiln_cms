@@ -77,6 +77,12 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
 
+      - name: Check for migration/snapshot drift
+        # Fails if the committed migrations + resource snapshots are out of sync
+        # with the Ash resources (someone edited a resource without running
+        # `mix ash.codegen`). Compares against the committed snapshots — no DB.
+        run: mix ash.codegen --check
+
       - name: Check formatting
         run: mix format --check-formatted
 
@@ -91,3 +97,76 @@ jobs:
 
       - name: Dialyzer
         run: mix dialyzer
+
+  e2e:
+    name: Browser E2E (Playwright)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-e2e-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-e2e-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('e2e/package.json') }}
+
+      - name: Install Elixir dependencies
+        run: mix deps.get
+
+      - name: Install E2E dependencies + browser
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # Playwright's webServer builds assets, sets up the kiln_cms_e2e DB +
+      # demo seeds (mix e2e.setup), then serves (PHX_SERVER=true). See
+      # e2e/playwright.config.js.
+      - name: Run Playwright suite
+        working-directory: e2e
+        run: npx playwright test
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7

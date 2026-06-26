@@ -27,6 +27,13 @@ notes that bite people:
 (`editor@kiln.test` / `kilneditor123`); override with the `ADMIN_*` / `EDITOR_*`
 env vars. Sign in at `/sign-in`, or use AshAdmin at `/admin` (dev only).
 
+In dev, AshAdmin uses your signed-in user as its actor automatically, so admin
+actions run under real RBAC policies — sign in as the editor and you'll only see
+what an editor is allowed to do. You can still impersonate a specific record by
+picking an actor from the AshAdmin toolbar (that choice overrides the default).
+This wiring lives in `KilnCMSWeb.AshAdmin.ActorPlug` and is enabled only when
+`dev_routes` is on (`config :ash_admin, :actor_plug, ...` in `config/dev.exs`).
+
 ## Development workflow
 
 ### Modeling is done in Ash — never hand-write migrations
@@ -43,8 +50,17 @@ KilnCMS models its domain with Ash resources. To change the schema:
    mix ash.migrate
    ```
 
-Don't hand-edit files under `priv/repo/migrations/` or
+Commit the generated migration **and** snapshot together with the resource
+change. Don't hand-edit files under `priv/repo/migrations/` or
 `priv/resource_snapshots/` — they're generated and checked.
+
+CI runs `mix ash.codegen --check`, which fails the build if the committed
+migrations/snapshots don't match the resources (i.e. you edited a resource but
+forgot to run `mix ash.codegen`). Run the same check locally before pushing:
+
+```bash
+mix ash.codegen --check   # exits non-zero when codegen is pending
+```
 
 ### Every action gets a domain code interface
 
@@ -79,6 +95,7 @@ mix precommit
 It runs: `compile --warnings-as-errors`, `deps.unlock --unused`, `format`,
 `credo --strict`, `sobelow` (security scan), and the test suite. CI
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) additionally runs
+`mix ash.codegen --check` (migration/snapshot drift, see above) and
 `mix dialyzer` (the first local run builds a PLT and is slow; it's cached
 afterwards).
 
@@ -92,6 +109,26 @@ afterwards).
   concurrent-test deadlocks.
 - Seed fixtures with `Ash.Seed.seed!` when you want to bypass the very
   policies/actions under test.
+
+### Browser E2E (Playwright)
+
+LiveView tests cover server-side events; the browser E2E suite (in `e2e/`)
+drives a real headless Chromium through the editor — TipTap rich text,
+SortableJS drag-reorder, and the create → edit → publish → view-live journey.
+It runs in a dedicated `MIX_ENV=e2e` against its own `kiln_cms_e2e` database
+(no SQL sandbox — the browser hits the server out-of-process).
+
+```bash
+cd e2e
+npm install
+npx playwright install chromium   # bundled browser; no system Chrome needed
+npx playwright test               # boots the server itself, then runs the suite
+```
+
+Playwright's `webServer` runs `mix e2e.setup` (build assets + create/migrate/seed
+the e2e DB) and then serves with `PHX_SERVER=true PORT=4002 mix phx.server`. To
+run against a server you started yourself, set `E2E_NO_WEBSERVER=1`. CI runs this
+suite as a separate `e2e` job (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## Commits & pull requests
 

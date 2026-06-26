@@ -16,10 +16,30 @@ defmodule KilnCMS.CMS.Category do
 
   graphql do
     type :category
+
+    # Taxonomy is world-readable (D7) — list all categories and fetch one by
+    # slug for headless frontends building navigation/landing pages.
+    queries do
+      list :categories, :read do
+        paginate_with nil
+      end
+
+      get :category_by_slug, :by_slug do
+        identity false
+      end
+    end
   end
 
   json_api do
     type "category"
+  end
+
+  # AshAdmin: group taxonomy together and label categories by name (issue #25).
+  admin do
+    resource_group :taxonomy
+    table_columns [:name, :slug, :description, :inserted_at]
+    relationship_display_fields [:name]
+    label_field :name
   end
 
   postgres do

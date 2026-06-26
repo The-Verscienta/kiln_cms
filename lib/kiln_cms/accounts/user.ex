@@ -106,6 +106,18 @@ defmodule KilnCMS.Accounts.User do
       prepare AshAuthentication.Preparations.FilterBySubject
     end
 
+    # Set the public display name (used as the JSON-LD author byline). A user can
+    # edit their own; admins can edit anyone's (via the policy bypass).
+    update :update_profile do
+      accept [:name]
+    end
+
+    # Self-service workflow-notification preferences (issue #46). A user can
+    # toggle their own; admins can edit anyone's via the policy bypass.
+    update :update_notification_prefs do
+      accept [:notify_on_review_request, :notify_on_publish, :notify_on_return_to_draft]
+    end
+
     update :change_password do
       # Use this action to allow users to change their password by providing
       # their current password and a new password.
@@ -287,6 +299,14 @@ defmodule KilnCMS.Accounts.User do
     policy action(:change_password) do
       authorize_if expr(id == ^actor(:id))
     end
+
+    policy action(:update_profile) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
+    policy action(:update_notification_prefs) do
+      authorize_if expr(id == ^actor(:id))
+    end
   end
 
   attributes do
@@ -294,6 +314,12 @@ defmodule KilnCMS.Accounts.User do
 
     attribute :email, :ci_string do
       allow_nil? false
+      public? true
+    end
+
+    # Public display name — used as the JSON-LD author on content this user
+    # authored. Optional; falls back to no author when blank.
+    attribute :name, :string do
       public? true
     end
 
@@ -309,6 +335,28 @@ defmodule KilnCMS.Accounts.User do
     attribute :role, :atom do
       constraints one_of: [:admin, :editor, :viewer]
       default :viewer
+      allow_nil? false
+      public? true
+    end
+
+    # Per-user workflow-notification preferences (issue #46). Opt-out model:
+    # every notification defaults on, and a user can mute each event for their
+    # own account via `:update_notification_prefs`. `KilnCMS.Notifications`
+    # honours these before enqueuing mail.
+    attribute :notify_on_review_request, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
+    attribute :notify_on_publish, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
+    attribute :notify_on_return_to_draft, :boolean do
+      default true
       allow_nil? false
       public? true
     end

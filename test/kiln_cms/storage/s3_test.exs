@@ -62,6 +62,15 @@ defmodule KilnCMS.Storage.S3Test do
     assert path =~ "abc.png"
   end
 
+  test "fetch returns the object body" do
+    Req.Test.stub(KilnCMS.Storage.S3, fn conn ->
+      assert conn.method == "GET"
+      Plug.Conn.send_resp(conn, 200, "image-bytes")
+    end)
+
+    assert {:ok, "image-bytes"} = S3.fetch("abc.png")
+  end
+
   test "url joins the configured public base URL and key" do
     assert S3.url("abc.png") == "https://cdn.test/kiln-test/abc.png"
   end

@@ -1,8 +1,8 @@
-<Layouts.public>
-  <h1 class="text-3xl font-bold tracking-tight">Blog</h1>
+<Layouts.public locale_links={@locale_links}>
+  <h1 class="text-3xl font-bold tracking-tight">{gettext("Blog")}</h1>
 
   <p :if={@posts == []} class="mt-6 text-base-content/60">
-    No posts yet.
+    {gettext("No posts yet.")}
   </p>
 
   <ul class="mt-8 space-y-8">
@@ -23,11 +23,11 @@
     aria-label="Pagination"
   >
     <a :if={@has_prev?} href={~p"/blog?#{[page: @page]}"} class="hover:underline" rel="prev">
-      ← Newer posts
+      {gettext("← Newer posts")}
     </a>
     <span :if={!@has_prev?}></span>
     <a :if={@has_next?} href={~p"/blog?#{[page: @page + 2]}"} class="hover:underline" rel="next">
-      Older posts →
+      {gettext("Older posts →")}
     </a>
   </nav>
 </Layouts.public>

@@ -10,7 +10,11 @@ implementation risk, not blast radius.
 
 ---
 
-## 1. Locale-aware search  ·  Effort M–L · Risk M · *correctness, do first*
+## 1. Locale-aware search  ·  Effort M–L · Risk M · *shipped*
+
+**Status.** Shipped via the stored, trigger-maintained, locale-weighted
+`search_vector` column (`kiln_regconfig/1` + `setweight`). Migration path and
+rationale: [`search-tsvector-migration.md`](./search-tsvector-migration.md).
 
 **Problem.** `:search`, the `search_rank` calc, the GIN index, and
 `:search_semantic` all hardcode `'english'` (`content.ex:181,247,525`). Content
@@ -50,7 +54,12 @@ new `Search.Language`, `SetSearchText`, migration, config. Pairs with #5.
 **Touches.** `content.ex` search actions, `Search.hybrid/3`, `cms.ex`
 interfaces. Phase counts separately.
 
-## 3. Highlighting / snippets  ·  Effort S–M · Risk L
+## 3. Highlighting / snippets  ·  Effort S–M · Risk L · *shipped (#38)*
+
+**Status.** Shipped: a `highlight` calc (`ts_headline` over `search_text`, marking
+matches with `<mark>`), rendered escape-safely via
+`KilnCMS.Search.Highlight.to_safe_html/1` and surfaced in the admin search palette
+(`/editor/search`). See [`search-tsvector-migration.md`](./search-tsvector-migration.md).
 
 **Goal.** Show *why* a result matched — a snippet with the terms marked.
 

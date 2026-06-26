@@ -24,6 +24,12 @@ defmodule KilnCMS.Storage.Local do
 
   @impl true
   # sobelow_skip ["Traversal.FileModule"]
+  def fetch(key) do
+    with {:ok, path} <- safe_path(key), do: File.read(path)
+  end
+
+  @impl true
+  # sobelow_skip ["Traversal.FileModule"]
   def delete(key) do
     with {:ok, dest} <- safe_path(key) do
       case File.rm(dest) do

@@ -1,0 +1,196 @@
+defmodule KilnCMSWeb.DeliveryGraphqlTest do
+  @moduledoc """
+  Issue #34 — the curated, read-only public GraphQL delivery surface (D7).
+
+  Anonymous queries go through the read policies, so only published content (and
+  world-readable taxonomy) is ever returned, and no authoring/workflow mutations
+  are exposed at all.
+  """
+  use KilnCMS.DataCase, async: true
+
+  alias KilnCMS.CMS
+
+  @schema KilnCMSWeb.GraphqlSchema
+
+  defp admin do
+    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+      email: "gql-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+      confirmed_at: DateTime.utc_now(),
+      role: :admin
+    })
+  end
+
+  defp slug, do: "gql-#{System.unique_integer([:positive])}"
+
+  defp run(query, variables \\ %{}), do: Absinthe.run(query, @schema, variables: variables)
+
+  describe "published content reads" do
+    test "postBySlug returns a published post and hides drafts" do
+      admin = admin()
+      live_slug = slug()
+      draft_slug = slug()
+
+      post =
+        CMS.create_post!(%{title: "Live", slug: live_slug, excerpt: "hi"}, actor: admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+
+      _draft = CMS.create_post!(%{title: "Draft", slug: draft_slug}, actor: admin)
+
+      query = """
+      query ($slug: String!, $locale: String!) {
+        postBySlug(slug: $slug, locale: $locale) { id title excerpt published }
+      }
+      """
+
+      assert {:ok, %{data: %{"postBySlug" => found}}} =
+               run(query, %{"slug" => live_slug, "locale" => "en"})
+
+      assert found["id"] == post.id
+      assert found["published"] == true
+
+      # A draft slug is invisible to anonymous callers.
+      assert {:ok, %{data: %{"postBySlug" => nil}}} =
+               run(query, %{"slug" => draft_slug, "locale" => "en"})
+    end
+
+    test "pageBySlug returns a published page" do
+      admin = admin()
+      page_slug = slug()
+
+      page =
+        CMS.create_page!(%{title: "Live page", slug: page_slug}, actor: admin)
+        |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+
+      query = """
+      query ($slug: String!, $locale: String!) {
+        pageBySlug(slug: $slug, locale: $locale) { id title }
+      }
+      """
+
+      assert {:ok, %{data: %{"pageBySlug" => %{"id" => id}}}} =
+               run(query, %{"slug" => page_slug, "locale" => "en"})
+
+      assert id == page.id
+    end
+
+    test "publishedPosts lists only published posts" do
+      admin = admin()
+      marker = "pubmarker#{System.unique_integer([:positive])}"
+
+      post =
+        CMS.create_post!(%{title: "#{marker} live", slug: slug()}, actor: admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+
+      _draft = CMS.create_post!(%{title: "#{marker} draft", slug: slug()}, actor: admin)
+
+      query = "{ publishedPosts { id title } }"
+
+      assert {:ok, %{data: %{"publishedPosts" => posts}}} = run(query)
+
+      titles = Enum.map(posts, & &1["title"])
+      assert "#{marker} live" in titles
+      refute "#{marker} draft" in titles
+      assert post.id in Enum.map(posts, & &1["id"])
+    end
+
+    test "postTranslations lists every published locale variant of a slug" do
+      admin = admin()
+      shared = slug()
+
+      en =
+        CMS.create_post!(%{title: "EN", slug: shared, locale: "en"}, actor: admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+
+      fr =
+        CMS.create_post!(%{title: "FR", slug: shared, locale: "fr"}, actor: admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+
+      query = """
+      query ($slug: String!) {
+        postTranslations(slug: $slug) { id locale }
+      }
+      """
+
+      assert {:ok, %{data: %{"postTranslations" => rows}}} = run(query, %{"slug" => shared})
+
+      ids = Enum.map(rows, & &1["id"])
+      assert en.id in ids
+      assert fr.id in ids
+    end
+  end
+
+  describe "taxonomy reads" do
+    test "categories and categoryBySlug are world-readable" do
+      admin = admin()
+      cat_slug = slug()
+      category = CMS.create_category!(%{name: "News", slug: cat_slug}, actor: admin)
+
+      list_q = "{ categories { id slug } }"
+      assert {:ok, %{data: %{"categories" => cats}}} = run(list_q)
+      assert category.id in Enum.map(cats, & &1["id"])
+
+      get_q = """
+      query ($slug: String!) { categoryBySlug(slug: $slug) { id name } }
+      """
+
+      assert {:ok, %{data: %{"categoryBySlug" => %{"id" => id}}}} =
+               run(get_q, %{"slug" => cat_slug})
+
+      assert id == category.id
+    end
+
+    test "tags and tagBySlug are world-readable" do
+      admin = admin()
+      tag_slug = slug()
+      tag = CMS.create_tag!(%{name: "Elixir", slug: tag_slug}, actor: admin)
+
+      assert {:ok, %{data: %{"tags" => tags}}} = run("{ tags { id slug } }")
+      assert tag.id in Enum.map(tags, & &1["id"])
+
+      get_q = "query ($slug: String!) { tagBySlug(slug: $slug) { id name } }"
+
+      assert {:ok, %{data: %{"tagBySlug" => %{"id" => id}}}} =
+               run(get_q, %{"slug" => tag_slug})
+
+      assert id == tag.id
+    end
+  end
+
+  describe "deliberate non-exposure (D7)" do
+    test "no authoring/workflow mutations are exposed" do
+      mutation_fields =
+        @schema
+        |> Absinthe.Schema.lookup_type("RootMutationType")
+        |> case do
+          nil -> %{}
+          type -> type.fields
+        end
+
+      names = Map.keys(mutation_fields)
+
+      # The public surface is read-only — none of the content write actions leak.
+      for forbidden <- [
+            :create_page,
+            :update_page,
+            :publish_page,
+            :destroy_page,
+            :create_post,
+            :publish_post,
+            :create_category,
+            :create_tag
+          ] do
+        refute forbidden in names,
+               "expected no #{forbidden} mutation on the public GraphQL surface"
+      end
+    end
+
+    test "media library has no top-level query (resolved only as nested featuredImage)" do
+      query_fields = Absinthe.Schema.lookup_type(@schema, "RootQueryType").fields
+      names = Map.keys(query_fields)
+
+      refute :media_items in names
+      refute :list_media_items in names
+    end
+  end
+end

@@ -17,7 +17,14 @@ config :kiln_cms, Oban,
   plugins: [{Oban.Plugins.Cron, []}]
 
 config :kiln_cms,
-  ash_domains: [KilnCMS.Accounts, KilnCMS.CMS, KilnCMS.Analytics],
+  ash_domains: [
+    KilnCMS.Accounts,
+    KilnCMS.CMS,
+    KilnCMS.Analytics,
+    KilnCMS.Firing,
+    KilnCMS.History,
+    KilnCMS.SearchIndex
+  ],
   # Default "from" address for transactional email (auth confirmation/reset).
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
@@ -44,7 +51,26 @@ config :kiln_cms, KilnCMS.Search,
   semantic: false,
   embedder: KilnCMS.Search.Embedder.Bumblebee,
   model: "BAAI/bge-small-en-v1.5",
-  dim: 384
+  dim: 384,
+  # Optional reranking of `hybrid/3` results by a local cross-encoder. Off by
+  # default — the model only loads when `rerank: true`, and even then only the
+  # `hybrid(..., rerank: true)` calls use it.
+  rerank: false,
+  reranker: KilnCMS.Search.Reranker.Bumblebee,
+  rerank_model: "BAAI/bge-reranker-base"
+
+# Optional Meilisearch backend — typo-tolerant, faceted keyword search over
+# published content (Project Plan Phase 6). Disabled by default: with
+# `enabled: false` no content write or publish ever talks to Meilisearch, so the
+# lean install pays nothing. Enable it (and point it at a running instance — the
+# `search` Docker Compose profile starts one) here or, for production, in
+# runtime.exs via MEILI_* env vars. Run `mix kiln.meili.reindex` once after
+# enabling. See docs/meilisearch.md.
+config :kiln_cms, KilnCMS.Search.Meilisearch,
+  enabled: false,
+  url: "http://localhost:7700",
+  master_key: nil,
+  index: "kiln_content"
 
 # Register pgvector's Postgrex extension so `vector` columns encode/decode.
 config :kiln_cms, KilnCMS.Repo, types: KilnCMS.PostgrexTypes

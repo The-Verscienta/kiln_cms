@@ -11,31 +11,31 @@
 
     <div class="relative max-w-3xl">
       <p class="text-sm font-medium uppercase tracking-[0.2em] text-base-content/50">
-        Headless CMS on Phoenix + Ash
+        {gettext("Headless CMS on Phoenix + Ash")}
       </p>
       <h1 class="mt-4 text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-        Model content once. Publish everywhere.
+        {gettext("Model content once. Publish everywhere.")}
       </h1>
       <p class="mt-5 max-w-2xl text-lg leading-8 text-base-content/70">
-        KilnCMS combines Ash resources, a LiveView block editor, version history,
-        and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by
-        default, and built for teams who want control without the ops tax.
+        {gettext(
+          "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
+        )}
       </p>
 
       <div class="mt-8 flex flex-wrap items-center gap-3">
         <a
           :if={@current_user && @current_user.role in [:editor, :admin]}
           href={~p"/editor"}
-          class="rounded-lg bg-base-content px-5 py-2.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
+          class="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
         >
-          Open editor
+          {gettext("Open editor")}
         </a>
         <a
           :if={is_nil(@current_user)}
           href={~p"/sign-in"}
-          class="rounded-lg bg-base-content px-5 py-2.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
+          class="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
         >
-          Sign in to edit
+          {gettext("Sign in to edit")}
         </a>
         <a
           href="/gql"
@@ -55,24 +55,27 @@
 
   <section class="mt-10 grid gap-4 sm:grid-cols-3">
     <article class="rounded-2xl border border-base-content/10 p-5">
-      <h2 class="text-base font-semibold">Block editor</h2>
+      <h2 class="text-base font-semibold">{gettext("Block editor")}</h2>
       <p class="mt-2 text-sm leading-6 text-base-content/70">
-        TipTap rich text, drag-and-drop blocks, live preview, and version restore
-        — all in LiveView.
+        {gettext(
+          "TipTap rich text, drag-and-drop blocks, live preview, and version restore — all in LiveView."
+        )}
       </p>
     </article>
     <article class="rounded-2xl border border-base-content/10 p-5">
-      <h2 class="text-base font-semibold">Policy-driven RBAC</h2>
+      <h2 class="text-base font-semibold">{gettext("Policy-driven RBAC")}</h2>
       <p class="mt-2 text-sm leading-6 text-base-content/70">
-        Published content is world-readable; drafts stay editor-only. Admins
-        bypass; hard deletes and webhooks are locked down.
+        {gettext(
+          "Published content is world-readable; drafts stay editor-only. Admins bypass; hard deletes and webhooks are locked down."
+        )}
       </p>
     </article>
     <article class="rounded-2xl border border-base-content/10 p-5">
-      <h2 class="text-base font-semibold">Headless delivery</h2>
+      <h2 class="text-base font-semibold">{gettext("Headless delivery")}</h2>
       <p class="mt-2 text-sm leading-6 text-base-content/70">
-        AshGraphql and AshJsonApi expose your content model to any frontend, with
-        signed preview tokens for drafts.
+        {gettext(
+          "AshGraphql and AshJsonApi expose your content model to any frontend, with signed preview tokens for drafts."
+        )}
       </p>
     </article>
   </section>

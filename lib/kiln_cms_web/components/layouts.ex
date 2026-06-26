@@ -48,40 +48,27 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-2 sm:gap-3">
-          <a
-            href="/gql"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            GraphQL
-          </a>
-          <a
-            href="/api/json"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            JSON:API
-          </a>
-          <a
-            :if={@current_user && @current_user.role in [:editor, :admin]}
-            href={~p"/editor"}
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            Editor
-          </a>
+          <%!-- Desktop: inline links --%>
+          <div class="hidden items-center gap-2 sm:flex sm:gap-3">
+            <.nav_links current_user={@current_user} />
+            <.locale_switcher />
+          </div>
+
           <.theme_toggle />
-          <a
-            :if={is_nil(@current_user)}
-            href={~p"/sign-in"}
-            class="rounded-lg bg-base-content px-3 py-1.5 text-sm font-semibold text-base-100 transition hover:opacity-90"
-          >
-            Sign in
-          </a>
-          <a
-            :if={@current_user}
-            href={~p"/sign-out"}
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition hover:bg-base-200 hover:text-base-content"
-          >
-            Sign out
-          </a>
+
+          <%!-- Mobile: hamburger disclosure --%>
+          <details class="relative sm:hidden">
+            <summary class="flex cursor-pointer list-none items-center rounded-lg p-2 text-base-content/80 hover:bg-base-200 [&::-webkit-details-marker]:hidden">
+              <.icon name="hero-bars-3" class="size-5" />
+              <span class="sr-only">{gettext("Menu")}</span>
+            </summary>
+            <div class="absolute right-0 z-50 mt-2 flex w-52 flex-col gap-0.5 rounded-lg border border-base-content/10 bg-base-100 p-2 shadow-lg">
+              <.nav_links current_user={@current_user} />
+              <div class="mt-1 border-t border-base-content/10 px-1 pt-2">
+                <.locale_switcher />
+              </div>
+            </div>
+          </details>
         </nav>
       </div>
     </header>
@@ -100,6 +87,9 @@ defmodule KilnCMSWeb.Layouts do
   Minimal chrome for the public delivery frontend (published Pages/Posts and the
   blog index). Deliberately free of the authoring nav.
   """
+  # Links to the current page in each available locale (`%{locale, href,
+  # current}`); rendered as a language switcher when there's more than one.
+  attr :locale_links, :list, default: []
   slot :inner_block, required: true
 
   def public(assigns) do
@@ -111,7 +101,27 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
-          <a href="/blog" class="hover:text-base-content">Blog</a>
+          <a href="/blog" class="hover:text-base-content">{gettext("Blog")}</a>
+          <span
+            :if={length(@locale_links) > 1}
+            class="flex items-center gap-2"
+            aria-label={gettext("Language")}
+          >
+            <a
+              :for={link <- @locale_links}
+              href={link.href}
+              hreflang={link.locale}
+              class={[
+                "uppercase",
+                if(link.current,
+                  do: "font-semibold text-base-content",
+                  else: "hover:text-base-content"
+                )
+              ]}
+            >
+              {link.locale}
+            </a>
+          </span>
         </nav>
       </div>
     </header>
@@ -121,7 +131,7 @@ defmodule KilnCMSWeb.Layouts do
     </main>
 
     <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/50 sm:px-6 lg:px-8">
-      Powered by KilnCMS.
+      {gettext("Powered by KilnCMS.")}
     </footer>
     """
   end
@@ -176,13 +186,82 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   @doc """
+  Admin UI language switcher. Each link persists the chosen locale in the
+  session (`LocaleController`); LiveViews then restore it via the
+  `:restore_locale` on_mount hook. Hidden when only one locale is configured.
+  """
+  def locale_switcher(assigns) do
+    assigns =
+      assigns
+      |> assign(:locales, KilnCMS.I18n.locales())
+      |> assign(:current, Gettext.get_locale(KilnCMSWeb.Gettext))
+
+    ~H"""
+    <span
+      :if={length(@locales) > 1}
+      class="flex items-center gap-1 text-xs"
+      aria-label={gettext("Language")}
+    >
+      <.link
+        :for={loc <- @locales}
+        href={~p"/locale/#{loc}"}
+        class={[
+          "rounded px-1.5 py-1 uppercase",
+          if(loc == @current,
+            do: "font-semibold text-base-content",
+            else: "text-base-content/60 hover:text-base-content"
+          )
+        ]}
+      >
+        {loc}
+      </.link>
+    </span>
+    """
+  end
+
+  # Shared authoring-nav links — rendered inline on desktop and stacked in the
+  # mobile menu, so they're defined once.
+  attr :current_user, :map, default: nil
+
+  defp nav_links(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :item,
+        "rounded-lg px-3 py-1.5 text-sm font-medium text-base-content/80 transition " <>
+          "hover:bg-base-200 hover:text-base-content"
+      )
+
+    ~H"""
+    <a href="/gql" class={@item}>GraphQL</a>
+    <a href="/api/json" class={@item}>JSON:API</a>
+    <a
+      :if={@current_user && @current_user.role in [:editor, :admin]}
+      href={~p"/editor"}
+      class={@item}
+    >
+      {gettext("Editor")}
+    </a>
+    <a
+      :if={@current_user && @current_user.role in [:editor, :admin]}
+      href={~p"/editor/settings"}
+      class={@item}
+    >
+      {gettext("Settings")}
+    </a>
+    <a :if={is_nil(@current_user)} href={~p"/sign-in"} class={@item}>{gettext("Sign in")}</a>
+    <a :if={@current_user} href={~p"/sign-out"} class={@item}>{gettext("Sign out")}</a>
+    """
+  end
+
+  @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.
 
   See <head> in root.html.heex which applies the theme before page load.
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
+    <div class="relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
       <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 [[data-theme-source=system]_&]:!left-0 transition-[left]" />
 
       <button

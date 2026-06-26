@@ -65,7 +65,7 @@ defmodule KilnCMS.CMS.ContentModelTest do
   end
 
   describe "word_count calculation" do
-    test "counts words across blocks, stripping markup, including children" do
+    test "counts words across blocks, stripping markup" do
       admin = user(:admin)
 
       page =
@@ -75,19 +75,15 @@ defmodule KilnCMS.CMS.ContentModelTest do
             slug: slug(),
             blocks: [
               %{type: :heading, content: "Hello world", order: 0},
-              %{
-                type: :rich_text,
-                content: "<p>three more words here</p>",
-                order: 1,
-                children: [%{type: :rich_text, content: "nested child block"}]
-              }
+              %{type: :rich_text, content: "<p>three more words here</p>", order: 1}
             ]
           },
           actor: admin
         )
 
-      # "Hello world" (2) + "three more words here" (4) + "nested child block" (3)
-      assert %{word_count: 9} = CMS.get_page!(page.id, load: [:word_count], actor: admin)
+      # "Hello world" (2) + "three more words here" (4). (The typed v2 block model
+      # has no nested `children`; rich prose nests as Portable Text instead.)
+      assert %{word_count: 6} = CMS.get_page!(page.id, load: [:word_count], actor: admin)
     end
 
     test "is zero when there are no blocks" do

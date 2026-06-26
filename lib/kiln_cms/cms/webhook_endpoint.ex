@@ -11,9 +11,27 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshAdmin.Resource]
 
-  @events ~w(page.published page.unpublished post.published post.unpublished)
+  # Lifecycle verbs a content type can emit. `<type>.<verb>` is the event name.
+  @verbs ~w(published unpublished updated)
 
-  def events, do: @events
+  @doc "The lifecycle verbs every content type can emit."
+  def verbs, do: @verbs
+
+  @doc """
+  Every selectable event name: each registered content type crossed with each
+  lifecycle verb (e.g. `"page.published"`, `"post.updated"`). Derived at runtime
+  so content types generated via `mix kiln.gen.content` get events for free.
+  """
+  def events do
+    for ct <- KilnCMS.CMS.ContentTypes.all(), verb <- @verbs, do: "#{ct.type}.#{verb}"
+  end
+
+  # AshAdmin: keep system config out of the content groups (issue #25). The
+  # `secret` is sensitive? and stays redacted by default.
+  admin do
+    resource_group :system
+    table_columns [:url, :active, :inserted_at]
+  end
 
   postgres do
     table "webhook_endpoints"
@@ -53,7 +71,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     # Subscribed event names; defaults to all known events (see `events/0`).
     attribute :events, {:array, :string} do
-      default @events
+      default &KilnCMS.CMS.WebhookEndpoint.events/0
       public? true
     end
 

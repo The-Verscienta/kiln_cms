@@ -17,8 +17,10 @@ defmodule KilnCMSWeb.SitemapController do
   @max_urls 50_000
 
   # Repeated hits within this window reuse the rendered XML instead of
-  # re-scanning every published row. Busted immediately on any content write
-  # (`KilnCMS.Cache.bust_published/0`), so it never serves stale content long.
+  # re-scanning every published row. This aggregate key isn't a single
+  # `{type, slug}`, so per-record `Cache.bust/2` (the usual publish path) leaves
+  # it alone — the short TTL (plus any blast-radius `bust_published/0`) bounds
+  # how stale the sitemap can get, which is fine for crawlers.
   @cache_ttl :timer.minutes(5)
 
   def index(conn, _params) do

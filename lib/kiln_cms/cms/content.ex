@@ -78,16 +78,38 @@ defmodule KilnCMS.CMS.Content do
             filter expr(^ref(:state) == :published)
             prepare build(sort: [published_at: :desc])
 
-            # Always paginated so the anonymous public index can't load an
-            # unbounded number of rows into memory per request. `default_limit`
-            # bounds a page-less call; `max_page_size` caps any caller-supplied
-            # limit (sitemaps/feeds page through rather than fetching all).
+            # Paginated for headless feed consumers (offset + keyset). `required?:
+            # false` keeps `CMS.list_published_*` returning a plain list, but
+            # `max_page_size` caps any explicit `page:` request — the public blog
+            # index (see `ContentController.blog_index/2`) pages through it rather
+            # than loading every row into memory.
             pagination offset?: true,
-                       default_limit: 20,
+                       keyset?: true,
+                       countable: true,
+                       required?: false,
                        max_page_size: 100,
-                       required?: true,
-                       countable: true
+                       default_limit: 25
           end
+        end
+      end
+
+    # The matching GraphQL query for the `:published` read (post index), only
+    # present when the type opts into `published?`. `paginate_with: nil` keeps it
+    # a plain list in GraphQL — the `:published` read is paginated for the
+    # JSON:API feed (#33), but the delivery GraphQL surface stays unpaginated.
+    published_query =
+      if published? do
+        quote do
+          list unquote(:"published_#{type}s"), :published, paginate_with: nil
+        end
+      end
+
+    # JSON:API route for the published feed — only added for types that declare
+    # the `:published` read (e.g. Post), so the macro stays type-agnostic.
+    published_route =
+      if published? do
+        quote do
+          index :published, route: "/published"
         end
       end
 
@@ -108,16 +130,110 @@ defmodule KilnCMS.CMS.Content do
 
       graphql do
         type unquote(type)
+
+        # Curated, read-only public surface (D7 — deliberate exposure). The
+        # GraphQL endpoint is a *delivery* API: it exposes published-content
+        # reads only. Authoring/workflow actions (create/update/publish/…) are
+        # intentionally NOT surfaced here — they run through the admin editor
+        # (and the bearer-authenticated JSON:API), behind the role policies.
+        queries do
+          # Published-content delivery: one record by slug+locale, and every
+          # published locale variant of a slug (hreflang alternates). Both reads
+          # are state-filtered, so anonymous callers only ever see published rows.
+          # `identity false` exposes the action's own slug/locale arguments
+          # instead of the default `id` lookup.
+          get unquote(:"#{type}_by_slug"), :public_by_slug do
+            identity false
+          end
+
+          list unquote(:"#{type}_translations"), :published_translations
+
+          # The published index (newest first) — posts only.
+          unquote(published_query)
+
+          # Headless search surface. Keyword + semantic search and typo-tolerant
+          # title autocomplete, per content type.
+          list unquote(:"search_#{type}s"), :search
+          list unquote(:"semantic_search_#{type}s"), :search_semantic
+          list unquote(:"autocomplete_#{type}s"), :autocomplete
+        end
       end
 
       json_api do
         type unquote(Atom.to_string(type))
+
+        routes do
+          base unquote("/#{type}s")
+
+          # Collection + single-record reads for headless consumers. Filtering
+          # (`filter[...]`), sorting (`sort=`) and pagination (`page[...]`) are
+          # derived from the `:read` action and the resource's public fields —
+          # documented in `docs/json-api.md`.
+          index :read
+          index :search, route: "/search"
+          index :autocomplete, route: "/autocomplete"
+          unquote(published_route)
+          # `/:id` last so it can't shadow the static sub-paths above.
+          get :read
+        end
+      end
+
+      # Content-focused AshAdmin overrides (issue #25). AshAdmin is the dev/CRUD
+      # inspector, not the editor — these just make it pleasant: group the content
+      # types together, show editorial columns at a glance instead of every raw
+      # attribute, surface only the meaningful actions (hiding the internal
+      # `:set_embedding` / `:set_published_version_id` / scheduler writes), and
+      # label content with its title wherever it's referenced.
+      admin do
+        resource_group :content
+
+        # Friendly datatable: identity + workflow + timing. Internal columns
+        # (search_text, embedding, embedded_at, lock_version, published_version_id)
+        # are deliberately omitted.
+        table_columns [:title, :slug, :state, :locale, :published_at, :updated_at]
+
+        format_fields published_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      scheduled_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      inserted_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      updated_at: {KilnCMS.CMS.Admin, :format_datetime, []}
+
+        # Show title (not the UUID) when this content appears as a relationship,
+        # and in relationship select/typeahead inputs on other resources.
+        relationship_display_fields [:title]
+        label_field :title
+
+        # Trim the action lists to what a developer actually drives by hand. The
+        # search/autocomplete reads and the scheduler/embedding writes are still
+        # callable in code — they're just noise in the admin.
+        read_actions [:read, :trashed]
+        create_actions [:create]
+
+        update_actions [
+          :update,
+          :submit_for_review,
+          :return_to_draft,
+          :publish,
+          :unpublish,
+          :archive,
+          :restore,
+          :restore_version
+        ]
+
+        destroy_actions [:destroy, :purge]
+
+        # Handy derived values on the show view.
+        show_calculations [:published, :word_count]
+
+        form do
+          field :seo_description, type: :long_text
+          field :canonical_url, type: :short_text
+        end
       end
 
       paper_trail do
         change_tracking_mode(:changes_only)
         store_action_name?(true)
-        ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at])
+        ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at, :lock_version])
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
         ignore_actions([:set_embedding, :set_published_version_id])
@@ -185,27 +301,47 @@ defmodule KilnCMS.CMS.Content do
         table unquote(table)
         repo KilnCMS.Repo
 
-        # GIN functional index backing the `:search` action — its expression
-        # matches the `to_tsvector(...)` in that action's filter exactly so the
-        # planner can use it instead of scanning every row.
+        # The `:search` action's GIN index is on the trigger-maintained
+        # `search_vector` column (locale-weighted tsvector) — created in the
+        # `add_locale_weighted_search` migration alongside the trigger, since the
+        # column isn't an Ash-managed attribute.
         custom_indexes do
-          index ["to_tsvector('english', coalesce(search_text, ''))"],
-            name: unquote("#{table}_search_text_gin_index"),
-            using: "gin"
-
           # HNSW index for approximate nearest-neighbour search over embeddings,
           # using cosine distance (`<=>`). The `embedding vector_cosine_ops`
           # column string carries the opclass through to the generated DDL.
           index ["embedding vector_cosine_ops"],
             name: unquote("#{table}_embedding_hnsw_index"),
             using: "hnsw"
+
+          # Trigram GIN index on title for typo-tolerant autocomplete (the `%`
+          # similarity operator + `similarity(...)`). `gin_trgm_ops` opclass is
+          # carried through via the column string.
+          index ["title gin_trgm_ops"],
+            name: unquote("#{table}_title_trgm_index"),
+            using: "gin"
         end
       end
 
       actions do
-        defaults [:read]
-
         default_accept unquote(accept)
+
+        # Primary read, tuned for headless list consumers (JSON:API `index
+        # :read`). Offset paging for page-numbered UIs, keyset for stable deep
+        # cursors; `default_limit`/`max_page_size` bound the response size and
+        # `countable` lets clients ask for a total. `required?: false` (with the
+        # default `paginate_by_default?: false`) keeps internal `CMS.list_*`
+        # callers returning plain lists — only callers that pass `page:` (the
+        # JSON:API layer, when `page[...]` is supplied) get a paginator.
+        read :read do
+          primary? true
+
+          pagination offset?: true,
+                     keyset?: true,
+                     countable: true,
+                     required?: false,
+                     max_page_size: 100,
+                     default_limit: 25
+        end
 
         # Soft-delete (AshArchival). Non-atomic so the cache-busting after_action
         # change can run.
@@ -227,7 +363,6 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
-          change KilnCMS.CMS.Changes.SanitizeBlocks
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
         end
@@ -235,6 +370,11 @@ defmodule KilnCMS.CMS.Content do
         update :update do
           primary? true
           require_atomic? false
+          # Optimistic concurrency: only apply if the in-memory `lock_version`
+          # still matches the row, incrementing it on success. Two editors saving
+          # the same draft no longer silently clobber each other — the loser gets
+          # a `StaleRecord` error and must reload.
+          change optimistic_lock(:lock_version)
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
@@ -243,30 +383,84 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
-          change KilnCMS.CMS.Changes.SanitizeBlocks
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+
+          # Edits to already-published content fire a `<type>.updated` webhook;
+          # `only_when: :published` keeps draft edits and autosaves silent.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+        end
+
+        # Debounced draft autosave from the editor. Writes the same content as
+        # `:update`, but as a distinct action so its PaperTrail versions are
+        # tagged `version_action_name: :autosave` and can be coalesced — a save
+        # per editor pause would otherwise flood history (issue #32).
+        # `CoalesceAutosaveVersions` collapses the trailing run of autosave
+        # versions into a single snapshot after each save. Drafts only (enforced
+        # by the editor); no `updated` webhook (draft edits are silent anyway).
+        update :autosave do
+          require_atomic? false
+          change optimistic_lock(:lock_version)
+          argument :tag_ids, {:array, :uuid}
+          argument unquote(related_arg), {:array, :uuid}
+          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+
+          change manage_relationship(unquote(related_arg), unquote(related_name),
+                   type: :append_and_remove
+                 )
+
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
         end
 
         # Full-text search over the denormalized `search_text`. Goes through the
         # read policy, so anonymous callers only match published content.
+        # Locale-aware full-text search over the trigger-maintained, weighted
+        # `search_vector`. Scopes results to one `locale` (default: the
+        # configured default) and stems with that locale's text-search config
+        # (`kiln_regconfig/1`), so French content is matched with French rules,
+        # etc. Goes through the read policy — anonymous callers match published
+        # content only.
         read :search do
           argument :query, :string, allow_nil?: false
+          argument :locale, :string
+
+          # Optional facets — each is skipped when nil, so callers filter by any
+          # combination of category, tags (content carrying any of them), author,
+          # and workflow state.
+          argument :category_id, :uuid
+          argument :author_id, :uuid
+          argument :state, :atom
+          argument :tag_ids, {:array, :uuid}
 
           filter expr(
-                   fragment(
-                     "to_tsvector('english', coalesce(?, '')) @@ plainto_tsquery('english', ?)",
-                     ^ref(:search_text),
-                     ^arg(:query)
-                   )
+                   ^ref(:locale) == ^arg(:locale) and
+                     fragment(
+                       "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
+                       ^arg(:locale),
+                       ^arg(:query)
+                     ) and
+                     (is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)) and
+                     (is_nil(^arg(:author_id)) or ^ref(:author_id) == ^arg(:author_id)) and
+                     (is_nil(^arg(:state)) or ^ref(:state) == ^arg(:state)) and
+                     (is_nil(^arg(:tag_ids)) or exists(tags, ^ref(:id) in ^arg(:tag_ids)))
                  )
 
-          # Most relevant first (ts_rank), newest as the tiebreak. The rank
-          # calculation takes the same query, threaded through at runtime.
+          # Resolve the locale (defaulting to the configured default) and set it
+          # back so the filter sees it too, then order by relevance (ts_rank over
+          # the weighted vector — title hits outrank body hits), newest to break
+          # ties.
           prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
             q = Ash.Query.get_argument(query, :query)
 
-            Ash.Query.sort(query, [{:search_rank, {%{query: q}, :desc}}, {:inserted_at, :desc}])
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([
+              {:search_rank, {%{locale: locale, query: q}, :desc}},
+              {:inserted_at, :desc}
+            ])
           end
         end
 
@@ -277,11 +471,15 @@ defmodule KilnCMS.CMS.Content do
         # embedded.
         read :search_semantic do
           argument :query, :string, allow_nil?: false
+          argument :locale, :string
 
-          # Only rows that have an embedding are candidates.
-          filter expr(not is_nil(^ref(:embedding)))
+          # Candidates: same-locale rows that have an embedding.
+          filter expr(not is_nil(^ref(:embedding)) and ^ref(:locale) == ^arg(:locale))
 
           prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+            query = Ash.Query.set_argument(query, :locale, locale)
+
             with true <- KilnCMS.Search.semantic?(),
                  {:ok, vector} <- KilnCMS.Search.embed(Ash.Query.get_argument(query, :query)) do
               Ash.Query.sort(query, [{:semantic_distance, {%{query_vector: vector}, :asc}}])
@@ -289,6 +487,30 @@ defmodule KilnCMS.CMS.Content do
               # Disabled, or the query couldn't be embedded — no semantic results.
               _ -> Ash.Query.limit(query, 0)
             end
+          end
+        end
+
+        # Typo-tolerant title autocomplete: same-locale rows whose title matches
+        # the prefix (case-insensitive) or is trigram-similar (handles typos),
+        # ordered by similarity, capped at 10. Goes through the read policy.
+        read :autocomplete do
+          argument :prefix, :string, allow_nil?: false
+          argument :locale, :string
+
+          filter expr(
+                   ^ref(:locale) == ^arg(:locale) and
+                     (fragment("? ILIKE ? || '%'", ^ref(:title), ^arg(:prefix)) or
+                        fragment("? <% ?", ^arg(:prefix), ^ref(:title)))
+                 )
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+            prefix = Ash.Query.get_argument(query, :prefix)
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([{:title_similarity, {%{prefix: prefix}, :desc}}])
+            |> Ash.Query.limit(10)
           end
         end
 
@@ -309,6 +531,7 @@ defmodule KilnCMS.CMS.Content do
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
+          change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
@@ -320,6 +543,7 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
+          change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
         end
@@ -331,13 +555,13 @@ defmodule KilnCMS.CMS.Content do
           accept []
           argument :version_id, :uuid, allow_nil?: false
           change KilnCMS.CMS.Changes.RestoreVersion
-          change KilnCMS.CMS.Changes.SanitizeBlocks
         end
 
         update :unpublish do
           require_atomic? false
           change transition_state(:draft)
           change KilnCMS.CMS.Changes.ClearPublishedVersion
+          change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
         end
 
@@ -470,9 +694,18 @@ defmodule KilnCMS.CMS.Content do
 
         unquote(excerpt_attribute)
 
-        attribute :blocks, {:array, KilnCMS.CMS.Block} do
+        # Typed polymorphic block tree (Kiln v2 — decision D11). `BlockUnion`'s
+        # cast is legacy-tolerant: legacy stored rows convert lazily on read and
+        # legacy params still cast, so this flip needs no data migration. Rich-text
+        # HTML / media URLs are sanitized inside the cast (replacing SanitizeBlocks).
+        # Not `public?` — the auto JSON:API/GraphQL surface can't render a union of
+        # embedded resources cleanly, and the v2 API surface is the *fired*
+        # artifacts (`KilnCMS.Firing.Engine.read/3`), not the raw editable tree.
+        # Still accepted on create/update (see `accept`) and read internally by the
+        # editor/firing/delivery.
+        attribute :blocks, {:array, KilnCMS.CMS.BlockUnion} do
           default []
-          public? true
+          public? false
         end
 
         attribute :seo_title, :string, public?: true
@@ -501,6 +734,10 @@ defmodule KilnCMS.CMS.Content do
         # embedded, or always when semantic search is disabled.
         attribute :embedding, KilnCMS.Search.Vector
         attribute :embedded_at, :utc_datetime_usec
+
+        # Optimistic-concurrency version, bumped on every `:update` (see the
+        # action's `optimistic_lock`). Internal.
+        attribute :lock_version, :integer, allow_nil?: false, default: 1, public?: false
 
         timestamps()
       end
@@ -557,18 +794,49 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # Full-text relevance of a row against a query — higher is more
-        # relevant. Used to order the `:search` action; the `query` argument is
-        # the same term that action filters on. Internal (sorting only).
+        # relevant. Used to order the `:search` action; `query`/`locale` are the
+        # same values that action filters on, so the weighted `search_vector` is
+        # ranked with the matching locale's text-search config. Internal.
         calculate :search_rank,
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(to_tsvector('english', coalesce(?, '')), plainto_tsquery('english', ?))",
-                      ^ref(:search_text),
+                      "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?))",
+                      ^arg(:locale),
                       ^arg(:query)
                     )
                   ) do
+          argument :locale, :string, allow_nil?: false
           argument :query, :string, allow_nil?: false
+        end
+
+        # A highlighted snippet of the match — the surrounding text with the
+        # query terms wrapped in `<mark>`. Loaded on demand by passing the same
+        # `query`/`locale`, e.g. `load: [highlight: %{query: q, locale: loc}]`.
+        # NOTE: `ts_headline` does not HTML-escape the source, so renderers must
+        # escape everything except the `<mark>` tags before treating it as HTML.
+        calculate :highlight,
+                  :string,
+                  expr(
+                    fragment(
+                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), plainto_tsquery(kiln_regconfig(?), ?), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
+                      ^arg(:locale),
+                      ^arg(:locale),
+                      ^arg(:query)
+                    )
+                  ) do
+          argument :locale, :string, allow_nil?: false
+          argument :query, :string, allow_nil?: false
+          public? true
+        end
+
+        # Word-level trigram similarity of the autocomplete prefix to the title
+        # (0–1, higher is closer) — matches a short query against any word in the
+        # title. Orders the `:autocomplete` action. Internal.
+        calculate :title_similarity,
+                  :float,
+                  expr(fragment("word_similarity(?, ?)", ^arg(:prefix), ^ref(:title))) do
+          argument :prefix, :string, allow_nil?: false
         end
 
         # Cosine distance (pgvector `<=>`) between a row's embedding and the

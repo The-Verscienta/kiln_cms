@@ -59,6 +59,20 @@ Then visit:
 - GraphQL playground: <http://localhost:4000/gql/playground>
 - JSON:API Swagger UI: <http://localhost:4000/api/json/swaggerui>
 
+## Headless consumption
+
+Published content is world-readable (no auth) over three public surfaces:
+`GET /api/content/:type/:slug` (the v2 content delivery API — structured `json`,
+`json_ld`, or pre-rendered `web` HTML), `GET /sitemap.xml` for enumeration, and
+`POST /gql` (GraphQL search). See [`examples/`](examples) for a runnable
+**Astro static blog** that builds entirely from these endpoints, with a complete
+headless setup walkthrough.
+
+**API docs:** a published OpenAPI 3 spec (`/api/json/open_api`) and interactive
+Swagger UI (`/api/json/swaggerui`) are available in dev **and** prod. Start at
+[`docs/api.md`](docs/api.md) — the full reference for authentication, the JSON:API
+content endpoints, GraphQL, webhooks, preview tokens and rate limits.
+
 ## Working with Ash
 
 ```bash
@@ -84,6 +98,9 @@ Bootstrapped & verified (compiling, migrating, serving):
   `:viewer`) for RBAC
 - **Oban** (Postgres-backed, no Redis) + **AshOban** wired into the supervision tree
 - Docker infra (Postgres default; Dragonfly/Meilisearch/MinIO optional profiles)
+- **Search** — Postgres full-text + optional semantic/hybrid (pgvector) and an
+  optional **Meilisearch** backend, both feature-flagged off by default
+  ([`docs/meilisearch.md`](docs/meilisearch.md))
 
 Not yet wired (next): **magic-link** auth strategy, **Ash policies** enforcing the RBAC
 roles, media upload/variant pipeline (`Image`/libvips), the **TipTap LiveView editor** +

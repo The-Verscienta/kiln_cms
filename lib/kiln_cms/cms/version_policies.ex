@@ -1,14 +1,24 @@
 defmodule KilnCMS.CMS.VersionPolicies do
   @moduledoc """
-  Shared Ash policies for AshPaperTrail version resources.
+  Shared Ash policies (and a system-only destroy action) for AshPaperTrail
+  version resources.
 
   Mixed into `Page.Version` and `Post.Version` via the `paper_trail` `mixin`
   option. Version history is editorial/audit data — editors and admins only;
   anonymous users and viewers must not read draft snapshots from `changes`.
+
+  The injected `:destroy` action exists solely for
+  `KilnCMS.CMS.Changes.CoalesceAutosaveVersions` to prune superseded autosave
+  snapshots; it's forbidden to every actor by the destroy policy below and only
+  runs as a trusted system caller (`authorize?: false`).
   """
 
   def policies do
     quote do
+      actions do
+        destroy :destroy
+      end
+
       policies do
         bypass actor_attribute_equals(:role, :admin) do
           authorize_if always()

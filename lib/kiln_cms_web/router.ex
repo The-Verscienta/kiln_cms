@@ -28,6 +28,21 @@ defmodule KilnCMSWeb.Router do
     "content-security-policy" => "script-src 'self' 'unsafe-inline' 'unsafe-eval'; #{@base_csp}"
   }
 
+  # CSP for the Swagger UI explorer (always available — issue #37). Swagger UI
+  # loads its bundle/CSS from cdnjs and runs one inline boot script, which gets a
+  # per-request nonce (see `put_swagger_csp`). `style-src` keeps 'unsafe-inline'
+  # because swagger-ui injects un-nonced inline styles.
+  @swagger_csp "default-src 'self'; " <>
+                 "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " <>
+                 "img-src 'self' data: blob: https://cdnjs.cloudflare.com; " <>
+                 "font-src 'self' data: https://cdnjs.cloudflare.com; " <>
+                 "connect-src 'self'; object-src 'none'; base-uri 'self'; " <>
+                 "frame-ancestors 'self'; form-action 'self'"
+
+  @swagger_csp_headers %{
+    "content-security-policy" => "script-src 'self' https://cdnjs.cloudflare.com; #{@swagger_csp}"
+  }
+
   pipeline :graphql do
     plug KilnCMSWeb.Plugs.RateLimit, :gql
     plug :load_from_bearer
@@ -67,6 +82,25 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
   end
 
+  # Headless sign-in — exchanges credentials for a bearer token (issue #37).
+  # Tight per-IP `:auth` limit to slow credential stuffing; no bearer/actor
+  # plugs (this is the endpoint that *issues* the token).
+  pipeline :api_auth do
+    plug :accepts, ["json"]
+    plug KilnCMSWeb.Plugs.RateLimit, :auth
+  end
+
+  # Swagger UI explorer — serves the published OpenAPI spec interactively in all
+  # environments (issue #37). Relaxed, swagger-specific CSP (`@swagger_csp`) plus
+  # a per-request nonce for swagger-ui's inline boot script.
+  pipeline :swagger_ui do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers, @swagger_csp_headers
+    plug :put_swagger_csp
+  end
+
   # Auth pages get a tighter per-IP limit to slow credential stuffing.
   pipeline :browser_auth do
     plug :accepts, ["html"]
@@ -103,12 +137,18 @@ defmodule KilnCMSWeb.Router do
 
     # Authoring UIs — editors and admins only.
     ash_authentication_live_session :editor_routes,
-      on_mount: [{KilnCMSWeb.LiveUserAuth, :live_editor_required}] do
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :live_editor_required},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
       live "/media", MediaLive, :index
       live "/editor", EditorLive, :index
+      live "/editor/search", SearchPaletteLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
       live "/editor/trash", TrashLive, :index
+      live "/editor/webhooks", WebhookLive, :index
       live "/editor/analytics", AnalyticsLive, :index
+      live "/editor/settings", SettingsLive, :index
       # Generic editor route — works for any content type (incl. ones generated
       # by `mix kiln.gen.content`). The `:page`/`:post` routes are kept as
       # backward-compatible aliases.
@@ -127,11 +167,40 @@ defmodule KilnCMSWeb.Router do
     forward "/", Absinthe.Plug, schema: Module.concat(["KilnCMSWeb.GraphqlSchema"])
   end
 
-  # Headless JSON:API — always available; Swagger UI + OpenAPI spec are dev-only.
+  # Interactive API docs — Swagger UI over the published OpenAPI spec. Always
+  # available (issue #37). Registered BEFORE the `/api/json` catch-all forward
+  # below so the forward can't shadow `/swaggerui`.
+  scope "/api/json" do
+    pipe_through :swagger_ui
+
+    forward "/swaggerui", OpenApiSpex.Plug.SwaggerUI,
+      path: "/api/json/open_api",
+      # Nonce the inline boot script so it runs under the strict `script-src`.
+      csp_nonce_assign_key: %{script: :swagger_script_nonce},
+      default_model_expand_depth: 4
+  end
+
+  # Headless JSON:API — always available, including the OpenAPI spec served by
+  # the router itself at `/api/json/open_api`.
   scope "/api/json" do
     pipe_through [:api]
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
+  end
+
+  # Headless sign-in: POST credentials, receive a bearer token (issue #37).
+  scope "/api/auth", KilnCMSWeb do
+    pipe_through :api_auth
+
+    post "/sign_in", ApiAuthController, :sign_in
+  end
+
+  # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
+  # immutable per-surface artifacts, not the raw editable block tree.
+  scope "/api", KilnCMSWeb do
+    pipe_through :api
+
+    get "/content/:type/:slug", ArtifactController, :show
   end
 
   scope "/preview", KilnCMSWeb do
@@ -153,6 +222,8 @@ defmodule KilnCMSWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    # UI locale switcher — persists the chosen locale in the session.
+    get "/locale/:locale", LocaleController, :update
   end
 
   scope "/", KilnCMSWeb do
@@ -180,27 +251,11 @@ defmodule KilnCMSWeb.Router do
     )
   end
 
-  # Public content delivery (HTML). Defined last among "/" routes so the
-  # root-level `/:slug` page route can't shadow auth/editor/SEO paths above.
-  # Only published content is reachable (see ContentController).
-  scope "/", KilnCMSWeb do
-    pipe_through :browser
-
-    get "/blog", ContentController, :blog_index
-    get "/blog/:slug", ContentController, :show_post
-    # Generic delivery for any other content type at `/<plural>/<slug>`. Defined
-    # after the literal `/blog` routes (so posts win) and alongside the
-    # single-segment page route (different arity — no collision).
-    get "/:type/:slug", ContentController, :show_content
-    get "/:slug", ContentController, :show_page
-  end
-
-  # Other scopes may use custom stacks.
-  # scope "/api", KilnCMSWeb do
-  #   pipe_through :api
-  # end
-
-  # Enable LiveDashboard and Swoosh mailbox preview in development
+  # Dev-only browser tooling (LiveDashboard, Swoosh mailbox preview, AshAdmin).
+  # Registered BEFORE the public content delivery routes below so the
+  # single/two-segment `/:type/:slug` and `/:slug` catch-alls can't shadow these
+  # paths in development. The blocks are compile-gated to `dev_routes`, so
+  # production routing is unaffected.
   if Application.compile_env(:kiln_cms, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put
     # it behind authentication and allow only admins to access it.
@@ -223,9 +278,33 @@ defmodule KilnCMSWeb.Router do
     scope "/admin" do
       pipe_through :browser_dev_tools
 
-      ash_admin "/"
+      # Default the AshAdmin actor to the signed-in user so policy-driven admin
+      # actions reflect real RBAC (issue #24). The `session:` MFA forwards the
+      # AshAuthentication session into AshAdmin's live_session; the actor itself
+      # is resolved by `KilnCMSWeb.AshAdmin.ActorPlug` (config/dev.exs).
+      ash_admin "/", session: {KilnCMSWeb.AshAdmin.ActorPlug, :admin_session, []}
     end
   end
+
+  # Public content delivery (HTML). Defined last among "/" routes so the
+  # root-level `/:slug` page route can't shadow auth/editor/SEO/dev paths above.
+  # Only published content is reachable (see ContentController).
+  scope "/", KilnCMSWeb do
+    pipe_through :browser
+
+    get "/blog", ContentController, :blog_index
+    get "/blog/:slug", ContentController, :show_post
+    # Generic delivery for any other content type at `/<plural>/<slug>`. Defined
+    # after the literal `/blog` routes (so posts win) and alongside the
+    # single-segment page route (different arity — no collision).
+    get "/:type/:slug", ContentController, :show_content
+    get "/:slug", ContentController, :show_page
+  end
+
+  # Other scopes may use custom stacks.
+  # scope "/api", KilnCMSWeb do
+  #   pipe_through :api
+  # end
 
   # API explorer UIs — dev/CI only (`config :kiln_cms, dev_routes: true` in
   # dev.exs). Production keeps `/gql` and `/api/json` headless endpoints only.
@@ -237,14 +316,6 @@ defmodule KilnCMSWeb.Router do
         schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
         socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
         interface: :simple
-    end
-
-    scope "/api/json" do
-      pipe_through :browser_dev_tools
-
-      forward "/swaggerui", OpenApiSpex.Plug.SwaggerUI,
-        path: "/api/json/open_api",
-        default_model_expand_depth: 4
     end
   end
 
@@ -261,6 +332,19 @@ defmodule KilnCMSWeb.Router do
     |> Plug.Conn.put_resp_header(
       "content-security-policy",
       "script-src 'self' 'nonce-#{nonce}'; #{@base_csp}"
+    )
+  end
+
+  # Swagger UI CSP: strict same-origin everything except swagger-ui's cdnjs
+  # bundle, plus a per-request nonce for its inline boot script.
+  defp put_swagger_csp(conn, _opts) do
+    nonce = generate_csp_nonce()
+
+    conn
+    |> Plug.Conn.assign(:swagger_script_nonce, nonce)
+    |> Plug.Conn.put_resp_header(
+      "content-security-policy",
+      "script-src 'self' 'nonce-#{nonce}' https://cdnjs.cloudflare.com; #{@swagger_csp}"
     )
   end
 

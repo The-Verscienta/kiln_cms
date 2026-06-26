@@ -14,85 +14,116 @@
    The heroicons installation itself is managed by your mix.exs */
 @plugin "../vendor/heroicons";
 
-/* daisyUI Tailwind Plugin. You can update this file by fetching the latest version with:
-   curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js
-   Make sure to look at the daisyUI changelog: https://daisyui.com/docs/changelog/ */
-@plugin "../vendor/daisyui" {
-  themes: false;
+/* ===========================================================================
+   KilnCMS design system — semantic color tokens
+   ===========================================================================
+   A small, self-owned palette (no DaisyUI). These tokens are the shared design
+   language for the whole admin/editor UI and are consumed as ordinary Tailwind
+   color utilities and opacity modifiers:
+
+     surfaces / text   bg-base-100  bg-base-200  bg-base-300  text-base-content
+     brand             bg-primary / text-primary-content  (secondary, accent, neutral)
+     status            info · success · warning · error  (+ matching *-content)
+
+   Light is the default (`:root`); `[data-theme="dark"]` swaps the values. The
+   theme is chosen before first paint by the inline script in root.html.heex,
+   which resolves "system" to a concrete light/dark `data-theme`, so no
+   `prefers-color-scheme` fallback is needed here. Retune the brand by editing
+   `--color-primary` (and friends) — every utility follows automatically. */
+@theme {
+  /* Warm "kiln" palette — fired-clay brand on warm bisque surfaces. */
+  --color-base-100: oklch(98.2% 0.004 75);
+  --color-base-200: oklch(95% 0.008 73);
+  --color-base-300: oklch(90% 0.013 72);
+  --color-base-content: oklch(27% 0.012 60);
+
+  --color-primary: oklch(55% 0.135 42);
+  --color-primary-content: oklch(98% 0.012 60);
+  --color-secondary: oklch(52% 0.018 65);
+  --color-secondary-content: oklch(98% 0.004 75);
+  --color-accent: oklch(72% 0.115 64);
+  --color-accent-content: oklch(27% 0.012 60);
+  --color-neutral: oklch(34% 0.01 65);
+  --color-neutral-content: oklch(98% 0.004 75);
+
+  --color-info: oklch(55% 0.1 248);
+  --color-info-content: oklch(98% 0.01 250);
+  --color-success: oklch(56% 0.09 155);
+  --color-success-content: oklch(98% 0.02 150);
+  --color-warning: oklch(72% 0.13 72);
+  --color-warning-content: oklch(28% 0.04 70);
+  --color-error: oklch(54% 0.16 28);
+  --color-error-content: oklch(98% 0.015 20);
+
+  /* Corner radius scale — slightly softer than stock for a refined feel. */
+  --radius-sm: 0.3rem;
+  --radius-md: 0.45rem;
+  --radius-lg: 0.7rem;
+  --radius-xl: 1rem;
+
+  /* UI font stack (system — no web-font dependency / CSP changes). */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
 }
 
-/* daisyUI theme plugin. You can update this file by fetching the latest version with:
-  curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js
-  We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
-  on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
-@plugin "../vendor/daisyui-theme" {
-  name: "dark";
-  default: false;
-  prefersdark: true;
-  color-scheme: "dark";
-  --color-base-100: oklch(30.33% 0.016 252.42);
-  --color-base-200: oklch(25.26% 0.014 253.1);
-  --color-base-300: oklch(20.15% 0.012 254.09);
-  --color-base-content: oklch(97.807% 0.029 256.847);
-  --color-primary: oklch(58% 0.233 277.117);
-  --color-primary-content: oklch(96% 0.018 272.314);
-  --color-secondary: oklch(58% 0.233 277.117);
-  --color-secondary-content: oklch(96% 0.018 272.314);
-  --color-accent: oklch(60% 0.25 292.717);
-  --color-accent-content: oklch(96% 0.016 293.756);
-  --color-neutral: oklch(37% 0.044 257.287);
-  --color-neutral-content: oklch(98% 0.003 247.858);
-  --color-info: oklch(58% 0.158 241.966);
-  --color-info-content: oklch(97% 0.013 236.62);
-  --color-success: oklch(60% 0.118 184.704);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
-  --size-selector: 0.21875rem;
-  --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
-  --noise: 0;
+/* Dark theme: a deeper, Elixir-leaning surface set with a violet brand. */
+@layer base {
+  [data-theme="dark"] {
+    /* Warm charcoal surfaces; base-200/300 lift for visible raised
+       surfaces + borders. Brighter clay so the brand reads on dark. */
+    --color-base-100: oklch(25% 0.012 60);
+    --color-base-200: oklch(29% 0.012 60);
+    --color-base-300: oklch(34% 0.012 62);
+    --color-base-content: oklch(95% 0.012 70);
+
+    --color-primary: oklch(66% 0.13 45);
+    --color-primary-content: oklch(20% 0.03 45);
+    --color-secondary: oklch(72% 0.02 70);
+    --color-secondary-content: oklch(22% 0.01 60);
+    --color-accent: oklch(76% 0.12 65);
+    --color-accent-content: oklch(22% 0.02 60);
+    --color-neutral: oklch(75% 0.01 70);
+    --color-neutral-content: oklch(22% 0.01 60);
+
+    --color-info: oklch(70% 0.1 248);
+    --color-info-content: oklch(20% 0.03 250);
+    --color-success: oklch(70% 0.1 155);
+    --color-success-content: oklch(20% 0.03 150);
+    --color-warning: oklch(78% 0.12 72);
+    --color-warning-content: oklch(24% 0.04 70);
+    --color-error: oklch(68% 0.15 28);
+    --color-error-content: oklch(20% 0.03 20);
+  }
 }
 
-@plugin "../vendor/daisyui-theme" {
-  name: "light";
-  default: true;
-  prefersdark: false;
-  color-scheme: "light";
-  --color-base-100: oklch(98% 0 0);
-  --color-base-200: oklch(96% 0.001 286.375);
-  --color-base-300: oklch(92% 0.004 286.32);
-  --color-base-content: oklch(21% 0.006 285.885);
-  --color-primary: oklch(70% 0.213 47.604);
-  --color-primary-content: oklch(98% 0.016 73.684);
-  --color-secondary: oklch(55% 0.027 264.364);
-  --color-secondary-content: oklch(98% 0.002 247.839);
-  --color-accent: oklch(0% 0 0);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(44% 0.017 285.786);
-  --color-neutral-content: oklch(98% 0 0);
-  --color-info: oklch(62% 0.214 259.815);
-  --color-info-content: oklch(97% 0.014 254.604);
-  --color-success: oklch(70% 0.14 182.503);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
-  --size-selector: 0.21875rem;
-  --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
-  --noise: 0;
+/* Apply the theme to the page surface + native controls. DaisyUI used to set
+   these from its base layer; we own them now so the body background and default
+   text color follow the active theme. */
+@layer base {
+  html {
+    color-scheme: light;
+    background-color: var(--color-base-100);
+  }
+
+  [data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-base-100);
+    color: var(--color-base-content);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+    line-height: 1.55;
+  }
+
+  /* Tighter, more confident headings. */
+  h1, h2, h3 {
+    letter-spacing: -0.012em;
+  }
 }
 
 /* Add variants based on LiveView classes */
@@ -135,4 +166,55 @@
   background: var(--color-base-200);
   padding: 0.1rem 0.25rem;
   border-radius: 0.2rem;
+}
+.ProseMirror pre {
+  background: var(--color-base-200);
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.3rem;
+  overflow-x: auto;
+}
+.ProseMirror pre code {
+  background: none;
+  padding: 0;
+}
+.ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--color-base-300);
+}
+
+/* Floating slash-command menu ("/" inside a rich-text block). Rendered into
+   document.body and positioned at the caret, so it lives outside .ProseMirror. */
+.rt-slash-menu {
+  position: absolute;
+  z-index: 50;
+  min-width: 14rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+.rt-slash-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.rt-slash-item-active,
+.rt-slash-item:hover {
+  background: var(--color-base-200);
+}
+.rt-slash-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.rt-slash-hint {
+  font-size: 0.75rem;
+  color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
 }

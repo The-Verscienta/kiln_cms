@@ -95,4 +95,18 @@ defmodule KilnCMS.CMS.VersionPoliciesTest do
       assert Enum.any?(versions, &(&1.version_source_id == post.id))
     end
   end
+
+  describe "manual version mutation" do
+    # Version rows are written only by AshPaperTrail (`authorize?: false`).
+    # `forbid_if always()` denies manual create/update to every non-admin role,
+    # so editors (who *can* read history) still can't forge a version.
+    test "editors and viewers cannot create versions manually", %{
+      editor: editor,
+      viewer: viewer
+    } do
+      refute Ash.can?({KilnCMS.CMS.Page.Version, :create}, editor)
+      refute Ash.can?({KilnCMS.CMS.Page.Version, :create}, viewer)
+      refute Ash.can?({KilnCMS.CMS.Post.Version, :create}, editor)
+    end
+  end
 end

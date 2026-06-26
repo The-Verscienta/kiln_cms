@@ -61,6 +61,22 @@ defmodule KilnCMSWeb.EditorLiveTest do
     )
   end
 
+  # Blocks are stored as the typed union (Kiln v2); read them back as legacy maps
+  # (`%{type:, content:, data:}`) for assertions.
+  defp blocks_legacy(record) do
+    record.blocks
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+  end
+
+  defp page_versions(page_id) do
+    CMS.list_page_versions!(authorize?: false)
+    |> Enum.filter(&(&1.version_source_id == page_id))
+  end
+
+  defp autosave_versions(page_id),
+    do: Enum.filter(page_versions(page_id), &(&1.version_action_name == :autosave))
+
   describe "/editor (content list)" do
     test "viewers are redirected away", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/"}}} =
@@ -305,6 +321,52 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # The published record is only changed via the explicit Save button.
       assert CMS.get_page!(page.id, authorize?: false).title == "Live"
     end
+
+    test "repeated autosaves coalesce into a single version (issue #32)", %{conn: conn} do
+      page = draft_page(%{title: "Draft"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Several edit-then-autosave cycles, the way the debounce timer fires
+      # between editor pauses.
+      for title <- ~w(One Two Three Four) do
+        lv |> form("#page-editor", form: %{title: title}) |> render_change()
+        send(lv.pid, :autosave)
+        render(lv)
+      end
+
+      # The live record always holds the latest edit...
+      assert CMS.get_page!(page.id, authorize?: false).title == "Four"
+      # ...but the four autosaves left exactly one version, not four.
+      assert length(autosave_versions(page.id)) == 1
+    end
+
+    test "a manual save is versioned distinctly from coalesced autosaves", %{conn: conn} do
+      page = draft_page(%{title: "Draft"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A run of autosaves collapses to one version.
+      lv |> form("#page-editor", form: %{title: "Autosaved"}) |> render_change()
+      send(lv.pid, :autosave)
+      render(lv)
+      assert length(autosave_versions(page.id)) == 1
+
+      # An explicit Save writes its own, separately-named version...
+      lv |> form("#page-editor", form: %{title: "Saved"}) |> render_submit()
+      assert Enum.any?(page_versions(page.id), &(&1.version_action_name == :update))
+
+      # ...and a fresh autosave run after it starts a new coalesced version
+      # rather than swallowing the manual one.
+      lv |> form("#page-editor", form: %{title: "Autosaved again"}) |> render_change()
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert length(autosave_versions(page.id)) == 2
+      assert Enum.any?(page_versions(page.id), &(&1.version_action_name == :update))
+    end
   end
 
   describe "/editor/trash" do
@@ -392,7 +454,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   describe "image block picker" do
     test "picking a library image sets the block's url and media_id", %{conn: conn} do
-      media = Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
+      media = Ash.Seed.seed!(MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
       page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
 
       {:ok, lv, _html} =
@@ -407,9 +469,108 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#page-editor") |> render_submit()
 
-      [block] = CMS.get_page!(page.id, authorize?: false).blocks
+      [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert block.content == "/uploads/x"
       assert block.data["media_id"] == media.id
+    end
+  end
+
+  describe "block inserter (slash menu)" do
+    test "menu lists an option for every registered block type", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      html = render(lv)
+
+      for type <- Map.keys(KilnCMS.Blocks.registry()) do
+        assert has_element?(
+                 lv,
+                 "button[data-inserter-item][phx-value-type='#{type}']"
+               ),
+               "expected an inserter option for #{type}"
+      end
+
+      # Rendered as an accessible listbox the JS hook drives.
+      assert html =~ ~s(role="listbox")
+      assert html =~ ~s(phx-hook="BlockInserter")
+    end
+
+    test "selecting an option inserts a block sub-form into the editor", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute has_element?(lv, "button[phx-click='remove_block']")
+
+      lv
+      |> element("button[data-inserter-item][phx-value-type='heading']")
+      |> render_click()
+
+      assert has_element?(lv, "button[phx-click='remove_block']")
+    end
+
+    test "an inserted block persists on save", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # `divider` has no required fields, so it round-trips through save unedited.
+      lv
+      |> element("button[data-inserter-item][phx-value-type='divider']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert to_string(block.type) == "divider"
+    end
+  end
+
+  describe "media library browser (editor chrome)" do
+    test "opening from chrome and picking inserts a new image block", %{conn: conn} do
+      media = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg", url: "/uploads/hero"})
+      # Start with no blocks at all — the browser is reachable without one.
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Reachable from the editor chrome (not a per-block button).
+      lv |> element("button[phx-click='open_media_browser']") |> render_click()
+
+      lv
+      |> element(
+        "button[phx-click='pick_image'][phx-value-index='new'][phx-value-id='#{media.id}']"
+      )
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert to_string(block.type) == "image"
+      assert block.content == "/uploads/hero"
+      assert block.data["media_id"] == media.id
+    end
+
+    test "searching filters the browser grid", %{conn: conn} do
+      keep = Ash.Seed.seed!(MediaItem, %{filename: "mountain.jpg", url: "/uploads/mountain"})
+      drop = Ash.Seed.seed!(MediaItem, %{filename: "ocean.jpg", url: "/uploads/ocean"})
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button[phx-click='open_media_browser']") |> render_click()
+
+      html =
+        lv |> form("#media-browser-filter", %{q: "mountain"}) |> render_change()
+
+      assert html =~ "phx-value-id=\"#{keep.id}\""
+      refute html =~ "phx-value-id=\"#{drop.id}\""
     end
   end
 
@@ -439,11 +600,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
       topic = Presence.topic("page", page.id)
       cursor = %{id: "other-editor", name: "bob", field: "title"}
 
+      # Scope to the cursor badge's title — a bare "bob" also matches unrelated
+      # markup (e.g. the inserter's `role="combobox"`).
       Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
-      assert render(lv) =~ "bob"
+      assert render(lv) =~ "bob is editing"
 
       Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
-      refute render(lv) =~ "bob"
+      refute render(lv) =~ "bob is editing"
     end
 
     test "soft-locks a field (readonly + ring) while another editor holds it", %{conn: conn} do
@@ -544,6 +707,36 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert_receive {:preview_update, %{title: "Broadcasted"}}
     end
+
+    test "renders with public-site fidelity (public shell + prose article)", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/preview/page/#{page.id}")
+
+      # The public layout chrome and prose typography wrap the content, so the
+      # preview matches the live site rather than rendering bare blocks.
+      assert html =~ "prose"
+      assert html =~ "Powered by KilnCMS."
+      assert html =~ "Draft preview"
+    end
+
+    test "a post preview shows the excerpt", %{conn: conn} do
+      post = draft_post(%{title: "PostTitle", excerpt: "A teaser line"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/preview/post/#{post.id}")
+
+      assert html =~ "A teaser line"
+
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        PreviewLive.topic("post", post.id),
+        {:preview_update, %{title: "PostTitle", excerpt: "Updated teaser", blocks: []}}
+      )
+
+      assert render(lv) =~ "Updated teaser"
+    end
   end
 
   describe "/editor/pages/:id (block editor)" do
@@ -566,12 +759,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element("button[phx-value-type='heading']") |> render_click()
 
+      # Native union member field for a heading is `text` (not legacy `content`).
       lv
-      |> form("#page-editor", form: %{blocks: %{"0" => %{content: "A nice heading"}}})
+      |> form("#page-editor", form: %{blocks: %{"0" => %{text: "A nice heading"}}})
       |> render_submit()
 
       assert [%{type: :heading, content: "A nice heading"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "reorders blocks via the sortable hook and persists the new order", %{conn: conn} do
@@ -591,7 +785,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor") |> render_submit()
 
       assert [%{content: "B"}, %{content: "A"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "a rich_text block's HTML content round-trips through save", %{conn: conn} do
@@ -610,22 +804,58 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor") |> render_submit()
 
       assert [%{type: :rich_text, content: "<p>Hi <strong>there</strong></p>"}] =
-               CMS.get_page!(page.id, authorize?: false).blocks
+               blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     test "the live preview reflects block content and updates on change", %{conn: conn} do
       page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Preview renders the heading block (distinct from the editor's textarea).
-      assert html =~ ~s(text-xl font-bold">Original Heading)
+      # Preview renders the heading block through the typed serializers — i.e.
+      # exactly what firing/delivery produces (Kiln v2 preview parity).
+      assert html =~ "<h2>Original Heading</h2>"
 
       html2 =
         lv
-        |> form("#page-editor", form: %{blocks: %{"0" => %{content: "Updated Heading"}}})
+        |> form("#page-editor", form: %{blocks: %{"0" => %{text: "Updated Heading"}}})
         |> render_change()
 
-      assert html2 =~ ~s(text-xl font-bold">Updated Heading)
+      assert html2 =~ "<h2>Updated Heading</h2>"
+    end
+
+    test "the block palette is driven by the typed block registry", %{conn: conn} do
+      page = draft_page()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Every registered typed block type is offered (incl. ones never in the old
+      # hardcoded palette, e.g. `custom`).
+      for type <- ~w(rich_text heading quote image embed divider custom) do
+        assert html =~ ~s(phx-value-type="#{type}")
+      end
+    end
+
+    test "renders DSL-declared fields per block, gated by field-level policy", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [%{type: :quote, content: "Q", data: %{"citation" => "me"}, order: 0}]
+        })
+
+      # An editor sees the quote's text + citation, but NOT the admin-only featured flag.
+      {:ok, _lv, editor_html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Native union member fields: form[blocks][0][citation], etc.
+      assert editor_html =~ "[citation]"
+      refute editor_html =~ "[featured]"
+
+      # An admin additionally sees the featured field.
+      {:ok, _lv, admin_html} =
+        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert admin_html =~ "[citation]"
+      assert admin_html =~ "[featured]"
     end
 
     test "saves SEO & scheduling fields", %{conn: conn} do

@@ -17,6 +17,11 @@ defmodule KilnCMSWeb.MediaLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
+    # Live-refresh the library when a background variant job finishes.
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, KilnCMS.Media.VariantWorker.topic())
+    end
+
     {:ok,
      socket
      |> assign(:actor, actor)
@@ -66,7 +71,7 @@ defmodule KilnCMSWeb.MediaLive do
     socket =
       case CMS.get_media_item(id, actor: actor) do
         {:ok, item} -> delete_item(socket, item, actor)
-        _ -> put_flash(socket, :error, "That item no longer exists.")
+        _ -> put_flash(socket, :error, gettext("That item no longer exists."))
       end
 
     {:noreply, socket |> assign(:selected, nil) |> assign(:media, list_media(actor))}
@@ -93,12 +98,15 @@ defmodule KilnCMSWeb.MediaLive do
     socket =
       case find_trashed(socket, id) do
         nil ->
-          put_flash(socket, :error, "That item no longer exists.")
+          put_flash(socket, :error, gettext("That item no longer exists."))
 
         item ->
           case CMS.restore_media_item(item, actor: actor) do
-            {:ok, _} -> put_flash(socket, :info, "Restored #{item.filename}.")
-            _ -> put_flash(socket, :error, "You don't have permission to restore media.")
+            {:ok, _} ->
+              put_flash(socket, :info, gettext("Restored %{name}.", name: item.filename))
+
+            _ ->
+              put_flash(socket, :error, gettext("You don't have permission to restore media."))
           end
       end
 
@@ -111,7 +119,7 @@ defmodule KilnCMSWeb.MediaLive do
 
     socket =
       case find_trashed(socket, id) do
-        nil -> put_flash(socket, :error, "That item no longer exists.")
+        nil -> put_flash(socket, :error, gettext("That item no longer exists."))
         item -> purge_item(socket, item, actor)
       end
 
@@ -138,33 +146,39 @@ defmodule KilnCMSWeb.MediaLive do
           socket
           |> assign(:selected, item)
           |> assign(:media, list_media(actor))
-          |> put_flash(:info, "Saved details.")
+          |> put_flash(:info, gettext("Saved details."))
 
         _ ->
-          put_flash(socket, :error, "Couldn't save those details.")
+          put_flash(socket, :error, gettext("Couldn't save those details."))
       end
 
     {:noreply, socket}
   end
 
   def handle_event("copied", _params, socket),
-    do: {:noreply, put_flash(socket, :info, "URL copied to clipboard.")}
+    do: {:noreply, put_flash(socket, :info, gettext("URL copied to clipboard."))}
+
+  # A background variant job finished — refresh the library so the new
+  # dimensions/thumbnail show without a manual reload.
+  @impl true
+  def handle_info({:media_processed, _id}, socket) do
+    {:noreply, assign(socket, :media, list_media(socket.assigns.actor))}
+  end
 
   # --- helpers ---------------------------------------------------------------
 
   defp store_entry(path, entry, actor) do
     key = Storage.generate_key(entry.client_name)
-    ext = entry.client_name |> Path.extname() |> String.downcase()
 
     with :ok <- ImageProcessor.validate_upload(path),
          {:ok, ^key} <- Storage.store(key, path) do
-      create_from_upload(key, ext, path, entry, actor)
+      create_from_upload(key, entry, actor)
     else
       _ -> :error
     end
   end
 
-  defp create_from_upload(key, ext, path, entry, actor) do
+  defp create_from_upload(key, entry, actor) do
     attrs = %{
       filename: entry.client_name,
       content_type: entry.client_type,
@@ -175,7 +189,7 @@ defmodule KilnCMSWeb.MediaLive do
 
     case CMS.create_media_item(attrs, actor: actor) do
       {:ok, item} ->
-        enqueue_processing(item, path, ext)
+        enqueue_processing(item)
         :ok
 
       _ ->
@@ -184,16 +198,11 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  # Hand the original off to a background worker for dimension/variant
-  # processing, keeping libvips work off the upload request. The upload temp
-  # file is consumed once this request returns, so copy it to a stable temp path
-  # the worker can read.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp enqueue_processing(item, source_path, ext) do
-    tmp = Path.join(System.tmp_dir!(), "kiln-process-#{Ecto.UUID.generate()}#{ext}")
-    File.cp!(source_path, tmp)
-
-    %{media_item_id: item.id, source_path: tmp, ext: ext}
+  # Queue background dimension/variant processing (keeps libvips off the upload
+  # request). The worker re-fetches the original from storage, so there's no
+  # node-local temp hand-off.
+  defp enqueue_processing(item) do
+    %{media_item_id: item.id}
     |> KilnCMS.Media.VariantWorker.new()
     |> Oban.insert!()
   end
@@ -206,8 +215,8 @@ defmodule KilnCMSWeb.MediaLive do
   # referencing the item keeps working and an admin can restore it from trash.
   defp delete_item(socket, item, actor) do
     case CMS.destroy_media_item(item, actor: actor) do
-      :ok -> put_flash(socket, :info, "Moved #{item.filename} to trash.")
-      _ -> put_flash(socket, :error, "You don't have permission to delete media.")
+      :ok -> put_flash(socket, :info, gettext("Moved %{name} to trash.", name: item.filename))
+      _ -> put_flash(socket, :error, gettext("You don't have permission to delete media."))
     end
   end
 
@@ -217,10 +226,10 @@ defmodule KilnCMSWeb.MediaLive do
       :ok ->
         if item.storage_key, do: Storage.delete(item.storage_key)
         delete_variant_blobs(item.variants)
-        put_flash(socket, :info, "Permanently deleted #{item.filename}.")
+        put_flash(socket, :info, gettext("Permanently deleted %{name}.", name: item.filename))
 
       _ ->
-        put_flash(socket, :error, "You don't have permission to delete media.")
+        put_flash(socket, :error, gettext("You don't have permission to delete media."))
     end
   end
 
@@ -247,27 +256,39 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   defp flash_for_upload(socket, ok, 0) when ok > 0,
-    do: put_flash(socket, :info, "Uploaded #{ok} #{pluralize(ok, "file")}.")
+    do:
+      put_flash(
+        socket,
+        :info,
+        ngettext("Uploaded %{count} file.", "Uploaded %{count} files.", ok, count: ok)
+      )
 
   defp flash_for_upload(socket, 0, failed) when failed > 0,
-    do: put_flash(socket, :error, "#{failed} #{pluralize(failed, "upload")} failed.")
+    do:
+      put_flash(
+        socket,
+        :error,
+        ngettext("%{count} upload failed.", "%{count} uploads failed.", failed, count: failed)
+      )
 
   defp flash_for_upload(socket, ok, failed) when ok > 0 and failed > 0,
-    do: put_flash(socket, :info, "Uploaded #{ok}; #{failed} failed.")
+    do:
+      put_flash(
+        socket,
+        :info,
+        gettext("Uploaded %{ok}; %{failed} failed.", ok: ok, failed: failed)
+      )
 
   defp flash_for_upload(socket, _, _), do: socket
-
-  defp pluralize(1, word), do: word
-  defp pluralize(_, word), do: word <> "s"
 
   defp humanize_bytes(nil), do: "—"
   defp humanize_bytes(b) when b < 1_024, do: "#{b} B"
   defp humanize_bytes(b) when b < 1_048_576, do: "#{Float.round(b / 1_024, 1)} KB"
   defp humanize_bytes(b), do: "#{Float.round(b / 1_048_576, 1)} MB"
 
-  defp error_to_string(:too_large), do: "too large (max 10 MB)"
-  defp error_to_string(:too_many_files), do: "too many files (max 10)"
-  defp error_to_string(:not_accepted), do: "unsupported type"
+  defp error_to_string(:too_large), do: gettext("too large (max 10 MB)")
+  defp error_to_string(:too_many_files), do: gettext("too many files (max 10)")
+  defp error_to_string(:not_accepted), do: gettext("unsupported type")
   defp error_to_string(other), do: to_string(other)
 
   @impl true
@@ -279,8 +300,8 @@ defmodule KilnCMSWeb.MediaLive do
       <div class="space-y-8">
         <div class="flex items-end justify-between gap-4">
           <div>
-            <h1 class="text-2xl font-semibold">Media library</h1>
-            <p class="text-sm text-base-content/70">Upload and manage images.</p>
+            <h1 class="text-2xl font-semibold">{gettext("Media library")}</h1>
+            <p class="text-sm text-base-content/70">{gettext("Upload and manage images.")}</p>
           </div>
           <div :if={@is_admin} class="flex gap-1 text-sm">
             <button
@@ -292,7 +313,7 @@ defmodule KilnCMSWeb.MediaLive do
                 @view != :library && "text-base-content/60 hover:bg-base-200"
               ]}
             >
-              Library
+              {gettext("Library")}
             </button>
             <button
               type="button"
@@ -303,7 +324,7 @@ defmodule KilnCMSWeb.MediaLive do
                 @view != :trash && "text-base-content/60 hover:bg-base-200"
               ]}
             >
-              Trash
+              {gettext("Trash")}
             </button>
           </div>
         </div>
@@ -324,11 +345,13 @@ defmodule KilnCMSWeb.MediaLive do
             <.icon name="hero-arrow-up-tray" class="mx-auto size-8 text-base-content/40" />
             <p class="mt-2 text-sm">
               <label for={@uploads.media.ref} class="cursor-pointer font-medium underline">
-                Choose images
+                {gettext("Choose images")}
               </label>
-              or drag and drop
+              {gettext("or drag and drop")}
             </p>
-            <p class="mt-1 text-xs text-base-content/50">PNG, JPG, WEBP or GIF up to 10 MB</p>
+            <p class="mt-1 text-xs text-base-content/50">
+              {gettext("PNG, JPG, WEBP or GIF up to 10 MB")}
+            </p>
             <.live_file_input upload={@uploads.media} class="sr-only" />
           </div>
 
@@ -351,7 +374,7 @@ defmodule KilnCMSWeb.MediaLive do
                 type="button"
                 phx-click="cancel"
                 phx-value-ref={entry.ref}
-                aria-label="Cancel upload"
+                aria-label={gettext("Cancel upload")}
                 class="text-base-content/50 hover:text-error"
               >
                 <.icon name="hero-x-mark" class="size-5" />
@@ -364,28 +387,34 @@ defmodule KilnCMSWeb.MediaLive do
           </p>
 
           <.button :if={@uploads.media.entries != []} type="submit" variant="primary">
-            Upload {length(@uploads.media.entries)} {pluralize(length(@uploads.media.entries), "file")}
+            {ngettext("Upload %{count} file", "Upload %{count} files", length(@uploads.media.entries),
+              count: length(@uploads.media.entries)
+            )}
           </.button>
         </form>
 
         <div :if={@view == :library}>
-          <div class="mb-3 flex items-center justify-between gap-4">
-            <h2 class="text-lg font-medium">Library ({length(@visible)})</h2>
-            <form :if={@media != []} id="media-filter" phx-change="search">
+          <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <h2 class="text-lg font-medium">
+              {gettext("Library (%{count})", count: length(@visible))}
+            </h2>
+            <form :if={@media != []} id="media-filter" phx-change="search" class="sm:w-auto">
               <input
                 type="text"
                 name="q"
                 value={@query}
-                placeholder="Filter by filename"
+                placeholder={gettext("Filter by filename")}
                 phx-debounce="200"
                 autocomplete="off"
-                class="rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+                class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm sm:w-auto"
               />
             </form>
           </div>
-          <p :if={@media == []} class="text-sm text-base-content/60">No media yet.</p>
+          <.empty_state :if={@media == []} icon="hero-photo" title={gettext("No media yet")}>
+            {gettext("Upload an image above to start building your library.")}
+          </.empty_state>
           <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
-            No media matches “{@query}”.
+            {gettext("No media matches “%{query}”.", query: @query)}
           </p>
           <ul
             :if={@visible != []}
@@ -411,14 +440,16 @@ defmodule KilnCMSWeb.MediaLive do
                 <p class="flex items-center gap-1 text-[10px] text-base-content/50">
                   <span :if={item.width}>{item.width}×{item.height}</span>
                   <span>{humanize_bytes(item.byte_size)}</span>
-                  <span :if={!item.alt} class="text-warning" title="Missing alt text">· no alt</span>
+                  <span :if={!item.alt} class="text-warning" title={gettext("Missing alt text")}>
+                    {gettext("· no alt")}
+                  </span>
                 </p>
               </div>
               <button
                 phx-click="delete"
                 phx-value-id={item.id}
-                data-confirm={"Delete #{item.filename}?"}
-                aria-label="Delete"
+                data-confirm={gettext("Delete %{name}?", name: item.filename)}
+                aria-label={gettext("Delete")}
                 class="absolute right-1 top-1 rounded bg-base-100/80 p-1 opacity-0 transition group-hover:opacity-100 hover:text-error"
               >
                 <.icon name="hero-trash" class="size-4" />
@@ -440,8 +471,8 @@ defmodule KilnCMSWeb.MediaLive do
   defp trash_panel(assigns) do
     ~H"""
     <div>
-      <h2 class="mb-3 text-lg font-medium">Trash ({length(@items)})</h2>
-      <p :if={@items == []} class="text-sm text-base-content/60">Trash is empty.</p>
+      <h2 class="mb-3 text-lg font-medium">{gettext("Trash (%{count})", count: length(@items))}</h2>
+      <p :if={@items == []} class="text-sm text-base-content/60">{gettext("Trash is empty.")}</p>
       <ul
         :if={@items != []}
         class="divide-y divide-base-content/10 rounded border border-base-content/10"
@@ -456,7 +487,7 @@ defmodule KilnCMSWeb.MediaLive do
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">{item.filename}</p>
             <p class="text-xs text-base-content/50">
-              deleted {Calendar.strftime(item.updated_at, "%Y-%m-%d %H:%M")}
+              {gettext("deleted %{at}", at: Calendar.strftime(item.updated_at, "%Y-%m-%d %H:%M"))}
             </p>
           </div>
           <button
@@ -465,16 +496,18 @@ defmodule KilnCMSWeb.MediaLive do
             phx-value-id={item.id}
             class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
           >
-            Restore
+            {gettext("Restore")}
           </button>
           <button
             type="button"
             phx-click="purge"
             phx-value-id={item.id}
-            data-confirm={"Permanently delete #{item.filename}? This can't be undone."}
+            data-confirm={
+              gettext("Permanently delete %{name}? This can't be undone.", name: item.filename)
+            }
             class="rounded border border-error/40 px-3 py-1 text-xs text-error hover:bg-error/10"
           >
-            Delete permanently
+            {gettext("Delete permanently")}
           </button>
         </li>
       </ul>
@@ -496,7 +529,7 @@ defmodule KilnCMSWeb.MediaLive do
           <button
             type="button"
             phx-click="close"
-            aria-label="Close"
+            aria-label={gettext("Close")}
             class="text-base-content/50 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
@@ -510,18 +543,18 @@ defmodule KilnCMSWeb.MediaLive do
         />
 
         <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-base-content/70">
-          <dt class="text-base-content/50">Type</dt>
+          <dt class="text-base-content/50">{gettext("Type")}</dt>
           <dd>{@item.content_type || "—"}</dd>
-          <dt class="text-base-content/50">Size</dt>
+          <dt class="text-base-content/50">{gettext("Size")}</dt>
           <dd>{humanize_bytes(@item.byte_size)}</dd>
-          <dt :if={@item.width} class="text-base-content/50">Dimensions</dt>
+          <dt :if={@item.width} class="text-base-content/50">{gettext("Dimensions")}</dt>
           <dd :if={@item.width}>{@item.width} × {@item.height} px</dd>
-          <dt class="text-base-content/50">Uploaded</dt>
+          <dt class="text-base-content/50">{gettext("Uploaded")}</dt>
           <dd>{Calendar.strftime(@item.inserted_at, "%Y-%m-%d %H:%M")}</dd>
         </dl>
 
         <div :if={@item.variants not in [nil, %{}]} class="mt-4">
-          <p class="text-xs text-base-content/50">Responsive variants</p>
+          <p class="text-xs text-base-content/50">{gettext("Responsive variants")}</p>
           <ul class="mt-1 space-y-1">
             <li
               :for={{label, v} <- @item.variants}
@@ -529,13 +562,15 @@ defmodule KilnCMSWeb.MediaLive do
             >
               <span class="font-medium capitalize">{label}</span>
               <span class="text-base-content/50">{v["width"]} × {v["height"]}</span>
-              <a href={v["url"]} target="_blank" class="text-primary hover:underline">open</a>
+              <a href={v["url"]} target="_blank" class="text-primary hover:underline">
+                {gettext("open")}
+              </a>
             </li>
           </ul>
         </div>
 
         <div class="mt-4">
-          <label class="text-xs text-base-content/50">URL</label>
+          <label class="text-xs text-base-content/50">{gettext("URL")}</label>
           <div class="mt-1 flex gap-2">
             <input
               type="text"
@@ -550,24 +585,24 @@ defmodule KilnCMSWeb.MediaLive do
               data-clipboard-text={@item.url}
               class="shrink-0 rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
             >
-              Copy
+              {gettext("Copy")}
             </button>
           </div>
         </div>
 
         <form phx-submit="save_meta" class="mt-5 space-y-3">
           <div>
-            <label for="media-alt" class="text-sm font-medium">Alt text</label>
+            <label for="media-alt" class="text-sm font-medium">{gettext("Alt text")}</label>
             <input
               id="media-alt"
               name="alt"
               value={@item.alt}
-              placeholder="Describe the image for screen readers"
+              placeholder={gettext("Describe the image for screen readers")}
               class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
             />
           </div>
           <div>
-            <label for="media-caption" class="text-sm font-medium">Caption</label>
+            <label for="media-caption" class="text-sm font-medium">{gettext("Caption")}</label>
             <textarea
               id="media-caption"
               name="caption"
@@ -575,7 +610,7 @@ defmodule KilnCMSWeb.MediaLive do
               class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
             >{@item.caption}</textarea>
           </div>
-          <.button type="submit" variant="primary">Save details</.button>
+          <.button type="submit" variant="primary">{gettext("Save details")}</.button>
         </form>
       </div>
     </div>

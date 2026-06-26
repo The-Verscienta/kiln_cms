@@ -85,15 +85,27 @@ defmodule KilnCMS.CMS.PoliciesTest do
     }
   end
 
+  # Assertions are scoped to the seeded fixtures (membership, not full-table
+  # equality) so they hold even when other suites' rows are visible under the
+  # shared sandbox mode used for `async: false` tests.
   describe "read visibility by role" do
-    test "anonymous (no actor) sees only published", %{published: published} do
+    test "anonymous (no actor) sees published but not drafts", %{
+      published: published,
+      draft: draft
+    } do
       ids = CMS.list_pages!(authorize?: true) |> Enum.map(& &1.id)
-      assert ids == [published.id]
+      assert published.id in ids
+      refute draft.id in ids
     end
 
-    test "viewer sees only published", %{viewer: viewer, published: published} do
+    test "viewer sees published but not drafts", %{
+      viewer: viewer,
+      published: published,
+      draft: draft
+    } do
       ids = CMS.list_pages!(actor: viewer) |> Enum.map(& &1.id)
-      assert ids == [published.id]
+      assert published.id in ids
+      refute draft.id in ids
     end
 
     test "editor sees published and unpublished", %{
@@ -101,13 +113,19 @@ defmodule KilnCMS.CMS.PoliciesTest do
       published: published,
       draft: draft
     } do
-      ids = CMS.list_pages!(actor: editor) |> Enum.map(& &1.id) |> Enum.sort()
-      assert ids == Enum.sort([published.id, draft.id])
+      ids = CMS.list_pages!(actor: editor) |> Enum.map(& &1.id)
+      assert published.id in ids
+      assert draft.id in ids
     end
 
-    test "admin sees everything", %{admin: admin, published: published, draft: draft} do
-      ids = CMS.list_pages!(actor: admin) |> Enum.map(& &1.id) |> Enum.sort()
-      assert ids == Enum.sort([published.id, draft.id])
+    test "admin sees published and unpublished", %{
+      admin: admin,
+      published: published,
+      draft: draft
+    } do
+      ids = CMS.list_pages!(actor: admin) |> Enum.map(& &1.id)
+      assert published.id in ids
+      assert draft.id in ids
     end
   end
 
@@ -139,6 +157,55 @@ defmodule KilnCMS.CMS.PoliciesTest do
     end
   end
 
+  describe "Page lifecycle authorization by role" do
+    test "editors may unpublish and archive, viewers may not", %{
+      editor: editor,
+      viewer: viewer,
+      published: published,
+      draft: draft
+    } do
+      assert CMS.can_unpublish_page?(editor, published)
+      assert CMS.can_archive_page?(editor, draft)
+      refute CMS.can_unpublish_page?(viewer, published)
+      refute CMS.can_archive_page?(viewer, draft)
+    end
+
+    test "editors may restore a version, viewers may not", %{
+      editor: editor,
+      viewer: viewer,
+      draft: draft
+    } do
+      assert CMS.can_restore_page_version?(editor, draft)
+      refute CMS.can_restore_page_version?(viewer, draft)
+    end
+
+    test "scheduled-publish and return-to-draft are admin-only", %{
+      admin: admin,
+      editor: editor,
+      draft: draft
+    } do
+      assert CMS.can_publish_scheduled_page?(admin, draft)
+      assert CMS.can_return_page_to_draft?(admin, draft)
+      refute CMS.can_publish_scheduled_page?(editor, draft)
+      refute CMS.can_return_page_to_draft?(editor, draft)
+    end
+
+    test "trash is visible to admins, filtered from editors", %{admin: admin, editor: editor} do
+      page(%{state: :draft, archived_at: DateTime.utc_now()})
+      # Read policy is `forbid_if always()` for non-admins: it filters to nothing
+      # rather than erroring (defence-in-depth behind the admin-only route).
+      assert [_] = CMS.list_trashed_pages!(actor: admin)
+      assert [] = CMS.list_trashed_pages!(actor: editor)
+    end
+
+    test "restore and purge are admin-only", %{admin: admin, editor: editor, draft: draft} do
+      assert CMS.can_restore_page?(admin, draft)
+      assert CMS.can_purge_page?(admin, draft)
+      refute CMS.can_restore_page?(editor, draft)
+      refute CMS.can_purge_page?(editor, draft)
+    end
+  end
+
   describe "Post read visibility by role" do
     setup %{editor: editor} do
       published = post(%{state: :published})
@@ -146,9 +213,13 @@ defmodule KilnCMS.CMS.PoliciesTest do
       %{published_post: published, draft_post: draft, editor: editor}
     end
 
-    test "anonymous sees only published posts", %{published_post: published} do
+    test "anonymous sees published posts but not drafts", %{
+      published_post: published,
+      draft_post: draft
+    } do
       ids = CMS.list_posts!(authorize?: true) |> Enum.map(& &1.id)
-      assert ids == [published.id]
+      assert published.id in ids
+      refute draft.id in ids
     end
 
     test "editor sees published and draft posts", %{
@@ -156,8 +227,9 @@ defmodule KilnCMS.CMS.PoliciesTest do
       published_post: published,
       draft_post: draft
     } do
-      ids = CMS.list_posts!(actor: editor) |> Enum.map(& &1.id) |> Enum.sort()
-      assert ids == Enum.sort([published.id, draft.id])
+      ids = CMS.list_posts!(actor: editor) |> Enum.map(& &1.id)
+      assert published.id in ids
+      assert draft.id in ids
     end
   end
 
@@ -175,6 +247,41 @@ defmodule KilnCMS.CMS.PoliciesTest do
     test "viewers may not create or update posts", %{viewer: viewer, draft_post: draft} do
       refute CMS.can_create_post?(viewer)
       refute CMS.can_update_post?(viewer, draft)
+    end
+
+    test "only admins may destroy or publish posts", %{
+      admin: admin,
+      editor: editor,
+      draft_post: draft
+    } do
+      assert CMS.can_destroy_post?(admin, draft)
+      assert CMS.can_publish_post?(admin, draft)
+      refute CMS.can_destroy_post?(editor, draft)
+      refute CMS.can_publish_post?(editor, draft)
+    end
+
+    test "editors may unpublish, archive and restore post versions", %{
+      editor: editor,
+      draft_post: draft
+    } do
+      published = post(%{state: :published})
+      assert CMS.can_unpublish_post?(editor, published)
+      assert CMS.can_archive_post?(editor, draft)
+      assert CMS.can_restore_post_version?(editor, draft)
+    end
+
+    test "post trash is visible to admins, filtered from editors", %{
+      admin: admin,
+      editor: editor
+    } do
+      post(%{state: :draft, archived_at: DateTime.utc_now()})
+      assert [_] = CMS.list_trashed_posts!(actor: admin)
+      assert [] = CMS.list_trashed_posts!(actor: editor)
+    end
+
+    test "purge is admin-only for posts", %{admin: admin, editor: editor, draft_post: draft} do
+      assert CMS.can_purge_post?(admin, draft)
+      refute CMS.can_purge_post?(editor, draft)
     end
   end
 
@@ -200,6 +307,35 @@ defmodule KilnCMS.CMS.PoliciesTest do
       assert CMS.can_destroy_media_item?(admin, media)
       refute CMS.can_destroy_media_item?(editor, media)
     end
+
+    test "viewers may read media", %{viewer: viewer, media: media} do
+      assert {:ok, _} = CMS.get_media_item(media.id, actor: viewer)
+    end
+
+    test "editors may update media, viewers may not", %{
+      editor: editor,
+      viewer: viewer,
+      media: media
+    } do
+      assert CMS.can_update_media_item?(editor, media)
+      refute CMS.can_update_media_item?(viewer, media)
+    end
+
+    test "media trash is visible to admins, filtered from editors", %{
+      admin: admin,
+      editor: editor
+    } do
+      media_item(%{archived_at: DateTime.utc_now()})
+      assert [_] = CMS.list_trashed_media_items!(actor: admin)
+      assert [] = CMS.list_trashed_media_items!(actor: editor)
+    end
+
+    test "restore and purge are admin-only", %{admin: admin, editor: editor, media: media} do
+      assert CMS.can_restore_media_item?(admin, media)
+      assert CMS.can_purge_media_item?(admin, media)
+      refute CMS.can_restore_media_item?(editor, media)
+      refute CMS.can_purge_media_item?(editor, media)
+    end
   end
 
   describe "WebhookEndpoint policies" do
@@ -220,6 +356,28 @@ defmodule KilnCMS.CMS.PoliciesTest do
     test "only admins can manage webhook endpoints", %{admin: admin, editor: editor} do
       assert CMS.can_create_webhook_endpoint?(admin)
       refute CMS.can_create_webhook_endpoint?(editor)
+    end
+
+    test "endpoints are visible to admins, filtered from editors/viewers", %{
+      admin: admin,
+      editor: editor,
+      viewer: viewer
+    } do
+      assert [_] = CMS.list_webhook_endpoints!(actor: admin)
+      assert [] = CMS.list_webhook_endpoints!(actor: editor)
+      assert [] = CMS.list_webhook_endpoints!(actor: viewer)
+    end
+
+    test "admins can update and destroy endpoints; editors/viewers cannot", %{
+      admin: admin,
+      editor: editor,
+      viewer: viewer,
+      endpoint: endpoint
+    } do
+      assert CMS.can_update_webhook_endpoint?(admin, endpoint)
+      assert CMS.can_destroy_webhook_endpoint?(admin, endpoint)
+      refute CMS.can_update_webhook_endpoint?(editor, endpoint)
+      refute CMS.can_destroy_webhook_endpoint?(viewer, endpoint)
     end
   end
 end
