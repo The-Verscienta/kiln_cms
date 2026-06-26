@@ -526,6 +526,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The media id currently on an image block sub-form, if any.
   defp media_id_of(bf), do: bf[:media_id].value
 
+  # Safe `src` for the image-block preview: a pasted URL is untrusted, so it must
+  # clear the same scheme allowlist as delivery before we echo it back. Returns
+  # nil (image hidden) for rejected schemes like `javascript:`/`data:`.
+  defp safe_preview_src(url), do: KilnCMS.HTMLSanitizer.safe_image_src(url)
+
   defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
 
   # Substring filter over filename/alt/caption — instant, no DB round-trip, and
@@ -1074,8 +1079,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     </div>
                     <div :if={block_type_string(bf) == "image"} class="space-y-2">
                       <img
-                        :if={bf[:url].value not in [nil, ""]}
-                        src={bf[:url].value}
+                        :if={safe_preview_src(bf[:url].value)}
+                        src={safe_preview_src(bf[:url].value)}
                         alt=""
                         class="max-h-40 rounded border border-base-content/10"
                       />
