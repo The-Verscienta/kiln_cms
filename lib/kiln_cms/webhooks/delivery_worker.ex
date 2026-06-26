@@ -4,7 +4,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   Retried with backoff by Oban; non-2xx responses and transport errors fail the
   job so it retries. A deleted/inactive endpoint is a no-op (job succeeds).
   """
-  use Oban.Worker, queue: :default, max_attempts: 5
+  use Oban.Worker, queue: :webhooks, max_attempts: 5
 
   alias KilnCMS.CMS
   alias KilnCMS.Webhooks

@@ -24,7 +24,7 @@ defmodule KilnCMS.NotificationsTest do
 
   defp slug, do: "notif-#{System.unique_integer([:positive])}"
 
-  defp drain, do: Oban.drain_queue(queue: :default, with_recursion: true)
+  defp drain, do: KilnCMS.DataCase.drain_oban()
 
   # Swoosh's test adapter delivers `{:email, email}` to this process; collect
   # every one currently in the mailbox (order-independent assertions). Each test

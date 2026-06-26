@@ -105,7 +105,7 @@ defmodule KilnCMS.Search.BlockSearchTest do
       page = page_with_blocks(actor, [%{type: :heading, content: "Indexed on publish", order: 0}])
       CMS.publish_page!(page, actor: actor)
 
-      assert %{success: success} = Oban.drain_queue(queue: :default, with_recursion: true)
+      assert %{success: success} = KilnCMS.DataCase.drain_oban()
       assert success >= 1
 
       {:ok, rows} = SearchIndex.block_embeddings_for(:page, page.id, authorize?: false)

@@ -53,7 +53,7 @@ defmodule KilnCMS.Search.EmbeddingPipelineTest do
     # Computed in the background, so nothing is stored synchronously.
     assert is_nil(CMS.get_page!(page.id, authorize?: false).embedding)
 
-    assert %{success: 1} = Oban.drain_queue(queue: :default, with_recursion: true)
+    assert %{success: 1} = KilnCMS.DataCase.drain_oban()
 
     embedding = CMS.get_page!(page.id, authorize?: false).embedding
     assert is_list(embedding)
@@ -63,11 +63,11 @@ defmodule KilnCMS.Search.EmbeddingPipelineTest do
   test "updating content re-embeds from the new text" do
     admin = admin()
     page = CMS.create_page!(%{title: "First", slug: slug()}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
     first = CMS.get_page!(page.id, authorize?: false).embedding
 
     CMS.update_page!(page, %{title: "Completely different subject matter"}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
     second = CMS.get_page!(page.id, authorize?: false).embedding
 
     assert is_list(second)
@@ -79,7 +79,7 @@ defmodule KilnCMS.Search.EmbeddingPipelineTest do
     page = CMS.create_page!(%{title: "Versioned", slug: slug()}, actor: admin)
     before = length(CMS.list_page_versions!(authorize?: false))
 
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
 
     assert CMS.get_page!(page.id, authorize?: false).embedding
     assert length(CMS.list_page_versions!(authorize?: false)) == before
@@ -90,7 +90,7 @@ defmodule KilnCMS.Search.EmbeddingPipelineTest do
     admin = admin()
     page = CMS.create_page!(%{title: "No embed", slug: slug()}, actor: admin)
 
-    assert %{success: 0, failure: 0} = Oban.drain_queue(queue: :default, with_recursion: true)
+    assert %{success: 0, failure: 0} = KilnCMS.DataCase.drain_oban()
     assert is_nil(CMS.get_page!(page.id, authorize?: false).embedding)
   end
 end

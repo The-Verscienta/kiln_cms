@@ -11,7 +11,7 @@ defmodule KilnCMS.Search.MeilisearchWorker do
   """
   # Dedupe repeated index ops for the same document+op while pending.
   use Oban.Worker,
-    queue: :default,
+    queue: :search,
     max_attempts: 3,
     unique: [
       period: 60,

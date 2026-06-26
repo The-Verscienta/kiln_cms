@@ -53,7 +53,7 @@ defmodule KilnCMS.Search.HybridTest do
     # Doesn't contain "alpha" (no keyword hit), but is still an embedded
     # candidate in the semantic leg.
     semantic_only = CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
 
     results = Search.hybrid(:page, "alpha", actor: admin)
     result_ids = ids(results)
@@ -68,7 +68,7 @@ defmodule KilnCMS.Search.HybridTest do
     admin = admin()
     both = CMS.create_page!(%{title: "alpha", slug: slug()}, actor: admin)
     semantic_only = CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
 
     put_search_env(semantic: false)
     result_ids = Search.hybrid(:page, "alpha", actor: admin) |> ids()
@@ -85,7 +85,7 @@ defmodule KilnCMS.Search.HybridTest do
       CMS.create_page!(%{title: "alpha #{n}", slug: slug()}, actor: admin)
     end
 
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
 
     assert length(Search.hybrid(:page, "alpha", actor: admin, limit: 3)) == 3
   end

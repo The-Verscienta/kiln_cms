@@ -9,7 +9,7 @@ defmodule KilnCMS.Firing.RefireWorker do
   # (type+id), ignoring the per-path `visited` set so a fan-in doesn't enqueue
   # the same node many times over.
   use Oban.Worker,
-    queue: :default,
+    queue: :firing,
     max_attempts: 3,
     unique: [
       period: 60,

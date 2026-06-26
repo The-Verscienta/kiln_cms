@@ -41,6 +41,29 @@ defmodule KilnCMS.DataCase do
   end
 
   @doc """
+  Drain **every** configured Oban queue until no job runs, aggregating the
+  per-queue results. Jobs are split across workload queues (firing/search/mail/
+  …), and a job in one queue can enqueue into another, so draining a single
+  queue is no longer sufficient — this loops over all queues until a full pass
+  runs nothing. Returns the summed `%{success:, failure:, …}` map.
+  """
+  def drain_oban(acc \\ %{}) do
+    queues =
+      :kiln_cms |> Application.fetch_env!(Oban) |> Keyword.fetch!(:queues) |> Keyword.keys()
+
+    pass =
+      Enum.reduce(queues, %{}, fn queue, totals ->
+        queue
+        |> then(&Oban.drain_queue(queue: &1, with_recursion: true))
+        |> Map.merge(totals, fn _k, v1, v2 -> v1 + v2 end)
+      end)
+
+    acc = Map.merge(acc, pass, fn _k, v1, v2 -> v1 + v2 end)
+
+    if pass |> Map.values() |> Enum.sum() > 0, do: drain_oban(acc), else: acc
+  end
+
+  @doc """
   A helper that transforms changeset errors into a map of messages.
 
       assert {:error, changeset} = Accounts.create_user(%{password: "short"})

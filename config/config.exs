@@ -17,7 +17,11 @@ config :kiln_cms, :compile_env, config_env()
 config :kiln_cms, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
-  queues: [default: 10],
+  # Split by workload so a bulk publish / embedding backfill can't starve mail,
+  # webhooks, or the cron-driven scheduled-publish & trash-purge triggers (which
+  # stay on :default). Total worker concurrency here is ~29 — size POOL_SIZE
+  # accordingly in production (see config/runtime.exs and docs/performance.md).
+  queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, default: 10],
   repo: KilnCMS.Repo,
   plugins: [{Oban.Plugins.Cron, []}]
 
