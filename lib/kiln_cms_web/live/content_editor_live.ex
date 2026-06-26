@@ -1072,8 +1072,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       phx-hook="RichText"
                       phx-update="ignore"
                       data-content={bf[:legacy_html].value || ""}
+                      data-editor-label={gettext("Rich text editor")}
+                      role="group"
+                      aria-label={gettext("Rich text block")}
                     >
-                      <div data-toolbar class="mb-1 flex flex-wrap gap-1"></div>
+                      <div
+                        data-toolbar
+                        role="toolbar"
+                        aria-label={gettext("Text formatting")}
+                        class="mb-1 flex flex-wrap gap-1"
+                      >
+                      </div>
                       <div data-editor></div>
                       <p class="mt-1 text-xs text-base-content/50">
                         {gettext("Type / for commands.")}

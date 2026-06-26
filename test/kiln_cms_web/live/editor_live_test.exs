@@ -1095,4 +1095,26 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute html =~ ~r/>\s*Sign in\s*</
     end
   end
+
+  # Regression for #170: rich-text blocks must be labeled in the accessibility
+  # tree — a named editor surface and a labeled formatting toolbar. (The TipTap
+  # contenteditable's own aria-label is applied client-side from data-editor-label.)
+  describe "rich-text block accessibility (#170)" do
+    test "rich-text block renders group + toolbar semantics and an editor label", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "A11yPage",
+          blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~s(role="group")
+      assert html =~ ~s(aria-label="Rich text block")
+      assert html =~ ~s(role="toolbar")
+      assert html =~ ~s(aria-label="Text formatting")
+      assert html =~ ~s(data-editor-label="Rich text editor")
+    end
+  end
 end

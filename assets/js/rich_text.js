@@ -49,6 +49,9 @@ const toolbarButton = (editor, item) => {
   b.type = "button"
   b.textContent = item.label
   b.title = item.title
+  // The visible label is a terse glyph ("B", "</>", "↺"), so give the button an
+  // explicit accessible name — `title` alone is not reliably announced (#170).
+  b.setAttribute("aria-label", item.title)
   b.className = "rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
   b.addEventListener("click", e => {
     e.preventDefault()
@@ -203,6 +206,16 @@ export const RichText = {
       element: this.el.querySelector("[data-editor]"),
       extensions: [StarterKit],
       content: this.el.dataset.content || "",
+      // Name the contenteditable surface for assistive tech — without this a
+      // screen reader lands in an unlabeled editable region (#170). The label
+      // can be overridden per block via `data-editor-label`.
+      editorProps: {
+        attributes: {
+          "aria-label": this.el.dataset.editorLabel || "Rich text editor",
+          "aria-multiline": "true",
+          role: "textbox",
+        },
+      },
       onUpdate: ({editor}) => {
         input.value = editor.getHTML()
         this.slash.update()
