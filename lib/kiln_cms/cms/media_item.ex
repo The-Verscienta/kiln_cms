@@ -92,7 +92,8 @@ defmodule KilnCMS.CMS.MediaItem do
   end
 
   actions do
-    defaults [:destroy]
+    # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+    destroy :destroy, primary?: true, require_atomic?: false
 
     default_accept [
       :filename,
@@ -125,7 +126,12 @@ defmodule KilnCMS.CMS.MediaItem do
     end
 
     create :create, primary?: true
-    update :update, primary?: true
+
+    # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
 
     # Soft-deleted ("trashed") media — the only read that bypasses AshArchival's
     # automatic `is_nil(archived_at)` filter.
@@ -143,6 +149,8 @@ defmodule KilnCMS.CMS.MediaItem do
     # Permanent hard delete (bypasses archival). The caller is responsible for
     # removing the storage blobs; admin-only via the destroy policy.
     destroy :purge do
+      # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+      require_atomic? false
     end
 
     # Full-text search over filename + alt + caption. World-readable like the
@@ -199,6 +207,13 @@ defmodule KilnCMS.CMS.MediaItem do
     policy action([:trashed, :restore]) do
       forbid_if always()
     end
+  end
+
+  # A media write can invalidate any page that embeds this item's enriched media
+  # (the delivery cache stores resolved srcset/alt/dimensions), so bust the
+  # published-content cache on every create/update/destroy.
+  changes do
+    change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :update, :destroy]
   end
 
   attributes do

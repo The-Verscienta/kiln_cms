@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.ContentCacheTest do
 
   alias KilnCMS.Cache
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.MediaItem
   alias KilnCMS.CMS.Page
 
   setup do
@@ -16,12 +17,22 @@ defmodule KilnCMSWeb.ContentCacheTest do
     :ok
   end
 
-  defp published_page(title) do
-    Ash.Seed.seed!(Page, %{
-      title: title,
-      slug: "cc-#{System.unique_integer([:positive])}",
-      state: :published
-    })
+  defp published_page(title, extra \\ %{}) do
+    Ash.Seed.seed!(
+      Page,
+      Map.merge(
+        %{title: title, slug: "cc-#{System.unique_integer([:positive])}", state: :published},
+        extra
+      )
+    )
+  end
+
+  # Raw DB delete (bypasses Ash), so the content cache is NOT busted — lets a
+  # test prove a later response came from cache rather than the database.
+  defp raw_delete(table, id) do
+    Ecto.Adapters.SQL.query!(KilnCMS.Repo, "DELETE FROM #{table} WHERE id = $1", [
+      Ecto.UUID.dump!(id)
+    ])
   end
 
   test "a published page is served from cache (survives a raw DB delete)", %{conn: conn} do
@@ -31,9 +42,7 @@ defmodule KilnCMSWeb.ContentCacheTest do
     assert conn |> get(~p"/#{page.slug}") |> html_response(200) =~ "Cached Page"
 
     # Delete the row directly, bypassing Ash (so the cache is NOT busted).
-    Ecto.Adapters.SQL.query!(KilnCMS.Repo, "DELETE FROM pages WHERE id = $1", [
-      Ecto.UUID.dump!(page.id)
-    ])
+    raw_delete("pages", page.id)
 
     # Still served — proving the response came from cache, not the database.
     assert conn |> get(~p"/#{page.slug}") |> html_response(200) =~ "Cached Page"
@@ -53,5 +62,59 @@ defmodule KilnCMSWeb.ContentCacheTest do
     html = conn |> get(~p"/#{page.slug}") |> html_response(200)
     assert html =~ "New Title"
     refute html =~ "Old Title"
+  end
+
+  test "editing one page busts only its key, not the whole cache", %{conn: conn} do
+    edited = published_page("Edited")
+    other = published_page("Untouched")
+
+    # Cache both pages.
+    assert conn |> get(~p"/#{edited.slug}") |> html_response(200) =~ "Edited"
+    assert conn |> get(~p"/#{other.slug}") |> html_response(200) =~ "Untouched"
+
+    # Drop `other` from the DB without busting, so it's only reachable from cache.
+    raw_delete("pages", other.id)
+
+    # Editing `edited` must invalidate only its own key (per-key, not a clear).
+    {:ok, _} = CMS.update_page(edited, %{title: "Edited New"}, authorize?: false)
+
+    assert conn |> get(~p"/#{edited.slug}") |> html_response(200) =~ "Edited New"
+    # `other` is still served from cache — proving its entry wasn't cleared.
+    assert conn |> get(~p"/#{other.slug}") |> html_response(200) =~ "Untouched"
+  end
+
+  test "delivery cache hits carry resolved media URLs", %{conn: conn} do
+    media =
+      Ash.Seed.seed!(MediaItem, %{
+        filename: "p.jpg",
+        url: "/uploads/orig",
+        content_type: "image/jpeg",
+        width: 1600,
+        height: 1067,
+        alt: "A described image",
+        variants: %{
+          "thumb" => %{"key" => "t", "url" => "/uploads/thumb", "width" => 400, "height" => 267}
+        }
+      })
+
+    page =
+      published_page("Media Page", %{
+        blocks: [
+          %{type: :image, content: "/uploads/orig", data: %{"media_id" => media.id}, order: 0}
+        ]
+      })
+
+    # First request resolves + caches the media-enriched blocks.
+    assert conn |> get(~p"/#{page.slug}") |> html_response(200) =~ "/uploads/thumb 400w"
+
+    # Drop the media row directly (no cache bust). A re-resolved request would now
+    # find no media and omit the srcset.
+    raw_delete("media_items", media.id)
+
+    # The srcset is still present — proving resolved media URLs are cached, not
+    # re-queried on every delivery hit.
+    html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+    assert html =~ "/uploads/thumb 400w"
+    assert html =~ ~s(alt="A described image")
   end
 end

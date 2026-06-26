@@ -27,6 +27,14 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
             |> KilnCMS.Search.BlockEmbeddingWorker.new()
             |> Oban.insert()
           end
+
+          # Upsert into the optional Meilisearch index (Phase 6). No-op when the
+          # backend is disabled, so the default install pays nothing.
+          if KilnCMS.Search.Meilisearch.enabled?() do
+            %{"op" => "upsert", "type" => to_string(type), "id" => record.id}
+            |> KilnCMS.Search.MeilisearchWorker.new()
+            |> Oban.insert()
+          end
         rescue
           error -> Logger.error("Firing failed for #{inspect(record.id)}: #{inspect(error)}")
         end
