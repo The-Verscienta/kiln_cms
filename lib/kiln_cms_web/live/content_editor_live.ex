@@ -705,8 +705,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
 
   # Focus-tracking attributes for an input; `field` keys the cursor badge.
+  # `phx-debounce` coalesces the per-keystroke `validate` events (and the
+  # `broadcast_preview/1` they trigger) so fast typing with a pop-out preview
+  # open doesn't flood PubSub / LiveView diffing.
   defp field_attrs(field) do
-    %{"phx-focus" => "field_focus", "phx-blur" => "field_blur", "phx-value-field" => field}
+    %{
+      "phx-focus" => "field_focus",
+      "phx-blur" => "field_blur",
+      "phx-value-field" => field,
+      "phx-debounce" => "300"
+    }
   end
 
   # The set of fields soft-locked *for us* right now. A field is contended when
