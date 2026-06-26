@@ -1,0 +1,290 @@
+defmodule KilnCMSWeb.JsonApiTest do
+  @moduledoc """
+  Headless JSON:API (`/api/json`) — filtering, sorting and pagination for the
+  Page/Post/MediaItem read routes (issue #33, Phase 5).
+
+  Anonymous requests go through the read policy, so only published content is
+  visible; a bearer-authenticated editor sees drafts too. Counts are always
+  scoped to records seeded by the test (shared-sandbox safety).
+  """
+  use KilnCMSWeb.ConnCase, async: true
+
+  alias KilnCMS.CMS
+
+  @accept "application/vnd.api+json"
+  @password "password123456"
+
+  defp user(role) do
+    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+      email: "json-#{role}-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt(@password),
+      confirmed_at: DateTime.utc_now(),
+      role: role
+    })
+  end
+
+  defp token(user) do
+    strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
+
+    {:ok, signed_in} =
+      AshAuthentication.Strategy.action(strategy, :sign_in, %{
+        "email" => user.email,
+        "password" => @password
+      })
+
+    signed_in.__metadata__.token
+  end
+
+  defp slug, do: "json-#{System.unique_integer([:positive])}"
+
+  defp category(admin) do
+    CMS.create_category!(%{name: "Cat #{System.unique_integer([:positive])}", slug: slug()},
+      actor: admin
+    )
+  end
+
+  defp make_post(attrs, admin) do
+    CMS.create_post!(Map.put_new(attrs, :slug, slug()), actor: admin)
+  end
+
+  defp published_post(attrs, admin) do
+    attrs |> make_post(admin) |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+  end
+
+  # Issue a GET against the JSON:API and return {status, decoded_body}.
+  defp api_get(path, opts \\ []) do
+    conn = put_req_header(build_conn(), "accept", @accept)
+
+    conn =
+      case opts[:token] do
+        nil -> conn
+        tok -> put_req_header(conn, "authorization", "Bearer #{tok}")
+      end
+
+    conn = get(conn, path)
+    {conn.status, Jason.decode!(conn.resp_body)}
+  end
+
+  defp ids(%{"data" => data}) when is_list(data), do: Enum.map(data, & &1["id"])
+
+  describe "filtering" do
+    test "anonymous list returns only published content, hiding drafts" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      live = published_post(%{title: "Live", category_id: cat.id}, admin)
+      _draft = make_post(%{title: "Draft", category_id: cat.id}, admin)
+
+      assert {200, body} = api_get("/api/json/posts?filter[category_id]=#{cat.id}")
+      assert ids(body) == [live.id]
+    end
+
+    test "filters by an exact attribute (slug)" do
+      admin = user(:admin)
+      cat = category(admin)
+      s = slug()
+
+      target = published_post(%{title: "By slug", slug: s, category_id: cat.id}, admin)
+      _other = published_post(%{title: "Other", category_id: cat.id}, admin)
+
+      assert {200, body} = api_get("/api/json/posts?filter[slug]=#{s}")
+      assert ids(body) == [target.id]
+    end
+
+    test "combines filters (category + locale)" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      en = published_post(%{title: "English", locale: "en", category_id: cat.id}, admin)
+      fr = published_post(%{title: "French", locale: "fr", category_id: cat.id}, admin)
+
+      assert {200, both} = api_get("/api/json/posts?filter[category_id]=#{cat.id}&sort=title")
+      assert Enum.sort(ids(both)) == Enum.sort([en.id, fr.id])
+
+      assert {200, only_fr} =
+               api_get("/api/json/posts?filter[category_id]=#{cat.id}&filter[locale]=fr")
+
+      assert ids(only_fr) == [fr.id]
+    end
+
+    test "editor (bearer) sees drafts and can filter by workflow state" do
+      admin = user(:admin)
+      editor = user(:editor)
+      cat = category(admin)
+
+      live = published_post(%{title: "Live", category_id: cat.id}, admin)
+      draft = make_post(%{title: "Draft", category_id: cat.id}, admin)
+
+      tok = token(editor)
+
+      assert {200, all} =
+               api_get("/api/json/posts?filter[category_id]=#{cat.id}&sort=title", token: tok)
+
+      assert Enum.sort(ids(all)) == Enum.sort([live.id, draft.id])
+
+      assert {200, drafts} =
+               api_get(
+                 "/api/json/posts?filter[category_id]=#{cat.id}&filter[state]=draft",
+                 token: tok
+               )
+
+      assert ids(drafts) == [draft.id]
+    end
+  end
+
+  describe "sorting" do
+    test "sorts by title ascending and descending" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      a = published_post(%{title: "Apple", category_id: cat.id}, admin)
+      m = published_post(%{title: "Mango", category_id: cat.id}, admin)
+      z = published_post(%{title: "Zebra", category_id: cat.id}, admin)
+
+      assert {200, asc} = api_get("/api/json/posts?filter[category_id]=#{cat.id}&sort=title")
+      assert ids(asc) == [a.id, m.id, z.id]
+
+      assert {200, desc} = api_get("/api/json/posts?filter[category_id]=#{cat.id}&sort=-title")
+      assert ids(desc) == [z.id, m.id, a.id]
+    end
+  end
+
+  describe "pagination" do
+    test "limits the page, reports the total count and links to the next page" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      a = published_post(%{title: "P1", category_id: cat.id}, admin)
+      b = published_post(%{title: "P2", category_id: cat.id}, admin)
+      c = published_post(%{title: "P3", category_id: cat.id}, admin)
+
+      assert {200, page1} =
+               api_get(
+                 "/api/json/posts?filter[category_id]=#{cat.id}&sort=title&page[limit]=2&page[count]=true"
+               )
+
+      assert ids(page1) == [a.id, b.id]
+      assert page1["meta"]["page"]["total"] == 3
+      assert page1["meta"]["page"]["limit"] == 2
+      assert is_binary(page1["links"]["next"])
+
+      assert {200, page2} =
+               api_get(
+                 "/api/json/posts?filter[category_id]=#{cat.id}&sort=title&page[limit]=2&page[offset]=2"
+               )
+
+      assert ids(page2) == [c.id]
+    end
+
+    test "an oversized page limit is accepted (rows are capped server-side by max_page_size)" do
+      admin = user(:admin)
+      cat = category(admin)
+      p = published_post(%{title: "Big", category_id: cat.id}, admin)
+
+      # `max_page_size: 100` caps how many rows are actually fetched rather than
+      # erroring, so a huge requested limit still succeeds.
+      assert {200, body} =
+               api_get("/api/json/posts?filter[category_id]=#{cat.id}&page[limit]=1000")
+
+      assert ids(body) == [p.id]
+    end
+  end
+
+  describe "single record" do
+    test "fetches a published post by id" do
+      admin = user(:admin)
+      post = published_post(%{title: "Single"}, admin)
+
+      assert {200, %{"data" => data}} = api_get("/api/json/posts/#{post.id}")
+      assert data["id"] == post.id
+      assert data["attributes"]["title"] == "Single"
+    end
+
+    test "hides an unpublished post by id from anonymous consumers" do
+      admin = user(:admin)
+      draft = make_post(%{title: "Hidden"}, admin)
+
+      assert {status, _} = api_get("/api/json/posts/#{draft.id}")
+      assert status in [403, 404]
+    end
+  end
+
+  describe "published feed route" do
+    test "/posts/published returns published content newest first" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      older = published_post(%{title: "Older", category_id: cat.id}, admin)
+      newer = published_post(%{title: "Newer", category_id: cat.id}, admin)
+
+      assert {200, body} = api_get("/api/json/posts/published?filter[category_id]=#{cat.id}")
+      # Newest-first default ordering from the `:published` read.
+      assert ids(body) == [newer.id, older.id]
+    end
+  end
+
+  describe "pages" do
+    test "lists and filters pages" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      live = published_post_page(%{title: "Live page", category_id: cat.id}, admin)
+
+      _draft =
+        CMS.create_page!(%{title: "Draft page", slug: slug(), category_id: cat.id}, actor: admin)
+
+      assert {200, body} = api_get("/api/json/pages?filter[category_id]=#{cat.id}")
+      assert ids(body) == [live.id]
+    end
+  end
+
+  describe "media items" do
+    test "lists media and filters by content_type" do
+      admin = user(:admin)
+
+      png =
+        CMS.create_media_item!(
+          %{filename: "a-#{System.unique_integer([:positive])}.png", content_type: "image/png"},
+          actor: admin
+        )
+
+      jpg =
+        CMS.create_media_item!(
+          %{filename: "b-#{System.unique_integer([:positive])}.jpg", content_type: "image/jpeg"},
+          actor: admin
+        )
+
+      assert {200, all} = api_get("/api/json/media-items?filter[id]=#{png.id}")
+      assert ids(all) == [png.id]
+
+      assert {200, pngs} = api_get("/api/json/media-items?filter[content_type]=image/png")
+      returned = ids(pngs)
+      assert png.id in returned
+      refute jpg.id in returned
+    end
+
+    test "fetches a media item by id" do
+      admin = user(:admin)
+
+      item =
+        CMS.create_media_item!(
+          %{
+            filename: "single-#{System.unique_integer([:positive])}.png",
+            content_type: "image/png"
+          },
+          actor: admin
+        )
+
+      assert {200, %{"data" => data}} = api_get("/api/json/media-items/#{item.id}")
+      assert data["id"] == item.id
+    end
+  end
+
+  # Page equivalent of `published_post/2`.
+  defp published_post_page(attrs, admin) do
+    attrs
+    |> Map.put_new(:slug, slug())
+    |> then(&CMS.create_page!(&1, actor: admin))
+    |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+  end
+end

@@ -73,20 +73,40 @@ defmodule KilnCMS.CMS.Content do
     published_read =
       if published? do
         quote do
-          # Public delivery: published content, newest first.
+          # Public delivery: published content, newest first. Paginated for
+          # headless feed consumers (offset + keyset), but `required?: false`
+          # keeps `CMS.list_published_*` returning a plain list.
           read :published do
             filter expr(^ref(:state) == :published)
             prepare build(sort: [published_at: :desc])
+
+            pagination offset?: true,
+                       keyset?: true,
+                       countable: true,
+                       required?: false,
+                       max_page_size: 100,
+                       default_limit: 25
           end
         end
       end
 
     # The matching GraphQL query for the `:published` read (post index), only
-    # present when the type opts into `published?`.
+    # present when the type opts into `published?`. `paginate_with: nil` keeps it
+    # a plain list in GraphQL — the `:published` read is paginated for the
+    # JSON:API feed (#33), but the delivery GraphQL surface stays unpaginated.
     published_query =
       if published? do
         quote do
-          list unquote(:"published_#{type}s"), :published
+          list unquote(:"published_#{type}s"), :published, paginate_with: nil
+        end
+      end
+
+    # JSON:API route for the published feed — only added for types that declare
+    # the `:published` read (e.g. Post), so the macro stays type-agnostic.
+    published_route =
+      if published? do
+        quote do
+          index :published, route: "/published"
         end
       end
 
@@ -141,8 +161,17 @@ defmodule KilnCMS.CMS.Content do
 
         routes do
           base unquote("/#{type}s")
+
+          # Collection + single-record reads for headless consumers. Filtering
+          # (`filter[...]`), sorting (`sort=`) and pagination (`page[...]`) are
+          # derived from the `:read` action and the resource's public fields —
+          # documented in `docs/json-api.md`.
+          index :read
           index :search, route: "/search"
           index :autocomplete, route: "/autocomplete"
+          unquote(published_route)
+          # `/:id` last so it can't shadow the static sub-paths above.
+          get :read
         end
       end
 
@@ -291,9 +320,25 @@ defmodule KilnCMS.CMS.Content do
       end
 
       actions do
-        defaults [:read]
-
         default_accept unquote(accept)
+
+        # Primary read, tuned for headless list consumers (JSON:API `index
+        # :read`). Offset paging for page-numbered UIs, keyset for stable deep
+        # cursors; `default_limit`/`max_page_size` bound the response size and
+        # `countable` lets clients ask for a total. `required?: false` (with the
+        # default `paginate_by_default?: false`) keeps internal `CMS.list_*`
+        # callers returning plain lists — only callers that pass `page:` (the
+        # JSON:API layer, when `page[...]` is supplied) get a paginator.
+        read :read do
+          primary? true
+
+          pagination offset?: true,
+                     keyset?: true,
+                     countable: true,
+                     required?: false,
+                     max_page_size: 100,
+                     default_limit: 25
+        end
 
         # Soft-delete (AshArchival). Non-atomic so the cache-busting after_action
         # change can run.
