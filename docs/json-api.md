@@ -6,9 +6,32 @@ headless consumers at **`/api/json`** (powered by
 filtering, sorting and pagination query params for the public content types —
 **Page**, **Post** and **MediaItem** — tuned in Phase 5 (issue #33).
 
-> The interactive Swagger UI + OpenAPI spec (`/api/json/swaggerui`,
-> `/api/json/open_api`) are mounted only when `dev_routes` is enabled. In
-> production the JSON endpoints are served, but the explorer is not.
+## OpenAPI specification
+
+A machine-readable **OpenAPI 3** document is published at
+**`/api/json/open_api`** in **all environments** (dev and prod, issue #37). It
+is generated from the resources by AshJsonApi and enriched by
+`KilnCMSWeb.OpenApi` with the title, app version and a description covering
+authentication, pagination and webhooks. Point any OpenAPI tool at it to
+generate clients or render documentation:
+
+```
+# Render the live docs with Redoc (example)
+npx @redocly/cli preview-docs https://your-host/api/json/open_api
+
+# Or generate a typed client
+npx @openapitools/openapi-generator-cli generate \
+  -i https://your-host/api/json/open_api -g typescript-fetch -o ./client
+```
+
+The spec declares a `bearerAuth` (JWT) security scheme applied to every
+operation, so generated clients prompt for a token — see
+[Authentication](#content-negotiation) below.
+
+> The **interactive Swagger UI explorer** (`/api/json/swaggerui`) is mounted
+> only when `dev_routes` is enabled — it ships inline scripts/CDN assets that
+> conflict with the strict production CSP. In production, render the published
+> spec with an external viewer (Redoc, Swagger UI, Postman, etc.) instead.
 
 ## Content negotiation
 

@@ -132,7 +132,9 @@ defmodule KilnCMSWeb.Router do
     forward "/", Absinthe.Plug, schema: Module.concat(["KilnCMSWeb.GraphqlSchema"])
   end
 
-  # Headless JSON:API — always available; Swagger UI + OpenAPI spec are dev-only.
+  # Headless JSON:API — always available, including the OpenAPI spec at
+  # `/api/json/open_api` (published in all environments; see AshJsonApiRouter).
+  # Only the interactive Swagger UI explorer is dev-only (mounted further down).
   scope "/api/json" do
     pipe_through [:api]
 
@@ -250,8 +252,10 @@ defmodule KilnCMSWeb.Router do
   #   pipe_through :api
   # end
 
-  # API explorer UIs — dev/CI only (`config :kiln_cms, dev_routes: true` in
-  # dev.exs). Production keeps `/gql` and `/api/json` headless endpoints only.
+  # Interactive API explorer UIs — dev/CI only (`config :kiln_cms, dev_routes:
+  # true` in dev.exs). Production keeps the headless `/gql` and `/api/json`
+  # endpoints (the JSON:API OpenAPI spec at `/api/json/open_api` is published in
+  # all environments; only these clickable explorers are gated).
   if Application.compile_env(:kiln_cms, :dev_routes) do
     scope "/gql" do
       pipe_through [:graphql]
