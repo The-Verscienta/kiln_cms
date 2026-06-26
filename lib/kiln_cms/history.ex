@@ -8,6 +8,8 @@ defmodule KilnCMS.History do
   """
   use Ash.Domain
 
+  require Ash.Query
+
   resources do
     resource KilnCMS.History.DocumentEvent do
       define :list_events, action: :read
@@ -19,6 +21,23 @@ defmodule KilnCMS.History do
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.History.DocumentEvent
+
+  @doc """
+  Null the `actor_id` on every event a now-erased user produced, retaining the
+  events themselves (#212/#219). Runs as a trusted system job.
+  """
+  @spec anonymize_actor(Ecto.UUID.t()) :: :ok
+  def anonymize_actor(actor_id) when is_binary(actor_id) do
+    DocumentEvent
+    |> Ash.Query.filter(actor_id == ^actor_id)
+    |> Ash.bulk_update!(:anonymize_actor, %{},
+      authorize?: false,
+      return_records?: false,
+      return_errors?: true
+    )
+
+    :ok
+  end
 
   @doc "Append an event, assigning the next per-document sequence number."
   @spec record(atom(), term(), atom(), map(), keyword()) ::

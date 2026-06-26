@@ -176,6 +176,11 @@ defmodule KilnCMSWeb.Router do
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index
     end
+
+    # Self-service data export (#212). Controller route (file download), gated by
+    # the signed-in user loaded in `:browser`; the controller scopes the payload
+    # to `current_user`.
+    get "/editor/account/export.json", AccountController, :export
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only

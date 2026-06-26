@@ -118,6 +118,17 @@ defmodule KilnCMS.Accounts.User do
       accept [:notify_on_review_request, :notify_on_publish, :notify_on_return_to_draft]
     end
 
+    # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
+    # revokes tokens + anonymizes audit-event actors, while keeping the row and
+    # content/version history (audit retention — #219). See
+    # KilnCMS.Accounts.Changes.AnonymizeUser and docs/data-flows.md.
+    update :anonymize do
+      description "Scrub personal data from a user while retaining audit history."
+      require_atomic? false
+      accept []
+      change KilnCMS.Accounts.Changes.AnonymizeUser
+    end
+
     update :change_password do
       # Use this action to allow users to change their password by providing
       # their current password and a new password.
@@ -311,6 +322,12 @@ defmodule KilnCMS.Accounts.User do
     policy action(:update_notification_prefs) do
       authorize_if expr(id == ^actor(:id))
     end
+
+    # Erasure is an operator action — admins only (covered by the admin bypass
+    # above; this makes the intent explicit and forbids everyone else).
+    policy action(:anonymize) do
+      authorize_if actor_attribute_equals(:role, :admin)
+    end
   end
 
   attributes do
@@ -333,6 +350,12 @@ defmodule KilnCMS.Accounts.User do
     end
 
     attribute :confirmed_at, :utc_datetime_usec
+
+    # Set when the account has been scrubbed via the `:anonymize` erasure action
+    # (#212). Non-nil marks a tombstoned account (email/name no longer personal).
+    attribute :anonymized_at, :utc_datetime_usec do
+      public? true
+    end
 
     # RBAC role. Defaults to the least-privileged role so self-registration
     # can never grant elevated access; promote via a separate admin action.

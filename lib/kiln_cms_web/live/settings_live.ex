@@ -90,6 +90,22 @@ defmodule KilnCMSWeb.SettingsLive do
             </.button>
           </.form>
         </section>
+
+        <section class="max-w-xl rounded-lg border border-base-content/10 p-4">
+          <h2 class="mb-1 text-lg font-medium">{gettext("Your data")}</h2>
+          <p class="mb-4 text-sm text-base-content/60">
+            {gettext("Download a copy of your account profile and notification preferences as JSON.")}
+          </p>
+
+          <.link
+            href={~p"/editor/account/export.json"}
+            download="kiln-account-export.json"
+            class="inline-flex items-center gap-2 rounded-lg border border-base-content/20 px-3 py-2 text-sm font-medium hover:bg-base-200"
+          >
+            <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
+            {gettext("Export my data")}
+          </.link>
+        </section>
       </div>
     </Layouts.app>
     """

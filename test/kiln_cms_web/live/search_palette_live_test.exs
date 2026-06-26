@@ -78,6 +78,15 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
     assert html =~ term
   end
 
+  test "discloses that searches are logged and the retention window (#220)", %{conn: conn} do
+    editor = authed_user(:editor)
+    {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/search")
+
+    days = KilnCMS.Analytics.SearchQuery.retention_days()
+    assert html =~ "logged anonymously"
+    assert html =~ "purged after #{days} days"
+  end
+
   test "shows an empty state for a non-matching query", %{conn: conn} do
     editor = authed_user(:editor)
     {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/search")

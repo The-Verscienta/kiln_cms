@@ -31,6 +31,15 @@ defmodule KilnCMS.History.DocumentEvent do
       filter expr(document_type == ^arg(:document_type) and document_id == ^arg(:document_id))
       prepare build(sort: [seq: :asc])
     end
+
+    # Privacy (#212/#219): null the actor on a user's events when that user is
+    # erased, while keeping the content-history rows themselves for audit. Run as
+    # a system job (`authorize?: false`) from `KilnCMS.History.anonymize_actor/1`.
+    update :anonymize_actor do
+      description "Clear actor_id (user erasure) while retaining the event."
+      accept []
+      change set_attribute(:actor_id, nil)
+    end
   end
 
   policies do
@@ -42,6 +51,12 @@ defmodule KilnCMS.History.DocumentEvent do
     end
 
     policy action_type(:create) do
+      forbid_if always()
+    end
+
+    # Writes (incl. actor anonymization) only ever run as a trusted system job
+    # (`authorize?: false`); no external caller may mutate the event log.
+    policy action_type(:update) do
       forbid_if always()
     end
   end

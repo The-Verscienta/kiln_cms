@@ -41,11 +41,11 @@ defmodule KilnCMSWeb.Presence do
     end)
   end
 
-  # `email` is an `Ash.CiString`, so normalise via `to_string/1` rather than
-  # guarding on `is_binary/1`.
-  @doc "A short display name for a user — the local part of their email."
-  def display_name(%{email: email}) when not is_nil(email),
-    do: email |> to_string() |> String.split("@") |> hd()
-
+  # Privacy (#214): show the user's chosen display name to other editors, never
+  # their email local-part (which leaks the address / naming convention). Falls
+  # back to a neutral handle when no name is set — identity stays keyed by user
+  # id, so unnamed editors are still tracked distinctly.
+  @doc "A display name for a user — their `name`, or a neutral fallback."
+  def display_name(%{name: name}) when is_binary(name) and name != "", do: name
   def display_name(_), do: "Someone"
 end
