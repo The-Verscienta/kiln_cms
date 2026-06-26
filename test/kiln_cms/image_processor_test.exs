@@ -83,4 +83,56 @@ defmodule KilnCMS.ImageProcessorTest do
 
     File.rm(path)
   end
+
+  describe "strip_metadata/2 (#215)" do
+    @artist_field "exif-ifd0-Artist"
+
+    # A JPEG carrying an EXIF Artist tag (stands in for GPS/device metadata).
+    defp jpeg_with_exif do
+      path = Path.join(System.tmp_dir!(), "exif-#{System.unique_integer([:positive])}.jpg")
+      {:ok, image} = Image.new(600, 400, color: :green)
+
+      {:ok, with_exif} =
+        Vix.Vips.Image.mutate(image, fn mut ->
+          :ok = Vix.Vips.MutableImage.set(mut, @artist_field, :gchararray, "Secret Person")
+        end)
+
+      {:ok, _} = Image.write(with_exif, path)
+      path
+    end
+
+    defp field?(path, field) do
+      {:ok, image} = Image.open(path)
+
+      case Vix.Vips.Image.header_value(image, field) do
+        {:ok, _value} -> true
+        _ -> false
+      end
+    end
+
+    test "removes EXIF metadata from the re-encoded copy" do
+      src = jpeg_with_exif()
+      on_exit(fn -> File.rm(src) end)
+      # Sanity: the source really does carry the EXIF tag.
+      assert field?(src, @artist_field)
+
+      assert {:ok, stripped} = ImageProcessor.strip_metadata(src, ".jpg")
+      on_exit(fn -> File.rm(stripped) end)
+
+      # The PII-bearing tag is gone (libvips may regenerate a technical-only
+      # exif-data blob on save — resolution/colorspace — but no EXIF Artist/GPS).
+      refute field?(stripped, @artist_field)
+      refute stripped |> File.read!() |> String.contains?("Secret Person")
+      # The pixels survive: same dimensions, still a readable image.
+      assert {:ok, %{width: 600, height: 400}} = ImageProcessor.process(stripped, ".jpg")
+    end
+
+    test "returns an error for non-image input (caller falls back to original)" do
+      bad = Path.join(System.tmp_dir!(), "bad-#{System.unique_integer([:positive])}.jpg")
+      File.write!(bad, "not an image")
+      on_exit(fn -> File.rm(bad) end)
+
+      assert {:error, _} = ImageProcessor.strip_metadata(bad, ".jpg")
+    end
+  end
 end

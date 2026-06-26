@@ -9,11 +9,40 @@ defmodule KilnCMS.Analytics.SearchQuery do
   use Ash.Resource,
     domain: KilnCMS.Analytics,
     data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshOban]
+
+  # Retention window (days) before a query row is purged. Although rows carry no
+  # actor/IP, the query text itself can contain names, emails, or confidential
+  # titles — so it isn't kept indefinitely. Override via
+  # `config :kiln_cms, :search_analytics, retention_days: N`.
+  @retention_days Application.compile_env(:kiln_cms, [:search_analytics, :retention_days], 90)
+
+  @doc "Configured retention window for recorded search queries, in days."
+  def retention_days, do: @retention_days
 
   postgres do
     table "search_queries"
     repo KilnCMS.Repo
+  end
+
+  # Privacy retention (#213): purge query rows last searched longer ago than the
+  # retention window. Runs nightly as a trusted system job. Surfaced to editors
+  # via the search-palette disclosure (#220).
+  oban do
+    triggers do
+      trigger :purge_expired do
+        action :purge_expired
+        read_action :expired
+        worker_read_action :expired
+        queue :default
+        scheduler_cron "0 3 * * *"
+        where expr(last_searched_at <= ago(@retention_days, :day))
+
+        worker_module_name KilnCMS.Analytics.SearchQuery.AshOban.Worker.PurgeExpired
+        scheduler_module_name KilnCMS.Analytics.SearchQuery.AshOban.Scheduler.PurgeExpired
+      end
+    end
   end
 
   actions do
@@ -41,10 +70,30 @@ defmodule KilnCMS.Analytics.SearchQuery do
       filter expr(^ref(:result_count) == 0)
       prepare build(sort: [count: :desc])
     end
+
+    # Rows whose most-recent search predates the retention window. Keyset
+    # pagination feeds the AshOban `:purge_expired` trigger.
+    read :expired do
+      description "Query rows last searched before the retention window."
+      pagination keyset?: true, required?: false
+      filter expr(last_searched_at <= ago(@retention_days, :day))
+    end
+
+    # Hard-delete expired rows. Invoked by the nightly `:purge_expired` trigger.
+    destroy :purge_expired do
+      description "Deletes search-query rows past the retention window."
+      change filter(expr(last_searched_at <= ago(@retention_days, :day)))
+    end
   end
 
   policies do
     bypass actor_attribute_equals(:role, :admin) do
+      authorize_if always()
+    end
+
+    # The nightly `:purge_expired` retention trigger reads + destroys as a
+    # trusted system job (no actor); let AshOban's scheduler/worker through.
+    bypass AshOban.Checks.AshObanInteraction do
       authorize_if always()
     end
 

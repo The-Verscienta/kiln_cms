@@ -89,8 +89,11 @@ defmodule KilnCMS.Notifications do
   defp kind(%Post{}), do: "post"
 
   # The submitter's display name for the body; nil for actor-less events.
-  defp actor_name(nil), do: nil
-  defp actor_name(actor), do: actor |> email_of() |> local_part()
+  # Privacy (#214): prefer the user's chosen `name`; never fall back to the
+  # email local-part. When no name is set we return nil and the mail worker
+  # renders a neutral "An editor" / "A reviewer".
+  defp actor_name(%{name: name}) when is_binary(name) and name != "", do: name
+  defp actor_name(_actor), do: nil
 
   defp same_user?(_user, nil), do: false
   defp same_user?(%{id: id}, %{id: id}), do: true
@@ -99,7 +102,4 @@ defmodule KilnCMS.Notifications do
   # `email` is an `Ash.CiString`, so normalise via `to_string/1`.
   defp email_of(%{email: email}) when not is_nil(email), do: to_string(email)
   defp email_of(_), do: nil
-
-  defp local_part(nil), do: nil
-  defp local_part(email), do: email |> String.split("@") |> hd()
 end

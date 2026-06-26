@@ -60,6 +60,60 @@ defmodule KilnCMS.ImageProcessor do
   defp allowed_format(_), do: {:error, :unsupported_format}
 
   @doc """
+  Re-encodes `path` (already validated, with canonical `ext`) to a temp file
+  with **all metadata stripped** — EXIF/GPS, camera info, and the original
+  client filename. Returns `{:ok, stripped_tmp_path}`; the caller owns the temp
+  file. On any failure returns `{:error, reason}` so the caller can fall back to
+  storing the original. Multi-page/animated sources (GIF/WebP) are opened with
+  all frames so animation is preserved.
+
+  Privacy (#215): uploaded photos commonly carry GPS and device metadata. Both
+  the stored original and (via re-fetch in `Media.VariantWorker`) its variants
+  are sourced from this stripped copy.
+  """
+  # `tmp` is server-built (System.tmp_dir! + a UUID), never user input — the
+  # File.rm traversal warning is a false positive.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec strip_metadata(Path.t(), String.t()) :: {:ok, Path.t()} | {:error, term}
+  def strip_metadata(path, ext) when is_binary(path) and is_binary(ext) do
+    tmp = Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-stripped#{ext}")
+
+    with {:ok, image} <- open_all_pages(path),
+         {:ok, stripped} <- strip(image),
+         {:ok, _} <- Image.write(stripped, tmp) do
+      {:ok, tmp}
+    else
+      {:error, reason} ->
+        File.rm(tmp)
+        {:error, reason}
+
+      other ->
+        File.rm(tmp)
+        {:error, other}
+    end
+  rescue
+    e ->
+      Logger.warning("ImageProcessor.strip_metadata failed for #{path}: #{inspect(e)}")
+      {:error, e}
+  end
+
+  # Drop every header field (all EXIF incl. GPS/device/filename, plus XMP/IPTC)
+  # so libvips can't regenerate the EXIF blob from leftover `exif-ifd*` fields on
+  # save. We remove fields directly rather than via the `strip` save flag (a
+  # silent no-op on current libvips) or `minimize_metadata` (which first *reads*
+  # EXIF and errors out on a thumbnail's regenerated `:invalid_exif` blob).
+  defp strip(image), do: Image.remove_metadata(image, [])
+
+  # Prefer loading every frame (animated GIF/WebP) so stripping doesn't flatten
+  # animation; single-page loaders (JPEG/PNG) reject `pages:` so fall back.
+  defp open_all_pages(path) do
+    case Image.open(path, pages: :all) do
+      {:ok, image} -> {:ok, image}
+      _ -> Image.open(path)
+    end
+  end
+
+  @doc """
   Analyzes `path` and writes any applicable variants (with extension `ext`,
   e.g. `".png"`) to the temp dir. Returns the dimensions and variant temp files.
   """
@@ -91,6 +145,9 @@ defmodule KilnCMS.ImageProcessor do
 
   defp thumb(image, label, target, ext) do
     with {:ok, resized} <- Image.thumbnail(image, target),
+         # Defense-in-depth: strip metadata on variants too, so they never carry
+         # EXIF/GPS even if a future caller processes an un-stripped original (#215).
+         {:ok, resized} <- strip(resized),
          tmp = Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-#{label}#{ext}"),
          {:ok, _} <- Image.write(resized, tmp) do
       %{

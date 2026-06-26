@@ -45,6 +45,8 @@ defmodule KilnCMS.NotificationsTest do
 
   defp recipients(email), do: Enum.map(email.to, fn {_name, addr} -> addr end)
 
+  defp local_part(user), do: user.email |> to_string() |> String.split("@") |> hd()
+
   test "submitting for review emails admins, not the submitter" do
     admin = user(:admin)
     editor = user(:editor)
@@ -110,6 +112,32 @@ defmodule KilnCMS.NotificationsTest do
     assert [email] = returned
     assert email.subject == "Changes requested: Needs Work"
     assert recipients(email) == [to_string(editor.email)]
+  end
+
+  test "review email shows the submitter's display name, not their email (#214)" do
+    _admin = user(:admin)
+    editor = user(:editor, %{name: "Jane Smith"})
+
+    page = CMS.create_page!(%{title: "Bylined", slug: slug()}, actor: editor)
+    CMS.submit_page_for_review!(page, %{}, actor: editor)
+    drain()
+
+    assert [review] = sent_emails("Bylined")
+    assert review.html_body =~ "Jane Smith"
+    refute review.html_body =~ local_part(editor)
+  end
+
+  test "review email falls back to a neutral name when none is set (#214)" do
+    _admin = user(:admin)
+    editor = user(:editor)
+
+    page = CMS.create_page!(%{title: "Anon Submit", slug: slug()}, actor: editor)
+    CMS.submit_page_for_review!(page, %{}, actor: editor)
+    drain()
+
+    assert [review] = sent_emails("Anon Submit")
+    assert review.html_body =~ "An editor"
+    refute review.html_body =~ local_part(editor)
   end
 
   test "an admin who opted out of review-request emails is skipped" do
