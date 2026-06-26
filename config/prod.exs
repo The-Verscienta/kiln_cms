@@ -33,6 +33,9 @@ config :logger, level: :info
 # runtime in KilnCMS.Application.
 config :kiln_cms, dev_routes: false
 
+# Disable GraphQL schema introspection in production (reconnaissance hardening).
+config :kiln_cms, :graphql_introspection, false
+
 # Webhook targets must be HTTPS and must not resolve to private addresses.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: true, resolve_dns: true
 

@@ -86,6 +86,11 @@ config :nx, default_backend: EXLA.Backend
 # Organization name used as the JSON-LD publisher. Override in runtime.exs.
 config :kiln_cms, :site_name, "KilnCMS"
 
+# GraphQL schema introspection. Enabled by default for local/dev tooling;
+# disabled in production (config/prod.exs) so the public /gql endpoint doesn't
+# expose a full schema map for reconnaissance.
+config :kiln_cms, :graphql_introspection, true
+
 # Open self-registration. `true` (default) lets anyone create a `:viewer`
 # account via `/register`; set to `false` for an invite-only / internal CMS,
 # which hides the registration route and rejects the registration action.
