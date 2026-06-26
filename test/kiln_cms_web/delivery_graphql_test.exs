@@ -226,4 +226,54 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
       assert msg =~ ~r/Cannot query field "author"/
     end
   end
+
+  # Regression for #184: a bearer token widens the `:read`/`:search` policies for
+  # editors, but the `*BySlug` queries run `:public_by_slug`, which hard-filters
+  # `state == :published` in the action — so they never return drafts, authed or
+  # not. The docs previously claimed otherwise.
+  describe "bearer does not widen *BySlug (#184)" do
+    defp editor do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "gqled-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :editor
+      })
+    end
+
+    defp run_as(actor, query, variables),
+      do: Absinthe.run(query, @schema, variables: variables, context: %{actor: actor})
+
+    test "postBySlug returns null for a draft slug even with an editor actor" do
+      admin = admin()
+      s = slug()
+      # Created, deliberately left in :draft.
+      _draft = CMS.create_post!(%{title: "Hidden draft", slug: s}, actor: admin)
+
+      q = "query($s:String!,$l:String!){ postBySlug(slug:$s,locale:$l){ id state } }"
+
+      # Anonymous: null (published-only).
+      assert {:ok, %{data: %{"postBySlug" => nil}}} = run(q, %{"s" => s, "l" => "en"})
+
+      # Editor bearer: STILL null — the action filter ignores the actor.
+      assert {:ok, %{data: %{"postBySlug" => nil}}} =
+               run_as(editor(), q, %{"s" => s, "l" => "en"})
+    end
+
+    test "searchPosts DOES widen for an editor actor (contrast with *BySlug)" do
+      admin = admin()
+      term = "draftsearch#{System.unique_integer([:positive])}"
+      draft = CMS.create_post!(%{title: "#{term} draft", slug: slug()}, actor: admin)
+
+      q = "query($q:String!){ searchPosts(query:$q){ id title } }"
+
+      # Anonymous: the draft is hidden.
+      assert {:ok, %{data: %{"searchPosts" => anon}}} = run(q, %{"q" => term})
+      refute draft.id in Enum.map(anon, & &1["id"])
+
+      # Editor bearer: the draft surfaces through search.
+      assert {:ok, %{data: %{"searchPosts" => found}}} = run_as(editor(), q, %{"q" => term})
+      assert draft.id in Enum.map(found, & &1["id"])
+    end
+  end
 end

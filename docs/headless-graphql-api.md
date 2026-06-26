@@ -215,6 +215,22 @@ curl -s http://localhost:4000/gql \
   }'
 ```
 
-Add `-H 'authorization: Bearer <token>'` to authenticate as an editor/admin and
-see draft content through the same queries (the read policy widens for
-authenticated editors).
+### Bearer tokens and drafts
+
+Add `-H 'authorization: Bearer <token>'` to authenticate as an editor/admin. The
+bearer **widens the `:read` and `:search` policies**, so authenticated editors
+see drafts through the *list/search* surfaces — e.g. `searchPosts`/`searchPages`
+return drafts, and the JSON:API `:read` routes accept `filter[state]=draft`.
+
+It does **not** widen the `*BySlug` queries. `postBySlug` / `pageBySlug` (and
+`categoryBySlug` / `tagBySlug`) run the `:public_by_slug` action, which
+**hard-filters `state == :published`** in the action itself — independent of the
+actor. A bearer token therefore makes no difference: a draft slug always returns
+`null`, authenticated or not.
+
+To fetch a specific draft by slug:
+
+- **JSON:API** (bearer): `GET /api/json/posts?filter[slug]=<slug>&filter[state]=draft`
+- **Share link**: `GET /preview/:token` (per-draft signed token, no account needed)
+
+See `docs/api.md` → "Reading drafts" for the full playbook.

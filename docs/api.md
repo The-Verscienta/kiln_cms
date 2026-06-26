@@ -99,6 +99,25 @@ strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 token = user.__metadata__.token
 ```
 
+### Reading drafts
+
+A bearer token widens the **`:read` and `:search`** policies for editors/admins,
+but **not every query returns drafts**. Pick the right surface:
+
+| Goal | Surface | Returns drafts with bearer? |
+|------|---------|------------------------------|
+| List / filter drafts | JSON:API `GET /api/json/<type>?filter[state]=draft` | ✅ yes |
+| Search drafts | JSON:API `/search` · GraphQL `searchPosts`/`searchPages` | ✅ yes |
+| Fetch one **by id** | JSON:API `GET /api/json/<type>/:id` | ✅ yes |
+| Fetch one **by slug** | GraphQL `postBySlug`/`pageBySlug`, `categoryBySlug`, `tagBySlug` | ❌ **no — published only** |
+| Share a specific draft | `GET /preview/:token` (signed link) | n/a (no account needed) |
+
+> **GraphQL `*BySlug` never returns drafts.** Those queries run the
+> `:public_by_slug` action, which **hard-filters `state == :published`** inside
+> the action — independent of the actor. A bearer token makes no difference; a
+> draft slug always resolves to `null`. To fetch a known draft slug, use the
+> JSON:API filter (`filter[slug]=<slug>&filter[state]=draft`) or a preview token.
+
 ## Core content endpoints
 
 Full filtering / sorting / pagination reference: **[json-api.md](json-api.md)**.
