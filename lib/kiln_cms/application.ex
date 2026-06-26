@@ -24,6 +24,9 @@ defmodule KilnCMS.Application do
          Application.fetch_env!(:kiln_cms, Oban)
        )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
+      # Fire-and-forget tasks off the request hot path (e.g. best-effort
+      # page-view analytics) so a DB write can't queue/slow content delivery.
+      {Task.Supervisor, name: KilnCMS.TaskSupervisor},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)

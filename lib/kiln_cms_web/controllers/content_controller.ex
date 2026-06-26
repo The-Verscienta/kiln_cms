@@ -293,12 +293,19 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  # Record a privacy-first page view. Best-effort: analytics must never break or
-  # slow content delivery, so failures are swallowed.
+  # Record a privacy-first page view. Best-effort and **off the request path**:
+  # the upsert runs in a supervised, unlinked task so a slow DB pool (or a crawler
+  # spike) can't queue page delivery. Failures are swallowed.
   defp track_view(type, id) do
-    Analytics.record_view(type, id, authorize?: false)
-  rescue
-    _ -> :ok
+    Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+      try do
+        Analytics.record_view(type, id, authorize?: false)
+      rescue
+        _ -> :ok
+      end
+    end)
+
+    :ok
   end
 
   defp not_found(conn) do
