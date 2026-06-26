@@ -33,6 +33,8 @@ defmodule KilnCMSWeb.Endpoint do
   # User-uploaded media (KilnCMS.Storage.Local). Served from priv/uploads,
   # which the Local adapter writes to (the app-dir paths stay in sync). In
   # production a remote adapter (S3/MinIO) would serve these instead.
+  plug :secure_upload_headers
+
   plug Plug.Static,
     at: "/uploads",
     from: {:kiln_cms, "priv/uploads"},
@@ -70,4 +72,16 @@ defmodule KilnCMSWeb.Endpoint do
   # Strip a `/<locale>/…` prefix and set the locale before routing.
   plug KilnCMSWeb.Plugs.SetLocale
   plug KilnCMSWeb.Router
+
+  # Force user-uploaded media to download rather than render inline, and disable
+  # content-type sniffing — defense-in-depth against a stored file being
+  # interpreted as active content in the app origin. (Content-Disposition is
+  # ignored for <img>/subresource loads, so legitimate images still render.)
+  defp secure_upload_headers(%{path_info: ["uploads" | _]} = conn, _opts) do
+    conn
+    |> Plug.Conn.put_resp_header("content-disposition", "attachment")
+    |> Plug.Conn.put_resp_header("x-content-type-options", "nosniff")
+  end
+
+  defp secure_upload_headers(conn, _opts), do: conn
 end

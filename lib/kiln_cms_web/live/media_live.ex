@@ -168,20 +168,19 @@ defmodule KilnCMSWeb.MediaLive do
   # --- helpers ---------------------------------------------------------------
 
   defp store_entry(path, entry, actor) do
-    key = Storage.generate_key(entry.client_name)
-
-    with :ok <- ImageProcessor.validate_upload(path),
+    with {:ok, %{ext: ext, content_type: content_type}} <- ImageProcessor.validate_upload(path),
+         key = Storage.generate_key_with_ext(ext),
          {:ok, ^key} <- Storage.store(key, path) do
-      create_from_upload(key, entry, actor)
+      create_from_upload(key, content_type, entry, actor)
     else
       _ -> :error
     end
   end
 
-  defp create_from_upload(key, entry, actor) do
+  defp create_from_upload(key, content_type, entry, actor) do
     attrs = %{
       filename: entry.client_name,
-      content_type: entry.client_type,
+      content_type: content_type,
       byte_size: entry.client_size,
       storage_key: key,
       url: Storage.url(key)
