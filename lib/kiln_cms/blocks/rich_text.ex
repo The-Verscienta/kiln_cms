@@ -15,7 +15,10 @@ defmodule KilnCMS.Blocks.RichText do
 
   @impl Kiln.Block.Renderer
   def render(%__MODULE__{body: [_ | _] = body}, :web), do: PortableText.to_html(body)
-  def render(%__MODULE__{legacy_html: legacy}, :web), do: legacy || ""
+  # Legacy stored TipTap HTML is untrusted: strip it to the allowlist before it
+  # reaches a fired `:web` artifact (headless consumers assign this to innerHTML).
+  def render(%__MODULE__{legacy_html: legacy}, :web),
+    do: KilnCMS.HTMLSanitizer.sanitize_rich_text(legacy)
 
   def render(%__MODULE__{} = block, :json),
     do: %{"_type" => "rich_text", "body" => block.body || []}

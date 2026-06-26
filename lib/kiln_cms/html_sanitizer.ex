@@ -60,6 +60,37 @@ defmodule KilnCMS.HTMLSanitizer do
   end
 
   @doc """
+  Returns a safe link `href` for block rendering, or `nil` when the URL uses a
+  disallowed scheme (`javascript:`, `data:`, `vbscript:`, …).
+
+  Allowed: same-origin relative paths, `http(s)://`, and `mailto:`. Mirrors the
+  URL policy applied on the public HEEx delivery path so fired `:web` artifacts
+  consumed via `innerHTML` cannot carry scriptable links.
+  """
+  def safe_href(nil), do: nil
+  def safe_href(""), do: nil
+
+  def safe_href(url) when is_binary(url) do
+    trimmed = String.trim(url)
+
+    cond do
+      safe_relative_path?(trimmed) -> trimmed
+      safe_absolute_url?(trimmed) -> trimmed
+      mailto?(trimmed) -> trimmed
+      true -> nil
+    end
+  end
+
+  def safe_href(_), do: nil
+
+  defp mailto?(url) do
+    case URI.parse(url) do
+      %URI{scheme: "mailto"} -> not String.contains?(String.downcase(url), "javascript:")
+      _ -> false
+    end
+  end
+
+  @doc """
   Returns a safe embed iframe `src` for supported providers (YouTube, Vimeo),
   or `nil` when the URL is rejected.
   """

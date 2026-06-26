@@ -365,6 +365,7 @@ defmodule KilnCMS.CMS.Content do
 
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          validate KilnCMS.CMS.Validations.SeoUrls
         end
 
         update :update do
@@ -389,6 +390,7 @@ defmodule KilnCMS.CMS.Content do
           # Edits to already-published content fire a `<type>.updated` webhook;
           # `only_when: :published` keeps draft edits and autosaves silent.
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+          validate KilnCMS.CMS.Validations.SeoUrls
         end
 
         # Debounced draft autosave from the editor. Writes the same content as
@@ -412,6 +414,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+          validate KilnCMS.CMS.Validations.SeoUrls
         end
 
         # Full-text search over the denormalized `search_text`. Goes through the

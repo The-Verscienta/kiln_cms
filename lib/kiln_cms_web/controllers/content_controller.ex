@@ -276,9 +276,16 @@ defmodule KilnCMSWeb.ContentController do
   # e.g. "/uploads/thumb 400w, /uploads/medium 1024w, /uploads/orig 1600w".
   defp srcset(item) do
     variant_parts =
-      for {_label, %{"url" => url, "width" => w}} <- item.variants || %{}, do: "#{url} #{w}w"
+      for {_label, %{"url" => url, "width" => w}} <- item.variants || %{},
+          safe = KilnCMS.HTMLSanitizer.safe_image_src(url),
+          is_binary(safe),
+          do: "#{safe} #{w}w"
 
-    original = if item.width, do: ["#{item.url} #{item.width}w"], else: []
+    original =
+      case item.width && KilnCMS.HTMLSanitizer.safe_image_src(item.url) do
+        url when is_binary(url) -> ["#{url} #{item.width}w"]
+        _ -> []
+      end
 
     case variant_parts ++ original do
       [] -> nil
@@ -286,12 +293,19 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  # Record a privacy-first page view. Best-effort: analytics must never break or
-  # slow content delivery, so failures are swallowed.
+  # Record a privacy-first page view. Best-effort and **off the request path**:
+  # the upsert runs in a supervised, unlinked task so a slow DB pool (or a crawler
+  # spike) can't queue page delivery. Failures are swallowed.
   defp track_view(type, id) do
-    Analytics.record_view(type, id, authorize?: false)
-  rescue
-    _ -> :ok
+    Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+      try do
+        Analytics.record_view(type, id, authorize?: false)
+      rescue
+        _ -> :ok
+      end
+    end)
+
+    :ok
   end
 
   defp not_found(conn) do

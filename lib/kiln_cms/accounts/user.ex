@@ -195,6 +195,10 @@ defmodule KilnCMS.Accounts.User do
     create :register_with_password do
       description "Register a new user with a email and password."
 
+      # Invite-only mode: reject self-registration when
+      # `config :kiln_cms, :registration_enabled` is false.
+      validate KilnCMS.Accounts.Validations.RegistrationEnabled
+
       argument :email, :ci_string do
         allow_nil? false
       end

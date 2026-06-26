@@ -43,7 +43,11 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
     test "editors are redirected away", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
-      assert {:error, {:live_redirect, %{to: "/editor"}}} = live(conn, ~p"/editor/webhooks")
+
+      assert {:error,
+              {:redirect,
+               %{to: "/", flash: %{"error" => "You need admin access to view that page."}}}} =
+               live(conn, ~p"/editor/webhooks")
     end
 
     test "admins can load the page and see selectable events", %{conn: conn} do

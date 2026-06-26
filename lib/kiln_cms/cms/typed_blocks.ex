@@ -113,8 +113,11 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp stringify(%{} = map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
   defp stringify(_), do: %{}
 
-  defp sanitize_attrs(%{"_type" => "rich_text"} = m),
-    do: Map.update(m, "legacy_html", nil, &HTMLSanitizer.sanitize_rich_text/1)
+  defp sanitize_attrs(%{"_type" => "rich_text"} = m) do
+    m
+    |> Map.update("legacy_html", nil, &HTMLSanitizer.sanitize_rich_text/1)
+    |> Map.update("body", nil, &KilnCMS.Blocks.PortableText.sanitize_body/1)
+  end
 
   defp sanitize_attrs(%{"_type" => "image"} = m),
     do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_image_src(&1) || ""))

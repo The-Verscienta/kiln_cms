@@ -2,8 +2,10 @@ defmodule KilnCMSWeb.AuthController do
   use KilnCMSWeb, :controller
   use AshAuthentication.Phoenix.Controller
 
+  alias KilnCMSWeb.SafeRedirect
+
   def success(conn, activity, user, _token) do
-    return_to = get_session(conn, :return_to) || ~p"/"
+    return_to = SafeRedirect.local_path(get_session(conn, :return_to), ~p"/")
 
     message =
       case activity do
@@ -54,7 +56,7 @@ defmodule KilnCMSWeb.AuthController do
   end
 
   def sign_out(conn, _params) do
-    return_to = get_session(conn, :return_to) || ~p"/"
+    return_to = SafeRedirect.local_path(get_session(conn, :return_to), ~p"/")
 
     conn
     |> clear_session(:kiln_cms)

@@ -371,7 +371,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   describe "/editor/trash" do
     test "editors are redirected away", %{conn: conn} do
-      assert {:error, {:live_redirect, %{to: "/editor"}}} =
+      assert {:error,
+              {:redirect,
+               %{to: "/", flash: %{"error" => "You need admin access to view that page."}}}} =
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/trash")
     end
 

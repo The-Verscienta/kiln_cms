@@ -9,7 +9,16 @@ defmodule KilnCMS.Search.EmbeddingWorker do
   text to embed yet. Enqueued by `KilnCMS.CMS.Changes.EnqueueEmbedding` after
   create/update, and by `mix kiln.embed_all` for backfill.
   """
-  use Oban.Worker, queue: :default, max_attempts: 3
+  # Coalesce rapid autosaves: while a job for this record is still pending, a new
+  # enqueue is deduped instead of stacking one embedding job per keystroke-save.
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 3,
+    unique: [
+      period: 60,
+      keys: [:resource, :id],
+      states: [:scheduled, :available, :executing, :retryable, :suspended]
+    ]
 
   alias KilnCMS.Search
 

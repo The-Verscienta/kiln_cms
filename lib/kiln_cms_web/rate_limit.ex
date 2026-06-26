@@ -7,7 +7,11 @@ defmodule KilnCMSWeb.RateLimit do
   @limits %{
     gql: {60, :timer.minutes(1)},
     api: {120, :timer.minutes(1)},
-    auth: {20, :timer.minutes(1)}
+    auth: {20, :timer.minutes(1)},
+    # Public HTML delivery — generous, just a flood/abuse ceiling per IP.
+    delivery: {300, :timer.minutes(1)},
+    # Signed preview links — tight, to slow token enumeration / draft scraping.
+    preview: {30, :timer.minutes(1)}
   }
 
   @doc false

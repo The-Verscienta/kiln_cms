@@ -106,6 +106,28 @@ defmodule KilnCMS.Blocks.PortableText do
   defp map_mark("underline"), do: "underline"
   defp map_mark(other), do: other
 
+  # ── Sanitization (cast-time, defense-in-depth) ────────────────────────────
+
+  @doc """
+  Strip link `markDefs` whose `href` fails the URL allowlist, so malicious
+  schemes (`javascript:`, `data:`, …) are never persisted in a `body`. The web
+  renderer already drops them at output time; this keeps stored prose clean for
+  any other consumer (typed renderers, exports).
+  """
+  @spec sanitize_body([pt_block()] | term()) :: [pt_block()] | term()
+  def sanitize_body(blocks) when is_list(blocks), do: Enum.map(blocks, &sanitize_block/1)
+  def sanitize_body(other), do: other
+
+  defp sanitize_block(%{"markDefs" => defs} = block) when is_list(defs),
+    do: Map.put(block, "markDefs", Enum.map(defs, &sanitize_def/1))
+
+  defp sanitize_block(block), do: block
+
+  defp sanitize_def(%{"_type" => "link", "href" => href} = def),
+    do: Map.put(def, "href", KilnCMS.HTMLSanitizer.safe_href(href) || "")
+
+  defp sanitize_def(def), do: def
+
   # ── Portable Text → HTML (web surface) ────────────────────────────────────
 
   @doc "Render PT blocks to an HTML string."
@@ -139,8 +161,17 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp apply_mark(key, acc, defs) do
     case Enum.find(defs, &(&1["_key"] == key)) do
-      %{"_type" => "link", "href" => href} -> ~s(<a href="#{esc(href)}">#{acc}</a>)
-      _ -> acc
+      %{"_type" => "link", "href" => href} ->
+        # Allowlist the URL scheme so fired `:web` HTML (consumed via innerHTML by
+        # headless clients) cannot carry `javascript:`/`data:` links. A rejected
+        # href degrades to the plain text rather than a live anchor.
+        case KilnCMS.HTMLSanitizer.safe_href(href) do
+          nil -> acc
+          safe -> ~s(<a href="#{esc(safe)}">#{acc}</a>)
+        end
+
+      _ ->
+        acc
     end
   end
 

@@ -12,6 +12,9 @@ defmodule KilnCMSWeb.MediaLive do
   @accept ~w(.jpg .jpeg .png .webp .gif)
   @max_entries 10
   @max_file_size 10_000_000
+  # Bound the library window loaded into the LiveView (newest first) so a large
+  # media library can't grow one editor's heap without limit.
+  @max_media 500
 
   @impl true
   def mount(_params, _session, socket) do
@@ -244,7 +247,7 @@ defmodule KilnCMSWeb.MediaLive do
   defp thumb_src(item), do: item.url
 
   defp list_media(actor) do
-    CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]])
+    CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc], limit: @max_media])
   end
 
   defp visible_media(media, ""), do: media

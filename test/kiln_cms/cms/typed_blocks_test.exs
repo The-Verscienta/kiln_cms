@@ -14,6 +14,22 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
       assert heading.level == 3
     end
 
+    test "strips javascript: link hrefs from Portable Text body on cast" do
+      body = [
+        %{
+          "_type" => "block",
+          "style" => "normal",
+          "children" => [%{"_type" => "span", "text" => "click", "marks" => ["lk0"]}],
+          "markDefs" => [%{"_key" => "lk0", "_type" => "link", "href" => "javascript:alert(1)"}]
+        }
+      ]
+
+      {:ok, %Ash.Union{value: %Blocks.RichText{body: [block]}}} =
+        Ash.Type.cast_input(BlockUnion, %{"_type" => "rich_text", "body" => body})
+
+      assert [%{"href" => ""}] = block["markDefs"]
+    end
+
     test "dispatches each member by its _type discriminator" do
       for {tag, mod} <- [
             {"image", Blocks.Image},

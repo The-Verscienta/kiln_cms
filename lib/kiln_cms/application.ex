@@ -7,6 +7,8 @@ defmodule KilnCMS.Application do
 
   @impl true
   def start(_type, _args) do
+    assert_dev_routes_disabled_in_prod!()
+
     children = [
       KilnCMSWeb.Telemetry,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
@@ -14,7 +16,8 @@ defmodule KilnCMS.Application do
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
-      Supervisor.child_spec({Cachex, name: KilnCMS.Firing.Cache.cache_name()}, id: :firing_cache),
+      # Bounded LRW firing-artifact cache (see `KilnCMS.Firing.Cache.child_spec/1`).
+      KilnCMS.Firing.Cache,
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
       {Oban,
@@ -23,6 +26,9 @@ defmodule KilnCMS.Application do
          Application.fetch_env!(:kiln_cms, Oban)
        )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
+      # Fire-and-forget tasks off the request hot path (e.g. best-effort
+      # page-view analytics) so a DB write can't queue/slow content delivery.
+      {Task.Supervisor, name: KilnCMS.TaskSupervisor},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)
@@ -38,6 +44,24 @@ defmodule KilnCMS.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
     Supervisor.start_link(children ++ embedding_children() ++ reranker_children(), opts)
+  end
+
+  # Fail fast if a :prod release was built with `dev_routes` enabled — that would
+  # expose AshAdmin (`/admin`, with an actor picker that can impersonate :admin),
+  # LiveDashboard, and the Swoosh mailbox with no authentication. dev_routes is
+  # compile-keyed (only config/dev.exs sets it), so this catches a mis-built
+  # release rather than a legitimate dev/test boot.
+  defp assert_dev_routes_disabled_in_prod! do
+    if Application.get_env(:kiln_cms, :compile_env) == :prod and
+         Application.get_env(:kiln_cms, :dev_routes) do
+      raise """
+      Refusing to boot: `dev_routes` is enabled in a :prod release.
+
+      This exposes /admin (AshAdmin), LiveDashboard, and the Swoosh mailbox
+      without authentication. Rebuild the release without `config :kiln_cms,
+      dev_routes: true` (it should only ever be set in config/dev.exs).
+      """
+    end
   end
 
   # The embedding serving is only started when semantic search is enabled with

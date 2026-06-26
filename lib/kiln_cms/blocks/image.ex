@@ -14,7 +14,10 @@ defmodule KilnCMS.Blocks.Image do
 
   @impl Kiln.Block.Renderer
   def render(%__MODULE__{} = block, :web) do
-    figure = ["<img src=\"", esc(block.url || ""), "\" alt=\"", esc(block.alt || ""), "\"/>"]
+    # Reject non-http(s)/relative schemes (e.g. `javascript:`, `data:`) so fired
+    # `:web` HTML is safe for headless innerHTML consumers (mirrors BlockComponents).
+    src = KilnCMS.HTMLSanitizer.safe_image_src(block.url) || ""
+    figure = ["<img src=\"", esc(src), "\" alt=\"", esc(block.alt || ""), "\"/>"]
 
     case block.caption do
       nil -> ["<figure>", figure, "</figure>"]

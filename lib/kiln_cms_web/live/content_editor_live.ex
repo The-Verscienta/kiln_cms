@@ -26,6 +26,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # adding a `Kiln.Block` module needs no editor change).
   @type_order ~w(rich_text heading quote image embed divider custom)
 
+  # Bound the media picker window loaded on mount (newest first) so a large
+  # library can't grow each open editor's heap without limit.
+  @max_media 500
+
   # Idle delay before a draft is autosaved after the last edit. Configurable so
   # tests can shorten it.
   @autosave_debounce_ms Application.compile_env(
@@ -76,7 +80,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:media_query, "")
          |> assign(
            :media,
-           CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]])
+           CMS.list_media_items!(
+             actor: actor,
+             query: [sort: [inserted_at: :desc], limit: @max_media]
+           )
          )
          |> assign(:categories, CMS.list_categories!(actor: actor))
          |> assign(:tags, CMS.list_tags!(actor: actor))
@@ -166,9 +173,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
   end
 
-  # Other content of the same kind, for the "related content" picker.
-  defp siblings(kind, id, actor),
-    do: kind |> ContentTypes.list!(actor: actor) |> Enum.reject(&(&1.id == id))
+  # Other content of the same kind, for the "related content" picker. Bounded to
+  # the same window as the media picker so a large library can't blow up the mount.
+  defp siblings(kind, id, actor) do
+    kind
+    |> ContentTypes.list!(actor: actor, query: [sort: [updated_at: :desc], limit: @max_media])
+    |> Enum.reject(&(&1.id == id))
+  end
 
   # The self-referential m2m relationship/argument names follow the convention
   # `related_<type>s` / `related_<type>_ids`. `to_existing_atom` (rather than
@@ -526,6 +537,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The media id currently on an image block sub-form, if any.
   defp media_id_of(bf), do: bf[:media_id].value
 
+  # Safe `src` for the image-block preview: a pasted URL is untrusted, so it must
+  # clear the same scheme allowlist as delivery before we echo it back. Returns
+  # nil (image hidden) for rejected schemes like `javascript:`/`data:`.
+  defp safe_preview_src(url), do: KilnCMS.HTMLSanitizer.safe_image_src(url)
+
   defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
 
   # Substring filter over filename/alt/caption — instant, no DB round-trip, and
@@ -700,8 +716,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
 
   # Focus-tracking attributes for an input; `field` keys the cursor badge.
+  # `phx-debounce` coalesces the per-keystroke `validate` events (and the
+  # `broadcast_preview/1` they trigger) so fast typing with a pop-out preview
+  # open doesn't flood PubSub / LiveView diffing.
   defp field_attrs(field) do
-    %{"phx-focus" => "field_focus", "phx-blur" => "field_blur", "phx-value-field" => field}
+    %{
+      "phx-focus" => "field_focus",
+      "phx-blur" => "field_blur",
+      "phx-value-field" => field,
+      "phx-debounce" => "300"
+    }
   end
 
   # The set of fields soft-locked *for us* right now. A field is contended when
@@ -1074,8 +1098,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     </div>
                     <div :if={block_type_string(bf) == "image"} class="space-y-2">
                       <img
-                        :if={bf[:url].value not in [nil, ""]}
-                        src={bf[:url].value}
+                        :if={safe_preview_src(bf[:url].value)}
+                        src={safe_preview_src(bf[:url].value)}
                         alt=""
                         class="max-h-40 rounded border border-base-content/10"
                       />

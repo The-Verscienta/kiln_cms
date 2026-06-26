@@ -45,6 +45,8 @@ defmodule KilnCMSWeb.Router do
 
   pipeline :graphql do
     plug KilnCMSWeb.Plugs.RateLimit, :gql
+    # Block schema introspection in production (config-gated).
+    plug KilnCMSWeb.Plugs.DisableGraphqlIntrospection
     plug :load_from_bearer
     plug :set_actor, :user
     plug AshGraphql.Plug
@@ -115,8 +117,16 @@ defmodule KilnCMSWeb.Router do
   end
 
   # Preview endpoint — authorized by a signed token, not a session/bearer.
+  # Tightly rate-limited per IP so a leaked/guessable token can't be used to
+  # enumerate or scrape draft content.
   pipeline :preview do
     plug :accepts, ["json"]
+    plug KilnCMSWeb.Plugs.RateLimit, :preview
+  end
+
+  # Light per-IP ceiling for public HTML delivery (especially cache-miss paths).
+  pipeline :delivery do
+    plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
   scope "/", KilnCMSWeb do
@@ -145,8 +155,6 @@ defmodule KilnCMSWeb.Router do
       live "/editor", EditorLive, :index
       live "/editor/search", SearchPaletteLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
-      live "/editor/trash", TrashLive, :index
-      live "/editor/webhooks", WebhookLive, :index
       live "/editor/analytics", AnalyticsLive, :index
       live "/editor/settings", SettingsLive, :index
       # Generic editor route — works for any content type (incl. ones generated
@@ -157,6 +165,17 @@ defmodule KilnCMSWeb.Router do
       live "/editor/posts/:id", ContentEditorLive, :post
       live "/editor/preview/:kind/:id", PreviewLive, :show
     end
+
+    # Admin-only authoring UIs. Guarded at the router (live_session) level, not
+    # just in each LiveView's mount/3, so non-admins can't mount the route.
+    ash_authentication_live_session :admin_routes,
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :live_admin_required},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
+      live "/editor/trash", TrashLive, :index
+      live "/editor/webhooks", WebhookLive, :index
+    end
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only
@@ -164,7 +183,12 @@ defmodule KilnCMSWeb.Router do
   scope "/gql" do
     pipe_through [:graphql]
 
-    forward "/", Absinthe.Plug, schema: Module.concat(["KilnCMSWeb.GraphqlSchema"])
+    # Cap query cost/depth so a deeply nested or wide query can't force an
+    # unbounded resolve (DoS). Tune `max_complexity` up as list queries are added.
+    forward "/", Absinthe.Plug,
+      schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
+      analyze_complexity: true,
+      max_complexity: 200
   end
 
   # Interactive API docs — Swagger UI over the published OpenAPI spec. Always
@@ -232,11 +256,22 @@ defmodule KilnCMSWeb.Router do
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     sign_out_route AuthController
 
-    sign_in_route register_path: "/register",
-                  reset_path: "/reset",
-                  auth_routes_prefix: "/auth",
-                  on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
-                  overrides: [KilnCMSWeb.AuthOverrides]
+    # Show the registration link/route only when open self-registration is
+    # enabled (the default). Set `config :kiln_cms, :registration_enabled, false`
+    # for invite-only mode — the registration *action* is also gated, so this
+    # just hides the UI affordance. (See KilnCMS.Accounts.Validations.RegistrationEnabled.)
+    if Application.compile_env(:kiln_cms, :registration_enabled, true) do
+      sign_in_route register_path: "/register",
+                    reset_path: "/reset",
+                    auth_routes_prefix: "/auth",
+                    on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
+                    overrides: [KilnCMSWeb.AuthOverrides]
+    else
+      sign_in_route reset_path: "/reset",
+                    auth_routes_prefix: "/auth",
+                    on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
+                    overrides: [KilnCMSWeb.AuthOverrides]
+    end
 
     reset_route auth_routes_prefix: "/auth",
                 overrides: [KilnCMSWeb.AuthOverrides]
@@ -290,7 +325,7 @@ defmodule KilnCMSWeb.Router do
   # root-level `/:slug` page route can't shadow auth/editor/SEO/dev paths above.
   # Only published content is reachable (see ContentController).
   scope "/", KilnCMSWeb do
-    pipe_through :browser
+    pipe_through [:browser, :delivery]
 
     get "/blog", ContentController, :blog_index
     get "/blog/:slug", ContentController, :show_post

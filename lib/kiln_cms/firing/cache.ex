@@ -9,12 +9,33 @@ defmodule KilnCMS.Firing.Cache do
 
   Keyed by `{document_type, document_id, surface}`.
   """
+  import Cachex.Spec, only: [hook: 1]
+
   @cache :kiln_cms_firing_cache
   @surfaces [:web, :json, :json_ld]
   @ttl :timer.minutes(60)
 
+  # Hard cap on cached artifacts. Without it, fired bodies (documents × 3
+  # surfaces) accumulate in BEAM memory forever. An evented LRW policy reclaims
+  # ~10% once the cap is hit, mirroring `KilnCMS.Cache`.
+  @max_entries 10_000
+
   @doc "Cachex instance name (supervised in the application tree)."
   def cache_name, do: @cache
+
+  @doc """
+  Supervisor child spec for the firing cache, bounded to `#{@max_entries}`
+  entries by an evented least-recently-written eviction policy. Used in place of
+  a bare `{Cachex, ...}` child so fired artifacts can't grow memory without bound.
+  """
+  def child_spec(_arg) do
+    Supervisor.child_spec(
+      {Cachex,
+       name: @cache,
+       hooks: [hook(module: Cachex.Limit.Evented, args: {@max_entries, [reclaim: 0.1]})]},
+      id: __MODULE__
+    )
+  end
 
   @spec get(atom(), Ash.UUID.t(), atom()) :: {:ok, map()} | :miss
   def get(document_type, document_id, surface) do
@@ -27,7 +48,9 @@ defmodule KilnCMS.Firing.Cache do
 
   @spec put(atom(), Ash.UUID.t(), atom(), map()) :: :ok
   def put(document_type, document_id, surface, body) do
-    Cachex.put(@cache, key(document_type, document_id, surface), body, ttl: @ttl)
+    # Cachex honors `:expire`, not `:ttl` — the latter is silently ignored, so
+    # entries would otherwise never expire (see KilnCMS.Cache).
+    Cachex.put(@cache, key(document_type, document_id, surface), body, expire: @ttl)
     :ok
   end
 

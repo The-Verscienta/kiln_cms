@@ -8,7 +8,9 @@ defmodule KilnCMS.CMS.PreviewToken do
   tamper-proof, no DB storage.
   """
   @salt "content preview"
-  @max_age_seconds 3600
+  # Short window: a preview link is meant for an immediate review, so a leaked
+  # link only exposes draft content briefly (was 1h).
+  @max_age_seconds 900
 
   @doc "Mint a preview token for a content record (any content type)."
   @spec sign(struct()) :: String.t()

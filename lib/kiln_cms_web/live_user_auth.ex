@@ -62,6 +62,28 @@ defmodule KilnCMSWeb.LiveUserAuth do
     end
   end
 
+  # Requires a signed-in user with the :admin role (admin-only authoring UIs:
+  # webhooks, trash). Router-level guard mirroring the per-LiveView mount checks
+  # and the Ash policies, so non-admins can't even mount the route.
+  def on_mount(:live_admin_required, _params, _session, socket) do
+    case socket.assigns[:current_user] do
+      %{role: :admin} ->
+        {:cont, socket}
+
+      %{} ->
+        {:halt,
+         socket
+         |> Phoenix.LiveView.put_flash(
+           :error,
+           gettext("You need admin access to view that page.")
+         )
+         |> Phoenix.LiveView.redirect(to: ~p"/")}
+
+      _ ->
+        {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/sign-in")}
+    end
+  end
+
   def on_mount(:live_no_user, _params, _session, socket) do
     if socket.assigns[:current_user] do
       {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/")}
