@@ -93,6 +93,9 @@ Bootstrapped & verified (compiling, migrating, serving):
   `:viewer`) for RBAC
 - **Oban** (Postgres-backed, no Redis) + **AshOban** wired into the supervision tree
 - Docker infra (Postgres default; Dragonfly/Meilisearch/MinIO optional profiles)
+- **Search** — Postgres full-text + optional semantic/hybrid (pgvector) and an
+  optional **Meilisearch** backend, both feature-flagged off by default
+  ([`docs/meilisearch.md`](docs/meilisearch.md))
 
 Not yet wired (next): **magic-link** auth strategy, **Ash policies** enforcing the RBAC
 roles, media upload/variant pipeline (`Image`/libvips), the **TipTap LiveView editor** +

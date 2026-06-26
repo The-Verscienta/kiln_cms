@@ -12,7 +12,16 @@ defmodule KilnCMS.CMS.Changes.DeleteArtifacts do
     Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
       with {:ok, record} <- result do
         try do
-          KilnCMS.Firing.Engine.purge(KilnCMS.Firing.Engine.document_type(record), record.id)
+          type = KilnCMS.Firing.Engine.document_type(record)
+          KilnCMS.Firing.Engine.purge(type, record.id)
+
+          # Drop it from the optional Meilisearch index (Phase 6). No-op when the
+          # backend is disabled.
+          if KilnCMS.Search.Meilisearch.enabled?() do
+            %{"op" => "delete", "type" => to_string(type), "id" => record.id}
+            |> KilnCMS.Search.MeilisearchWorker.new()
+            |> Oban.insert()
+          end
         rescue
           error ->
             Logger.error("Artifact purge failed for #{inspect(record.id)}: #{inspect(error)}")
