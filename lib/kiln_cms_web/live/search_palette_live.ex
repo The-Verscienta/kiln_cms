@@ -33,12 +33,27 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           Search.global(query, actor: socket.assigns.current_user, limit: 8, highlight: true)
 
         total = length(results.pages) + length(results.posts) + length(results.media)
-        Search.record_query(query, total)
+        record_query_async(query, total)
 
         socket |> assign(:query, query) |> assign(:searched, true) |> assign(:results, results)
       end
 
     {:noreply, socket}
+  end
+
+  # Record the search for analytics off the LiveView's process so a debounced
+  # keystroke doesn't block on the DB write. Best-effort and bounded by the
+  # shared Task.Supervisor's max_children (drops under load); failures swallowed.
+  defp record_query_async(query, total) do
+    Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+      try do
+        Search.record_query(query, total)
+      rescue
+        _ -> :ok
+      end
+    end)
+
+    :ok
   end
 
   defp result_count(%{pages: p, posts: o, media: m}), do: length(p) + length(o) + length(m)
