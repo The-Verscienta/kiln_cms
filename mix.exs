@@ -40,6 +40,7 @@ defmodule KilnCMS.MixProject do
         "docs/editor-shortcuts.md": [],
         "docs/policy-matrix.md": [],
         "docs/accessibility-audit.md": [],
+        "docs/verscienta-health.md": [],
         # APIs
         "docs/api.md": [],
         "docs/headless-graphql-api.md": [],
@@ -71,7 +72,8 @@ defmodule KilnCMS.MixProject do
           "docs/design-system.md",
           "docs/editor-shortcuts.md",
           "docs/policy-matrix.md",
-          "docs/accessibility-audit.md"
+          "docs/accessibility-audit.md",
+          "docs/verscienta-health.md"
         ],
         APIs: ["docs/api.md", "docs/headless-graphql-api.md", "docs/json-api.md"],
         Search: [

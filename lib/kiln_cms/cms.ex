@@ -129,5 +129,55 @@ defmodule KilnCMS.CMS do
       define :create_content_link, action: :create
       define :destroy_content_link, action: :destroy
     end
+
+    resource KilnCMS.CMS.Herb do
+      define :list_herbs, action: :read
+      define :get_herb, action: :read, get_by: [:id]
+      define :get_published_herb_by_slug, action: :public_by_slug, args: [:slug]
+      define :search_herbs, action: :search, args: [:query]
+      define :create_herb, action: :create
+      define :update_herb, action: :update
+      define :submit_herb_for_review, action: :submit_for_review
+      define :return_herb_to_draft, action: :return_to_draft
+      define :publish_herb, action: :publish
+      define :publish_scheduled_herb, action: :publish_scheduled
+      define :unpublish_herb, action: :unpublish
+      define :archive_herb, action: :archive
+      define :restore_herb_version, action: :restore_version
+      define :destroy_herb, action: :destroy
+      define :list_trashed_herbs, action: :trashed
+      define :restore_herb, action: :restore
+      define :purge_herb, action: :purge
+      define :list_published_herbs, action: :published
+    end
+
+    resource KilnCMS.CMS.Herb.Version do
+      define :list_herb_versions, action: :read
+    end
+
+    resource KilnCMS.CMS.Condition do
+      define :list_conditions, action: :read
+      define :get_condition, action: :read, get_by: [:id]
+      define :get_published_condition_by_slug, action: :public_by_slug, args: [:slug]
+      define :search_conditions, action: :search, args: [:query]
+      define :create_condition, action: :create
+      define :update_condition, action: :update
+      define :submit_condition_for_review, action: :submit_for_review
+      define :return_condition_to_draft, action: :return_to_draft
+      define :publish_condition, action: :publish
+      define :publish_scheduled_condition, action: :publish_scheduled
+      define :unpublish_condition, action: :unpublish
+      define :archive_condition, action: :archive
+      define :restore_condition_version, action: :restore_version
+      define :destroy_condition, action: :destroy
+      define :list_trashed_conditions, action: :trashed
+      define :restore_condition, action: :restore
+      define :purge_condition, action: :purge
+      define :list_published_conditions, action: :published
+    end
+
+    resource KilnCMS.CMS.Condition.Version do
+      define :list_condition_versions, action: :read
+    end
   end
 end
