@@ -28,6 +28,21 @@ defmodule KilnCMSWeb.Router do
     "content-security-policy" => "script-src 'self' 'unsafe-inline' 'unsafe-eval'; #{@base_csp}"
   }
 
+  # CSP for the Swagger UI explorer (always available — issue #37). Swagger UI
+  # loads its bundle/CSS from cdnjs and runs one inline boot script, which gets a
+  # per-request nonce (see `put_swagger_csp`). `style-src` keeps 'unsafe-inline'
+  # because swagger-ui injects un-nonced inline styles.
+  @swagger_csp "default-src 'self'; " <>
+                 "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " <>
+                 "img-src 'self' data: blob: https://cdnjs.cloudflare.com; " <>
+                 "font-src 'self' data: https://cdnjs.cloudflare.com; " <>
+                 "connect-src 'self'; object-src 'none'; base-uri 'self'; " <>
+                 "frame-ancestors 'self'; form-action 'self'"
+
+  @swagger_csp_headers %{
+    "content-security-policy" => "script-src 'self' https://cdnjs.cloudflare.com; #{@swagger_csp}"
+  }
+
   pipeline :graphql do
     plug KilnCMSWeb.Plugs.RateLimit, :gql
     plug :load_from_bearer
@@ -65,6 +80,25 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :api
     plug :load_from_bearer
     plug :set_actor, :user
+  end
+
+  # Headless sign-in — exchanges credentials for a bearer token (issue #37).
+  # Tight per-IP `:auth` limit to slow credential stuffing; no bearer/actor
+  # plugs (this is the endpoint that *issues* the token).
+  pipeline :api_auth do
+    plug :accepts, ["json"]
+    plug KilnCMSWeb.Plugs.RateLimit, :auth
+  end
+
+  # Swagger UI explorer — serves the published OpenAPI spec interactively in all
+  # environments (issue #37). Relaxed, swagger-specific CSP (`@swagger_csp`) plus
+  # a per-request nonce for swagger-ui's inline boot script.
+  pipeline :swagger_ui do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers, @swagger_csp_headers
+    plug :put_swagger_csp
   end
 
   # Auth pages get a tighter per-IP limit to slow credential stuffing.
@@ -132,11 +166,32 @@ defmodule KilnCMSWeb.Router do
     forward "/", Absinthe.Plug, schema: Module.concat(["KilnCMSWeb.GraphqlSchema"])
   end
 
-  # Headless JSON:API — always available; Swagger UI + OpenAPI spec are dev-only.
+  # Interactive API docs — Swagger UI over the published OpenAPI spec. Always
+  # available (issue #37). Registered BEFORE the `/api/json` catch-all forward
+  # below so the forward can't shadow `/swaggerui`.
+  scope "/api/json" do
+    pipe_through :swagger_ui
+
+    forward "/swaggerui", OpenApiSpex.Plug.SwaggerUI,
+      path: "/api/json/open_api",
+      # Nonce the inline boot script so it runs under the strict `script-src`.
+      csp_nonce_assign_key: %{script: :swagger_script_nonce},
+      default_model_expand_depth: 4
+  end
+
+  # Headless JSON:API — always available, including the OpenAPI spec served by
+  # the router itself at `/api/json/open_api`.
   scope "/api/json" do
     pipe_through [:api]
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
+  end
+
+  # Headless sign-in: POST credentials, receive a bearer token (issue #37).
+  scope "/api/auth", KilnCMSWeb do
+    pipe_through :api_auth
+
+    post "/sign_in", ApiAuthController, :sign_in
   end
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
@@ -261,14 +316,6 @@ defmodule KilnCMSWeb.Router do
         socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
         interface: :simple
     end
-
-    scope "/api/json" do
-      pipe_through :browser_dev_tools
-
-      forward "/swaggerui", OpenApiSpex.Plug.SwaggerUI,
-        path: "/api/json/open_api",
-        default_model_expand_depth: 4
-    end
   end
 
   # --- Content-Security-Policy plugs ----------------------------------------
@@ -284,6 +331,19 @@ defmodule KilnCMSWeb.Router do
     |> Plug.Conn.put_resp_header(
       "content-security-policy",
       "script-src 'self' 'nonce-#{nonce}'; #{@base_csp}"
+    )
+  end
+
+  # Swagger UI CSP: strict same-origin everything except swagger-ui's cdnjs
+  # bundle, plus a per-request nonce for its inline boot script.
+  defp put_swagger_csp(conn, _opts) do
+    nonce = generate_csp_nonce()
+
+    conn
+    |> Plug.Conn.assign(:swagger_script_nonce, nonce)
+    |> Plug.Conn.put_resp_header(
+      "content-security-policy",
+      "script-src 'self' 'nonce-#{nonce}' https://cdnjs.cloudflare.com; #{@swagger_csp}"
     )
   end
 

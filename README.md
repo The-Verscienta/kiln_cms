@@ -68,6 +68,11 @@ Published content is world-readable (no auth) over three public surfaces:
 **Astro static blog** that builds entirely from these endpoints, with a complete
 headless setup walkthrough.
 
+**API docs:** a published OpenAPI 3 spec (`/api/json/open_api`) and interactive
+Swagger UI (`/api/json/swaggerui`) are available in dev **and** prod. Start at
+[`docs/api.md`](docs/api.md) — the full reference for authentication, the JSON:API
+content endpoints, GraphQL, webhooks, preview tokens and rate limits.
+
 ## Working with Ash
 
 ```bash

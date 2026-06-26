@@ -6,9 +6,10 @@ headless consumers at **`/api/json`** (powered by
 filtering, sorting and pagination query params for the public content types —
 **Page**, **Post** and **MediaItem** — tuned in Phase 5 (issue #33).
 
-> The interactive Swagger UI + OpenAPI spec (`/api/json/swaggerui`,
-> `/api/json/open_api`) are mounted only when `dev_routes` is enabled. In
-> production the JSON endpoints are served, but the explorer is not.
+> The machine-readable OpenAPI spec (`/api/json/open_api`) and its interactive
+> Swagger UI (`/api/json/swaggerui`) are published in **all environments** (dev
+> and prod). See [api.md](api.md) for the full API documentation index
+> (authentication, GraphQL, webhooks, preview tokens, rate limits).
 
 ## Content negotiation
 
