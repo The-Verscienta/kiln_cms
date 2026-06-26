@@ -14,7 +14,8 @@ defmodule KilnCMS.Application do
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
-      Supervisor.child_spec({Cachex, name: KilnCMS.Firing.Cache.cache_name()}, id: :firing_cache),
+      # Bounded LRW firing-artifact cache (see `KilnCMS.Firing.Cache.child_spec/1`).
+      KilnCMS.Firing.Cache,
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
       {Oban,
