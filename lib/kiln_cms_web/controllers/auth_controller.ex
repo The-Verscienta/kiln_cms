@@ -9,9 +9,9 @@ defmodule KilnCMSWeb.AuthController do
 
     message =
       case activity do
-        {:confirm_new_user, :confirm} -> "Your email address has now been confirmed"
-        {:password, :reset} -> "Your password has successfully been reset"
-        _ -> "You are now signed in"
+        {:confirm_new_user, :confirm} -> gettext("Your email address has now been confirmed")
+        {:password, :reset} -> gettext("Your password has successfully been reset")
+        _ -> gettext("You are now signed in")
       end
 
     conn
@@ -32,22 +32,22 @@ defmodule KilnCMSWeb.AuthController do
              errors: [%AshAuthentication.Errors.CannotConfirmUnconfirmedUser{}]
            }
          }} ->
-          """
-          You have already signed in another way, but have not confirmed your account.
-          You can confirm your account using the link we sent to you, or by resetting your password.
-          """
+          gettext(
+            "You have already signed in another way, but have not confirmed your account. " <>
+              "You can confirm your account using the link we sent to you, or by resetting your password."
+          )
 
         {_,
          %AshAuthentication.Errors.AuthenticationFailed{
            caused_by: %AshAuthentication.Errors.ConfirmationRequired{}
          }} ->
-          """
-          An account with this email already exists. We've sent a link to that
-          address - confirm it to finish linking this provider to your account.
-          """
+          gettext(
+            "An account with this email already exists. We've sent a link to that " <>
+              "address - confirm it to finish linking this provider to your account."
+          )
 
         _ ->
-          "Incorrect email or password"
+          gettext("Incorrect email or password")
       end
 
     conn
