@@ -9,6 +9,11 @@ import Config
 
 config :ash_oban, pro?: false
 
+# The build-time Mix environment, baked into the release so runtime code can
+# refuse unsafe combinations (e.g. dev_routes enabled in a :prod release — see
+# KilnCMS.Application). Compile-time only; never overridden at runtime.
+config :kiln_cms, :compile_env, config_env()
+
 config :kiln_cms, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
@@ -80,6 +85,11 @@ config :nx, default_backend: EXLA.Backend
 
 # Organization name used as the JSON-LD publisher. Override in runtime.exs.
 config :kiln_cms, :site_name, "KilnCMS"
+
+# Open self-registration. `true` (default) lets anyone create a `:viewer`
+# account via `/register`; set to `false` for an invite-only / internal CMS,
+# which hides the registration route and rejects the registration action.
+config :kiln_cms, :registration_enabled, true
 
 # Content locales. Content is modelled per-locale (unique [slug, locale]); the
 # delivery layer serves the requested locale with a fallback to the default.

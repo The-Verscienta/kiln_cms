@@ -232,11 +232,22 @@ defmodule KilnCMSWeb.Router do
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     sign_out_route AuthController
 
-    sign_in_route register_path: "/register",
-                  reset_path: "/reset",
-                  auth_routes_prefix: "/auth",
-                  on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
-                  overrides: [KilnCMSWeb.AuthOverrides]
+    # Show the registration link/route only when open self-registration is
+    # enabled (the default). Set `config :kiln_cms, :registration_enabled, false`
+    # for invite-only mode — the registration *action* is also gated, so this
+    # just hides the UI affordance. (See KilnCMS.Accounts.Validations.RegistrationEnabled.)
+    if Application.compile_env(:kiln_cms, :registration_enabled, true) do
+      sign_in_route register_path: "/register",
+                    reset_path: "/reset",
+                    auth_routes_prefix: "/auth",
+                    on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
+                    overrides: [KilnCMSWeb.AuthOverrides]
+    else
+      sign_in_route reset_path: "/reset",
+                    auth_routes_prefix: "/auth",
+                    on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
+                    overrides: [KilnCMSWeb.AuthOverrides]
+    end
 
     reset_route auth_routes_prefix: "/auth",
                 overrides: [KilnCMSWeb.AuthOverrides]

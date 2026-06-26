@@ -28,6 +28,11 @@ config :swoosh, local: false
 # Do not print debug messages in production
 config :logger, level: :info
 
+# Never expose dev-only tooling (AshAdmin, LiveDashboard, Swoosh mailbox) in a
+# production build. Set explicitly (not just left unset) and asserted again at
+# runtime in KilnCMS.Application.
+config :kiln_cms, dev_routes: false
+
 # Webhook targets must be HTTPS and must not resolve to private addresses.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: true, resolve_dns: true
 

@@ -54,6 +54,10 @@ defmodule KilnCMSWeb.Endpoint do
     param_key: "request_logger",
     cookie_key: "request_logger"
 
+  # Resolve the real client IP from X-Forwarded-For when behind a trusted proxy,
+  # before anything (rate limiting, logging) reads conn.remote_ip.
+  plug KilnCMSWeb.Plugs.ClientIp
+
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 

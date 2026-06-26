@@ -86,6 +86,21 @@ mix ash.setup            # create DB + run migrations
 Multi-stage [`Dockerfile`](Dockerfile) builds an OTP release and includes **libvips**
 in the runtime image for image processing. Target: Coolify (RackNerd VPS) or Fly.io/Render.
 
+### Production hardening checklist
+
+- **`dev_routes` must stay off.** It is only set in `config/dev.exs`; `config/prod.exs`
+  sets it `false` explicitly and the app **refuses to boot** if a `:prod` release has it
+  enabled (it would expose `/admin`, LiveDashboard, and the Swoosh mailbox unauthenticated).
+- **Database TLS is on by default.** The Postgres connection uses `ssl: true`; set
+  `DATABASE_SSL=false` only for a provider that cannot offer TLS. Point
+  `DATABASE_SSL_CACERTFILE` at the provider CA bundle to verify the server certificate
+  (otherwise the connection is encrypted but uses `verify_none`).
+- **Behind a reverse proxy**, set `TRUSTED_PROXIES` (comma-separated CIDRs, e.g.
+  `10.0.0.0/8`) so rate limiting keys on the real client IP from `X-Forwarded-For`
+  instead of the proxy address. Leave unset when the app is internet-facing directly.
+- **Invite-only mode:** set `config :kiln_cms, :registration_enabled, false` to disable
+  open `/register` self-signup (the registration action is gated, not just the UI link).
+
 ## Status & next steps
 
 Bootstrapped & verified (compiling, migrating, serving):

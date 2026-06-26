@@ -7,6 +7,8 @@ defmodule KilnCMS.Application do
 
   @impl true
   def start(_type, _args) do
+    assert_dev_routes_disabled_in_prod!()
+
     children = [
       KilnCMSWeb.Telemetry,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
@@ -42,6 +44,24 @@ defmodule KilnCMS.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
     Supervisor.start_link(children ++ embedding_children() ++ reranker_children(), opts)
+  end
+
+  # Fail fast if a :prod release was built with `dev_routes` enabled — that would
+  # expose AshAdmin (`/admin`, with an actor picker that can impersonate :admin),
+  # LiveDashboard, and the Swoosh mailbox with no authentication. dev_routes is
+  # compile-keyed (only config/dev.exs sets it), so this catches a mis-built
+  # release rather than a legitimate dev/test boot.
+  defp assert_dev_routes_disabled_in_prod! do
+    if Application.get_env(:kiln_cms, :compile_env) == :prod and
+         Application.get_env(:kiln_cms, :dev_routes) do
+      raise """
+      Refusing to boot: `dev_routes` is enabled in a :prod release.
+
+      This exposes /admin (AshAdmin), LiveDashboard, and the Swoosh mailbox
+      without authentication. Rebuild the release without `config :kiln_cms,
+      dev_routes: true` (it should only ever be set in config/dev.exs).
+      """
+    end
   end
 
   # The embedding serving is only started when semantic search is enabled with

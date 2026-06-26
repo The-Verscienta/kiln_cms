@@ -33,13 +33,33 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
-  config :kiln_cms, KilnCMS.Repo,
-    # ssl: true,
-    url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    # For machines with several cores, consider starting multiple pools of `pool_size`
-    # pool_count: 4,
-    socket_options: maybe_ipv6
+  # Encrypt the Postgres connection by default. Set DATABASE_SSL=false only for a
+  # provider that genuinely cannot offer TLS (most managed Postgres — RDS,
+  # Supabase, Neon, Fly — require or strongly prefer it). When DATABASE_SSL_CACERTFILE
+  # points at the provider's CA bundle we verify the server certificate; otherwise
+  # we still encrypt but skip peer verification (verify_none) so deployment isn't
+  # blocked on cert plumbing.
+  database_ssl? = System.get_env("DATABASE_SSL", "true") in ~w(true 1)
+
+  database_ssl_opts =
+    case System.get_env("DATABASE_SSL_CACERTFILE") do
+      nil ->
+        [verify: :verify_none]
+
+      cacertfile ->
+        [verify: :verify_peer, cacertfile: cacertfile, depth: 3]
+    end
+
+  config :kiln_cms,
+         KilnCMS.Repo,
+         [
+           url: database_url,
+           pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+           # For machines with several cores, consider starting multiple pools of `pool_size`
+           # pool_count: 4,
+           socket_options: maybe_ipv6,
+           ssl: database_ssl?
+         ] ++ if(database_ssl?, do: [ssl_opts: database_ssl_opts], else: [])
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
@@ -56,6 +76,14 @@ if config_env() == :prod do
   host = System.get_env("PHX_HOST") || "example.com"
 
   config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+
+  # Trusted reverse-proxy CIDRs. When set (comma-separated, e.g.
+  # "10.0.0.0/8,172.16.0.0/12"), KilnCMSWeb.Plugs.ClientIp rewrites remote_ip from
+  # X-Forwarded-For so rate limiting keys on the real client. Leave unset when the
+  # app is internet-facing directly (X-Forwarded-For would be spoofable).
+  config :kiln_cms,
+         :trusted_proxies,
+         "TRUSTED_PROXIES" |> System.get_env("") |> String.split(",", trim: true)
 
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

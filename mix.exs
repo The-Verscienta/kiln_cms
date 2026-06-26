@@ -101,6 +101,7 @@ defmodule KilnCMS.MixProject do
       # progress formatting, so forcing 3.x is safe. Override resolves the clash.
       {:decimal, "~> 3.0", override: true},
       {:hammer, "~> 7.0"},
+      {:remote_ip, "~> 1.2"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.2.0"},
       {:lazy_html, ">= 0.1.0", only: :test},
