@@ -5,7 +5,7 @@ defmodule KilnCMSWeb.Plugs.DisableGraphqlIntrospectionTest do
 
   test "passes through when introspection enabled (default)" do
     conn =
-      %Plug.Conn{body_params: %{"query" => "{ __schema { types { name } } }"}}
+      build_conn(:post, "/", %{"query" => "{ __schema { types { name } } }"})
       |> DisableGraphqlIntrospection.call([])
 
     refute conn.halted
@@ -15,7 +15,7 @@ defmodule KilnCMSWeb.Plugs.DisableGraphqlIntrospectionTest do
     Application.put_env(:kiln_cms, :graphql_introspection, false)
 
     conn =
-      %Plug.Conn{body_params: %{"query" => "{ __schema { types { name } } }"}}
+      build_conn(:post, "/", %{"query" => "{ __schema { types { name } } }"})
       |> DisableGraphqlIntrospection.call([])
 
     assert conn.halted
@@ -28,7 +28,7 @@ defmodule KilnCMSWeb.Plugs.DisableGraphqlIntrospectionTest do
     Application.put_env(:kiln_cms, :graphql_introspection, false)
 
     conn =
-      %Plug.Conn{body_params: %{"query" => "{ viewer { __typename } }"}}
+      build_conn(:post, "/", %{"query" => "{ viewer { __typename } }"})
       |> DisableGraphqlIntrospection.call([])
 
     refute conn.halted
