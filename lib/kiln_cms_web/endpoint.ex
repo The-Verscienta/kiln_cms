@@ -2,13 +2,15 @@ defmodule KilnCMSWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :kiln_cms
   use Absinthe.Phoenix.Endpoint
 
-  # The session will be stored in the cookie and signed,
-  # this means its contents can be read but not tampered with.
-  # Set :encryption_salt if you would also like to encrypt it.
+  # The session is stored in the cookie, signed (tamper-proof) and encrypted
+  # (`encryption_salt`) so its contents aren't readable client-side either —
+  # defense-in-depth for anything we put in the session (#217). Both salts derive
+  # keys from `secret_key_base`; rotating that invalidates existing sessions.
   @session_options [
     store: :cookie,
     key: "_kiln_cms_key",
     signing_salt: "Dsoh9oKb",
+    encryption_salt: "8fso5iqxDfI",
     same_site: "Lax"
   ]
 

@@ -432,11 +432,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute render(lv) =~ "editing"
     end
 
-    test "the roster shows a count and names everyone editing", %{conn: _conn} do
+    test "the roster shows a count and display names, not emails (#214)", %{conn: _conn} do
       page = draft_page()
       user_a = authed_user(:editor)
       user_b = authed_user(:editor)
-      name_b = user_b.email |> to_string() |> String.split("@") |> hd()
+
+      # Give user_b a display name; the roster must show it, not their email.
+      Ash.update!(Ash.Changeset.for_update(user_b, :update_profile, %{name: "Bob Editor"}),
+        authorize?: false
+      )
+
+      local_b = user_b.email |> to_string() |> String.split("@") |> hd()
 
       {:ok, lv_a, _html} =
         build_conn() |> log_in(user_a) |> live(~p"/editor/pages/#{page.id}")
@@ -449,8 +455,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # lv_a receives the presence_diff and re-renders with both editors.
       html = render(lv_a)
       assert html =~ "2 editing"
-      # user_b appears in their avatar's tooltip.
-      assert html =~ name_b
+      # user_b appears in their avatar's tooltip by display name…
+      assert html =~ "Bob Editor"
+      # …and never by their email local-part.
+      refute html =~ local_b
     end
   end
 

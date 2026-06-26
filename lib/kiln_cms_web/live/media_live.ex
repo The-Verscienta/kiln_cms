@@ -170,13 +170,37 @@ defmodule KilnCMSWeb.MediaLive do
 
   # --- helpers ---------------------------------------------------------------
 
+  # `source`, when removed, is the server-built stripped temp file (UUID path),
+  # never user input — the File.rm traversal warning is a false positive.
+  # sobelow_skip ["Traversal.FileModule"]
   defp store_entry(path, entry, actor) do
-    with {:ok, %{ext: ext, content_type: content_type}} <- ImageProcessor.validate_upload(path),
-         key = Storage.generate_key_with_ext(ext),
-         {:ok, ^key} <- Storage.store(key, path) do
-      create_from_upload(key, content_type, entry, actor)
-    else
-      _ -> :error
+    case ImageProcessor.validate_upload(path) do
+      {:ok, %{ext: ext, content_type: content_type}} ->
+        key = Storage.generate_key_with_ext(ext)
+        # Strip EXIF/GPS + the client filename before persisting (#215). On any
+        # strip failure we fall back to the original so a valid upload still saves.
+        {source, stripped?} = stripped_source(path, ext)
+
+        try do
+          case Storage.store(key, source) do
+            {:ok, ^key} -> create_from_upload(key, content_type, entry, actor)
+            _ -> :error
+          end
+        after
+          if stripped?, do: File.rm(source)
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  # {temp_path, true} when a metadata-stripped copy was produced (caller cleans
+  # it up); {original_path, false} when stripping wasn't possible.
+  defp stripped_source(path, ext) do
+    case ImageProcessor.strip_metadata(path, ext) do
+      {:ok, tmp} -> {tmp, true}
+      {:error, _} -> {path, false}
     end
   end
 

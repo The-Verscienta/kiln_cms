@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
      socket
      |> assign(:query, "")
      |> assign(:searched, false)
+     |> assign(:retention_days, KilnCMS.Analytics.SearchQuery.retention_days())
      |> assign(:results, empty())}
   end
 
@@ -69,6 +70,10 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           <h1 class="text-2xl font-semibold">Search</h1>
           <p class="text-sm text-base-content/60">
             Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here.
+          </p>
+          <p class="mt-1 text-xs text-base-content/40">
+            Searches are logged anonymously — no user ID or IP — to improve content discovery,
+            and purged after {@retention_days} days.
           </p>
         </div>
 

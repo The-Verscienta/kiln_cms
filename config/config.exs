@@ -109,6 +109,12 @@ config :kiln_cms, :i18n, default_locale: "en", locales: ["en"]
 # AshOban `purge_trashed` trigger hard-deletes it.
 config :kiln_cms, :trash, retention_days: 30
 
+# How many days recorded editor search queries (KilnCMS.Analytics.SearchQuery)
+# are retained before the nightly AshOban `purge_expired` trigger deletes them.
+# Rows carry no actor/IP, but the query text can contain PII or confidential
+# titles, so it isn't kept indefinitely. See docs/data-flows.md (#213, #220).
+config :kiln_cms, :search_analytics, retention_days: 90
+
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
 config :mime,
