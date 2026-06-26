@@ -73,6 +73,15 @@ if config_env() == :prod do
       System.get_env("TOKEN_SIGNING_SECRET") ||
         raise("Missing environment variable `TOKEN_SIGNING_SECRET`!")
 
+  # Absolute base URL used for SEO (canonical tags, sitemap), JSON-LD, and
+  # webhook callback URLs. Defaults to the public site host so it matches the
+  # live domain; override with PUBLIC_BASE_URL only when the canonical origin
+  # differs from PHX_HOST (e.g. behind a separate marketing domain). The
+  # compile-time default in config/config.exs (localhost) is dev-only.
+  config :kiln_cms,
+         :public_base_url,
+         System.get_env("PUBLIC_BASE_URL") || "https://#{host}"
+
   # ## Object storage (S3-compatible)
   #
   # Opt into the S3 adapter by setting S3_BUCKET. Works with AWS S3, Cloudflare
