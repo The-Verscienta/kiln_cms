@@ -111,6 +111,20 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
+  @doc "Cache key for the generated sitemap XML (shared with the sitemap controller)."
+  def sitemap_key, do: "sitemap:xml"
+
+  @doc """
+  Drop the cached sitemap XML so a new publish/unpublish is reflected on the next
+  request rather than waiting out the sitemap's TTL. Per-record `bust/2` doesn't
+  touch this key, so publish hooks call it explicitly.
+  """
+  @spec bust_sitemap() :: :ok
+  def bust_sitemap do
+    if enabled?(), do: Cachex.del(@cache, sitemap_key())
+    :ok
+  end
+
   @doc """
   Drop all cached published content. The blunt fallback for writes whose blast
   radius isn't a single `{type, slug}` (e.g. a media-item edit that may be
