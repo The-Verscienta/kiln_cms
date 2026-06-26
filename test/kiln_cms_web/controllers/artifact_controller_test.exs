@@ -31,6 +31,9 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
       )
 
     CMS.publish_page!(page, actor: actor)
+    # Firing is async (#201): run the enqueued FireWorker so the artifact is
+    # stored before the request, otherwise the API answers 503 (#208).
+    KilnCMS.DataCase.drain_oban()
     slug
   end
 
@@ -63,5 +66,24 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
       )
 
     assert conn |> get(~p"/api/content/page/#{draft.slug}") |> json_response(404)
+  end
+
+  test "503s with Retry-After while a published artifact is still compiling", %{conn: conn} do
+    actor = admin()
+    slug = "art-bf-#{System.unique_integer([:positive])}"
+
+    page =
+      CMS.create_page!(%{title: "Pending", slug: slug, blocks: []}, actor: actor)
+
+    # Publish but do NOT drain — the FireWorker hasn't run, so no artifact yet.
+    CMS.publish_page!(page, actor: actor)
+
+    conn = get(conn, ~p"/api/content/page/#{slug}")
+    assert json_response(conn, 503)["error"] == "artifact_compiling"
+    assert ["2"] = get_resp_header(conn, "retry-after")
+
+    # Once the background firing runs, the artifact is served.
+    KilnCMS.DataCase.drain_oban()
+    assert conn |> recycle() |> get(~p"/api/content/page/#{slug}") |> json_response(200)
   end
 end
