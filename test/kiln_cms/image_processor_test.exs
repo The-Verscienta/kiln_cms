@@ -31,7 +31,30 @@ defmodule KilnCMS.ImageProcessorTest do
   end
 
   test "validate_upload/1 accepts a readable raster image", %{path: path} do
-    assert :ok = ImageProcessor.validate_upload(path)
+    assert {:ok, %{ext: ".png", content_type: "image/png"}} = ImageProcessor.validate_upload(path)
+  end
+
+  test "validate_upload/1 derives the extension from bytes, not the filename", %{path: path} do
+    # PNG bytes written to a `.svg`-named file: the result must reflect the real
+    # format (PNG), so a disguised upload can never be stored with an .svg key.
+    evil = Path.join(System.tmp_dir!(), "evil-#{System.unique_integer([:positive])}.svg")
+    File.cp!(path, evil)
+    on_exit(fn -> File.rm(evil) end)
+
+    assert {:ok, %{ext: ".png", content_type: "image/png"}} = ImageProcessor.validate_upload(evil)
+  end
+
+  test "validate_upload/1 rejects a well-formed SVG" do
+    svg = Path.join(System.tmp_dir!(), "vector-#{System.unique_integer([:positive])}.svg")
+
+    File.write!(
+      svg,
+      ~s(<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>)
+    )
+
+    on_exit(fn -> File.rm(svg) end)
+
+    assert {:error, _} = ImageProcessor.validate_upload(svg)
   end
 
   test "validate_upload/1 rejects non-image content" do

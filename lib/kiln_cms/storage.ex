@@ -57,4 +57,8 @@ defmodule KilnCMS.Storage do
     ext = filename |> Path.extname() |> String.downcase()
     "#{Ecto.UUID.generate()}#{ext}"
   end
+
+  @doc "Builds a collision-resistant storage key from an already-validated extension (e.g. \".png\")."
+  @spec generate_key_with_ext(String.t()) :: String.t()
+  def generate_key_with_ext(ext) when is_binary(ext), do: "#{Ecto.UUID.generate()}#{ext}"
 end
