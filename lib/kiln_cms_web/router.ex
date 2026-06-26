@@ -145,8 +145,6 @@ defmodule KilnCMSWeb.Router do
       live "/editor", EditorLive, :index
       live "/editor/search", SearchPaletteLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
-      live "/editor/trash", TrashLive, :index
-      live "/editor/webhooks", WebhookLive, :index
       live "/editor/analytics", AnalyticsLive, :index
       live "/editor/settings", SettingsLive, :index
       # Generic editor route — works for any content type (incl. ones generated
@@ -156,6 +154,17 @@ defmodule KilnCMSWeb.Router do
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post
       live "/editor/preview/:kind/:id", PreviewLive, :show
+    end
+
+    # Admin-only authoring UIs. Guarded at the router (live_session) level, not
+    # just in each LiveView's mount/3, so non-admins can't mount the route.
+    ash_authentication_live_session :admin_routes,
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :live_admin_required},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
+      live "/editor/trash", TrashLive, :index
+      live "/editor/webhooks", WebhookLive, :index
     end
   end
 
