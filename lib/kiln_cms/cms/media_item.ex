@@ -30,6 +30,18 @@ defmodule KilnCMS.CMS.MediaItem do
 
   json_api do
     type "media_item"
+
+    routes do
+      base "/media-items"
+
+      # Collection + single-record reads + full-text search for headless
+      # consumers. Filtering/sorting/pagination are derived from the `:read`
+      # action and public fields — documented in `docs/json-api.md`.
+      index :read
+      index :search, route: "/search"
+      # `/:id` last so it can't shadow the static `/search` sub-path.
+      get :read
+    end
   end
 
   # Let `:trashed` see soft-deleted rows and `:purge` actually hard-delete.
@@ -80,7 +92,7 @@ defmodule KilnCMS.CMS.MediaItem do
   end
 
   actions do
-    defaults [:read, :destroy]
+    defaults [:destroy]
 
     default_accept [
       :filename,
@@ -96,6 +108,21 @@ defmodule KilnCMS.CMS.MediaItem do
       :focal_x,
       :focal_y
     ]
+
+    # Primary read, paginated for the headless JSON:API media library (offset +
+    # keyset, bounded page size). `required?: false` keeps `CMS.list_media_items`
+    # returning a plain list for internal callers; only `page:`-passing callers
+    # (the JSON:API layer) get a paginator.
+    read :read do
+      primary? true
+
+      pagination offset?: true,
+                 keyset?: true,
+                 countable: true,
+                 required?: false,
+                 max_page_size: 100,
+                 default_limit: 25
+    end
 
     create :create, primary?: true
     update :update, primary?: true
