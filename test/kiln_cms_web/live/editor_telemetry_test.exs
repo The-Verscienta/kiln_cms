@@ -4,8 +4,14 @@ defmodule KilnCMSWeb.EditorTelemetryTest do
   autosave and publish (issue #41) so the editor hot path can be profiled in
   LiveDashboard / Prometheus. Each test attaches a handler and asserts the event
   fires with a duration measurement and `kind`/`result` metadata.
+
+  `async: false`: `:telemetry` handlers are global to the VM and the event
+  metadata carries no per-record id, so an async sibling test's save (e.g. the
+  conflict suite's intentional `:error` save) would be delivered to this test's
+  handler and match its `assert_receive`. Running synchronously guarantees no
+  other test emits editor telemetry concurrently.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  use KilnCMSWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
