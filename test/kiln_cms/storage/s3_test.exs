@@ -37,6 +37,8 @@ defmodule KilnCMS.Storage.S3Test do
     assert path =~ "abc.png"
     # SigV4 signing actually ran.
     assert headers["authorization"] =~ "AWS4-HMAC-SHA256"
+    # Long, immutable Cache-Control for the CDN in front of the bucket (#42).
+    assert headers["cache-control"] == "public, max-age=31536000, immutable"
     # No per-object ACL by default (works with R2/B2/Wasabi/modern AWS).
     refute Map.has_key?(headers, "x-amz-acl")
   end

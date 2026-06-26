@@ -33,10 +33,15 @@ defmodule KilnCMSWeb.Endpoint do
   # User-uploaded media (KilnCMS.Storage.Local). Served from priv/uploads,
   # which the Local adapter writes to (the app-dir paths stay in sync). In
   # production a remote adapter (S3/MinIO) would serve these instead.
+  #
+  # Upload keys are UUID-named (and image variants are immutable), so a blob at
+  # a given key never changes — serve it with a long, immutable Cache-Control so
+  # a CDN/browser in front of the app caches it indefinitely. See docs/cdn.md.
   plug Plug.Static,
     at: "/uploads",
     from: {:kiln_cms, "priv/uploads"},
-    gzip: false
+    gzip: false,
+    cache_control_for_etags: "public, max-age=31536000, immutable"
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.

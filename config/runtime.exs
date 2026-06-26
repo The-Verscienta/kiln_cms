@@ -106,6 +106,15 @@ if config_env() == :prod do
         acl -> Keyword.put(s3_opts, :acl, String.to_atom(acl))
       end
 
+    # Cache-Control stored on each uploaded object for the CDN in front of the
+    # bucket. Defaults to a long immutable TTL (keys are content-unique); set
+    # S3_CACHE_CONTROL to override. See docs/cdn.md.
+    s3_opts =
+      case System.get_env("S3_CACHE_CONTROL") do
+        nil -> s3_opts
+        cc -> Keyword.put(s3_opts, :cache_control, cc)
+      end
+
     config :kiln_cms, KilnCMS.Storage.S3, s3_opts
 
     config :ex_aws,

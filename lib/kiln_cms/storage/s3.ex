@@ -73,7 +73,7 @@ defmodule KilnCMS.Storage.S3 do
   def url(key), do: "#{public_base_url()}/#{key}"
 
   defp put_object(key, body) do
-    opts = [content_type: content_type(key)] ++ acl_opt()
+    opts = [content_type: content_type(key), cache_control: cache_control()] ++ acl_opt()
 
     bucket()
     |> ExAws.S3.put_object(key, body, opts)
@@ -81,6 +81,14 @@ defmodule KilnCMS.Storage.S3 do
   end
 
   defp content_type(key), do: MIME.from_path(key)
+
+  # Stored on the object so a CDN in front of the bucket caches it. Keys are
+  # UUID-named and image variants are immutable, so a long, immutable TTL is
+  # safe. Override with `config :kiln_cms, KilnCMS.Storage.S3, cache_control:`.
+  # See docs/cdn.md.
+  defp cache_control do
+    Keyword.get(config(), :cache_control, "public, max-age=31536000, immutable")
+  end
 
   # Only send an x-amz-acl header when one is configured; the default (none)
   # works across R2/B2/Wasabi and modern AWS, which expect bucket-level access.
