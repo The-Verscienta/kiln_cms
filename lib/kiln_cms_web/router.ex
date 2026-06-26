@@ -195,27 +195,11 @@ defmodule KilnCMSWeb.Router do
     )
   end
 
-  # Public content delivery (HTML). Defined last among "/" routes so the
-  # root-level `/:slug` page route can't shadow auth/editor/SEO paths above.
-  # Only published content is reachable (see ContentController).
-  scope "/", KilnCMSWeb do
-    pipe_through :browser
-
-    get "/blog", ContentController, :blog_index
-    get "/blog/:slug", ContentController, :show_post
-    # Generic delivery for any other content type at `/<plural>/<slug>`. Defined
-    # after the literal `/blog` routes (so posts win) and alongside the
-    # single-segment page route (different arity — no collision).
-    get "/:type/:slug", ContentController, :show_content
-    get "/:slug", ContentController, :show_page
-  end
-
-  # Other scopes may use custom stacks.
-  # scope "/api", KilnCMSWeb do
-  #   pipe_through :api
-  # end
-
-  # Enable LiveDashboard and Swoosh mailbox preview in development
+  # Dev-only browser tooling (LiveDashboard, Swoosh mailbox preview, AshAdmin).
+  # Registered BEFORE the public content delivery routes below so the
+  # single/two-segment `/:type/:slug` and `/:slug` catch-alls can't shadow these
+  # paths in development. The blocks are compile-gated to `dev_routes`, so
+  # production routing is unaffected.
   if Application.compile_env(:kiln_cms, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put
     # it behind authentication and allow only admins to access it.
@@ -245,6 +229,26 @@ defmodule KilnCMSWeb.Router do
       ash_admin "/", session: {KilnCMSWeb.AshAdmin.ActorPlug, :admin_session, []}
     end
   end
+
+  # Public content delivery (HTML). Defined last among "/" routes so the
+  # root-level `/:slug` page route can't shadow auth/editor/SEO/dev paths above.
+  # Only published content is reachable (see ContentController).
+  scope "/", KilnCMSWeb do
+    pipe_through :browser
+
+    get "/blog", ContentController, :blog_index
+    get "/blog/:slug", ContentController, :show_post
+    # Generic delivery for any other content type at `/<plural>/<slug>`. Defined
+    # after the literal `/blog` routes (so posts win) and alongside the
+    # single-segment page route (different arity — no collision).
+    get "/:type/:slug", ContentController, :show_content
+    get "/:slug", ContentController, :show_page
+  end
+
+  # Other scopes may use custom stacks.
+  # scope "/api", KilnCMSWeb do
+  #   pipe_through :api
+  # end
 
   # API explorer UIs — dev/CI only (`config :kiln_cms, dev_routes: true` in
   # dev.exs). Production keeps `/gql` and `/api/json` headless endpoints only.
