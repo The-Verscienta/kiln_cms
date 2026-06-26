@@ -26,7 +26,13 @@ defmodule KilnCMSWeb.TrashLive do
        |> assign(:retention_days, @retention_days)
        |> load_items()}
     else
-      {:ok, push_navigate(socket, to: ~p"/editor")}
+      # Defense-in-depth: the `:live_admin_required` on_mount guard already
+      # redirects non-admins with this flash before mount runs; mirror it here so
+      # this fallback stays consistent rather than silently bouncing to /editor.
+      {:ok,
+       socket
+       |> put_flash(:error, gettext("You need admin access to view that page."))
+       |> push_navigate(to: ~p"/")}
     end
   end
 
