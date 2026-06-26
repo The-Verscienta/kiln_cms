@@ -69,6 +69,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
     |> KilnCMS.CMS.TypedBlocks.to_legacy()
   end
 
+  defp page_versions(page_id) do
+    CMS.list_page_versions!(authorize?: false)
+    |> Enum.filter(&(&1.version_source_id == page_id))
+  end
+
+  defp autosave_versions(page_id),
+    do: Enum.filter(page_versions(page_id), &(&1.version_action_name == :autosave))
+
   describe "/editor (content list)" do
     test "viewers are redirected away", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/"}}} =
@@ -312,6 +320,52 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # The published record is only changed via the explicit Save button.
       assert CMS.get_page!(page.id, authorize?: false).title == "Live"
+    end
+
+    test "repeated autosaves coalesce into a single version (issue #32)", %{conn: conn} do
+      page = draft_page(%{title: "Draft"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Several edit-then-autosave cycles, the way the debounce timer fires
+      # between editor pauses.
+      for title <- ~w(One Two Three Four) do
+        lv |> form("#page-editor", form: %{title: title}) |> render_change()
+        send(lv.pid, :autosave)
+        render(lv)
+      end
+
+      # The live record always holds the latest edit...
+      assert CMS.get_page!(page.id, authorize?: false).title == "Four"
+      # ...but the four autosaves left exactly one version, not four.
+      assert length(autosave_versions(page.id)) == 1
+    end
+
+    test "a manual save is versioned distinctly from coalesced autosaves", %{conn: conn} do
+      page = draft_page(%{title: "Draft"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A run of autosaves collapses to one version.
+      lv |> form("#page-editor", form: %{title: "Autosaved"}) |> render_change()
+      send(lv.pid, :autosave)
+      render(lv)
+      assert length(autosave_versions(page.id)) == 1
+
+      # An explicit Save writes its own, separately-named version...
+      lv |> form("#page-editor", form: %{title: "Saved"}) |> render_submit()
+      assert Enum.any?(page_versions(page.id), &(&1.version_action_name == :update))
+
+      # ...and a fresh autosave run after it starts a new coalesced version
+      # rather than swallowing the manual one.
+      lv |> form("#page-editor", form: %{title: "Autosaved again"}) |> render_change()
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert length(autosave_versions(page.id)) == 2
+      assert Enum.any?(page_versions(page.id), &(&1.version_action_name == :update))
     end
   end
 
