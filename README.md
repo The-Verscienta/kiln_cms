@@ -86,6 +86,9 @@ mix ash.setup            # create DB + run migrations
 Multi-stage [`Dockerfile`](Dockerfile) builds an OTP release and includes **libvips**
 in the runtime image for image processing. Target: Coolify (RackNerd VPS) or Fly.io/Render.
 
+Performance SLOs, Oban queue/`POOL_SIZE` tuning, and load-test recipes are in
+[`docs/performance.md`](docs/performance.md).
+
 ### Production hardening checklist
 
 - **`dev_routes` must stay off.** It is only set in `config/dev.exs`; `config/prod.exs`
