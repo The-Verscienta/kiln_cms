@@ -10,6 +10,10 @@ defmodule KilnCMSWeb.TrashLive do
 
   @retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
+  # Bound the trashed rows loaded per content type (most-recently-deleted first)
+  # so a large trash can't grow the LiveView heap without limit.
+  @max_per_type 500
+
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
@@ -34,7 +38,12 @@ defmodule KilnCMSWeb.TrashLive do
     items =
       ContentTypes.all()
       |> Enum.flat_map(fn ct ->
-        ct.type |> ContentTypes.list_trashed!(actor: actor) |> Enum.map(&{ct.type, &1})
+        ct.type
+        |> ContentTypes.list_trashed!(
+          actor: actor,
+          query: [sort: [archived_at: :desc], limit: @max_per_type]
+        )
+        |> Enum.map(&{ct.type, &1})
       end)
       |> Enum.sort_by(fn {_kind, r} -> r.archived_at end, {:desc, DateTime})
 

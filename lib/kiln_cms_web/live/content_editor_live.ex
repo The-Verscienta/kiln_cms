@@ -26,6 +26,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # adding a `Kiln.Block` module needs no editor change).
   @type_order ~w(rich_text heading quote image embed divider custom)
 
+  # Bound the media picker window loaded on mount (newest first) so a large
+  # library can't grow each open editor's heap without limit.
+  @max_media 500
+
   # Idle delay before a draft is autosaved after the last edit. Configurable so
   # tests can shorten it.
   @autosave_debounce_ms Application.compile_env(
@@ -76,7 +80,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:media_query, "")
          |> assign(
            :media,
-           CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc]])
+           CMS.list_media_items!(
+             actor: actor,
+             query: [sort: [inserted_at: :desc], limit: @max_media]
+           )
          )
          |> assign(:categories, CMS.list_categories!(actor: actor))
          |> assign(:tags, CMS.list_tags!(actor: actor))

@@ -10,6 +10,11 @@ defmodule KilnCMSWeb.EditorLive do
 
   @statuses ~w(all draft in_review published archived)
 
+  # Bound the per-type rows loaded into the index so a large library can't grow
+  # one LiveView's heap without limit (filtering/search is client-side over this
+  # window). Most-recently-updated first.
+  @max_per_type 500
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -32,7 +37,12 @@ defmodule KilnCMSWeb.EditorLive do
     items =
       ContentTypes.all()
       |> Enum.flat_map(fn ct ->
-        ct.type |> ContentTypes.list!(actor: actor) |> Enum.map(&{ct.type, &1})
+        ct.type
+        |> ContentTypes.list!(
+          actor: actor,
+          query: [sort: [updated_at: :desc], limit: @max_per_type]
+        )
+        |> Enum.map(&{ct.type, &1})
       end)
       |> Enum.sort_by(fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
 
