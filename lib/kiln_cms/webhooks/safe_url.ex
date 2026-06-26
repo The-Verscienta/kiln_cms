@@ -53,7 +53,7 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   defp validate_host(host) do
     host = String.downcase(host)
-    base = host |> String.split(":") |> hd()
+    base = host_only(host)
 
     cond do
       base in @blocked_hostnames ->
@@ -82,10 +82,22 @@ defmodule KilnCMS.Webhooks.SafeUrl do
   defp validate_resolved_dns(host) do
     host
     |> String.downcase()
-    |> String.split(":")
-    |> hd()
+    |> host_only()
     |> resolve_addresses()
     |> check_resolved_addresses()
+  end
+
+  defp host_only(host) do
+    cond do
+      String.starts_with?(host, "[") ->
+        host |> String.trim_leading("[") |> String.split("]") |> hd()
+
+      String.contains?(host, ":") and length(String.split(host, ":")) > 2 ->
+        host
+
+      true ->
+        host |> String.split(":") |> hd()
+    end
   end
 
   defp check_resolved_addresses({:ok, addresses}) do
@@ -127,22 +139,45 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   defp blocked_ip?(address), do: blocked_address?(address)
 
+  # IPv4
   defp blocked_address?({a, b, _, _}), do: ipv4_blocked?(a, b)
+
+  # IPv6 loopback (::1) and unspecified (::) — match before the generic mapped clauses
   defp blocked_address?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
   defp blocked_address?({0, 0, 0, 0, 0, 0, 0, 0}), do: true
-  defp blocked_address?({0xFE, b, _, _, _, _, _, _}), do: ipv6_link_local?(b)
-  defp blocked_address?({0xFC, _, _, _, _, _, _, _}), do: true
-  defp blocked_address?({0xFD, _, _, _, _, _, _, _}), do: true
+
+  # IPv4-mapped ::ffff:a.b.c.d → re-check under the IPv4 rules
+  defp blocked_address?({0, 0, 0, 0, 0, 0xFFFF, g7, g8}),
+    do: blocked_address?(v4_from_groups(g7, g8))
+
+  # IPv4-compatible ::a.b.c.d (deprecated) → re-check under the IPv4 rules
+  defp blocked_address?({0, 0, 0, 0, 0, 0, g7, g8}),
+    do: blocked_address?(v4_from_groups(g7, g8))
+
+  # IPv6 ULA fc00::/7 (first 7 bits == 1111110)
+  defp blocked_address?({g1, _, _, _, _, _, _, _})
+       when Bitwise.band(g1, 0xFE00) == 0xFC00,
+       do: true
+
+  # IPv6 link-local fe80::/10 (first 10 bits == 1111111010)
+  defp blocked_address?({g1, _, _, _, _, _, _, _})
+       when Bitwise.band(g1, 0xFFC0) == 0xFE80,
+       do: true
+
   defp blocked_address?(_), do: false
 
   defp ipv4_blocked?(a, b) do
     a in [0, 10, 127, 255] or
+      (a == 100 and b in 64..127) or
       (a == 169 and b == 254) or
       (a == 172 and b in 16..31) or
       (a == 192 and b == 168)
   end
 
-  defp ipv6_link_local?(b), do: Bitwise.band(b, 0xC0) == 0x80
+  # Split two 16-bit IPv6 groups into the embedded IPv4 4-tuple.
+  defp v4_from_groups(g7, g8) do
+    {Bitwise.bsr(g7, 8), Bitwise.band(g7, 0xFF), Bitwise.bsr(g8, 8), Bitwise.band(g8, 0xFF)}
+  end
 
   defp allowed_schemes do
     if require_https?(), do: ["https"], else: ["http", "https"]

@@ -40,6 +40,30 @@ defmodule KilnCMS.Webhooks.SafeUrlTest do
         assert {:error, _} = SafeUrl.validate("http://192.168.1.10/hook")
         assert {:error, _} = SafeUrl.validate("http://10.0.0.5/hook")
         assert {:error, _} = SafeUrl.validate("http://169.254.169.254/latest/meta-data")
+        assert {:error, _} = SafeUrl.validate("http://100.64.0.1/hook")
+      end)
+    end
+
+    test "rejects internal IPv6 literals" do
+      with_config([require_https: false, resolve_dns: false], fn ->
+        assert {:error, _} = SafeUrl.validate("https://[fd00::1]/hook")
+        assert {:error, _} = SafeUrl.validate("https://[fc00::1]/hook")
+        assert {:error, _} = SafeUrl.validate("https://[fe80::1]/hook")
+        assert {:error, _} = SafeUrl.validate("https://[::1]/hook")
+      end)
+    end
+
+    test "rejects IPv4-mapped/compatible IPv6 literals under the IPv4 rules" do
+      with_config([require_https: false, resolve_dns: false], fn ->
+        assert {:error, _} = SafeUrl.validate("https://[::ffff:169.254.169.254]/hook")
+        assert {:error, _} = SafeUrl.validate("https://[::ffff:127.0.0.1]/hook")
+      end)
+    end
+
+    test "accepts public IPv6 and IPv4 literals" do
+      with_config([require_https: false, resolve_dns: false], fn ->
+        assert :ok = SafeUrl.validate("https://[2606:2800::1]/hook")
+        assert :ok = SafeUrl.validate("http://93.184.216.34/hook")
       end)
     end
 
