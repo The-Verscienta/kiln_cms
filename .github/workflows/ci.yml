@@ -92,6 +92,9 @@ jobs:
       - name: Sobelow (security scan)
         run: mix sobelow --config
 
+      - name: Dependency audit (mix_audit)
+        run: mix deps.audit
+
       - name: Run tests
         run: mix test
 

@@ -74,6 +74,7 @@ defmodule KilnCMS.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:ash_phoenix, "~> 2.0"},
       {:ash_postgres, "~> 2.0"},
@@ -166,6 +167,7 @@ defmodule KilnCMS.MixProject do
         "format --check-formatted",
         "credo --strict",
         "sobelow --config",
+        "deps.audit",
         "test"
       ]
     ]
