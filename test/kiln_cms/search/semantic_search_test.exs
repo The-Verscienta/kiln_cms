@@ -44,7 +44,7 @@ defmodule KilnCMS.Search.SemanticSearchTest do
 
   defp slug, do: "sem-#{System.unique_integer([:positive])}"
 
-  defp embed_all, do: Oban.drain_queue(queue: :default, with_recursion: true)
+  defp embed_all, do: KilnCMS.DataCase.drain_oban()
 
   test "ranks the nearest embedded record first" do
     admin = admin()

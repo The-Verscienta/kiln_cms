@@ -54,6 +54,9 @@ if config_env() == :prod do
          KilnCMS.Repo,
          [
            url: database_url,
+           # Shared by web requests and Oban workers (~29 concurrent across the
+           # split queues) — size up from 10 in production. See the pool-sizing
+           # formula in docs/performance.md.
            pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
            # For machines with several cores, consider starting multiple pools of `pool_size`
            # pool_count: 4,

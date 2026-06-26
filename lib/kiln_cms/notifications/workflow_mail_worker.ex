@@ -6,7 +6,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   email for the event and delivers it via `KilnCMS.Mailer`; delivery failures
   raise and Oban retries with backoff.
   """
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Oban.Worker, queue: :mail, max_attempts: 3
   use KilnCMSWeb, :verified_routes
 
   import Swoosh.Email

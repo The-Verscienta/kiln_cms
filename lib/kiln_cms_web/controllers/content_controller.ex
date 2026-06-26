@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ContentController do
 
   def show_page(conn, %{"slug" => slug}) do
     locale = locale(conn)
+    ct = ContentTypes.get(:page)
 
     fetch =
       &CMS.get_published_page_by_slug!(slug, &1,
@@ -29,18 +30,19 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published("page", slug, locale, fn -> payload(fetch, locale) end) do
+    case Cache.fetch_published("page", slug, locale, fn -> payload(fetch, locale, ct) end) do
       nil ->
         not_found(conn)
 
       payload ->
         track_view("page", payload.record.id)
-        render_content(conn, :show_page, payload, ContentTypes.get(:page))
+        render_content(conn, :show_page, payload, ct)
     end
   end
 
   def show_post(conn, %{"slug" => slug}) do
     locale = locale(conn)
+    ct = ContentTypes.get(:post)
 
     fetch =
       &CMS.get_published_post_by_slug!(slug, &1,
@@ -49,13 +51,13 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published("post", slug, locale, fn -> payload(fetch, locale) end) do
+    case Cache.fetch_published("post", slug, locale, fn -> payload(fetch, locale, ct) end) do
       nil ->
         not_found(conn)
 
       payload ->
         track_view("post", payload.record.id)
-        render_content(conn, :show_post, payload, ContentTypes.get(:post))
+        render_content(conn, :show_post, payload, ct)
     end
   end
 
@@ -73,7 +75,7 @@ defmodule KilnCMSWeb.ContentController do
            ),
          payload when not is_nil(payload) <-
            Cache.fetch_published(to_string(ct.type), slug, locale, fn ->
-             payload(fetch, locale)
+             payload(fetch, locale, ct)
            end) do
       track_view(to_string(ct.type), payload.record.id)
       render_content(conn, :show, payload, ct)
@@ -98,6 +100,8 @@ defmodule KilnCMSWeb.ContentController do
       )
 
     conn
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
     |> assign(:locale, locale)
     |> assign(:page_title, "Blog")
     |> assign(:meta_description, "Latest posts.")
@@ -128,14 +132,19 @@ defmodule KilnCMSWeb.ContentController do
   # The requested locale (set by `KilnCMSWeb.Plugs.SetLocale`).
   defp locale(conn), do: conn.assigns[:locale] || I18n.default_locale()
 
-  # The cached delivery payload: the published record plus its media-enriched
-  # blocks. Enrichment (the per-image media lookup + `srcset`) happens here, at
-  # cache-miss time, so a cache hit already carries resolved media URLs and skips
-  # the media query entirely. Returns `nil` (not cached) when nothing is found.
-  defp payload(fetch, locale) do
+  # The cached delivery payload: the published record, its media-enriched blocks,
+  # and its published locale variants. All enrichment (the per-image media lookup
+  # + `srcset`, and the `translations` lookup for hreflang/locale links) happens
+  # here at cache-miss time, so a cache *hit* carries resolved media URLs and
+  # translations and issues no further DB queries. Returns `nil` (not cached)
+  # when nothing is found.
+  defp payload(fetch, locale, ct) do
     case localized(fetch, locale) do
-      nil -> nil
-      record -> %{record: record, blocks: blocks(record)}
+      nil ->
+        nil
+
+      record ->
+        %{record: record, blocks: blocks(record), translations: translations(ct, record.slug)}
     end
   end
 
@@ -152,9 +161,34 @@ defmodule KilnCMSWeb.ContentController do
   # Assign SEO metadata (read by the root layout) and the pre-enriched blocks,
   # then render. `payload` is a `%{record, blocks}` map (see `payload/2`) and
   # `ct` its `ContentTypes` entry.
-  defp render_content(conn, template, %{record: record, blocks: blocks}, ct) do
-    translations = translations(ct, record.slug)
+  defp render_content(
+         conn,
+         template,
+         %{record: record, blocks: blocks, translations: translations},
+         ct
+       ) do
+    conn = put_delivery_cache_headers(conn, record)
+    start = System.monotonic_time()
 
+    result =
+      if delivery_fresh?(conn, record) do
+        send_resp(conn, :not_modified, "")
+      else
+        render_content_body(conn, template, record, blocks, translations, ct)
+      end
+
+    # Delivery-render duration telemetry (#206), tagged by content type and
+    # whether the response was a 304.
+    :telemetry.execute(
+      [:kiln_cms, :delivery, :render],
+      %{duration: System.monotonic_time() - start, count: 1},
+      %{type: to_string(ct.type), status: result.status}
+    )
+
+    result
+  end
+
+  defp render_content_body(conn, template, record, blocks, translations, ct) do
     conn
     |> assign(:locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
@@ -295,7 +329,9 @@ defmodule KilnCMSWeb.ContentController do
 
   # Record a privacy-first page view. Best-effort and **off the request path**:
   # the upsert runs in a supervised, unlinked task so a slow DB pool (or a crawler
-  # spike) can't queue page delivery. Failures are swallowed.
+  # spike) can't queue page delivery. The supervisor's `max_children` bounds
+  # concurrent tasks, so a spike drops views (start_child → {:error, :max_children})
+  # rather than exhausting the pool. Failures are swallowed.
   defp track_view(type, id) do
     Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
       try do
@@ -310,8 +346,33 @@ defmodule KilnCMSWeb.ContentController do
 
   defp not_found(conn) do
     conn
+    # A 404 may be an unpublished/draft slug — never let a CDN or browser cache
+    # it (it would mask the page once published).
+    |> put_resp_header("cache-control", "no-store")
     |> put_status(:not_found)
     |> put_view(KilnCMSWeb.ErrorHTML)
     |> render(:"404")
+  end
+
+  # CDN/browser cache headers for published HTML: a short shared max-age with a
+  # longer stale-while-revalidate window (the in-BEAM cache is single-node, so
+  # these let a CDN absorb origin load), plus a content ETag for conditional GETs
+  # and `Vary: Accept-Language` since delivery is locale-sensitive.
+  defp put_delivery_cache_headers(conn, record) do
+    conn
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
+    |> put_resp_header("etag", etag(record))
+  end
+
+  defp etag(record) do
+    raw = "#{record.id}:#{record.updated_at}:#{record.published_version_id}"
+    digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+    ~s("#{digest}")
+  end
+
+  defp delivery_fresh?(conn, record) do
+    match?([_ | _], get_req_header(conn, "if-none-match")) and
+      etag(record) in get_req_header(conn, "if-none-match")
   end
 end

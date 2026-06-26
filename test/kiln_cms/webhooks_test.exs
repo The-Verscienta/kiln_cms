@@ -33,7 +33,7 @@ defmodule KilnCMS.WebhooksTest do
   defp publish_page(admin) do
     page = CMS.create_page!(%{title: "Launch", slug: slug()}, actor: admin)
     CMS.publish_page!(page, %{}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
   end
 
   test "publishing delivers a signed payload to a subscribed endpoint" do
@@ -62,7 +62,7 @@ defmodule KilnCMS.WebhooksTest do
     page = CMS.create_page!(%{title: "Live", slug: slug()}, actor: admin)
     page = CMS.publish_page!(page, %{}, actor: admin)
     CMS.unpublish_page!(page, %{}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
 
     events =
       Stream.repeatedly(fn ->
@@ -86,7 +86,7 @@ defmodule KilnCMS.WebhooksTest do
     page = CMS.create_page!(%{title: "Live", slug: slug()}, actor: admin)
     page = CMS.publish_page!(page, %{}, actor: admin)
     CMS.update_page!(page, %{title: "Live (edited)"}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
 
     events =
       Stream.repeatedly(fn ->
@@ -109,7 +109,7 @@ defmodule KilnCMS.WebhooksTest do
 
     page = CMS.create_page!(%{title: "Draft", slug: slug()}, actor: admin)
     CMS.update_page!(page, %{title: "Draft (edited)"}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
 
     refute_received {:delivered, _, _, _, _}
   end

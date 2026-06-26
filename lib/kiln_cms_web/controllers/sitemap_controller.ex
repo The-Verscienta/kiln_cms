@@ -24,7 +24,7 @@ defmodule KilnCMSWeb.SitemapController do
   @cache_ttl :timer.minutes(5)
 
   def index(conn, _params) do
-    xml = Cache.fetch("sitemap:xml", @cache_ttl, fn -> sitemap_xml(build_urls()) end)
+    xml = Cache.fetch(Cache.sitemap_key(), @cache_ttl, fn -> sitemap_xml(build_urls()) end)
 
     conn
     |> put_resp_content_type("application/xml")

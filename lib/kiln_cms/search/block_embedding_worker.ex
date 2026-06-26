@@ -6,7 +6,7 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
   """
   # Dedupe a fan-out of fire/refire jobs for the same document while pending.
   use Oban.Worker,
-    queue: :default,
+    queue: :search,
     max_attempts: 3,
     unique: [
       period: 60,

@@ -23,8 +23,10 @@ defmodule KilnCMS.Firing.Engine do
   @spec fire(struct(), keyword()) :: {:ok, %{atom() => map()}}
   def fire(document, opts \\ []) do
     mode = Keyword.get(opts, :mode, :persist)
-    typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
     type = document_type(document)
+    start = System.monotonic_time()
+
+    typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
     artifacts = Map.new(@surfaces, fn surface -> {surface, compose(document, typed, surface)} end)
 
     if mode == :persist do
@@ -34,6 +36,14 @@ defmodule KilnCMS.Firing.Engine do
       # here, to keep fire/2 free of recursion.
       KilnCMS.Firing.References.rebuild(type, document.id, typed)
     end
+
+    # Firing-duration telemetry (#206): wall-clock of the per-surface render
+    # (+ persist on :persist), tagged by mode so persist vs preview are separable.
+    :telemetry.execute(
+      [:kiln_cms, :firing, :fire],
+      %{duration: System.monotonic_time() - start, count: 1},
+      %{type: type, mode: mode}
+    )
 
     {:ok, artifacts}
   end

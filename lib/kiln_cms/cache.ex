@@ -56,13 +56,20 @@ defmodule KilnCMS.Cache do
       key = key(type, slug, locale)
 
       case Cachex.get(@cache, key) do
-        {:ok, nil} -> compute_and_cache(key, fun)
-        {:ok, value} -> value
-        _ -> fun.()
+        {:ok, nil} -> emit(:miss, compute_and_cache(key, fun))
+        {:ok, value} -> emit(:hit, value)
+        _ -> emit(:miss, fun.())
       end
     else
       fun.()
     end
+  end
+
+  # Emit a content-cache hit/miss event (for cache-hit-rate dashboards, #206) and
+  # return `value` unchanged.
+  defp emit(result, value) do
+    :telemetry.execute([:kiln_cms, :cache, :content], %{count: 1}, %{result: result})
+    value
   end
 
   @doc """
@@ -108,6 +115,20 @@ defmodule KilnCMS.Cache do
       end)
     end
 
+    :ok
+  end
+
+  @doc "Cache key for the generated sitemap XML (shared with the sitemap controller)."
+  def sitemap_key, do: "sitemap:xml"
+
+  @doc """
+  Drop the cached sitemap XML so a new publish/unpublish is reflected on the next
+  request rather than waiting out the sitemap's TTL. Per-record `bust/2` doesn't
+  touch this key, so publish hooks call it explicitly.
+  """
+  @spec bust_sitemap() :: :ok
+  def bust_sitemap do
+    if enabled?(), do: Cachex.del(@cache, sitemap_key())
     :ok
   end
 

@@ -113,6 +113,37 @@ defmodule KilnCMSWeb.Telemetry do
         description: "Number of non-publish workflow transitions"
       ),
 
+      # Delivery / cache / firing Metrics (#206)
+      counter("kiln_cms.cache.content.count",
+        tags: [:result],
+        description: "Public content cache lookups, tagged hit/miss"
+      ),
+      summary("kiln_cms.firing.fire.duration",
+        unit: {:native, :millisecond},
+        tags: [:type, :mode],
+        description: "Time to render+persist a document's per-surface artifacts"
+      ),
+      summary("kiln_cms.delivery.render.duration",
+        unit: {:native, :millisecond},
+        tags: [:type, :status],
+        description: "Time to build a public HTML delivery response"
+      ),
+
+      # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures
+      summary("oban.job.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:queue, :worker],
+        description: "Time to execute an Oban job"
+      ),
+      counter("oban.job.stop.count",
+        tags: [:queue, :worker],
+        description: "Completed Oban jobs"
+      ),
+      counter("oban.job.exception.count",
+        tags: [:queue, :worker],
+        description: "Failed Oban jobs"
+      ),
+
       # VM Metrics
       summary("vm.memory.total", unit: {:byte, :kilobyte}),
       summary("vm.total_run_queue_lengths.total"),

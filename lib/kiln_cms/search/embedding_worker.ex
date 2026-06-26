@@ -12,7 +12,7 @@ defmodule KilnCMS.Search.EmbeddingWorker do
   # Coalesce rapid autosaves: while a job for this record is still pending, a new
   # enqueue is deduped instead of stacking one embedding job per keystroke-save.
   use Oban.Worker,
-    queue: :default,
+    queue: :search,
     max_attempts: 3,
     unique: [
       period: 60,

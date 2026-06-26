@@ -228,7 +228,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       # Dimensions are filled in asynchronously by the variant worker (the 1x1
       # pixel is too small for any responsive variant, so none are produced).
-      Oban.drain_queue(queue: :default, with_recursion: true)
+      KilnCMS.DataCase.drain_oban()
       processed = CMS.get_media_item!(item.id, actor: editor)
       assert processed.width == 1
       assert processed.height == 1

@@ -24,7 +24,7 @@ defmodule KilnCMS.Firing.ReferencesTest do
       order: 0
     }
 
-  defp drain, do: Oban.drain_queue(queue: :default, with_recursion: true)
+  defp drain, do: KilnCMS.DataCase.drain_oban()
 
   describe "extract/1" do
     test "pulls reference edges out of legacy ref blocks via the bridge" do

@@ -53,7 +53,7 @@ defmodule KilnCMS.Search.MeilisearchTest do
 
   defp slug, do: "meili-#{System.unique_integer([:positive])}"
 
-  defp drain, do: Oban.drain_queue(queue: :default, with_recursion: true)
+  defp drain, do: KilnCMS.DataCase.drain_oban()
 
   describe "config flag" do
     test "disabled by default" do

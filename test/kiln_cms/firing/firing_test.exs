@@ -30,7 +30,10 @@ defmodule KilnCMS.Firing.FiringTest do
         actor: actor
       )
 
-    CMS.publish_page!(page, actor: actor)
+    published = CMS.publish_page!(page, actor: actor)
+    # Firing is async (#201): run the enqueued FireWorker so artifacts exist.
+    KilnCMS.DataCase.drain_oban()
+    published
   end
 
   describe "firing on publish" do
@@ -79,6 +82,7 @@ defmodule KilnCMS.Firing.FiringTest do
         )
 
       page = CMS.publish_page!(page, actor: actor)
+      KilnCMS.DataCase.drain_oban()
       {:ok, ld} = Engine.read(:page, page.id, :json_ld)
 
       assert ld["@context"] == "https://schema.org"

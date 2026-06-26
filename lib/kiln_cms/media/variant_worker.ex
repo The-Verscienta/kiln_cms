@@ -14,7 +14,7 @@ defmodule KilnCMS.Media.VariantWorker do
   library refreshes live. A non-raster upload (or a since-deleted item / missing
   original) is a graceful no-op — the original is still served.
   """
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Oban.Worker, queue: :media, max_attempts: 3
 
   alias KilnCMS.{CMS, ImageProcessor, Storage}
 
