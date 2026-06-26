@@ -15,20 +15,20 @@ defmodule KilnCMS.CMS.Validations.SeoUrls do
   @impl true
   def validate(changeset, _opts, _context) do
     Enum.reduce_while(@url_fields, :ok, fn field, _acc ->
-      case Ash.Changeset.get_attribute(changeset, field) do
-        value when value in [nil, ""] ->
-          {:cont, :ok}
-
-        value when is_binary(value) ->
-          if valid?(value),
-            do: {:cont, :ok},
-            else: {:halt, {:error, invalid(field, value)}}
-
-        value ->
-          {:halt, {:error, invalid(field, value)}}
+      case validate_field(field, Ash.Changeset.get_attribute(changeset, field)) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
       end
     end)
   end
+
+  defp validate_field(_field, value) when value in [nil, ""], do: :ok
+
+  defp validate_field(field, value) when is_binary(value) do
+    if valid?(value), do: :ok, else: {:error, invalid(field, value)}
+  end
+
+  defp validate_field(field, value), do: {:error, invalid(field, value)}
 
   defp invalid(field, value) do
     InvalidAttribute.exception(

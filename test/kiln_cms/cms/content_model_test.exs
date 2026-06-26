@@ -37,6 +37,28 @@ defmodule KilnCMS.CMS.ContentModelTest do
       assert page.seo_image == "https://cdn.example/og.png"
       assert page.canonical_url == "https://example.com/seo"
     end
+
+    test "accepts same-origin relative paths" do
+      admin = user(:admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "Rel", slug: slug(), canonical_url: "/blog/post", seo_image: "/img/og.png"},
+          actor: admin
+        )
+
+      assert page.canonical_url == "/blog/post"
+      assert page.seo_image == "/img/og.png"
+    end
+
+    test "rejects off-scheme and off-origin URLs" do
+      admin = user(:admin)
+
+      for bad <- ["javascript:alert(1)", "http://example.com/x", "//evil.com/x", "/a/../../etc"] do
+        assert {:error, _} =
+                 CMS.create_page(%{title: "Bad", slug: slug(), canonical_url: bad}, actor: admin)
+      end
+    end
   end
 
   describe "author relationship" do
