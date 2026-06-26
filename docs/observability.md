@@ -76,3 +76,57 @@ Grafana at it:
 
 The same metric definitions feed both LiveDashboard and Prometheus, so adding the
 reporter needs no change to the event-emitting code.
+
+## Health & readiness probes (issue #56)
+
+Two HTTP probes back the platform healthcheck and external monitoring:
+
+| Probe | Purpose | Body | Status |
+|-------|---------|------|--------|
+| `GET /up` | Liveness — used by the Coolify/LB healthcheck | `OK` | 200 if the DB answers `SELECT 1`, else 503 |
+| `GET /ready` | Readiness — for monitoring/alert sinks | JSON | 200 when the DB is reachable, else 503 |
+
+`/ready` returns a machine-readable snapshot:
+
+```json
+{
+  "status": "ok",
+  "db": "ok",
+  "oban": { "available": 0, "retryable": 0, "backlog": 0 }
+}
+```
+
+- `db` — `"ok"` when `SELECT 1` succeeds, `"error"` otherwise (drives the 503).
+- `oban.available` / `oban.retryable` — jobs queued to run now or awaiting a
+  retry; `backlog` is their sum. Counted straight from `oban_jobs`, so the probe
+  works without any Oban Pro/Met dependency.
+
+Both probes live in
+[`KilnCMSWeb.HealthController`](../lib/kiln_cms_web/controllers/health_controller.ex).
+
+### Alert rules
+
+Point an uptime monitor and/or Prometheus blackbox/JSON exporter at these and
+alert on:
+
+- **Database connectivity** — `GET /up` returns non-200 for > 1 min, **or**
+  `/ready` reports `db != "ok"`. Page immediately: the app cannot serve content.
+- **Oban queue depth** — `/ready` `oban.backlog` stays above a threshold
+  (e.g. > 100 jobs for > 5 min). A climbing backlog means workers can't keep up,
+  so emails, webhooks, search indexing, and image variants fall behind. Warn at
+  100, page at 1000 (tune to traffic).
+- **Readiness flapping** — repeated `/ready` 503s indicate an unstable DB
+  connection (pool exhaustion, failover) even when liveness recovers.
+
+A minimal Prometheus rule sketch (via a JSON exporter scraping `/ready`):
+
+```yaml
+- alert: KilnCMSDatabaseDown
+  expr: probe_success{job="kiln_cms_ready"} == 0
+  for: 1m
+  labels: { severity: critical }
+- alert: KilnCMSObanBacklogHigh
+  expr: kiln_cms_oban_backlog > 1000
+  for: 5m
+  labels: { severity: warning }
+```

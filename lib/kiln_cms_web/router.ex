@@ -214,8 +214,10 @@ defmodule KilnCMSWeb.Router do
     get "/sitemap.xml", SitemapController, :index
     get "/robots.txt", SitemapController, :robots
 
-    # Health probe for load balancers / uptime monitors / Coolify.
+    # Liveness probe for load balancers / uptime monitors / Coolify.
     get "/up", HealthController, :show
+    # Readiness probe with DB + Oban queue-depth payload for monitoring.
+    get "/ready", HealthController, :ready
   end
 
   scope "/", KilnCMSWeb do
