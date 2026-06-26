@@ -1050,4 +1050,28 @@ defmodule KilnCMSWeb.EditorLiveTest do
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/widget/#{id}")
     end
   end
+
+  # Regression for #133: every authoring LiveView must pass current_user to
+  # Layouts.app so the header shows Sign out / Editor / Settings instead of
+  # Sign in while the editor is actively working.
+  describe "header navigation (current_user in layout)" do
+    test "content list shows authenticated nav for a signed-in editor", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ "Sign out"
+      refute html =~ ~r/>\s*Sign in\s*</
+      assert html =~ "Editor"
+      assert html =~ "Settings"
+    end
+
+    test "content editor shows authenticated nav for a signed-in editor", %{conn: conn} do
+      page = draft_page(%{title: "NavPage"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ "Sign out"
+      refute html =~ ~r/>\s*Sign in\s*</
+    end
+  end
 end

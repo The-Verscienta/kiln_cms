@@ -950,7 +950,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:related_current, related_current(assigns.kind, assigns.record))
 
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div
         :if={@conflict}
         id="edit-conflict"
