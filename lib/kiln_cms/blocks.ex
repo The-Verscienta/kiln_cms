@@ -9,13 +9,20 @@ defmodule KilnCMS.Blocks do
   build on.
   """
 
-  @doc "All block modules using `Kiln.Block`."
+  @doc """
+  All block modules using `Kiln.Block` — the in-app blocks discovered from the
+  `:kiln_cms` application, plus any contributed by installed plugins
+  (`KilnCMS.Plugins`, issue #63).
+  """
   @spec modules() :: [module()]
   def modules do
-    case :application.get_key(:kiln_cms, :modules) do
-      {:ok, mods} -> Enum.filter(mods, &kiln_block?/1)
-      _ -> []
-    end
+    app_modules =
+      case :application.get_key(:kiln_cms, :modules) do
+        {:ok, mods} -> Enum.filter(mods, &kiln_block?/1)
+        _ -> []
+      end
+
+    (app_modules ++ KilnCMS.Plugins.block_modules()) |> Enum.uniq()
   end
 
   @doc "Map of `_type` discriminator → block module."
