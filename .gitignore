@@ -52,3 +52,6 @@ npm-debug.log
 
 # Local Claude Code settings (launch.json is shared; settings.local.json is not)
 /.claude/settings.local.json
+
+# Static site export output (mix kiln.export.static)
+/priv/static_export/
