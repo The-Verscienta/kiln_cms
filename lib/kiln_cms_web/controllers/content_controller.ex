@@ -100,6 +100,8 @@ defmodule KilnCMSWeb.ContentController do
       )
 
     conn
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
     |> assign(:locale, locale)
     |> assign(:page_title, "Blog")
     |> assign(:meta_description, "Latest posts.")
@@ -165,6 +167,16 @@ defmodule KilnCMSWeb.ContentController do
          %{record: record, blocks: blocks, translations: translations},
          ct
        ) do
+    conn = put_delivery_cache_headers(conn, record)
+
+    if delivery_fresh?(conn, record) do
+      send_resp(conn, :not_modified, "")
+    else
+      render_content_body(conn, template, record, blocks, translations, ct)
+    end
+  end
+
+  defp render_content_body(conn, template, record, blocks, translations, ct) do
     conn
     |> assign(:locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
@@ -322,8 +334,33 @@ defmodule KilnCMSWeb.ContentController do
 
   defp not_found(conn) do
     conn
+    # A 404 may be an unpublished/draft slug — never let a CDN or browser cache
+    # it (it would mask the page once published).
+    |> put_resp_header("cache-control", "no-store")
     |> put_status(:not_found)
     |> put_view(KilnCMSWeb.ErrorHTML)
     |> render(:"404")
+  end
+
+  # CDN/browser cache headers for published HTML: a short shared max-age with a
+  # longer stale-while-revalidate window (the in-BEAM cache is single-node, so
+  # these let a CDN absorb origin load), plus a content ETag for conditional GETs
+  # and `Vary: Accept-Language` since delivery is locale-sensitive.
+  defp put_delivery_cache_headers(conn, record) do
+    conn
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
+    |> put_resp_header("etag", etag(record))
+  end
+
+  defp etag(record) do
+    raw = "#{record.id}:#{record.updated_at}:#{record.published_version_id}"
+    digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+    ~s("#{digest}")
+  end
+
+  defp delivery_fresh?(conn, record) do
+    match?([_ | _], get_req_header(conn, "if-none-match")) and
+      etag(record) in get_req_header(conn, "if-none-match")
   end
 end
