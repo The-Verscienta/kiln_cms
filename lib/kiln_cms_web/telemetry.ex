@@ -113,6 +113,12 @@ defmodule KilnCMSWeb.Telemetry do
         description: "Number of non-publish workflow transitions"
       ),
 
+      # Content Analytics (emitted by KilnCMS.Analytics on each recorded view)
+      counter("kiln_cms.analytics.view.count",
+        tags: [:content_type],
+        description: "Number of recorded content views, by content type"
+      ),
+
       # VM Metrics
       summary("vm.memory.total", unit: {:byte, :kilobyte}),
       summary("vm.total_run_queue_lengths.total"),

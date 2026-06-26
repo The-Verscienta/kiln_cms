@@ -27,6 +27,8 @@ defmodule KilnCMS.Analytics.ContentView do
       accept [:content_type, :content_id]
       change atomic_update(:views, expr(views + 1))
       change set_attribute(:last_viewed_at, &DateTime.utc_now/0)
+      # Emit telemetry + increment the per-day time-series bucket (issue #45).
+      change KilnCMS.Analytics.Changes.RecordDailyView
     end
 
     # Most-viewed content first, for the dashboard.
