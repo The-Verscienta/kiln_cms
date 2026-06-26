@@ -47,6 +47,12 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       assert html =~ "Email notifications"
       assert html =~ "Review requested"
     end
+
+    test "offers a self-service data export link (#212)", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/settings")
+      assert html =~ "Export my data"
+      assert html =~ ~p"/editor/account/export.json"
+    end
   end
 
   describe "saving preferences" do

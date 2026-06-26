@@ -36,6 +36,10 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
     |> Enum.each(&Cache.bust(type, &1))
+
+    # A publish/unpublish changes the set of public URLs, so the cached sitemap
+    # (keyed separately from per-record entries) must be dropped too.
+    Cache.bust_sitemap()
   end
 
   defp published_involved?(changeset, record) do

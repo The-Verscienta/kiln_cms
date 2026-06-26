@@ -26,9 +26,13 @@ defmodule KilnCMS.Application do
          Application.fetch_env!(:kiln_cms, Oban)
        )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
-      # Fire-and-forget tasks off the request hot path (e.g. best-effort
-      # page-view analytics) so a DB write can't queue/slow content delivery.
-      {Task.Supervisor, name: KilnCMS.TaskSupervisor},
+      # Fire-and-forget tasks off the request hot path (best-effort page-view
+      # analytics, search-query recording) so a DB write can't queue/slow
+      # delivery. `max_children` bounds in-flight tasks: under a crawler/traffic
+      # spike, excess best-effort writes are dropped instead of spawning without
+      # limit and exhausting the DB pool (start_child returns {:error,
+      # :max_children}, which callers treat as a dropped sample).
+      {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 50},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)

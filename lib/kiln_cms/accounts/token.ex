@@ -8,11 +8,31 @@ defmodule KilnCMS.Accounts.Token do
     domain: KilnCMS.Accounts,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshAuthentication.TokenResource]
+    extensions: [AshAuthentication.TokenResource, AshOban]
 
   postgres do
     table "tokens"
     repo KilnCMS.Repo
+  end
+
+  # Privacy retention (#224): expired auth tokens (sign-in/reset/magic/confirm
+  # JWTs) carry a subject + jti and otherwise accumulate forever. A nightly
+  # AshOban trigger runs `:expunge_expired`, so an expired token is purged within
+  # ~24h of expiry. See docs/data-flows.md and config `:token_retention`.
+  oban do
+    triggers do
+      trigger :expunge_expired do
+        action :expunge_expired
+        read_action :expired
+        worker_read_action :expired
+        queue :default
+        scheduler_cron "0 4 * * *"
+        where expr(expires_at < now())
+
+        worker_module_name KilnCMS.Accounts.Token.AshOban.Worker.ExpungeExpired
+        scheduler_module_name KilnCMS.Accounts.Token.AshOban.Scheduler.ExpungeExpired
+      end
+    end
   end
 
   actions do
@@ -20,6 +40,9 @@ defmodule KilnCMS.Accounts.Token do
 
     read :expired do
       description "Look up all expired tokens."
+      # Keyset pagination is required for the AshOban `:expunge_expired` trigger;
+      # `required?: false` keeps any direct callers returning a plain list.
+      pagination keyset?: true, required?: false
       filter expr(expires_at < now())
     end
 
@@ -81,6 +104,13 @@ defmodule KilnCMS.Accounts.Token do
   policies do
     bypass AshAuthentication.Checks.AshAuthenticationInteraction do
       description "AshAuthentication can interact with the token resource"
+      authorize_if always()
+    end
+
+    # The nightly `:expunge_expired` trigger reads + destroys as a trusted system
+    # job (no actor); let AshOban's scheduler/worker through.
+    bypass AshOban.Checks.AshObanInteraction do
+      description "AshOban can run the expired-token expunge trigger"
       authorize_if always()
     end
   end

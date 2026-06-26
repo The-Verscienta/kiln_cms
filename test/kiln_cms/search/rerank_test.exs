@@ -60,7 +60,7 @@ defmodule KilnCMS.Search.RerankTest do
   defp seed_pair(admin, term) do
     plain = CMS.create_page!(%{title: "#{term} alpha", slug: slug()}, actor: admin)
     boosted = CMS.create_page!(%{title: "#{term} beta boost", slug: slug()}, actor: admin)
-    Oban.drain_queue(queue: :default, with_recursion: true)
+    KilnCMS.DataCase.drain_oban()
     {plain, boosted}
   end
 

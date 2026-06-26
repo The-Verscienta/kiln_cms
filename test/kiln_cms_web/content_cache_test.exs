@@ -117,4 +117,47 @@ defmodule KilnCMSWeb.ContentCacheTest do
     assert html =~ "/uploads/thumb 400w"
     assert html =~ ~s(alt="A described image")
   end
+
+  test "published HTML carries CDN cache headers and supports conditional GET", %{conn: conn} do
+    page = published_page("Cacheable")
+
+    conn1 = get(conn, ~p"/#{page.slug}")
+    assert html_response(conn1, 200) =~ "Cacheable"
+
+    assert ["public, max-age=60, stale-while-revalidate=300"] =
+             get_resp_header(conn1, "cache-control")
+
+    assert [etag] = get_resp_header(conn1, "etag")
+    assert ["Accept-Language"] = get_resp_header(conn1, "vary")
+
+    # A conditional GET with the same ETag gets a 304 (no body).
+    conn2 = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+    assert response(conn2, 304) == ""
+  end
+
+  test "a 404 for an unknown slug is not cacheable", %{conn: conn} do
+    conn = get(conn, ~p"/no-such-slug-#{System.unique_integer([:positive])}")
+    assert response(conn, 404)
+    assert ["no-store"] = get_resp_header(conn, "cache-control")
+  end
+
+  test "delivery cache hits carry locale translations (no per-hit translations query)", %{
+    conn: conn
+  } do
+    slug = "tr-#{System.unique_integer([:positive])}"
+    en = published_page("EN page", %{slug: slug, locale: "en"})
+    _fr = published_page("FR page", %{slug: slug, locale: "fr"})
+
+    # First request (default locale) resolves + caches the translations list.
+    html = conn |> get(~p"/#{en.slug}") |> html_response(200)
+    assert html =~ ~s(hreflang="fr")
+
+    # Drop the French variant directly (no cache bust). A re-resolved request would
+    # now find no French translation and omit its hreflang alternate.
+    raw_delete("pages", _fr.id)
+
+    # The fr alternate is still present — proving translations are cached, not
+    # re-queried on every delivery hit.
+    assert conn |> get(~p"/#{en.slug}") |> html_response(200) =~ ~s(hreflang="fr")
+  end
 end

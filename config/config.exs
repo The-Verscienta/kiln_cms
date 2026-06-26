@@ -17,7 +17,11 @@ config :kiln_cms, :compile_env, config_env()
 config :kiln_cms, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
-  queues: [default: 10],
+  # Split by workload so a bulk publish / embedding backfill can't starve mail,
+  # webhooks, or the cron-driven scheduled-publish & trash-purge triggers (which
+  # stay on :default). Total worker concurrency here is ~29 — size POOL_SIZE
+  # accordingly in production (see config/runtime.exs and docs/performance.md).
+  queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, default: 10],
   repo: KilnCMS.Repo,
   plugins: [{Oban.Plugins.Cron, []}]
 
@@ -104,6 +108,12 @@ config :kiln_cms, :i18n, default_locale: "en", locales: ["en"]
 # How many days soft-deleted (trashed) content is retained before the nightly
 # AshOban `purge_trashed` trigger hard-deletes it.
 config :kiln_cms, :trash, retention_days: 30
+
+# How many days recorded editor search queries (KilnCMS.Analytics.SearchQuery)
+# are retained before the nightly AshOban `purge_expired` trigger deletes them.
+# Rows carry no actor/IP, but the query text can contain PII or confidential
+# titles, so it isn't kept indefinitely. See docs/data-flows.md (#213, #220).
+config :kiln_cms, :search_analytics, retention_days: 90
 
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
