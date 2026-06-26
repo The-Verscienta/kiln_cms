@@ -42,6 +42,12 @@ config :ex_aws,
 # and JSON-LD canonical URLs. Override in runtime.exs for production.
 config :kiln_cms, :public_base_url, "http://localhost:4000"
 
+# White-label branding tokens (see KilnCMS.Branding). Override at runtime via
+# SITE_NAME / BRAND_LOGO_URL / BRAND_PRIMARY_COLOR in config/runtime.exs.
+config :kiln_cms, :branding,
+  site_name: "KilnCMS",
+  logo_url: "/images/logo.svg"
+
 # Semantic search — pgvector storage + local Bumblebee embeddings. Disabled by
 # default: with `semantic: false` the model/serving never start and content
 # writes skip embedding work, so the lean install pays nothing. Flip `semantic`

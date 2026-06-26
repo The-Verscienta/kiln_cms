@@ -44,8 +44,8 @@ defmodule KilnCMSWeb.Layouts do
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
-          <img src={~p"/images/logo.svg"} width="32" alt="" />
-          <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
+          <img src={KilnCMS.Branding.logo_url()} width="32" alt="" />
+          <span class="text-sm font-semibold tracking-tight">{KilnCMS.Branding.site_name()}</span>
         </a>
         <nav class="flex items-center gap-2 sm:gap-3">
           <%!-- Desktop: inline links --%>
@@ -97,8 +97,8 @@ defmodule KilnCMSWeb.Layouts do
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-3xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
-          <img src={~p"/images/logo.svg"} width="28" alt="" />
-          <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
+          <img src={KilnCMS.Branding.logo_url()} width="28" alt="" />
+          <span class="text-sm font-semibold tracking-tight">{KilnCMS.Branding.site_name()}</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
           <a href="/blog" class="hover:text-base-content">{gettext("Blog")}</a>

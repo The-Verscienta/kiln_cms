@@ -82,6 +82,13 @@ if config_env() == :prod do
          :public_base_url,
          System.get_env("PUBLIC_BASE_URL") || "https://#{host}"
 
+  # White-label branding (see KilnCMS.Branding). Unset vars fall back to the
+  # stock KilnCMS defaults.
+  config :kiln_cms, :branding,
+    site_name: System.get_env("SITE_NAME") || "KilnCMS",
+    logo_url: System.get_env("BRAND_LOGO_URL") || "/images/logo.svg",
+    primary_color: System.get_env("BRAND_PRIMARY_COLOR")
+
   # ## Object storage (S3-compatible)
   #
   # Opt into the S3 adapter by setting S3_BUCKET. Works with AWS S3, Cloudflare
