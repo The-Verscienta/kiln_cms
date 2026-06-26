@@ -168,12 +168,24 @@ defmodule KilnCMSWeb.ContentController do
          ct
        ) do
     conn = put_delivery_cache_headers(conn, record)
+    start = System.monotonic_time()
 
-    if delivery_fresh?(conn, record) do
-      send_resp(conn, :not_modified, "")
-    else
-      render_content_body(conn, template, record, blocks, translations, ct)
-    end
+    result =
+      if delivery_fresh?(conn, record) do
+        send_resp(conn, :not_modified, "")
+      else
+        render_content_body(conn, template, record, blocks, translations, ct)
+      end
+
+    # Delivery-render duration telemetry (#206), tagged by content type and
+    # whether the response was a 304.
+    :telemetry.execute(
+      [:kiln_cms, :delivery, :render],
+      %{duration: System.monotonic_time() - start, count: 1},
+      %{type: to_string(ct.type), status: result.status}
+    )
+
+    result
   end
 
   defp render_content_body(conn, template, record, blocks, translations, ct) do

@@ -56,13 +56,20 @@ defmodule KilnCMS.Cache do
       key = key(type, slug, locale)
 
       case Cachex.get(@cache, key) do
-        {:ok, nil} -> compute_and_cache(key, fun)
-        {:ok, value} -> value
-        _ -> fun.()
+        {:ok, nil} -> emit(:miss, compute_and_cache(key, fun))
+        {:ok, value} -> emit(:hit, value)
+        _ -> emit(:miss, fun.())
       end
     else
       fun.()
     end
+  end
+
+  # Emit a content-cache hit/miss event (for cache-hit-rate dashboards, #206) and
+  # return `value` unchanged.
+  defp emit(result, value) do
+    :telemetry.execute([:kiln_cms, :cache, :content], %{count: 1}, %{result: result})
+    value
   end
 
   @doc """
