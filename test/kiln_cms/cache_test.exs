@@ -44,4 +44,35 @@ defmodule KilnCMS.CacheTest do
     # Same type+slug, different locale → a separate entry.
     assert :fr = Cache.fetch_published("page", s, "fr", fn -> :fr end)
   end
+
+  test "bust/2 drops every locale variant of one record, leaving others intact" do
+    s = slug()
+    other = slug()
+
+    # Cache the same slug under two locales, plus an unrelated slug.
+    assert :en = Cache.fetch_published("page", s, "en", fn -> :en end)
+    assert :fr = Cache.fetch_published("page", s, "fr", fn -> :fr end)
+    assert :keep = Cache.fetch_published("page", other, "en", fn -> :keep end)
+
+    Cache.bust("page", s)
+
+    # Both locale variants of the busted record are recomputed…
+    assert :en2 = Cache.fetch_published("page", s, "en", fn -> :en2 end)
+    assert :fr2 = Cache.fetch_published("page", s, "fr", fn -> :fr2 end)
+    # …while the unrelated record is still served from cache.
+    assert :keep = Cache.fetch_published("page", other, "en", fn -> :ignored end)
+  end
+
+  test "bust/2 is scoped by type" do
+    s = slug()
+
+    assert :page = Cache.fetch_published("page", s, "en", fn -> :page end)
+    assert :post = Cache.fetch_published("post", s, "en", fn -> :post end)
+
+    Cache.bust("page", s)
+
+    assert :page2 = Cache.fetch_published("page", s, "en", fn -> :page2 end)
+    # Same slug, different type → untouched.
+    assert :post = Cache.fetch_published("post", s, "en", fn -> :ignored end)
+  end
 end
