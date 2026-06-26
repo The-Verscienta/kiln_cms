@@ -41,7 +41,12 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         body: body,
         headers: headers,
         retry: false,
-        redirect: false
+        redirect: false,
+        # Bound how long a slow/hanging endpoint can hold this Oban worker (queue
+        # concurrency is limited). req_options() is appended after, so the test
+        # env can still override these.
+        connect_options: [timeout: 5_000],
+        receive_timeout: 15_000
       ] ++
         Webhooks.req_options()
 
