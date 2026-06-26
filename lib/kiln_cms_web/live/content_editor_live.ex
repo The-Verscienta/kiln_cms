@@ -1201,7 +1201,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   />
                   <.field_cursors field="canonical_url" cursors={@cursors} />
                 </div>
-                <.input field={@form[:locale]} label={gettext("Locale")} />
+                <.input
+                  field={@form[:locale]}
+                  type="select"
+                  label={gettext("Locale")}
+                  options={KilnCMS.I18n.locales()}
+                />
+                <p class="-mt-1 text-xs text-base-content/50">
+                  {gettext(
+                    "Give a translation the same slug in another locale to link it as a variant."
+                  )}
+                </p>
                 <.input
                   field={@form[:scheduled_at]}
                   type="datetime-local"
