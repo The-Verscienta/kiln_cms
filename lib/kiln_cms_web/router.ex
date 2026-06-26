@@ -183,7 +183,12 @@ defmodule KilnCMSWeb.Router do
   scope "/gql" do
     pipe_through [:graphql]
 
-    forward "/", Absinthe.Plug, schema: Module.concat(["KilnCMSWeb.GraphqlSchema"])
+    # Cap query cost/depth so a deeply nested or wide query can't force an
+    # unbounded resolve (DoS). Tune `max_complexity` up as list queries are added.
+    forward "/", Absinthe.Plug,
+      schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
+      analyze_complexity: true,
+      max_complexity: 200
   end
 
   # Interactive API docs — Swagger UI over the published OpenAPI spec. Always
