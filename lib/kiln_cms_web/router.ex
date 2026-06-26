@@ -45,6 +45,8 @@ defmodule KilnCMSWeb.Router do
 
   pipeline :graphql do
     plug KilnCMSWeb.Plugs.RateLimit, :gql
+    # Block schema introspection in production (config-gated).
+    plug KilnCMSWeb.Plugs.DisableGraphqlIntrospection
     plug :load_from_bearer
     plug :set_actor, :user
     plug AshGraphql.Plug

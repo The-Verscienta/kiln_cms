@@ -66,8 +66,12 @@ defmodule KilnCMS.Blocks.PortableTextTest do
     end
 
     test "rejects javascript: and data: link hrefs, keeping the text" do
-      for scheme <- ["javascript:alert(document.domain)", "data:text/html,<script>1</script>",
-                     "vbscript:msgbox(1)", "  JavaScript:alert(1)"] do
+      for scheme <- [
+            "javascript:alert(document.domain)",
+            "data:text/html,<script>1</script>",
+            "vbscript:msgbox(1)",
+            "  JavaScript:alert(1)"
+          ] do
         doc =
           tiptap([
             %{
