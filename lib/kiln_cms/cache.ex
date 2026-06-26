@@ -43,7 +43,32 @@ defmodule KilnCMS.Cache do
     end
   end
 
-  @doc "Drop all cached published content (called after a content write)."
+  @doc """
+  Invalidate every locale variant of a single published record (`{type, slug}`).
+
+  The precise alternative to `bust_published/0`: a publish or edit drops only the
+  keys for the affected record instead of clearing the whole cache. All locales
+  are busted because a request for a missing locale caches the default-locale
+  fallback under the *requested* locale's key (same slug), so a single slug can
+  live under several locale keys.
+  """
+  @spec bust(String.t(), String.t()) :: :ok
+  def bust(type, slug) when is_binary(type) and is_binary(slug) do
+    if enabled?() do
+      Enum.each(KilnCMS.I18n.locales(), fn locale ->
+        Cachex.del(@cache, key(type, slug, locale))
+      end)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Drop all cached published content. The blunt fallback for writes whose blast
+  radius isn't a single `{type, slug}` (e.g. a media-item edit that may be
+  referenced by any number of pages); prefer `bust/2` where the affected record
+  is known.
+  """
   @spec bust_published() :: :ok
   def bust_published do
     if enabled?(), do: Cachex.clear(@cache)
