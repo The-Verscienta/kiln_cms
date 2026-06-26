@@ -73,13 +73,16 @@ defmodule KilnCMS.CMS.Content do
     published_read =
       if published? do
         quote do
-          # Public delivery: published content, newest first. Paginated for
-          # headless feed consumers (offset + keyset), but `required?: false`
-          # keeps `CMS.list_published_*` returning a plain list.
+          # Public delivery: published content, newest first.
           read :published do
             filter expr(^ref(:state) == :published)
             prepare build(sort: [published_at: :desc])
 
+            # Paginated for headless feed consumers (offset + keyset). `required?:
+            # false` keeps `CMS.list_published_*` returning a plain list, but
+            # `max_page_size` caps any explicit `page:` request — the public blog
+            # index (see `ContentController.blog_index/2`) pages through it rather
+            # than loading every row into memory.
             pagination offset?: true,
                        keyset?: true,
                        countable: true,

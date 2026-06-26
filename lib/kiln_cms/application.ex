@@ -9,8 +9,11 @@ defmodule KilnCMS.Application do
   def start(_type, _args) do
     children = [
       KilnCMSWeb.Telemetry,
-      KilnCMSWeb.RateLimit,
-      Supervisor.child_spec({Cachex, name: KilnCMS.Cache.cache_name()}, id: :content_cache),
+      # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
+      # ETS table without bound (one row per `bucket:IP` otherwise lives forever).
+      {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
+      # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
+      KilnCMS.Cache,
       Supervisor.child_spec({Cachex, name: KilnCMS.Firing.Cache.cache_name()}, id: :firing_cache),
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},

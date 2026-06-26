@@ -82,9 +82,20 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  def blog_index(conn, _params) do
+  # Posts shown per page on the public blog index. Bounds per-request memory/DB
+  # load — the `:published` read is paginated and capped at its `max_page_size`.
+  @blog_page_size 20
+
+  def blog_index(conn, params) do
     locale = locale(conn)
-    posts = CMS.list_published_posts!(authorize?: false, query: [filter: [locale: locale]])
+    page = page_param(params)
+
+    %Ash.Page.Offset{results: posts, more?: more?} =
+      CMS.list_published_posts!(
+        authorize?: false,
+        query: [filter: [locale: locale]],
+        page: [limit: @blog_page_size, offset: page * @blog_page_size, count: true]
+      )
 
     conn
     |> assign(:locale, locale)
@@ -92,8 +103,19 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:meta_description, "Latest posts.")
     |> assign(:locale_links, blog_locale_links(locale))
     |> assign(:json_ld, json_ld_script(StructuredData.blog(posts)))
-    |> render(:blog_index, posts: posts)
+    |> render(:blog_index, posts: posts, page: page, has_prev?: page > 0, has_next?: more?)
   end
+
+  # Zero-based page index from `?page=N` (1-based in the URL for humans).
+  # Anything missing or invalid is page 0.
+  defp page_param(%{"page" => raw}) do
+    case Integer.parse(to_string(raw)) do
+      {n, _} when n > 1 -> n - 1
+      _ -> 0
+    end
+  end
+
+  defp page_param(_params), do: 0
 
   # Language-switcher links to the blog index in each supported locale.
   defp blog_locale_links(current) do
