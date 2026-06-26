@@ -332,16 +332,25 @@ defmodule KilnCMSWeb.ContentController do
   # spike) can't queue page delivery. The supervisor's `max_children` bounds
   # concurrent tasks, so a spike drops views (start_child → {:error, :max_children})
   # rather than exhausting the pool. Failures are swallowed.
+  #
+  # `:async_analytics` is on in prod/dev but off under test, where the detached
+  # task would run outside the ExUnit SQL sandbox connection (leaking a connection
+  # past the owning test and racing assertions). Running it inline keeps the
+  # upsert on the request's sandbox-owned connection.
   defp track_view(type, id) do
-    Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
-      try do
-        Analytics.record_view(type, id, authorize?: false)
-      rescue
-        _ -> :ok
-      end
-    end)
+    if Application.get_env(:kiln_cms, :async_analytics, true) do
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_view(type, id) end)
+    else
+      record_view(type, id)
+    end
 
     :ok
+  end
+
+  defp record_view(type, id) do
+    Analytics.record_view(type, id, authorize?: false)
+  rescue
+    _ -> :ok
   end
 
   defp not_found(conn) do

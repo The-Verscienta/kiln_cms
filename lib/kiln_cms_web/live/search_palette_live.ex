@@ -45,16 +45,22 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   # Record the search for analytics off the LiveView's process so a debounced
   # keystroke doesn't block on the DB write. Best-effort and bounded by the
   # shared Task.Supervisor's max_children (drops under load); failures swallowed.
+  # `:async_analytics` is off under test so the write stays on the test's SQL
+  # sandbox connection rather than leaking from a detached task.
   defp record_query_async(query, total) do
-    Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
-      try do
-        Search.record_query(query, total)
-      rescue
-        _ -> :ok
-      end
-    end)
+    if Application.get_env(:kiln_cms, :async_analytics, true) do
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_query(query, total) end)
+    else
+      record_query(query, total)
+    end
 
     :ok
+  end
+
+  defp record_query(query, total) do
+    Search.record_query(query, total)
+  rescue
+    _ -> :ok
   end
 
   defp result_count(%{pages: p, posts: o, media: m}), do: length(p) + length(o) + length(m)
