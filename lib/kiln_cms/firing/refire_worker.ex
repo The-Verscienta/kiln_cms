@@ -5,7 +5,17 @@ defmodule KilnCMS.Firing.RefireWorker do
   Cycle-safe: each node is fired at most once per wave via the accumulating
   `visited` set. Only published documents re-fire; everything else is a no-op.
   """
-  use Oban.Worker, queue: :default, max_attempts: 3
+  # Bound refire storms for hub documents: dedupe pending refire jobs by node
+  # (type+id), ignoring the per-path `visited` set so a fan-in doesn't enqueue
+  # the same node many times over.
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 3,
+    unique: [
+      period: 60,
+      keys: [:type, :id],
+      states: [:scheduled, :available, :executing, :retryable, :suspended]
+    ]
 
   alias KilnCMS.Firing.{Engine, References}
 

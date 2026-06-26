@@ -4,7 +4,15 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
   Enqueued on fire when semantic search is enabled. No-op otherwise / if the
   document is gone.
   """
-  use Oban.Worker, queue: :default, max_attempts: 3
+  # Dedupe a fan-out of fire/refire jobs for the same document while pending.
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 3,
+    unique: [
+      period: 60,
+      keys: [:type, :id],
+      states: [:scheduled, :available, :executing, :retryable, :suspended]
+    ]
 
   alias KilnCMS.{CMS, Search}
   alias KilnCMS.Search.BlockIndexer

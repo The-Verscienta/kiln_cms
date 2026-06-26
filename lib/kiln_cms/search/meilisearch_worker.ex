@@ -9,7 +9,15 @@ defmodule KilnCMS.Search.MeilisearchWorker do
   of consequence. An upsert whose document has vanished (deleted before the job
   ran) degrades to a delete, keeping the index from drifting.
   """
-  use Oban.Worker, queue: :default, max_attempts: 3
+  # Dedupe repeated index ops for the same document+op while pending.
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 3,
+    unique: [
+      period: 60,
+      keys: [:op, :type, :id],
+      states: [:scheduled, :available, :executing, :retryable, :suspended]
+    ]
 
   alias KilnCMS.CMS
   alias KilnCMS.Search.Meilisearch
