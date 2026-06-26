@@ -16,4 +16,18 @@
       </a>
     </li>
   </ul>
+
+  <nav
+    :if={@has_prev? || @has_next?}
+    class="mt-12 flex justify-between text-sm"
+    aria-label="Pagination"
+  >
+    <a :if={@has_prev?} href={~p"/blog?#{[page: @page]}"} class="hover:underline" rel="prev">
+      ← Newer posts
+    </a>
+    <span :if={!@has_prev?}></span>
+    <a :if={@has_next?} href={~p"/blog?#{[page: @page + 2]}"} class="hover:underline" rel="next">
+      Older posts →
+    </a>
+  </nav>
 </Layouts.public>

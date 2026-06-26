@@ -58,6 +58,10 @@ defmodule KilnCMSWeb.Endpoint do
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json, AshJsonApi.Plug.Parser, Absinthe.Plug.Parser],
     pass: ["*/*"],
+    # Explicit request-body cap (Plug's default is 8MB). Bounds the memory a
+    # single request can force us to buffer; raise per-endpoint if large uploads
+    # are ever needed.
+    length: 8_000_000,
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride

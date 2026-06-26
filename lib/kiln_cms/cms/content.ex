@@ -77,6 +77,16 @@ defmodule KilnCMS.CMS.Content do
           read :published do
             filter expr(^ref(:state) == :published)
             prepare build(sort: [published_at: :desc])
+
+            # Always paginated so the anonymous public index can't load an
+            # unbounded number of rows into memory per request. `default_limit`
+            # bounds a page-less call; `max_page_size` caps any caller-supplied
+            # limit (sitemaps/feeds page through rather than fetching all).
+            pagination offset?: true,
+                       default_limit: 20,
+                       max_page_size: 100,
+                       required?: true,
+                       countable: true
           end
         end
       end

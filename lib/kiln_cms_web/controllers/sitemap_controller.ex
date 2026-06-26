@@ -8,21 +8,45 @@ defmodule KilnCMSWeb.SitemapController do
   """
   use KilnCMSWeb, :controller
 
+  alias KilnCMS.Cache
   alias KilnCMS.CMS.ContentTypes
 
+  # The sitemaps protocol caps a single sitemap at 50,000 URLs. Enforce that as a
+  # hard ceiling so the per-request scan (and response) is bounded no matter how
+  # much published content exists.
+  @max_urls 50_000
+
+  # Repeated hits within this window reuse the rendered XML instead of
+  # re-scanning every published row. Busted immediately on any content write
+  # (`KilnCMS.Cache.bust_published/0`), so it never serves stale content long.
+  @cache_ttl :timer.minutes(5)
+
   def index(conn, _params) do
-    # No actor + `authorize?: true` ⇒ the read policy returns published records
-    # only, which is exactly what belongs in a public sitemap.
-    urls =
-      Enum.flat_map(ContentTypes.all(), fn ct ->
-        ct.type
-        |> ContentTypes.list!(authorize?: true)
-        |> page_entries(ContentTypes.public_prefix(ct))
-      end)
+    xml = Cache.fetch("sitemap:xml", @cache_ttl, fn -> sitemap_xml(build_urls()) end)
 
     conn
     |> put_resp_content_type("application/xml")
-    |> send_resp(200, sitemap_xml(urls))
+    |> send_resp(200, xml)
+  end
+
+  # No actor + `authorize?: true` ⇒ the read policy returns published records
+  # only, which is exactly what belongs in a public sitemap. Each type's read is
+  # capped, and accumulation stops once the overall ceiling is reached.
+  defp build_urls do
+    Enum.reduce_while(ContentTypes.all(), [], fn ct, acc ->
+      remaining = @max_urls - length(acc)
+
+      if remaining <= 0 do
+        {:halt, acc}
+      else
+        entries =
+          ct.type
+          |> ContentTypes.list!(authorize?: true, query: [limit: remaining])
+          |> page_entries(ContentTypes.public_prefix(ct))
+
+        {:cont, acc ++ entries}
+      end
+    end)
   end
 
   def robots(conn, _params) do

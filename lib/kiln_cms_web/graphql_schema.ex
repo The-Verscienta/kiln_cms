@@ -5,6 +5,12 @@ defmodule KilnCMSWeb.GraphqlSchema do
   use AshGraphql,
     domains: [KilnCMS.CMS]
 
+  # Follow-up: when list queries are first exposed via GraphQL, add a query
+  # complexity/depth limit (e.g. `Absinthe.Plug` `max_complexity:` plus
+  # `Absinthe.Phase.Document.Complexity.Analysis`) so a deeply nested or
+  # wide query can't force an unbounded resolve. Latent today — no list
+  # queries are exposed, only the `:health` probe.
+
   import_types Absinthe.Plug.Types
 
   query do
