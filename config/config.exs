@@ -48,6 +48,11 @@ config :kiln_cms, :branding,
   site_name: "KilnCMS",
   logo_url: "/images/logo.svg"
 
+# AI content assistant (see KilnCMS.AI). Defaults to the offline Echo provider;
+# runtime.exs swaps in the Claude (Anthropic) provider when ANTHROPIC_API_KEY is
+# set. Set `enabled: false` to hide the editor assist UI entirely.
+config :kiln_cms, KilnCMS.AI, adapter: KilnCMS.AI.Echo, enabled: true
+
 # Semantic search — pgvector storage + local Bumblebee embeddings. Disabled by
 # default: with `semantic: false` the model/serving never start and content
 # writes skip embedding work, so the lean install pays nothing. Flip `semantic`

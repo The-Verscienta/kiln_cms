@@ -69,6 +69,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:save_state, :saved)
          # Set when an optimistic-lock conflict blocks saving until reload.
          |> assign(:conflict, false)
+         # AI assist (issue #60): true while a suggestion request is in flight.
+         |> assign(:ai_busy, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -121,6 +123,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, autosave(socket)}
+
+  @impl true
+  def handle_async({:ai_assist, field}, {:ok, {:ok, suggestion}}, socket) do
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> Map.put(field, suggestion)
+
+    {:noreply,
+     socket
+     |> assign(:ai_busy, false)
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+  end
+
+  def handle_async({:ai_assist, _field}, {:ok, {:error, _reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:ai_busy, false)
+     |> put_flash(:error, gettext("AI suggestion failed. Please try again."))}
+  end
+
+  def handle_async({:ai_assist, _field}, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:ai_busy, false)
+     |> put_flash(:error, gettext("AI suggestion failed. Please try again."))}
+  end
+
+  # Source text the AI assist works from: the title plus the saved search text
+  # (the server-derived plain text of the blocks), falling back to the title.
+  defp assist_source_text(socket) do
+    record = socket.assigns.record
+    body = Map.get(record, :search_text)
+
+    [record.title, body]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
+  end
 
   defp assign_record(socket, record) do
     socket
@@ -280,6 +320,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("reorder", %{"order" => order}, socket) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
     {:noreply, assign(socket, :form, form)}
+  end
+
+  # AI assist (issue #60): generate an SEO field from the content, off the
+  # request path via start_async so a slow provider never blocks the editor.
+  def handle_event("ai_assist", %{"field" => field}, socket)
+      when field in ~w(seo_description seo_title) do
+    if KilnCMS.AI.enabled?() and not socket.assigns.ai_busy do
+      text = assist_source_text(socket)
+
+      fun =
+        if field == "seo_title", do: &KilnCMS.AI.seo_title/1, else: &KilnCMS.AI.seo_description/1
+
+      socket =
+        socket
+        |> assign(:ai_busy, true)
+        |> start_async({:ai_assist, field}, fn -> fun.(text) end)
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("save", %{"form" => params}, socket) do
@@ -1172,6 +1233,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {field_attrs("seo_title")}
                   />
                   <.field_cursors field="seo_title" cursors={@cursors} />
+                  <.ai_assist_button field="seo_title" busy={@ai_busy} />
                 </div>
                 <div class={["relative", lock_ring(@locked_fields, "seo_description")]}>
                   <.input
@@ -1182,6 +1244,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {field_attrs("seo_description")}
                   />
                   <.field_cursors field="seo_description" cursors={@cursors} />
+                  <.ai_assist_button field="seo_description" busy={@ai_busy} />
                 </div>
                 <div class={["relative", lock_ring(@locked_fields, "seo_image")]}>
                   <.input
@@ -1303,6 +1366,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
       </div>
       <span class="text-xs text-base-content/60">{gettext("%{count} editing", count: @count)}</span>
     </div>
+    """
+  end
+
+  attr :field, :string, required: true
+  attr :busy, :boolean, default: false
+
+  # "Suggest with AI" affordance for an SEO field (issue #60). Hidden entirely
+  # when the AI assistant is disabled in config.
+  defp ai_assist_button(assigns) do
+    ~H"""
+    <button
+      :if={KilnCMS.AI.enabled?()}
+      type="button"
+      phx-click="ai_assist"
+      phx-value-field={@field}
+      disabled={@busy}
+      class="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
+    >
+      <.icon name="hero-sparkles-micro" class="size-3.5" />
+      {if @busy, do: gettext("Suggesting…"), else: gettext("Suggest with AI")}
+    </button>
     """
   end
 

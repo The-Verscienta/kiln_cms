@@ -89,6 +89,17 @@ if config_env() == :prod do
     logo_url: System.get_env("BRAND_LOGO_URL") || "/images/logo.svg",
     primary_color: System.get_env("BRAND_PRIMARY_COLOR")
 
+  # AI content assistant (see KilnCMS.AI). When ANTHROPIC_API_KEY is set, use the
+  # Claude provider; otherwise fall back to the offline Echo provider so the
+  # editor assist UI still works. Model defaults to claude-opus-4-8.
+  if anthropic_key = System.get_env("ANTHROPIC_API_KEY") do
+    config :kiln_cms, KilnCMS.AI, adapter: KilnCMS.AI.Anthropic, enabled: true
+
+    config :kiln_cms, KilnCMS.AI.Anthropic,
+      api_key: anthropic_key,
+      model: System.get_env("ANTHROPIC_MODEL") || "claude-opus-4-8"
+  end
+
   # ## Object storage (S3-compatible)
   #
   # Opt into the S3 adapter by setting S3_BUCKET. Works with AWS S3, Cloudflare
