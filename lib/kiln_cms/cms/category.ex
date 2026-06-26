@@ -16,6 +16,18 @@ defmodule KilnCMS.CMS.Category do
 
   graphql do
     type :category
+
+    # Taxonomy is world-readable (D7) — list all categories and fetch one by
+    # slug for headless frontends building navigation/landing pages.
+    queries do
+      list :categories, :read do
+        paginate_with nil
+      end
+
+      get :category_by_slug, :by_slug do
+        identity false
+      end
+    end
   end
 
   json_api do

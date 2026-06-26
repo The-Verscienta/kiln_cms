@@ -81,6 +81,15 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+    # The matching GraphQL query for the `:published` read (post index), only
+    # present when the type opts into `published?`.
+    published_query =
+      if published? do
+        quote do
+          list unquote(:"published_#{type}s"), :published
+        end
+      end
+
     quote do
       use Ash.Resource,
         domain: KilnCMS.CMS,
@@ -99,9 +108,28 @@ defmodule KilnCMS.CMS.Content do
       graphql do
         type unquote(type)
 
-        # Headless search surface (D7 — exposed deliberately). Keyword + semantic
-        # search and typo-tolerant title autocomplete, per content type.
+        # Curated, read-only public surface (D7 — deliberate exposure). The
+        # GraphQL endpoint is a *delivery* API: it exposes published-content
+        # reads only. Authoring/workflow actions (create/update/publish/…) are
+        # intentionally NOT surfaced here — they run through the admin editor
+        # (and the bearer-authenticated JSON:API), behind the role policies.
         queries do
+          # Published-content delivery: one record by slug+locale, and every
+          # published locale variant of a slug (hreflang alternates). Both reads
+          # are state-filtered, so anonymous callers only ever see published rows.
+          # `identity false` exposes the action's own slug/locale arguments
+          # instead of the default `id` lookup.
+          get unquote(:"#{type}_by_slug"), :public_by_slug do
+            identity false
+          end
+
+          list unquote(:"#{type}_translations"), :published_translations
+
+          # The published index (newest first) — posts only.
+          unquote(published_query)
+
+          # Headless search surface. Keyword + semantic search and typo-tolerant
+          # title autocomplete, per content type.
           list unquote(:"search_#{type}s"), :search
           list unquote(:"semantic_search_#{type}s"), :search_semantic
           list unquote(:"autocomplete_#{type}s"), :autocomplete

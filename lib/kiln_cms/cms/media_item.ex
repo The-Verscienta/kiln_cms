@@ -22,6 +22,10 @@ defmodule KilnCMS.CMS.MediaItem do
 
   graphql do
     type :media_item
+
+    # No top-level queries (D7 — deliberate). Media is resolved only as a nested
+    # `featuredImage` on content; the library itself isn't a public listing
+    # endpoint (that's an admin concern via AshAdmin / the JSON:API).
   end
 
   json_api do
