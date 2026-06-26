@@ -65,6 +65,52 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       assert PortableText.to_html(pt) =~ ~s(<a href="https://x.test">click</a>)
     end
 
+    test "rejects javascript: and data: link hrefs, keeping the text" do
+      for scheme <- ["javascript:alert(document.domain)", "data:text/html,<script>1</script>",
+                     "vbscript:msgbox(1)", "  JavaScript:alert(1)"] do
+        doc =
+          tiptap([
+            %{
+              "type" => "paragraph",
+              "content" => [
+                %{
+                  "type" => "text",
+                  "text" => "click",
+                  "marks" => [%{"type" => "link", "attrs" => %{"href" => scheme}}]
+                }
+              ]
+            }
+          ])
+
+        html = doc |> PortableText.from_tiptap() |> PortableText.to_html()
+        refute html =~ "<a"
+        refute html =~ "javascript:"
+        refute html =~ "data:"
+        assert html =~ "click"
+      end
+    end
+
+    test "allows mailto: and relative link hrefs" do
+      for href <- ["mailto:hi@x.test", "/editor/foo"] do
+        doc =
+          tiptap([
+            %{
+              "type" => "paragraph",
+              "content" => [
+                %{
+                  "type" => "text",
+                  "text" => "click",
+                  "marks" => [%{"type" => "link", "attrs" => %{"href" => href}}]
+                }
+              ]
+            }
+          ])
+
+        html = doc |> PortableText.from_tiptap() |> PortableText.to_html()
+        assert html =~ ~s(<a href="#{href}">click</a>)
+      end
+    end
+
     test "text is HTML-escaped" do
       doc =
         tiptap([

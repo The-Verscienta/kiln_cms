@@ -139,8 +139,17 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp apply_mark(key, acc, defs) do
     case Enum.find(defs, &(&1["_key"] == key)) do
-      %{"_type" => "link", "href" => href} -> ~s(<a href="#{esc(href)}">#{acc}</a>)
-      _ -> acc
+      %{"_type" => "link", "href" => href} ->
+        # Allowlist the URL scheme so fired `:web` HTML (consumed via innerHTML by
+        # headless clients) cannot carry `javascript:`/`data:` links. A rejected
+        # href degrades to the plain text rather than a live anchor.
+        case KilnCMS.HTMLSanitizer.safe_href(href) do
+          nil -> acc
+          safe -> ~s(<a href="#{esc(safe)}">#{acc}</a>)
+        end
+
+      _ ->
+        acc
     end
   end
 
