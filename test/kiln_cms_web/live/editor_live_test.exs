@@ -718,6 +718,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert_receive {:preview_update, %{title: "Broadcasted"}}
     end
 
+    # Regression for #134: the broadcast payload for a rich-text block must carry
+    # the rendered HTML (legacy_html), not the empty Portable Text `body` that a
+    # primary-field lookup would pick — otherwise the pop-out preview is blank.
+    test "broadcast payload carries rich-text HTML, not empty body", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "RTPage",
+          blocks: [%{type: :rich_text, content: "<p>Pop-out RichText</p>", order: 0}]
+        })
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "RTPage edited"}) |> render_change()
+
+      assert_receive {:preview_update, %{blocks: blocks}}
+      assert Enum.any?(blocks, &(&1.type == "rich_text" and &1.content =~ "Pop-out RichText"))
+    end
+
     test "renders with public-site fidelity (public shell + prose article)", %{conn: conn} do
       page = draft_page()
 

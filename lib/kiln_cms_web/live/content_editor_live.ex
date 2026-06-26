@@ -753,29 +753,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
   # Thin `%{type, content}` maps — used by the decoupled (pop-out) preview window.
+  # Thin `%{type, content}` block maps for the decoupled (pop-out) preview, which
+  # renders them through the shared `BlockComponents`. Routed through the SAME
+  # sanitized typed→legacy pipeline as the inline preview (`preview_block_maps`)
+  # and `PreviewLive.content_blocks/1`, so rich-text edits surface as rendered
+  # `legacy_html` rather than the empty Portable Text `body` field that a
+  # primary-field lookup would pick (#134).
   defp preview_blocks(form) do
-    case AshPhoenix.Form.value(form, :blocks) do
-      forms when is_list(forms) -> Enum.map(forms, &block_map/1)
-      _ -> []
-    end
-  end
-
-  defp block_map(%AshPhoenix.Form{} = subform) do
-    mod = block_member(subform)
-
-    %{
-      type: to_string(Kiln.Block.Info.name(mod)),
-      content: to_string(member_primary_value(subform, mod) || "")
-    }
-  end
-
-  # The value of a member's primary (first string/rich_text) field — the closest
-  # analogue to the legacy `content`, for the thin decoupled-preview map.
-  defp member_primary_value(subform, mod) do
-    case primary_field_name(mod) do
-      nil -> nil
-      name -> AshPhoenix.Form.value(subform, name)
-    end
+    form
+    |> preview_block_maps()
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+    |> Enum.map(&%{type: to_string(&1.type), content: &1.content})
   end
 
   # Inline preview rendered through the **same typed serializers that firing
