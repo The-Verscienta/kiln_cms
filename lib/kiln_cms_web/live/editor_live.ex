@@ -271,6 +271,7 @@ defmodule KilnCMSWeb.EditorLive do
           <form id="content-filter" phx-change="filter">
             <select
               name="status"
+              aria-label={gettext("Filter by status")}
               class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
             >
               <option :for={status <- @statuses} value={status} selected={status == @status}>
@@ -278,12 +279,13 @@ defmodule KilnCMSWeb.EditorLive do
               </option>
             </select>
           </form>
-          <form id="content-search" phx-change="search" class="flex-1">
+          <form id="content-search" phx-change="search" class="flex-1" role="search">
             <input
               type="text"
               name="q"
               value={@query}
               placeholder={gettext("Search by title")}
+              aria-label={gettext("Search by title")}
               phx-debounce="200"
               autocomplete="off"
               class="w-full max-w-xs rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
@@ -375,6 +377,7 @@ defmodule KilnCMSWeb.EditorLive do
               checked={MapSet.member?(@selected, "#{kind}:#{record.id}")}
               phx-click="toggle_select"
               phx-value-key={"#{kind}:#{record.id}"}
+              aria-label={gettext("Select %{title}", title: record.title)}
               class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
             />
             <span class="shrink-0 text-xs uppercase text-base-content/40">{kind}</span>

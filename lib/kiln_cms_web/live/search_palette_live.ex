@@ -57,12 +57,15 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           </p>
         </div>
 
-        <form phx-change="search" id="palette-search">
+        <form phx-change="search" id="palette-search" role="search">
+          <label for="palette-search-input" class="sr-only">Search content</label>
           <input
+            id="palette-search-input"
             type="text"
             name="q"
             value={@query}
             placeholder="Search content…"
+            aria-label="Search content"
             autocomplete="off"
             autofocus
             phx-debounce="150"
@@ -70,7 +73,12 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           />
         </form>
 
-        <p :if={@searched and @count == 0} class="text-sm text-base-content/60">
+        <p
+          :if={@searched and @count == 0}
+          class="text-sm text-base-content/60"
+          role="status"
+          aria-live="polite"
+        >
           No results for “{@query}”.
         </p>
 
