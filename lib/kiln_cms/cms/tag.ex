@@ -15,6 +15,18 @@ defmodule KilnCMS.CMS.Tag do
 
   graphql do
     type :tag
+
+    # Taxonomy is world-readable (D7) — list all tags and fetch one by slug for
+    # headless frontends building tag clouds / filtered listings.
+    queries do
+      list :tags, :read do
+        paginate_with nil
+      end
+
+      get :tag_by_slug, :by_slug do
+        identity false
+      end
+    end
   end
 
   json_api do
