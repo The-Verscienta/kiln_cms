@@ -16,6 +16,11 @@ defmodule KilnCMS.Notifications do
     * `:published` — content went live; the author is notified. This also covers
       scheduled publishing, where there is no acting user.
     * `:returned_to_draft` — an admin sent reviewed content back to the author.
+
+  Each recipient is honoured against their per-user notification preferences
+  (`User.notify_on_*`, issue #46) before a job is enqueued: a user who has
+  muted an event for their account is skipped. Preferences default on, so
+  existing behaviour is unchanged until someone opts out.
   """
   require Ash.Query
 
@@ -33,24 +38,35 @@ defmodule KilnCMS.Notifications do
     |> Ash.Query.filter(role == :admin)
     |> Ash.read!(authorize?: false)
     |> Enum.reject(&same_user?(&1, actor))
+    |> Enum.filter(&wants?(&1, :submitted_for_review))
     |> Enum.each(&enqueue(email_of(&1), :submitted_for_review, record, actor))
   end
 
   def dispatch(:published, record, _actor) do
-    record
-    |> Ash.load!(:author, authorize?: false)
-    |> Map.get(:author)
-    |> email_of()
-    |> enqueue(:published, record, nil)
+    notify_author(record, :published, nil)
   end
 
   def dispatch(:returned_to_draft, record, actor) do
-    record
-    |> Ash.load!(:author, authorize?: false)
-    |> Map.get(:author)
-    |> email_of()
-    |> enqueue(:returned_to_draft, record, actor)
+    notify_author(record, :returned_to_draft, actor)
   end
+
+  # Author-targeted events (`:published`, `:returned_to_draft`) load the author
+  # and notify them unless they've muted that event for their account.
+  defp notify_author(record, event, actor) do
+    author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
+
+    if author && wants?(author, event) do
+      enqueue(email_of(author), event, record, actor)
+    else
+      :ok
+    end
+  end
+
+  # Per-user opt-out (issue #46). Unknown/legacy users default to opted-in.
+  defp wants?(%{notify_on_review_request: enabled?}, :submitted_for_review), do: enabled?
+  defp wants?(%{notify_on_publish: enabled?}, :published), do: enabled?
+  defp wants?(%{notify_on_return_to_draft: enabled?}, :returned_to_draft), do: enabled?
+  defp wants?(_user, _event), do: true
 
   defp enqueue(nil, _event, _record, _actor), do: :ok
 
