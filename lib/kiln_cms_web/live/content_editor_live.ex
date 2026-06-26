@@ -173,9 +173,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
   end
 
-  # Other content of the same kind, for the "related content" picker.
-  defp siblings(kind, id, actor),
-    do: kind |> ContentTypes.list!(actor: actor) |> Enum.reject(&(&1.id == id))
+  # Other content of the same kind, for the "related content" picker. Bounded to
+  # the same window as the media picker so a large library can't blow up the mount.
+  defp siblings(kind, id, actor) do
+    kind
+    |> ContentTypes.list!(actor: actor, query: [sort: [updated_at: :desc], limit: @max_media])
+    |> Enum.reject(&(&1.id == id))
+  end
 
   # The self-referential m2m relationship/argument names follow the convention
   # `related_<type>s` / `related_<type>_ids`. `to_existing_atom` (rather than
