@@ -13,12 +13,88 @@ defmodule KilnCMS.MixProject do
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       consolidate_protocols: Mix.env() != :dev,
+      name: "KilnCMS",
+      source_url: "https://github.com/The-Verscienta/kiln_cms",
+      docs: docs(),
       dialyzer: [
         plt_add_apps: [:mix, :ex_unit],
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: false
+      ]
+    ]
+  end
+
+  # `mix docs` — ExDoc API reference plus the human guides under `docs/`.
+  # Run `mix docs` and open `doc/index.html`; `main` is the onboarding guide.
+  defp docs do
+    [
+      main: "getting-started",
+      extras: [
+        "docs/getting-started.md": [title: "Getting started"],
+        "README.md": [title: "Overview"],
+        "CONTRIBUTING.md": [title: "Contributing"],
+        # Modeling & authoring
+        "docs/design-system.md": [],
+        "docs/editor-shortcuts.md": [],
+        "docs/policy-matrix.md": [],
+        # APIs
+        "docs/api.md": [],
+        "docs/headless-graphql-api.md": [],
+        "docs/json-api.md": [],
+        # Search
+        "docs/search-roadmap.md": [],
+        "docs/search-tsvector-migration.md": [],
+        "docs/semantic-search-plan.md": [],
+        "docs/meilisearch.md": [],
+        # Operations & deployment
+        "docs/deployment-coolify.md": [],
+        "docs/releases-and-migrations.md": [],
+        "docs/domain-and-ssl.md": [],
+        "docs/backups.md": [],
+        "docs/observability.md": [],
+        "docs/cdn.md": [],
+        "docs/threat-model.md": [],
+        "docs/beta-testing.md": [],
+        # Design notes & spikes
+        "docs/advanced-analytics-design.md": [],
+        "docs/collaborative-editing-spike.md": [],
+        "docs/mobile-admin-spike.md": [],
+        "docs/frontend-assets.md": [],
+        "docs/kiln-v2-implementation-guide.md": []
+      ],
+      groups_for_extras: [
+        "Getting started": ["docs/getting-started.md", "README.md", "CONTRIBUTING.md"],
+        "Modeling & authoring": [
+          "docs/design-system.md",
+          "docs/editor-shortcuts.md",
+          "docs/policy-matrix.md"
+        ],
+        APIs: ["docs/api.md", "docs/headless-graphql-api.md", "docs/json-api.md"],
+        Search: [
+          "docs/search-roadmap.md",
+          "docs/search-tsvector-migration.md",
+          "docs/semantic-search-plan.md",
+          "docs/meilisearch.md"
+        ],
+        "Operations & deployment": [
+          "docs/deployment-coolify.md",
+          "docs/releases-and-migrations.md",
+          "docs/domain-and-ssl.md",
+          "docs/backups.md",
+          "docs/observability.md",
+          "docs/cdn.md",
+          "docs/threat-model.md",
+          "docs/beta-testing.md"
+        ],
+        "Design notes & spikes": [
+          "docs/advanced-analytics-design.md",
+          "docs/collaborative-editing-spike.md",
+          "docs/mobile-admin-spike.md",
+          "docs/frontend-assets.md",
+          "docs/kiln-v2-implementation-guide.md"
+        ]
       ]
     ]
   end
