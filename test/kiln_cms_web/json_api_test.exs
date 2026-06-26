@@ -190,6 +190,33 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # Regression for #183: the JSON:API must not expose author PII. User is not a
+  # JSON:API resource (the Accounts domain has no AshJsonApi router), so the
+  # author relationship is not includable and the post payload carries only the
+  # opaque `author_id` foreign key — never email or role.
+  describe "author PII redaction (#183)" do
+    test "?include=author is rejected — author is not an exposed resource" do
+      admin = user(:admin)
+      post = published_post(%{title: "P"}, admin)
+
+      assert {400, %{"errors" => [%{"code" => "invalid_includes"}]}} =
+               api_get("/api/json/posts/#{post.id}?include=author")
+    end
+
+    test "a post payload exposes author_id but never author email or role" do
+      admin = user(:admin)
+      post = published_post(%{title: "P"}, admin)
+
+      assert {200, %{"data" => data}} = api_get("/api/json/posts/#{post.id}")
+
+      # The opaque FK is fine; the author's PII must not appear anywhere.
+      serialized = Jason.encode!(data)
+      refute serialized =~ to_string(admin.email)
+      refute serialized =~ ~s("email")
+      refute serialized =~ ~s("role")
+    end
+  end
+
   describe "single record" do
     test "fetches a published post by id" do
       admin = user(:admin)

@@ -747,7 +747,10 @@ defmodule KilnCMS.CMS.Content do
 
       relationships do
         # The user who authored this record. Nullable so existing/system content
-        # without an actor is valid. Not exposed via the public APIs.
+        # without an actor is valid. Exposed via the public APIs, but only the
+        # safe byline fields (`id`, `name`) serialize — email, role, and notify
+        # prefs are `public? false` on User (#183), so `?include=author` /
+        # `author { ... }` can never return author PII.
         belongs_to :author, KilnCMS.Accounts.User do
           allow_nil? true
           public? true

@@ -85,7 +85,13 @@ categories) `pages` / `posts` relationships.
   editable tree. Render content from the fired artifacts or your own block
   renderer.
 - **Internal fields** — `search_text`, `embedding`, `published_version_id`,
-  `lock_version`, the `author` PII, etc. are not `public?` and never serialized.
+  `lock_version`, etc. are not `public?` and never serialized.
+- **Author PII** — content exposes only the opaque `authorId` foreign key. `User`
+  has no GraphQL type (and no JSON:API resource), so there is **no nested `author`
+  object** through which `email` or `role` could be selected. Even if the author
+  surface were ever widened, a `User` field policy keeps email, role and
+  notification preferences admin/self-only (#183). The display `name` is read
+  server-side (`authorize?: false`) for the JSON-LD/byline only.
 
 ## Playground examples
 

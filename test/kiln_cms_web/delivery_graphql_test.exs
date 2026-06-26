@@ -193,4 +193,37 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
       refute :list_media_items in names
     end
   end
+
+  # Regression for #183: the public GraphQL surface must never expose author PII.
+  # User has no GraphQL type, so the content types expose only the opaque
+  # `authorId` foreign key — there is no nested `author` object through which
+  # email / role could be selected.
+  describe "author PII redaction (#183)" do
+    for type <- ["Post", "Page"] do
+      test "the #{type} GraphQL type exposes authorId but no author object/PII" do
+        fields = Map.keys(Absinthe.Schema.lookup_type(@schema, unquote(type)).fields)
+
+        assert :author_id in fields
+        refute :author in fields
+        refute :email in fields
+        refute :role in fields
+      end
+    end
+
+    test "selecting a nested author object is a schema error, not a leak" do
+      admin = admin()
+      s = slug()
+
+      CMS.create_post!(%{title: "Byline", slug: s}, actor: admin)
+      |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+
+      assert {:ok, %{errors: [%{message: msg} | _]}} =
+               run(
+                 "query($s:String!,$l:String!){ postBySlug(slug:$s,locale:$l){ author { email } } }",
+                 %{"s" => s, "l" => "en"}
+               )
+
+      assert msg =~ ~r/Cannot query field "author"/
+    end
+  end
 end

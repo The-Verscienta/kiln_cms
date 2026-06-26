@@ -57,6 +57,32 @@ defmodule KilnCMS.Accounts.UserPoliciesTest do
     end
   end
 
+  # #183: the `author` relationship on CMS content is public, so any User field
+  # not gated by a field policy would be reachable as author PII if the author
+  # surface were ever widened (includes/nested types). Lock the restrictive field
+  # policy so email, role and notification prefs stay admin/self-only.
+  describe "author PII field policy (#183)" do
+    test "email, role and notification prefs are each guarded by a restrictive field policy" do
+      guarded =
+        User
+        |> Ash.Policy.Info.field_policies()
+        |> Enum.reject(&(&1.fields == :* or &1.fields == [:*]))
+        |> Enum.flat_map(&List.wrap(&1.fields))
+        |> MapSet.new()
+
+      for field <- [
+            :email,
+            :role,
+            :notify_on_review_request,
+            :notify_on_publish,
+            :notify_on_return_to_draft
+          ] do
+        assert MapSet.member?(guarded, field),
+               "expected User.#{field} to be guarded by a field policy (admin/self only)"
+      end
+    end
+  end
+
   describe "self-only profile updates" do
     test "a user may update their own profile", %{editor: editor} do
       assert Ash.can?(Ash.Changeset.for_update(editor, :update_profile, %{name: "Me"}), editor)
