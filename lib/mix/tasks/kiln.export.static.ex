@@ -31,7 +31,6 @@ defmodule Mix.Tasks.Kiln.Export.Static do
   @requirements []
 
   @default_output "priv/static_export"
-  @default_port 4999
 
   @impl Mix.Task
   def run(argv) do
