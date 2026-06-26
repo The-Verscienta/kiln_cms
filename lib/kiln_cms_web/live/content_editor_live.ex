@@ -652,9 +652,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
       <div class="absolute inset-0 bg-black/40" phx-click="close_picker" aria-hidden="true"></div>
-      <div class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl">
+      <div
+        id="image-picker-dialog"
+        phx-hook="FocusTrap"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="image-picker-title"
+        tabindex="-1"
+        class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl"
+      >
         <div class="mb-3 flex items-center justify-between gap-4">
-          <h2 class="text-lg font-medium">
+          <h2 id="image-picker-title" class="text-lg font-medium">
             {if @index == :new,
               do: gettext("Insert image from library"),
               else: gettext("Choose an image")}

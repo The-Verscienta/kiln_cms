@@ -26,8 +26,10 @@ import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {RichText} from "./rich_text"
+import {FocusTrap} from "./focus_trap"
 
 const Hooks = {
+  FocusTrap,
   Clipboard: {
     mounted() {
       this.el.addEventListener("click", () => {

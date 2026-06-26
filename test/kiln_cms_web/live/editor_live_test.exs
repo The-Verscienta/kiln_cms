@@ -483,6 +483,23 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert block.content == "/uploads/x"
       assert block.data["media_id"] == media.id
     end
+
+    # Regression for #169: the picker is a labeled modal dialog with a focus trap.
+    test "the picker exposes dialog semantics and a focus trap", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      picker =
+        lv |> element("button[phx-click='open_picker'][phx-value-index='0']") |> render_click()
+
+      assert picker =~ ~s(role="dialog")
+      assert picker =~ ~s(aria-modal="true")
+      assert picker =~ ~s(aria-labelledby="image-picker-title")
+      assert picker =~ ~s(id="image-picker-title")
+      assert picker =~ ~s(phx-hook="FocusTrap")
+    end
   end
 
   describe "block inserter (slash menu)" do

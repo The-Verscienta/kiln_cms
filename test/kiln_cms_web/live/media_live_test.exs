@@ -120,6 +120,21 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert saved.alt == "A nice photo"
       assert saved.caption == "At dusk"
     end
+
+    # Regression for #169: the drawer is a labeled modal dialog with a focus trap.
+    test "the detail drawer exposes dialog semantics and a focus trap", %{conn: conn} do
+      item = Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "dlg.png", url: "/uploads/dlg"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      panel = lv |> element(~s(img[phx-value-id="#{item.id}"])) |> render_click()
+
+      assert panel =~ ~s(role="dialog")
+      assert panel =~ ~s(aria-modal="true")
+      assert panel =~ ~s(aria-labelledby="media-detail-title")
+      assert panel =~ ~s(id="media-detail-title")
+      assert panel =~ ~s(phx-hook="FocusTrap")
+    end
   end
 
   describe "trash" do

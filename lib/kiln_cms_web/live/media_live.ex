@@ -549,9 +549,17 @@ defmodule KilnCMSWeb.MediaLive do
     ~H"""
     <div class="fixed inset-0 z-40" phx-window-keydown="close" phx-key="Escape">
       <div class="absolute inset-0 bg-black/40" phx-click="close" aria-hidden="true"></div>
-      <div class="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-xl">
+      <div
+        id="media-detail-dialog"
+        phx-hook="FocusTrap"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="media-detail-title"
+        tabindex="-1"
+        class="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-xl"
+      >
         <div class="flex items-start justify-between gap-4">
-          <h2 class="truncate text-lg font-medium">{@item.filename}</h2>
+          <h2 id="media-detail-title" class="truncate text-lg font-medium">{@item.filename}</h2>
           <button
             type="button"
             phx-click="close"
