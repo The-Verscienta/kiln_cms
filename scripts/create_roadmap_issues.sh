@@ -1,9 +1,72 @@
 #!/usr/bin/env bash
 # Creates GitHub issues from KilnCMS_Project_Plan.md remaining work.
+#
+# Idempotent: re-running skips issues whose title already exists (any state),
+# so it is safe to run again after adding new items or after a partial failure.
 set -euo pipefail
 
 REPO="The-Verscienta/kiln_cms"
 PLAN="KilnCMS_Project_Plan.md"
+
+# GitHub Project board that roadmap issues are tracked on (see KilnCMS_Project_Plan.md).
+PROJECT_OWNER="The-Verscienta"
+PROJECT_TITLE="KilnCMS Roadmap"
+MASTER_ISSUE=67  # tracking epic: "Roadmap: KilnCMS remaining work"
+
+# URLs of issues actually created on this run (skips don't count). Used for the
+# closing note about linking them under the master checklist issue.
+CREATED_URLS=()
+
+command -v gh >/dev/null 2>&1 || { echo "error: gh CLI not found on PATH" >&2; exit 1; }
+gh auth status >/dev/null 2>&1 || { echo "error: gh is not authenticated (run 'gh auth login')" >&2; exit 1; }
+
+# `gh project` commands need the 'project' (or 'write:project') OAuth scope, which
+# the plain login does not grant. Read the granted scopes off an API response so we
+# fail early with an actionable message instead of mid-run under `set -e`.
+gh_scopes=$(gh api -i user 2>/dev/null | tr -d '\r' \
+  | awk -F': ' 'tolower($1) == "x-oauth-scopes" { print $2 }')
+case ",${gh_scopes// /}," in
+  *,project,*|*,write:project,*) ;;
+  *)
+    echo "error: gh token lacks the 'project' scope required for the roadmap board." >&2
+    echo "       run: gh auth refresh -s project" >&2
+    exit 1
+    ;;
+esac
+
+# Resolve the project number by title (robust to the board being renumbered or the
+# script being pointed at a different owner). Bail out clearly if it is missing.
+PROJECT_NUMBER=$(gh project list --owner "$PROJECT_OWNER" --format json \
+  --jq "first(.projects[] | select(.title == \"$PROJECT_TITLE\") | .number)")
+if [[ -z "${PROJECT_NUMBER:-}" ]]; then
+  echo "error: could not find project '$PROJECT_TITLE' for owner '$PROJECT_OWNER'." >&2
+  echo "       check 'gh project list --owner $PROJECT_OWNER'." >&2
+  exit 1
+fi
+
+# Add an issue to the roadmap board. gh dedupes by content, so re-adding an issue
+# already on the board is a no-op (verified) — but guard it anyway so a transient
+# failure does not abort the whole run under `set -euo pipefail`.
+add_to_project() {
+  local url="$1"
+  if gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$url" >/dev/null 2>&1; then
+    echo "  added to project #$PROJECT_NUMBER: $url"
+  else
+    echo "  warn: failed to add to project #$PROJECT_NUMBER (add manually): $url" >&2
+  fi
+}
+
+# Ensure the custom roadmap labels exist before creating issues. --force is an
+# upsert, so this is safe to re-run and self-documents the labels the issues use.
+ensure_label() {
+  gh label create "$1" --repo "$REPO" --color "$2" --description "KilnCMS roadmap" --force >/dev/null
+}
+for n in 0 1 2 3 4 5 6 7 8 9; do ensure_label "phase-$n" "0E8A16"; done
+ensure_label "stretch" "0E8A16"
+ensure_label "roadmap" "0E8A16"
+ensure_label "P0" "B60205"
+ensure_label "P1" "D93F0B"
+ensure_label "P2" "FBCA04"
 
 create() {
   local title="$1"
@@ -11,11 +74,26 @@ create() {
   local priority="$3"
   local body="$4"
 
-  gh issue create \
+  # Skip if an issue with this exact title already exists (open or closed).
+  local existing
+  existing=$(gh issue list --repo "$REPO" --state all --search "in:title \"$title\"" \
+    --json title --jq "map(select(.title == \"$title\")) | length")
+  if [[ "$existing" -gt 0 ]]; then
+    echo "skip (exists): $title"
+    return 0
+  fi
+
+  # Capture the URL on the create path only (skips returned early above), then add
+  # the freshly created issue to the roadmap board.
+  local url
+  url=$(gh issue create \
     --repo "$REPO" \
     --title "$title" \
     --label "$phase,$priority,roadmap,enhancement" \
-    --body "$body"
+    --body "$body")
+  echo "$url"
+  CREATED_URLS+=("$url")
+  add_to_project "$url"
 }
 
 create "[Phase 0] Custom Tailwind design system (replace DaisyUI scaffolding)" "phase-0" "P0" \
@@ -414,3 +492,15 @@ Export published content to static HTML for high-traffic blogs/CDN-only delivery
 - Documented deploy to object storage"
 
 echo "Created roadmap issues."
+
+# Editing the master checklist body in place can't be done idempotently without
+# risking clobbering manual edits, so leave linking as a clearly-noted manual step.
+if [[ ${#CREATED_URLS[@]} -gt 0 ]]; then
+  echo
+  echo "${#CREATED_URLS[@]} issue(s) created and added to project #$PROJECT_NUMBER."
+  echo "Manual step: reference them under master checklist issue #$MASTER_ISSUE:"
+  echo "  https://github.com/$REPO/issues/$MASTER_ISSUE"
+  for u in "${CREATED_URLS[@]}"; do echo "  - $u"; done
+else
+  echo "No new issues created; nothing to link under issue #$MASTER_ISSUE."
+fi
