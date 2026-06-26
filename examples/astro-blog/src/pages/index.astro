@@ -1,0 +1,46 @@
+---
+import Base from "../layouts/Base.astro";
+import { discoverContent, fetchArtifact, type ContentRef, type Document } from "../lib/kiln";
+
+// 1. Enumerate every published document from the sitemap.
+// 2. Fetch each one's artifact so we can show its title.
+const refs = await discoverContent();
+
+const entries = (
+  await Promise.all(
+    refs.map(async (ref): Promise<{ ref: ContentRef; doc: Document } | null> => {
+      const doc = await fetchArtifact(ref);
+      return doc ? { ref, doc } : null;
+    }),
+  )
+).filter((entry): entry is { ref: ContentRef; doc: Document } => entry !== null);
+
+// Posts first, then pages, alphabetical within each.
+const order: Record<string, number> = { post: 0, page: 1 };
+entries.sort((a, b) => {
+  const byType = (order[a.ref.type] ?? 9) - (order[b.ref.type] ?? 9);
+  return byType !== 0 ? byType : a.doc.title.localeCompare(b.doc.title);
+});
+---
+
+<Base title="Kiln Blog">
+  <h1>Latest content</h1>
+
+  {entries.length === 0 && (
+    <p>
+      No published content found. Start KilnCMS, seed it
+      (<code>mix run priv/repo/seeds.exs</code>), then rebuild.
+    </p>
+  )}
+
+  <ul class="post-list">
+    {entries.map(({ ref, doc }) => (
+      <li>
+        <span class="type">{ref.type}</span>
+        <div>
+          <a href={`/${ref.type}/${ref.slug}`}>{doc.title}</a>
+        </div>
+      </li>
+    ))}
+  </ul>
+</Base>

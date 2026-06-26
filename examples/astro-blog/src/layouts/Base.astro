@@ -1,0 +1,72 @@
+---
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="generator" content={Astro.generator} />
+    <style is:global>
+      :root {
+        --ink: #1a1a1a;
+        --muted: #666;
+        --accent: #b4441f;
+        --rule: #e5e5e5;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font: 17px/1.6 ui-serif, Georgia, "Times New Roman", serif;
+        color: var(--ink);
+        margin: 0;
+        background: #fafaf8;
+      }
+      a { color: var(--accent); }
+      .wrap { max-width: 42rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+      header.site { border-bottom: 1px solid var(--rule); margin-bottom: 2rem; }
+      header.site a { color: var(--ink); text-decoration: none; font-weight: 700; }
+      header.site .tag { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
+      nav a { margin-right: 1rem; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.9rem; }
+      h1, h2, h3 { line-height: 1.2; }
+      article :is(h2, h3) { margin-top: 2rem; }
+      article img { max-width: 100%; height: auto; border-radius: 4px; }
+      article figure { margin: 1.5rem 0; }
+      article figcaption { color: var(--muted); font-size: 0.85rem; text-align: center; margin-top: 0.4rem; }
+      article blockquote {
+        margin: 1.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); color: #333;
+      }
+      article blockquote cite { display: block; color: var(--muted); font-size: 0.9rem; margin-top: 0.4rem; }
+      .post-list { list-style: none; padding: 0; }
+      .post-list li { padding: 1rem 0; border-bottom: 1px solid var(--rule); }
+      .post-list .type { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+      .post-list a { font-size: 1.15rem; text-decoration: none; }
+      footer.site { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.85rem; font-family: ui-sans-serif, system-ui, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="site">
+        <p>
+          <a href="/">Kiln Blog</a>
+          <span class="tag">· a headless KilnCMS consumer</span>
+        </p>
+        <nav>
+          <a href="/">Home</a>
+          <a href="/search">Search</a>
+        </nav>
+      </header>
+      <main>
+        <slot />
+      </main>
+      <footer class="site">
+        Built statically from the KilnCMS content API. See the
+        <code>README.md</code> in this example.
+      </footer>
+    </div>
+  </body>
+</html>

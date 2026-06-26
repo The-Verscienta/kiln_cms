@@ -59,6 +59,15 @@ Then visit:
 - GraphQL playground: <http://localhost:4000/gql/playground>
 - JSON:API Swagger UI: <http://localhost:4000/api/json/swaggerui>
 
+## Headless consumption
+
+Published content is world-readable (no auth) over three public surfaces:
+`GET /api/content/:type/:slug` (the v2 content delivery API — structured `json`,
+`json_ld`, or pre-rendered `web` HTML), `GET /sitemap.xml` for enumeration, and
+`POST /gql` (GraphQL search). See [`examples/`](examples) for a runnable
+**Astro static blog** that builds entirely from these endpoints, with a complete
+headless setup walkthrough.
+
 ## Working with Ash
 
 ```bash
