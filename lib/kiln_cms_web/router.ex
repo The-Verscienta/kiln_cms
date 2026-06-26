@@ -115,8 +115,16 @@ defmodule KilnCMSWeb.Router do
   end
 
   # Preview endpoint — authorized by a signed token, not a session/bearer.
+  # Tightly rate-limited per IP so a leaked/guessable token can't be used to
+  # enumerate or scrape draft content.
   pipeline :preview do
     plug :accepts, ["json"]
+    plug KilnCMSWeb.Plugs.RateLimit, :preview
+  end
+
+  # Light per-IP ceiling for public HTML delivery (especially cache-miss paths).
+  pipeline :delivery do
+    plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
   scope "/", KilnCMSWeb do
@@ -310,7 +318,7 @@ defmodule KilnCMSWeb.Router do
   # root-level `/:slug` page route can't shadow auth/editor/SEO/dev paths above.
   # Only published content is reachable (see ContentController).
   scope "/", KilnCMSWeb do
-    pipe_through :browser
+    pipe_through [:browser, :delivery]
 
     get "/blog", ContentController, :blog_index
     get "/blog/:slug", ContentController, :show_post
