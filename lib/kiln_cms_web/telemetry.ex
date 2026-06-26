@@ -75,6 +75,44 @@ defmodule KilnCMSWeb.Telemetry do
           "The time the connection spent waiting before being checked out for the query"
       ),
 
+      # Editor Action Metrics (emitted by KilnCMSWeb.EditorTelemetry)
+      summary("kiln_cms.editor.save.duration",
+        unit: {:native, :millisecond},
+        tags: [:kind, :result],
+        description: "Time to persist an explicit editor Save"
+      ),
+      counter("kiln_cms.editor.save.count",
+        tags: [:kind, :result],
+        description: "Number of explicit editor Saves"
+      ),
+      summary("kiln_cms.editor.autosave.duration",
+        unit: {:native, :millisecond},
+        tags: [:kind, :result],
+        description: "Time to persist a debounced draft autosave"
+      ),
+      counter("kiln_cms.editor.autosave.count",
+        tags: [:kind, :result],
+        description: "Number of draft autosaves"
+      ),
+      summary("kiln_cms.editor.publish.duration",
+        unit: {:native, :millisecond},
+        tags: [:kind, :result],
+        description: "Time to run the publish workflow transition"
+      ),
+      counter("kiln_cms.editor.publish.count",
+        tags: [:kind, :result],
+        description: "Number of publish transitions"
+      ),
+      summary("kiln_cms.editor.workflow.duration",
+        unit: {:native, :millisecond},
+        tags: [:kind, :action, :result],
+        description: "Time to run a non-publish workflow transition"
+      ),
+      counter("kiln_cms.editor.workflow.count",
+        tags: [:kind, :action, :result],
+        description: "Number of non-publish workflow transitions"
+      ),
+
       # VM Metrics
       summary("vm.memory.total", unit: {:byte, :kilobyte}),
       summary("vm.total_run_queue_lengths.total"),
