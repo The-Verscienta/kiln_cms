@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
 
   # Preferred display order for the block palette; any block type registered
@@ -284,7 +285,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("save", %{"form" => params}, socket) do
     socket = cancel_autosave_timer(socket)
 
-    case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
+    result =
+      EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(socket.assigns.form, params: params)
+      end)
+
+    case result do
       {:ok, record} ->
         # Re-fetch so the relationship pickers reflect the saved links (the
         # submit result doesn't carry loaded relationships).
@@ -345,8 +351,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp run_workflow(socket, action) when action in ~w(submit return publish unpublish archive) do
+    # `publish` gets its own event; the rest share `:workflow` (tagged by action)
+    # so the publish hot path is isolated in the metrics.
+    {event, meta} =
+      if action == "publish",
+        do: {:publish, %{kind: socket.assigns.kind}},
+        else: {:workflow, %{kind: socket.assigns.kind, action: action}}
+
     result =
-      do_workflow(socket.assigns.kind, action, socket.assigns.record, socket.assigns.actor)
+      EditorTelemetry.span(event, meta, fn ->
+        do_workflow(socket.assigns.kind, action, socket.assigns.record, socket.assigns.actor)
+      end)
 
     case result do
       {:ok, record} ->
@@ -393,9 +408,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
           forms: [auto?: true]
         )
 
-      case AshPhoenix.Form.submit(autosave_form,
-             params: AshPhoenix.Form.params(socket.assigns.form)
-           ) do
+      result =
+        EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
+          AshPhoenix.Form.submit(autosave_form,
+            params: AshPhoenix.Form.params(socket.assigns.form)
+          )
+        end)
+
+      case result do
         {:ok, record} ->
           reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
           socket |> assign_record(reloaded) |> assign(:save_state, :saved)
