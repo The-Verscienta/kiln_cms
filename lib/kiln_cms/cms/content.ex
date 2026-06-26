@@ -315,6 +315,29 @@ defmodule KilnCMS.CMS.Content do
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
         end
 
+        # Debounced draft autosave from the editor. Writes the same content as
+        # `:update`, but as a distinct action so its PaperTrail versions are
+        # tagged `version_action_name: :autosave` and can be coalesced — a save
+        # per editor pause would otherwise flood history (issue #32).
+        # `CoalesceAutosaveVersions` collapses the trailing run of autosave
+        # versions into a single snapshot after each save. Drafts only (enforced
+        # by the editor); no `updated` webhook (draft edits are silent anyway).
+        update :autosave do
+          require_atomic? false
+          change optimistic_lock(:lock_version)
+          argument :tag_ids, {:array, :uuid}
+          argument unquote(related_arg), {:array, :uuid}
+          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+
+          change manage_relationship(unquote(related_arg), unquote(related_name),
+                   type: :append_and_remove
+                 )
+
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+        end
+
         # Full-text search over the denormalized `search_text`. Goes through the
         # read policy, so anonymous callers only match published content.
         # Locale-aware full-text search over the trigger-maintained, weighted

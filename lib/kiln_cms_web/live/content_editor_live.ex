@@ -383,7 +383,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     if draft?(socket) do
       socket = assign(socket, :autosave_timer, nil)
 
-      case AshPhoenix.Form.submit(socket.assigns.form,
+      # Submit the current edits through the dedicated `:autosave` action (kept
+      # distinct from the explicit Save's `:update` so its PaperTrail versions
+      # are tagged and coalesced). A throwaway form mirrors the live one's
+      # params, leaving `socket.assigns.form` intact for the Save button.
+      autosave_form =
+        AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
+          actor: socket.assigns.actor,
+          forms: [auto?: true]
+        )
+
+      case AshPhoenix.Form.submit(autosave_form,
              params: AshPhoenix.Form.params(socket.assigns.form)
            ) do
         {:ok, record} ->

@@ -85,6 +85,28 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     assert length(versions(page, admin)) == 3
   end
 
+  test "restoring a coalesced autosave version reconstructs the whole run" do
+    admin = admin()
+    page = CMS.create_page!(%{title: "Start", slug: slug()}, actor: admin)
+
+    # A run of autosaves touching different fields collapses (issue #32) to a
+    # single version — which must still carry the cumulative delta so a restore
+    # reconstructs every field, not just the last one changed.
+    page = Ash.update!(page, %{title: "Edited title"}, action: :autosave, actor: admin)
+    page = Ash.update!(page, %{seo_title: "Edited SEO"}, action: :autosave, actor: admin)
+    _page = Ash.update!(page, %{slug: "coalesced-slug"}, action: :autosave, actor: admin)
+
+    autosaves = Enum.filter(versions(page, admin), &(&1.version_action_name == :autosave))
+    assert length(autosaves) == 1
+    [coalesced] = autosaves
+
+    restored = CMS.restore_page_version!(page, %{version_id: coalesced.id}, actor: admin)
+
+    assert restored.title == "Edited title"
+    assert restored.seo_title == "Edited SEO"
+    assert restored.slug == "coalesced-slug"
+  end
+
   test "rejects a version belonging to a different record" do
     admin = admin()
     page = CMS.create_page!(%{title: "Mine", slug: slug()}, actor: admin)
