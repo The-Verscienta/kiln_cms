@@ -15,22 +15,25 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
 
   @impl true
   def change(changeset, _opts, _context) do
-    Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
-      with {:ok, record} <- result do
-        type = KilnCMS.Firing.Engine.document_type(record)
-
-        case %{"type" => to_string(type), "id" => record.id}
-             |> KilnCMS.Firing.FireWorker.new()
-             |> Oban.insert() do
-          {:ok, _job} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error("Enqueue firing failed for #{record.id}: #{inspect(reason)}")
-        end
-
-        {:ok, record}
-      end
-    end)
+    Ash.Changeset.after_transaction(changeset, &enqueue_firing/2)
   end
+
+  # Only enqueue on a committed publish; pass any error result straight through.
+  defp enqueue_firing(_changeset, {:ok, record} = result) do
+    type = KilnCMS.Firing.Engine.document_type(record)
+
+    case %{"type" => to_string(type), "id" => record.id}
+         |> KilnCMS.Firing.FireWorker.new()
+         |> Oban.insert() do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Enqueue firing failed for #{record.id}: #{inspect(reason)}")
+    end
+
+    result
+  end
+
+  defp enqueue_firing(_changeset, result), do: result
 end
