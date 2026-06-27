@@ -12,6 +12,11 @@ config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webho
 # Webhook URL validation: skip DNS resolution for Req.Test stub hosts.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: false, resolve_dns: false
 
+# Route the Verscienta Directus migration client through a Req.Test stub so its
+# pagination/auth is exercised offline.
+config :kiln_cms, KilnCMS.Verscienta.Source.Directus,
+  req_options: [plug: {Req.Test, KilnCMS.Verscienta.Source.Directus}]
+
 # S3 storage adapter: dummy credentials + route ExAws HTTP through a Req.Test
 # stub, so the adapter is exercised end-to-end (signing included) with no live S3.
 config :ex_aws, access_key_id: "test", secret_access_key: "test", region: "us-east-1"

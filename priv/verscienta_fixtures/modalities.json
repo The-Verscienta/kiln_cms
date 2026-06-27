@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "title": "Acupuncture",
+    "slug": "acupuncture",
+    "excels_at": ["pain", "stress"],
+    "benefits": "<p>Relieves pain and restores balance.</p>",
+    "description": "<p>Insertion of fine needles at specific points.</p>",
+    "conditions": [{ "id": 1, "slug": "fatigue" }]
+  }
+]

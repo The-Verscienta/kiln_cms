@@ -25,12 +25,11 @@ defmodule KilnCMS.Notifications do
   require Ash.Query
 
   alias KilnCMS.Accounts.User
-  alias KilnCMS.CMS.{Page, Post}
   alias KilnCMS.Notifications.WorkflowMailWorker
 
   @spec dispatch(
           :submitted_for_review | :published | :returned_to_draft,
-          Page.t() | Post.t(),
+          struct(),
           map() | nil
         ) :: :ok
   def dispatch(:submitted_for_review, record, actor) do
@@ -85,8 +84,18 @@ defmodule KilnCMS.Notifications do
     :ok
   end
 
-  defp kind(%Page{}), do: "page"
-  defp kind(%Post{}), do: "post"
+  # Resolve the human-facing content-type name from the registry rather than
+  # enumerating each resource: every content type generated via
+  # `KilnCMS.CMS.Content` exposes `__kiln_content_type__/0` (the same hook
+  # `KilnCMS.CMS.ContentTypes` discovers), so new types (herb, formula, …) work
+  # without touching this module. Falls back to "content" for any non-content struct.
+  defp kind(%mod{}) do
+    if function_exported?(mod, :__kiln_content_type__, 0) do
+      to_string(mod.__kiln_content_type__())
+    else
+      "content"
+    end
+  end
 
   # The submitter's display name for the body; nil for actor-less events.
   # Privacy (#214): prefer the user's chosen `name`; never fall back to the

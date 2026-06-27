@@ -1,0 +1,45 @@
+[
+  {
+    "id": 1,
+    "title": "Si Jun Zi Tang",
+    "slug": "si-jun-zi-tang",
+    "chinese_name": "四君子湯",
+    "pinyin_name": "Si Jun Zi Tang",
+    "description": "<p>Four Gentlemen Decoction — the foundational qi tonic.</p>",
+    "preparation_instructions": "<p>Decoct in water.</p>",
+    "dosage": "<p>Take 9g twice daily.</p>",
+    "total_weight": 30,
+    "total_weight_unit": "g",
+    "use_cases": ["qi deficiency", "poor digestion"],
+    "image": {
+      "id": "file-bbb",
+      "filename_download": "sijunzi.jpg",
+      "type": "image/jpeg",
+      "cloudflare_url": "https://imagedelivery.net/acc/sijunzi/public",
+      "width": 800,
+      "height": 600
+    },
+    "conditions": [{ "id": 1, "slug": "fatigue" }],
+    "ingredients": [
+      {
+        "id": 1,
+        "herb_id": { "id": 1, "slug": "ginseng" },
+        "quantity": 9,
+        "unit": "g",
+        "role": "Chief (Jun)",
+        "function": "Tonifies qi",
+        "notes": "Primary tonic"
+      }
+    ],
+    "modifications": [
+      {
+        "id": 1,
+        "herb_id": { "id": 2, "slug": "ashwagandha" },
+        "condition": "Insomnia",
+        "action": "Add",
+        "amount": "3g",
+        "note": "When sleep is disturbed"
+      }
+    ]
+  }
+]
