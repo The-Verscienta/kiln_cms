@@ -1,5 +1,8 @@
 defmodule KilnCMS.Webhooks.SafeUrlTest do
-  use ExUnit.Case, async: true
+  # async: false — `with_config` mutates the global SafeUrl Application env
+  # (e.g. flipping resolve_dns on), which would otherwise race async tests that
+  # read it (the webhook URL validator resolves DNS based on that config).
+  use ExUnit.Case, async: false
 
   alias KilnCMS.Webhooks.SafeUrl
 
