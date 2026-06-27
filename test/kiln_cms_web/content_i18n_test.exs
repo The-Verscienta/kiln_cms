@@ -105,6 +105,9 @@ defmodule KilnCMSWeb.ContentI18nTest do
 
     html = conn |> get(~p"/#{s}") |> html_response(200)
     assert html =~ ~s(aria-label="Language")
+    # #163: the locale links have real tap-target padding and mark the current one.
+    assert html =~ "py-1.5"
+    assert html =~ ~s(aria-current="true")
   end
 
   test "no language switcher for single-locale content", %{conn: conn} do

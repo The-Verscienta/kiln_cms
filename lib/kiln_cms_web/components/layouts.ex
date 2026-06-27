@@ -122,18 +122,19 @@ defmodule KilnCMSWeb.Layouts do
           </a>
           <span
             :if={length(@locale_links) > 1}
-            class="flex items-center gap-2"
+            class="flex items-center gap-1"
             aria-label={gettext("Language")}
           >
             <a
               :for={link <- @locale_links}
               href={link.href}
               hreflang={link.locale}
+              aria-current={link.current && "true"}
               class={[
-                "uppercase",
+                "inline-flex items-center rounded px-2 py-1.5 uppercase",
                 if(link.current,
                   do: "font-semibold text-base-content",
-                  else: "hover:text-base-content"
+                  else: "text-base-content/70 hover:bg-base-200 hover:text-base-content"
                 )
               ]}
             >
