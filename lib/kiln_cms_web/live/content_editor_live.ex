@@ -628,6 +628,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
 
+  # Accessible tag picker (#153): a labeled checkbox group replacing the native
+  # <select multiple> (no ⌘/Ctrl needed). Each tag is its own labeled control;
+  # the array submits under the same `tag_ids[]` name the relationship expects.
+  attr :form, :any, required: true
+  attr :tags, :list, required: true
+  attr :record, :any, required: true
+
+  defp tag_picker(assigns) do
+    selected =
+      assigns.form
+      |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
+      |> Enum.map(&to_string/1)
+
+    assigns =
+      assigns
+      |> assign(:selected, selected)
+      |> assign(:name, assigns.form[:tag_ids].name <> "[]")
+
+    ~H"""
+    <fieldset>
+      <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
+      <p :if={@tags == []} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
+      <div :if={@tags != []} class="flex flex-wrap gap-2">
+        <label
+          :for={tag <- @tags}
+          class="inline-flex cursor-pointer items-center gap-1.5 rounded border border-base-content/20 px-2 py-1 text-sm hover:bg-base-200"
+        >
+          <input
+            type="checkbox"
+            name={@name}
+            value={tag.id}
+            checked={to_string(tag.id) in @selected}
+            class="size-4 rounded border border-base-content/30 accent-primary"
+          />
+          {tag.name}
+        </label>
+      </div>
+    </fieldset>
+    """
+  end
+
   # Featured-image chooser (#154): a thumbnail of the current selection plus a
   # button that opens the searchable media picker, replacing a <select> that
   # loaded every asset. The id is carried in a hidden input so it still submits.
@@ -1346,17 +1387,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   options={Enum.map(@categories, &{&1.name, &1.id})}
                 />
 
-                <.input
-                  field={@form[:tag_ids]}
-                  type="select"
-                  multiple
-                  label={gettext("Tags")}
-                  value={selected_ids(@form, :tag_ids, current_ids(@record.tags))}
-                  options={Enum.map(@tags, &{&1.name, &1.id})}
-                />
-                <p class="-mt-1 text-xs text-base-content/70">
-                  {gettext("Hold ⌘/Ctrl to select multiple.")}
-                </p>
+                <.tag_picker form={@form} tags={@tags} record={@record} />
 
                 <.featured_image_field form={@form} media={@media} />
 

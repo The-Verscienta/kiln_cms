@@ -1141,9 +1141,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
 
-      # The tag's <option> is rendered with the `selected` attribute even before
-      # the user touches the field (so an untouched save won't wipe the link).
-      assert html =~ ~r/<option selected[^>]*value="#{tag.id}"/
+      # The tag's checkbox is pre-checked even before the user touches the field
+      # (so an untouched save won't wipe the link) — #153 replaced the <select>.
+      assert html =~
+               ~r/<input[^>]*value="#{tag.id}"[^>]*checked|checked[^>]*value="#{tag.id}"/
     end
 
     test "links a related post on save", %{conn: conn} do
