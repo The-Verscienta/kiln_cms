@@ -1167,6 +1167,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         type="button"
                         phx-click="remove_block"
                         phx-value-path={bf.name}
+                        data-confirm={gettext("Delete this block? This can't be undone.")}
                         aria-label={gettext("Remove block")}
                         class="text-base-content/50 hover:text-error"
                       >

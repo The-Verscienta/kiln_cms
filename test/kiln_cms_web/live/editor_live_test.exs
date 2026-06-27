@@ -1268,6 +1268,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "<summary"
       assert html =~ "hidden lg:block"
       assert html =~ "PrevBlock"
+      # #152: removing a block asks for confirmation first.
+      assert html =~
+               ~r/phx-click="remove_block"[^>]*data-confirm|data-confirm[^>]*phx-click="remove_block"/
     end
   end
 end
