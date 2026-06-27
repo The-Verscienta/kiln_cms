@@ -1071,6 +1071,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               type="submit"
               variant="primary"
               disabled={@conflict}
+              phx-disable-with={gettext("Saving…")}
               title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
             >
               {gettext("Save")}
@@ -1519,6 +1520,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="submit"
+      phx-disable-with={gettext("Submitting…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Submit for review")}
@@ -1528,6 +1530,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="publish"
+      phx-disable-with={gettext("Publishing…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {if @state == :in_review, do: gettext("Approve & publish"), else: gettext("Publish")}
@@ -1537,6 +1540,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="return"
+      phx-disable-with={gettext("Working…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Request changes")}
@@ -1552,6 +1556,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="unpublish"
+      phx-disable-with={gettext("Working…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Unpublish")}

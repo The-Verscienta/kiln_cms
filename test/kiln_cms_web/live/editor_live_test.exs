@@ -328,8 +328,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       html = render(lv)
 
       assert CMS.get_page!(page.id, authorize?: false).title == "Autosaved title"
+      # The indicator shows the saved state (the Save button's phx-disable-with
+      # carries "Saving…" as an attribute regardless, so don't refute it broadly).
       assert html =~ "Saved"
-      refute html =~ "Saving…"
+      refute html =~ ~r/>\s*Saving…/
     end
 
     # #136: a failing autosave (invalid form) surfaces an error state, not silence.
@@ -1277,6 +1279,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       h1_count = (html |> String.split("<h1") |> length()) - 1
       assert h1_count == 1, "expected exactly one <h1>, found #{h1_count}"
+    end
+
+    # #151: Save and workflow buttons show a loading state while the event runs.
+    test "the Save and workflow buttons have loading states", %{conn: conn} do
+      page = draft_page(%{title: "LoadingPage"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~s(phx-disable-with="Saving…")
+      assert html =~ ~s(phx-disable-with="Submitting…")
     end
 
     # Regression for #138: on mobile the preview is a collapsible disclosure so it
