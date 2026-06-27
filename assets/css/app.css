@@ -182,6 +182,81 @@
   border-top: 1px solid var(--color-base-300);
 }
 
+/* Public rich-text typography (#147). The delivered article wrapper uses
+   `prose max-w-none`, but the Tailwind Typography plugin isn't installed, so the
+   sanitized `<p>/<h*>/<ul>/<blockquote>/<a>/<code>` inside each rich-text
+   `.kiln-block` would render unstyled. These rules give published content
+   readable spacing and hierarchy without a plugin (theme tokens, no @apply). */
+.kiln-block > * + * {
+  margin-top: 1rem;
+}
+.kiln-block p {
+  line-height: 1.7;
+}
+.kiln-block h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 2rem;
+}
+.kiln-block h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.75rem;
+}
+.kiln-block h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+}
+.kiln-block ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.kiln-block ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.kiln-block li + li {
+  margin-top: 0.25rem;
+}
+.kiln-block a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.kiln-block a:hover {
+  text-decoration: none;
+}
+.kiln-block blockquote {
+  border-left: 3px solid var(--color-base-300);
+  padding-left: 1rem;
+  font-style: italic;
+  color: color-mix(in oklch, var(--color-base-content) 80%, transparent);
+}
+.kiln-block code {
+  background: var(--color-base-200);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.9em;
+}
+.kiln-block pre {
+  background: var(--color-base-200);
+  padding: 0.75rem 1rem;
+  border-radius: 0.3rem;
+  overflow-x: auto;
+}
+.kiln-block pre code {
+  background: none;
+  padding: 0;
+}
+.kiln-block hr {
+  border: none;
+  border-top: 1px solid var(--color-base-300);
+  margin: 1.5rem 0;
+}
+
 /* Floating slash-command menu ("/" inside a rich-text block). Rendered into
    document.body and positioned at the caret, so it lives outside .ProseMirror. */
 .rt-slash-menu {
