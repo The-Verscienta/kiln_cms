@@ -89,6 +89,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Findable Page"
     end
 
+    # #155: workflow state labels are humanized and localized, not raw atoms.
+    test "humanizes workflow state labels", %{conn: conn} do
+      draft_page(%{title: "ReviewMe", state: :in_review})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      # The badge and the status filter both show "In review", not "in_review".
+      assert html =~ "In review"
+      # The status filter shows humanized option labels.
+      assert html =~ ~r/<option[^>]*>\s*Draft\s*</
+    end
+
     test "filters the list by status", %{conn: conn} do
       draft_page(%{title: "AlphaDraft", state: :draft})
       draft_page(%{title: "BetaPub", state: :published})
