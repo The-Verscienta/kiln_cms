@@ -50,6 +50,17 @@
           JSON:API
         </a>
       </div>
+
+      <%!-- Onboarding for viewer-role accounts (#142): self-registration defaults
+            to :viewer, which can't reach the editor, so explain the next step. --%>
+      <p
+        :if={@current_user && @current_user.role == :viewer}
+        class="mt-8 rounded-lg border border-base-content/15 bg-base-200/60 px-4 py-3 text-sm text-base-content/70"
+      >
+        {gettext(
+          "You're signed in as a viewer, which can read published content but not edit. Ask an administrator to upgrade your account to gain editor access."
+        )}
+      </p>
     </div>
   </section>
 
