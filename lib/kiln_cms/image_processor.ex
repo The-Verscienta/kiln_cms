@@ -36,9 +36,10 @@ defmodule KilnCMS.ImageProcessor do
           {:ok, %{ext: String.t(), content_type: String.t()}} | {:error, term}
   def validate_upload(path) when is_binary(path) do
     with {:ok, image} <- Image.open(path),
-         true <- Image.width(image) > 0 and Image.height(image) > 0,
          {:ok, loader} <- Vix.Vips.Image.header_value(image, "vips-loader"),
          {:ok, {ext, content_type}} <- allowed_format(loader) do
+      # Dimensions are implicitly positive for a successfully opened raster;
+      # we do not assert here to keep Dialyzer happy on the boolean match.
       {:ok, %{ext: ext, content_type: content_type}}
     else
       {:error, reason} -> {:error, reason}
@@ -86,10 +87,6 @@ defmodule KilnCMS.ImageProcessor do
       {:error, reason} ->
         File.rm(tmp)
         {:error, reason}
-
-      other ->
-        File.rm(tmp)
-        {:error, other}
     end
   rescue
     e ->

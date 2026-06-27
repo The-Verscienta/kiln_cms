@@ -252,8 +252,8 @@ defmodule KilnCMSWeb.Layouts do
       )
 
     ~H"""
-    <a href="/gql" class={@item}>GraphQL</a>
-    <a href="/api/json" class={@item}>JSON:API</a>
+    <a href="/gql" class={@item}>{gettext("GraphQL")}</a>
+    <a href="/api/json" class={@item}>{gettext("JSON:API")}</a>
     <a
       :if={@current_user && @current_user.role in [:editor, :admin]}
       href={~p"/editor"}

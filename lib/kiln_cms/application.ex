@@ -9,6 +9,10 @@ defmodule KilnCMS.Application do
   def start(_type, _args) do
     assert_dev_routes_disabled_in_prod!()
 
+    # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
+    # loaded so they register with the protocol and prevent unhandled errors.
+    _ = Code.ensure_loaded(KilnCMSWeb.AshFormErrors)
+
     children = [
       KilnCMSWeb.Telemetry,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the

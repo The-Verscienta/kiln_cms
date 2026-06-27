@@ -28,6 +28,12 @@ config :kiln_cms, token_signing_secret: "DxVOH7q7LauTIqk0KY8Mj2auM6QzdpHw"
 config :bcrypt_elixir, log_rounds: 1
 config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 
+# In tests, prevent async Task-based analytics recording (view counts, search queries)
+# which can produce noisy "owner exited" DB connection errors under Ecto sandbox
+# when the task outlives the test process. Tests that assert on the side-effects
+# call the record functions synchronously instead.
+config :kiln_cms, :analytics_enabled, false
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used

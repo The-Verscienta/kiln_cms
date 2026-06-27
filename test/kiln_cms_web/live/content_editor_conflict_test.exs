@@ -6,6 +6,8 @@ defmodule KilnCMSWeb.ContentEditorConflictTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
+  @tag :capture_log
+
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User

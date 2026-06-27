@@ -152,6 +152,7 @@ defmodule KilnCMSWeb.Router do
     # Authoring UIs — editors and admins only.
     ash_authentication_live_session :editor_routes,
       on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :live_editor_required},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
@@ -174,6 +175,7 @@ defmodule KilnCMSWeb.Router do
     # just in each LiveView's mount/3, so non-admins can't mount the route.
     ash_authentication_live_session :admin_routes,
       on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :live_admin_required},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do

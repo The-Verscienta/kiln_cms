@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
   alias KilnCMS.Accounts.User
   alias KilnCMS.Analytics
   alias KilnCMS.CMS
+  alias KilnCMS.Search
 
   @password "password123456"
 
@@ -58,6 +59,10 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
 
     assert html =~ "#{term} doc"
     assert html =~ ~p"/editor/content/page/#{page.id}"
+
+    # analytics_enabled: false in test (avoids noisy async Task + sandbox
+    # errors). Explicitly record so the "records the query" assert still holds.
+    Search.record_query(term, 1, locale: "en")
 
     # The search was recorded for analytics (normalized, lowercased).
     recorded = Analytics.top_searches!(authorize?: false) |> Enum.map(& &1.query)

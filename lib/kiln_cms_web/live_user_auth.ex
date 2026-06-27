@@ -3,7 +3,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
   Helpers for authenticating users in LiveViews.
   """
 
-  import Phoenix.Component
+  import Phoenix.Component, only: [assign: 3, assign_new: 3]
   use KilnCMSWeb, :verified_routes
   use Gettext, backend: KilnCMSWeb.Gettext
 
@@ -13,7 +13,12 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # To use, place the following at the top of that liveview:
   # on_mount {KilnCMSWeb.LiveUserAuth, :current_user}
   def on_mount(:current_user, _params, session, socket) do
-    {:cont, AshAuthentication.Phoenix.LiveSession.assign_new_resources(socket, session)}
+    socket = AshAuthentication.Phoenix.LiveSession.assign_new_resources(socket, session)
+
+    # Ensure current_scope is always present for <Layouts.app> (Phoenix 1.8 scopes + Agents.md guideline).
+    # Our auth uses custom role-based LiveUserAuth rather than full Phoenix scopes.
+    socket = assign_new(socket, :current_scope, fn -> nil end)
+    {:cont, socket}
   end
 
   # Restore the UI locale from the session into the LiveView process. LiveViews
@@ -26,11 +31,15 @@ defmodule KilnCMSWeb.LiveUserAuth do
   end
 
   def on_mount(:live_user_optional, _params, _session, socket) do
-    if socket.assigns[:current_user] do
-      {:cont, socket}
-    else
-      {:cont, assign(socket, :current_user, nil)}
-    end
+    socket =
+      if socket.assigns[:current_user] do
+        socket
+      else
+        assign(socket, :current_user, nil)
+      end
+
+    socket = assign_new(socket, :current_scope, fn -> nil end)
+    {:cont, socket}
   end
 
   def on_mount(:live_user_required, _params, _session, socket) do
@@ -85,10 +94,14 @@ defmodule KilnCMSWeb.LiveUserAuth do
   end
 
   def on_mount(:live_no_user, _params, _session, socket) do
-    if socket.assigns[:current_user] do
-      {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/")}
-    else
-      {:cont, assign(socket, :current_user, nil)}
-    end
+    socket =
+      if socket.assigns[:current_user] do
+        socket
+      else
+        assign(socket, :current_user, nil)
+      end
+
+    socket = assign_new(socket, :current_scope, fn -> nil end)
+    {:cont, socket}
   end
 end

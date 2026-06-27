@@ -2,6 +2,8 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
   @moduledoc false
   use KilnCMSWeb.ConnCase, async: true
 
+  @tag :capture_log
+
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User

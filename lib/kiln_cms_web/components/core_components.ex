@@ -191,6 +191,48 @@ defmodule KilnCMSWeb.CoreComponents do
   end
 
   @doc """
+  Renders a small status pill for content workflow states (draft / in_review /
+  published / archived). The label is translated via Gettext.
+
+  ## Examples
+
+      <.state_badge state={:draft} />
+      <.state_badge state={:published} />
+  """
+  attr :state, :atom, required: true
+  attr :class, :any, default: nil
+
+  def state_badge(assigns) do
+    variant =
+      case assigns.state do
+        :published -> "success"
+        :in_review -> "warning"
+        :archived -> "neutral"
+        _ -> "info"
+      end
+
+    assigns =
+      assigns
+      |> assign(:variant, variant)
+      |> assign(:label, state_label(assigns.state))
+
+    ~H"""
+    <.badge variant={@variant} class={@class}>{@label}</.badge>
+    """
+  end
+
+  @doc "Returns a translated human label for a content workflow state atom."
+  def state_label(state) do
+    case state do
+      :draft -> gettext("Draft")
+      :in_review -> gettext("In review")
+      :published -> gettext("Published")
+      :archived -> gettext("Archived")
+      _ -> to_string(state)
+    end
+  end
+
+  @doc """
   Renders a centered empty-state: an icon, a message, optional body and action.
 
   ## Examples

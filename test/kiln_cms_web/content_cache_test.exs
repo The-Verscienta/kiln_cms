@@ -146,7 +146,7 @@ defmodule KilnCMSWeb.ContentCacheTest do
   } do
     slug = "tr-#{System.unique_integer([:positive])}"
     en = published_page("EN page", %{slug: slug, locale: "en"})
-    _fr = published_page("FR page", %{slug: slug, locale: "fr"})
+    fr = published_page("FR page", %{slug: slug, locale: "fr"})
 
     # First request (default locale) resolves + caches the translations list.
     html = conn |> get(~p"/#{en.slug}") |> html_response(200)
@@ -154,7 +154,7 @@ defmodule KilnCMSWeb.ContentCacheTest do
 
     # Drop the French variant directly (no cache bust). A re-resolved request would
     # now find no French translation and omit its hreflang alternate.
-    raw_delete("pages", _fr.id)
+    raw_delete("pages", fr.id)
 
     # The fr alternate is still present — proving translations are cached, not
     # re-queried on every delivery hit.
