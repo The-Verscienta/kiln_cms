@@ -179,3 +179,38 @@ Over the limit returns **429** with a `retry-after` header.
 | `api`  | `/api/json/*`   | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 20 requests / minute  |
+
+## Versioning & stability
+
+The HTTP paths are currently **unversioned** (`/api/json`, `/api/content`,
+`/gql`, `/preview`). The OpenAPI document's `info.version` tracks the **app
+release**, not the HTTP contract — don't pin behaviour to it.
+
+**What's stable** (changes only via the breaking-change process below):
+
+- The **path layout** of the published read surfaces above.
+- The **published-content read contract**: resource types, their `public?`
+  attribute names/types, the JSON:API filter/sort/page semantics, and the fired
+  artifact surfaces (`json` / `json_ld` / `web`).
+- Author PII is never exposed (only `authorId` + display `name`); `*BySlug`
+  returns published content only. See the consumer guide.
+
+**What may change without notice:**
+
+- Anything behind a bearer token that mirrors editor/admin internals beyond the
+  documented read fields.
+- Result *ordering* where not explicitly specified (use `sort=`).
+- Non-`public?` internals (never serialized) and the raw editable block tree
+  (intentionally not exposed — render from fired artifacts).
+
+**Breaking-change process.** A change that removes/renames a `public?` field or
+alters documented response semantics is a breaking change. When one is
+unavoidable it will be introduced under a **`/api/v1/…` prefix** (the current
+unprefixed paths becoming the implicit `v1`), with the previous version kept for
+a deprecation window announced in the changelog and reflected in the OpenAPI
+`deprecated` markers. Adding new endpoints, optional query params, or new
+`public?` fields is **not** breaking and can land at any time.
+
+To insulate yourself: consume the published OpenAPI spec (`/api/json/open_api`),
+request only the fields you use (GraphQL selection / JSON:API sparse fieldsets),
+and treat unknown fields as additive.
