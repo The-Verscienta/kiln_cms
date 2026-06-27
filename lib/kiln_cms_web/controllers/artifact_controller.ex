@@ -23,6 +23,10 @@ defmodule KilnCMSWeb.ArtifactController do
   @surfaces %{"json" => :json, "json_ld" => :json_ld, "web" => :web}
   # How long clients should wait before retrying a still-compiling artifact.
   @retry_after_seconds 2
+  # Artifacts are immutable per publish (republish updates `updated_at` and
+  # evicts the firing cache), so they're cacheable; the ETag lets a CDN/static
+  # build revalidate cheaply after the window (#188).
+  @max_age_seconds 300
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
@@ -31,11 +35,39 @@ defmodule KilnCMSWeb.ArtifactController do
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
          record when not is_nil(record) <- published(ct.type, slug, locale),
          {:ok, body} <- artifact(ct.type, record, surface) do
-      json(conn, body)
+      serve(conn, record, params["surface"] || "json", body)
     else
       :backfilling -> backfilling(conn)
       _ -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
     end
+  end
+
+  # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
+  # matching `If-None-Match` with a 304 so revalidation skips the body.
+  defp serve(conn, record, surface, body) do
+    etag = etag(record, surface)
+
+    conn =
+      conn
+      |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
+      |> put_resp_header("etag", etag)
+      |> put_resp_header("last-modified", http_date(record.updated_at))
+
+    if etag in get_req_header(conn, "if-none-match") do
+      send_resp(conn, :not_modified, "")
+    else
+      json(conn, body)
+    end
+  end
+
+  # Strong ETag keyed on the record + surface + last-modified time, so it changes
+  # whenever the document is republished.
+  defp etag(record, surface) do
+    ~s("#{record.id}-#{surface}-#{DateTime.to_unix(record.updated_at)}")
+  end
+
+  defp http_date(%DateTime{} = dt) do
+    Calendar.strftime(dt, "%a, %d %b %Y %H:%M:%S GMT")
   end
 
   defp published(type, slug, locale) do

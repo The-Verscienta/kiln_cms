@@ -46,6 +46,26 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     assert [%{"_type" => "heading"} | _] = body["blocks"]
   end
 
+  test "includes CDN cache headers and honours If-None-Match (#188)", %{conn: conn} do
+    slug = published_page()
+
+    served = get(conn, ~p"/api/content/page/#{slug}")
+    assert json_response(served, 200)
+    assert ["public, max-age=300"] = get_resp_header(served, "cache-control")
+    assert [etag] = get_resp_header(served, "etag")
+    assert etag =~ ~r/^".+"$/
+    assert [_last_modified] = get_resp_header(served, "last-modified")
+
+    # Revalidating with the same ETag returns 304 with an empty body.
+    not_modified =
+      build_conn()
+      |> put_req_header("if-none-match", etag)
+      |> get(~p"/api/content/page/#{slug}")
+
+    assert not_modified.status == 304
+    assert not_modified.resp_body == ""
+  end
+
   test "serves the json_ld surface as a schema.org graph", %{conn: conn} do
     slug = published_page()
     body = conn |> get(~p"/api/content/page/#{slug}?surface=json_ld") |> json_response(200)
