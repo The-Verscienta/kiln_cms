@@ -17,6 +17,23 @@ has three values:
 | `:editor` | Authors content, manages taxonomy/media, runs draft→review transitions. |
 | `:viewer` | Default on registration. Reads published content only; no authoring. |
 
+### Audiences (the read axis)
+
+`role` gates **authoring**. A separate, orthogonal **audience** axis gates which
+signed-in end-users may *read* a published record — the consumer-facing access
+model (cf. Directus "Professional"/"Patient" access). Configured via
+`config :kiln_cms, :audiences` (`KilnCMS.CMS.Audiences`); `:public` is always
+implied.
+
+- Each content record carries one `audience` (default `:public`).
+- Each user carries a set of `audiences` (`KilnCMS.Accounts.User`), assigned by
+  an admin via `:manage_access` — never self-service.
+- A published record is readable when its audience is `:public`, **or** its
+  audience is one of the reader's audiences. Editors/admins see everything.
+
+So the content read row below is `:public`-published for anonymous/viewer;
+audience-restricted published rows additionally require membership.
+
 Two non-role actors also appear below:
 
 - **anonymous** — no actor (`authorize?: true` with no `actor:`); the public site / headless API.
@@ -28,7 +45,7 @@ Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads ret
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
-| read (`read`, `search`, `by_slug`, …) | ✅ all | ✅ all | 🔎 published only | 🔎 published only |
+| read (`read`, `search`, `by_slug`, …) | ✅ all | ✅ all | 🔎 published + audience | 🔎 published + `:public` |
 | `create`, `update` | ✅ | ✅ | ❌ | ❌ |
 | `submit_for_review` | ✅ | ✅ | ❌ | ❌ |
 | `unpublish` | ✅ | ✅ | ❌ | ❌ |
@@ -96,6 +113,18 @@ inline assets).
 
 Endpoint configuration is admin-only. The delivery worker reads endpoints as the
 **system** (`authorize?: false`).
+
+## Custom fields — `FieldDefinition`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `for_type`) | ✅ | ✅ | ❌ | ❌ |
+| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Defining the schema (fields per content type) is admin-only; editors read
+definitions so the content editor can render the inputs. Both the editor and the
+`ApplyCustomFields` write change read definitions as the **system**
+(`authorize?: false`).
 
 ## Analytics — `ContentView`, `SearchQuery`
 

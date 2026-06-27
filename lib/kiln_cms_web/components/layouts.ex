@@ -268,6 +268,13 @@ defmodule KilnCMSWeb.Layouts do
     >
       {gettext("Settings")}
     </a>
+    <a
+      :if={@current_user && @current_user.role == :admin}
+      href={~p"/editor/fields"}
+      class={@item}
+    >
+      {gettext("Fields")}
+    </a>
     <a :if={is_nil(@current_user)} href={~p"/sign-in"} class={@item}>{gettext("Sign in")}</a>
     <a :if={@current_user} href={~p"/sign-out"} class={@item}>{gettext("Sign out")}</a>
     """

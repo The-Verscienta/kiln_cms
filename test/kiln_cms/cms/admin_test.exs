@@ -28,7 +28,7 @@ defmodule KilnCMS.CMS.AdminTest do
       test "#{inspect(resource)} datatable shows editorial columns, not internals" do
         columns = AshAdmin.Resource.table_columns(@resource)
 
-        assert columns == [:title, :slug, :state, :locale, :published_at, :updated_at]
+        assert columns == [:title, :slug, :state, :audience, :locale, :published_at, :updated_at]
 
         # Internal/search/embedding plumbing stays out of the table.
         for internal <- [

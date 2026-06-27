@@ -59,6 +59,7 @@ defmodule KilnCMS.CMS.Content do
           :canonical_url,
           :locale,
           :audience,
+          :custom_fields,
           :scheduled_at,
           :category_id,
           :featured_image_id
@@ -369,6 +370,7 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -390,6 +392,7 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
 
@@ -417,6 +420,7 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
@@ -742,6 +746,17 @@ defmodule KilnCMS.CMS.Content do
         attribute :audience, :atom do
           constraints one_of: KilnCMS.CMS.Audiences.all()
           default :public
+          allow_nil? false
+          public? true
+        end
+
+        # Admin-UI-defined custom fields (decision D4 — schema stays compile-time,
+        # but *fields* are data-driven). Values are keyed by `FieldDefinition.name`
+        # and coerced/validated against the registry on write by
+        # `Changes.ApplyCustomFields`. Public so headless clients get the extra
+        # fields; the editor renders one input per definition.
+        attribute :custom_fields, :map do
+          default %{}
           allow_nil? false
           public? true
         end
