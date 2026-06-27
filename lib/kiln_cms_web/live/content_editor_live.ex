@@ -1281,7 +1281,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
           <div class="lg:sticky lg:top-4 lg:self-start">
             <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
             <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
-              <h1 class="text-2xl font-bold">{@form[:title].value}</h1>
+              <%!-- Visual preview of the published title — an h2 (not h1) so the
+                    editor page keeps a single logical h1 (the "Edit %{kind}" header). #174 --%>
+              <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
               {preview_html(@form)}
             </article>
           </div>

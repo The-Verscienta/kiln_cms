@@ -1133,5 +1133,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(aria-label="Text formatting")
       assert html =~ ~s(data-editor-label="Rich text editor")
     end
+
+    # Regression for #174: the editor page must have exactly one h1 (the
+    # "Edit <kind>" header); the preview-pane title is an h2.
+    test "renders a single h1", %{conn: conn} do
+      page = draft_page(%{title: "H1Page"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      h1_count = (html |> String.split("<h1") |> length()) - 1
+      assert h1_count == 1, "expected exactly one <h1>, found #{h1_count}"
+    end
   end
 end
