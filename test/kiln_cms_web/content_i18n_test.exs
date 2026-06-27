@@ -141,6 +141,19 @@ defmodule KilnCMSWeb.ContentI18nTest do
     end
   end
 
+  # #175: a skip link is the first focusable element and targets <main id="main">.
+  test "public pages render a skip link to main content", %{conn: conn} do
+    s = slug()
+    page(%{title: "About", slug: s, locale: "en"})
+
+    html = conn |> get(~p"/#{s}") |> html_response(200)
+
+    assert html =~ ~s(href="#main")
+    assert html =~ "Skip to main content"
+    # <main> carries the id="main" target (Phoenix may inject a phx-r debug attr).
+    assert html =~ ~r/<main[^>]*\sid="main"/
+  end
+
   describe "I18n.localized_path/2" do
     test "prefixes non-default locales but not the default or the home path" do
       assert I18n.localized_path("fr", "/blog") == "/fr/blog"

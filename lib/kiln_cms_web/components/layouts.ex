@@ -73,7 +73,7 @@ defmodule KilnCMSWeb.Layouts do
       </div>
     </header>
 
-    <main class="px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+    <main id="main" class="px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
       <div class={@container_class}>
         {render_slot(@inner_block)}
       </div>
@@ -129,7 +129,7 @@ defmodule KilnCMSWeb.Layouts do
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+    <main id="main" class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
       {render_slot(@inner_block)}
     </main>
 
