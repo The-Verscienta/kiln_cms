@@ -49,7 +49,11 @@ defmodule KilnCMSWeb.PreviewControllerTest do
 
     test "404s on a tampered/invalid token", %{conn: conn} do
       conn = conn |> json_conn() |> get(~p"/preview/garbage")
-      assert json_response(conn, 404)["error"] =~ "Invalid or expired"
+
+      assert %{"errors" => [%{"code" => "invalid_preview", "detail" => detail}]} =
+               json_response(conn, 404)
+
+      assert detail =~ "Invalid or expired"
     end
 
     test "404s when the referenced content doesn't exist", %{conn: conn} do

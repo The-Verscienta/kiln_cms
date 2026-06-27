@@ -117,7 +117,10 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     CMS.publish_page!(page, actor: actor)
 
     conn = get(conn, ~p"/api/content/page/#{slug}")
-    assert json_response(conn, 503)["error"] == "artifact_compiling"
+
+    assert %{"errors" => [%{"code" => "artifact_compiling", "status" => "503"}]} =
+             json_response(conn, 503)
+
     assert ["2"] = get_resp_header(conn, "retry-after")
 
     # Once the background firing runs, the artifact is served.

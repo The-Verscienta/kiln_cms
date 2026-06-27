@@ -16,9 +16,14 @@ defmodule KilnCMSWeb.PreviewController do
       json(conn, %{data: ContentSerializer.to_map(record)})
     else
       _ ->
+        # Standard error envelope shared across the headless surfaces (#190).
         conn
         |> put_status(:not_found)
-        |> json(%{error: "Invalid or expired preview link"})
+        |> json(%{
+          errors: [
+            %{status: "404", code: "invalid_preview", detail: "Invalid or expired preview link."}
+          ]
+        })
     end
   end
 

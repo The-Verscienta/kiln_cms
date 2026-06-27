@@ -38,8 +38,18 @@ defmodule KilnCMSWeb.ArtifactController do
       serve(conn, record, params["surface"] || "json", body)
     else
       :backfilling -> backfilling(conn)
-      _ -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      _ -> error(conn, :not_found, "not_found", "Content not found.")
     end
+  end
+
+  # Standard error envelope shared with the other headless surfaces (#190):
+  # `{"errors": [{"status", "code", "detail"}]}`.
+  defp error(conn, status, code, detail) do
+    conn
+    |> put_status(status)
+    |> json(%{
+      errors: [%{status: to_string(Plug.Conn.Status.code(status)), code: code, detail: detail}]
+    })
   end
 
   # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
@@ -99,7 +109,6 @@ defmodule KilnCMSWeb.ArtifactController do
   defp backfilling(conn) do
     conn
     |> put_resp_header("retry-after", Integer.to_string(@retry_after_seconds))
-    |> put_status(:service_unavailable)
-    |> json(%{error: "artifact_compiling"})
+    |> error(:service_unavailable, "artifact_compiling", "Artifact is compiling; retry shortly.")
   end
 end

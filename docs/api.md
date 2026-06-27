@@ -181,6 +181,21 @@ Over the limit returns **429** with a `retry-after` header.
 | `auth` | sign-in / auth  | 20 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
 
+## Error responses
+
+All surfaces return errors as a JSON object with an **`errors` array**, each
+entry carrying a string `status` (HTTP code), a machine-readable `code`, and a
+human `detail`:
+
+```jsonc
+{ "errors": [ { "status": "404", "code": "not_found", "detail": "Content not found." } ] }
+```
+
+This is the JSON:API shape; the headless sign-in, fired-artifact
+(`not_found` / `artifact_compiling`), and preview-token (`invalid_preview`)
+endpoints use the same envelope (#190). GraphQL follows the GraphQL spec's
+top-level `errors` array instead.
+
 ## Versioning & stability
 
 The HTTP paths are currently **unversioned** (`/api/json`, `/api/content`,
