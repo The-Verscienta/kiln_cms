@@ -2,8 +2,19 @@
   <article class="prose max-w-none">
     <header class="mb-6">
       <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
-      <p :if={@record.published_at} class="mt-2 text-sm text-base-content/50">
-        {Calendar.strftime(@record.published_at, "%B %-d, %Y")}
+      <p class="mt-2 text-sm text-base-content/50">
+        <span :if={@record.author && is_binary(@record.author.name) && @record.author.name != ""}>
+          {gettext("By %{author}", author: @record.author.name)}
+        </span>
+        <span :if={
+          @record.author && is_binary(@record.author.name) && @record.author.name != "" &&
+            @record.published_at
+        }>
+          ·
+        </span>
+        <span :if={@record.published_at}>
+          {Calendar.strftime(@record.published_at, "%B %-d, %Y")}
+        </span>
       </p>
       <p :if={@record.excerpt} class="mt-3 text-lg text-base-content/70">
         {@record.excerpt}

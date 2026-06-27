@@ -154,6 +154,24 @@ defmodule KilnCMSWeb.ContentI18nTest do
     assert html =~ ~r/<main[^>]*\sid="main"/
   end
 
+  # #165: published posts show an author byline when the author has a name.
+  test "a public post shows the author byline", %{conn: conn} do
+    author =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "byline-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin,
+        name: "Ada Byline"
+      })
+
+    s = slug()
+    post(%{title: "Bylined", slug: s, locale: "en", author_id: author.id})
+
+    html = conn |> get("/blog/#{s}") |> html_response(200)
+    assert html =~ "By Ada Byline"
+  end
+
   # #149: public on-site search over published content.
   describe "public search" do
     test "finds published content and links to it", %{conn: conn} do
