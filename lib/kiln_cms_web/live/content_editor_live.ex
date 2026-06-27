@@ -1173,33 +1173,42 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <.icon name="hero-trash" class="size-5" />
                       </button>
                     </div>
+                    <%!-- The collab lock UI (ring + "who's editing" badge) lives on
+                          this non-ignored wrapper so it can update, while the inner
+                          editor stays phx-update="ignore" (#140). --%>
                     <div
                       :if={block_type_string(bf) == "rich_text"}
-                      id={"rt-#{bf.index}-v#{@editor_version}"}
-                      phx-hook="RichText"
-                      phx-update="ignore"
-                      data-content={bf[:legacy_html].value || ""}
-                      data-editor-label={gettext("Rich text editor")}
-                      role="group"
-                      aria-label={gettext("Rich text block")}
+                      class={["relative", lock_ring(@locked_fields, bf[:legacy_html].name)]}
                     >
+                      <.field_cursors field={bf[:legacy_html].name} cursors={@cursors} />
                       <div
-                        data-toolbar
-                        role="toolbar"
-                        aria-label={gettext("Text formatting")}
-                        class="mb-1 flex flex-wrap gap-1"
+                        id={"rt-#{bf.index}-v#{@editor_version}"}
+                        phx-hook="RichText"
+                        phx-update="ignore"
+                        data-content={bf[:legacy_html].value || ""}
+                        data-editor-label={gettext("Rich text editor")}
+                        data-lock-field={bf[:legacy_html].name}
+                        role="group"
+                        aria-label={gettext("Rich text block")}
                       >
+                        <div
+                          data-toolbar
+                          role="toolbar"
+                          aria-label={gettext("Text formatting")}
+                          class="mb-1 flex flex-wrap gap-1"
+                        >
+                        </div>
+                        <div data-editor></div>
+                        <p class="mt-1 text-xs text-base-content/50">
+                          {gettext("Type / for commands.")}
+                        </p>
+                        <input
+                          type="hidden"
+                          name={bf[:legacy_html].name}
+                          value={bf[:legacy_html].value}
+                          data-input
+                        />
                       </div>
-                      <div data-editor></div>
-                      <p class="mt-1 text-xs text-base-content/50">
-                        {gettext("Type / for commands.")}
-                      </p>
-                      <input
-                        type="hidden"
-                        name={bf[:legacy_html].name}
-                        value={bf[:legacy_html].value}
-                        data-input
-                      />
                     </div>
                     <div :if={block_type_string(bf) == "image"} class="space-y-2">
                       <img

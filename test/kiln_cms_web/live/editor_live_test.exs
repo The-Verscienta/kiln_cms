@@ -674,6 +674,31 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute render(lv) =~ "ring-warning"
     end
 
+    # #140: rich-text blocks participate in the same collaborative locking as the
+    # title/slug/DSL inputs (the TipTap editor broadcasts focus/blur via its hook).
+    test "soft-locks a rich-text block while another editor holds it", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute html =~ "ring-warning"
+
+      # The block's lock field name (the legacy_html form field) is on the wrapper.
+      [_, field] = Regex.run(~r/data-lock-field="([^"]+)"/, html)
+
+      topic = Presence.topic("page", page.id)
+      cursor = %{id: "other-editor", name: "bob", field: field}
+
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      locked = render(lv)
+      assert locked =~ "ring-warning"
+      assert locked =~ "bob is editing"
+
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      refute render(lv) =~ "ring-warning"
+    end
+
     test "simultaneous focus is broken by id — the lower id keeps the field", %{conn: conn} do
       page = draft_page()
 

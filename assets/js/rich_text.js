@@ -230,6 +230,16 @@ export const RichText = {
         this.slash.update()
         this.syncToolbar()
       },
+      // Collaborative locking (#140): broadcast focus/blur on this block's field
+      // so other editors get the same lock ring + "who's editing" badge that the
+      // title/slug/DSL inputs already use. data-lock-field is the form field name.
+      onFocus: () => {
+        const field = this.el.dataset.lockField
+        if (field) this.pushEvent("field_focus", {field})
+      },
+      onBlur: () => {
+        if (this.el.dataset.lockField) this.pushEvent("field_blur", {})
+      },
     })
     this.editor = editor
     this.slash = new SlashMenu(editor)
