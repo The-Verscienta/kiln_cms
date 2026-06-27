@@ -176,7 +176,7 @@ Over the limit returns **429** with a `retry-after` header.
 
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
-| `api`  | `/api/json/*`   | 120 requests / minute |
+| `api`  | `/api/json/*` and `GET /api/content/:type/:slug` (fired artifacts) | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 20 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
