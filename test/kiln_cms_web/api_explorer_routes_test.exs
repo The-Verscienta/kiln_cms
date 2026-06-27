@@ -55,6 +55,12 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
     # Covers auth: the headless sign-in endpoint is documented and public.
     assert get_in(spec, ["paths", "/api/auth/sign_in", "post", "operationId"]) == "signIn"
     assert get_in(spec, ["paths", "/api/auth/sign_in", "post", "security"]) == []
+
+    # #191: the artifact + preview delivery surfaces are documented as operations.
+    assert get_in(spec, ["paths", "/api/content/{type}/{slug}", "get", "operationId"]) ==
+             "getArtifact"
+
+    assert get_in(spec, ["paths", "/preview/{token}", "get", "operationId"]) == "getPreview"
   end
 
   test "headless GraphQL endpoint remains available" do
