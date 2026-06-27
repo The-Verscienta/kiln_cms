@@ -12,6 +12,19 @@
     <meta :if={assigns[:og_image]} property="og:image" content={@og_image} />
     <meta property="og:type" content={assigns[:og_type] || "website"} />
     <meta :if={assigns[:locale]} property="og:locale" content={@locale} />
+    <meta :if={assigns[:canonical_url]} property="og:url" content={@canonical_url} />
+    <%!-- Other published locales as og:locale:alternate (#164). --%>
+    <meta
+      :for={alt <- assigns[:hreflang] || []}
+      :if={alt.hreflang not in ["x-default", assigns[:locale]]}
+      property="og:locale:alternate"
+      content={alt.hreflang}
+    />
+    <%!-- Twitter Card (#164): falls back to the Open Graph values above. --%>
+    <meta name="twitter:card" content={(assigns[:og_image] && "summary_large_image") || "summary"} />
+    <meta :if={assigns[:page_title]} name="twitter:title" content={@page_title} />
+    <meta :if={assigns[:meta_description]} name="twitter:description" content={@meta_description} />
+    <meta :if={assigns[:og_image]} name="twitter:image" content={@og_image} />
     <link
       :for={alt <- assigns[:hreflang] || []}
       rel="alternate"

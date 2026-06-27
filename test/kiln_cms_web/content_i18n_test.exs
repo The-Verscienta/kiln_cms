@@ -187,6 +187,19 @@ defmodule KilnCMSWeb.ContentI18nTest do
     assert page2 =~ "Page 2"
   end
 
+  # #164: complete social meta and locale-aware JSON-LD.
+  test "a fr post has Twitter/OG meta and locale-prefixed JSON-LD", %{conn: conn} do
+    s = slug()
+    post(%{title: "FR Social", slug: s, locale: "fr"})
+
+    html = conn |> get("/fr/blog/#{s}") |> html_response(200)
+
+    assert html =~ ~s(name="twitter:card")
+    assert html =~ ~s(property="og:url")
+    # The JSON-LD article/breadcrumb URLs carry the /fr locale prefix.
+    assert html =~ "/fr/blog/#{s}"
+  end
+
   # #149: public on-site search over published content.
   describe "public search" do
     test "finds published content and links to it", %{conn: conn} do
