@@ -534,6 +534,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
   end
 
   describe "image block picker" do
+    # #154: the featured image uses the searchable media picker, not a <select>.
+    test "selects the featured image via the media picker", %{conn: conn} do
+      media = Ash.Seed.seed!(MediaItem, %{filename: "feat.jpg", url: "/uploads/feat"})
+      page = draft_page(%{title: "FeatPage"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "Choose from library"
+
+      lv |> element("button[phx-click='open_featured_picker']") |> render_click()
+
+      lv
+      |> element("button[phx-click='pick_image'][phx-value-id='#{media.id}']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert CMS.get_page!(page.id, authorize?: false).featured_image_id == media.id
+    end
+
     test "picking a library image sets the block's url and media_id", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
       page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
@@ -1088,29 +1109,25 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Related posts"
     end
 
-    test "assigns a category, tags and a featured image on save", %{conn: conn} do
+    test "assigns a category and tags on save", %{conn: conn} do
       post = draft_post()
       cat = Ash.Seed.seed!(Category, %{name: "News", slug: "c-#{uniq()}"})
       tag = Ash.Seed.seed!(Tag, %{name: "elixir", slug: "t-#{uniq()}"})
-      img = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg"})
 
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
 
-      # The seeded taxonomy/media appear as options.
+      # The seeded taxonomy appears as options (the featured image is chosen
+      # through the media picker modal rather than a <select> — see #154).
       assert html =~ "News"
       assert html =~ "elixir"
-      assert html =~ "hero.jpg"
 
       lv
-      |> form("#post-editor",
-        form: %{category_id: cat.id, featured_image_id: img.id, tag_ids: [tag.id]}
-      )
+      |> form("#post-editor", form: %{category_id: cat.id, tag_ids: [tag.id]})
       |> render_submit()
 
       saved = CMS.get_post!(post.id, authorize?: false, load: [:tags])
       assert saved.category_id == cat.id
-      assert saved.featured_image_id == img.id
       assert [%{id: tag_id}] = saved.tags
       assert tag_id == tag.id
     end

@@ -242,12 +242,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("open_media_browser", _params, socket),
     do: {:noreply, assign(socket, :picking, :new)}
 
+  # Open the (searchable) media browser to choose the featured image (#154),
+  # replacing the load-everything <select>.
+  def handle_event("open_featured_picker", _params, socket),
+    do: {:noreply, assign(socket, :picking, :featured)}
+
+  def handle_event("clear_featured", _params, socket) do
+    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", nil)
+    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+  end
+
   def handle_event("close_picker", _params, socket),
     do: {:noreply, reset_picker(socket)}
 
   # Live-filter the browser grid as the user types.
   def handle_event("search_media", %{"q" => q}, socket),
     do: {:noreply, assign(socket, :media_query, q)}
+
+  # Set the featured image from the library (#154).
+  def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
+    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
+
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+     |> reset_picker()}
+  end
 
   # Insert a library image as a brand-new image block (browser opened from the
   # editor chrome): the URL becomes the block content and its id is stashed in
@@ -608,6 +628,56 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
 
+  # Featured-image chooser (#154): a thumbnail of the current selection plus a
+  # button that opens the searchable media picker, replacing a <select> that
+  # loaded every asset. The id is carried in a hidden input so it still submits.
+  attr :form, :any, required: true
+  attr :media, :list, required: true
+
+  defp featured_image_field(assigns) do
+    id = AshPhoenix.Form.value(assigns.form, :featured_image_id)
+
+    assigns =
+      assigns
+      |> assign(:field, assigns.form[:featured_image_id])
+      |> assign(:selected, Enum.find(assigns.media, &(to_string(&1.id) == to_string(id))))
+
+    ~H"""
+    <div>
+      <span class="mb-1 block text-sm font-medium text-base-content">
+        {gettext("Featured image")}
+      </span>
+      <input type="hidden" name={@field.name} value={@field.value} />
+      <div class="mt-1 flex flex-wrap items-center gap-3">
+        <img
+          :if={@selected}
+          src={@selected.url}
+          alt=""
+          class="h-16 w-16 rounded border border-base-content/10 object-cover"
+        />
+        <span class="text-sm text-base-content/70">
+          {(@selected && @selected.filename) || gettext("None selected")}
+        </span>
+        <button
+          type="button"
+          phx-click="open_featured_picker"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          {gettext("Choose from library")}
+        </button>
+        <button
+          :if={@selected}
+          type="button"
+          phx-click="clear_featured"
+          class="text-sm text-base-content/70 hover:text-error"
+        >
+          {gettext("Remove")}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
   # Substring filter over filename/alt/caption — instant, no DB round-trip, and
   # matches partial input as the user types (the library's `:search` action is
   # whole-word tsquery, less forgiving for a live picker).
@@ -625,6 +695,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
+  defp pick_index(:featured), do: "featured"
   defp pick_index(index), do: index
 
   attr :block_types, :list, required: true
@@ -1287,13 +1358,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   {gettext("Hold ⌘/Ctrl to select multiple.")}
                 </p>
 
-                <.input
-                  field={@form[:featured_image_id]}
-                  type="select"
-                  label={gettext("Featured image")}
-                  prompt="— None —"
-                  options={Enum.map(@media, &{&1.filename, &1.id})}
-                />
+                <.featured_image_field form={@form} media={@media} />
 
                 <.input
                   field={@form[@related_field]}
