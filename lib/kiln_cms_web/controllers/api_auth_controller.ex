@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.ApiAuthController do
   Exchange `email` + `password` for a bearer token.
 
   Body (`application/json`): `{"email": "...", "password": "..."}`.
-  Success → `200 {"token": "<jwt>", "user": {"id", "email", "role"}}`.
+  Success → `201 Created {"token": "<jwt>", "user": {"id", "email", "role"}}`.
   """
   def sign_in(conn, params) do
     email = params["email"]

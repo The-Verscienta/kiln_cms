@@ -123,10 +123,11 @@ Bootstrapped & verified (compiling, migrating, serving):
   optional **Meilisearch** backend, both feature-flagged off by default
   ([`docs/meilisearch.md`](docs/meilisearch.md))
 
-Not yet wired (next): **magic-link** auth strategy, **Ash policies** enforcing the RBAC
-roles, media upload/variant pipeline (`Image`/libvips), the **TipTap LiveView editor** +
-real-time visual preview, and removing the default DaisyUI assets (the plan specifies no
-DaisyUI).
+Now wired: **magic-link** auth, **Ash policies** enforcing the RBAC roles on every
+resource, the media upload/variant pipeline (libvips), the **TipTap LiveView editor**
+with real-time visual preview and collaborative locking, and headless GraphQL + JSON:API
+delivery. Remaining cleanup: replace the temporary DaisyUI auth-override scaffolding in
+`router.ex`/`auth_overrides.ex` with custom components (the plan specifies no DaisyUI).
 
 > **Note:** keep this project at a path **without spaces** (it lives at
 > `~/Github/kiln_cms`). Native deps (`bcrypt_elixir`, `libvips`) build via `make`, which
