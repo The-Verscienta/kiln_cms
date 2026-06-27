@@ -42,7 +42,7 @@ from its singular type name. For `post`:
 |-------|--------|-----------|---------|
 | `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!` | one published post (or `null`) |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
-| `publishedPosts` | `:published` | — | published posts, newest first *(posts only)* |
+| `publishedPosts` | `:published` | `limit`, `offset` | published posts, newest first, **offset-paginated** (`PageOfPost`) *(posts only)* |
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds` | full-text matches, relevance-ranked |
 | `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
@@ -127,14 +127,23 @@ Variables:
 
 ### List the published blog index
 
+`publishedPosts` is **offset-paginated** (parity with the JSON:API `/published`
+feed) — it returns a `PageOfPost` with `results`, `count`, and `hasNextPage`.
+`limit` is capped server-side (max 100, default 25), so use `limit`/`offset` to
+page.
+
 ```graphql
 {
-  publishedPosts {
-    id
-    title
-    excerpt
-    publishedAt
-    category { name slug }
+  publishedPosts(limit: 25, offset: 0) {
+    count
+    hasNextPage
+    results {
+      id
+      title
+      excerpt
+      publishedAt
+      category { name slug }
+    }
   }
 }
 ```

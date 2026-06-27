@@ -84,14 +84,18 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
 
       _draft = CMS.create_post!(%{title: "#{marker} draft", slug: slug()}, actor: admin)
 
-      query = "{ publishedPosts { id title } }"
+      # #195: publishedPosts is offset-paginated (a PageOfPost with results+count),
+      # matching the JSON:API /published feed.
+      query = "{ publishedPosts(limit: 100) { results { id title } count } }"
 
-      assert {:ok, %{data: %{"publishedPosts" => posts}}} = run(query)
+      assert {:ok, %{data: %{"publishedPosts" => %{"results" => posts, "count" => count}}}} =
+               run(query)
 
       titles = Enum.map(posts, & &1["title"])
       assert "#{marker} live" in titles
       refute "#{marker} draft" in titles
       assert post.id in Enum.map(posts, & &1["id"])
+      assert is_integer(count)
     end
 
     test "postTranslations lists every published locale variant of a slug" do
