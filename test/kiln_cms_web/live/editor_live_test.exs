@@ -89,6 +89,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Findable Page"
     end
 
+    # #161: the filter and search fields are labeled for assistive tech.
+    test "labels the filter and search fields", %{conn: conn} do
+      draft_page(%{title: "Some content"})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ ~s(aria-label="Filter by status")
+      assert html =~ ~s(aria-label="Search by title")
+      assert html =~ ~s(for="content-status-filter")
+    end
+
     # #156: the editor links to the media library for discoverability.
     test "links to the media library", %{conn: conn} do
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")

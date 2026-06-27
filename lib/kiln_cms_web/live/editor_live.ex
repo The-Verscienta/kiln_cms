@@ -286,8 +286,11 @@ defmodule KilnCMSWeb.EditorLive do
 
         <div :if={@items != []} class="flex flex-wrap items-center gap-3">
           <form id="content-filter" phx-change="filter">
+            <label for="content-status-filter" class="sr-only">{gettext("Filter by status")}</label>
             <select
+              id="content-status-filter"
               name="status"
+              aria-label={gettext("Filter by status")}
               class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
             >
               <option :for={status <- @statuses} value={status} selected={status == @status}>
@@ -296,11 +299,14 @@ defmodule KilnCMSWeb.EditorLive do
             </select>
           </form>
           <form id="content-search" phx-change="search" class="flex-1">
+            <label for="content-search-input" class="sr-only">{gettext("Search by title")}</label>
             <input
+              id="content-search-input"
               type="text"
               name="q"
               value={@query}
               placeholder={gettext("Search by title")}
+              aria-label={gettext("Search by title")}
               phx-debounce="200"
               autocomplete="off"
               class="w-full max-w-xs rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
