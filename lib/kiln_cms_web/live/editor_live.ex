@@ -239,6 +239,13 @@ defmodule KilnCMSWeb.EditorLive do
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h1 class="text-2xl font-semibold">{gettext("Content")}</h1>
           <div class="flex flex-wrap items-center gap-2">
+            <%!-- Media library discoverability from the editor (#156). --%>
+            <.link
+              navigate={~p"/media"}
+              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+            >
+              {gettext("Media")}
+            </.link>
             <.link
               navigate={~p"/editor/taxonomy"}
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"

@@ -89,6 +89,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Findable Page"
     end
 
+    # #156: the editor links to the media library for discoverability.
+    test "links to the media library", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ ~s(href="/media")
+      assert html =~ "Media"
+    end
+
     # #155: workflow state labels are humanized and localized, not raw atoms.
     test "humanizes workflow state labels", %{conn: conn} do
       draft_page(%{title: "ReviewMe", state: :in_review})
