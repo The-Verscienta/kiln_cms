@@ -80,5 +80,14 @@ defmodule KilnCMS.Webhooks.SafeUrlTest do
         assert message =~ "private" or message =~ "loopback" or message =~ "resolved"
       end)
     end
+
+    # #223: a slow/blocked DNS lookup must fail fast instead of tying up the
+    # webhook worker. A zero timeout forces the resolution-timeout path.
+    test "fails fast when DNS resolution exceeds the timeout" do
+      with_config([require_https: false, resolve_dns: true, dns_timeout_ms: 0], fn ->
+        assert {:error, "hostname resolution timed out"} =
+                 SafeUrl.validate("https://example.com/hook")
+      end)
+    end
   end
 end

@@ -106,17 +106,29 @@ defmodule KilnCMS.Webhooks.SafeUrl do
       else: :ok
   end
 
+  defp check_resolved_addresses({:error, :timeout}),
+    do: {:error, "hostname resolution timed out"}
+
   defp check_resolved_addresses({:error, _}), do: {:error, "hostname could not be resolved"}
 
+  # Resolve in a supervised task with a hard timeout (#223): `:inet.gethostbyname`
+  # blocks for the resolver's full timeout, so a slow/firewalled/NXDOMAIN target
+  # would otherwise tie up the DeliveryWorker (Oban) for seconds per attempt.
   defp resolve_addresses(host) do
     charlist = String.to_charlist(host)
+    task = Task.async(fn -> :inet.gethostbyname(charlist) end)
 
-    case :inet.gethostbyname(charlist) do
-      {:ok, {:hostent, _name, _aliases, _addrtype, _length, addresses}} ->
+    case Task.yield(task, dns_timeout_ms()) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:ok, {:hostent, _name, _aliases, _addrtype, _length, addresses}}} ->
         {:ok, Enum.map(addresses, &normalize_address/1)}
 
-      {:error, reason} ->
+      {:ok, {:error, reason}} ->
         {:error, reason}
+
+      # Task.yield timed out (and shutdown returned nil) — treat as a resolution
+      # timeout so the webhook fails validation fast instead of blocking.
+      _ ->
+        {:error, :timeout}
     end
   end
 
@@ -189,6 +201,11 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   defp resolve_dns? do
     config() |> Keyword.get(:resolve_dns, true)
+  end
+
+  # Max time to wait for hostname resolution before failing validation (#223).
+  defp dns_timeout_ms do
+    config() |> Keyword.get(:dns_timeout_ms, 3_000)
   end
 
   defp config, do: Application.get_env(:kiln_cms, __MODULE__, [])
