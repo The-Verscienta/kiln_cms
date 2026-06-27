@@ -293,6 +293,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :form, form)}
   end
 
+  # Keyboard-accessible alternative to drag-and-drop reordering (#171): swap a
+  # block with its neighbour and announce the new position to screen readers.
+  def handle_event("move_block", %{"index" => index, "dir" => dir}, socket) do
+    i = String.to_integer(index)
+    count = blocks_count(socket.assigns.form)
+    j = if dir == "up", do: i - 1, else: i + 1
+
+    if j >= 0 and j < count do
+      order =
+        0..(count - 1)
+        |> Enum.map(&to_string/1)
+        |> swap_at(i, j)
+
+      form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
+
+      {:noreply,
+       socket
+       |> assign(:form, form)
+       |> assign(
+         :moved_announcement,
+         gettext("Moved block to position %{pos} of %{count}", pos: j + 1, count: count)
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("save", %{"form" => params}, socket) do
     socket = cancel_autosave_timer(socket)
 
@@ -485,6 +512,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp draft?(socket), do: socket.assigns.record.state == :draft
+
+  # Number of block sub-forms currently in the form (#171 keyboard reorder).
+  defp blocks_count(form) do
+    case AshPhoenix.Form.value(form, :blocks) do
+      list when is_list(list) -> length(list)
+      _ -> 0
+    end
+  end
+
+  # Swap the two list elements at positions `i` and `j`.
+  defp swap_at(list, i, j) do
+    a = Enum.at(list, i)
+    b = Enum.at(list, j)
+
+    list
+    |> List.replace_at(i, b)
+    |> List.replace_at(j, a)
+  end
 
   # Push the current title + blocks to any open decoupled preview windows.
   defp broadcast_preview(socket) do
@@ -1044,6 +1089,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <div class="space-y-3">
               <h2 class="text-lg font-medium">{gettext("Blocks")}</h2>
 
+              <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
+              <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
+
               <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
                 <.inputs_for :let={bf} field={@form[:blocks]}>
                   <div
@@ -1060,6 +1108,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         >
                           <.icon name="hero-bars-3" class="size-5" />
                         </span>
+                        <%!-- Keyboard-accessible reorder, alongside the drag handle (#171). --%>
+                        <div class="flex flex-col">
+                          <button
+                            type="button"
+                            phx-click="move_block"
+                            phx-value-index={bf.index}
+                            phx-value-dir="up"
+                            disabled={bf.index == 0}
+                            aria-label={gettext("Move block up")}
+                            class="text-base-content/40 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <.icon name="hero-chevron-up" class="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            phx-click="move_block"
+                            phx-value-index={bf.index}
+                            phx-value-dir="down"
+                            disabled={bf.index == blocks_count(@form) - 1}
+                            aria-label={gettext("Move block down")}
+                            class="text-base-content/40 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <.icon name="hero-chevron-down" class="size-4" />
+                          </button>
+                        </div>
                         <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
                           {dsl_label(block_type_string(bf))}
                         </span>

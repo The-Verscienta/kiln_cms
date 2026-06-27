@@ -1134,6 +1134,37 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(data-editor-label="Rich text editor")
     end
 
+    # Regression for #171: blocks are reorderable without a pointer device.
+    test "blocks can be reordered with keyboard move buttons", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "First", order: 0},
+            %{type: :heading, content: "Second", order: 1}
+          ]
+        })
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Move-up on the first block is disabled; move-down is available.
+      assert html =~
+               ~r/phx-value-index="0"[^>]*phx-value-dir="up"[^>]*disabled|disabled[^>]*phx-value-index="0"[^>]*phx-value-dir="up"/
+
+      moved =
+        lv
+        |> element(~s(button[phx-click="move_block"][phx-value-index="0"][phx-value-dir="down"]))
+        |> render_click()
+
+      # The new position is announced to screen readers.
+      assert moved =~ "Moved block to position 2 of 2"
+
+      # Saving persists the swapped order.
+      lv |> form("#page-editor") |> render_submit()
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(blocks, & &1.content) == ["Second", "First"]
+    end
+
     # Regression for #174: the editor page must have exactly one h1 (the
     # "Edit <kind>" header); the preview-pane title is an h2.
     test "renders a single h1", %{conn: conn} do
