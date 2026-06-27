@@ -1243,6 +1243,21 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(data-editor-label="Rich text editor")
     end
 
+    # #150: the two slash systems have distinct hints (block inserter vs in-text).
+    test "distinguishes the block inserter from the rich-text slash menu", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "SlashPage",
+          blocks: [%{type: :rich_text, content: "<p>x</p>", order: 0}]
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ "Type / for text formatting within this block."
+      assert html =~ "Add block"
+    end
+
     # Regression for #135: a server-driven form replacement (conflict reload)
     # remounts rich-text blocks (new element id) so TipTap reloads from the latest
     # content instead of keeping its phx-update="ignore" editor.

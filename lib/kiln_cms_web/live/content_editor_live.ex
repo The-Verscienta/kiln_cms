@@ -1205,8 +1205,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         >
                         </div>
                         <div data-editor></div>
+                        <%!-- Distinguish this in-text slash menu from the block
+                              inserter's "Add block /" so the two / systems are
+                              clearly scoped (#150). --%>
                         <p class="mt-1 text-xs text-base-content/70">
-                          {gettext("Type / for commands.")}
+                          {gettext("Type / for text formatting within this block.")}
                         </p>
                         <input
                           type="hidden"
