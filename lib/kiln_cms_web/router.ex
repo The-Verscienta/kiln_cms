@@ -97,6 +97,10 @@ defmodule KilnCMSWeb.Router do
   # a per-request nonce for swagger-ui's inline boot script.
   pipeline :swagger_ui do
     plug :accepts, ["html"]
+    # Bound unauthenticated browsing of the always-on docs explorer (#225). The
+    # `docs` bucket is generous enough for interactive use but caps sustained
+    # crawler traffic against the UI + forwarded spec.
+    plug KilnCMSWeb.Plugs.RateLimit, :docs
     plug :fetch_session
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @swagger_csp_headers

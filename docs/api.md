@@ -179,6 +179,7 @@ Over the limit returns **429** with a `retry-after` header.
 | `api`  | `/api/json/*`   | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 20 requests / minute  |
+| `docs` | `/api/json/swaggerui` | 60 requests / minute |
 
 ## Versioning & stability
 

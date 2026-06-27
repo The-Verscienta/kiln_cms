@@ -11,7 +11,10 @@ defmodule KilnCMSWeb.RateLimit do
     # Public HTML delivery — generous, just a flood/abuse ceiling per IP.
     delivery: {300, :timer.minutes(1)},
     # Signed preview links — tight, to slow token enumeration / draft scraping.
-    preview: {30, :timer.minutes(1)}
+    preview: {30, :timer.minutes(1)},
+    # Always-on Swagger UI explorer (#225) — generous for human browsing, caps
+    # crawler/abuse traffic against the docs UI.
+    docs: {60, :timer.minutes(1)}
   }
 
   @doc false
