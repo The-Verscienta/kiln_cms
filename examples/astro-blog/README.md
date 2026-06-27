@@ -1,5 +1,11 @@
 # KilnCMS × Astro — headless blog example
 
+> ⚠️ **Optional example, not the reference frontend.** KilnCMS delivers its own
+> public website with Phoenix LiveView/controllers (`KilnCMSWeb.ContentController`
+> — pages, blog, search, locales). This Astro project is kept only to demonstrate
+> consuming KilnCMS as a *headless* backend from an external/mobile frontend; you
+> do **not** need it to run a KilnCMS site.
+
 A reference [Astro](https://astro.build) static site that builds a small blog
 **entirely from the KilnCMS headless content API** — no database access, no
 shared code, just HTTP. It's the minimal end-to-end example of consuming KilnCMS
