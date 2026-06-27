@@ -91,6 +91,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
          )
          |> assign(:categories, CMS.list_categories!(actor: actor))
          |> assign(:tags, CMS.list_tags!(actor: actor))
+         |> assign(:audiences, audience_options())
+         |> assign(:field_definitions, CMS.field_definitions_for!(kind, actor: actor))
          |> assign(:siblings, siblings(kind, id, actor))
          |> assign_record(record)}
     end
@@ -183,6 +185,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     kind
     |> ContentTypes.list!(actor: actor, query: [sort: [updated_at: :desc], limit: @max_media])
     |> Enum.reject(&(&1.id == id))
+  end
+
+  # `<select>` options for the consumer-facing audience (KilnCMS.CMS.Audiences):
+  # `{humanized label, atom value}`. The select is only rendered when more than
+  # one audience is configured (see the template).
+  defp audience_options do
+    Enum.map(KilnCMS.CMS.Audiences.all(), &{Phoenix.Naming.humanize(&1), &1})
   end
 
   # The self-referential m2m relationship/argument names follow the convention
@@ -672,6 +681,101 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Featured-image chooser (#154): a thumbnail of the current selection plus a
   # button that opens the searchable media picker, replacing a <select> that
   # loaded every asset. The id is carried in a hidden input so it still submits.
+  # One input for an admin-defined custom field (KilnCMS.CMS.FieldDefinition).
+  # Inputs are named into the content form's `custom_fields` map
+  # (`form[custom_fields][<name>]`); the write change coerces/validates them.
+  attr :definition, :map, required: true
+  attr :name, :string, required: true
+  attr :value, :any, required: true
+
+  defp custom_field_input(%{definition: %{field_type: :boolean}} = assigns) do
+    assigns = assign(assigns, :checked, assigns.value in [true, "true", "1", "on"])
+
+    ~H"""
+    <label class="flex items-center gap-2 text-sm">
+      <%!-- hidden "false" first so an unchecked box still submits a value (last wins) --%>
+      <input type="hidden" name={@name} value="false" />
+      <input type="checkbox" name={@name} value="true" checked={@checked} />
+      <span class="font-medium">{@definition.label}</span>
+      <span :if={@definition.help_text} class="text-base-content/60">— {@definition.help_text}</span>
+    </label>
+    """
+  end
+
+  defp custom_field_input(%{definition: %{field_type: :select}} = assigns) do
+    ~H"""
+    <div>
+      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <select
+        name={@name}
+        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+      >
+        <option value="">{gettext("— None —")}</option>
+        <option :for={opt <- @definition.options} value={opt} selected={to_string(@value) == opt}>
+          {opt}
+        </option>
+      </select>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+    </div>
+    """
+  end
+
+  defp custom_field_input(%{definition: %{field_type: :text}} = assigns) do
+    ~H"""
+    <div>
+      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <textarea
+        name={@name}
+        required={@definition.required}
+        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+      >{@value}</textarea>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+    </div>
+    """
+  end
+
+  defp custom_field_input(assigns) do
+    assigns = assign(assigns, :input_type, custom_input_type(assigns.definition.field_type))
+
+    ~H"""
+    <div>
+      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <input
+        type={@input_type}
+        name={@name}
+        value={@value}
+        required={@definition.required}
+        step={@input_type == "number" && @definition.field_type == :float && "any"}
+        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+      />
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+    </div>
+    """
+  end
+
+  defp custom_input_type(:integer), do: "number"
+  defp custom_input_type(:float), do: "number"
+  defp custom_input_type(:date), do: "date"
+  defp custom_input_type(:datetime), do: "datetime-local"
+  defp custom_input_type(:url), do: "url"
+  defp custom_input_type(_), do: "text"
+
+  # Current value of one custom field, from the form's `custom_fields` map
+  # (param value mid-edit, otherwise the record's stored value). Keys are always
+  # strings (jsonb / form params).
+  defp custom_field_value(form, name) do
+    case AshPhoenix.Form.value(form, :custom_fields) do
+      map when is_map(map) -> Map.get(map, name)
+      _ -> nil
+    end
+  end
+
   attr :form, :any, required: true
   attr :media, :list, required: true
 
@@ -1387,6 +1491,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   options={Enum.map(@categories, &{&1.name, &1.id})}
                 />
 
+                <.input
+                  :if={length(@audiences) > 1}
+                  field={@form[:audience]}
+                  type="select"
+                  label={gettext("Audience")}
+                  options={@audiences}
+                />
+
                 <.tag_picker form={@form} tags={@tags} record={@record} />
 
                 <.featured_image_field form={@form} media={@media} />
@@ -1398,6 +1510,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   label={gettext("Related %{kind}s", kind: @kind)}
                   value={selected_ids(@form, @related_field, current_ids(@related_current))}
                   options={Enum.map(@siblings, &{&1.title, &1.id})}
+                />
+              </div>
+            </details>
+
+            <details :if={@field_definitions != []} class="rounded border border-base-content/15 p-3">
+              <summary class="cursor-pointer text-sm font-medium">
+                {gettext("Custom fields")}
+              </summary>
+              <div class="mt-3 space-y-3">
+                <.custom_field_input
+                  :for={definition <- @field_definitions}
+                  definition={definition}
+                  name={"#{@form.name}[custom_fields][#{definition.name}]"}
+                  value={custom_field_value(@form, definition.name)}
                 />
               </div>
             </details>

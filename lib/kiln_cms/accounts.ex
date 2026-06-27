@@ -16,6 +16,8 @@ defmodule KilnCMS.Accounts do
       define :list_users, action: :read
       define :get_user_by_email, action: :get_by_email, args: [:email]
       define :update_notification_prefs, action: :update_notification_prefs
+      # Admin-only: assign role + consumer audiences; pass `actor: admin`.
+      define :manage_user_access, action: :manage_access
       # GDPR Art. 17 erasure (#212) — admin-only; pass `actor: admin`.
       define :anonymize_user, action: :anonymize
     end
@@ -34,6 +36,7 @@ defmodule KilnCMS.Accounts do
         email: to_string(user.email),
         name: user.name,
         role: user.role,
+        audiences: user.audiences,
         confirmed_at: user.confirmed_at,
         anonymized_at: user.anonymized_at
       },

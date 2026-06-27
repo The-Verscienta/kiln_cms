@@ -129,5 +129,18 @@ defmodule KilnCMS.CMS do
       define :create_content_link, action: :create
       define :destroy_content_link, action: :destroy
     end
+
+    # Admin-UI-defined custom fields: the runtime field registry that backs the
+    # `custom_fields` map on content (decision D4 — data-driven *fields*, not a
+    # runtime meta-model of *types*). `field_definitions_for` is the per-type
+    # lookup the editor and the write change call with `authorize?: false`.
+    resource KilnCMS.CMS.FieldDefinition do
+      define :list_field_definitions, action: :read
+      define :get_field_definition, action: :read, get_by: [:id]
+      define :field_definitions_for, action: :for_type, args: [:content_type]
+      define :create_field_definition, action: :create
+      define :update_field_definition, action: :update
+      define :destroy_field_definition, action: :destroy
+    end
   end
 end

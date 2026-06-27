@@ -58,6 +58,8 @@ defmodule KilnCMS.CMS.Content do
           :seo_image,
           :canonical_url,
           :locale,
+          :audience,
+          :custom_fields,
           :scheduled_at,
           :category_id,
           :featured_image_id
@@ -195,7 +197,7 @@ defmodule KilnCMS.CMS.Content do
         # Friendly datatable: identity + workflow + timing. Internal columns
         # (search_text, embedding, embedded_at, lock_version, published_version_id)
         # are deliberately omitted.
-        table_columns [:title, :slug, :state, :locale, :published_at, :updated_at]
+        table_columns [:title, :slug, :state, :audience, :locale, :published_at, :updated_at]
 
         format_fields published_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       scheduled_at: {KilnCMS.CMS.Admin, :format_datetime, []},
@@ -368,6 +370,7 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -389,6 +392,7 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
 
@@ -416,6 +420,7 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
@@ -660,11 +665,21 @@ defmodule KilnCMS.CMS.Content do
           authorize_if always()
         end
 
-        # Published content is world-readable (headless delivery / public site);
-        # unpublished content (draft/in_review/archived) is editors-only.
+        # Read access combines the publishing workflow with the consumer-facing
+        # audience (KilnCMS.CMS.Audiences) — the *read* axis, separate from the
+        # editorial role:
+        #   • editors (and admins, via the bypass above) see every record;
+        #   • `:public` published content stays world-readable (anonymous
+        #     headless delivery / public site);
+        #   • audience-restricted published content is visible only to a
+        #     signed-in reader who belongs to that audience.
+        # Drafts/in-review/archived remain editors-only. `actor(:audiences)` is
+        # nil for anonymous callers, so a gated record simply isn't authorized
+        # (the `in` yields no match) rather than erroring.
         policy action_type(:read) do
-          authorize_if expr(^ref(:state) == :published)
           authorize_if actor_attribute_equals(:role, :editor)
+          authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
+          authorize_if expr(^ref(:state) == :published and ^ref(:audience) in ^actor(:audiences))
         end
 
         # Authoring and workflow transitions are reserved for editors (and admins
@@ -722,6 +737,30 @@ defmodule KilnCMS.CMS.Content do
         attribute :seo_image, :string, public?: true
         attribute :canonical_url, :string, public?: true
         attribute :locale, :string, default: "en", public?: true
+
+        # Consumer-facing access tier (KilnCMS.CMS.Audiences). `:public` (the
+        # default) keeps a published record world-readable; any other audience
+        # restricts published reads to signed-in users who belong to it (see the
+        # read policy). Public on the API so headless clients can label gated
+        # content — the policy, not field hiding, is the access boundary.
+        attribute :audience, :atom do
+          constraints one_of: KilnCMS.CMS.Audiences.all()
+          default :public
+          allow_nil? false
+          public? true
+        end
+
+        # Admin-UI-defined custom fields (decision D4 — schema stays compile-time,
+        # but *fields* are data-driven). Values are keyed by `FieldDefinition.name`
+        # and coerced/validated against the registry on write by
+        # `Changes.ApplyCustomFields`. Public so headless clients get the extra
+        # fields; the editor renders one input per definition.
+        attribute :custom_fields, :map do
+          default %{}
+          allow_nil? false
+          public? true
+        end
+
         attribute :published_at, :utc_datetime_usec, public?: true
 
         # PaperTrail version id of the immutable snapshot taken at the last
@@ -788,6 +827,23 @@ defmodule KilnCMS.CMS.Content do
           through KilnCMS.CMS.ContentLink
           source_attribute_on_join_resource :source_id
           destination_attribute_on_join_resource :target_id
+          public? true
+        end
+
+        # The raw outgoing `ContentLink` rows for this record (it as `source`),
+        # so relations that carry a payload are reachable: each row exposes
+        # `kind`, `position`, `label` and the `metadata` map. Use this (instead
+        # of the typed `related_*` m2m above) when you need the link attributes —
+        # e.g. `load: [content_links: []]` then read `link.metadata`.
+        has_many :content_links, KilnCMS.CMS.ContentLink do
+          destination_attribute :source_id
+          public? true
+        end
+
+        # The reverse: links pointing *at* this record (it as `target`) — "what
+        # links to me", with the same per-link payload.
+        has_many :incoming_links, KilnCMS.CMS.ContentLink do
+          destination_attribute :target_id
           public? true
         end
       end
