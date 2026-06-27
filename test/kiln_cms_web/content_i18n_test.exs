@@ -6,11 +6,23 @@ defmodule KilnCMSWeb.ContentI18nTest do
   use KilnCMSWeb.ConnCase, async: true
 
   alias KilnCMS.CMS.Page
+  alias KilnCMS.CMS.Post
+  alias KilnCMS.I18n
 
   defp slug, do: "i18n-#{System.unique_integer([:positive])}"
 
   defp page(attrs) do
     Ash.Seed.seed!(Page, Map.merge(%{state: :published, locale: "en"}, attrs))
+  end
+
+  defp post(attrs) do
+    Ash.Seed.seed!(
+      Post,
+      Map.merge(
+        %{state: :published, locale: "en", published_at: DateTime.utc_now()},
+        attrs
+      )
+    )
   end
 
   test "the default locale is served at the unprefixed URL", %{conn: conn} do
@@ -101,5 +113,43 @@ defmodule KilnCMSWeb.ContentI18nTest do
 
     html = conn |> get(~p"/#{s}") |> html_response(200)
     refute html =~ ~s(aria-label="Language")
+  end
+
+  # #146: internal public links must keep the active locale prefix.
+  describe "locale-aware public links" do
+    test "blog post links and the Blog nav keep the locale prefix on /fr/blog", %{conn: conn} do
+      s = slug()
+      post(%{title: "FR Post", slug: s, locale: "fr"})
+
+      html = conn |> get("/fr/blog") |> html_response(200)
+
+      # The post link is locale-prefixed, not the default unprefixed form.
+      assert html =~ ~s(href="/fr/blog/#{s}")
+      refute html =~ ~s(href="/blog/#{s}")
+      # The header Blog nav link is prefixed too.
+      assert html =~ ~s(href="/fr/blog")
+    end
+
+    test "default-locale blog links stay unprefixed", %{conn: conn} do
+      s = slug()
+      post(%{title: "EN Post", slug: s, locale: "en"})
+
+      html = conn |> get("/blog") |> html_response(200)
+
+      assert html =~ ~s(href="/blog/#{s}")
+      refute html =~ ~s(href="/fr/blog/#{s}")
+    end
+  end
+
+  describe "I18n.localized_path/2" do
+    test "prefixes non-default locales but not the default or the home path" do
+      assert I18n.localized_path("fr", "/blog") == "/fr/blog"
+      assert I18n.localized_path("fr", "/blog/my-post") == "/fr/blog/my-post"
+      assert I18n.localized_path("en", "/blog") == "/blog"
+      assert I18n.localized_path("fr", "/") == "/"
+      # Unknown/blank locale falls back to the unprefixed path.
+      assert I18n.localized_path("zz", "/blog") == "/blog"
+      assert I18n.localized_path(nil, "/blog") == "/blog"
+    end
   end
 end

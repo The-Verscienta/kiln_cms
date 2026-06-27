@@ -90,6 +90,7 @@ defmodule KilnCMSWeb.Layouts do
   # Links to the current page in each available locale (`%{locale, href,
   # current}`); rendered as a language switcher when there's more than one.
   attr :locale_links, :list, default: []
+  attr :locale, :string, default: nil, doc: "active locale, to keep nav links locale-prefixed"
   slot :inner_block, required: true
 
   def public(assigns) do
@@ -101,7 +102,9 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
-          <a href="/blog" class="hover:text-base-content">{gettext("Blog")}</a>
+          <a href={KilnCMS.I18n.localized_path(@locale, "/blog")} class="hover:text-base-content">
+            {gettext("Blog")}
+          </a>
           <span
             :if={length(@locale_links) > 1}
             class="flex items-center gap-2"
