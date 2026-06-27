@@ -251,6 +251,29 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # #186: semantic search is reachable over JSON:API (parity with GraphQL). When
+  # embeddings are unavailable (test env) it degrades to an empty 200, not an error.
+  describe "semantic search" do
+    test "the semantic-search route responds (empty when embeddings unavailable)" do
+      admin = user(:admin)
+      _post = published_post(%{title: "Semantic"}, admin)
+
+      # Arguments are top-level query params (query is required).
+      assert {200, %{"data" => data}} =
+               api_get("/api/json/posts/semantic-search?query=anything&locale=en")
+
+      assert is_list(data)
+
+      # Pages have the route too.
+      assert {200, %{"data" => _}} =
+               api_get("/api/json/pages/semantic-search?query=anything&locale=en")
+
+      # The query argument is required.
+      assert {400, %{"errors" => [%{"code" => "required"} | _]}} =
+               api_get("/api/json/posts/semantic-search")
+    end
+  end
+
   describe "single record" do
     test "fetches a published post by id" do
       admin = user(:admin)

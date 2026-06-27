@@ -171,6 +171,10 @@ defmodule KilnCMS.CMS.Content do
           # documented in `docs/json-api.md`.
           index :read
           index :search, route: "/search"
+          # Semantic (vector) search over the same surface as GraphQL's
+          # `semanticSearch*` (#186). Degrades to no results when embeddings are
+          # unavailable (KilnCMS.Search.semantic? false).
+          index :search_semantic, route: "/semantic-search"
           index :autocomplete, route: "/autocomplete"
           unquote(published_route)
           # `/:id` last so it can't shadow the static sub-paths above.

@@ -125,14 +125,20 @@ A quick map:
 
 | Resource  | Collection                  | Single record                   | Extra reads                                   |
 |-----------|-----------------------------|---------------------------------|-----------------------------------------------|
-| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`       | `/pages/search`, `/pages/autocomplete`        |
-| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`       | `/posts/published`, `/posts/search`, `/posts/autocomplete` |
+| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`       | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete` |
+| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`       | `/posts/published`, `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete` |
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`                         |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id`  | `/categories/by-slug/:slug`                   |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
 
 Taxonomy (Category/Tag) is world-readable and now mirrors the GraphQL taxonomy
 surface over JSON:API (#185) — list, fetch by id, or fetch by slug.
+
+`*/search` (keyword) and `*/semantic-search` (vector) take their inputs as
+top-level query params — `?query=<text>&locale=<code>` (plus optional
+`category_id`, `author_id`, `state`, `tag_ids` facets on keyword search).
+Semantic search requires the embedding model (`KilnCMS.Search.semantic?`); when
+it's unavailable the endpoint returns an empty result set rather than an error.
 
 All requests use the JSON:API media type:
 
