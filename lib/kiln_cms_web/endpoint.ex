@@ -77,6 +77,14 @@ defmodule KilnCMSWeb.Endpoint do
   plug Plug.Session, @session_options
   # Strip a `/<locale>/…` prefix and set the locale before routing.
   plug KilnCMSWeb.Plugs.SetLocale
+
+  # Attach request context (method, path, scrubbed headers/params) to any Sentry
+  # event raised while handling this request. No-op without a configured DSN.
+  # Sensitive params/headers are scrubbed by Sentry's defaults. On Bandit this is
+  # the capture path — `Sentry.PlugCapture` is deliberately omitted (it would
+  # double-report). See KilnCMS.Application.setup_observability/0.
+  plug Sentry.PlugContext
+
   plug KilnCMSWeb.Router
 
   # Force user-uploaded media to download rather than render inline, and disable

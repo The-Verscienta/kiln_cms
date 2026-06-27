@@ -119,6 +119,21 @@ defmodule KilnCMS.MixProject do
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      # Error tracking. No-op unless SENTRY_DSN is set (config/runtime.exs), so
+      # dev/test/precommit stay offline. Uses Req (not hackney) for transport to
+      # keep the project on a single HTTP client — see KilnCMS.SentryReqClient.
+      {:sentry, "~> 13.2"},
+      # Distributed tracing (OpenTelemetry). Spans are only exported when
+      # OTEL_EXPORTER_OTLP_ENDPOINT is set (config/runtime.exs); otherwise the
+      # instrumentation is never attached. See KilnCMS.Application.setup_otel/0
+      # and docs/observability.md.
+      {:opentelemetry_api, "~> 1.5"},
+      {:opentelemetry, "~> 1.7"},
+      {:opentelemetry_exporter, "~> 1.10"},
+      {:opentelemetry_phoenix, "~> 2.0"},
+      {:opentelemetry_ecto, "~> 1.2"},
+      {:opentelemetry_bandit, "~> 0.3"},
+      {:opentelemetry_oban, "~> 1.2"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},

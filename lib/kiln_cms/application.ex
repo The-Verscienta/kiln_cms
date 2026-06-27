@@ -8,6 +8,7 @@ defmodule KilnCMS.Application do
   @impl true
   def start(_type, _args) do
     assert_dev_routes_disabled_in_prod!()
+    setup_observability()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -52,6 +53,36 @@ defmodule KilnCMS.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
     Supervisor.start_link(children ++ embedding_children() ++ reranker_children(), opts)
+  end
+
+  # Wire up production observability. Both halves are no-ops unless configured,
+  # so dev/test/precommit pay nothing and never reach a collector:
+  #
+  #   * OpenTelemetry tracing — attached only when OTEL_EXPORTER_OTLP_ENDPOINT is
+  #     set (config/runtime.exs flips `:otel_enabled`). Instruments the HTTP
+  #     server (Bandit), Phoenix + LiveView, Ecto queries, and Oban jobs. Ecto
+  #     spans include the parameterized SQL (`db_statement: :enabled`) — safe
+  #     because Ecto sends values as bound parameters, not inlined in the text.
+  #   * Sentry — the logger handler that turns crashes into events is added only
+  #     when SENTRY_DSN is set. Request context comes from `Sentry.PlugContext`
+  #     in the endpoint; Oban errors via the built-in integration (config.exs).
+  #     `Sentry.PlugCapture` is intentionally NOT used: on Bandit it double-reports.
+  defp setup_observability do
+    if Application.get_env(:kiln_cms, :otel_enabled, false) do
+      OpentelemetryBandit.setup()
+      OpentelemetryPhoenix.setup(adapter: :bandit, liveview: true)
+      OpentelemetryEcto.setup([:kiln_cms, :repo], db_statement: :enabled)
+      OpentelemetryOban.setup()
+    end
+
+    if Application.get_env(:sentry, :dsn) do
+      _ =
+        :logger.add_handler(:kiln_sentry_handler, Sentry.LoggerHandler, %{
+          config: %{metadata: [:file, :line]}
+        })
+    end
+
+    :ok
   end
 
   # Fail fast if a :prod release was built with `dev_routes` enabled — that would

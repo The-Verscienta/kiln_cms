@@ -241,6 +241,28 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Error tracking (Sentry). The DSN is only set in config/runtime.exs from the
+# SENTRY_DSN env var, so with no DSN every capture is a no-op — dev, test, and
+# precommit never reach out to Sentry. Transport uses the default Finch client
+# (Finch is already in the tree via Req), so no extra HTTP client is pulled in.
+# Oban job failures are captured automatically; request context is attached by
+# `Sentry.PlugContext` in the endpoint. Source context is packaged into the
+# release by `mix sentry.package_source_code` (see Dockerfile).
+config :sentry,
+  enable_source_code_context: true,
+  root_source_code_paths: [File.cwd!()],
+  integrations: [oban: [capture_errors: true]]
+
+# OpenTelemetry. Spans are dropped (`traces_exporter: :none`) and the
+# instrumentation is never attached unless OTEL_EXPORTER_OTLP_ENDPOINT is set at
+# runtime (config/runtime.exs flips `:otel_enabled` and the exporter on). This
+# keeps dev/test/precommit free of tracing overhead and exporter connection
+# noise. Instrumentation is wired up in KilnCMS.Application.setup_observability/0;
+# see docs/observability.md.
+config :kiln_cms, :otel_enabled, false
+
+config :opentelemetry, traces_exporter: :none
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
