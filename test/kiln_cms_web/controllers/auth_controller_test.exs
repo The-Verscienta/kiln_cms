@@ -22,14 +22,14 @@ defmodule KilnCMSWeb.AuthControllerTest do
     |> Phoenix.Controller.fetch_flash([])
   end
 
-  defp signed_in_user do
+  defp signed_in_user(role \\ :editor) do
     email = "auth-#{System.unique_integer([:positive])}@example.com"
 
     Ash.Seed.seed!(User, %{
       email: email,
       hashed_password: Bcrypt.hash_pwd_salt("password123456"),
       confirmed_at: DateTime.utc_now(),
-      role: :editor
+      role: role
     })
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
@@ -79,6 +79,21 @@ defmodule KilnCMSWeb.AuthControllerTest do
       conn = AuthController.success(flash_conn(), :sign_in, user, user.__metadata__.token)
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) == "Vous êtes maintenant connecté"
+    end
+  end
+
+  # #157: editors/admins land in the editor after sign-in; viewers land on home.
+  describe "success/4 redirect" do
+    test "an editor is redirected to /editor" do
+      user = signed_in_user(:editor)
+      conn = AuthController.success(flash_conn(), :sign_in, user, user.__metadata__.token)
+      assert redirected_to(conn) == "/editor"
+    end
+
+    test "a viewer is redirected to /" do
+      user = signed_in_user(:viewer)
+      conn = AuthController.success(flash_conn(), :sign_in, user, user.__metadata__.token)
+      assert redirected_to(conn) == "/"
     end
   end
 end

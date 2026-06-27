@@ -5,7 +5,10 @@ defmodule KilnCMSWeb.AuthController do
   alias KilnCMSWeb.SafeRedirect
 
   def success(conn, activity, user, _token) do
-    return_to = SafeRedirect.local_path(get_session(conn, :return_to), ~p"/")
+    # Editors/admins land in the editor by default; viewers (and anyone with an
+    # explicit return_to) keep their intended destination (#157).
+    default = if user.role in [:editor, :admin], do: ~p"/editor", else: ~p"/"
+    return_to = SafeRedirect.local_path(get_session(conn, :return_to), default)
 
     message =
       case activity do
