@@ -274,6 +274,33 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # #197: HTTP contract coverage for the keyword search + autocomplete routes.
+  describe "search and autocomplete over HTTP" do
+    test "keyword search returns matching published posts" do
+      admin = user(:admin)
+      term = "httpsearch#{System.unique_integer([:positive])}"
+      hit = published_post(%{title: "#{term} match"}, admin)
+      _miss = published_post(%{title: "unrelated"}, admin)
+
+      assert {200, body} = api_get("/api/json/posts/search?query=#{term}&locale=en")
+      assert ids(body) == [hit.id]
+    end
+
+    test "autocomplete returns title prefix matches" do
+      admin = user(:admin)
+      term = "Autohttp#{System.unique_integer([:positive])}"
+      hit = published_post(%{title: "#{term} suggestion"}, admin)
+
+      assert {200, body} = api_get("/api/json/posts/autocomplete?prefix=#{term}&locale=en")
+      assert hit.id in ids(body)
+    end
+
+    test "keyword search requires the query argument" do
+      assert {400, %{"errors" => [%{"code" => "required"} | _]}} =
+               api_get("/api/json/posts/search")
+    end
+  end
+
   describe "single record" do
     test "fetches a published post by id" do
       admin = user(:admin)

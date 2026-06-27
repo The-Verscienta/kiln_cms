@@ -76,6 +76,24 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     assert "ImageObject" in types
   end
 
+  # #197: the artifact endpoint serves a specific locale via ?locale=.
+  test "serves a locale-specific artifact via ?locale=", %{conn: conn} do
+    actor = admin()
+    slug = "art-loc-#{System.unique_integer([:positive])}"
+
+    fr =
+      CMS.create_page!(%{title: "Bonjour", slug: slug, locale: "fr"}, actor: actor)
+
+    CMS.publish_page!(fr, actor: actor)
+    KilnCMS.DataCase.drain_oban()
+
+    body = conn |> get(~p"/api/content/page/#{slug}?locale=fr") |> json_response(200)
+    assert body["title"] == "Bonjour"
+
+    # The default locale has no such slug → 404.
+    assert conn |> get(~p"/api/content/page/#{slug}?locale=en") |> json_response(404)
+  end
+
   test "404s for unknown type, unknown slug, and unpublished content", %{conn: conn} do
     assert conn |> get(~p"/api/content/widget/whatever") |> json_response(404)
     assert conn |> get(~p"/api/content/page/does-not-exist") |> json_response(404)
