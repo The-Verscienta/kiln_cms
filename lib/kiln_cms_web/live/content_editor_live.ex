@@ -1378,13 +1378,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </div>
 
           <div class="lg:sticky lg:top-4 lg:self-start">
-            <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-            <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
-              <%!-- Visual preview of the published title — an h2 (not h1) so the
-                    editor page keeps a single logical h1 (the "Edit %{kind}" header). #174 --%>
-              <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
-              {preview_html(@form)}
-            </article>
+            <%!-- Mobile (#138): a collapsed disclosure so the preview doesn't bury
+                  the form's Save/SEO/version sections below a full-height panel. --%>
+            <details class="rounded border border-base-content/15 p-3 lg:hidden">
+              <summary class="cursor-pointer text-lg font-medium">{gettext("Preview")}</summary>
+              <div class="mt-3">
+                <.preview_article form={@form} />
+              </div>
+            </details>
+
+            <%!-- Desktop: the preview sits inline as the sticky second column. --%>
+            <div class="hidden lg:block">
+              <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
+              <.preview_article form={@form} />
+            </div>
           </div>
         </div>
       </.form>
@@ -1451,6 +1458,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <.icon name="hero-lock-closed-mini" class="size-3" />{c.name}
       </span>
     </div>
+    """
+  end
+
+  # The live preview article (title + rendered blocks). Shared by the desktop
+  # sticky column and the mobile collapsible disclosure (#138). The previewed
+  # title is an h2 so the editor keeps a single logical h1 (#174).
+  attr :form, :any, required: true
+
+  defp preview_article(assigns) do
+    ~H"""
+    <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
+      <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
+      {preview_html(@form)}
+    </article>
     """
   end
 

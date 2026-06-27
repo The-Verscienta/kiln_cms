@@ -1223,5 +1223,23 @@ defmodule KilnCMSWeb.EditorLiveTest do
       h1_count = (html |> String.split("<h1") |> length()) - 1
       assert h1_count == 1, "expected exactly one <h1>, found #{h1_count}"
     end
+
+    # Regression for #138: on mobile the preview is a collapsible disclosure so it
+    # doesn't bury the form; on desktop it stays inline as the sticky column.
+    test "the preview is collapsible on mobile and inline on desktop", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "PrevPage",
+          blocks: [%{type: :heading, content: "PrevBlock", order: 0}]
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~r/<details[^>]*lg:hidden/
+      assert html =~ "<summary"
+      assert html =~ "hidden lg:block"
+      assert html =~ "PrevBlock"
+    end
   end
 end
