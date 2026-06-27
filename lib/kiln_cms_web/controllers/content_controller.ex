@@ -110,6 +110,45 @@ defmodule KilnCMSWeb.ContentController do
     |> render(:blog_index, posts: posts, page: page, has_prev?: page > 0, has_next?: more?)
   end
 
+  # Public on-site search (#149). Anonymous, so the read policy returns published
+  # content only; locale-scoped to the active locale. Posts and pages only
+  # (media isn't part of the public site).
+  def search(conn, params) do
+    locale = locale(conn)
+    query = params["q"] |> to_string() |> String.trim()
+
+    results =
+      if query == "" do
+        %{posts: [], pages: []}
+      else
+        r = KilnCMS.Search.global(query, authorize?: true, locale: locale, limit: 20)
+        %{posts: r.posts, pages: r.pages}
+      end
+
+    conn
+    # Don't cache personalized/empty query result pages on shared caches.
+    |> put_resp_header("cache-control", "private, no-cache")
+    |> assign(:locale, locale)
+    |> assign(:page_title, "Search")
+    |> assign(:locale_links, search_locale_links(locale, query))
+    |> render(:search, query: query, results: results)
+  end
+
+  # Language-switcher links to the search page (preserving the query) per locale.
+  defp search_locale_links(current, query) do
+    suffix = if query == "", do: "", else: "?q=#{URI.encode_www_form(query)}"
+
+    for locale <- I18n.locales() do
+      prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
+
+      %{
+        locale: locale,
+        href: "#{base_url()}#{prefix}/search#{suffix}",
+        current: locale == current
+      }
+    end
+  end
+
   # Zero-based page index from `?page=N` (1-based in the URL for humans).
   # Anything missing or invalid is page 0.
   defp page_param(%{"page" => raw}) do

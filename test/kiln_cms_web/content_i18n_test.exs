@@ -154,6 +154,49 @@ defmodule KilnCMSWeb.ContentI18nTest do
     assert html =~ ~r/<main[^>]*\sid="main"/
   end
 
+  # #149: public on-site search over published content.
+  describe "public search" do
+    test "finds published content and links to it", %{conn: conn} do
+      s = slug()
+      term = "uniquesearch#{System.unique_integer([:positive])}"
+      post(%{title: "#{term} post", slug: s, locale: "en", excerpt: "a teaser"})
+
+      html = conn |> get("/search?q=#{term}") |> html_response(200)
+
+      assert html =~ "#{term} post"
+      assert html =~ ~s(href="/blog/#{s}")
+    end
+
+    test "does not surface drafts", %{conn: conn} do
+      term = "draftsearch#{System.unique_integer([:positive])}"
+
+      Ash.Seed.seed!(Post, %{
+        title: "#{term} draft",
+        slug: slug(),
+        locale: "en",
+        state: :draft
+      })
+
+      html = conn |> get("/search?q=#{term}") |> html_response(200)
+      refute html =~ "#{term} draft"
+    end
+
+    test "shows an empty state for no matches", %{conn: conn} do
+      html =
+        conn
+        |> get("/search?q=zzznomatch#{System.unique_integer([:positive])}")
+        |> html_response(200)
+
+      assert html =~ "No results"
+    end
+
+    test "the public header links to search", %{conn: conn} do
+      html = conn |> get("/search") |> html_response(200)
+      assert html =~ ~s(href="/search")
+      assert html =~ "Search published content"
+    end
+  end
+
   describe "I18n.localized_path/2" do
     test "prefixes non-default locales but not the default or the home path" do
       assert I18n.localized_path("fr", "/blog") == "/fr/blog"

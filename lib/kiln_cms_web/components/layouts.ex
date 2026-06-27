@@ -117,6 +117,9 @@ defmodule KilnCMSWeb.Layouts do
           <a href={KilnCMS.I18n.localized_path(@locale, "/blog")} class="hover:text-base-content">
             {gettext("Blog")}
           </a>
+          <a href={KilnCMS.I18n.localized_path(@locale, "/search")} class="hover:text-base-content">
+            {gettext("Search")}
+          </a>
           <span
             :if={length(@locale_links) > 1}
             class="flex items-center gap-2"

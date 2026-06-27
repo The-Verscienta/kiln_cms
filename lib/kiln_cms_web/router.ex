@@ -338,6 +338,8 @@ defmodule KilnCMSWeb.Router do
 
     get "/blog", ContentController, :blog_index
     get "/blog/:slug", ContentController, :show_post
+    # Public on-site search (#149). Literal path, before the `/:slug` catch-all.
+    get "/search", ContentController, :search
     # Generic delivery for any other content type at `/<plural>/<slug>`. Defined
     # after the literal `/blog` routes (so posts win) and alongside the
     # single-segment page route (different arity — no collision).
