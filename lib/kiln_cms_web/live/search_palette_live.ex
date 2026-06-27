@@ -73,25 +73,27 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     <Layouts.app flash={@flash} current_user={@current_user}>
       <div class="mx-auto max-w-2xl space-y-6">
         <div>
-          <h1 class="text-2xl font-semibold">Search</h1>
-          <p class="text-sm text-base-content/60">
-            Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here.
+          <h1 class="text-2xl font-semibold">{gettext("Search")}</h1>
+          <p class="text-sm text-base-content/70">
+            {gettext("Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here.")}
           </p>
           <p class="mt-1 text-xs text-base-content/70">
-            Searches are logged anonymously — no user ID or IP — to improve content discovery,
-            and purged after {@retention_days} days.
+            {gettext(
+              "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days.",
+              days: @retention_days
+            )}
           </p>
         </div>
 
         <form phx-change="search" id="palette-search" role="search">
-          <label for="palette-q" class="sr-only">Search content</label>
+          <label for="palette-q" class="sr-only">{gettext("Search content")}</label>
           <input
             id="palette-q"
             type="text"
             name="q"
             value={@query}
-            placeholder="Search content…"
-            aria-label="Search content"
+            placeholder={gettext("Search content…")}
+            aria-label={gettext("Search content")}
             aria-describedby="search-status"
             autocomplete="off"
             autofocus
@@ -104,25 +106,25 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         <p id="search-status" role="status" aria-live="polite" class="sr-only">
           <%= cond do %>
             <% @searched and @count == 0 -> %>
-              No results for “{@query}”.
+              {gettext("No results for “%{query}”.", query: @query)}
             <% @searched -> %>
-              {@count} results for “{@query}”.
+              {gettext("%{count} results for “%{query}”.", count: @count, query: @query)}
             <% true -> %>
           <% end %>
         </p>
 
-        <p :if={@searched and @count == 0} class="text-sm text-base-content/60">
-          No results for “{@query}”.
+        <p :if={@searched and @count == 0} class="text-sm text-base-content/70">
+          {gettext("No results for “%{query}”.", query: @query)}
         </p>
 
         <div :if={@count > 0} class="space-y-6">
-          <.section :if={@results.pages != []} title="Pages">
+          <.section :if={@results.pages != []} title={gettext("Pages")}>
             <.content_row :for={p <- @results.pages} type="page" record={p} />
           </.section>
-          <.section :if={@results.posts != []} title="Posts">
+          <.section :if={@results.posts != []} title={gettext("Posts")}>
             <.content_row :for={p <- @results.posts} type="post" record={p} />
           </.section>
-          <.section :if={@results.media != []} title="Media">
+          <.section :if={@results.media != []} title={gettext("Media")}>
             <.link
               :for={m <- @results.media}
               navigate={~p"/media"}
