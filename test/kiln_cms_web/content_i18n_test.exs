@@ -175,6 +175,18 @@ defmodule KilnCMSWeb.ContentI18nTest do
     assert html =~ "By Ada Byline"
   end
 
+  # #162: the blog index localizes its SEO title and shows the current page.
+  test "blog index has a localized title and a page indicator", %{conn: conn} do
+    for i <- 1..21, do: post(%{title: "Paged #{i}", slug: slug(), locale: "en"})
+
+    html = conn |> get("/blog") |> html_response(200)
+    assert html =~ "<title" and html =~ "Blog"
+    assert html =~ "Page 1"
+
+    page2 = conn |> get("/blog?page=2") |> html_response(200)
+    assert page2 =~ "Page 2"
+  end
+
   # #149: public on-site search over published content.
   describe "public search" do
     test "finds published content and links to it", %{conn: conn} do

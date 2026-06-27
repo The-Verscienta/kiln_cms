@@ -19,8 +19,8 @@
 
   <nav
     :if={@has_prev? || @has_next?}
-    class="mt-12 flex justify-between text-sm"
-    aria-label="Pagination"
+    class="mt-12 flex items-center justify-between text-sm"
+    aria-label={gettext("Pagination")}
   >
     <a
       :if={@has_prev?}
@@ -31,6 +31,9 @@
       {gettext("← Newer posts")}
     </a>
     <span :if={!@has_prev?}></span>
+    <span class="text-base-content/70" aria-current="page">
+      {gettext("Page %{page}", page: @page + 1)}
+    </span>
     <a
       :if={@has_next?}
       href={KilnCMS.I18n.localized_path(@locale, ~p"/blog?#{[page: @page + 2]}")}
@@ -39,5 +42,6 @@
     >
       {gettext("Older posts →")}
     </a>
+    <span :if={!@has_next?}></span>
   </nav>
 </Layouts.public>
