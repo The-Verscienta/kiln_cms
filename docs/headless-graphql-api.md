@@ -172,6 +172,15 @@ query Search($q: String!, $categoryId: ID) {
 { "q": "elixir", "categoryId": null }
 ```
 
+> ⚠️ **`highlight` is untrusted HTML — escape it before rendering.** The field is
+> a Postgres `ts_headline` snippet that wraps matched terms in `<mark>…</mark>`.
+> The surrounding text is **not** HTML-escaped, so a malicious title/body could
+> inject markup. Do **not** assign it to `innerHTML` directly. Either escape the
+> whole string and then re-introduce `<mark>` yourself, or run it through a
+> sanitizer that allows only `<mark>` (the server's own admin UI uses
+> `KilnCMS.Search.Highlight.to_safe_html/1`, which escapes the text and keeps
+> only `<mark>`). If you don't need highlighting, omit the field.
+
 ### Title autocomplete (typeahead)
 
 ```graphql
