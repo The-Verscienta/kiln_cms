@@ -294,7 +294,7 @@ defmodule KilnCMSWeb.EditorLive do
               class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
             >
               <option :for={status <- @statuses} value={status} selected={status == @status}>
-                {state_label(status)}
+                {status_filter_label(status)}
               </option>
             </select>
           </form>
@@ -464,33 +464,19 @@ defmodule KilnCMSWeb.EditorLive do
     """
   end
 
-  attr :state, :atom, required: true
+  # Humanized, localized labels for the status-filter <select> (#155). Accepts a
+  # filter value string, including the "all" pseudo-state, or a workflow-state
+  # atom. The content-state badge itself uses CoreComponents.state_badge/1.
+  defp status_filter_label("all"), do: gettext("All")
 
-  defp state_badge(assigns) do
-    variant =
-      case assigns.state do
-        :published -> "success"
-        :in_review -> "warning"
-        :archived -> "neutral"
-        _ -> "info"
-      end
+  defp status_filter_label(state) when is_binary(state),
+    do: status_filter_label(String.to_existing_atom(state))
 
-    assigns = assign(assigns, :variant, variant)
+  defp status_filter_label(:draft), do: gettext("Draft")
+  defp status_filter_label(:in_review), do: gettext("In review")
+  defp status_filter_label(:published), do: gettext("Published")
+  defp status_filter_label(:archived), do: gettext("Archived")
 
-    ~H"""
-    <.badge variant={@variant}>{state_label(@state)}</.badge>
-    """
-  end
-
-  # Humanized, localized workflow-state labels (#155). Accepts the state atom or
-  # its string form (used by the status filter, plus the "all" pseudo-state).
-  defp state_label("all"), do: gettext("All")
-  defp state_label(state) when is_binary(state), do: state_label(String.to_existing_atom(state))
-  defp state_label(:draft), do: gettext("Draft")
-  defp state_label(:in_review), do: gettext("In review")
-  defp state_label(:published), do: gettext("Published")
-  defp state_label(:archived), do: gettext("Archived")
-
-  defp state_label(other) when is_atom(other),
+  defp status_filter_label(other) when is_atom(other),
     do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
 end
