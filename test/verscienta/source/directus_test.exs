@@ -1,8 +1,8 @@
-defmodule KilnCMS.Verscienta.Source.DirectusTest do
+defmodule Verscienta.Source.DirectusTest do
   @moduledoc "Directus REST client: pagination + bearer auth, stubbed via Req.Test."
   use ExUnit.Case, async: true
 
-  alias KilnCMS.Verscienta.Source
+  alias Verscienta.Source
 
   setup do
     Req.Test.verify_on_exit!()
@@ -12,7 +12,7 @@ defmodule KilnCMS.Verscienta.Source.DirectusTest do
   test "paginates until a short page and sends the read token + fields selector" do
     {:ok, handle} = Source.resolve({:directus, url: "https://api.example.com", token: "secret"})
 
-    Req.Test.stub(KilnCMS.Verscienta.Source.Directus, fn conn ->
+    Req.Test.stub(Verscienta.Source.Directus, fn conn ->
       assert ["Bearer secret"] = Plug.Conn.get_req_header(conn, "authorization")
       conn = Plug.Conn.fetch_query_params(conn)
       assert conn.query_params["fields"] == "*.*"
@@ -34,7 +34,7 @@ defmodule KilnCMS.Verscienta.Source.DirectusTest do
   test "surfaces a non-200 response as an error" do
     {:ok, handle} = Source.resolve({:directus, url: "https://api.example.com", token: "secret"})
 
-    Req.Test.stub(KilnCMS.Verscienta.Source.Directus, fn conn ->
+    Req.Test.stub(Verscienta.Source.Directus, fn conn ->
       Plug.Conn.send_resp(conn, 403, "forbidden")
     end)
 

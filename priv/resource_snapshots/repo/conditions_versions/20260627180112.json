@@ -91,7 +91,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "D8BF39930E9550B1FB5A027B9A990E4706496CBE1D4691FCAC153C6604B3C06A",
+  "hash": "E59CF42B2D872A5C4C92B4BA727E87C390AD2A707753B30D3C9C8D9A2010B448",
   "identities": [],
   "multitenancy": {
     "attribute": null,
@@ -100,5 +100,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "modalities_versions"
+  "table": "conditions_versions"
 }

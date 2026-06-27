@@ -91,7 +91,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "94630C02C4BFF09F632C7AC9DE59AF60A08353F9DE8D003B31D6318800E48C8C",
+  "hash": "3AECF05731701AD3D52872FE57BBB1A4BDB7149C8107550336827685692A3A7F",
   "identities": [],
   "multitenancy": {
     "attribute": null,
@@ -100,5 +100,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "practitioners_versions"
+  "table": "herbs_versions"
 }

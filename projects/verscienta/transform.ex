@@ -1,11 +1,11 @@
-defmodule KilnCMS.Verscienta.Transform do
+defmodule Verscienta.Transform do
   @moduledoc """
   Pure transforms from Directus items to KilnCMS shapes, driven by
-  `KilnCMS.Verscienta.Mapping`. No database or network access — the
-  `KilnCMS.Verscienta.Importer` performs the side effects using these results.
+  `Verscienta.Mapping`. No database or network access — the
+  `Verscienta.Importer` performs the side effects using these results.
   """
 
-  alias KilnCMS.Verscienta.Mapping
+  alias Verscienta.Mapping
 
   @typedoc "A per-record plan the importer turns into a content record + media."
   @type plan :: %{

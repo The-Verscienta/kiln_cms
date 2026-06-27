@@ -1,4 +1,4 @@
-defmodule KilnCMS.Verscienta.Source do
+defmodule Verscienta.Source do
   @moduledoc """
   Read-only source of Verscienta content for the one-off migration importer
   (`mix kiln.import.verscienta`).
@@ -7,14 +7,14 @@ defmodule KilnCMS.Verscienta.Source do
   immediate relations expanded) as a list of plain maps with string keys —
   exactly the shape the Directus REST API returns. Two implementations ship:
 
-    * `KilnCMS.Verscienta.Source.Directus` — paginates the live Directus REST
+    * `Verscienta.Source.Directus` — paginates the live Directus REST
       API using a static read token.
-    * `KilnCMS.Verscienta.Source.Fixtures` — reads JSON files from a directory,
+    * `Verscienta.Source.Fixtures` — reads JSON files from a directory,
       so the full transform/load pipeline can be exercised offline and in tests
       without access to the production database.
 
   Selecting an implementation is the caller's job; see
-  `KilnCMS.Verscienta.Source.resolve/1`.
+  `Verscienta.Source.resolve/1`.
   """
 
   @typedoc "A single Directus item as returned by the REST API (string keys)."

@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Kiln.Import.Verscienta do
+defmodule Mix.Tasks.Verscienta.Import do
   @shortdoc "Import Verscienta's Directus content into KilnCMS"
 
   @moduledoc """
@@ -6,20 +6,20 @@ defmodule Mix.Tasks.Kiln.Import.Verscienta do
   backend into KilnCMS content (`herbs`, `formulas`, `conditions`,
   `practitioners`, `clinics`, `modalities`, plus taxonomy, media and relations).
 
-  See `KilnCMS.Verscienta.Importer` for the field-by-field mapping.
+  See `Verscienta.Importer` for the field-by-field mapping.
 
   ## Usage
 
       # Live Directus API (reads DIRECTUS_URL + DIRECTUS_TOKEN from the env)
       DIRECTUS_URL=https://api.verscienta.com \\
       DIRECTUS_TOKEN=xxxxx \\
-      mix kiln.import.verscienta
+      mix verscienta.import
 
       # …or pass them explicitly
-      mix kiln.import.verscienta --url https://api.verscienta.com --token xxxxx
+      mix verscienta.import --url https://api.verscienta.com --token xxxxx
 
       # Offline dry-run against JSON fixtures (no writes)
-      mix kiln.import.verscienta --source priv/verscienta_fixtures --dry-run
+      mix verscienta.import --source projects/verscienta/fixtures --dry-run
 
   ## Options
 
@@ -36,7 +36,7 @@ defmodule Mix.Tasks.Kiln.Import.Verscienta do
 
   @requirements ["app.start"]
 
-  alias KilnCMS.Verscienta.Importer
+  alias Verscienta.Importer
 
   @switches [source: :string, url: :string, token: :string, dry_run: :boolean, locale: :string]
 

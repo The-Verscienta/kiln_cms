@@ -1,12 +1,12 @@
-defmodule KilnCMS.Verscienta.ImporterTest do
+defmodule Verscienta.ImporterTest do
   @moduledoc "Full ETL pipeline against the bundled JSON fixtures."
   use KilnCMS.DataCase, async: true
 
   require Ash.Query
 
-  alias KilnCMS.Verscienta.Importer
+  alias Verscienta.Importer
 
-  @fixtures Path.join(File.cwd!(), "priv/verscienta_fixtures")
+  @fixtures Path.join(File.cwd!(), "projects/verscienta/fixtures")
 
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -34,7 +34,7 @@ defmodule KilnCMS.Verscienta.ImporterTest do
     assert stats.skipped_links == 0
 
     # Content type + state
-    ginseng = one(KilnCMS.CMS.Herb, "ginseng")
+    ginseng = one(Verscienta.Catalog.Herb, "ginseng")
     assert ginseng.title == "Ginseng"
     assert ginseng.state == :published
 
@@ -58,7 +58,7 @@ defmodule KilnCMS.Verscienta.ImporterTest do
     assert Enum.any?(ginseng.content_links, &(&1.kind == :related_species))
 
     # O2M child carried its data onto the link metadata
-    formula = one(KilnCMS.CMS.Formula, "si-jun-zi-tang")
+    formula = one(Verscienta.Catalog.Formula, "si-jun-zi-tang")
     ingredient = Enum.find(formula.content_links, &(&1.kind == :ingredient))
     assert ingredient.metadata["quantity"] == 9
     assert ingredient.metadata["role"] == "Chief (Jun)"
@@ -68,6 +68,6 @@ defmodule KilnCMS.Verscienta.ImporterTest do
     assert again.content == 0
     assert again.tags == 0
     assert again.links == 0
-    assert Ash.count!(KilnCMS.CMS.Herb, authorize?: false) == 2
+    assert Ash.count!(Verscienta.Catalog.Herb, authorize?: false) == 2
   end
 end

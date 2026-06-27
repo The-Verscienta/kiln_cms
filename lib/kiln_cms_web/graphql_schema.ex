@@ -3,7 +3,7 @@ defmodule KilnCMSWeb.GraphqlSchema do
   use Absinthe.Schema
 
   use AshGraphql,
-    domains: [KilnCMS.CMS]
+    domains: [KilnCMS.CMS, Verscienta.Catalog]
 
   # Query cost is bounded at the transport: the `/gql` Absinthe.Plug forward sets
   # `analyze_complexity: true` + `max_complexity:` (see the router) so a deeply

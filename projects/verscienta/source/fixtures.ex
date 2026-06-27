@@ -1,6 +1,6 @@
-defmodule KilnCMS.Verscienta.Source.Fixtures do
+defmodule Verscienta.Source.Fixtures do
   @moduledoc """
-  `KilnCMS.Verscienta.Source` implementation that reads collections from JSON
+  `Verscienta.Source` implementation that reads collections from JSON
   files on disk, so the transform/load pipeline can be exercised offline.
 
   Each collection lives in `<dir>/<collection>.json`, containing either a raw
@@ -9,7 +9,7 @@ defmodule KilnCMS.Verscienta.Source.Fixtures do
   importer's two-pass logic happy when only a subset of collections is provided.
   """
 
-  @behaviour KilnCMS.Verscienta.Source
+  @behaviour Verscienta.Source
 
   @impl true
   def fetch_all(%{dir: dir}, collection, _opts) do

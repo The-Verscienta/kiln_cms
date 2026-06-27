@@ -1,4 +1,4 @@
-defmodule KilnCMS.Verscienta.Mapping do
+defmodule Verscienta.Mapping do
   @moduledoc """
   Declarative map from the Verscienta **Directus** schema to **KilnCMS** content.
 
@@ -21,7 +21,7 @@ defmodule KilnCMS.Verscienta.Mapping do
       rest become `image` blocks.
     * **Custom fields** — *everything else* (scalars, selects, JSON arrays, and
       the rich O2M child collections) is captured automatically as
-      `custom_fields` by `KilnCMS.Verscienta.Transform`, JSON-encoding any
+      `custom_fields` by `Verscienta.Transform`, JSON-encoding any
       non-scalar value losslessly. Nothing is silently dropped.
 
   Keeping the rules as data (not code) means the long tail of fields needs no

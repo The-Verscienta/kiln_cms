@@ -13,7 +13,7 @@ defmodule KilnCMSWeb.AshJsonApiRouter do
   """
 
   use AshJsonApi.Router,
-    domains: [KilnCMS.CMS],
+    domains: [KilnCMS.CMS, Verscienta.Catalog],
     open_api: "/open_api",
     modify_open_api: {KilnCMSWeb.OpenApi, :modify, []}
 end

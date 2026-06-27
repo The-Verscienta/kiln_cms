@@ -1,6 +1,6 @@
-defmodule KilnCMS.Verscienta.Source.Directus do
+defmodule Verscienta.Source.Directus do
   @moduledoc """
-  `KilnCMS.Verscienta.Source` implementation backed by the live Directus 11
+  `Verscienta.Source` implementation backed by the live Directus 11
   REST API.
 
   Pages through `GET {url}/items/{collection}` with a static read token,
@@ -9,7 +9,7 @@ defmodule KilnCMS.Verscienta.Source.Directus do
   objects) is expanded one level deep in a single pass.
   """
 
-  @behaviour KilnCMS.Verscienta.Source
+  @behaviour Verscienta.Source
 
   @page_size 100
 

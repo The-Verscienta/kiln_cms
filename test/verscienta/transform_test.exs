@@ -1,8 +1,8 @@
-defmodule KilnCMS.Verscienta.TransformTest do
+defmodule Verscienta.TransformTest do
   @moduledoc "Pure transform rules — no DB or network."
   use ExUnit.Case, async: true
 
-  alias KilnCMS.Verscienta.{Mapping, Transform}
+  alias Verscienta.{Mapping, Transform}
 
   defp herbs, do: Mapping.config_for("herbs")
   defp formulas, do: Mapping.config_for("formulas")

@@ -1,4 +1,4 @@
-defmodule KilnCMS.Verscienta.Importer do
+defmodule Verscienta.Importer do
   @moduledoc """
   Two-pass ETL that loads Verscienta's Directus content into KilnCMS.
 
@@ -27,12 +27,12 @@ defmodule KilnCMS.Verscienta.Importer do
 
   alias KilnCMS.{Accounts, CMS}
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMS.Verscienta.{Mapping, Source, Transform}
+  alias Verscienta.{Mapping, Source, Transform}
 
   @doc """
   Run the migration.
 
-  `source_spec` is anything `KilnCMS.Verscienta.Source.resolve/1` accepts
+  `source_spec` is anything `Verscienta.Source.resolve/1` accepts
   (`:directus`, `{:directus, url: …, token: …}` or `{:fixtures, dir}`).
 
   Options:

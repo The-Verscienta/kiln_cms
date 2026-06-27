@@ -7,8 +7,8 @@ The two systems model content very differently, so this is an ETL, not a copy:
 Directus exposes ~6 flat collections of typed columns plus junction tables;
 KilnCMS models each record as a typed block tree with data-driven custom fields,
 namespaced tags, polymorphic content links and media items. The mapping below is
-declared as data in `KilnCMS.Verscienta.Mapping` and applied by
-`KilnCMS.Verscienta.Importer`.
+declared as data in `Verscienta.Mapping` and applied by
+`Verscienta.Importer`.
 
 ## What moves where
 
@@ -42,7 +42,7 @@ read token**. Create a read-only token in Directus, then:
 ```bash
 DIRECTUS_URL=https://api.verscienta.com \
 DIRECTUS_TOKEN=xxxxxxxx \
-mix kiln.import.verscienta
+mix verscienta.import
 ```
 
 or pass them as flags: `--url https://api.verscienta.com --token xxxxxxxx`.
@@ -50,7 +50,7 @@ or pass them as flags: `--url https://api.verscienta.com --token xxxxxxxx`.
 Add `--dry-run` to fetch + transform and print counts without writing anything:
 
 ```bash
-mix kiln.import.verscienta --url … --token … --dry-run
+mix verscienta.import --url … --token … --dry-run
 ```
 
 The importer is **idempotent** — content is matched by `slug`, tags/media by
@@ -60,14 +60,14 @@ so cross-document references (including self-references between herbs) resolve.
 
 ### Offline / fixtures
 
-A small fixture set under `priv/verscienta_fixtures/` mirrors the Directus
+A small fixture set under `projects/verscienta/fixtures/` mirrors the Directus
 `fields=*.*` response shape and exercises the whole pipeline with no network:
 
 ```bash
-mix kiln.import.verscienta --source priv/verscienta_fixtures
+mix verscienta.import --source projects/verscienta/fixtures
 ```
 
-The test suite (`test/kiln_cms/verscienta/`) runs the full ETL against these
+The test suite (`test/verscienta/`) runs the full ETL against these
 fixtures, plus pure transform tests and a `Req.Test`-stubbed client test.
 
 ## Notes & integration seams

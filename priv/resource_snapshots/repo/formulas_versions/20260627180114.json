@@ -91,7 +91,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "7D0C9362CC6FDDBE3466D64263978862606C3AE8284D306C6E452BA1F2A6F40F",
+  "hash": "48AEB18F782A9C9FD1395E9B44D96BA4318453DE50D5349533BE4B8B04F3BF43",
   "identities": [],
   "multitenancy": {
     "attribute": null,
@@ -100,5 +100,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "clinics_versions"
+  "table": "formulas_versions"
 }

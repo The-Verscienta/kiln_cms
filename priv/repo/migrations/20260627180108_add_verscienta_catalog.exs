@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.AddVerscientaContentTypes do
+defmodule KilnCMS.Repo.Migrations.AddVerscientaCatalog do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
