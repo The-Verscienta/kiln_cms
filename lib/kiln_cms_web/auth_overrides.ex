@@ -54,7 +54,7 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :root_class, "w-full py-12"
     set :strategy_class, @card_root
     set :authentication_error_container_class, "text-center text-base-content"
-    set :authentication_error_text_class, "text-sm text-red-600"
+    set :authentication_error_text_class, "text-sm text-error"
     set :strategy_display_order, :forms_first
   end
 
@@ -204,7 +204,7 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :password_confirmation_input_label, "Password confirmation"
     set :identity_input_label, "Email"
     set :identity_input_placeholder, nil
-    set :error_ul, "my-3 list-inside list-disc text-sm text-red-600"
+    set :error_ul, "my-3 list-inside list-disc text-sm text-error"
     set :error_li, nil
     set :input_debounce, 350
     set :remember_me_class, "mt-2 mb-2 flex items-center gap-2"
