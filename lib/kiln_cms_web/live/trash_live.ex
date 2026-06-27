@@ -75,6 +75,27 @@ defmodule KilnCMSWeb.TrashLive do
     end
   end
 
+  # Permanently delete a single trashed item (#167). Guarded by a data-confirm on
+  # the button; the destroy itself is admin-only at the resource policy.
+  def handle_event("purge", %{"kind" => kind, "id" => id}, socket) do
+    actor = socket.assigns.actor
+
+    case find_item(socket.assigns.items, kind, id) do
+      nil ->
+        {:noreply, socket}
+
+      record ->
+        case do_purge(kind, record, actor) do
+          :ok ->
+            {:noreply,
+             socket |> load_items() |> put_flash(:info, gettext("Permanently deleted."))}
+
+          _ ->
+            {:noreply, put_flash(socket, :error, gettext("Couldn't delete that item."))}
+        end
+    end
+  end
+
   # Emptying the trash permanently deletes everything in it, so it goes through
   # a two-step confirmation rather than a single click.
   def handle_event("request_empty", _params, socket) do
@@ -200,6 +221,18 @@ defmodule KilnCMSWeb.TrashLive do
               class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
             >
               {gettext("Restore")}
+            </button>
+            <button
+              type="button"
+              phx-click="purge"
+              phx-value-kind={kind}
+              phx-value-id={record.id}
+              data-confirm={
+                gettext("Permanently delete “%{title}”? This can't be undone.", title: record.title)
+              }
+              class="rounded border border-error/30 px-3 py-1 text-xs text-error hover:bg-error/10"
+            >
+              {gettext("Delete permanently")}
             </button>
           </li>
         </ul>

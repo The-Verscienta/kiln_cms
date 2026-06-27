@@ -434,11 +434,29 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/trash")
       assert html =~ "TrashedPage"
 
-      lv |> element("button[phx-value-id='#{page.id}']") |> render_click()
+      lv |> element("button[phx-click='restore'][phx-value-id='#{page.id}']") |> render_click()
 
       # Gone from trash, back in the main listing.
       refute render(lv) =~ "TrashedPage"
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
+    end
+
+    # #167: admins can permanently delete a single trashed item (not just empty all).
+    test "admin permanently deletes a single trashed item", %{conn: conn} do
+      page = draft_page(%{title: "PurgeOne"})
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_page(page, actor: admin)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/trash")
+      assert html =~ "PurgeOne"
+      assert html =~ "Delete permanently"
+
+      lv |> element("button[phx-click='purge'][phx-value-id='#{page.id}']") |> render_click()
+
+      # Hard-deleted: gone from trash AND not back in the listing (i.e. not just
+      # restored).
+      refute render(lv) =~ "PurgeOne"
+      refute Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
     test "empty trash asks for confirmation, then permanently deletes everything", %{conn: conn} do
