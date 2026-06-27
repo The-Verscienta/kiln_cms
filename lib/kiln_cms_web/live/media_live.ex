@@ -476,7 +476,7 @@ defmodule KilnCMSWeb.MediaLive do
                 phx-value-id={item.id}
                 data-confirm={gettext("Delete %{name}?", name: item.filename)}
                 aria-label={gettext("Delete")}
-                class="absolute right-1 top-1 rounded bg-base-100/80 p-1 opacity-0 transition group-hover:opacity-100 hover:text-error"
+                class="absolute right-1 top-1 rounded bg-base-100/80 p-1 transition hover:text-error opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"
               >
                 <.icon name="hero-trash" class="size-4" />
               </button>

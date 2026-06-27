@@ -84,6 +84,19 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert filtered =~ ">sunset.png<"
       refute filtered =~ ">logo.svg<"
     end
+
+    # #160: the delete button isn't hover-only — visible on touch and on focus.
+    test "the delete button is visible without hover", %{conn: conn} do
+      seed_media("touchable.png")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      [_, delete_class] =
+        Regex.run(~r/phx-click="delete"[^>]*class="([^"]+)"/s, html) ||
+          Regex.run(~r/class="([^"]+)"[^>]*phx-click="delete"/s, html)
+
+      assert delete_class =~ "opacity-100"
+      assert delete_class =~ "focus:opacity-100"
+    end
   end
 
   describe "detail panel" do
