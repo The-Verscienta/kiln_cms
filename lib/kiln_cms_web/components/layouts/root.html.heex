@@ -21,7 +21,10 @@
       content={alt.hreflang}
     />
     <%!-- Twitter Card (#164): falls back to the Open Graph values above. --%>
-    <meta name="twitter:card" content={(assigns[:og_image] && "summary_large_image") || "summary"} />
+    <meta
+      name="twitter:card"
+      content={(assigns[:og_image] && "summary_large_image") || "summary"}
+    />
     <meta :if={assigns[:page_title]} name="twitter:title" content={@page_title} />
     <meta :if={assigns[:meta_description]} name="twitter:description" content={@meta_description} />
     <meta :if={assigns[:og_image]} name="twitter:image" content={@og_image} />
