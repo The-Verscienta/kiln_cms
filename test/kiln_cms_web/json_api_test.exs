@@ -311,12 +311,22 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert data["attributes"]["title"] == "Single"
     end
 
-    test "hides an unpublished post by id from anonymous consumers" do
+    # #192: a stable contract — an unpublished record is filtered out (the read
+    # policy's published filter applies), so anonymous and bearer-other callers
+    # get a 404 (not a 403 that would reveal the draft exists).
+    test "hides an unpublished post by id from anonymous consumers (stable 404)" do
       admin = user(:admin)
       draft = make_post(%{title: "Hidden"}, admin)
 
-      assert {status, _} = api_get("/api/json/posts/#{draft.id}")
-      assert status in [403, 404]
+      assert {404, _} = api_get("/api/json/posts/#{draft.id}")
+    end
+
+    test "hides an unpublished post by id from a bearer viewer (stable 404)" do
+      admin = user(:admin)
+      viewer = user(:viewer)
+      draft = make_post(%{title: "Hidden"}, admin)
+
+      assert {404, _} = api_get("/api/json/posts/#{draft.id}", token: token(viewer))
     end
   end
 

@@ -195,6 +195,9 @@ release**, not the HTTP contract — don't pin behaviour to it.
   artifact surfaces (`json` / `json_ld` / `web`).
 - Author PII is never exposed (only `authorId` + display `name`); `*BySlug`
   returns published content only. See the consumer guide.
+- A JSON:API GET of an **unpublished** record returns **404** (not 403) for
+  anyone without read access — the published filter removes it, so the response
+  never reveals that a draft exists. Branch on 404 for "not available".
 
 **What may change without notice:**
 
