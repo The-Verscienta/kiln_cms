@@ -1142,6 +1142,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute html =~ ~r/>\s*Sign in\s*</
       assert html =~ "Editor"
       assert html =~ "Settings"
+      # #166: the icon-only theme toggle buttons are labeled.
+      assert html =~ ~s(aria-label="Use dark theme")
+      assert html =~ ~s(aria-label="Use light theme")
     end
 
     # #139: ⌘K targets a LiveView `navigate` link (data-phx-link="redirect"), so
