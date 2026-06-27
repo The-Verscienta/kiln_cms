@@ -45,9 +45,11 @@ defmodule KilnCMS.MixProject do
     ]
   end
 
-  # Specifies which paths to compile per environment.
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_), do: ["lib"]
+  # Specifies which paths to compile per environment. `projects/` holds
+  # project-specific subprojects (content catalogs, importers) layered on the
+  # reusable core in `lib/`.
+  defp elixirc_paths(:test), do: ["lib", "projects", "test/support"]
+  defp elixirc_paths(_), do: ["lib", "projects"]
 
   # Specifies your project dependencies.
   #

@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "title": "Fatigue",
+    "slug": "fatigue",
+    "symptoms": ["tiredness", "low energy"],
+    "severity": "Moderate",
+    "description": "<p>Persistent tiredness not relieved by rest.</p>"
+  },
+  {
+    "id": 2,
+    "title": "Anxiety",
+    "slug": "anxiety",
+    "symptoms": ["worry", "restlessness"],
+    "severity": "Mild",
+    "description": "<p>Excessive worry and nervous tension.</p>"
+  }
+]

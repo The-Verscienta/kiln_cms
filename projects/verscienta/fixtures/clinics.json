@@ -1,0 +1,33 @@
+[
+  {
+    "id": 1,
+    "name": "Harmony Holistic Clinic",
+    "slug": "harmony-holistic-clinic",
+    "status": "active",
+    "description": "<p>A multidisciplinary holistic health clinic.</p>",
+    "phone": "555-0100",
+    "email": "info@harmony.example",
+    "website": "https://harmony.example",
+    "city": "New York",
+    "state": "NY",
+    "zip_code": "10001",
+    "accepts_insurance": true,
+    "hours": { "mon": "9-5", "tue": "9-5" },
+    "services": ["acupuncture", "herbal medicine"],
+    "images": [
+      {
+        "id": 1,
+        "file": {
+          "id": "file-ddd",
+          "filename_download": "clinic-front.jpg",
+          "type": "image/jpeg",
+          "cloudflare_url": "https://imagedelivery.net/acc/clinic/public"
+        },
+        "image_type": "Exterior",
+        "caption": "Clinic entrance"
+      }
+    ],
+    "practitioners": [{ "id": 1, "slug": "jane-smith" }],
+    "modalities": [{ "id": 1, "slug": "acupuncture" }]
+  }
+]

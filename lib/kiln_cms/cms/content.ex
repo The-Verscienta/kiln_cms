@@ -20,7 +20,15 @@ defmodule KilnCMS.CMS.Content do
     * `:type` (required) — the singular content type atom, e.g. `:page`. Drives
       the GraphQL/JSON:API type names and, by convention, the join resources
       (`PageTag`, `RelatedPage`) and the table (`"pages"`).
+    * `:plural` — the plural for interface names and the delivery URL segment;
+      defaults to `"\#{type}s"`. Set it for irregular nouns (e.g. `:modality` →
+      `"modalities"`) so discovery and dispatch match the generated interfaces.
     * `:table` — the Postgres table; defaults to `"\#{type}s"`.
+    * `:domain` — the Ash domain the resource is registered on. Defaults to
+      `KilnCMS.CMS` (the core CMS). Project-specific content types pass their own
+      domain (e.g. `Verscienta.Catalog`) so the reusable core stays
+      project-agnostic; list that domain in `:content_domains` (see
+      `KilnCMS.CMS.ContentTypes`) so it is discovered everywhere.
     * `:excerpt?` — include an `excerpt` attribute (listings/feeds). Default `false`.
     * `:published?` — add a `:published` read (published-only, newest first).
       Default `false`.
@@ -33,7 +41,9 @@ defmodule KilnCMS.CMS.Content do
 
   defmacro __using__(opts) do
     type = Keyword.fetch!(opts, :type)
+    plural = Keyword.get(opts, :plural, "#{type}s")
     table = Keyword.get(opts, :table, "#{type}s")
+    domain = Keyword.get(opts, :domain, KilnCMS.CMS)
     excerpt? = Keyword.get(opts, :excerpt?, false)
     published? = Keyword.get(opts, :published?, false)
 
@@ -118,7 +128,7 @@ defmodule KilnCMS.CMS.Content do
 
     quote do
       use Ash.Resource,
-        domain: KilnCMS.CMS,
+        domain: unquote(domain),
         data_layer: AshPostgres.DataLayer,
         authorizers: [Ash.Policy.Authorizer],
         extensions: [
@@ -927,6 +937,11 @@ defmodule KilnCMS.CMS.Content do
       # automatically, so generated types appear in the admin with no extra
       # wiring.
       def __kiln_content_type__, do: unquote(type)
+
+      # The plural used for code-interface names, the delivery URL segment, and
+      # discovery. Defaults to `"\#{type}s"`; declare `:plural` for irregular
+      # nouns (e.g. modality → "modalities") so it matches the interfaces.
+      def __kiln_content_plural__, do: unquote(plural)
     end
   end
 end

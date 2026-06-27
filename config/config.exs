@@ -32,8 +32,14 @@ config :kiln_cms,
     KilnCMS.Analytics,
     KilnCMS.Firing,
     KilnCMS.History,
-    KilnCMS.SearchIndex
+    KilnCMS.SearchIndex,
+    # Project subdomains (see projects/*). The core stays project-agnostic; each
+    # project registers its own content types on its own domain.
+    Verscienta.Catalog
   ],
+  # Domains scanned by `KilnCMS.CMS.ContentTypes` for content types. Core types
+  # (page/post) live on KilnCMS.CMS; each project adds its catalog domain here.
+  content_domains: [KilnCMS.CMS, Verscienta.Catalog],
   # Default "from" address for transactional email (auth confirmation/reset).
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
