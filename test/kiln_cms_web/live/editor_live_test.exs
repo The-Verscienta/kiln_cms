@@ -89,6 +89,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Findable Page"
     end
 
+    # #177: bulk-select row checkboxes are named with the item title.
+    test "row checkboxes have accessible names", %{conn: conn} do
+      draft_page(%{title: "CheckboxRow"})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+      assert html =~ ~s(aria-label="Select CheckboxRow")
+    end
+
     # #161: the filter and search fields are labeled for assistive tech.
     test "labels the filter and search fields", %{conn: conn} do
       draft_page(%{title: "Some content"})
@@ -1297,6 +1304,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       h1_count = (html |> String.split("<h1") |> length()) - 1
       assert h1_count == 1, "expected exactly one <h1>, found #{h1_count}"
+    end
+
+    # #181: the Preview link opens in a new tab safely and warns assistive tech.
+    test "the new-tab Preview link is safe and labeled", %{conn: conn} do
+      page = draft_page(%{title: "NewTabPage"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~r/target="_blank"[^>]*rel="noopener noreferrer"/
+      assert html =~ "(opens in a new tab)"
     end
 
     # #151: Save and workflow buttons show a loading state while the event runs.

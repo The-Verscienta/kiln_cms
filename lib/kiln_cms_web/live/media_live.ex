@@ -389,7 +389,14 @@ defmodule KilnCMSWeb.MediaLive do
               <.live_img_preview entry={entry} class="size-14 rounded object-cover" />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium">{entry.client_name}</p>
-                <div class="mt-1 h-1.5 w-full overflow-hidden rounded bg-base-content/10">
+                <div
+                  class="mt-1 h-1.5 w-full overflow-hidden rounded bg-base-content/10"
+                  role="progressbar"
+                  aria-valuenow={entry.progress}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-label={gettext("Upload progress for %{name}", name: entry.client_name)}
+                >
                   <div class="h-full bg-primary" style={"width: #{entry.progress}%"}></div>
                 </div>
                 <p :for={err <- upload_errors(@uploads.media, entry)} class="mt-1 text-xs text-error">
@@ -596,8 +603,13 @@ defmodule KilnCMSWeb.MediaLive do
             >
               <span class="font-medium capitalize">{label}</span>
               <span class="text-base-content/50">{v["width"]} × {v["height"]}</span>
-              <a href={v["url"]} target="_blank" class="text-primary hover:underline">
-                {gettext("open")}
+              <a
+                href={v["url"]}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary hover:underline"
+              >
+                {gettext("open")} <span class="sr-only">{gettext("(opens in a new tab)")}</span>
               </a>
             </li>
           </ul>

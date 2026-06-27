@@ -398,6 +398,7 @@ defmodule KilnCMSWeb.EditorLive do
               checked={MapSet.member?(@selected, "#{kind}:#{record.id}")}
               phx-click="toggle_select"
               phx-value-key={"#{kind}:#{record.id}"}
+              aria-label={gettext("Select %{title}", title: record.title)}
               class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
             />
             <span class="shrink-0 text-xs uppercase text-base-content/40">{kind}</span>

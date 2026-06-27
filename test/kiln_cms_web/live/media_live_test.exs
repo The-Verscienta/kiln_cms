@@ -235,6 +235,23 @@ defmodule KilnCMSWeb.MediaLiveTest do
       refute File.exists?(Path.join(root, "fake.png"))
     end
 
+    # #178: the upload progress bar exposes progressbar semantics.
+    test "the upload progress bar has progressbar semantics", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "pixel.png", content: @png, type: "image/png"}
+        ])
+
+      html = render_upload(input, "pixel.png", 40)
+
+      assert html =~ ~s(role="progressbar")
+      assert html =~ ~s(aria-valuenow="40")
+      assert html =~ ~s(aria-valuemax="100")
+    end
+
     test "uploading an image stores it and adds it to the library", %{conn: conn, root: root} do
       editor = authed_user(:editor)
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")

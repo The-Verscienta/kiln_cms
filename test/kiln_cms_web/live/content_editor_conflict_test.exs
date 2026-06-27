@@ -54,6 +54,8 @@ defmodule KilnCMSWeb.ContentEditorConflictTest do
     # This editor's save is now stale → conflict banner, no clobber.
     html = lv |> form("#page-editor") |> render_submit()
     assert html =~ "Someone else saved changes"
+    # #179: the banner is announced to screen readers.
+    assert html =~ ~r/id="edit-conflict"[^>]*role="alert"/
     assert CMS.get_page!(page.id, actor: editor).title == "Changed elsewhere"
 
     # #137: the blocked save also flashes feedback and disables the Save button.

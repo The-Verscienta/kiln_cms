@@ -1015,6 +1015,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <div
         :if={@conflict}
         id="edit-conflict"
+        role="alert"
+        aria-live="assertive"
         class="mb-4 flex flex-wrap items-center gap-3 rounded border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
       >
         <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
@@ -1061,9 +1063,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <.link
               href={~p"/editor/preview/#{@kind}/#{@record.id}"}
               target="_blank"
+              rel="noopener noreferrer"
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
             >
               {gettext("Preview")} &nearr;
+              <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
             <.autosave_status :if={@record.state == :draft} state={@save_state} />
             <.workflow_buttons state={@record.state} actor={@actor} />

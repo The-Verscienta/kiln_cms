@@ -108,9 +108,10 @@ defmodule KilnCMSWeb.AnalyticsLive do
                     :if={row[:public]}
                     href={row.public}
                     target="_blank"
+                    rel="noopener noreferrer"
                     class="ml-2 text-xs text-primary hover:underline"
                   >
-                    view &nearr;
+                    view &nearr; <span class="sr-only">{gettext("(opens in a new tab)")}</span>
                   </a>
                 </td>
                 <td class="py-2 capitalize text-base-content/70">{row.type}</td>
