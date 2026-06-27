@@ -128,6 +128,11 @@ A quick map:
 | Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`       | `/pages/search`, `/pages/autocomplete`        |
 | Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`       | `/posts/published`, `/posts/search`, `/posts/autocomplete` |
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`                         |
+| Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id`  | `/categories/by-slug/:slug`                   |
+| Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
+
+Taxonomy (Category/Tag) is world-readable and now mirrors the GraphQL taxonomy
+surface over JSON:API (#185) — list, fetch by id, or fetch by slug.
 
 All requests use the JSON:API media type:
 

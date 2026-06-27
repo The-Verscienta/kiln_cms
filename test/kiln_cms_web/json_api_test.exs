@@ -217,6 +217,40 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # #185: taxonomy is now reachable over JSON:API (parity with GraphQL), not
+  # GraphQL-only.
+  describe "taxonomy" do
+    test "lists categories and fetches one by slug and by id" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      assert {200, list} = api_get("/api/json/categories?filter[id]=#{cat.id}")
+      assert ids(list) == [cat.id]
+
+      assert {200, %{"data" => by_slug}} = api_get("/api/json/categories/by-slug/#{cat.slug}")
+      assert by_slug["id"] == cat.id
+      assert by_slug["attributes"]["name"] == cat.name
+
+      assert {200, %{"data" => by_id}} = api_get("/api/json/categories/#{cat.id}")
+      assert by_id["id"] == cat.id
+    end
+
+    test "lists tags and fetches one by slug" do
+      admin = user(:admin)
+
+      tag =
+        CMS.create_tag!(%{name: "Tag #{System.unique_integer([:positive])}", slug: slug()},
+          actor: admin
+        )
+
+      assert {200, list} = api_get("/api/json/tags?filter[id]=#{tag.id}")
+      assert ids(list) == [tag.id]
+
+      assert {200, %{"data" => by_slug}} = api_get("/api/json/tags/by-slug/#{tag.slug}")
+      assert by_slug["id"] == tag.id
+    end
+  end
+
   describe "single record" do
     test "fetches a published post by id" do
       admin = user(:admin)
