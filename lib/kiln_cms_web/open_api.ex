@@ -80,7 +80,7 @@ defmodule KilnCMSWeb.OpenApi do
   def modify(spec, conn, _opts) do
     %{
       spec
-      | paths: Map.merge(spec.paths, auth_paths()),
+      | paths: spec.paths |> Map.merge(auth_paths()) |> Map.merge(delivery_paths()),
         info: %{
           spec.info
           | title: "KilnCMS Headless API",
@@ -166,6 +166,79 @@ defmodule KilnCMSWeb.OpenApi do
           }
         }
       }
+    }
+  end
+
+  # Headless surfaces that live outside the AshJsonApi domain — the fired-artifact
+  # endpoint and signed preview links — so Swagger documents them as real
+  # operations instead of only prose (#191).
+  defp delivery_paths do
+    %{
+      "/api/content/{type}/{slug}" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          tags: ["Delivery"],
+          operationId: "getArtifact",
+          summary: "Fetch a published document's fired artifact",
+          description:
+            "Returns the immutable, pre-compiled output for a published page/post " <>
+              "(Kiln v2 — D9). `surface` selects `json` (default), `json_ld`, or " <>
+              "`web`. Public; only published content is reachable. A 503 with " <>
+              "`Retry-After` means the artifact is still compiling.",
+          security: [],
+          parameters: [
+            path_param(:type, "Content type (e.g. `page`, `post`)"),
+            path_param(:slug, "Content slug"),
+            query_param(:surface, "Artifact surface", enum: ["json", "json_ld", "web"]),
+            query_param(:locale, "Locale code (defaults to the site default)")
+          ],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "The fired artifact for the requested surface"
+            },
+            404 => %OpenApiSpex.Response{description: "Unknown type/slug or unpublished content"},
+            503 => %OpenApiSpex.Response{
+              description: "Artifact is compiling — retry after the header delay"
+            }
+          }
+        }
+      },
+      "/preview/{token}" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          tags: ["Delivery"],
+          operationId: "getPreview",
+          summary: "Fetch an unpublished document via a signed preview token",
+          description:
+            "Returns a single referenced draft Page/Post (curated public fields) " <>
+              "for a short-lived signed token. No account needed; the token is the " <>
+              "credential.",
+          security: [],
+          parameters: [path_param(:token, "Signed preview token")],
+          responses: %{
+            200 => %OpenApiSpex.Response{description: "The draft document"},
+            404 => %OpenApiSpex.Response{description: "Invalid or expired preview link"}
+          }
+        }
+      }
+    }
+  end
+
+  defp path_param(name, description) do
+    %OpenApiSpex.Parameter{
+      name: name,
+      in: :path,
+      required: true,
+      description: description,
+      schema: %OpenApiSpex.Schema{type: :string}
+    }
+  end
+
+  defp query_param(name, description, opts \\ []) do
+    %OpenApiSpex.Parameter{
+      name: name,
+      in: :query,
+      required: false,
+      description: description,
+      schema: %OpenApiSpex.Schema{type: :string, enum: opts[:enum]}
     }
   end
 

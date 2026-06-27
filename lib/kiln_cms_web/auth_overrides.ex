@@ -54,7 +54,7 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :root_class, "w-full py-12"
     set :strategy_class, @card_root
     set :authentication_error_container_class, "text-center text-base-content"
-    set :authentication_error_text_class, "text-sm text-red-600"
+    set :authentication_error_text_class, "text-sm text-error"
     set :strategy_display_order, :forms_first
   end
 
@@ -106,7 +106,7 @@ defmodule KilnCMSWeb.AuthOverrides do
 
   override Components.HorizontalRule do
     set :root_class,
-        "my-4 flex items-center gap-3 text-xs uppercase tracking-wide text-base-content/50"
+        "my-4 flex items-center gap-3 text-xs uppercase tracking-wide text-base-content/70"
 
     set :hr_outer_class, "flex-1 border-t border-base-content/15"
     set :hr_inner_class, nil
@@ -115,15 +115,17 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :text, "or"
   end
 
+  # Theme tokens (not hardcoded emerald/rose) so auth toasts meet contrast in
+  # both light and dark themes, matching CoreComponents.flash (#173).
   override Components.Flash do
     set :message_class_info, """
     fixed top-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border
-    border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-sm
+    border-info/30 bg-base-100 px-4 py-3 text-sm text-base-content shadow-lg
     """
 
     set :message_class_error, """
     fixed top-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border
-    border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 shadow-sm
+    border-error/30 bg-base-100 px-4 py-3 text-sm text-base-content shadow-lg
     """
   end
 
@@ -202,7 +204,7 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :password_confirmation_input_label, "Password confirmation"
     set :identity_input_label, "Email"
     set :identity_input_placeholder, nil
-    set :error_ul, "my-3 list-inside list-disc text-sm text-red-600"
+    set :error_ul, "my-3 list-inside list-disc text-sm text-error"
     set :error_li, nil
     set :input_debounce, 350
     set :remember_me_class, "mt-2 mb-2 flex items-center gap-2"

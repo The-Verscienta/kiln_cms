@@ -1,11 +1,21 @@
 defmodule KilnCMS.HTMLSanitizer.RichText do
   @moduledoc """
   Allowlist for TipTap StarterKit HTML (bold, italic, headings, lists, quotes,
-  code, horizontal rules). Everything else — including scripts, iframes, and
-  event-handler attributes — is stripped.
+  code, horizontal rules) plus safe hyperlinks. Everything else — including
+  scripts, iframes, and event-handler attributes — is stripped.
+
+  Shared by both public HTML delivery (`BlockComponents`) and the fired headless
+  `:web` artifacts (`RichText.render(:web)`), so the link allowlist here is the
+  single source of truth for what survives to readers (#148).
   """
 
   use HtmlSanitizeEx, extend: :strip_tags
+
+  # Safe hyperlinks (#148): `<a href>` for `https:` / `mailto:` and relative URLs
+  # (schemeless hrefs like `/blog/x` or `#anchor` are kept). `javascript:`,
+  # `data:`, and bare `http:` schemes are rejected by the scheme allowlist;
+  # `target`/`rel`/event-handler attributes are scrubbed off.
+  allow_tag_with_uri_attributes("a", ["href"], ["https", "mailto"])
 
   allow_tag_with_these_attributes("p", [])
   allow_tag_with_these_attributes("br", [])

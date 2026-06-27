@@ -1,0 +1,56 @@
+<Layouts.public locale_links={@locale_links} locale={@locale}>
+  <h1 class="text-3xl font-bold tracking-tight">{gettext("Search")}</h1>
+
+  <form method="get" action={KilnCMS.I18n.localized_path(@locale, "/search")} class="mt-6">
+    <label for="q" class="sr-only">{gettext("Search published content")}</label>
+    <input
+      type="search"
+      id="q"
+      name="q"
+      value={@query}
+      placeholder={gettext("Search published content…")}
+      autocomplete="off"
+      class="w-full rounded-lg border border-base-content/20 bg-transparent px-4 py-2.5 text-base focus:border-primary focus:outline-none"
+    />
+  </form>
+
+  <p
+    :if={@query != "" and @results.posts == [] and @results.pages == []}
+    class="mt-8 text-base-content/60"
+  >
+    {gettext("No results for “%{query}”.", query: @query)}
+  </p>
+
+  <section :if={@results.posts != []} class="mt-8">
+    <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+      {gettext("Posts")}
+    </h2>
+    <ul class="mt-3 space-y-4">
+      <li :for={post <- @results.posts}>
+        <a
+          href={KilnCMS.I18n.localized_path(@locale, ~p"/blog/#{post.slug}")}
+          class="group block"
+        >
+          <span class="font-medium group-hover:underline">{post.title}</span>
+          <p :if={post.excerpt} class="mt-1 text-sm text-base-content/70">{post.excerpt}</p>
+        </a>
+      </li>
+    </ul>
+  </section>
+
+  <section :if={@results.pages != []} class="mt-8">
+    <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+      {gettext("Pages")}
+    </h2>
+    <ul class="mt-3 space-y-4">
+      <li :for={page <- @results.pages}>
+        <a
+          href={KilnCMS.I18n.localized_path(@locale, ~p"/#{page.slug}")}
+          class="font-medium hover:underline"
+        >
+          {page.title}
+        </a>
+      </li>
+    </ul>
+  </section>
+</Layouts.public>

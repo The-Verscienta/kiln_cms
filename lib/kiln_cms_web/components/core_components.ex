@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.CoreComponents do
   # Shared field styling (token-based; no DaisyUI). Used by input/select/textarea.
   defp input_base do
     "w-full rounded-lg border border-base-content/15 bg-base-100 px-3 py-2 text-sm " <>
-      "text-base-content transition placeholder:text-base-content/40 focus:border-primary/50 " <>
+      "text-base-content transition placeholder:text-base-content/70 focus:border-primary/50 " <>
       "focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
   end
 
@@ -329,12 +329,14 @@ defmodule KilnCMSWeb.CoreComponents do
             name={@name}
             value="true"
             checked={@checked}
+            aria-invalid={@errors != [] && "true"}
+            aria-describedby={@errors != [] && error_id(@id)}
             class={@class || "size-4 rounded border border-base-content/30 accent-primary"}
             {@rest}
           />{@label}
         </span>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.field_errors id={error_id(@id)} errors={@errors} />
     </div>
     """
   end
@@ -347,6 +349,8 @@ defmodule KilnCMSWeb.CoreComponents do
         <select
           id={@id}
           name={@name}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && error_id(@id)}
           class={[
             @class || input_base() <> " cursor-pointer",
             @errors != [] && (@error_class || input_error_class())
@@ -358,7 +362,7 @@ defmodule KilnCMSWeb.CoreComponents do
           {Phoenix.HTML.Form.options_for_select(@options, @value)}
         </select>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.field_errors id={error_id(@id)} errors={@errors} />
     </div>
     """
   end
@@ -371,6 +375,8 @@ defmodule KilnCMSWeb.CoreComponents do
         <textarea
           id={@id}
           name={@name}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && error_id(@id)}
           class={[
             @class || input_base() <> " min-h-24",
             @errors != [] && (@error_class || input_error_class())
@@ -378,7 +384,7 @@ defmodule KilnCMSWeb.CoreComponents do
           {@rest}
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.field_errors id={error_id(@id)} errors={@errors} />
     </div>
     """
   end
@@ -394,6 +400,8 @@ defmodule KilnCMSWeb.CoreComponents do
           name={@name}
           id={@id}
           value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && error_id(@id)}
           class={[
             @class || input_base(),
             @errors != [] && (@error_class || input_error_class())
@@ -401,6 +409,23 @@ defmodule KilnCMSWeb.CoreComponents do
           {@rest}
         />
       </label>
+      <.field_errors id={error_id(@id)} errors={@errors} />
+    </div>
+    """
+  end
+
+  # The id of a field's error container, for `aria-describedby` (#172).
+  defp error_id(id), do: "#{id}-error"
+
+  # Renders a field's validation errors inside an id'd container so the input can
+  # reference them via aria-describedby. Screen readers announce them on
+  # validate/submit failure (the input is also marked aria-invalid). #172
+  attr :id, :string, required: true
+  attr :errors, :list, default: []
+
+  defp field_errors(assigns) do
+    ~H"""
+    <div :if={@errors != []} id={@id}>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
     """

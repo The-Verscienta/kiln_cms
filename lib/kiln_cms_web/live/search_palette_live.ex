@@ -45,16 +45,22 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   # Record the search for analytics off the LiveView's process so a debounced
   # keystroke doesn't block on the DB write. Best-effort and bounded by the
   # shared Task.Supervisor's max_children (drops under load); failures swallowed.
+  # `:async_analytics` is off under test so the write stays on the test's SQL
+  # sandbox connection rather than leaking from a detached task.
   defp record_query_async(query, total) do
-    Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
-      try do
-        Search.record_query(query, total)
-      rescue
-        _ -> :ok
-      end
-    end)
+    if Application.get_env(:kiln_cms, :async_analytics, true) do
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_query(query, total) end)
+    else
+      record_query(query, total)
+    end
 
     :ok
+  end
+
+  defp record_query(query, total) do
+    Search.record_query(query, total)
+  rescue
+    _ -> :ok
   end
 
   defp result_count(%{pages: p, posts: o, media: m}), do: length(p) + length(o) + length(m)
@@ -64,25 +70,31 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     assigns = assign(assigns, :count, result_count(assigns.results))
 
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div class="mx-auto max-w-2xl space-y-6">
         <div>
-          <h1 class="text-2xl font-semibold">Search</h1>
-          <p class="text-sm text-base-content/60">
-            Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here.
+          <h1 class="text-2xl font-semibold">{gettext("Search")}</h1>
+          <p class="text-sm text-base-content/70">
+            {gettext("Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here.")}
           </p>
-          <p class="mt-1 text-xs text-base-content/40">
-            Searches are logged anonymously — no user ID or IP — to improve content discovery,
-            and purged after {@retention_days} days.
+          <p class="mt-1 text-xs text-base-content/70">
+            {gettext(
+              "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days.",
+              days: @retention_days
+            )}
           </p>
         </div>
 
-        <form phx-change="search" id="palette-search">
+        <form phx-change="search" id="palette-search" role="search">
+          <label for="palette-q" class="sr-only">{gettext("Search content")}</label>
           <input
+            id="palette-q"
             type="text"
             name="q"
             value={@query}
-            placeholder="Search content…"
+            placeholder={gettext("Search content…")}
+            aria-label={gettext("Search content")}
+            aria-describedby="search-status"
             autocomplete="off"
             autofocus
             phx-debounce="150"
@@ -90,25 +102,36 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           />
         </form>
 
-        <p :if={@searched and @count == 0} class="text-sm text-base-content/60">
-          No results for “{@query}”.
+        <%!-- Announce result changes to screen readers (#176). --%>
+        <p id="search-status" role="status" aria-live="polite" class="sr-only">
+          <%= cond do %>
+            <% @searched and @count == 0 -> %>
+              {gettext("No results for “%{query}”.", query: @query)}
+            <% @searched -> %>
+              {gettext("%{count} results for “%{query}”.", count: @count, query: @query)}
+            <% true -> %>
+          <% end %>
+        </p>
+
+        <p :if={@searched and @count == 0} class="text-sm text-base-content/70">
+          {gettext("No results for “%{query}”.", query: @query)}
         </p>
 
         <div :if={@count > 0} class="space-y-6">
-          <.section :if={@results.pages != []} title="Pages">
+          <.section :if={@results.pages != []} title={gettext("Pages")}>
             <.content_row :for={p <- @results.pages} type="page" record={p} />
           </.section>
-          <.section :if={@results.posts != []} title="Posts">
+          <.section :if={@results.posts != []} title={gettext("Posts")}>
             <.content_row :for={p <- @results.posts} type="post" record={p} />
           </.section>
-          <.section :if={@results.media != []} title="Media">
+          <.section :if={@results.media != []} title={gettext("Media")}>
             <.link
               :for={m <- @results.media}
               navigate={~p"/media"}
               class="block rounded px-3 py-2 hover:bg-base-200"
             >
               <span class="font-medium">{m.filename}</span>
-              <span :if={m.alt} class="ml-2 text-xs text-base-content/50">{m.alt}</span>
+              <span :if={m.alt} class="ml-2 text-xs text-base-content/70">{m.alt}</span>
             </.link>
           </.section>
         </div>
@@ -123,7 +146,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   defp section(assigns) do
     ~H"""
     <div>
-      <h2 class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/40">
+      <h2 class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/70">
         {@title}
       </h2>
       <div class="divide-y divide-base-content/5 rounded border border-base-content/10">
@@ -143,7 +166,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
       class="block rounded px-3 py-2 hover:bg-base-200"
     >
       <span class="font-medium">{@record.title}</span>
-      <span class="ml-2 text-xs text-base-content/50">/{@record.slug}</span>
+      <span class="ml-2 text-xs text-base-content/70">/{@record.slug}</span>
       <p
         :if={snippet(@record)}
         class="mt-0.5 line-clamp-2 text-xs text-base-content/60 [&_mark]:rounded-sm [&_mark]:bg-warning/30 [&_mark]:px-0.5 [&_mark]:text-base-content"

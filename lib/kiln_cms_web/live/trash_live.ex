@@ -26,7 +26,13 @@ defmodule KilnCMSWeb.TrashLive do
        |> assign(:retention_days, @retention_days)
        |> load_items()}
     else
-      {:ok, push_navigate(socket, to: ~p"/editor")}
+      # Defense-in-depth: the `:live_admin_required` on_mount guard already
+      # redirects non-admins with this flash before mount runs; mirror it here so
+      # this fallback stays consistent rather than silently bouncing to /editor.
+      {:ok,
+       socket
+       |> put_flash(:error, gettext("You need admin access to view that page."))
+       |> push_navigate(to: ~p"/")}
     end
   end
 
@@ -65,6 +71,27 @@ defmodule KilnCMSWeb.TrashLive do
 
           _ ->
             {:noreply, put_flash(socket, :error, gettext("Couldn't restore that item."))}
+        end
+    end
+  end
+
+  # Permanently delete a single trashed item (#167). Guarded by a data-confirm on
+  # the button; the destroy itself is admin-only at the resource policy.
+  def handle_event("purge", %{"kind" => kind, "id" => id}, socket) do
+    actor = socket.assigns.actor
+
+    case find_item(socket.assigns.items, kind, id) do
+      nil ->
+        {:noreply, socket}
+
+      record ->
+        case do_purge(kind, record, actor) do
+          :ok ->
+            {:noreply,
+             socket |> load_items() |> put_flash(:info, gettext("Permanently deleted."))}
+
+          _ ->
+            {:noreply, put_flash(socket, :error, gettext("Couldn't delete that item."))}
         end
     end
   end
@@ -115,7 +142,7 @@ defmodule KilnCMSWeb.TrashLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div class="space-y-6">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div>
@@ -178,12 +205,12 @@ defmodule KilnCMSWeb.TrashLive do
             id={"trash-#{kind}-#{record.id}"}
             class="flex items-center gap-4 p-3"
           >
-            <span class="w-12 shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
+            <span class="w-12 shrink-0 text-xs uppercase text-base-content/70">{kind}</span>
             <div class="min-w-0 flex-1">
               <span class="font-medium">{record.title}</span>
-              <p class="truncate text-xs text-base-content/50">/{record.slug}</p>
+              <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
-            <span class="text-xs text-base-content/50">
+            <span class="text-xs text-base-content/70">
               {gettext("deleted %{at}", at: Calendar.strftime(record.archived_at, "%Y-%m-%d %H:%M"))}
             </span>
             <button
@@ -194,6 +221,18 @@ defmodule KilnCMSWeb.TrashLive do
               class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
             >
               {gettext("Restore")}
+            </button>
+            <button
+              type="button"
+              phx-click="purge"
+              phx-value-kind={kind}
+              phx-value-id={record.id}
+              data-confirm={
+                gettext("Permanently delete “%{title}”? This can't be undone.", title: record.title)
+              }
+              class="rounded border border-error/30 px-3 py-1 text-xs text-error hover:bg-error/10"
+            >
+              {gettext("Delete permanently")}
             </button>
           </li>
         </ul>

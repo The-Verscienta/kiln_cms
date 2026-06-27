@@ -23,7 +23,13 @@ defmodule KilnCMSWeb.WebhookLive do
        |> assign(:form, create_form(actor))
        |> load_endpoints()}
     else
-      {:ok, push_navigate(socket, to: ~p"/editor")}
+      # Defense-in-depth: the `:live_admin_required` on_mount guard already
+      # redirects non-admins with this flash before mount runs; mirror it here so
+      # this fallback stays consistent rather than silently bouncing to /editor.
+      {:ok,
+       socket
+       |> put_flash(:error, gettext("You need admin access to view that page."))
+       |> push_navigate(to: ~p"/")}
     end
   end
 
@@ -153,7 +159,7 @@ defmodule KilnCMSWeb.WebhookLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -225,7 +231,7 @@ defmodule KilnCMSWeb.WebhookLive do
                       {event}
                     </span>
                   </div>
-                  <p class="text-xs text-base-content/50">
+                  <p class="text-xs text-base-content/70">
                     {gettext("Signing secret")}: <code>{endpoint.secret}</code>
                   </p>
                 </div>

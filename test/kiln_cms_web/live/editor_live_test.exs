@@ -89,6 +89,40 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Findable Page"
     end
 
+    # #177: bulk-select row checkboxes are named with the item title.
+    test "row checkboxes have accessible names", %{conn: conn} do
+      draft_page(%{title: "CheckboxRow"})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+      assert html =~ ~s(aria-label="Select CheckboxRow")
+    end
+
+    # #161: the filter and search fields are labeled for assistive tech.
+    test "labels the filter and search fields", %{conn: conn} do
+      draft_page(%{title: "Some content"})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ ~s(aria-label="Filter by status")
+      assert html =~ ~s(aria-label="Search by title")
+      assert html =~ ~s(for="content-status-filter")
+    end
+
+    # #156: the editor links to the media library for discoverability.
+    test "links to the media library", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ ~s(href="/media")
+      assert html =~ "Media"
+    end
+
+    # #155: workflow state labels are humanized and localized, not raw atoms.
+    test "humanizes workflow state labels", %{conn: conn} do
+      draft_page(%{title: "ReviewMe", state: :in_review})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      # The badge and the status filter both show "In review", not "in_review".
+      assert html =~ "In review"
+      # The status filter shows humanized option labels.
+      assert html =~ ~r/<option[^>]*>\s*Draft\s*</
+    end
+
     test "filters the list by status", %{conn: conn} do
       draft_page(%{title: "AlphaDraft", state: :draft})
       draft_page(%{title: "BetaPub", state: :published})
@@ -291,9 +325,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Editing marks the draft unsaved and schedules the debounced autosave.
+      # Editing shows a "Saving…" state and schedules the debounced autosave (#136).
       changed = lv |> form("#page-editor", form: %{title: "Autosaved title"}) |> render_change()
-      assert changed =~ "Unsaved changes"
+      assert changed =~ "Saving"
       assert CMS.get_page!(page.id, authorize?: false).title == "Old"
 
       # Fire the debounce timer.
@@ -301,8 +335,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
       html = render(lv)
 
       assert CMS.get_page!(page.id, authorize?: false).title == "Autosaved title"
+      # The indicator shows the saved state (the Save button's phx-disable-with
+      # carries "Saving…" as an attribute regardless, so don't refute it broadly).
       assert html =~ "Saved"
-      refute html =~ "Unsaved changes"
+      refute html =~ ~r/>\s*Saving…/
+    end
+
+    # #136: a failing autosave (invalid form) surfaces an error state, not silence.
+    test "an autosave that fails validation shows an error state", %{conn: conn} do
+      page = draft_page(%{title: "Has title"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Title is required — clearing it makes the autosave submit fail validation.
+      lv |> form("#page-editor", form: %{title: ""}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      assert html =~ "Couldn&#39;t autosave"
+      # The invalid edit was not persisted.
+      assert CMS.get_page!(page.id, authorize?: false).title == "Has title"
     end
 
     test "published content is not autosaved", %{conn: conn} do
@@ -388,11 +441,29 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/trash")
       assert html =~ "TrashedPage"
 
-      lv |> element("button[phx-value-id='#{page.id}']") |> render_click()
+      lv |> element("button[phx-click='restore'][phx-value-id='#{page.id}']") |> render_click()
 
       # Gone from trash, back in the main listing.
       refute render(lv) =~ "TrashedPage"
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
+    end
+
+    # #167: admins can permanently delete a single trashed item (not just empty all).
+    test "admin permanently deletes a single trashed item", %{conn: conn} do
+      page = draft_page(%{title: "PurgeOne"})
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_page(page, actor: admin)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/trash")
+      assert html =~ "PurgeOne"
+      assert html =~ "Delete permanently"
+
+      lv |> element("button[phx-click='purge'][phx-value-id='#{page.id}']") |> render_click()
+
+      # Hard-deleted: gone from trash AND not back in the listing (i.e. not just
+      # restored).
+      refute render(lv) =~ "PurgeOne"
+      refute Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
     test "empty trash asks for confirmation, then permanently deletes everything", %{conn: conn} do
@@ -463,6 +534,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
   end
 
   describe "image block picker" do
+    # #154: the featured image uses the searchable media picker, not a <select>.
+    test "selects the featured image via the media picker", %{conn: conn} do
+      media = Ash.Seed.seed!(MediaItem, %{filename: "feat.jpg", url: "/uploads/feat"})
+      page = draft_page(%{title: "FeatPage"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "Choose from library"
+
+      lv |> element("button[phx-click='open_featured_picker']") |> render_click()
+
+      lv
+      |> element("button[phx-click='pick_image'][phx-value-id='#{media.id}']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert CMS.get_page!(page.id, authorize?: false).featured_image_id == media.id
+    end
+
     test "picking a library image sets the block's url and media_id", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
       page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
@@ -482,6 +574,23 @@ defmodule KilnCMSWeb.EditorLiveTest do
       [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert block.content == "/uploads/x"
       assert block.data["media_id"] == media.id
+    end
+
+    # Regression for #169: the picker is a labeled modal dialog with a focus trap.
+    test "the picker exposes dialog semantics and a focus trap", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      picker =
+        lv |> element("button[phx-click='open_picker'][phx-value-index='0']") |> render_click()
+
+      assert picker =~ ~s(role="dialog")
+      assert picker =~ ~s(aria-modal="true")
+      assert picker =~ ~s(aria-labelledby="image-picker-title")
+      assert picker =~ ~s(id="image-picker-title")
+      assert picker =~ ~s(phx-hook="FocusTrap")
     end
   end
 
@@ -640,6 +749,31 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute render(lv) =~ "ring-warning"
     end
 
+    # #140: rich-text blocks participate in the same collaborative locking as the
+    # title/slug/DSL inputs (the TipTap editor broadcasts focus/blur via its hook).
+    test "soft-locks a rich-text block while another editor holds it", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute html =~ "ring-warning"
+
+      # The block's lock field name (the legacy_html form field) is on the wrapper.
+      [_, field] = Regex.run(~r/data-lock-field="([^"]+)"/, html)
+
+      topic = Presence.topic("page", page.id)
+      cursor = %{id: "other-editor", name: "bob", field: field}
+
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      locked = render(lv)
+      assert locked =~ "ring-warning"
+      assert locked =~ "bob is editing"
+
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      refute render(lv) =~ "ring-warning"
+    end
+
     test "simultaneous focus is broken by id — the lower id keeps the field", %{conn: conn} do
       page = draft_page()
 
@@ -716,6 +850,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor", form: %{title: "Broadcasted"}) |> render_change()
 
       assert_receive {:preview_update, %{title: "Broadcasted"}}
+    end
+
+    # Regression for #134: the broadcast payload for a rich-text block must carry
+    # the rendered HTML (legacy_html), not the empty Portable Text `body` that a
+    # primary-field lookup would pick — otherwise the pop-out preview is blank.
+    test "broadcast payload carries rich-text HTML, not empty body", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "RTPage",
+          blocks: [%{type: :rich_text, content: "<p>Pop-out RichText</p>", order: 0}]
+        })
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "RTPage edited"}) |> render_change()
+
+      assert_receive {:preview_update, %{blocks: blocks}}
+      assert Enum.any?(blocks, &(&1.type == "rich_text" and &1.content =~ "Pop-out RichText"))
     end
 
     test "renders with public-site fidelity (public shell + prose article)", %{conn: conn} do
@@ -954,29 +1109,25 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Related posts"
     end
 
-    test "assigns a category, tags and a featured image on save", %{conn: conn} do
+    test "assigns a category and tags on save", %{conn: conn} do
       post = draft_post()
       cat = Ash.Seed.seed!(Category, %{name: "News", slug: "c-#{uniq()}"})
       tag = Ash.Seed.seed!(Tag, %{name: "elixir", slug: "t-#{uniq()}"})
-      img = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg"})
 
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
 
-      # The seeded taxonomy/media appear as options.
+      # The seeded taxonomy appears as options (the featured image is chosen
+      # through the media picker modal rather than a <select> — see #154).
       assert html =~ "News"
       assert html =~ "elixir"
-      assert html =~ "hero.jpg"
 
       lv
-      |> form("#post-editor",
-        form: %{category_id: cat.id, featured_image_id: img.id, tag_ids: [tag.id]}
-      )
+      |> form("#post-editor", form: %{category_id: cat.id, tag_ids: [tag.id]})
       |> render_submit()
 
       saved = CMS.get_post!(post.id, authorize?: false, load: [:tags])
       assert saved.category_id == cat.id
-      assert saved.featured_image_id == img.id
       assert [%{id: tag_id}] = saved.tags
       assert tag_id == tag.id
     end
@@ -990,9 +1141,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
 
-      # The tag's <option> is rendered with the `selected` attribute even before
-      # the user touches the field (so an untouched save won't wipe the link).
-      assert html =~ ~r/<option selected[^>]*value="#{tag.id}"/
+      # The tag's checkbox is pre-checked even before the user touches the field
+      # (so an untouched save won't wipe the link) — #153 replaced the <select>.
+      assert html =~
+               ~r/<input[^>]*value="#{tag.id}"[^>]*checked|checked[^>]*value="#{tag.id}"/
     end
 
     test "links a related post on save", %{conn: conn} do
@@ -1048,6 +1200,186 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert {:error, {:live_redirect, %{to: "/editor"}}} =
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/widget/#{id}")
+    end
+  end
+
+  # Regression for #133: every authoring LiveView must pass current_user to
+  # Layouts.app so the header shows Sign out / Editor / Settings instead of
+  # Sign in while the editor is actively working.
+  describe "header navigation (current_user in layout)" do
+    test "content list shows authenticated nav for a signed-in editor", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ "Sign out"
+      refute html =~ ~r/>\s*Sign in\s*</
+      assert html =~ "Editor"
+      assert html =~ "Settings"
+      # #166: the icon-only theme toggle buttons are labeled.
+      assert html =~ ~s(aria-label="Use dark theme")
+      assert html =~ ~s(aria-label="Use light theme")
+    end
+
+    # #139: ⌘K targets a LiveView `navigate` link (data-phx-link="redirect"), so
+    # the jump to search is a client-side navigation, not a full page reload.
+    test "renders a client-side navigate target for the search shortcut", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ ~s(id="cmdk-search-link")
+      assert html =~ ~s(data-phx-link="redirect")
+      assert html =~ ~s(href="/editor/search")
+    end
+
+    test "content editor shows authenticated nav for a signed-in editor", %{conn: conn} do
+      page = draft_page(%{title: "NavPage"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ "Sign out"
+      refute html =~ ~r/>\s*Sign in\s*</
+    end
+  end
+
+  # Regression for #170: rich-text blocks must be labeled in the accessibility
+  # tree — a named editor surface and a labeled formatting toolbar. (The TipTap
+  # contenteditable's own aria-label is applied client-side from data-editor-label.)
+  describe "rich-text block accessibility (#170)" do
+    test "rich-text block renders group + toolbar semantics and an editor label", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "A11yPage",
+          blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~s(role="group")
+      assert html =~ ~s(aria-label="Rich text block")
+      assert html =~ ~s(role="toolbar")
+      assert html =~ ~s(aria-label="Text formatting")
+      assert html =~ ~s(data-editor-label="Rich text editor")
+    end
+
+    # #150: the two slash systems have distinct hints (block inserter vs in-text).
+    test "distinguishes the block inserter from the rich-text slash menu", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "SlashPage",
+          blocks: [%{type: :rich_text, content: "<p>x</p>", order: 0}]
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ "Type / for text formatting within this block."
+      assert html =~ "Add block"
+    end
+
+    # Regression for #135: a server-driven form replacement (conflict reload)
+    # remounts rich-text blocks (new element id) so TipTap reloads from the latest
+    # content instead of keeping its phx-update="ignore" editor.
+    test "rich-text editors remount after a conflict reload", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      assert html =~ "rt-0-v0"
+
+      # Someone else saves first → this editor's save is stale → conflict.
+      {:ok, _} = CMS.update_page(page, %{title: "Changed elsewhere"}, actor: editor)
+      lv |> form("#page-editor") |> render_submit()
+
+      # Reloading bumps the editor version so the rich-text block remounts.
+      reloaded = lv |> element("#edit-conflict button", "Reload latest") |> render_click()
+      assert reloaded =~ "rt-0-v1"
+      refute reloaded =~ ~s(id="rt-0-v0")
+    end
+
+    # Regression for #171: blocks are reorderable without a pointer device.
+    test "blocks can be reordered with keyboard move buttons", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "First", order: 0},
+            %{type: :heading, content: "Second", order: 1}
+          ]
+        })
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Move-up on the first block is disabled; move-down is available.
+      assert html =~
+               ~r/phx-value-index="0"[^>]*phx-value-dir="up"[^>]*disabled|disabled[^>]*phx-value-index="0"[^>]*phx-value-dir="up"/
+
+      moved =
+        lv
+        |> element(~s(button[phx-click="move_block"][phx-value-index="0"][phx-value-dir="down"]))
+        |> render_click()
+
+      # The new position is announced to screen readers.
+      assert moved =~ "Moved block to position 2 of 2"
+
+      # Saving persists the swapped order.
+      lv |> form("#page-editor") |> render_submit()
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(blocks, & &1.content) == ["Second", "First"]
+    end
+
+    # Regression for #174: the editor page must have exactly one h1 (the
+    # "Edit <kind>" header); the preview-pane title is an h2.
+    test "renders a single h1", %{conn: conn} do
+      page = draft_page(%{title: "H1Page"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      h1_count = (html |> String.split("<h1") |> length()) - 1
+      assert h1_count == 1, "expected exactly one <h1>, found #{h1_count}"
+    end
+
+    # #181: the Preview link opens in a new tab safely and warns assistive tech.
+    test "the new-tab Preview link is safe and labeled", %{conn: conn} do
+      page = draft_page(%{title: "NewTabPage"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~r/target="_blank"[^>]*rel="noopener noreferrer"/
+      assert html =~ "(opens in a new tab)"
+    end
+
+    # #151: Save and workflow buttons show a loading state while the event runs.
+    test "the Save and workflow buttons have loading states", %{conn: conn} do
+      page = draft_page(%{title: "LoadingPage"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~s(phx-disable-with="Saving…")
+      assert html =~ ~s(phx-disable-with="Submitting…")
+    end
+
+    # Regression for #138: on mobile the preview is a collapsible disclosure so it
+    # doesn't bury the form; on desktop it stays inline as the sticky column.
+    test "the preview is collapsible on mobile and inline on desktop", %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "PrevPage",
+          blocks: [%{type: :heading, content: "PrevBlock", order: 0}]
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ ~r/<details[^>]*lg:hidden/
+      assert html =~ "<summary"
+      assert html =~ "hidden lg:block"
+      assert html =~ "PrevBlock"
+      # #152: removing a block asks for confirmation first.
+      assert html =~
+               ~r/phx-click="remove_block"[^>]*data-confirm|data-confirm[^>]*phx-click="remove_block"/
     end
   end
 end

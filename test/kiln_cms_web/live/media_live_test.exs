@@ -84,6 +84,19 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert filtered =~ ">sunset.png<"
       refute filtered =~ ">logo.svg<"
     end
+
+    # #160: the delete button isn't hover-only — visible on touch and on focus.
+    test "the delete button is visible without hover", %{conn: conn} do
+      seed_media("touchable.png")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      [_, delete_class] =
+        Regex.run(~r/phx-click="delete"[^>]*class="([^"]+)"/s, html) ||
+          Regex.run(~r/class="([^"]+)"[^>]*phx-click="delete"/s, html)
+
+      assert delete_class =~ "opacity-100"
+      assert delete_class =~ "focus:opacity-100"
+    end
   end
 
   describe "detail panel" do
@@ -119,6 +132,21 @@ defmodule KilnCMSWeb.MediaLiveTest do
       saved = CMS.get_media_item!(item.id, authorize?: false)
       assert saved.alt == "A nice photo"
       assert saved.caption == "At dusk"
+    end
+
+    # Regression for #169: the drawer is a labeled modal dialog with a focus trap.
+    test "the detail drawer exposes dialog semantics and a focus trap", %{conn: conn} do
+      item = Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "dlg.png", url: "/uploads/dlg"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      panel = lv |> element(~s(img[phx-value-id="#{item.id}"])) |> render_click()
+
+      assert panel =~ ~s(role="dialog")
+      assert panel =~ ~s(aria-modal="true")
+      assert panel =~ ~s(aria-labelledby="media-detail-title")
+      assert panel =~ ~s(id="media-detail-title")
+      assert panel =~ ~s(phx-hook="FocusTrap")
     end
   end
 
@@ -205,6 +233,23 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert html =~ "failed"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
       refute File.exists?(Path.join(root, "fake.png"))
+    end
+
+    # #178: the upload progress bar exposes progressbar semantics.
+    test "the upload progress bar has progressbar semantics", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "pixel.png", content: @png, type: "image/png"}
+        ])
+
+      html = render_upload(input, "pixel.png", 40)
+
+      assert html =~ ~s(role="progressbar")
+      assert html =~ ~s(aria-valuenow="40")
+      assert html =~ ~s(aria-valuemax="100")
     end
 
     test "uploading an image stores it and adds it to the library", %{conn: conn, root: root} do

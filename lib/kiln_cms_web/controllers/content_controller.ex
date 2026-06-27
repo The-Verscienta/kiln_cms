@@ -103,11 +103,50 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
     |> put_resp_header("vary", "Accept-Language")
     |> assign(:locale, locale)
-    |> assign(:page_title, "Blog")
-    |> assign(:meta_description, "Latest posts.")
+    |> assign(:page_title, gettext("Blog"))
+    |> assign(:meta_description, gettext("Latest posts."))
     |> assign(:locale_links, blog_locale_links(locale))
     |> assign(:json_ld, json_ld_script(StructuredData.blog(posts)))
     |> render(:blog_index, posts: posts, page: page, has_prev?: page > 0, has_next?: more?)
+  end
+
+  # Public on-site search (#149). Anonymous, so the read policy returns published
+  # content only; locale-scoped to the active locale. Posts and pages only
+  # (media isn't part of the public site).
+  def search(conn, params) do
+    locale = locale(conn)
+    query = params["q"] |> to_string() |> String.trim()
+
+    results =
+      if query == "" do
+        %{posts: [], pages: []}
+      else
+        r = KilnCMS.Search.global(query, authorize?: true, locale: locale, limit: 20)
+        %{posts: r.posts, pages: r.pages}
+      end
+
+    conn
+    # Don't cache personalized/empty query result pages on shared caches.
+    |> put_resp_header("cache-control", "private, no-cache")
+    |> assign(:locale, locale)
+    |> assign(:page_title, "Search")
+    |> assign(:locale_links, search_locale_links(locale, query))
+    |> render(:search, query: query, results: results)
+  end
+
+  # Language-switcher links to the search page (preserving the query) per locale.
+  defp search_locale_links(current, query) do
+    suffix = if query == "", do: "", else: "?q=#{URI.encode_www_form(query)}"
+
+    for locale <- I18n.locales() do
+      prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
+
+      %{
+        locale: locale,
+        href: "#{base_url()}#{prefix}/search#{suffix}",
+        current: locale == current
+      }
+    end
   end
 
   # Zero-based page index from `?page=N` (1-based in the URL for humans).
@@ -332,16 +371,25 @@ defmodule KilnCMSWeb.ContentController do
   # spike) can't queue page delivery. The supervisor's `max_children` bounds
   # concurrent tasks, so a spike drops views (start_child → {:error, :max_children})
   # rather than exhausting the pool. Failures are swallowed.
+  #
+  # `:async_analytics` is on in prod/dev but off under test, where the detached
+  # task would run outside the ExUnit SQL sandbox connection (leaking a connection
+  # past the owning test and racing assertions). Running it inline keeps the
+  # upsert on the request's sandbox-owned connection.
   defp track_view(type, id) do
-    Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
-      try do
-        Analytics.record_view(type, id, authorize?: false)
-      rescue
-        _ -> :ok
-      end
-    end)
+    if Application.get_env(:kiln_cms, :async_analytics, true) do
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_view(type, id) end)
+    else
+      record_view(type, id)
+    end
 
     :ok
+  end
+
+  defp record_view(type, id) do
+    Analytics.record_view(type, id, authorize?: false)
+  rescue
+    _ -> :ok
   end
 
   defp not_found(conn) do

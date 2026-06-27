@@ -76,4 +76,67 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       assert reloaded.notify_on_return_to_draft == true
     end
   end
+
+  # #141: profile (display name) and password change have web UIs.
+  describe "profile" do
+    test "updates the display name", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, html} = conn |> log_in(user) |> live(~p"/editor/settings")
+      assert html =~ "Display name"
+
+      lv
+      |> form("#profile-form", user: %{"name" => "Ada Lovelace"})
+      |> render_submit()
+
+      assert reload(user).name == "Ada Lovelace"
+    end
+  end
+
+  describe "password" do
+    test "changes the password with the correct current password", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, html} = conn |> log_in(user) |> live(~p"/editor/settings")
+      assert html =~ "Change password"
+
+      saved =
+        lv
+        |> form("#password-form",
+          user: %{
+            "current_password" => @password,
+            "password" => "newpassword789",
+            "password_confirmation" => "newpassword789"
+          }
+        )
+        |> render_submit()
+
+      assert saved =~ "Password changed"
+
+      # The new password now authenticates.
+      strategy = AshAuthentication.Info.strategy!(User, :password)
+
+      assert {:ok, _} =
+               AshAuthentication.Strategy.action(strategy, :sign_in, %{
+                 "email" => to_string(reload(user).email),
+                 "password" => "newpassword789"
+               })
+    end
+
+    test "rejects a wrong current password", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      result =
+        lv
+        |> form("#password-form",
+          user: %{
+            "current_password" => "wrongpassword",
+            "password" => "newpassword789",
+            "password_confirmation" => "newpassword789"
+          }
+        )
+        |> render_submit()
+
+      assert result =~ "Couldn&#39;t change your password"
+    end
+  end
 end

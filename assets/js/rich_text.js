@@ -49,6 +49,9 @@ const toolbarButton = (editor, item) => {
   b.type = "button"
   b.textContent = item.label
   b.title = item.title
+  // The visible label is a terse glyph ("B", "</>", "↺"), so give the button an
+  // explicit accessible name — `title` alone is not reliably announced (#170).
+  b.setAttribute("aria-label", item.title)
   b.className = "rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
   b.addEventListener("click", e => {
     e.preventDefault()
@@ -203,6 +206,16 @@ export const RichText = {
       element: this.el.querySelector("[data-editor]"),
       extensions: [StarterKit],
       content: this.el.dataset.content || "",
+      // Name the contenteditable surface for assistive tech — without this a
+      // screen reader lands in an unlabeled editable region (#170). The label
+      // can be overridden per block via `data-editor-label`.
+      editorProps: {
+        attributes: {
+          "aria-label": this.el.dataset.editorLabel || "Rich text editor",
+          "aria-multiline": "true",
+          role: "textbox",
+        },
+      },
       onUpdate: ({editor}) => {
         input.value = editor.getHTML()
         this.slash.update()
@@ -216,6 +229,16 @@ export const RichText = {
       onSelectionUpdate: () => {
         this.slash.update()
         this.syncToolbar()
+      },
+      // Collaborative locking (#140): broadcast focus/blur on this block's field
+      // so other editors get the same lock ring + "who's editing" badge that the
+      // title/slug/DSL inputs already use. data-lock-field is the form field name.
+      onFocus: () => {
+        const field = this.el.dataset.lockField
+        if (field) this.pushEvent("field_focus", {field})
+      },
+      onBlur: () => {
+        if (this.el.dataset.lockField) this.pushEvent("field_blur", {})
       },
     })
     this.editor = editor

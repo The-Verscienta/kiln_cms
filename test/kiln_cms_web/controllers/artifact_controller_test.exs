@@ -46,6 +46,26 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     assert [%{"_type" => "heading"} | _] = body["blocks"]
   end
 
+  test "includes CDN cache headers and honours If-None-Match (#188)", %{conn: conn} do
+    slug = published_page()
+
+    served = get(conn, ~p"/api/content/page/#{slug}")
+    assert json_response(served, 200)
+    assert ["public, max-age=300"] = get_resp_header(served, "cache-control")
+    assert [etag] = get_resp_header(served, "etag")
+    assert etag =~ ~r/^".+"$/
+    assert [_last_modified] = get_resp_header(served, "last-modified")
+
+    # Revalidating with the same ETag returns 304 with an empty body.
+    not_modified =
+      build_conn()
+      |> put_req_header("if-none-match", etag)
+      |> get(~p"/api/content/page/#{slug}")
+
+    assert not_modified.status == 304
+    assert not_modified.resp_body == ""
+  end
+
   test "serves the json_ld surface as a schema.org graph", %{conn: conn} do
     slug = published_page()
     body = conn |> get(~p"/api/content/page/#{slug}?surface=json_ld") |> json_response(200)
@@ -54,6 +74,24 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     types = Enum.map(body["@graph"], & &1["@type"])
     assert "Article" in types
     assert "ImageObject" in types
+  end
+
+  # #197: the artifact endpoint serves a specific locale via ?locale=.
+  test "serves a locale-specific artifact via ?locale=", %{conn: conn} do
+    actor = admin()
+    slug = "art-loc-#{System.unique_integer([:positive])}"
+
+    fr =
+      CMS.create_page!(%{title: "Bonjour", slug: slug, locale: "fr"}, actor: actor)
+
+    CMS.publish_page!(fr, actor: actor)
+    KilnCMS.DataCase.drain_oban()
+
+    body = conn |> get(~p"/api/content/page/#{slug}?locale=fr") |> json_response(200)
+    assert body["title"] == "Bonjour"
+
+    # The default locale has no such slug → 404.
+    assert conn |> get(~p"/api/content/page/#{slug}?locale=en") |> json_response(404)
   end
 
   test "404s for unknown type, unknown slug, and unpublished content", %{conn: conn} do
@@ -79,7 +117,10 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     CMS.publish_page!(page, actor: actor)
 
     conn = get(conn, ~p"/api/content/page/#{slug}")
-    assert json_response(conn, 503)["error"] == "artifact_compiling"
+
+    assert %{"errors" => [%{"code" => "artifact_compiling", "status" => "503"}]} =
+             json_response(conn, 503)
+
     assert ["2"] = get_resp_header(conn, "retry-after")
 
     # Once the background firing runs, the artifact is served.

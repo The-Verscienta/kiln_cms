@@ -25,5 +25,23 @@ defmodule KilnCMS.I18n do
 
   def normalize(_), do: default_locale()
 
+  @doc """
+  Prefixes a public path with the active locale segment so internal links keep
+  the reader's locale (`/fr/blog`, `/fr/blog/my-post`). The default locale is
+  served unprefixed, and the bare home path `"/"` is never prefixed — a single
+  segment like `/fr` is treated as a slug by `Plugs.SetLocale`, not a locale
+  prefix. Matches the prefix convention used for hreflang/locale links.
+  """
+  @spec localized_path(String.t() | nil, String.t()) :: String.t()
+  def localized_path(locale, "/" <> _ = path) do
+    cond do
+      path == "/" -> path
+      not is_binary(locale) -> path
+      locale == default_locale() -> path
+      not supported?(locale) -> path
+      true -> "/" <> locale <> path
+    end
+  end
+
   defp config, do: Application.get_env(:kiln_cms, :i18n, [])
 end

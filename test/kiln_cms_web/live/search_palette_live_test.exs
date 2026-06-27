@@ -98,4 +98,23 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
 
     assert html =~ "No results"
   end
+
+  # #176: the search field is named and result changes are announced.
+  test "labels the search field and announces results in a live region", %{conn: conn} do
+    editor = authed_user(:editor)
+    term = "a11ysearch#{System.unique_integer([:positive])}"
+    CMS.create_page!(%{title: "#{term} doc", slug: slug()}, actor: editor)
+
+    {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/search")
+
+    # The input is named and points at the live status region.
+    assert html =~ ~s(aria-label="Search content")
+    assert html =~ ~s(aria-describedby="search-status")
+    assert html =~ ~s(id="search-status")
+    assert html =~ ~s(aria-live="polite")
+
+    # After a search, the status region announces the result count.
+    searched = lv |> form("#palette-search", %{q: term}) |> render_change()
+    assert searched =~ "results for"
+  end
 end

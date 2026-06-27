@@ -73,6 +73,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:save_state, :saved)
          # Set when an optimistic-lock conflict blocks saving until reload.
          |> assign(:conflict, false)
+         # Bumped on server-driven form replacement (conflict reload, version
+         # restore) so rich-text blocks remount and reload TipTap from the new
+         # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
+         |> assign(:editor_version, 0)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -127,7 +131,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Debounced draft autosave fired by the timer scheduled in `validate`.
-  def handle_info(:autosave, socket), do: {:noreply, autosave(socket)}
+  def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
   defp assign_record(socket, record) do
     socket
@@ -238,12 +242,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("open_media_browser", _params, socket),
     do: {:noreply, assign(socket, :picking, :new)}
 
+  # Open the (searchable) media browser to choose the featured image (#154),
+  # replacing the load-everything <select>.
+  def handle_event("open_featured_picker", _params, socket),
+    do: {:noreply, assign(socket, :picking, :featured)}
+
+  def handle_event("clear_featured", _params, socket) do
+    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", nil)
+    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+  end
+
   def handle_event("close_picker", _params, socket),
     do: {:noreply, reset_picker(socket)}
 
   # Live-filter the browser grid as the user types.
   def handle_event("search_media", %{"q" => q}, socket),
     do: {:noreply, assign(socket, :media_query, q)}
+
+  # Set the featured image from the library (#154).
+  def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
+    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
+
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+     |> reset_picker()}
+  end
 
   # Insert a library image as a brand-new image block (browser opened from the
   # editor chrome): the URL becomes the block content and its id is stashed in
@@ -293,6 +317,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :form, form)}
   end
 
+  # Keyboard-accessible alternative to drag-and-drop reordering (#171): swap a
+  # block with its neighbour and announce the new position to screen readers.
+  def handle_event("move_block", %{"index" => index, "dir" => dir}, socket) do
+    i = String.to_integer(index)
+    count = blocks_count(socket.assigns.form)
+    j = if dir == "up", do: i - 1, else: i + 1
+
+    if j >= 0 and j < count do
+      order =
+        0..(count - 1)
+        |> Enum.map(&to_string/1)
+        |> swap_at(i, j)
+
+      form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
+
+      {:noreply,
+       socket
+       |> assign(:form, form)
+       |> assign(
+         :moved_announcement,
+         gettext("Moved block to position %{pos} of %{count}", pos: j + 1, count: count)
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("save", %{"form" => params}, socket) do
     socket = cancel_autosave_timer(socket)
 
@@ -333,6 +384,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply,
      socket
      |> assign_record(record)
+     |> reset_editors()
      |> assign(:conflict, false)
      |> assign(:save_state, :saved)
      |> put_flash(:info, gettext("Reloaded the latest version."))}
@@ -354,12 +406,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case result do
       {:ok, record} ->
         {:noreply,
-         socket |> assign_record(record) |> put_flash(:info, gettext("Restored that version."))}
+         socket
+         |> assign_record(record)
+         |> reset_editors()
+         |> put_flash(:info, gettext("Restored that version."))}
 
       _ ->
         {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
     end
   end
+
+  # Force rich-text blocks to remount (new element id) so TipTap reloads from the
+  # replaced form rather than keeping its `phx-update="ignore"` content (#135).
+  defp reset_editors(socket), do: update(socket, :editor_version, &(&1 + 1))
 
   defp run_workflow(socket, action) when action in ~w(submit return publish unpublish archive) do
     # `publish` gets its own event; the rest share `:workflow` (tagged by action)
@@ -399,13 +458,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket
       |> cancel_autosave_timer()
       |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
-      |> assign(:save_state, :unsaved)
+      # `:saving` from the moment of edit — the change is queued to autosave, like
+      # a "Saving…" indicator (#136). Resolves to `:saved` or `:error` on flush.
+      |> assign(:save_state, :saving)
     else
       socket
     end
   end
 
-  defp autosave(%{assigns: %{save_state: :unsaved}} = socket) do
+  defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
     if draft?(socket) do
       socket = assign(socket, :autosave_timer, nil)
 
@@ -439,26 +500,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Nothing pending (a stale timer, or already saved) — no-op.
-  defp autosave(socket), do: assign(socket, :autosave_timer, nil)
+  # Stale timer (already saved, or state moved on) — no-op.
+  defp perform_autosave(socket), do: assign(socket, :autosave_timer, nil)
 
   # Someone else saved first → stop autosaving and surface the conflict rather
-  # than retrying (which would keep losing). Otherwise leave the inline
-  # validation errors in place and keep the draft unsaved so the next edit
+  # than retrying (which would keep losing). Otherwise mark the draft as failing
+  # validation (`:error`) so the indicator says so (#136); the next edit
   # reschedules a retry.
   defp handle_autosave_error(socket, form) do
     if stale_conflict?(form),
       do: flag_conflict(socket),
-      else: assign(socket, :save_state, :unsaved)
+      else: assign(socket, :save_state, :error)
   end
 
   # Stop autosaving and put the editor into a conflict state until the user
-  # reloads.
+  # reloads. Surface a flash so a blocked Save gets immediate feedback (#137) —
+  # the Save button is also disabled while `@conflict` is set.
   defp flag_conflict(socket) do
     socket
     |> cancel_autosave_timer()
     |> assign(:conflict, true)
     |> assign(:save_state, :unsaved)
+    |> put_flash(
+      :error,
+      gettext("This content changed elsewhere. Reload to get the latest before saving.")
+    )
   end
 
   # True when a failed submit was rejected by the optimistic lock (the record
@@ -485,6 +551,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp draft?(socket), do: socket.assigns.record.state == :draft
+
+  # Number of block sub-forms currently in the form (#171 keyboard reorder).
+  defp blocks_count(form) do
+    case AshPhoenix.Form.value(form, :blocks) do
+      list when is_list(list) -> length(list)
+      _ -> 0
+    end
+  end
+
+  # Swap the two list elements at positions `i` and `j`.
+  defp swap_at(list, i, j) do
+    a = Enum.at(list, i)
+    b = Enum.at(list, j)
+
+    list
+    |> List.replace_at(i, b)
+    |> List.replace_at(j, a)
+  end
 
   # Push the current title + blocks to any open decoupled preview windows.
   defp broadcast_preview(socket) do
@@ -544,6 +628,97 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
 
+  # Accessible tag picker (#153): a labeled checkbox group replacing the native
+  # <select multiple> (no ⌘/Ctrl needed). Each tag is its own labeled control;
+  # the array submits under the same `tag_ids[]` name the relationship expects.
+  attr :form, :any, required: true
+  attr :tags, :list, required: true
+  attr :record, :any, required: true
+
+  defp tag_picker(assigns) do
+    selected =
+      assigns.form
+      |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
+      |> Enum.map(&to_string/1)
+
+    assigns =
+      assigns
+      |> assign(:selected, selected)
+      |> assign(:name, assigns.form[:tag_ids].name <> "[]")
+
+    ~H"""
+    <fieldset>
+      <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
+      <p :if={@tags == []} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
+      <div :if={@tags != []} class="flex flex-wrap gap-2">
+        <label
+          :for={tag <- @tags}
+          class="inline-flex cursor-pointer items-center gap-1.5 rounded border border-base-content/20 px-2 py-1 text-sm hover:bg-base-200"
+        >
+          <input
+            type="checkbox"
+            name={@name}
+            value={tag.id}
+            checked={to_string(tag.id) in @selected}
+            class="size-4 rounded border border-base-content/30 accent-primary"
+          />
+          {tag.name}
+        </label>
+      </div>
+    </fieldset>
+    """
+  end
+
+  # Featured-image chooser (#154): a thumbnail of the current selection plus a
+  # button that opens the searchable media picker, replacing a <select> that
+  # loaded every asset. The id is carried in a hidden input so it still submits.
+  attr :form, :any, required: true
+  attr :media, :list, required: true
+
+  defp featured_image_field(assigns) do
+    id = AshPhoenix.Form.value(assigns.form, :featured_image_id)
+
+    assigns =
+      assigns
+      |> assign(:field, assigns.form[:featured_image_id])
+      |> assign(:selected, Enum.find(assigns.media, &(to_string(&1.id) == to_string(id))))
+
+    ~H"""
+    <div>
+      <span class="mb-1 block text-sm font-medium text-base-content">
+        {gettext("Featured image")}
+      </span>
+      <input type="hidden" name={@field.name} value={@field.value} />
+      <div class="mt-1 flex flex-wrap items-center gap-3">
+        <img
+          :if={@selected}
+          src={@selected.url}
+          alt=""
+          class="h-16 w-16 rounded border border-base-content/10 object-cover"
+        />
+        <span class="text-sm text-base-content/70">
+          {(@selected && @selected.filename) || gettext("None selected")}
+        </span>
+        <button
+          type="button"
+          phx-click="open_featured_picker"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          {gettext("Choose from library")}
+        </button>
+        <button
+          :if={@selected}
+          type="button"
+          phx-click="clear_featured"
+          class="text-sm text-base-content/70 hover:text-error"
+        >
+          {gettext("Remove")}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
   # Substring filter over filename/alt/caption — instant, no DB round-trip, and
   # matches partial input as the user types (the library's `:search` action is
   # whole-word tsquery, less forgiving for a live picker).
@@ -561,6 +736,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
+  defp pick_index(:featured), do: "featured"
   defp pick_index(index), do: index
 
   attr :block_types, :list, required: true
@@ -652,9 +828,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
       <div class="absolute inset-0 bg-black/40" phx-click="close_picker" aria-hidden="true"></div>
-      <div class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl">
+      <div
+        id="image-picker-dialog"
+        phx-hook="FocusTrap"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="image-picker-title"
+        tabindex="-1"
+        class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl"
+      >
         <div class="mb-3 flex items-center justify-between gap-4">
-          <h2 class="text-lg font-medium">
+          <h2 id="image-picker-title" class="text-lg font-medium">
             {if @index == :new,
               do: gettext("Insert image from library"),
               else: gettext("Choose an image")}
@@ -663,7 +847,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             type="button"
             phx-click="close_picker"
             aria-label={gettext("Close")}
-            class="text-base-content/50 hover:text-base-content"
+            class="text-base-content/70 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
@@ -753,29 +937,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Effective blocks (data + unsaved edits) from the form, for the live preview.
   # Thin `%{type, content}` maps — used by the decoupled (pop-out) preview window.
+  # Thin `%{type, content}` block maps for the decoupled (pop-out) preview, which
+  # renders them through the shared `BlockComponents`. Routed through the SAME
+  # sanitized typed→legacy pipeline as the inline preview (`preview_block_maps`)
+  # and `PreviewLive.content_blocks/1`, so rich-text edits surface as rendered
+  # `legacy_html` rather than the empty Portable Text `body` field that a
+  # primary-field lookup would pick (#134).
   defp preview_blocks(form) do
-    case AshPhoenix.Form.value(form, :blocks) do
-      forms when is_list(forms) -> Enum.map(forms, &block_map/1)
-      _ -> []
-    end
-  end
-
-  defp block_map(%AshPhoenix.Form{} = subform) do
-    mod = block_member(subform)
-
-    %{
-      type: to_string(Kiln.Block.Info.name(mod)),
-      content: to_string(member_primary_value(subform, mod) || "")
-    }
-  end
-
-  # The value of a member's primary (first string/rich_text) field — the closest
-  # analogue to the legacy `content`, for the thin decoupled-preview map.
-  defp member_primary_value(subform, mod) do
-    case primary_field_name(mod) do
-      nil -> nil
-      name -> AshPhoenix.Form.value(subform, name)
-    end
+    form
+    |> preview_block_maps()
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+    |> Enum.map(&%{type: to_string(&1.type), content: &1.content})
   end
 
   # Inline preview rendered through the **same typed serializers that firing
@@ -908,7 +1081,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     ~H"""
     <div class="space-y-2">
-      <p :if={@fields == []} class="text-sm text-base-content/50">
+      <p :if={@fields == []} class="text-sm text-base-content/70">
         {gettext("Section break — no editable fields.")}
       </p>
 
@@ -950,10 +1123,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:related_current, related_current(assigns.kind, assigns.record))
 
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div
         :if={@conflict}
         id="edit-conflict"
+        role="alert"
+        aria-live="assertive"
         class="mb-4 flex flex-wrap items-center gap-3 rounded border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
       >
         <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
@@ -1000,13 +1175,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <.link
               href={~p"/editor/preview/#{@kind}/#{@record.id}"}
               target="_blank"
+              rel="noopener noreferrer"
               class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
             >
               {gettext("Preview")} &nearr;
+              <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
             <.autosave_status :if={@record.state == :draft} state={@save_state} />
             <.workflow_buttons state={@record.state} actor={@actor} />
-            <.button type="submit" variant="primary">{gettext("Save")}</.button>
+            <.button
+              type="submit"
+              variant="primary"
+              disabled={@conflict}
+              phx-disable-with={gettext("Saving…")}
+              title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
+            >
+              {gettext("Save")}
+            </.button>
           </div>
         </div>
 
@@ -1047,6 +1232,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <div class="space-y-3">
               <h2 class="text-lg font-medium">{gettext("Blocks")}</h2>
 
+              <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
+              <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
+
               <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
                 <.inputs_for :let={bf} field={@form[:blocks]}>
                   <div
@@ -1059,10 +1247,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <span
                           data-drag-handle
                           aria-label={gettext("Drag to reorder")}
-                          class="cursor-grab text-base-content/40 hover:text-base-content/70"
+                          class="cursor-grab text-base-content/70 hover:text-base-content/70"
                         >
                           <.icon name="hero-bars-3" class="size-5" />
                         </span>
+                        <%!-- Keyboard-accessible reorder, alongside the drag handle (#171). --%>
+                        <div class="flex flex-col">
+                          <button
+                            type="button"
+                            phx-click="move_block"
+                            phx-value-index={bf.index}
+                            phx-value-dir="up"
+                            disabled={bf.index == 0}
+                            aria-label={gettext("Move block up")}
+                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <.icon name="hero-chevron-up" class="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            phx-click="move_block"
+                            phx-value-index={bf.index}
+                            phx-value-dir="down"
+                            disabled={bf.index == blocks_count(@form) - 1}
+                            aria-label={gettext("Move block down")}
+                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <.icon name="hero-chevron-down" class="size-4" />
+                          </button>
+                        </div>
                         <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
                           {dsl_label(block_type_string(bf))}
                         </span>
@@ -1071,30 +1284,52 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         type="button"
                         phx-click="remove_block"
                         phx-value-path={bf.name}
+                        data-confirm={gettext("Delete this block? This can't be undone.")}
                         aria-label={gettext("Remove block")}
-                        class="text-base-content/50 hover:text-error"
+                        class="text-base-content/70 hover:text-error"
                       >
                         <.icon name="hero-trash" class="size-5" />
                       </button>
                     </div>
+                    <%!-- The collab lock UI (ring + "who's editing" badge) lives on
+                          this non-ignored wrapper so it can update, while the inner
+                          editor stays phx-update="ignore" (#140). --%>
                     <div
                       :if={block_type_string(bf) == "rich_text"}
-                      id={"rt-#{bf.index}"}
-                      phx-hook="RichText"
-                      phx-update="ignore"
-                      data-content={bf[:legacy_html].value || ""}
+                      class={["relative", lock_ring(@locked_fields, bf[:legacy_html].name)]}
                     >
-                      <div data-toolbar class="mb-1 flex flex-wrap gap-1"></div>
-                      <div data-editor></div>
-                      <p class="mt-1 text-xs text-base-content/50">
-                        {gettext("Type / for commands.")}
-                      </p>
-                      <input
-                        type="hidden"
-                        name={bf[:legacy_html].name}
-                        value={bf[:legacy_html].value}
-                        data-input
-                      />
+                      <.field_cursors field={bf[:legacy_html].name} cursors={@cursors} />
+                      <div
+                        id={"rt-#{bf.index}-v#{@editor_version}"}
+                        phx-hook="RichText"
+                        phx-update="ignore"
+                        data-content={bf[:legacy_html].value || ""}
+                        data-editor-label={gettext("Rich text editor")}
+                        data-lock-field={bf[:legacy_html].name}
+                        role="group"
+                        aria-label={gettext("Rich text block")}
+                      >
+                        <div
+                          data-toolbar
+                          role="toolbar"
+                          aria-label={gettext("Text formatting")}
+                          class="mb-1 flex flex-wrap gap-1"
+                        >
+                        </div>
+                        <div data-editor></div>
+                        <%!-- Distinguish this in-text slash menu from the block
+                              inserter's "Add block /" so the two / systems are
+                              clearly scoped (#150). --%>
+                        <p class="mt-1 text-xs text-base-content/70">
+                          {gettext("Type / for text formatting within this block.")}
+                        </p>
+                        <input
+                          type="hidden"
+                          name={bf[:legacy_html].name}
+                          value={bf[:legacy_html].value}
+                          data-input
+                        />
+                      </div>
                     </div>
                     <div :if={block_type_string(bf) == "image"} class="space-y-2">
                       <img
@@ -1152,25 +1387,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   options={Enum.map(@categories, &{&1.name, &1.id})}
                 />
 
-                <.input
-                  field={@form[:tag_ids]}
-                  type="select"
-                  multiple
-                  label={gettext("Tags")}
-                  value={selected_ids(@form, :tag_ids, current_ids(@record.tags))}
-                  options={Enum.map(@tags, &{&1.name, &1.id})}
-                />
-                <p class="-mt-1 text-xs text-base-content/50">
-                  {gettext("Hold ⌘/Ctrl to select multiple.")}
-                </p>
+                <.tag_picker form={@form} tags={@tags} record={@record} />
 
-                <.input
-                  field={@form[:featured_image_id]}
-                  type="select"
-                  label={gettext("Featured image")}
-                  prompt="— None —"
-                  options={Enum.map(@media, &{&1.filename, &1.id})}
-                />
+                <.featured_image_field form={@form} media={@media} />
 
                 <.input
                   field={@form[@related_field]}
@@ -1273,11 +1492,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </div>
 
           <div class="lg:sticky lg:top-4 lg:self-start">
-            <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-            <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
-              <h1 class="text-2xl font-bold">{@form[:title].value}</h1>
-              {preview_html(@form)}
-            </article>
+            <%!-- Mobile (#138): a collapsed disclosure so the preview doesn't bury
+                  the form's Save/SEO/version sections below a full-height panel. --%>
+            <details class="rounded border border-base-content/15 p-3 lg:hidden">
+              <summary class="cursor-pointer text-lg font-medium">{gettext("Preview")}</summary>
+              <div class="mt-3">
+                <.preview_article form={@form} />
+              </div>
+            </details>
+
+            <%!-- Desktop: the preview sits inline as the sticky second column. --%>
+            <div class="hidden lg:block">
+              <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
+              <.preview_article form={@form} />
+            </div>
           </div>
         </div>
       </.form>
@@ -1347,13 +1575,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  # The live preview article (title + rendered blocks). Shared by the desktop
+  # sticky column and the mobile collapsible disclosure (#138). The previewed
+  # title is an h2 so the editor keeps a single logical h1 (#174).
+  attr :form, :any, required: true
+
+  defp preview_article(assigns) do
+    ~H"""
+    <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
+      <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
+      {preview_html(@form)}
+    </article>
+    """
+  end
+
   attr :state, :atom, required: true
 
-  # Draft autosave indicator shown next to the workflow/Save buttons.
+  # Draft autosave indicator shown next to the workflow/Save buttons. Covers the
+  # in-flight (:saving) and validation-failure (:error) states too (#136).
   defp autosave_status(assigns) do
     ~H"""
-    <span class="text-xs text-base-content/50" aria-live="polite">
-      {if @state == :unsaved, do: gettext("Unsaved changes"), else: gettext("Saved")}
+    <span
+      class={["text-xs", (@state == :error && "text-error") || "text-base-content/70"]}
+      aria-live="polite"
+    >
+      <%= case @state do %>
+        <% :saving -> %>
+          {gettext("Saving…")}
+        <% :saved -> %>
+          {gettext("Saved")}
+        <% :error -> %>
+          {gettext("Couldn't autosave — check for errors")}
+        <% _ -> %>
+          {gettext("Unsaved changes")}
+      <% end %>
     </span>
     """
   end
@@ -1368,6 +1623,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="submit"
+      phx-disable-with={gettext("Submitting…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Submit for review")}
@@ -1377,6 +1633,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="publish"
+      phx-disable-with={gettext("Publishing…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {if @state == :in_review, do: gettext("Approve & publish"), else: gettext("Publish")}
@@ -1386,13 +1643,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="return"
+      phx-disable-with={gettext("Working…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Request changes")}
     </button>
     <span
       :if={@state == :in_review and @actor.role == :editor}
-      class="text-xs text-base-content/50"
+      class="text-xs text-base-content/70"
     >
       {gettext("Awaiting admin approval")}
     </span>
@@ -1401,6 +1659,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       type="button"
       phx-click="workflow"
       phx-value-action="unpublish"
+      phx-disable-with={gettext("Working…")}
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Unpublish")}

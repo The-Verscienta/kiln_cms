@@ -190,6 +190,117 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # Regression for #183: the JSON:API must not expose author PII. User is not a
+  # JSON:API resource (the Accounts domain has no AshJsonApi router), so the
+  # author relationship is not includable and the post payload carries only the
+  # opaque `author_id` foreign key — never email or role.
+  describe "author PII redaction (#183)" do
+    test "?include=author is rejected — author is not an exposed resource" do
+      admin = user(:admin)
+      post = published_post(%{title: "P"}, admin)
+
+      assert {400, %{"errors" => [%{"code" => "invalid_includes"}]}} =
+               api_get("/api/json/posts/#{post.id}?include=author")
+    end
+
+    test "a post payload exposes author_id but never author email or role" do
+      admin = user(:admin)
+      post = published_post(%{title: "P"}, admin)
+
+      assert {200, %{"data" => data}} = api_get("/api/json/posts/#{post.id}")
+
+      # The opaque FK is fine; the author's PII must not appear anywhere.
+      serialized = Jason.encode!(data)
+      refute serialized =~ to_string(admin.email)
+      refute serialized =~ ~s("email")
+      refute serialized =~ ~s("role")
+    end
+  end
+
+  # #185: taxonomy is now reachable over JSON:API (parity with GraphQL), not
+  # GraphQL-only.
+  describe "taxonomy" do
+    test "lists categories and fetches one by slug and by id" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      assert {200, list} = api_get("/api/json/categories?filter[id]=#{cat.id}")
+      assert ids(list) == [cat.id]
+
+      assert {200, %{"data" => by_slug}} = api_get("/api/json/categories/by-slug/#{cat.slug}")
+      assert by_slug["id"] == cat.id
+      assert by_slug["attributes"]["name"] == cat.name
+
+      assert {200, %{"data" => by_id}} = api_get("/api/json/categories/#{cat.id}")
+      assert by_id["id"] == cat.id
+    end
+
+    test "lists tags and fetches one by slug" do
+      admin = user(:admin)
+
+      tag =
+        CMS.create_tag!(%{name: "Tag #{System.unique_integer([:positive])}", slug: slug()},
+          actor: admin
+        )
+
+      assert {200, list} = api_get("/api/json/tags?filter[id]=#{tag.id}")
+      assert ids(list) == [tag.id]
+
+      assert {200, %{"data" => by_slug}} = api_get("/api/json/tags/by-slug/#{tag.slug}")
+      assert by_slug["id"] == tag.id
+    end
+  end
+
+  # #186: semantic search is reachable over JSON:API (parity with GraphQL). When
+  # embeddings are unavailable (test env) it degrades to an empty 200, not an error.
+  describe "semantic search" do
+    test "the semantic-search route responds (empty when embeddings unavailable)" do
+      admin = user(:admin)
+      _post = published_post(%{title: "Semantic"}, admin)
+
+      # Arguments are top-level query params (query is required).
+      assert {200, %{"data" => data}} =
+               api_get("/api/json/posts/semantic-search?query=anything&locale=en")
+
+      assert is_list(data)
+
+      # Pages have the route too.
+      assert {200, %{"data" => _}} =
+               api_get("/api/json/pages/semantic-search?query=anything&locale=en")
+
+      # The query argument is required.
+      assert {400, %{"errors" => [%{"code" => "required"} | _]}} =
+               api_get("/api/json/posts/semantic-search")
+    end
+  end
+
+  # #197: HTTP contract coverage for the keyword search + autocomplete routes.
+  describe "search and autocomplete over HTTP" do
+    test "keyword search returns matching published posts" do
+      admin = user(:admin)
+      term = "httpsearch#{System.unique_integer([:positive])}"
+      hit = published_post(%{title: "#{term} match"}, admin)
+      _miss = published_post(%{title: "unrelated"}, admin)
+
+      assert {200, body} = api_get("/api/json/posts/search?query=#{term}&locale=en")
+      assert ids(body) == [hit.id]
+    end
+
+    test "autocomplete returns title prefix matches" do
+      admin = user(:admin)
+      term = "Autohttp#{System.unique_integer([:positive])}"
+      hit = published_post(%{title: "#{term} suggestion"}, admin)
+
+      assert {200, body} = api_get("/api/json/posts/autocomplete?prefix=#{term}&locale=en")
+      assert hit.id in ids(body)
+    end
+
+    test "keyword search requires the query argument" do
+      assert {400, %{"errors" => [%{"code" => "required"} | _]}} =
+               api_get("/api/json/posts/search")
+    end
+  end
+
   describe "single record" do
     test "fetches a published post by id" do
       admin = user(:admin)
@@ -200,12 +311,22 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert data["attributes"]["title"] == "Single"
     end
 
-    test "hides an unpublished post by id from anonymous consumers" do
+    # #192: a stable contract — an unpublished record is filtered out (the read
+    # policy's published filter applies), so anonymous and bearer-other callers
+    # get a 404 (not a 403 that would reveal the draft exists).
+    test "hides an unpublished post by id from anonymous consumers (stable 404)" do
       admin = user(:admin)
       draft = make_post(%{title: "Hidden"}, admin)
 
-      assert {status, _} = api_get("/api/json/posts/#{draft.id}")
-      assert status in [403, 404]
+      assert {404, _} = api_get("/api/json/posts/#{draft.id}")
+    end
+
+    test "hides an unpublished post by id from a bearer viewer (stable 404)" do
+      admin = user(:admin)
+      viewer = user(:viewer)
+      draft = make_post(%{title: "Hidden"}, admin)
+
+      assert {404, _} = api_get("/api/json/posts/#{draft.id}", token: token(viewer))
     end
   end
 

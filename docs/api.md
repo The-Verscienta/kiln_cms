@@ -99,6 +99,25 @@ strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 token = user.__metadata__.token
 ```
 
+### Reading drafts
+
+A bearer token widens the **`:read` and `:search`** policies for editors/admins,
+but **not every query returns drafts**. Pick the right surface:
+
+| Goal | Surface | Returns drafts with bearer? |
+|------|---------|------------------------------|
+| List / filter drafts | JSON:API `GET /api/json/<type>?filter[state]=draft` | ✅ yes |
+| Search drafts | JSON:API `/search` · GraphQL `searchPosts`/`searchPages` | ✅ yes |
+| Fetch one **by id** | JSON:API `GET /api/json/<type>/:id` | ✅ yes |
+| Fetch one **by slug** | GraphQL `postBySlug`/`pageBySlug`, `categoryBySlug`, `tagBySlug` | ❌ **no — published only** |
+| Share a specific draft | `GET /preview/:token` (signed link) | n/a (no account needed) |
+
+> **GraphQL `*BySlug` never returns drafts.** Those queries run the
+> `:public_by_slug` action, which **hard-filters `state == :published`** inside
+> the action — independent of the actor. A bearer token makes no difference; a
+> draft slug always resolves to `null`. To fetch a known draft slug, use the
+> JSON:API filter (`filter[slug]=<slug>&filter[state]=draft`) or a preview token.
+
 ## Core content endpoints
 
 Full filtering / sorting / pagination reference: **[json-api.md](json-api.md)**.
@@ -106,9 +125,20 @@ A quick map:
 
 | Resource  | Collection                  | Single record                   | Extra reads                                   |
 |-----------|-----------------------------|---------------------------------|-----------------------------------------------|
-| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`       | `/pages/search`, `/pages/autocomplete`        |
-| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`       | `/posts/published`, `/posts/search`, `/posts/autocomplete` |
+| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`       | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete` |
+| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`       | `/posts/published`, `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete` |
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`                         |
+| Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id`  | `/categories/by-slug/:slug`                   |
+| Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
+
+Taxonomy (Category/Tag) is world-readable and now mirrors the GraphQL taxonomy
+surface over JSON:API (#185) — list, fetch by id, or fetch by slug.
+
+`*/search` (keyword) and `*/semantic-search` (vector) take their inputs as
+top-level query params — `?query=<text>&locale=<code>` (plus optional
+`category_id`, `author_id`, `state`, `tag_ids` facets on keyword search).
+Semantic search requires the embedding model (`KilnCMS.Search.semantic?`); when
+it's unavailable the endpoint returns an empty result set rather than an error.
 
 All requests use the JSON:API media type:
 
@@ -146,6 +176,60 @@ Over the limit returns **429** with a `retry-after` header.
 
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
-| `api`  | `/api/json/*`   | 120 requests / minute |
+| `api`  | `/api/json/*` and `GET /api/content/:type/:slug` (fired artifacts) | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 20 requests / minute  |
+| `docs` | `/api/json/swaggerui` | 60 requests / minute |
+
+## Error responses
+
+All surfaces return errors as a JSON object with an **`errors` array**, each
+entry carrying a string `status` (HTTP code), a machine-readable `code`, and a
+human `detail`:
+
+```jsonc
+{ "errors": [ { "status": "404", "code": "not_found", "detail": "Content not found." } ] }
+```
+
+This is the JSON:API shape; the headless sign-in, fired-artifact
+(`not_found` / `artifact_compiling`), and preview-token (`invalid_preview`)
+endpoints use the same envelope (#190). GraphQL follows the GraphQL spec's
+top-level `errors` array instead.
+
+## Versioning & stability
+
+The HTTP paths are currently **unversioned** (`/api/json`, `/api/content`,
+`/gql`, `/preview`). The OpenAPI document's `info.version` tracks the **app
+release**, not the HTTP contract — don't pin behaviour to it.
+
+**What's stable** (changes only via the breaking-change process below):
+
+- The **path layout** of the published read surfaces above.
+- The **published-content read contract**: resource types, their `public?`
+  attribute names/types, the JSON:API filter/sort/page semantics, and the fired
+  artifact surfaces (`json` / `json_ld` / `web`).
+- Author PII is never exposed (only `authorId` + display `name`); `*BySlug`
+  returns published content only. See the consumer guide.
+- A JSON:API GET of an **unpublished** record returns **404** (not 403) for
+  anyone without read access — the published filter removes it, so the response
+  never reveals that a draft exists. Branch on 404 for "not available".
+
+**What may change without notice:**
+
+- Anything behind a bearer token that mirrors editor/admin internals beyond the
+  documented read fields.
+- Result *ordering* where not explicitly specified (use `sort=`).
+- Non-`public?` internals (never serialized) and the raw editable block tree
+  (intentionally not exposed — render from fired artifacts).
+
+**Breaking-change process.** A change that removes/renames a `public?` field or
+alters documented response semantics is a breaking change. When one is
+unavoidable it will be introduced under a **`/api/v1/…` prefix** (the current
+unprefixed paths becoming the implicit `v1`), with the previous version kept for
+a deprecation window announced in the changelog and reflected in the OpenAPI
+`deprecated` markers. Adding new endpoints, optional query params, or new
+`public?` fields is **not** breaking and can land at any time.
+
+To insulate yourself: consume the published OpenAPI spec (`/api/json/open_api`),
+request only the fields you use (GraphQL selection / JSON:API sparse fieldsets),
+and treat unknown fields as additive.

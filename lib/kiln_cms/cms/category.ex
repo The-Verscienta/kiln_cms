@@ -32,6 +32,16 @@ defmodule KilnCMS.CMS.Category do
 
   json_api do
     type "category"
+
+    # JSON:API parity with the GraphQL taxonomy surface (#185): list, fetch by
+    # slug, and fetch by id. Taxonomy is world-readable (D7).
+    routes do
+      base "/categories"
+      index :read
+      get :by_slug, route: "/by-slug/:slug"
+      # `/:id` last so it can't shadow the static sub-path above.
+      get :read
+    end
   end
 
   # AshAdmin: group taxonomy together and label categories by name (issue #25).

@@ -84,13 +84,24 @@ defmodule KilnCMS.Accounts.User do
       authorize_if always()
     end
 
-    # The role is visible only to admins or the user themselves.
-    field_policy :role do
+    # Author PII (#183): the `author` relationship on CMS content is public, so
+    # these fields would otherwise serialize via JSON:API `?include=author` /
+    # GraphQL `author { ... }`. Restrict email, role and notification preferences
+    # to admins or the user themselves, so anonymous and bearer-other API callers
+    # only ever get the public byline (`id`, `name`). Internal byline/JSON-LD
+    # loads run with `authorize?: false`, so they still read `name`.
+    field_policy [
+      :email,
+      :role,
+      :notify_on_review_request,
+      :notify_on_publish,
+      :notify_on_return_to_draft
+    ] do
       authorize_if actor_attribute_equals(:role, :admin)
       authorize_if expr(id == ^actor(:id))
     end
 
-    # Everything else (id, email, timestamps) follows the resource read policy.
+    # Everything else (id, name, timestamps) follows the resource read policy.
     field_policy :* do
       authorize_if always()
     end
@@ -333,6 +344,9 @@ defmodule KilnCMS.Accounts.User do
   attributes do
     uuid_primary_key :id
 
+    # Must stay `public?` — AshAuthentication requires the password identity field
+    # to be public. It is kept off the public author byline by the field policy
+    # below (#183), which restricts email reads to admins / the user themselves.
     attribute :email, :ci_string do
       allow_nil? false
       public? true
@@ -359,6 +373,9 @@ defmodule KilnCMS.Accounts.User do
 
     # RBAC role. Defaults to the least-privileged role so self-registration
     # can never grant elevated access; promote via a separate admin action.
+    # `public?` for the API schema, but never leaked on the author byline: the
+    # field policy below restricts role reads to admins / the user themselves
+    # (#183), so anonymous and bearer-other API callers can't read it.
     attribute :role, :atom do
       constraints one_of: [:admin, :editor, :viewer]
       default :viewer
@@ -370,6 +387,9 @@ defmodule KilnCMS.Accounts.User do
     # every notification defaults on, and a user can mute each event for their
     # own account via `:update_notification_prefs`. `KilnCMS.Notifications`
     # honours these before enqueuing mail.
+    # Personal account settings — kept off the public author byline by the field
+    # policy below (#183), which restricts these to admins / the user themselves.
+    # Edited via the self-service `:update_notification_prefs` action.
     attribute :notify_on_review_request, :boolean do
       default true
       allow_nil? false

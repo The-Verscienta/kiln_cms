@@ -1,5 +1,8 @@
 defmodule KilnCMS.Webhooks.SafeUrlTest do
-  use ExUnit.Case, async: true
+  # async: false — `with_config` mutates the global SafeUrl Application env
+  # (e.g. flipping resolve_dns on), which would otherwise race async tests that
+  # read it (the webhook URL validator resolves DNS based on that config).
+  use ExUnit.Case, async: false
 
   alias KilnCMS.Webhooks.SafeUrl
 
@@ -78,6 +81,15 @@ defmodule KilnCMS.Webhooks.SafeUrlTest do
       with_config([require_https: false, resolve_dns: true], fn ->
         assert {:error, message} = SafeUrl.validate("http://127.0.0.1.nip.io/hook")
         assert message =~ "private" or message =~ "loopback" or message =~ "resolved"
+      end)
+    end
+
+    # #223: a slow/blocked DNS lookup must fail fast instead of tying up the
+    # webhook worker. A zero timeout forces the resolution-timeout path.
+    test "fails fast when DNS resolution exceeds the timeout" do
+      with_config([require_https: false, resolve_dns: true, dns_timeout_ms: 0], fn ->
+        assert {:error, "hostname resolution timed out"} =
+                 SafeUrl.validate("https://example.com/hook")
       end)
     end
   end

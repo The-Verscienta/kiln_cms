@@ -187,7 +187,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -289,7 +289,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
           <div :if={!editing?(@edit, @kind, record.id)} class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="truncate font-medium">{record.name}</p>
-              <p class="truncate text-xs text-base-content/50">
+              <p class="truncate text-xs text-base-content/70">
                 <code>{record.slug}</code>
                 · {record.page_count} {pluralize(record.page_count, "page")}, {record.post_count} {pluralize(
                   record.post_count,

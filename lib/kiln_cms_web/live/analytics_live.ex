@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div class="space-y-6">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -78,7 +78,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
         </div>
 
         <div class="rounded-lg border border-base-content/10 p-4">
-          <p class="text-xs uppercase tracking-wide text-base-content/50">{gettext("Total views")}</p>
+          <p class="text-xs uppercase tracking-wide text-base-content/70">{gettext("Total views")}</p>
           <p class="mt-1 text-3xl font-semibold">{@total}</p>
         </div>
 
@@ -89,7 +89,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
           </p>
 
           <table :if={@rows != []} class="w-full text-sm">
-            <thead class="text-left text-xs uppercase tracking-wide text-base-content/50">
+            <thead class="text-left text-xs uppercase tracking-wide text-base-content/70">
               <tr class="border-b border-base-content/10">
                 <th class="py-2">{gettext("Content")}</th>
                 <th class="py-2">{gettext("Type")}</th>
@@ -108,9 +108,10 @@ defmodule KilnCMSWeb.AnalyticsLive do
                     :if={row[:public]}
                     href={row.public}
                     target="_blank"
+                    rel="noopener noreferrer"
                     class="ml-2 text-xs text-primary hover:underline"
                   >
-                    view &nearr;
+                    view &nearr; <span class="sr-only">{gettext("(opens in a new tab)")}</span>
                   </a>
                 </td>
                 <td class="py-2 capitalize text-base-content/70">{row.type}</td>

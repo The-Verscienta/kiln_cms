@@ -49,6 +49,36 @@ defmodule KilnCMS.HTMLSanitizerTest do
       assert HTMLSanitizer.sanitize_rich_text(nil) == ""
       assert HTMLSanitizer.sanitize_rich_text("") == ""
     end
+
+    test "preserves safe https / mailto / relative hyperlinks (#148)" do
+      https = "https" <> @colon <> "//example.com/read-more"
+      mailto = "mailto" <> @colon <> "hi@example.com"
+
+      for href <- [https, mailto, "/blog/post", "#section"] do
+        html = ["<p><a href=", @quote, href, @quote, ">link</a></p>"] |> Enum.join()
+        sanitized = HTMLSanitizer.sanitize_rich_text(html)
+
+        assert sanitized =~ "href=" <> @quote <> href <> @quote,
+               "expected href #{href} to survive sanitization"
+
+        assert sanitized =~ ">link</a>"
+      end
+    end
+
+    test "strips dangerous / disallowed link schemes but keeps the text (#148)" do
+      js = "javascript" <> @colon <> "alert(1)"
+      data = "data" <> @colon <> "text/plain;base64,ABC"
+      # bare http is not on the https/mailto allowlist
+      http = "http" <> @colon <> "//insecure.example"
+
+      for href <- [js, data, http] do
+        html = ["<p><a href=", @quote, href, @quote, ">click</a></p>"] |> Enum.join()
+        sanitized = HTMLSanitizer.sanitize_rich_text(html)
+
+        refute sanitized =~ href, "expected unsafe href #{href} to be stripped"
+        assert sanitized =~ "click"
+      end
+    end
   end
 
   describe "safe_embed_url/1" do

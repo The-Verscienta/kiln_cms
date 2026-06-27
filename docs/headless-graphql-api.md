@@ -42,7 +42,7 @@ from its singular type name. For `post`:
 |-------|--------|-----------|---------|
 | `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!` | one published post (or `null`) |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
-| `publishedPosts` | `:published` | — | published posts, newest first *(posts only)* |
+| `publishedPosts` | `:published` | `limit`, `offset` | published posts, newest first, **offset-paginated** (`PageOfPost`) *(posts only)* |
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds` | full-text matches, relevance-ranked |
 | `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
@@ -85,7 +85,13 @@ categories) `pages` / `posts` relationships.
   editable tree. Render content from the fired artifacts or your own block
   renderer.
 - **Internal fields** — `search_text`, `embedding`, `published_version_id`,
-  `lock_version`, the `author` PII, etc. are not `public?` and never serialized.
+  `lock_version`, etc. are not `public?` and never serialized.
+- **Author PII** — content exposes only the opaque `authorId` foreign key. `User`
+  has no GraphQL type (and no JSON:API resource), so there is **no nested `author`
+  object** through which `email` or `role` could be selected. Even if the author
+  surface were ever widened, a `User` field policy keeps email, role and
+  notification preferences admin/self-only (#183). The display `name` is read
+  server-side (`authorize?: false`) for the JSON-LD/byline only.
 
 ## Playground examples
 
@@ -121,14 +127,23 @@ Variables:
 
 ### List the published blog index
 
+`publishedPosts` is **offset-paginated** (parity with the JSON:API `/published`
+feed) — it returns a `PageOfPost` with `results`, `count`, and `hasNextPage`.
+`limit` is capped server-side (max 100, default 25), so use `limit`/`offset` to
+page.
+
 ```graphql
 {
-  publishedPosts {
-    id
-    title
-    excerpt
-    publishedAt
-    category { name slug }
+  publishedPosts(limit: 25, offset: 0) {
+    count
+    hasNextPage
+    results {
+      id
+      title
+      excerpt
+      publishedAt
+      category { name slug }
+    }
   }
 }
 ```
@@ -165,6 +180,15 @@ query Search($q: String!, $categoryId: ID) {
 ```json
 { "q": "elixir", "categoryId": null }
 ```
+
+> ⚠️ **`highlight` is untrusted HTML — escape it before rendering.** The field is
+> a Postgres `ts_headline` snippet that wraps matched terms in `<mark>…</mark>`.
+> The surrounding text is **not** HTML-escaped, so a malicious title/body could
+> inject markup. Do **not** assign it to `innerHTML` directly. Either escape the
+> whole string and then re-introduce `<mark>` yourself, or run it through a
+> sanitizer that allows only `<mark>` (the server's own admin UI uses
+> `KilnCMS.Search.Highlight.to_safe_html/1`, which escapes the text and keeps
+> only `<mark>`). If you don't need highlighting, omit the field.
 
 ### Title autocomplete (typeahead)
 
@@ -209,6 +233,22 @@ curl -s http://localhost:4000/gql \
   }'
 ```
 
-Add `-H 'authorization: Bearer <token>'` to authenticate as an editor/admin and
-see draft content through the same queries (the read policy widens for
-authenticated editors).
+### Bearer tokens and drafts
+
+Add `-H 'authorization: Bearer <token>'` to authenticate as an editor/admin. The
+bearer **widens the `:read` and `:search` policies**, so authenticated editors
+see drafts through the *list/search* surfaces — e.g. `searchPosts`/`searchPages`
+return drafts, and the JSON:API `:read` routes accept `filter[state]=draft`.
+
+It does **not** widen the `*BySlug` queries. `postBySlug` / `pageBySlug` (and
+`categoryBySlug` / `tagBySlug`) run the `:public_by_slug` action, which
+**hard-filters `state == :published`** in the action itself — independent of the
+actor. A bearer token therefore makes no difference: a draft slug always returns
+`null`, authenticated or not.
+
+To fetch a specific draft by slug:
+
+- **JSON:API** (bearer): `GET /api/json/posts?filter[slug]=<slug>&filter[state]=draft`
+- **Share link**: `GET /preview/:token` (per-draft signed token, no account needed)
+
+See `docs/api.md` → "Reading drafts" for the full playbook.

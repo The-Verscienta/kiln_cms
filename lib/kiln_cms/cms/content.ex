@@ -94,13 +94,14 @@ defmodule KilnCMS.CMS.Content do
       end
 
     # The matching GraphQL query for the `:published` read (post index), only
-    # present when the type opts into `published?`. `paginate_with: nil` keeps it
-    # a plain list in GraphQL — the `:published` read is paginated for the
-    # JSON:API feed (#33), but the delivery GraphQL surface stays unpaginated.
+    # present when the type opts into `published?`. Offset-paginated for parity
+    # with the JSON:API `/published` feed (#195) — the `:published` action caps
+    # results at `max_page_size` (100, default 25) so the delivery surface can't
+    # be asked to load every published row at once.
     published_query =
       if published? do
         quote do
-          list unquote(:"published_#{type}s"), :published, paginate_with: nil
+          list unquote(:"published_#{type}s"), :published, paginate_with: :offset
         end
       end
 
@@ -171,6 +172,10 @@ defmodule KilnCMS.CMS.Content do
           # documented in `docs/json-api.md`.
           index :read
           index :search, route: "/search"
+          # Semantic (vector) search over the same surface as GraphQL's
+          # `semanticSearch*` (#186). Degrades to no results when embeddings are
+          # unavailable (KilnCMS.Search.semantic? false).
+          index :search_semantic, route: "/semantic-search"
           index :autocomplete, route: "/autocomplete"
           unquote(published_route)
           # `/:id` last so it can't shadow the static sub-paths above.
@@ -747,7 +752,10 @@ defmodule KilnCMS.CMS.Content do
 
       relationships do
         # The user who authored this record. Nullable so existing/system content
-        # without an actor is valid. Not exposed via the public APIs.
+        # without an actor is valid. Exposed via the public APIs, but only the
+        # safe byline fields (`id`, `name`) serialize — email, role, and notify
+        # prefs are `public? false` on User (#183), so `?include=author` /
+        # `author { ... }` can never return author PII.
         belongs_to :author, KilnCMS.Accounts.User do
           allow_nil? true
           public? true

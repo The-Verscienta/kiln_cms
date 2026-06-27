@@ -6,11 +6,23 @@ defmodule KilnCMSWeb.ContentI18nTest do
   use KilnCMSWeb.ConnCase, async: true
 
   alias KilnCMS.CMS.Page
+  alias KilnCMS.CMS.Post
+  alias KilnCMS.I18n
 
   defp slug, do: "i18n-#{System.unique_integer([:positive])}"
 
   defp page(attrs) do
     Ash.Seed.seed!(Page, Map.merge(%{state: :published, locale: "en"}, attrs))
+  end
+
+  defp post(attrs) do
+    Ash.Seed.seed!(
+      Post,
+      Map.merge(
+        %{state: :published, locale: "en", published_at: DateTime.utc_now()},
+        attrs
+      )
+    )
   end
 
   test "the default locale is served at the unprefixed URL", %{conn: conn} do
@@ -93,6 +105,9 @@ defmodule KilnCMSWeb.ContentI18nTest do
 
     html = conn |> get(~p"/#{s}") |> html_response(200)
     assert html =~ ~s(aria-label="Language")
+    # #163: the locale links have real tap-target padding and mark the current one.
+    assert html =~ "py-1.5"
+    assert html =~ ~s(aria-current="true")
   end
 
   test "no language switcher for single-locale content", %{conn: conn} do
@@ -101,5 +116,142 @@ defmodule KilnCMSWeb.ContentI18nTest do
 
     html = conn |> get(~p"/#{s}") |> html_response(200)
     refute html =~ ~s(aria-label="Language")
+  end
+
+  # #146: internal public links must keep the active locale prefix.
+  describe "locale-aware public links" do
+    test "blog post links and the Blog nav keep the locale prefix on /fr/blog", %{conn: conn} do
+      s = slug()
+      post(%{title: "FR Post", slug: s, locale: "fr"})
+
+      html = conn |> get("/fr/blog") |> html_response(200)
+
+      # The post link is locale-prefixed, not the default unprefixed form.
+      assert html =~ ~s(href="/fr/blog/#{s}")
+      refute html =~ ~s(href="/blog/#{s}")
+      # The header Blog nav link is prefixed too.
+      assert html =~ ~s(href="/fr/blog")
+    end
+
+    test "default-locale blog links stay unprefixed", %{conn: conn} do
+      s = slug()
+      post(%{title: "EN Post", slug: s, locale: "en"})
+
+      html = conn |> get("/blog") |> html_response(200)
+
+      assert html =~ ~s(href="/blog/#{s}")
+      refute html =~ ~s(href="/fr/blog/#{s}")
+    end
+  end
+
+  # #175: a skip link is the first focusable element and targets <main id="main">.
+  test "public pages render a skip link to main content", %{conn: conn} do
+    s = slug()
+    page(%{title: "About", slug: s, locale: "en"})
+
+    html = conn |> get(~p"/#{s}") |> html_response(200)
+
+    assert html =~ ~s(href="#main")
+    assert html =~ "Skip to main content"
+    # <main> carries the id="main" target (Phoenix may inject a phx-r debug attr).
+    assert html =~ ~r/<main[^>]*\sid="main"/
+  end
+
+  # #165: published posts show an author byline when the author has a name.
+  test "a public post shows the author byline", %{conn: conn} do
+    author =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "byline-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin,
+        name: "Ada Byline"
+      })
+
+    s = slug()
+    post(%{title: "Bylined", slug: s, locale: "en", author_id: author.id})
+
+    html = conn |> get("/blog/#{s}") |> html_response(200)
+    assert html =~ "By Ada Byline"
+  end
+
+  # #162: the blog index localizes its SEO title and shows the current page.
+  test "blog index has a localized title and a page indicator", %{conn: conn} do
+    for i <- 1..21, do: post(%{title: "Paged #{i}", slug: slug(), locale: "en"})
+
+    html = conn |> get("/blog") |> html_response(200)
+    assert html =~ "<title" and html =~ "Blog"
+    assert html =~ "Page 1"
+
+    page2 = conn |> get("/blog?page=2") |> html_response(200)
+    assert page2 =~ "Page 2"
+  end
+
+  # #164: complete social meta and locale-aware JSON-LD.
+  test "a fr post has Twitter/OG meta and locale-prefixed JSON-LD", %{conn: conn} do
+    s = slug()
+    post(%{title: "FR Social", slug: s, locale: "fr"})
+
+    html = conn |> get("/fr/blog/#{s}") |> html_response(200)
+
+    assert html =~ ~s(name="twitter:card")
+    assert html =~ ~s(property="og:url")
+    # The JSON-LD article/breadcrumb URLs carry the /fr locale prefix.
+    assert html =~ "/fr/blog/#{s}"
+  end
+
+  # #149: public on-site search over published content.
+  describe "public search" do
+    test "finds published content and links to it", %{conn: conn} do
+      s = slug()
+      term = "uniquesearch#{System.unique_integer([:positive])}"
+      post(%{title: "#{term} post", slug: s, locale: "en", excerpt: "a teaser"})
+
+      html = conn |> get("/search?q=#{term}") |> html_response(200)
+
+      assert html =~ "#{term} post"
+      assert html =~ ~s(href="/blog/#{s}")
+    end
+
+    test "does not surface drafts", %{conn: conn} do
+      term = "draftsearch#{System.unique_integer([:positive])}"
+
+      Ash.Seed.seed!(Post, %{
+        title: "#{term} draft",
+        slug: slug(),
+        locale: "en",
+        state: :draft
+      })
+
+      html = conn |> get("/search?q=#{term}") |> html_response(200)
+      refute html =~ "#{term} draft"
+    end
+
+    test "shows an empty state for no matches", %{conn: conn} do
+      html =
+        conn
+        |> get("/search?q=zzznomatch#{System.unique_integer([:positive])}")
+        |> html_response(200)
+
+      assert html =~ "No results"
+    end
+
+    test "the public header links to search", %{conn: conn} do
+      html = conn |> get("/search") |> html_response(200)
+      assert html =~ ~s(href="/search")
+      assert html =~ "Search published content"
+    end
+  end
+
+  describe "I18n.localized_path/2" do
+    test "prefixes non-default locales but not the default or the home path" do
+      assert I18n.localized_path("fr", "/blog") == "/fr/blog"
+      assert I18n.localized_path("fr", "/blog/my-post") == "/fr/blog/my-post"
+      assert I18n.localized_path("en", "/blog") == "/blog"
+      assert I18n.localized_path("fr", "/") == "/"
+      # Unknown/blank locale falls back to the unprefixed path.
+      assert I18n.localized_path("zz", "/blog") == "/blog"
+      assert I18n.localized_path(nil, "/blog") == "/blog"
+    end
   end
 end

@@ -322,7 +322,7 @@ defmodule KilnCMSWeb.MediaLive do
     assigns = assign(assigns, :visible, visible_media(assigns.media, assigns.query))
 
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_user={@current_user}>
       <div class="space-y-8">
         <div class="flex items-end justify-between gap-4">
           <div>
@@ -368,14 +368,14 @@ defmodule KilnCMSWeb.MediaLive do
             class="rounded-lg border-2 border-dashed border-base-content/20 p-8 text-center"
             phx-drop-target={@uploads.media.ref}
           >
-            <.icon name="hero-arrow-up-tray" class="mx-auto size-8 text-base-content/40" />
+            <.icon name="hero-arrow-up-tray" class="mx-auto size-8 text-base-content/70" />
             <p class="mt-2 text-sm">
               <label for={@uploads.media.ref} class="cursor-pointer font-medium underline">
                 {gettext("Choose images")}
               </label>
               {gettext("or drag and drop")}
             </p>
-            <p class="mt-1 text-xs text-base-content/50">
+            <p class="mt-1 text-xs text-base-content/70">
               {gettext("PNG, JPG, WEBP or GIF up to 10 MB")}
             </p>
             <.live_file_input upload={@uploads.media} class="sr-only" />
@@ -389,7 +389,14 @@ defmodule KilnCMSWeb.MediaLive do
               <.live_img_preview entry={entry} class="size-14 rounded object-cover" />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium">{entry.client_name}</p>
-                <div class="mt-1 h-1.5 w-full overflow-hidden rounded bg-base-content/10">
+                <div
+                  class="mt-1 h-1.5 w-full overflow-hidden rounded bg-base-content/10"
+                  role="progressbar"
+                  aria-valuenow={entry.progress}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-label={gettext("Upload progress for %{name}", name: entry.client_name)}
+                >
                   <div class="h-full bg-primary" style={"width: #{entry.progress}%"}></div>
                 </div>
                 <p :for={err <- upload_errors(@uploads.media, entry)} class="mt-1 text-xs text-error">
@@ -401,7 +408,7 @@ defmodule KilnCMSWeb.MediaLive do
                 phx-click="cancel"
                 phx-value-ref={entry.ref}
                 aria-label={gettext("Cancel upload")}
-                class="text-base-content/50 hover:text-error"
+                class="text-base-content/70 hover:text-error"
               >
                 <.icon name="hero-x-mark" class="size-5" />
               </button>
@@ -463,7 +470,7 @@ defmodule KilnCMSWeb.MediaLive do
               />
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
-                <p class="flex items-center gap-1 text-[10px] text-base-content/50">
+                <p class="flex items-center gap-1 text-[10px] text-base-content/70">
                   <span :if={item.width}>{item.width}×{item.height}</span>
                   <span>{humanize_bytes(item.byte_size)}</span>
                   <span :if={!item.alt} class="text-warning" title={gettext("Missing alt text")}>
@@ -476,7 +483,7 @@ defmodule KilnCMSWeb.MediaLive do
                 phx-value-id={item.id}
                 data-confirm={gettext("Delete %{name}?", name: item.filename)}
                 aria-label={gettext("Delete")}
-                class="absolute right-1 top-1 rounded bg-base-100/80 p-1 opacity-0 transition group-hover:opacity-100 hover:text-error"
+                class="absolute right-1 top-1 rounded bg-base-100/80 p-1 transition hover:text-error opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"
               >
                 <.icon name="hero-trash" class="size-4" />
               </button>
@@ -512,7 +519,7 @@ defmodule KilnCMSWeb.MediaLive do
           />
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">{item.filename}</p>
-            <p class="text-xs text-base-content/50">
+            <p class="text-xs text-base-content/70">
               {gettext("deleted %{at}", at: Calendar.strftime(item.updated_at, "%Y-%m-%d %H:%M"))}
             </p>
           </div>
@@ -549,14 +556,22 @@ defmodule KilnCMSWeb.MediaLive do
     ~H"""
     <div class="fixed inset-0 z-40" phx-window-keydown="close" phx-key="Escape">
       <div class="absolute inset-0 bg-black/40" phx-click="close" aria-hidden="true"></div>
-      <div class="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-xl">
+      <div
+        id="media-detail-dialog"
+        phx-hook="FocusTrap"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="media-detail-title"
+        tabindex="-1"
+        class="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-xl"
+      >
         <div class="flex items-start justify-between gap-4">
-          <h2 class="truncate text-lg font-medium">{@item.filename}</h2>
+          <h2 id="media-detail-title" class="truncate text-lg font-medium">{@item.filename}</h2>
           <button
             type="button"
             phx-click="close"
             aria-label={gettext("Close")}
-            class="text-base-content/50 hover:text-base-content"
+            class="text-base-content/70 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
@@ -569,34 +584,39 @@ defmodule KilnCMSWeb.MediaLive do
         />
 
         <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-base-content/70">
-          <dt class="text-base-content/50">{gettext("Type")}</dt>
+          <dt class="text-base-content/70">{gettext("Type")}</dt>
           <dd>{@item.content_type || "—"}</dd>
-          <dt class="text-base-content/50">{gettext("Size")}</dt>
+          <dt class="text-base-content/70">{gettext("Size")}</dt>
           <dd>{humanize_bytes(@item.byte_size)}</dd>
-          <dt :if={@item.width} class="text-base-content/50">{gettext("Dimensions")}</dt>
+          <dt :if={@item.width} class="text-base-content/70">{gettext("Dimensions")}</dt>
           <dd :if={@item.width}>{@item.width} × {@item.height} px</dd>
-          <dt class="text-base-content/50">{gettext("Uploaded")}</dt>
+          <dt class="text-base-content/70">{gettext("Uploaded")}</dt>
           <dd>{Calendar.strftime(@item.inserted_at, "%Y-%m-%d %H:%M")}</dd>
         </dl>
 
         <div :if={@item.variants not in [nil, %{}]} class="mt-4">
-          <p class="text-xs text-base-content/50">{gettext("Responsive variants")}</p>
+          <p class="text-xs text-base-content/70">{gettext("Responsive variants")}</p>
           <ul class="mt-1 space-y-1">
             <li
               :for={{label, v} <- @item.variants}
               class="flex items-center justify-between gap-2 text-xs"
             >
               <span class="font-medium capitalize">{label}</span>
-              <span class="text-base-content/50">{v["width"]} × {v["height"]}</span>
-              <a href={v["url"]} target="_blank" class="text-primary hover:underline">
-                {gettext("open")}
+              <span class="text-base-content/70">{v["width"]} × {v["height"]}</span>
+              <a
+                href={v["url"]}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary hover:underline"
+              >
+                {gettext("open")} <span class="sr-only">{gettext("(opens in a new tab)")}</span>
               </a>
             </li>
           </ul>
         </div>
 
         <div class="mt-4">
-          <label class="text-xs text-base-content/50">{gettext("URL")}</label>
+          <label class="text-xs text-base-content/70">{gettext("URL")}</label>
           <div class="mt-1 flex gap-2">
             <input
               type="text"

@@ -59,19 +59,30 @@ Then visit:
 - GraphQL playground: <http://localhost:4000/gql/playground>
 - JSON:API Swagger UI: <http://localhost:4000/api/json/swaggerui>
 
-## Headless consumption
+## Delivery
 
-Published content is world-readable (no auth) over three public surfaces:
-`GET /api/content/:type/:slug` (the v2 content delivery API — structured `json`,
-`json_ld`, or pre-rendered `web` HTML), `GET /sitemap.xml` for enumeration, and
-`POST /gql` (GraphQL search). See [`examples/`](examples) for a runnable
-**Astro static blog** that builds entirely from these endpoints, with a complete
-headless setup walkthrough.
+KilnCMS serves its **public website itself**, with Phoenix LiveView and
+controllers — `KilnCMSWeb.ContentController` renders pages (`/<slug>`), the blog
+(`/blog`, `/blog/<slug>`), on-site search (`/search`), and locale-prefixed
+variants (`/fr/...`) straight from published content. There is no separate
+frontend build to deploy; the app is the site.
+
+The same content is also **world-readable over headless APIs** for external or
+mobile consumers: `GET /api/content/:type/:slug` (the v2 fired-artifact API —
+structured `json`, `json_ld`, or pre-rendered `web` HTML), `GET /sitemap.xml`
+for enumeration, `POST /gql` (GraphQL), and the JSON:API at `/api/json`. See
+[`docs/headless-consumer-guide.md`](docs/headless-consumer-guide.md) for which
+surface to use, and [`examples/`](examples) for a runnable headless integration
+(an optional Astro example — **not** the reference frontend; the LiveView site
+above is).
 
 **API docs:** a published OpenAPI 3 spec (`/api/json/open_api`) and interactive
 Swagger UI (`/api/json/swaggerui`) are available in dev **and** prod. Start at
 [`docs/api.md`](docs/api.md) — the full reference for authentication, the JSON:API
-content endpoints, GraphQL, webhooks, preview tokens and rate limits.
+content endpoints, GraphQL, webhooks, preview tokens and rate limits. New to the
+headless surfaces? [`docs/headless-consumer-guide.md`](docs/headless-consumer-guide.md)
+is a decision tree for picking the right surface and knowing what JSON shape each
+one returns.
 
 ## Working with Ash
 
@@ -120,10 +131,11 @@ Bootstrapped & verified (compiling, migrating, serving):
   optional **Meilisearch** backend, both feature-flagged off by default
   ([`docs/meilisearch.md`](docs/meilisearch.md))
 
-Not yet wired (next): **magic-link** auth strategy, **Ash policies** enforcing the RBAC
-roles, media upload/variant pipeline (`Image`/libvips), the **TipTap LiveView editor** +
-real-time visual preview, and removing the default DaisyUI assets (the plan specifies no
-DaisyUI).
+Now wired: **magic-link** auth, **Ash policies** enforcing the RBAC roles on every
+resource, the media upload/variant pipeline (libvips), the **TipTap LiveView editor**
+with real-time visual preview and collaborative locking, and headless GraphQL + JSON:API
+delivery. Remaining cleanup: replace the temporary DaisyUI auth-override scaffolding in
+`router.ex`/`auth_overrides.ex` with custom components (the plan specifies no DaisyUI).
 
 > **Note:** keep this project at a path **without spaces** (it lives at
 > `~/Github/kiln_cms`). Native deps (`bcrypt_elixir`, `libvips`) build via `make`, which

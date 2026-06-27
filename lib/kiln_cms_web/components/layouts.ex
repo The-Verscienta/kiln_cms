@@ -41,6 +41,18 @@ defmodule KilnCMSWeb.Layouts do
 
   def app(assigns) do
     ~H"""
+    <%!-- Hidden target for the ⌘K/Ctrl-K shortcut: clicking a `navigate` link does
+          a client-side LiveView navigation (no full reload) when connected, and
+          falls back to a normal load otherwise (#139). --%>
+    <.link
+      navigate={~p"/editor/search"}
+      id="cmdk-search-link"
+      class="sr-only"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      {gettext("Search")}
+    </.link>
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
@@ -73,7 +85,7 @@ defmodule KilnCMSWeb.Layouts do
       </div>
     </header>
 
-    <main class="px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+    <main id="main" class="px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
       <div class={@container_class}>
         {render_slot(@inner_block)}
       </div>
@@ -90,6 +102,7 @@ defmodule KilnCMSWeb.Layouts do
   # Links to the current page in each available locale (`%{locale, href,
   # current}`); rendered as a language switcher when there's more than one.
   attr :locale_links, :list, default: []
+  attr :locale, :string, default: nil, doc: "active locale, to keep nav links locale-prefixed"
   slot :inner_block, required: true
 
   def public(assigns) do
@@ -101,21 +114,27 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
-          <a href="/blog" class="hover:text-base-content">{gettext("Blog")}</a>
+          <a href={KilnCMS.I18n.localized_path(@locale, "/blog")} class="hover:text-base-content">
+            {gettext("Blog")}
+          </a>
+          <a href={KilnCMS.I18n.localized_path(@locale, "/search")} class="hover:text-base-content">
+            {gettext("Search")}
+          </a>
           <span
             :if={length(@locale_links) > 1}
-            class="flex items-center gap-2"
+            class="flex items-center gap-1"
             aria-label={gettext("Language")}
           >
             <a
               :for={link <- @locale_links}
               href={link.href}
               hreflang={link.locale}
+              aria-current={link.current && "true"}
               class={[
-                "uppercase",
+                "inline-flex items-center rounded px-2 py-1.5 uppercase",
                 if(link.current,
                   do: "font-semibold text-base-content",
-                  else: "hover:text-base-content"
+                  else: "text-base-content/70 hover:bg-base-200 hover:text-base-content"
                 )
               ]}
             >
@@ -126,11 +145,11 @@ defmodule KilnCMSWeb.Layouts do
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+    <main id="main" class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
       {render_slot(@inner_block)}
     </main>
 
-    <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/50 sm:px-6 lg:px-8">
+    <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8">
       {gettext("Powered by KilnCMS.")}
     </footer>
     """
@@ -261,13 +280,18 @@ defmodule KilnCMSWeb.Layouts do
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
+    <div
+      class="relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full"
+      role="group"
+      aria-label={gettext("Theme")}
+    >
       <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 [[data-theme-source=system]_&]:!left-0 transition-[left]" />
 
       <button
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
+        aria-label={gettext("Use system theme")}
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -276,6 +300,7 @@ defmodule KilnCMSWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
+        aria-label={gettext("Use light theme")}
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -284,6 +309,7 @@ defmodule KilnCMSWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
+        aria-label={gettext("Use dark theme")}
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>

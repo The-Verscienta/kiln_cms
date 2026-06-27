@@ -1,5 +1,11 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
+
+# Run best-effort analytics writes (page-view + search-query recording) inline
+# rather than in a detached supervised task, so the upsert stays on the test's
+# ExUnit SQL sandbox connection — avoids a connection leaking past the owning
+# test and racing assertions. See ContentController / SearchPaletteLive.
+config :kiln_cms, :async_analytics, false
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
 
