@@ -41,6 +41,18 @@ defmodule KilnCMSWeb.Layouts do
 
   def app(assigns) do
     ~H"""
+    <%!-- Hidden target for the ⌘K/Ctrl-K shortcut: clicking a `navigate` link does
+          a client-side LiveView navigation (no full reload) when connected, and
+          falls back to a normal load otherwise (#139). --%>
+    <.link
+      navigate={~p"/editor/search"}
+      id="cmdk-search-link"
+      class="sr-only"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      {gettext("Search")}
+    </.link>
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">

@@ -1102,6 +1102,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Settings"
     end
 
+    # #139: ⌘K targets a LiveView `navigate` link (data-phx-link="redirect"), so
+    # the jump to search is a client-side navigation, not a full page reload.
+    test "renders a client-side navigate target for the search shortcut", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ ~s(id="cmdk-search-link")
+      assert html =~ ~s(data-phx-link="redirect")
+      assert html =~ ~s(href="/editor/search")
+    end
+
     test "content editor shows authenticated nav for a signed-in editor", %{conn: conn} do
       page = draft_page(%{title: "NavPage"})
 
