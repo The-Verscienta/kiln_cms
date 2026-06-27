@@ -735,7 +735,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             type="button"
             phx-click="close_picker"
             aria-label={gettext("Close")}
-            class="text-base-content/50 hover:text-base-content"
+            class="text-base-content/70 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
@@ -969,7 +969,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     ~H"""
     <div class="space-y-2">
-      <p :if={@fields == []} class="text-sm text-base-content/50">
+      <p :if={@fields == []} class="text-sm text-base-content/70">
         {gettext("Section break — no editable fields.")}
       </p>
 
@@ -1135,7 +1135,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <span
                           data-drag-handle
                           aria-label={gettext("Drag to reorder")}
-                          class="cursor-grab text-base-content/40 hover:text-base-content/70"
+                          class="cursor-grab text-base-content/70 hover:text-base-content/70"
                         >
                           <.icon name="hero-bars-3" class="size-5" />
                         </span>
@@ -1148,7 +1148,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-dir="up"
                             disabled={bf.index == 0}
                             aria-label={gettext("Move block up")}
-                            class="text-base-content/40 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
+                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
                           >
                             <.icon name="hero-chevron-up" class="size-4" />
                           </button>
@@ -1159,7 +1159,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-dir="down"
                             disabled={bf.index == blocks_count(@form) - 1}
                             aria-label={gettext("Move block down")}
-                            class="text-base-content/40 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
+                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
                           >
                             <.icon name="hero-chevron-down" class="size-4" />
                           </button>
@@ -1174,7 +1174,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         phx-value-path={bf.name}
                         data-confirm={gettext("Delete this block? This can't be undone.")}
                         aria-label={gettext("Remove block")}
-                        class="text-base-content/50 hover:text-error"
+                        class="text-base-content/70 hover:text-error"
                       >
                         <.icon name="hero-trash" class="size-5" />
                       </button>
@@ -1205,7 +1205,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         >
                         </div>
                         <div data-editor></div>
-                        <p class="mt-1 text-xs text-base-content/50">
+                        <p class="mt-1 text-xs text-base-content/70">
                           {gettext("Type / for commands.")}
                         </p>
                         <input
@@ -1280,7 +1280,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   value={selected_ids(@form, :tag_ids, current_ids(@record.tags))}
                   options={Enum.map(@tags, &{&1.name, &1.id})}
                 />
-                <p class="-mt-1 text-xs text-base-content/50">
+                <p class="-mt-1 text-xs text-base-content/70">
                   {gettext("Hold ⌘/Ctrl to select multiple.")}
                 </p>
 
@@ -1497,7 +1497,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp autosave_status(assigns) do
     ~H"""
     <span
-      class={["text-xs", (@state == :error && "text-error") || "text-base-content/50"]}
+      class={["text-xs", (@state == :error && "text-error") || "text-base-content/70"]}
       aria-live="polite"
     >
       <%= case @state do %>
@@ -1551,7 +1551,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </button>
     <span
       :if={@state == :in_review and @actor.role == :editor}
-      class="text-xs text-base-content/50"
+      class="text-xs text-base-content/70"
     >
       {gettext("Awaiting admin approval")}
     </span>

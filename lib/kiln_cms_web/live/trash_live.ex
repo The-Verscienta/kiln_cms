@@ -205,12 +205,12 @@ defmodule KilnCMSWeb.TrashLive do
             id={"trash-#{kind}-#{record.id}"}
             class="flex items-center gap-4 p-3"
           >
-            <span class="w-12 shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
+            <span class="w-12 shrink-0 text-xs uppercase text-base-content/70">{kind}</span>
             <div class="min-w-0 flex-1">
               <span class="font-medium">{record.title}</span>
-              <p class="truncate text-xs text-base-content/50">/{record.slug}</p>
+              <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
-            <span class="text-xs text-base-content/50">
+            <span class="text-xs text-base-content/70">
               {gettext("deleted %{at}", at: Calendar.strftime(record.archived_at, "%Y-%m-%d %H:%M"))}
             </span>
             <button

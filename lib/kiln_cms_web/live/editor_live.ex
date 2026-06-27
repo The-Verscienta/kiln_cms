@@ -401,12 +401,12 @@ defmodule KilnCMSWeb.EditorLive do
               aria-label={gettext("Select %{title}", title: record.title)}
               class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
             />
-            <span class="shrink-0 text-xs uppercase text-base-content/40">{kind}</span>
+            <span class="shrink-0 text-xs uppercase text-base-content/70">{kind}</span>
             <div class="min-w-0 flex-1">
               <.link navigate={edit_path(kind, record.id)} class="font-medium hover:underline">
                 {record.title}
               </.link>
-              <p class="truncate text-xs text-base-content/50">/{record.slug}</p>
+              <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
             <div class="flex w-full items-center justify-end gap-2 sm:w-auto">

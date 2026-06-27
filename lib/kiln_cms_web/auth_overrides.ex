@@ -106,7 +106,7 @@ defmodule KilnCMSWeb.AuthOverrides do
 
   override Components.HorizontalRule do
     set :root_class,
-        "my-4 flex items-center gap-3 text-xs uppercase tracking-wide text-base-content/50"
+        "my-4 flex items-center gap-3 text-xs uppercase tracking-wide text-base-content/70"
 
     set :hr_outer_class, "flex-1 border-t border-base-content/15"
     set :hr_inner_class, nil

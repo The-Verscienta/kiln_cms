@@ -368,14 +368,14 @@ defmodule KilnCMSWeb.MediaLive do
             class="rounded-lg border-2 border-dashed border-base-content/20 p-8 text-center"
             phx-drop-target={@uploads.media.ref}
           >
-            <.icon name="hero-arrow-up-tray" class="mx-auto size-8 text-base-content/40" />
+            <.icon name="hero-arrow-up-tray" class="mx-auto size-8 text-base-content/70" />
             <p class="mt-2 text-sm">
               <label for={@uploads.media.ref} class="cursor-pointer font-medium underline">
                 {gettext("Choose images")}
               </label>
               {gettext("or drag and drop")}
             </p>
-            <p class="mt-1 text-xs text-base-content/50">
+            <p class="mt-1 text-xs text-base-content/70">
               {gettext("PNG, JPG, WEBP or GIF up to 10 MB")}
             </p>
             <.live_file_input upload={@uploads.media} class="sr-only" />
@@ -408,7 +408,7 @@ defmodule KilnCMSWeb.MediaLive do
                 phx-click="cancel"
                 phx-value-ref={entry.ref}
                 aria-label={gettext("Cancel upload")}
-                class="text-base-content/50 hover:text-error"
+                class="text-base-content/70 hover:text-error"
               >
                 <.icon name="hero-x-mark" class="size-5" />
               </button>
@@ -470,7 +470,7 @@ defmodule KilnCMSWeb.MediaLive do
               />
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
-                <p class="flex items-center gap-1 text-[10px] text-base-content/50">
+                <p class="flex items-center gap-1 text-[10px] text-base-content/70">
                   <span :if={item.width}>{item.width}×{item.height}</span>
                   <span>{humanize_bytes(item.byte_size)}</span>
                   <span :if={!item.alt} class="text-warning" title={gettext("Missing alt text")}>
@@ -519,7 +519,7 @@ defmodule KilnCMSWeb.MediaLive do
           />
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">{item.filename}</p>
-            <p class="text-xs text-base-content/50">
+            <p class="text-xs text-base-content/70">
               {gettext("deleted %{at}", at: Calendar.strftime(item.updated_at, "%Y-%m-%d %H:%M"))}
             </p>
           </div>
@@ -571,7 +571,7 @@ defmodule KilnCMSWeb.MediaLive do
             type="button"
             phx-click="close"
             aria-label={gettext("Close")}
-            class="text-base-content/50 hover:text-base-content"
+            class="text-base-content/70 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
@@ -584,25 +584,25 @@ defmodule KilnCMSWeb.MediaLive do
         />
 
         <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-base-content/70">
-          <dt class="text-base-content/50">{gettext("Type")}</dt>
+          <dt class="text-base-content/70">{gettext("Type")}</dt>
           <dd>{@item.content_type || "—"}</dd>
-          <dt class="text-base-content/50">{gettext("Size")}</dt>
+          <dt class="text-base-content/70">{gettext("Size")}</dt>
           <dd>{humanize_bytes(@item.byte_size)}</dd>
-          <dt :if={@item.width} class="text-base-content/50">{gettext("Dimensions")}</dt>
+          <dt :if={@item.width} class="text-base-content/70">{gettext("Dimensions")}</dt>
           <dd :if={@item.width}>{@item.width} × {@item.height} px</dd>
-          <dt class="text-base-content/50">{gettext("Uploaded")}</dt>
+          <dt class="text-base-content/70">{gettext("Uploaded")}</dt>
           <dd>{Calendar.strftime(@item.inserted_at, "%Y-%m-%d %H:%M")}</dd>
         </dl>
 
         <div :if={@item.variants not in [nil, %{}]} class="mt-4">
-          <p class="text-xs text-base-content/50">{gettext("Responsive variants")}</p>
+          <p class="text-xs text-base-content/70">{gettext("Responsive variants")}</p>
           <ul class="mt-1 space-y-1">
             <li
               :for={{label, v} <- @item.variants}
               class="flex items-center justify-between gap-2 text-xs"
             >
               <span class="font-medium capitalize">{label}</span>
-              <span class="text-base-content/50">{v["width"]} × {v["height"]}</span>
+              <span class="text-base-content/70">{v["width"]} × {v["height"]}</span>
               <a
                 href={v["url"]}
                 target="_blank"
@@ -616,7 +616,7 @@ defmodule KilnCMSWeb.MediaLive do
         </div>
 
         <div class="mt-4">
-          <label class="text-xs text-base-content/50">{gettext("URL")}</label>
+          <label class="text-xs text-base-content/70">{gettext("URL")}</label>
           <div class="mt-1 flex gap-2">
             <input
               type="text"

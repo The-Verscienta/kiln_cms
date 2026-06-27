@@ -231,7 +231,7 @@ defmodule KilnCMSWeb.WebhookLive do
                       {event}
                     </span>
                   </div>
-                  <p class="text-xs text-base-content/50">
+                  <p class="text-xs text-base-content/70">
                     {gettext("Signing secret")}: <code>{endpoint.secret}</code>
                   </p>
                 </div>

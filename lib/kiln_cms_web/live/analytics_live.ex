@@ -78,7 +78,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
         </div>
 
         <div class="rounded-lg border border-base-content/10 p-4">
-          <p class="text-xs uppercase tracking-wide text-base-content/50">{gettext("Total views")}</p>
+          <p class="text-xs uppercase tracking-wide text-base-content/70">{gettext("Total views")}</p>
           <p class="mt-1 text-3xl font-semibold">{@total}</p>
         </div>
 
@@ -89,7 +89,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
           </p>
 
           <table :if={@rows != []} class="w-full text-sm">
-            <thead class="text-left text-xs uppercase tracking-wide text-base-content/50">
+            <thead class="text-left text-xs uppercase tracking-wide text-base-content/70">
               <tr class="border-b border-base-content/10">
                 <th class="py-2">{gettext("Content")}</th>
                 <th class="py-2">{gettext("Type")}</th>

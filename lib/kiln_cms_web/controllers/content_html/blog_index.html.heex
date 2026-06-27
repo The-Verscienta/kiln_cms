@@ -9,7 +9,7 @@
     <li :for={post <- @posts}>
       <a href={KilnCMS.I18n.localized_path(@locale, ~p"/blog/#{post.slug}")} class="group block">
         <h2 class="text-xl font-semibold group-hover:underline">{post.title}</h2>
-        <p :if={post.published_at} class="mt-1 text-sm text-base-content/50">
+        <p :if={post.published_at} class="mt-1 text-sm text-base-content/70">
           {Calendar.strftime(post.published_at, "%B %-d, %Y")}
         </p>
         <p :if={post.excerpt} class="mt-2 text-base-content/70">{post.excerpt}</p>

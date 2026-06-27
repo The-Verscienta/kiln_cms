@@ -77,7 +77,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           <p class="text-sm text-base-content/60">
             Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here.
           </p>
-          <p class="mt-1 text-xs text-base-content/40">
+          <p class="mt-1 text-xs text-base-content/70">
             Searches are logged anonymously — no user ID or IP — to improve content discovery,
             and purged after {@retention_days} days.
           </p>
@@ -129,7 +129,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
               class="block rounded px-3 py-2 hover:bg-base-200"
             >
               <span class="font-medium">{m.filename}</span>
-              <span :if={m.alt} class="ml-2 text-xs text-base-content/50">{m.alt}</span>
+              <span :if={m.alt} class="ml-2 text-xs text-base-content/70">{m.alt}</span>
             </.link>
           </.section>
         </div>
@@ -144,7 +144,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   defp section(assigns) do
     ~H"""
     <div>
-      <h2 class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/40">
+      <h2 class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/70">
         {@title}
       </h2>
       <div class="divide-y divide-base-content/5 rounded border border-base-content/10">
@@ -164,7 +164,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
       class="block rounded px-3 py-2 hover:bg-base-200"
     >
       <span class="font-medium">{@record.title}</span>
-      <span class="ml-2 text-xs text-base-content/50">/{@record.slug}</span>
+      <span class="ml-2 text-xs text-base-content/70">/{@record.slug}</span>
       <p
         :if={snippet(@record)}
         class="mt-0.5 line-clamp-2 text-xs text-base-content/60 [&_mark]:rounded-sm [&_mark]:bg-warning/30 [&_mark]:px-0.5 [&_mark]:text-base-content"

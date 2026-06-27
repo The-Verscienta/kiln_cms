@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.CoreComponents do
   # Shared field styling (token-based; no DaisyUI). Used by input/select/textarea.
   defp input_base do
     "w-full rounded-lg border border-base-content/15 bg-base-100 px-3 py-2 text-sm " <>
-      "text-base-content transition placeholder:text-base-content/40 focus:border-primary/50 " <>
+      "text-base-content transition placeholder:text-base-content/70 focus:border-primary/50 " <>
       "focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
   end
 

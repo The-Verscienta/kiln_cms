@@ -149,7 +149,7 @@ defmodule KilnCMSWeb.Layouts do
       {render_slot(@inner_block)}
     </main>
 
-    <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/50 sm:px-6 lg:px-8">
+    <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8">
       {gettext("Powered by KilnCMS.")}
     </footer>
     """
