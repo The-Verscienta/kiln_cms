@@ -291,9 +291,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Editing marks the draft unsaved and schedules the debounced autosave.
+      # Editing shows a "Saving…" state and schedules the debounced autosave (#136).
       changed = lv |> form("#page-editor", form: %{title: "Autosaved title"}) |> render_change()
-      assert changed =~ "Unsaved changes"
+      assert changed =~ "Saving"
       assert CMS.get_page!(page.id, authorize?: false).title == "Old"
 
       # Fire the debounce timer.
@@ -302,7 +302,24 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert CMS.get_page!(page.id, authorize?: false).title == "Autosaved title"
       assert html =~ "Saved"
-      refute html =~ "Unsaved changes"
+      refute html =~ "Saving…"
+    end
+
+    # #136: a failing autosave (invalid form) surfaces an error state, not silence.
+    test "an autosave that fails validation shows an error state", %{conn: conn} do
+      page = draft_page(%{title: "Has title"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Title is required — clearing it makes the autosave submit fail validation.
+      lv |> form("#page-editor", form: %{title: ""}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      assert html =~ "Couldn&#39;t autosave"
+      # The invalid edit was not persisted.
+      assert CMS.get_page!(page.id, authorize?: false).title == "Has title"
     end
 
     test "published content is not autosaved", %{conn: conn} do

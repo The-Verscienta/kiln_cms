@@ -127,7 +127,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Debounced draft autosave fired by the timer scheduled in `validate`.
-  def handle_info(:autosave, socket), do: {:noreply, autosave(socket)}
+  def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
   defp assign_record(socket, record) do
     socket
@@ -426,13 +426,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket
       |> cancel_autosave_timer()
       |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
-      |> assign(:save_state, :unsaved)
+      # `:saving` from the moment of edit — the change is queued to autosave, like
+      # a "Saving…" indicator (#136). Resolves to `:saved` or `:error` on flush.
+      |> assign(:save_state, :saving)
     else
       socket
     end
   end
 
-  defp autosave(%{assigns: %{save_state: :unsaved}} = socket) do
+  defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
     if draft?(socket) do
       socket = assign(socket, :autosave_timer, nil)
 
@@ -466,17 +468,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Nothing pending (a stale timer, or already saved) — no-op.
-  defp autosave(socket), do: assign(socket, :autosave_timer, nil)
+  # Stale timer (already saved, or state moved on) — no-op.
+  defp perform_autosave(socket), do: assign(socket, :autosave_timer, nil)
 
   # Someone else saved first → stop autosaving and surface the conflict rather
-  # than retrying (which would keep losing). Otherwise leave the inline
-  # validation errors in place and keep the draft unsaved so the next edit
+  # than retrying (which would keep losing). Otherwise mark the draft as failing
+  # validation (`:error`) so the indicator says so (#136); the next edit
   # reschedules a retry.
   defp handle_autosave_error(socket, form) do
     if stale_conflict?(form),
       do: flag_conflict(socket),
-      else: assign(socket, :save_state, :unsaved)
+      else: assign(socket, :save_state, :error)
   end
 
   # Stop autosaving and put the editor into a conflict state until the user
@@ -1442,11 +1444,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   attr :state, :atom, required: true
 
-  # Draft autosave indicator shown next to the workflow/Save buttons.
+  # Draft autosave indicator shown next to the workflow/Save buttons. Covers the
+  # in-flight (:saving) and validation-failure (:error) states too (#136).
   defp autosave_status(assigns) do
     ~H"""
-    <span class="text-xs text-base-content/50" aria-live="polite">
-      {if @state == :unsaved, do: gettext("Unsaved changes"), else: gettext("Saved")}
+    <span
+      class={["text-xs", (@state == :error && "text-error") || "text-base-content/50"]}
+      aria-live="polite"
+    >
+      <%= case @state do %>
+        <% :saving -> %>
+          {gettext("Saving…")}
+        <% :saved -> %>
+          {gettext("Saved")}
+        <% :error -> %>
+          {gettext("Couldn't autosave — check for errors")}
+        <% _ -> %>
+          {gettext("Unsaved changes")}
+      <% end %>
     </span>
     """
   end
