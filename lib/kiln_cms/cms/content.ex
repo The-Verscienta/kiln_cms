@@ -814,6 +814,23 @@ defmodule KilnCMS.CMS.Content do
           destination_attribute_on_join_resource :target_id
           public? true
         end
+
+        # The raw outgoing `ContentLink` rows for this record (it as `source`),
+        # so relations that carry a payload are reachable: each row exposes
+        # `kind`, `position`, `label` and the `metadata` map. Use this (instead
+        # of the typed `related_*` m2m above) when you need the link attributes —
+        # e.g. `load: [content_links: []]` then read `link.metadata`.
+        has_many :content_links, KilnCMS.CMS.ContentLink do
+          destination_attribute :source_id
+          public? true
+        end
+
+        # The reverse: links pointing *at* this record (it as `target`) — "what
+        # links to me", with the same per-link payload.
+        has_many :incoming_links, KilnCMS.CMS.ContentLink do
+          destination_attribute :target_id
+          public? true
+        end
       end
 
       calculations do

@@ -2,7 +2,8 @@ defmodule KilnCMS.CMS.ContentLink do
   @moduledoc """
   A polymorphic, directional link between **any two content records**, carrying
   a `kind` (`:related`, `:see_also`, …) so several named relationships can be
-  modelled with one table.
+  modelled with one table — and an optional `metadata` payload so a relation can
+  carry data *about the link itself*.
 
   Both ends are referenced by id only (`source_id` → `target_id`); because ids
   are globally-unique UUIDs no type discriminator is needed. A content type
@@ -11,8 +12,23 @@ defmodule KilnCMS.CMS.ContentLink do
   the destination typed as `Page`. Linking a new content type to any other is
   just inserting rows; no new join table.
 
+  ## Relations with payload
+
+  When a relationship needs per-link attributes (a formula→ingredient link that
+  carries a dosage and role, a jia-jian modification, an ordered "step N of"),
+  set `kind` to name the relation and put the attributes in `metadata` (a free
+  map) and/or `label`. This is the lightweight alternative to hand-writing a
+  typed join resource per relation: one `content_links` table backs every
+  data-carrying relation. Read the payload via the `content_links` /
+  `incoming_links` relationships on the parent content resource. (A dedicated
+  Ash join resource is still the better fit when the link attributes are
+  numerous, strongly-typed, or independently queried — this covers the common
+  case without that ceremony.)
+
   Managed through `manage_relationship` on the parent content resource (which
-  defaults new rows to `kind: :related`); not exposed via the public APIs.
+  defaults new rows to `kind: :related`), or directly via the `create_content_link`
+  interface for payload-carrying links. Not exposed via the auto API surface,
+  but reachable through the content resources' link relationships.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -26,7 +42,7 @@ defmodule KilnCMS.CMS.ContentLink do
 
   actions do
     defaults [:read, :create, :update, :destroy]
-    default_accept [:source_id, :target_id, :kind, :position]
+    default_accept [:source_id, :target_id, :kind, :position, :label, :metadata]
   end
 
   policies do
@@ -58,6 +74,14 @@ defmodule KilnCMS.CMS.ContentLink do
 
     # Ordering of a record's links within a kind.
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
+
+    # Optional short human label for the link (e.g. "Chief herb", "Step 2").
+    attribute :label, :string, public?: true
+
+    # Free-form per-link payload — the data a relation carries *about itself*
+    # (dosage, role, jia-jian notes, …). Lets a data-carrying relation reuse the
+    # one `content_links` table instead of needing a bespoke typed join resource.
+    attribute :metadata, :map, allow_nil?: false, default: %{}, public?: true
   end
 
   identities do
