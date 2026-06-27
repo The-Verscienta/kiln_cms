@@ -58,6 +58,7 @@ defmodule KilnCMS.CMS.Content do
           :seo_image,
           :canonical_url,
           :locale,
+          :audience,
           :scheduled_at,
           :category_id,
           :featured_image_id
@@ -195,7 +196,7 @@ defmodule KilnCMS.CMS.Content do
         # Friendly datatable: identity + workflow + timing. Internal columns
         # (search_text, embedding, embedded_at, lock_version, published_version_id)
         # are deliberately omitted.
-        table_columns [:title, :slug, :state, :locale, :published_at, :updated_at]
+        table_columns [:title, :slug, :state, :audience, :locale, :published_at, :updated_at]
 
         format_fields published_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       scheduled_at: {KilnCMS.CMS.Admin, :format_datetime, []},
@@ -660,11 +661,21 @@ defmodule KilnCMS.CMS.Content do
           authorize_if always()
         end
 
-        # Published content is world-readable (headless delivery / public site);
-        # unpublished content (draft/in_review/archived) is editors-only.
+        # Read access combines the publishing workflow with the consumer-facing
+        # audience (KilnCMS.CMS.Audiences) — the *read* axis, separate from the
+        # editorial role:
+        #   • editors (and admins, via the bypass above) see every record;
+        #   • `:public` published content stays world-readable (anonymous
+        #     headless delivery / public site);
+        #   • audience-restricted published content is visible only to a
+        #     signed-in reader who belongs to that audience.
+        # Drafts/in-review/archived remain editors-only. `actor(:audiences)` is
+        # nil for anonymous callers, so a gated record simply isn't authorized
+        # (the `in` yields no match) rather than erroring.
         policy action_type(:read) do
-          authorize_if expr(^ref(:state) == :published)
           authorize_if actor_attribute_equals(:role, :editor)
+          authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
+          authorize_if expr(^ref(:state) == :published and ^ref(:audience) in ^actor(:audiences))
         end
 
         # Authoring and workflow transitions are reserved for editors (and admins
@@ -722,6 +733,19 @@ defmodule KilnCMS.CMS.Content do
         attribute :seo_image, :string, public?: true
         attribute :canonical_url, :string, public?: true
         attribute :locale, :string, default: "en", public?: true
+
+        # Consumer-facing access tier (KilnCMS.CMS.Audiences). `:public` (the
+        # default) keeps a published record world-readable; any other audience
+        # restricts published reads to signed-in users who belong to it (see the
+        # read policy). Public on the API so headless clients can label gated
+        # content — the policy, not field hiding, is the access boundary.
+        attribute :audience, :atom do
+          constraints one_of: KilnCMS.CMS.Audiences.all()
+          default :public
+          allow_nil? false
+          public? true
+        end
+
         attribute :published_at, :utc_datetime_usec, public?: true
 
         # PaperTrail version id of the immutable snapshot taken at the last

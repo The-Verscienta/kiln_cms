@@ -129,6 +129,14 @@ defmodule KilnCMS.Accounts.User do
       accept [:notify_on_review_request, :notify_on_publish, :notify_on_return_to_draft]
     end
 
+    # Admin-only: assign a user's editorial role (authoring privilege) and the
+    # consumer audiences (read access) they belong to. This is the single place
+    # access is granted — self-registration always lands on `:viewer` with no
+    # audiences. See KilnCMS.CMS.Audiences and the content read policy.
+    update :manage_access do
+      accept [:role, :audiences]
+    end
+
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
     # revokes tokens + anonymizes audit-event actors, while keeping the row and
     # content/version history (audit retention — #219). See
@@ -339,6 +347,13 @@ defmodule KilnCMS.Accounts.User do
     policy action(:anonymize) do
       authorize_if actor_attribute_equals(:role, :admin)
     end
+
+    # Assigning the editorial role and consumer audiences is an admin action —
+    # never self-service (a user must not grant themselves access). Covered by
+    # the admin bypass above; explicit here to forbid everyone else.
+    policy action(:manage_access) do
+      authorize_if actor_attribute_equals(:role, :admin)
+    end
   end
 
   attributes do
@@ -381,6 +396,20 @@ defmodule KilnCMS.Accounts.User do
       default :viewer
       allow_nil? false
       public? true
+    end
+
+    # Consumer-facing access tiers this user belongs to (the *read* axis, kept
+    # separate from `role` — see KilnCMS.CMS.Audiences). Gates which published,
+    # audience-restricted content the user may read. Empty by default, so a fresh
+    # account sees only `:public` content until an admin grants audiences via
+    # `:manage_access`. Not `public?` — it's access-control data, never part of
+    # the author byline, and the content read policy reads it off the actor
+    # struct regardless of API visibility.
+    attribute :audiences, {:array, :atom} do
+      constraints items: [one_of: KilnCMS.CMS.Audiences.all()]
+      default []
+      allow_nil? false
+      public? false
     end
 
     # Per-user workflow-notification preferences (issue #46). Opt-out model:

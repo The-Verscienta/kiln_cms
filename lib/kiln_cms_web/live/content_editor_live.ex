@@ -91,6 +91,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          )
          |> assign(:categories, CMS.list_categories!(actor: actor))
          |> assign(:tags, CMS.list_tags!(actor: actor))
+         |> assign(:audiences, audience_options())
          |> assign(:siblings, siblings(kind, id, actor))
          |> assign_record(record)}
     end
@@ -183,6 +184,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     kind
     |> ContentTypes.list!(actor: actor, query: [sort: [updated_at: :desc], limit: @max_media])
     |> Enum.reject(&(&1.id == id))
+  end
+
+  # `<select>` options for the consumer-facing audience (KilnCMS.CMS.Audiences):
+  # `{humanized label, atom value}`. The select is only rendered when more than
+  # one audience is configured (see the template).
+  defp audience_options do
+    Enum.map(KilnCMS.CMS.Audiences.all(), &{Phoenix.Naming.humanize(&1), &1})
   end
 
   # The self-referential m2m relationship/argument names follow the convention
@@ -1385,6 +1393,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   label={gettext("Category")}
                   prompt="— None —"
                   options={Enum.map(@categories, &{&1.name, &1.id})}
+                />
+
+                <.input
+                  :if={length(@audiences) > 1}
+                  field={@form[:audience]}
+                  type="select"
+                  label={gettext("Audience")}
+                  options={@audiences}
                 />
 
                 <.tag_picker form={@form} tags={@tags} record={@record} />

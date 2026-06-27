@@ -105,6 +105,15 @@ config :kiln_cms, :registration_enabled, true
 # Non-default locales are served under a `/<locale>/…` URL prefix.
 config :kiln_cms, :i18n, default_locale: "en", locales: ["en"]
 
+# Consumer-facing access tiers ("audiences"). Independent of the editorial RBAC
+# role (`:admin`/`:editor`/`:viewer`, which gates *authoring*): an audience
+# gates which signed-in end-users may *read* a published record. `:public` is
+# always implied (world-readable) and must stay first. Content carries one
+# `audience`; a user carries the set of `audiences` they belong to, and may read
+# a gated record only if its audience is in that set (editors/admins see all).
+# Override per-deployment, e.g. `[:public, :professional, :patient]`.
+config :kiln_cms, :audiences, [:public, :member]
+
 # How many days soft-deleted (trashed) content is retained before the nightly
 # AshOban `purge_trashed` trigger hard-deletes it.
 config :kiln_cms, :trash, retention_days: 30
