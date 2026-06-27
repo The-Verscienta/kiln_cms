@@ -76,3 +76,73 @@ Grafana at it:
 
 The same metric definitions feed both LiveDashboard and Prometheus, so adding the
 reporter needs no change to the event-emitting code.
+
+## Error tracking (Sentry)
+
+Crashes and unhandled exceptions are reported to [Sentry](https://sentry.io) when
+a DSN is configured. **It is a no-op unless `SENTRY_DSN` is set** — dev, test,
+and `mix precommit` never reach out, so there is nothing to stub or disable
+locally.
+
+Wiring (all gated on the DSN):
+
+- **Capture** — `Sentry.LoggerHandler` is attached in
+  [`KilnCMS.Application.setup_observability/0`](../lib/kiln_cms/application.ex)
+  only when `SENTRY_DSN` is present. It turns process crashes (with their
+  stacktraces) into Sentry events.
+- **Request context** — `Sentry.PlugContext` in
+  [the endpoint](../lib/kiln_cms_web/endpoint.ex) attaches the request method,
+  path, and **scrubbed** headers/params to any event raised while handling a
+  request. We deliberately do **not** use `Sentry.PlugCapture`: on Bandit (this
+  app's webserver) it double-reports.
+- **Background jobs** — Oban job failures are captured via Sentry's built-in
+  integration (`config :sentry, integrations: [oban: [capture_errors: true]]` in
+  `config/config.exs`).
+- **Transport** — the default `Sentry.FinchClient`. Finch is already in the tree
+  via Req, so no extra HTTP client (e.g. hackney) is pulled in.
+- **Source context** — `mix sentry.package_source_code` runs in the
+  [Dockerfile](../Dockerfile) so stack frames in the Sentry UI show the
+  surrounding code.
+
+Environment variables:
+
+| Variable | Effect |
+|----------|--------|
+| `SENTRY_DSN` | Enables Sentry. Unset = fully disabled. |
+| `SENTRY_ENV` | Environment tag (defaults to the `MIX_ENV`, e.g. `prod`). |
+| `RELEASE_VSN` | Tags events with the release version (set automatically in a release). |
+
+Send a test event after deploying with `bin/kiln_cms eval "Sentry.capture_message(\"test\")"`.
+
+## Distributed tracing (OpenTelemetry)
+
+Request/query/job spans are exported over OTLP to any OpenTelemetry collector
+(Grafana Tempo, Honeycomb, Jaeger, Datadog, etc.). **It is a no-op unless
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set** — without it the instrumentation is never
+attached and no spans are created, so dev/test/precommit pay nothing.
+
+When enabled (`config/runtime.exs` flips `:otel_enabled` and the exporter on),
+[`KilnCMS.Application.setup_observability/0`](../lib/kiln_cms/application.ex)
+attaches:
+
+- **`OpentelemetryBandit`** — the root HTTP server span.
+- **`OpentelemetryPhoenix`** (`adapter: :bandit`, `liveview: true`) — router
+  dispatch and LiveView lifecycle spans, as children of the Bandit span.
+- **`OpentelemetryEcto`** (`[:kiln_cms, :repo]`) — a span per DB query. SQL text
+  is included (`db_statement: :enabled`); it is safe because Ecto sends values as
+  bound parameters rather than inlining them into the statement.
+- **`OpentelemetryOban`** — a span per background job, trace-linked to the
+  request that enqueued it.
+
+Environment variables (the standard OTel set):
+
+| Variable | Effect |
+|----------|--------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector URL, e.g. `http://otel-collector:4318`. Enables tracing. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` (default) or `grpc`. |
+| `OTEL_SERVICE_NAME` | Service name in traces (defaults to `kiln_cms`). |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Auth headers for hosted collectors, e.g. `x-honeycomb-team=…`. |
+
+Sentry can also act as the tracing backend via its OpenTelemetry span processor;
+this wiring keeps traces vendor-neutral (plain OTLP) instead, so the collector
+choice stays independent of error tracking.

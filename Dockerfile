@@ -42,6 +42,12 @@ RUN mix compile
 
 COPY config/runtime.exs config/
 COPY rel rel
+
+# Package application source so Sentry can show code context around stack frames
+# in error reports (config :sentry, enable_source_code_context: true). Must run
+# after `lib` is present and before the release is assembled.
+RUN mix sentry.package_source_code
+
 RUN mix release
 
 # ---- Runtime stage ----
