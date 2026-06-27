@@ -1161,6 +1161,26 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(data-editor-label="Rich text editor")
     end
 
+    # Regression for #135: a server-driven form replacement (conflict reload)
+    # remounts rich-text blocks (new element id) so TipTap reloads from the latest
+    # content instead of keeping its phx-update="ignore" editor.
+    test "rich-text editors remount after a conflict reload", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      assert html =~ "rt-0-v0"
+
+      # Someone else saves first → this editor's save is stale → conflict.
+      {:ok, _} = CMS.update_page(page, %{title: "Changed elsewhere"}, actor: editor)
+      lv |> form("#page-editor") |> render_submit()
+
+      # Reloading bumps the editor version so the rich-text block remounts.
+      reloaded = lv |> element("#edit-conflict button", "Reload latest") |> render_click()
+      assert reloaded =~ "rt-0-v1"
+      refute reloaded =~ ~s(id="rt-0-v0")
+    end
+
     # Regression for #171: blocks are reorderable without a pointer device.
     test "blocks can be reordered with keyboard move buttons", %{conn: conn} do
       page =

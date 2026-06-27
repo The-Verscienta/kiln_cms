@@ -73,6 +73,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:save_state, :saved)
          # Set when an optimistic-lock conflict blocks saving until reload.
          |> assign(:conflict, false)
+         # Bumped on server-driven form replacement (conflict reload, version
+         # restore) so rich-text blocks remount and reload TipTap from the new
+         # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
+         |> assign(:editor_version, 0)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -360,6 +364,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply,
      socket
      |> assign_record(record)
+     |> reset_editors()
      |> assign(:conflict, false)
      |> assign(:save_state, :saved)
      |> put_flash(:info, gettext("Reloaded the latest version."))}
@@ -381,12 +386,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case result do
       {:ok, record} ->
         {:noreply,
-         socket |> assign_record(record) |> put_flash(:info, gettext("Restored that version."))}
+         socket
+         |> assign_record(record)
+         |> reset_editors()
+         |> put_flash(:info, gettext("Restored that version."))}
 
       _ ->
         {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
     end
   end
+
+  # Force rich-text blocks to remount (new element id) so TipTap reloads from the
+  # replaced form rather than keeping its `phx-update="ignore"` content (#135).
+  defp reset_editors(socket), do: update(socket, :editor_version, &(&1 + 1))
 
   defp run_workflow(socket, action) when action in ~w(submit return publish unpublish archive) do
     # `publish` gets its own event; the rest share `:workflow` (tagged by action)
@@ -1163,7 +1175,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     </div>
                     <div
                       :if={block_type_string(bf) == "rich_text"}
-                      id={"rt-#{bf.index}"}
+                      id={"rt-#{bf.index}-v#{@editor_version}"}
                       phx-hook="RichText"
                       phx-update="ignore"
                       data-content={bf[:legacy_html].value || ""}
