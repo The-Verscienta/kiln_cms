@@ -83,18 +83,33 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           </p>
         </div>
 
-        <form phx-change="search" id="palette-search">
+        <form phx-change="search" id="palette-search" role="search">
+          <label for="palette-q" class="sr-only">Search content</label>
           <input
+            id="palette-q"
             type="text"
             name="q"
             value={@query}
             placeholder="Search content…"
+            aria-label="Search content"
+            aria-describedby="search-status"
             autocomplete="off"
             autofocus
             phx-debounce="150"
             class="w-full rounded-lg border border-base-content/20 bg-transparent px-4 py-2.5 text-base"
           />
         </form>
+
+        <%!-- Announce result changes to screen readers (#176). --%>
+        <p id="search-status" role="status" aria-live="polite" class="sr-only">
+          <%= cond do %>
+            <% @searched and @count == 0 -> %>
+              No results for “{@query}”.
+            <% @searched -> %>
+              {@count} results for “{@query}”.
+            <% true -> %>
+          <% end %>
+        </p>
 
         <p :if={@searched and @count == 0} class="text-sm text-base-content/60">
           No results for “{@query}”.
