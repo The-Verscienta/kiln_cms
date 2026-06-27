@@ -115,15 +115,17 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :text, "or"
   end
 
+  # Theme tokens (not hardcoded emerald/rose) so auth toasts meet contrast in
+  # both light and dark themes, matching CoreComponents.flash (#173).
   override Components.Flash do
     set :message_class_info, """
     fixed top-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border
-    border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-sm
+    border-info/30 bg-base-100 px-4 py-3 text-sm text-base-content shadow-lg
     """
 
     set :message_class_error, """
     fixed top-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border
-    border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 shadow-sm
+    border-error/30 bg-base-100 px-4 py-3 text-sm text-base-content shadow-lg
     """
   end
 
