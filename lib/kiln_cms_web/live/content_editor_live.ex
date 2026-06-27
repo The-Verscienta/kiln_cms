@@ -480,12 +480,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Stop autosaving and put the editor into a conflict state until the user
-  # reloads.
+  # reloads. Surface a flash so a blocked Save gets immediate feedback (#137) —
+  # the Save button is also disabled while `@conflict` is set.
   defp flag_conflict(socket) do
     socket
     |> cancel_autosave_timer()
     |> assign(:conflict, true)
     |> assign(:save_state, :unsaved)
+    |> put_flash(
+      :error,
+      gettext("This content changed elsewhere. Reload to get the latest before saving.")
+    )
   end
 
   # True when a failed submit was rejected by the optimistic lock (the record
@@ -1048,7 +1053,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </.link>
             <.autosave_status :if={@record.state == :draft} state={@save_state} />
             <.workflow_buttons state={@record.state} actor={@actor} />
-            <.button type="submit" variant="primary">{gettext("Save")}</.button>
+            <.button
+              type="submit"
+              variant="primary"
+              disabled={@conflict}
+              title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
+            >
+              {gettext("Save")}
+            </.button>
           </div>
         </div>
 

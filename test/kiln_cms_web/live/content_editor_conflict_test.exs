@@ -56,9 +56,14 @@ defmodule KilnCMSWeb.ContentEditorConflictTest do
     assert html =~ "Someone else saved changes"
     assert CMS.get_page!(page.id, actor: editor).title == "Changed elsewhere"
 
-    # Reloading clears the banner and recovers the latest version.
+    # #137: the blocked save also flashes feedback and disables the Save button.
+    assert html =~ "This content changed elsewhere"
+    assert has_element?(lv, ~s(button[type="submit"][disabled]))
+
+    # Reloading clears the banner, recovers the latest version, and re-enables Save.
     reloaded = lv |> element("#edit-conflict button", "Reload latest") |> render_click()
     refute reloaded =~ "Someone else saved changes"
     assert reloaded =~ "Changed elsewhere"
+    refute has_element?(lv, ~s(button[type="submit"][disabled]))
   end
 end
