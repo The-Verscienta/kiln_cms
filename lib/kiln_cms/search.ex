@@ -40,6 +40,18 @@ defmodule KilnCMS.Search do
   @spec rerank_model() :: String.t()
   def rerank_model, do: cfg(:rerank_model, "BAAI/bge-reranker-base")
 
+  @doc """
+  Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when
+  the `:exla` dependency is compiled in (dev/test); otherwise returns `[]` so the
+  servings fall back to Nx's default backend instead of crashing on a missing
+  `EXLA` module. EXLA is required for acceptable embedding/rerank performance —
+  restore it in prod (off-box image build) before enabling semantic search.
+  """
+  @spec defn_options() :: keyword()
+  def defn_options do
+    if Code.ensure_loaded?(EXLA), do: [compiler: EXLA], else: []
+  end
+
   # Top-N taken from each leg before fusion, and the RRF rank constant (the
   # standard k=60 dampens the contribution of low-ranked results).
   @hybrid_candidates 50

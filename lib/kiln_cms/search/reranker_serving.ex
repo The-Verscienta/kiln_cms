@@ -19,7 +19,7 @@ defmodule KilnCMS.Search.RerankerServing do
 
     Bumblebee.Text.text_classification(model_info, tokenizer,
       compile: [batch_size: 8, sequence_length: 512],
-      defn_options: [compiler: EXLA]
+      defn_options: KilnCMS.Search.defn_options()
     )
   end
 end

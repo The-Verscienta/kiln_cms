@@ -73,3 +73,7 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Use the EXLA (XLA) backend for Nx in tests — the :exla dep is only available in
+# dev/test. Prod/e2e fall back to Nx.BinaryBackend (see config/config.exs).
+config :nx, default_backend: EXLA.Backend

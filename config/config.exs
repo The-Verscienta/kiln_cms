@@ -84,8 +84,10 @@ config :kiln_cms, KilnCMS.Search.Meilisearch,
 # Register pgvector's Postgrex extension so `vector` columns encode/decode.
 config :kiln_cms, KilnCMS.Repo, types: KilnCMS.PostgrexTypes
 
-# EXLA backs Nx — only exercised when the embedding serving runs.
-config :nx, default_backend: EXLA.Backend
+# Nx's backend is set per-env: EXLA.Backend in dev/test (where the :exla dep is
+# available — see config/dev.exs + test.exs), Nx.BinaryBackend (Nx's default)
+# elsewhere. EXLA is excluded from the prod build because its from-source XLA NIF
+# is too heavy for the build host; semantic search is disabled by default there.
 
 # Organization name used as the JSON-LD publisher. Override in runtime.exs.
 config :kiln_cms, :site_name, "KilnCMS"
