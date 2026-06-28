@@ -37,8 +37,11 @@ COPY assets assets
 # Install JS dependencies (TipTap, etc.) before bundling.
 RUN npm --prefix assets ci
 
-RUN mix assets.deploy
+# Compile first so Phoenix generates the colocated JS/CSS manifest
+# (_build/$MIX_ENV/phoenix-colocated/...) that assets/css/app.css and
+# assets/js/app.js import; otherwise tailwind/esbuild can't resolve it.
 RUN mix compile
+RUN mix assets.deploy
 
 COPY config/runtime.exs config/
 COPY rel rel
