@@ -96,3 +96,7 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# Use the EXLA (XLA) backend for Nx locally — the :exla dep is only available in
+# dev/test. Prod/e2e fall back to Nx.BinaryBackend (see config/config.exs).
+config :nx, default_backend: EXLA.Backend

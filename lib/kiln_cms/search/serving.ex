@@ -31,7 +31,7 @@ defmodule KilnCMS.Search.Serving do
 
     Bumblebee.Text.text_embedding(model_info, tokenizer,
       compile: [batch_size: 8, sequence_length: 512],
-      defn_options: [compiler: EXLA],
+      defn_options: KilnCMS.Search.defn_options(),
       output_attribute: :hidden_state,
       output_pool: :cls_token_pooling,
       embedding_processor: :l2_norm

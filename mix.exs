@@ -97,7 +97,12 @@ defmodule KilnCMS.MixProject do
       {:pgvector, "~> 0.3"},
       {:bumblebee, "~> 0.7"},
       {:nx, "~> 0.12"},
-      {:exla, "~> 0.12"},
+      # EXLA compiles a heavy XLA NIF from source (~13 min, multi-GB RAM) and
+      # pulls the :xla archive — too much for the small prod build host. Keep it
+      # for local dev/test speed; prod/e2e fall back to Nx.BinaryBackend (see
+      # config/dev.exs + test.exs). Semantic search is disabled by default in
+      # prod; restore EXLA there via an off-box image build before enabling it.
+      {:exla, "~> 0.12", only: [:dev, :test]},
       # Bumblebee's `progress_bar` still caps `decimal ~> 2.0`, but Ash/ecto 3.14
       # need `decimal ~> 3.0`. progress_bar only uses decimal for CLI download
       # progress formatting, so forcing 3.x is safe. Override resolves the clash.
