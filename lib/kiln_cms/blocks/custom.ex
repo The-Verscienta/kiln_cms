@@ -13,11 +13,17 @@ defmodule KilnCMS.Blocks.Custom do
     field :data, :map, default: %{}
   end
 
+  # NB: match the bare struct and branch in the body. Block modules are Ash
+  # embedded resources whose struct is built by a transformer at @before_compile,
+  # so matching a struct *key* in a function head (%__MODULE__{legacy_type: ...})
+  # fails on a clean compile ("__struct__/1 is undefined"). Bare %__MODULE__{} is
+  # fine because Elixir resolves the current module's struct lazily.
   @impl Kiln.Block.Renderer
-  def render(%__MODULE__{legacy_type: "divider"}, :web), do: ["<hr/>"]
-
   def render(%__MODULE__{} = block, :web) do
-    ["<!-- ", esc(block.legacy_type || "custom"), " block -->"]
+    case block.legacy_type do
+      "divider" -> ["<hr/>"]
+      _ -> ["<!-- ", esc(block.legacy_type || "custom"), " block -->"]
+    end
   end
 
   def render(%__MODULE__{} = block, :json) do
@@ -32,11 +38,15 @@ defmodule KilnCMS.Blocks.Custom do
   def render(%__MODULE__{}, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{content: content}) when is_binary(content),
-    do:
-      content |> String.replace(~r/<[^>]*>/, " ") |> String.replace(~r/\s+/, " ") |> String.trim()
+  def search_text(%__MODULE__{} = block) do
+    case block.content do
+      content when is_binary(content) ->
+        content |> String.replace(~r/<[^>]*>/, " ") |> String.replace(~r/\s+/, " ") |> String.trim()
 
-  def search_text(%__MODULE__{}), do: ""
+      _ ->
+        ""
+    end
+  end
 
   defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end
