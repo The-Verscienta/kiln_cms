@@ -12,8 +12,10 @@ defmodule KilnCMS.Blocks.Image do
     field :media_id, :string
   end
 
+  # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the
+  # block struct isn't available when these heads compile (clean-compile only).
   @impl Kiln.Block.Renderer
-  def render(%__MODULE__{} = block, :web) do
+  def render(block, :web) do
     # Reject non-http(s)/relative schemes (e.g. `javascript:`, `data:`) so fired
     # `:web` HTML is safe for headless innerHTML consumers (mirrors BlockComponents).
     src = KilnCMS.HTMLSanitizer.safe_image_src(block.url) || ""
@@ -26,17 +28,17 @@ defmodule KilnCMS.Blocks.Image do
     end
   end
 
-  def render(%__MODULE__{} = block, :json),
+  def render(block, :json),
     do: %{"_type" => "image", "url" => block.url, "alt" => block.alt, "caption" => block.caption}
 
-  def render(%__MODULE__{} = block, :json_ld) do
+  def render(block, :json_ld) do
     %{"@type" => "ImageObject", "url" => block.url}
     |> put_if("caption", block.caption)
     |> put_if("name", block.alt)
   end
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{} = block),
+  def search_text(block),
     do: [block.alt, block.caption] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")
 
   defp put_if(map, _key, nil), do: map

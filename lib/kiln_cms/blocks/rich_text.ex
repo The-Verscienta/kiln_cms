@@ -14,7 +14,7 @@ defmodule KilnCMS.Blocks.RichText do
   end
 
   @impl Kiln.Block.Renderer
-  def render(%__MODULE__{} = block, :web) do
+  def render(block, :web) do
     case block.body do
       [_ | _] = body ->
         PortableText.to_html(body)
@@ -26,13 +26,13 @@ defmodule KilnCMS.Blocks.RichText do
     end
   end
 
-  def render(%__MODULE__{} = block, :json),
+  def render(block, :json),
     do: %{"_type" => "rich_text", "body" => block.body || []}
 
-  def render(%__MODULE__{}, :json_ld), do: nil
+  def render(_block, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{} = block) do
+  def search_text(block) do
     case block.body do
       [_ | _] = body -> PortableText.to_plain_text(body)
       _ -> strip(block.legacy_html)

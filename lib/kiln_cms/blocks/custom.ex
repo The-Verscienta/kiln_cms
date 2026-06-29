@@ -13,20 +13,21 @@ defmodule KilnCMS.Blocks.Custom do
     field :data, :map, default: %{}
   end
 
-  # NB: match the bare struct and branch in the body. Block modules are Ash
-  # embedded resources whose struct is built by a transformer at @before_compile,
-  # so matching a struct *key* in a function head (%__MODULE__{legacy_type: ...})
-  # fails on a clean compile ("__struct__/1 is undefined"). Bare %__MODULE__{} is
-  # fine because Elixir resolves the current module's struct lazily.
+  # Match a plain variable, not %__MODULE__{}. Block modules are Ash embedded
+  # resources whose struct is built by a transformer at @before_compile — after
+  # these heads compile — so a clean compile can't resolve %__MODULE__{} here at
+  # all (not even the bare form): it raises "__struct__/1 is undefined". Read
+  # fields in the body; KilnCMS.Blocks dispatches by struct type, so the argument
+  # is always this block.
   @impl Kiln.Block.Renderer
-  def render(%__MODULE__{} = block, :web) do
+  def render(block, :web) do
     case block.legacy_type do
       "divider" -> ["<hr/>"]
       _ -> ["<!-- ", esc(block.legacy_type || "custom"), " block -->"]
     end
   end
 
-  def render(%__MODULE__{} = block, :json) do
+  def render(block, :json) do
     %{
       "_type" => "custom",
       "legacy_type" => block.legacy_type,
@@ -35,10 +36,10 @@ defmodule KilnCMS.Blocks.Custom do
     }
   end
 
-  def render(%__MODULE__{}, :json_ld), do: nil
+  def render(_block, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{} = block) do
+  def search_text(block) do
     case block.content do
       content when is_binary(content) ->
         content |> String.replace(~r/<[^>]*>/, " ") |> String.replace(~r/\s+/, " ") |> String.trim()

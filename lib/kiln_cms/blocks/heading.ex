@@ -16,7 +16,7 @@ defmodule KilnCMS.Blocks.Heading do
   def upcast_v1_to_v2(map), do: Map.put_new(map, "level", 2)
 
   @impl Kiln.Block.Renderer
-  def render(%__MODULE__{} = block, :web) do
+  def render(block, :web) do
     level = clamp(block.level)
 
     [
@@ -30,15 +30,15 @@ defmodule KilnCMS.Blocks.Heading do
     ]
   end
 
-  def render(%__MODULE__{} = block, :json),
+  def render(block, :json),
     do: %{"_type" => "heading", "text" => block.text, "level" => clamp(block.level)}
 
   # Headings have no standalone schema.org type — they contribute to the document
   # graph (Phase D/J), not a node of their own.
-  def render(%__MODULE__{}, :json_ld), do: nil
+  def render(_block, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{} = block), do: block.text || ""
+  def search_text(block), do: block.text || ""
 
   defp clamp(level) when level in 1..6, do: level
   defp clamp(_), do: 2
