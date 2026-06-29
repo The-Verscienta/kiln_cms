@@ -28,8 +28,8 @@ defmodule KilnCMS.Blocks.Quote do
   def render(%__MODULE__{}, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{text: text, citation: citation}),
-    do: [text, citation] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")
+  def search_text(%__MODULE__{} = block),
+    do: [block.text, block.citation] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")
 
   defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end

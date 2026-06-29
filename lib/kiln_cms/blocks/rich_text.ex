@@ -14,11 +14,17 @@ defmodule KilnCMS.Blocks.RichText do
   end
 
   @impl Kiln.Block.Renderer
-  def render(%__MODULE__{body: [_ | _] = body}, :web), do: PortableText.to_html(body)
-  # Legacy stored TipTap HTML is untrusted: strip it to the allowlist before it
-  # reaches a fired `:web` artifact (headless consumers assign this to innerHTML).
-  def render(%__MODULE__{legacy_html: legacy}, :web),
-    do: KilnCMS.HTMLSanitizer.sanitize_rich_text(legacy)
+  def render(%__MODULE__{} = block, :web) do
+    case block.body do
+      [_ | _] = body ->
+        PortableText.to_html(body)
+
+      _ ->
+        # Legacy stored TipTap HTML is untrusted: strip it to the allowlist before
+        # it reaches a fired `:web` artifact (headless consumers assign to innerHTML).
+        KilnCMS.HTMLSanitizer.sanitize_rich_text(block.legacy_html)
+    end
+  end
 
   def render(%__MODULE__{} = block, :json),
     do: %{"_type" => "rich_text", "body" => block.body || []}
@@ -26,8 +32,12 @@ defmodule KilnCMS.Blocks.RichText do
   def render(%__MODULE__{}, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{body: [_ | _] = body}), do: PortableText.to_plain_text(body)
-  def search_text(%__MODULE__{legacy_html: legacy}), do: strip(legacy)
+  def search_text(%__MODULE__{} = block) do
+    case block.body do
+      [_ | _] = body -> PortableText.to_plain_text(body)
+      _ -> strip(block.legacy_html)
+    end
+  end
 
   defp strip(nil), do: ""
 

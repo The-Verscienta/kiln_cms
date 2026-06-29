@@ -38,7 +38,7 @@ defmodule KilnCMS.Blocks.Heading do
   def render(%__MODULE__{}, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{text: text}), do: text || ""
+  def search_text(%__MODULE__{} = block), do: block.text || ""
 
   defp clamp(level) when level in 1..6, do: level
   defp clamp(_), do: 2

@@ -36,8 +36,8 @@ defmodule KilnCMS.Blocks.Image do
   end
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{alt: alt, caption: caption}),
-    do: [alt, caption] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")
+  def search_text(%__MODULE__{} = block),
+    do: [block.alt, block.caption] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")
 
   defp put_if(map, _key, nil), do: map
   defp put_if(map, _key, ""), do: map
