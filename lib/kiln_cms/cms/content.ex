@@ -204,10 +204,14 @@ defmodule KilnCMS.CMS.Content do
       admin do
         resource_group :content
 
-        # Friendly datatable: identity + workflow + timing. Internal columns
-        # (search_text, embedding, embedded_at, lock_version, published_version_id)
-        # are deliberately omitted.
-        table_columns [:title, :slug, :state, :audience, :locale, :published_at, :updated_at]
+        # Friendly datatable: identity + timing. Internal columns (search_text,
+        # embedding, embedded_at, lock_version, published_version_id) are
+        # deliberately omitted. `:state` is omitted too: it's added by the
+        # AshStateMachine transformer, which on a clean compile runs *after*
+        # AshAdmin's ValidateTableColumns — so listing it raises "Invalid table
+        # columns: [:state]". `:published_at` conveys publish status here, and the
+        # full `:state` is still shown/editable on the record page.
+        table_columns [:title, :slug, :audience, :locale, :published_at, :updated_at]
 
         format_fields published_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       scheduled_at: {KilnCMS.CMS.Admin, :format_datetime, []},
