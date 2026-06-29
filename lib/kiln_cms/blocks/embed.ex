@@ -8,15 +8,17 @@ defmodule KilnCMS.Blocks.Embed do
     field :url, :string
   end
 
+  # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the
+  # block struct isn't available when these heads compile (clean-compile only).
   @impl Kiln.Block.Renderer
-  def render(%__MODULE__{} = block, :web),
+  def render(block, :web),
     do: ["<figure class=\"kiln-embed\" data-url=\"", esc(block.url || ""), "\"></figure>"]
 
-  def render(%__MODULE__{} = block, :json), do: %{"_type" => "embed", "url" => block.url}
-  def render(%__MODULE__{}, :json_ld), do: nil
+  def render(block, :json), do: %{"_type" => "embed", "url" => block.url}
+  def render(_block, :json_ld), do: nil
 
   @impl Kiln.Block.Renderer
-  def search_text(%__MODULE__{}), do: ""
+  def search_text(_block), do: ""
 
   defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end

@@ -14,8 +14,8 @@ defmodule Kiln.Block do
           field :level, :integer, default: 2
         end
 
-        def render(%__MODULE__{} = b, :web), do: ["<h", to_string(b.level), ">", ...]
-        def search_text(%__MODULE__{} = b), do: b.text || ""
+        def render(b, :web), do: ["<h", to_string(b.level), ">", ...]
+        def search_text(b), do: b.text || ""
       end
 
   From that one definition you get the embedded schema + validation (via the
@@ -23,10 +23,12 @@ defmodule Kiln.Block do
   the serializers (the overridden render contract). Blocks are discovered and
   dispatched through `KilnCMS.Blocks`.
 
-  Match the **bare** struct in your `render/2` and `search_text/1` heads
-  (`%__MODULE__{} = b`) and read fields in the body. The block's struct is built
-  by a transformer at `@before_compile`, so matching a struct *key* in a head
-  (`%__MODULE__{text: t}`) raises `__struct__/1 is undefined` on a clean compile.
+  Do **not** pattern-match `%__MODULE__{}` in your `render/2` or `search_text/1`
+  heads. The block's struct is built by a transformer at `@before_compile` —
+  after these heads compile — so referencing it (even the bare `%__MODULE__{}`)
+  raises `__struct__/1 is undefined` on a clean compile. Match a plain variable
+  and read fields in the body; `KilnCMS.Blocks` dispatches by struct type, so the
+  argument is always this block.
   """
 
   defmacro __using__(_opts) do
