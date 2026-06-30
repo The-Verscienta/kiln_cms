@@ -2,8 +2,12 @@ defmodule KilnCMSWeb.GraphqlSchema do
   @moduledoc false
   use Absinthe.Schema
 
+  # Only domains that exist in this repo. `Verscienta.Catalog` is a downstream,
+  # project-specific content domain (see the KilnCMS.CMS.Content / ContentTypes
+  # docs) that isn't built here — listing it breaks a clean compile ("not a Spark
+  # DSL module"). A project that adds its own content domain re-adds it here.
   use AshGraphql,
-    domains: [KilnCMS.CMS, Verscienta.Catalog]
+    domains: [KilnCMS.CMS]
 
   # Query cost is bounded at the transport: the `/gql` Absinthe.Plug forward sets
   # `analyze_complexity: true` + `max_complexity:` (see the router) so a deeply

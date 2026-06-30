@@ -12,8 +12,11 @@ defmodule KilnCMSWeb.AshJsonApiRouter do
   documentation and concrete servers.
   """
 
+  # Only domains that exist in this repo — `Verscienta.Catalog` is a downstream
+  # project-specific domain that isn't built here (same as in GraphqlSchema), so
+  # listing it breaks a clean compile.
   use AshJsonApi.Router,
-    domains: [KilnCMS.CMS, Verscienta.Catalog],
+    domains: [KilnCMS.CMS],
     open_api: "/open_api",
     modify_open_api: {KilnCMSWeb.OpenApi, :modify, []}
 end
