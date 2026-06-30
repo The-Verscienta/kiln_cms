@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.Layouts do
 
   ## Examples
 
-      <Layouts.app flash={@flash}>
+      <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
         <h1>Content</h1>
       </Layouts.app>
 

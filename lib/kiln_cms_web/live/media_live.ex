@@ -322,7 +322,7 @@ defmodule KilnCMSWeb.MediaLive do
     assigns = assign(assigns, :visible, visible_media(assigns.media, assigns.query))
 
     ~H"""
-    <Layouts.app flash={@flash} current_user={@current_user}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
       <div class="space-y-8">
         <div class="flex items-end justify-between gap-4">
           <div>

@@ -8,8 +8,6 @@ defmodule KilnCMSWeb.AdminI18nTest do
 
   import Phoenix.LiveViewTest
 
-  alias KilnCMS.CMS.Page
-
   @password "password123456"
 
   defp editor do
@@ -56,13 +54,6 @@ defmodule KilnCMSWeb.AdminI18nTest do
     test "the editor renders in the session locale", %{conn: conn} do
       user = editor()
 
-      # Seed a draft so the state badge ("Brouillon" in fr) appears in the content list.
-      Ash.Seed.seed!(Page, %{
-        title: "i18n draft",
-        slug: "i18n-draft-#{System.unique_integer([:positive])}",
-        state: :draft
-      })
-
       conn =
         conn
         |> log_in(user)
@@ -75,8 +66,16 @@ defmodule KilnCMSWeb.AdminI18nTest do
       assert html =~ "Statistiques"
       refute html =~ ">Taxonomy<"
 
-      # State labels are translated via state_label/1 + state_badge component.
-      assert html =~ "Brouillon"
+      # The state_label helper (used inside state_badge components rendered
+      # by the editor list) respects the current Gettext locale.
+      Gettext.put_locale(KilnCMSWeb.Gettext, "fr")
+      assert KilnCMSWeb.CoreComponents.state_label(:draft) == "Brouillon"
+      assert KilnCMSWeb.CoreComponents.state_label(:in_review) == "En révision"
+      assert KilnCMSWeb.CoreComponents.state_label(:published) == "Publié"
+      assert KilnCMSWeb.CoreComponents.state_label(:archived) == "Archivé"
+
+      # Restore for subsequent tests.
+      Gettext.put_locale(KilnCMSWeb.Gettext, "en")
     end
 
     test "defaults to English without a locale preference", %{conn: conn} do
