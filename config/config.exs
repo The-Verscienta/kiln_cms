@@ -32,14 +32,18 @@ config :kiln_cms,
     KilnCMS.Analytics,
     KilnCMS.Firing,
     KilnCMS.History,
-    KilnCMS.SearchIndex,
-    # Project subdomains (see projects/*). The core stays project-agnostic; each
-    # project registers its own content types on its own domain.
-    Verscienta.Catalog
+    KilnCMS.SearchIndex
+    # The core stays project-agnostic. A downstream project registers its own
+    # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
+    # OWN config — it must NOT be listed here, since it isn't compiled into the
+    # reusable core. Ash and AshOban iterate `ash_domains` at compile and boot, so
+    # a nonexistent module here crashes the release ("not a Spark DSL module").
   ],
   # Domains scanned by `KilnCMS.CMS.ContentTypes` for content types. Core types
-  # (page/post) live on KilnCMS.CMS; each project adds its catalog domain here.
-  content_domains: [KilnCMS.CMS, Verscienta.Catalog],
+  # (page/post) live on KilnCMS.CMS; each downstream project adds its catalog
+  # domain in its own config (same reason as ash_domains above — keep it out of
+  # the core default so a clean build/boot doesn't reference a missing module).
+  content_domains: [KilnCMS.CMS],
   # Default "from" address for transactional email (auth confirmation/reset).
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
