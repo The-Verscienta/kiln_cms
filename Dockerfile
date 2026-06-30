@@ -28,7 +28,13 @@ RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 
 COPY config/config.exs config/${MIX_ENV}.exs config/
-RUN mix deps.compile
+# Cap the BEAM to 2 schedulers *for the build only* (inline, so it never reaches
+# the runtime image). Compiling the full dep set cold — the Ash ecosystem plus
+# the Nx/Axon/Bumblebee ML stack — is the peak-RAM moment of the build, and the
+# small build host OOM-kills `mix deps.compile` partway through (exit 255, no
+# error) when files compile fully in parallel. Fewer schedulers = fewer modules
+# compiled at once = lower peak RAM, at the cost of a slower build.
+RUN ERL_FLAGS="+S 2:2" mix deps.compile
 
 COPY priv priv
 COPY lib lib
@@ -40,7 +46,8 @@ RUN npm --prefix assets ci
 # Compile first so Phoenix generates the colocated JS/CSS manifest
 # (_build/$MIX_ENV/phoenix-colocated/...) that assets/css/app.css and
 # assets/js/app.js import; otherwise tailwind/esbuild can't resolve it.
-RUN mix compile
+# Same 2-scheduler cap for the app compile (Ash resources are also memory-heavy).
+RUN ERL_FLAGS="+S 2:2" mix compile
 RUN mix assets.deploy
 
 COPY config/runtime.exs config/
