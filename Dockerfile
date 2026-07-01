@@ -110,4 +110,10 @@ USER nobody
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["/app/bin/kiln_cms", "rpc", "1 + 1"]
 
-CMD ["/app/bin/server"]
+# Run pending migrations (KilnCMS.Release.migrate — see rel/overlays/bin/migrate)
+# before starting the server. Coolify's pre-deployment command hook only runs
+# inside an already-running container, so it's a no-op on a fresh deploy target
+# or after any build failure — this makes migrations run unconditionally on
+# every boot instead. Ecto.Migrator takes a DB advisory lock, so this stays
+# safe if this ever scales beyond a single replica.
+CMD ["/bin/sh", "-c", "/app/bin/migrate && /app/bin/server"]
