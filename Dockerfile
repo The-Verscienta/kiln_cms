@@ -31,9 +31,23 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 # Cap the BEAM to 2 schedulers *for the build only* (inline, so it never reaches
 # the runtime image). Compiling the full dep set cold — the Ash ecosystem plus
 # the Nx/Axon/Bumblebee ML stack — is the peak-RAM moment of the build, and the
-# small build host OOM-kills `mix deps.compile` partway through (exit 255, no
-# error) when files compile fully in parallel. Fewer schedulers = fewer modules
-# compiled at once = lower peak RAM, at the cost of a slower build.
+# small build host OOM-kills `mix deps.compile` (exit 255, no error). Fewer
+# schedulers = fewer modules compiled at once = lower peak RAM.
+#
+# The scheduler cap alone wasn't enough: `mix deps.compile` uses one long-lived
+# BEAM and keeps every compiled dep loaded so later deps can use their macros.
+# The ML stack (nx/axon/tokenizers/bumblebee) compiles early but stays resident,
+# so by the time the Ash/Phoenix web stack compiles at the end, the whole world
+# is co-resident and RAM peaks — which is where the OOM hit (after ash_phoenix).
+#
+# Split the compile: build the ML/Nx stack in its own RUN (a separate BEAM that
+# frees that memory when it exits), then compile the rest. Nothing in the
+# Ash/Phoenix stack has a compile-time dependency on the ML stack, so the second
+# (heavy) pass never reloads it — the peak-RAM final compile is much lighter.
+# Any ML dep not named here still compiles in the second pass; it just costs a
+# bit of the benefit, so this list is safe to keep loosely in sync.
+RUN ERL_FLAGS="+S 2:2" mix deps.compile \
+  complex nx nx_image nx_signal polaris axon safetensors unpickler tokenizers bumblebee
 RUN ERL_FLAGS="+S 2:2" mix deps.compile
 
 COPY priv priv
