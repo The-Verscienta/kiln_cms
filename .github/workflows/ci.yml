@@ -156,8 +156,16 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
+      # Compile the app in MIX_ENV=e2e up front, as a normal (uncapped) step, so
+      # the potentially-cold dep build lands in the cached _build BEFORE
+      # Playwright starts. Otherwise this compile runs inside the webServer
+      # command below, whose 300s startup budget a cold e2e compile blows.
+      - name: Compile app (MIX_ENV=e2e)
+        run: MIX_ENV=e2e mix compile
+
       # Playwright's webServer builds assets, sets up the kiln_cms_e2e DB +
-      # demo seeds (mix e2e.setup), then serves (PHX_SERVER=true). See
+      # demo seeds (mix e2e.setup), then serves (PHX_SERVER=true). With the app
+      # already compiled above, startup stays well inside the timeout. See
       # e2e/playwright.config.js.
       - name: Run Playwright suite
         working-directory: e2e
