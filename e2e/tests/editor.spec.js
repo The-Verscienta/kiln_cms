@@ -100,11 +100,14 @@ test.describe("editor journey", () => {
     await page.fill('input[name$="[title]"]', "E2E Reorder");
     await page.fill('input[name$="[slug]"]', `e2e-reorder-${Date.now()}`);
 
-    // Two heading blocks (simple textareas) so order is easy to assert.
+    // Two heading blocks (simple textareas) so order is easy to assert. The
+    // typed-block DSL's generic editor (dsl_block_fields) binds the primary
+    // textarea to the block's first string field — for Heading that's `text`
+    // (see KilnCMS.Blocks.Heading), not a generic `content`.
     await addBlock(page, "heading");
     await addBlock(page, "heading");
 
-    const areas = page.locator('#blocks-sortable textarea[name$="[content]"]');
+    const areas = page.locator('#blocks-sortable textarea[name$="[text]"]');
     await expect(areas).toHaveCount(2);
     await areas.nth(0).fill("First");
     await areas.nth(1).fill("Second");
