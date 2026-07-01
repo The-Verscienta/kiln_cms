@@ -239,19 +239,28 @@ if config_env() == :prod do
 
   # ## Configuring the mailer
   #
-  # In production you need to configure the mailer to use a different adapter.
-  # Here is an example configuration for Mailgun:
+  # config/config.exs defaults to Swoosh.Adapters.Local — a dev-only in-memory
+  # mailbox with no delivery, and no supervised storage process outside `mix
+  # phx.server`. Auth confirmation/reset emails are sent synchronously inside
+  # the triggering Ash action, so with no real adapter configured, production
+  # registration/reset requests crash outright (GenServer call to a process
+  # that was never started) rather than just failing to deliver silently.
   #
-  #     config :kiln_cms, KilnCMS.Mailer,
-  #       adapter: Swoosh.Adapters.Mailgun,
-  #       api_key: System.get_env("MAILGUN_API_KEY"),
-  #       domain: System.get_env("MAILGUN_DOMAIN")
-  #
-  # Most non-SMTP adapters require an API client. Swoosh supports Req, Hackney,
-  # and Finch out-of-the-box. This configuration is typically done at
-  # compile-time in your config/prod.exs:
-  #
-  #     config :swoosh, :api_client, Swoosh.ApiClient.Req
-  #
-  # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
+  # Opt into real delivery via SMTP (works with Postmark, SES, Gmail, or any
+  # mail server) by setting SMTP_HOST. TLS is on by default (STARTTLS on 587);
+  # set SMTP_TLS=false for an unencrypted relay (e.g. a local dev/test relay).
+  if smtp_host = System.get_env("SMTP_HOST") do
+    config :kiln_cms, KilnCMS.Mailer,
+      adapter: Swoosh.Adapters.SMTP,
+      relay: smtp_host,
+      port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
+      username: System.get_env("SMTP_USERNAME"),
+      password: System.get_env("SMTP_PASSWORD"),
+      tls: if(System.get_env("SMTP_TLS") == "false", do: :never, else: :always),
+      auth: :always
+
+    if from_email = System.get_env("MAIL_FROM_EMAIL") do
+      config :kiln_cms, email_from: {System.get_env("MAIL_FROM_NAME") || "KilnCMS", from_email}
+    end
+  end
 end
