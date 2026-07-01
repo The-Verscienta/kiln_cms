@@ -7,11 +7,24 @@ defmodule Verscienta.Catalog do
   Directus backend (herbs, formulas, conditions, practitioners, clinics,
   modalities). Each is built on `KilnCMS.CMS.Content` with `domain: __MODULE__`,
   so it inherits the block editor, publishing workflow, versioning, search, SEO
-  and relationships while keeping the core project-agnostic. Listed in
-  `:content_domains` so `KilnCMS.CMS.ContentTypes` discovers these types
-  everywhere (admin, delivery, search).
+  and relationships while keeping the core project-agnostic.
+
+  The reusable core deliberately does **not** register this domain: it's absent
+  from `ash_domains`/`content_domains` in `config/config.exs` (see commit that
+  removed it to keep a clean core build/boot). So it compiles but stays dormant
+  — nothing migrates or serves it. A downstream/production config *activates*
+  the catalog by appending `Verscienta.Catalog` to both lists, which makes
+  `KilnCMS.CMS.ContentTypes` discover these types (admin, delivery, search) and
+  wires the resources into migrations/AshOban.
   """
+  # `validate_config_inclusion?: false`: this domain is intentionally not in
+  # `config :kiln_cms, ash_domains` (the core stays project-agnostic; a
+  # downstream config opts it in). Without this, Ash warns that a compiled
+  # domain is missing from `ash_domains` — which `mix compile --warnings-as-errors`
+  # turns into a build failure — and `AshOban.config/3` would raise
+  # "not a Spark DSL module" at boot if it were listed there before load.
   use Ash.Domain,
+    validate_config_inclusion?: false,
     extensions: [AshJsonApi.Domain, AshGraphql.Domain, AshAdmin.Domain]
 
   admin do

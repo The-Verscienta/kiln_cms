@@ -18,9 +18,11 @@ const webServer = process.env.E2E_NO_WEBSERVER
       command: `cd .. && MIX_ENV=e2e mix e2e.setup && MIX_ENV=e2e PHX_SERVER=true PORT=${PORT} mix phx.server`,
       url: BASE_URL,
       reuseExistingServer: !process.env.CI,
-      // Generous: a cold CI run compiles the app in :e2e + downloads the
-      // esbuild/tailwind binaries + builds assets before serving.
-      timeout: 300_000,
+      // Generous: a cold run compiles the app in :e2e + downloads the
+      // esbuild/tailwind binaries + builds assets before serving. CI now
+      // pre-compiles :e2e in a separate step (see .github/workflows/ci.yml), so
+      // this mainly covers cold *local* runs; kept high as defense-in-depth.
+      timeout: 600_000,
       stdout: "pipe",
       stderr: "pipe",
     };
