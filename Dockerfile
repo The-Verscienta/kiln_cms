@@ -47,15 +47,20 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 # Any ML dep not named here still compiles in the second pass; it just costs a
 # bit of the benefit, so this list is safe to keep loosely in sync.
 #
-# `rustler_precompiled` must be listed explicitly: tokenizers/native.ex does
-# `use RustlerPrecompiled` at compile time, and `mix deps.compile <list>` only
-# compiles exactly the apps named — it does NOT transitively pull in an
-# unlisted compile-time dependency the way a bare `mix deps.compile` would.
-# Without it here, tokenizers fails cold-build with "module RustlerPrecompiled
-# is not loaded and could not be found".
+# `mix deps.compile <list>` only compiles exactly the apps named — it does
+# NOT transitively pull in an unlisted compile-time dependency the way a bare
+# `mix deps.compile` would. Two ML deps have such a dependency and must be
+# listed explicitly even though they're not in the curated set above:
+#   - rustler_precompiled: tokenizers/native.ex does `use RustlerPrecompiled`.
+#   - unzip: bumblebee/conversion/pytorch_loader.ex pattern-matches
+#     `%Unzip.Entry{}`, which needs the struct's definition at compile time.
+# (Verified against bumblebee's source: `Unzip.Entry` is its only external
+# struct usage; other unlisted deps like jason/progress_bar/castore are only
+# called as plain functions, which just warn under this scheme — see the
+# Jason warnings on `safetensors` below — not hard-fail.)
 RUN ERL_FLAGS="+S 2:2" mix deps.compile \
   complex nx nx_image nx_signal polaris axon safetensors unpickler \
-  rustler_precompiled tokenizers bumblebee
+  rustler_precompiled unzip tokenizers bumblebee
 RUN ERL_FLAGS="+S 2:2" mix deps.compile
 
 COPY priv priv
