@@ -28,7 +28,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector, not plain postgres: `KilnCMS.Repo.installed_extensions/0`
+        # requires the `vector` extension (semantic-search embeddings) even
+        # though the feature is disabled by default, so `ash.setup`/`mix test`
+        # fail on plain postgres:16 with "extension \"vector\" is not available".
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -104,7 +108,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector, not plain postgres: `KilnCMS.Repo.installed_extensions/0`
+        # requires the `vector` extension (semantic-search embeddings) even
+        # though the feature is disabled by default, so `ash.setup`/`mix test`
+        # fail on plain postgres:16 with "extension \"vector\" is not available".
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
