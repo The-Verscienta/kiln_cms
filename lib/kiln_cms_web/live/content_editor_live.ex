@@ -230,7 +230,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("validate", %{"form" => params}, socket) do
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
-    {:noreply, schedule_autosave(socket)}
+    {:noreply, mark_dirty(socket)}
   end
 
   def handle_event("field_focus", %{"field" => field}, socket) do
@@ -258,7 +258,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("clear_featured", _params, socket) do
     params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", nil)
-    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+     |> mark_dirty()}
   end
 
   def handle_event("close_picker", _params, socket),
@@ -275,7 +279,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply,
      socket
      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> reset_picker()}
+     |> reset_picker()
+     |> mark_dirty()}
   end
 
   # Insert a library image as a brand-new image block (browser opened from the
@@ -289,7 +294,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     socket = socket |> assign(:form, form) |> reset_picker()
     broadcast_preview(socket)
-    {:noreply, socket}
+    {:noreply, mark_dirty(socket)}
   end
 
   # Insert a library image into the existing image block at `index`.
@@ -305,7 +310,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> reset_picker()
 
     broadcast_preview(socket)
-    {:noreply, socket}
+    {:noreply, mark_dirty(socket)}
   end
 
   def handle_event("add_block", %{"type" => type}, socket) do
@@ -314,16 +319,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
         params: %{"_union_type" => type}
       )
 
-    {:noreply, assign(socket, :form, form)}
+    {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
 
   def handle_event("remove_block", %{"path" => path}, socket) do
-    {:noreply, assign(socket, :form, AshPhoenix.Form.remove_form(socket.assigns.form, path))}
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
+     |> mark_dirty()}
   end
 
   def handle_event("reorder", %{"order" => order}, socket) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
-    {:noreply, assign(socket, :form, form)}
+    {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
 
   # Keyboard-accessible alternative to drag-and-drop reordering (#171): swap a
@@ -344,6 +352,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply,
        socket
        |> assign(:form, form)
+       |> mark_dirty()
        |> assign(
          :moved_announcement,
          gettext("Moved block to position %{pos} of %{count}", pos: j + 1, count: count)
@@ -418,6 +427,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          socket
          |> assign_record(record)
          |> reset_editors()
+         |> assign(:save_state, :saved)
          |> put_flash(:info, gettext("Restored that version."))}
 
       _ ->
@@ -457,12 +467,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp run_workflow(socket, _action), do: socket
 
-  # --- draft autosave --------------------------------------------------------
+  # --- dirty tracking + draft autosave ----------------------------------------
 
-  # Only drafts autosave; published/in-review/archived content is changed
-  # deliberately via the explicit Save button. Each edit (re)starts the idle
-  # timer, so we save once the editor pauses rather than on every keystroke.
-  defp schedule_autosave(socket) do
+  # Every form-mutating event funnels through here. Drafts autosave;
+  # published/in-review/archived content is changed deliberately via the
+  # explicit Save button, so for those we only flip the dirty indicator
+  # (and the UnsavedGuard hook warns before navigating away).
+  defp mark_dirty(socket) do
     if draft?(socket) do
       socket
       |> cancel_autosave_timer()
@@ -471,7 +482,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # a "Saving…" indicator (#136). Resolves to `:saved` or `:error` on flush.
       |> assign(:save_state, :saving)
     else
-      socket
+      assign(socket, :save_state, :unsaved)
     end
   end
 
@@ -1255,6 +1266,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-change="validate"
         phx-submit="save"
         id={"#{@kind}-editor"}
+        phx-hook="UnsavedGuard"
+        data-dirty={to_string(@save_state != :saved)}
+        data-unsaved-message={gettext("You have unsaved changes. Leave without saving?")}
         class="space-y-6"
       >
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -1285,7 +1299,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
-            <.autosave_status :if={@record.state == :draft} state={@save_state} />
+            <.autosave_status
+              :if={@record.state == :draft or @save_state != :saved}
+              state={@save_state}
+            />
             <.workflow_buttons state={@record.state} actor={@actor} />
             <.button
               type="submit"

@@ -376,6 +376,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_page!(page.id, authorize?: false).title == "Live"
     end
 
+    # Audit U-H1: non-draft content gets no autosave, so unsaved edits must be
+    # tracked — the form flips data-dirty (read by the UnsavedGuard hook) and
+    # shows an "Unsaved changes" indicator until an explicit Save.
+    test "editing published content marks the form dirty until saved", %{conn: conn} do
+      page = draft_page(%{title: "Live", state: :published})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(data-dirty="false")
+
+      changed = lv |> form("#page-editor", form: %{title: "Edited live"}) |> render_change()
+      assert changed =~ ~s(data-dirty="true")
+      assert changed =~ "Unsaved changes"
+
+      saved = lv |> form("#page-editor", form: %{title: "Edited live"}) |> render_submit()
+      assert saved =~ ~s(data-dirty="false")
+      refute saved =~ "Unsaved changes"
+      assert CMS.get_page!(page.id, authorize?: false).title == "Edited live"
+    end
+
     test "repeated autosaves coalesce into a single version (issue #32)", %{conn: conn} do
       page = draft_page(%{title: "Draft"})
 

@@ -30,6 +30,42 @@ import {FocusTrap} from "./focus_trap"
 
 const Hooks = {
   FocusTrap,
+  // Warn before discarding unsaved editor changes. The server keeps
+  // `data-dirty` on the form in sync with its save state; this hook guards
+  // full page unloads (tab close, hard reload, plain links) via `beforeunload`
+  // and in-app LiveView navigation (e.g. "← All content") by confirming
+  // clicks on live links while dirty.
+  UnsavedGuard: {
+    mounted() {
+      this.beforeUnload = e => {
+        if (this.dirty()) {
+          e.preventDefault()
+          e.returnValue = ""
+        }
+      }
+      window.addEventListener("beforeunload", this.beforeUnload)
+
+      this.onClick = e => {
+        if (!this.dirty()) return
+        const link = e.target.closest && e.target.closest("a[data-phx-link]")
+        if (!link || link.target === "_blank") return
+        const message =
+          this.el.dataset.unsavedMessage || "You have unsaved changes. Leave without saving?"
+        if (!window.confirm(message)) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+        }
+      }
+      document.addEventListener("click", this.onClick, true)
+    },
+    destroyed() {
+      window.removeEventListener("beforeunload", this.beforeUnload)
+      document.removeEventListener("click", this.onClick, true)
+    },
+    dirty() {
+      return this.el.dataset.dirty === "true"
+    },
+  },
   Clipboard: {
     mounted() {
       this.el.addEventListener("click", () => {
