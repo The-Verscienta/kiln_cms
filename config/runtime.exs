@@ -112,7 +112,17 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  host = System.get_env("PHX_HOST") || "example.com"
+  # PHX_HOST is meant to be a bare host (e.g. "be.verscienta.com"), but is
+  # easy to misconfigure as a full URL. Strip any scheme/trailing slash so a
+  # `https://host` value doesn't get baked into the Endpoint's `url: [host:
+  # ...]` — Phoenix uses that host as-is (not re-parsed) both for generating
+  # absolute URLs and for validating the LiveView/channel socket's Origin
+  # header (check_origin), so a raw scheme prefix silently breaks both.
+  host =
+    (System.get_env("PHX_HOST") || "example.com")
+    |> String.replace_leading("https://", "")
+    |> String.replace_leading("http://", "")
+    |> String.trim_trailing("/")
 
   config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
