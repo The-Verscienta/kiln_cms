@@ -210,10 +210,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.input field={@form[:position]} type="number" label={gettext("Position")} />
             <div class="sm:col-span-2">
-              <label class="mb-1 block text-sm font-medium">
+              <label for="new-field-options" class="mb-1 block text-sm font-medium">
                 {gettext("Options (one per line — select only)")}
               </label>
               <textarea
+                id="new-field-options"
                 name="field_definition[options]"
                 rows="3"
                 class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
@@ -320,10 +321,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
                   <.input field={@edit.form[:position]} type="number" label={gettext("Position")} />
                   <div class="sm:col-span-2">
-                    <label class="mb-1 block text-sm font-medium">
+                    <label
+                      for={"edit-field-options-#{@edit.id}"}
+                      class="mb-1 block text-sm font-medium"
+                    >
                       {gettext("Options (one per line — select only)")}
                     </label>
                     <textarea
+                      id={"edit-field-options-#{@edit.id}"}
                       name="field_definition[options]"
                       rows="3"
                       class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"

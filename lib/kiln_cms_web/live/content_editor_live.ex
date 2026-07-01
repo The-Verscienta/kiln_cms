@@ -698,27 +698,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :definition, :map, required: true
   attr :name, :string, required: true
   attr :value, :any, required: true
+  attr :errors, :list, default: []
 
   defp custom_field_input(%{definition: %{field_type: :boolean}} = assigns) do
     assigns = assign(assigns, :checked, assigns.value in [true, "true", "1", "on"])
 
     ~H"""
-    <label class="flex items-center gap-2 text-sm">
-      <%!-- hidden "false" first so an unchecked box still submits a value (last wins) --%>
-      <input type="hidden" name={@name} value="false" />
-      <input type="checkbox" name={@name} value="true" checked={@checked} />
-      <span class="font-medium">{@definition.label}</span>
-      <span :if={@definition.help_text} class="text-base-content/60">— {@definition.help_text}</span>
-    </label>
+    <div>
+      <label class="flex items-center gap-2 text-sm">
+        <%!-- hidden "false" first so an unchecked box still submits a value (last wins) --%>
+        <input type="hidden" name={@name} value="false" />
+        <input
+          type="checkbox"
+          name={@name}
+          value="true"
+          checked={@checked}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        />
+        <span class="font-medium">{@definition.label}</span>
+        <span :if={@definition.help_text} class="text-base-content/60">— {@definition.help_text}</span>
+      </label>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
     """
   end
 
   defp custom_field_input(%{definition: %{field_type: :select}} = assigns) do
     ~H"""
     <div>
-      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
       <select
+        id={cf_id(@definition)}
         name={@name}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
       >
         <option value="">{gettext("— None —")}</option>
@@ -729,6 +745,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
       </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
     </div>
     """
   end
@@ -736,15 +753,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp custom_field_input(%{definition: %{field_type: :text}} = assigns) do
     ~H"""
     <div>
-      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
       <textarea
+        id={cf_id(@definition)}
         name={@name}
         required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
       >{@value}</textarea>
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
       </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
     </div>
     """
   end
@@ -754,21 +777,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     ~H"""
     <div>
-      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
       <input
+        id={cf_id(@definition)}
         type={@input_type}
         name={@name}
         value={@value}
         required={@definition.required}
         step={@input_type == "number" && @definition.field_type == :float && "any"}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
       />
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
       </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
     </div>
     """
   end
+
+  attr :definition, :map, required: true
+  attr :errors, :list, required: true
+
+  defp custom_field_errors_list(assigns) do
+    ~H"""
+    <div :if={@errors != []} id={cf_errors_id(@definition)}>
+      <p :for={message <- @errors} class="mt-1 flex items-center gap-1 text-xs text-error">
+        <.icon name="hero-exclamation-circle" class="size-4" /> {message}
+      </p>
+    </div>
+    """
+  end
+
+  defp cf_id(definition), do: "custom-field-#{definition.name}"
+  defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
 
   defp custom_input_type(:integer), do: "number"
   defp custom_input_type(:float), do: "number"
@@ -786,6 +831,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
       _ -> nil
     end
   end
+
+  # Validation messages `ApplyCustomFields` attached for one definition — the
+  # errors land on the `:custom_fields` attribute with the field's name in
+  # `value`, so they'd otherwise never render anywhere (audit U-H2).
+  defp custom_field_errors(form, name) do
+    form
+    |> changeset_errors()
+    |> Enum.filter(fn
+      %Ash.Error.Changes.InvalidAttribute{field: :custom_fields, value: value} -> value == name
+      _ -> false
+    end)
+    |> Enum.map(& &1.message)
+  end
+
+  defp any_custom_field_errors?(form, definitions),
+    do: Enum.any?(definitions, &(custom_field_errors(form, &1.name) != []))
 
   attr :form, :any, required: true
   attr :media, :list, required: true
@@ -1531,7 +1592,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
               </div>
             </details>
 
-            <details :if={@field_definitions != []} class="rounded border border-base-content/15 p-3">
+            <details
+              :if={@field_definitions != []}
+              class="rounded border border-base-content/15 p-3"
+              open={any_custom_field_errors?(@form, @field_definitions)}
+            >
               <summary class="cursor-pointer text-sm font-medium">
                 {gettext("Custom fields")}
               </summary>
@@ -1541,6 +1606,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   definition={definition}
                   name={"#{@form.name}[custom_fields][#{definition.name}]"}
                   value={custom_field_value(@form, definition.name)}
+                  errors={custom_field_errors(@form, definition.name)}
                 />
               </div>
             </details>

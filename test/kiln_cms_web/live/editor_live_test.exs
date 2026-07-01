@@ -319,6 +319,38 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Audit U-H2: ApplyCustomFields errors land on :custom_fields and previously
+  # rendered nowhere — the editor got a generic flash with nothing highlighted.
+  describe "custom field validation errors" do
+    test "an invalid custom-field value renders an inline error and opens the section",
+         %{conn: conn} do
+      KilnCMS.CMS.create_field_definition!(
+        %{content_type: :page, name: "level", label: "Level", field_type: :integer},
+        actor: authed_user(:admin)
+      )
+
+      page = draft_page(%{title: "Has fields"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # The input is labelled via for/id (previously a bare sibling label).
+      assert html =~ ~s(for="custom-field-level")
+      assert html =~ ~s(id="custom-field-level")
+
+      invalid =
+        lv
+        |> form("#page-editor", form: %{custom_fields: %{level: "abc"}})
+        |> render_submit()
+
+      assert invalid =~ "Level (level) must be a whole number"
+      assert invalid =~ ~s(id="custom-field-level-errors")
+      assert invalid =~ ~s(aria-invalid="true")
+      # The collapsed "Custom fields" details opens so the error is visible.
+      assert invalid =~ ~r/<details[^>]*open/
+    end
+  end
+
   describe "draft autosave" do
     test "a draft is autosaved after editing, without submitting", %{conn: conn} do
       page = draft_page(%{title: "Old"})
