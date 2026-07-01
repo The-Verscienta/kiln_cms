@@ -28,7 +28,12 @@ defmodule KilnCMS.CMS.AdminTest do
       test "#{inspect(resource)} datatable shows editorial columns, not internals" do
         columns = AshAdmin.Resource.table_columns(@resource)
 
-        assert columns == [:title, :slug, :state, :audience, :locale, :published_at, :updated_at]
+        # `:state` is deliberately absent — see the comment on `table_columns`
+        # in KilnCMS.CMS.Content (commit 24d60d9): on a clean compile,
+        # AshStateMachine adds `:state` *after* AshAdmin's ValidateTableColumns
+        # transformer runs, so listing it here raises "Invalid table columns".
+        # `:published_at` conveys publish status in the table instead.
+        assert columns == [:title, :slug, :audience, :locale, :published_at, :updated_at]
 
         # Internal/search/embedding plumbing stays out of the table.
         for internal <- [

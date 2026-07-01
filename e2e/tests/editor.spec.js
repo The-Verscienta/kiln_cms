@@ -9,8 +9,9 @@ async function signInAsAdmin(page) {
   await page.fill('input[name="user[email]"]', ADMIN.email);
   await page.fill('input[name="user[password]"]', ADMIN.password);
   await page.getByRole("button", { name: /sign in/i }).click();
-  // Successful sign-in redirects to the site root.
-  await expect(page).toHaveURL("/");
+  // Editors/admins land in the editor by default after sign-in (#157); this
+  // seeded user has the :admin role (see priv/repo/seeds.exs).
+  await expect(page).toHaveURL("/editor");
 }
 
 // Start a fresh draft page from the editor index and return its slug (the
