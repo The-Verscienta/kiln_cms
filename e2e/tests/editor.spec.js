@@ -114,7 +114,13 @@ test.describe("editor journey", () => {
     await page.waitForTimeout(400);
 
     // Preview (right pane) renders heading blocks as <h2>, in block order.
-    const previewHeadings = page.locator("article h2");
+    // preview_article/1 renders the title as its own `<h2 class="text-2xl
+    // font-bold">` (#174 — a single logical h1 per page) ahead of the blocks,
+    // and is shared verbatim by the desktop sticky column and the mobile
+    // disclosure (#138) — both stay in the DOM regardless of viewport, just
+    // toggled via CSS. `:visible` picks the rendered pane for this viewport;
+    // `:not(.text-2xl)` excludes the title so only block headings remain.
+    const previewHeadings = page.locator("article:visible h2:not(.text-2xl)");
     await expect(previewHeadings).toHaveText(["First", "Second"]);
 
     // Drag the second block's handle above the first. SortableJS listens to
