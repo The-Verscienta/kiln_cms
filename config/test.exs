@@ -1,6 +1,27 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
+# Register the Verscienta project's catalog domain for the test suite only.
+# `config/config.exs` deliberately keeps `Verscienta.Catalog` out of
+# `ash_domains`/`content_domains` everywhere else, so a clean core build/boot
+# never references a project-specific module (see the comment there). But
+# `Verscienta.Catalog` IS compiled here (`projects/` is in `elixirc_paths` for
+# every env — see mix.exs), and `test/verscienta/importer_test.exs` exercises
+# its import pipeline (Catalog.Herb/Formula) directly, so the test suite needs
+# it registered to pass. This override is test-only: prod stays exactly as
+# decided (dormant), so there's no boot-crash risk from this change.
+config :kiln_cms,
+  ash_domains: [
+    KilnCMS.Accounts,
+    KilnCMS.CMS,
+    KilnCMS.Analytics,
+    KilnCMS.Firing,
+    KilnCMS.History,
+    KilnCMS.SearchIndex,
+    Verscienta.Catalog
+  ],
+  content_domains: [KilnCMS.CMS, Verscienta.Catalog]
+
 # Run best-effort analytics writes (page-view + search-query recording) inline
 # rather than in a detached supervised task, so the upsert stays on the test's
 # ExUnit SQL sandbox connection — avoids a connection leaking past the owning

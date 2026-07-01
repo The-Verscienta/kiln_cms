@@ -9,8 +9,9 @@ async function signInAsAdmin(page) {
   await page.fill('input[name="user[email]"]', ADMIN.email);
   await page.fill('input[name="user[password]"]', ADMIN.password);
   await page.getByRole("button", { name: /sign in/i }).click();
-  // Successful sign-in redirects to the site root.
-  await expect(page).toHaveURL("/");
+  // Editors/admins land in the editor by default after sign-in (#157); this
+  // seeded user has the :admin role (see priv/repo/seeds.exs).
+  await expect(page).toHaveURL("/editor");
 }
 
 // Start a fresh draft page from the editor index and return its slug (the
@@ -20,6 +21,16 @@ async function newDraftPage(page) {
   await page.click('button[phx-click="new"][phx-value-kind="page"]');
   await page.waitForURL(/\/editor\/(content\/page|pages)\//);
   await expect(page.locator('form[id$="-editor"]')).toBeVisible();
+}
+
+// The block inserter (#29) is a closed dropdown: its options only become
+// visible/clickable after the "Add block" trigger opens the menu (the
+// BlockInserter JS hook toggles `data-inserter-menu`'s `hidden` attribute).
+// Selecting an option closes the menu again, so each insert needs its own
+// trigger click.
+async function addBlock(page, type) {
+  await page.click("button[data-inserter-trigger]");
+  await page.click(`button[phx-click="add_block"][phx-value-type="${type}"]`);
 }
 
 test.describe("editor journey", () => {
@@ -39,7 +50,7 @@ test.describe("editor journey", () => {
     await page.fill('input[name$="[slug]"]', slug);
 
     // Add a TipTap rich-text block and type into the ProseMirror editor.
-    await page.click('button[phx-click="add_block"][phx-value-type="rich_text"]');
+    await addBlock(page, "rich_text");
     const editor = page.locator('[phx-hook="RichText"] [data-editor]').first();
     await expect(editor).toBeVisible();
     await editor.click();
@@ -66,7 +77,7 @@ test.describe("editor journey", () => {
     await page.fill('input[name$="[title]"]', "E2E Slash");
     await page.fill('input[name$="[slug]"]', `e2e-slash-${Date.now()}`);
 
-    await page.click('button[phx-click="add_block"][phx-value-type="rich_text"]');
+    await addBlock(page, "rich_text");
     const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
     await expect(editor).toBeVisible();
     await editor.click();
@@ -89,18 +100,27 @@ test.describe("editor journey", () => {
     await page.fill('input[name$="[title]"]', "E2E Reorder");
     await page.fill('input[name$="[slug]"]', `e2e-reorder-${Date.now()}`);
 
-    // Two heading blocks (simple textareas) so order is easy to assert.
-    await page.click('button[phx-click="add_block"][phx-value-type="heading"]');
-    await page.click('button[phx-click="add_block"][phx-value-type="heading"]');
+    // Two heading blocks (simple textareas) so order is easy to assert. The
+    // typed-block DSL's generic editor (dsl_block_fields) binds the primary
+    // textarea to the block's first string field — for Heading that's `text`
+    // (see KilnCMS.Blocks.Heading), not a generic `content`.
+    await addBlock(page, "heading");
+    await addBlock(page, "heading");
 
-    const areas = page.locator('#blocks-sortable textarea[name$="[content]"]');
+    const areas = page.locator('#blocks-sortable textarea[name$="[text]"]');
     await expect(areas).toHaveCount(2);
     await areas.nth(0).fill("First");
     await areas.nth(1).fill("Second");
     await page.waitForTimeout(400);
 
     // Preview (right pane) renders heading blocks as <h2>, in block order.
-    const previewHeadings = page.locator("article h2");
+    // preview_article/1 renders the title as its own `<h2 class="text-2xl
+    // font-bold">` (#174 — a single logical h1 per page) ahead of the blocks,
+    // and is shared verbatim by the desktop sticky column and the mobile
+    // disclosure (#138) — both stay in the DOM regardless of viewport, just
+    // toggled via CSS. `:visible` picks the rendered pane for this viewport;
+    // `:not(.text-2xl)` excludes the title so only block headings remain.
+    const previewHeadings = page.locator("article:visible h2:not(.text-2xl)");
     await expect(previewHeadings).toHaveText(["First", "Second"]);
 
     // Drag the second block's handle above the first. SortableJS listens to

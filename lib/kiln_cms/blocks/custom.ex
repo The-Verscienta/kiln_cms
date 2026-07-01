@@ -42,7 +42,10 @@ defmodule KilnCMS.Blocks.Custom do
   def search_text(block) do
     case block.content do
       content when is_binary(content) ->
-        content |> String.replace(~r/<[^>]*>/, " ") |> String.replace(~r/\s+/, " ") |> String.trim()
+        content
+        |> String.replace(~r/<[^>]*>/, " ")
+        |> String.replace(~r/\s+/, " ")
+        |> String.trim()
 
       _ ->
         ""
