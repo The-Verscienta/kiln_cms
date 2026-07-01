@@ -460,14 +460,20 @@ defmodule KilnCMSWeb.MediaLive do
               id={"media-#{item.id}"}
               class="group relative overflow-hidden rounded border border-base-content/10"
             >
-              <img
-                src={thumb_src(item)}
-                alt={item.alt || item.filename}
+              <button
+                type="button"
                 phx-click="select"
                 phx-value-id={item.id}
-                loading="lazy"
-                class="aspect-square w-full cursor-pointer object-cover"
-              />
+                aria-label={gettext("View details for %{name}", name: item.filename)}
+                class="block w-full focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <img
+                  src={thumb_src(item)}
+                  alt={item.alt || item.filename}
+                  loading="lazy"
+                  class="aspect-square w-full object-cover"
+                />
+              </button>
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
                 <p class="flex items-center gap-1 text-[10px] text-base-content/70">

@@ -118,7 +118,9 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
 
-      panel = lv |> element(~s(img[phx-value-id="#{item.id}"])) |> render_click()
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
       assert panel =~ "Alt text"
       assert panel =~ "2.0 KB"
       assert panel =~ "image/png"
@@ -142,7 +144,8 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
 
-      panel = lv |> element(~s(img[phx-value-id="#{item.id}"])) |> render_click()
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
 
       assert panel =~ ~s(role="dialog")
       assert panel =~ ~s(aria-modal="true")
