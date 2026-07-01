@@ -23,6 +23,16 @@ async function newDraftPage(page) {
   await expect(page.locator('form[id$="-editor"]')).toBeVisible();
 }
 
+// The block inserter (#29) is a closed dropdown: its options only become
+// visible/clickable after the "Add block" trigger opens the menu (the
+// BlockInserter JS hook toggles `data-inserter-menu`'s `hidden` attribute).
+// Selecting an option closes the menu again, so each insert needs its own
+// trigger click.
+async function addBlock(page, type) {
+  await page.click("button[data-inserter-trigger]");
+  await page.click(`button[phx-click="add_block"][phx-value-type="${type}"]`);
+}
+
 test.describe("editor journey", () => {
   test.beforeEach(async ({ page }) => {
     await signInAsAdmin(page);
@@ -40,7 +50,7 @@ test.describe("editor journey", () => {
     await page.fill('input[name$="[slug]"]', slug);
 
     // Add a TipTap rich-text block and type into the ProseMirror editor.
-    await page.click('button[phx-click="add_block"][phx-value-type="rich_text"]');
+    await addBlock(page, "rich_text");
     const editor = page.locator('[phx-hook="RichText"] [data-editor]').first();
     await expect(editor).toBeVisible();
     await editor.click();
@@ -67,7 +77,7 @@ test.describe("editor journey", () => {
     await page.fill('input[name$="[title]"]', "E2E Slash");
     await page.fill('input[name$="[slug]"]', `e2e-slash-${Date.now()}`);
 
-    await page.click('button[phx-click="add_block"][phx-value-type="rich_text"]');
+    await addBlock(page, "rich_text");
     const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
     await expect(editor).toBeVisible();
     await editor.click();
@@ -91,8 +101,8 @@ test.describe("editor journey", () => {
     await page.fill('input[name$="[slug]"]', `e2e-reorder-${Date.now()}`);
 
     // Two heading blocks (simple textareas) so order is easy to assert.
-    await page.click('button[phx-click="add_block"][phx-value-type="heading"]');
-    await page.click('button[phx-click="add_block"][phx-value-type="heading"]');
+    await addBlock(page, "heading");
+    await addBlock(page, "heading");
 
     const areas = page.locator('#blocks-sortable textarea[name$="[content]"]');
     await expect(areas).toHaveCount(2);
