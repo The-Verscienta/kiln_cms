@@ -20,6 +20,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
 
     {:ok,
      socket
+     |> assign(:page_title, gettext("Analytics"))
      |> assign(:total, total_views(actor))
      |> assign(:rows, decorate_all(rows))}
   end

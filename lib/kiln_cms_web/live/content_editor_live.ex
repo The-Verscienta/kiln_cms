@@ -144,6 +144,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp assign_record(socket, record) do
     socket
     |> assign(:record, record)
+    |> assign(:page_title, record.title)
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> refresh_preview()
     |> load_versions()

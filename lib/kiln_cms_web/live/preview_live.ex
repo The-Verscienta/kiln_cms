@@ -31,6 +31,7 @@ defmodule KilnCMSWeb.PreviewLive do
       {:ok,
        socket
        |> assign(:kind, kind)
+       |> assign(:page_title, gettext("Preview: %{title}", title: record.title))
        |> assign(:excerpt?, ContentTypes.get!(kind).excerpt?)
        |> assign(:title, record.title)
        |> assign(:excerpt, Map.get(record, :excerpt))

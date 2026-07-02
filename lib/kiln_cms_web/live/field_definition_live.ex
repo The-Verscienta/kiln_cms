@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {:ok,
        socket
        |> assign(:actor, actor)
+       |> assign(:page_title, gettext("Custom fields"))
        |> assign(:content_types, ContentTypes.all())
        |> assign(:field_types, FieldDefinition.field_types())
        |> assign(:edit, nil)

@@ -52,18 +52,18 @@ defmodule KilnCMS.Cache do
   """
   @spec fetch_published(String.t(), String.t(), String.t(), (-> any())) :: any()
   def fetch_published(type, slug, locale, fun) when is_function(fun, 0) do
-    if enabled?() do
-      # `Cachex.fetch` deduplicates concurrent fallback executions per key
-      # (Courier), so a burst of requests for a hot page right after an
-      # invalidation computes the value once instead of stampeding the DB.
-      case Cachex.fetch(@cache, key(type, slug, locale), fn _key -> commit(fun.(), @ttl) end) do
-        {:ok, value} -> emit(:hit, value)
-        {:commit, value} -> emit(:miss, value)
-        {:ignore, value} -> emit(:miss, value)
-        _ -> emit(:miss, fun.())
-      end
-    else
-      fun.()
+    if enabled?(), do: fetch_published_cached(type, slug, locale, fun), else: fun.()
+  end
+
+  # `Cachex.fetch` deduplicates concurrent fallback executions per key
+  # (Courier), so a burst of requests for a hot page right after an
+  # invalidation computes the value once instead of stampeding the DB.
+  defp fetch_published_cached(type, slug, locale, fun) do
+    case Cachex.fetch(@cache, key(type, slug, locale), fn _key -> commit(fun.(), @ttl) end) do
+      {:ok, value} -> emit(:hit, value)
+      {:commit, value} -> emit(:miss, value)
+      {:ignore, value} -> emit(:miss, value)
+      _ -> emit(:miss, fun.())
     end
   end
 
@@ -82,17 +82,17 @@ defmodule KilnCMS.Cache do
   """
   @spec fetch(term(), pos_integer(), (-> any())) :: any()
   def fetch(key, ttl, fun) when is_function(fun, 0) do
-    if enabled?() do
-      # Stampede-safe like `fetch_published/4` — one concurrent rebuild per key
-      # (this also guards the sitemap, whose rebuild is expensive).
-      case Cachex.fetch(@cache, key, fn _key -> commit(fun.(), ttl) end) do
-        {:ok, value} -> value
-        {:commit, value} -> value
-        {:ignore, value} -> value
-        _ -> fun.()
-      end
-    else
-      fun.()
+    if enabled?(), do: fetch_cached(key, ttl, fun), else: fun.()
+  end
+
+  # Stampede-safe like `fetch_published/4` — one concurrent rebuild per key
+  # (this also guards the sitemap, whose rebuild is expensive).
+  defp fetch_cached(key, ttl, fun) do
+    case Cachex.fetch(@cache, key, fn _key -> commit(fun.(), ttl) end) do
+      {:ok, value} -> value
+      {:commit, value} -> value
+      {:ignore, value} -> value
+      _ -> fun.()
     end
   end
 

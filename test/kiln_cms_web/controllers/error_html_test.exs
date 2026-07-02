@@ -13,8 +13,24 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
     assert html =~ ~s(href="/blog")
   end
 
+  # 500 and 403 are branded pages too (audit): a crash or forbidden page gets
+  # public chrome and a recovery link, not bare status text.
+  test "renders a branded 500.html with recovery links" do
+    html = render_to_string(KilnCMSWeb.ErrorHTML, "500", "html", [])
+
+    assert html =~ "Something went wrong"
+    assert html =~ ~s(href="/")
+  end
+
+  test "renders a branded 403.html with a sign-in link" do
+    html = render_to_string(KilnCMSWeb.ErrorHTML, "403", "html", [])
+
+    assert html =~ "Access denied"
+    assert html =~ ~s(href="/sign-in")
+  end
+
   # Statuses without a template still fall through to the plain status message.
-  test "renders 500.html" do
-    assert render_to_string(KilnCMSWeb.ErrorHTML, "500", "html", []) == "Internal Server Error"
+  test "renders the plain status message for untemplated statuses" do
+    assert render_to_string(KilnCMSWeb.ErrorHTML, "502", "html", []) == "Bad Gateway"
   end
 end

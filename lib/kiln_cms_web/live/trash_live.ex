@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.TrashLive do
       {:ok,
        socket
        |> assign(:actor, actor)
+       |> assign(:page_title, gettext("Trash"))
        |> assign(:confirming_empty, false)
        |> assign(:retention_days, @retention_days)
        |> load_items()}

@@ -28,6 +28,7 @@ defmodule KilnCMSWeb.MediaLive do
     {:ok,
      socket
      |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Media library"))
      |> assign(:is_admin, actor.role == :admin)
      |> assign(:query, "")
      |> assign(:selected, nil)

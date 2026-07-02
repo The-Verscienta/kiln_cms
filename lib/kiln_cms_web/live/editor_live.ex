@@ -20,6 +20,7 @@ defmodule KilnCMSWeb.EditorLive do
     {:ok,
      socket
      |> assign(:actor, socket.assigns.current_user)
+     |> assign(:page_title, gettext("Content"))
      |> assign(:content_types, ContentTypes.all())
      |> assign(:statuses, @statuses)
      |> assign(:status, "all")
