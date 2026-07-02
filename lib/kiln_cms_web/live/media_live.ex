@@ -335,6 +335,7 @@ defmodule KilnCMSWeb.MediaLive do
     put_flash(socket, :error, message)
   end
 
+  defp upload_failure_reason(:too_many_pixels), do: gettext("image dimensions are too large")
   defp upload_failure_reason(:unsupported_format), do: gettext("unsupported image format")
   defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
   defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")

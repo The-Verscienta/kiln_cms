@@ -34,6 +34,16 @@ defmodule KilnCMS.ImageProcessorTest do
     assert {:ok, %{ext: ".png", content_type: "image/png"}} = ImageProcessor.validate_upload(path)
   end
 
+  # Decompression-bomb guard: dimensions above the configured pixel budget are
+  # rejected from the header alone, before any full decode can happen.
+  test "validate_upload/1 rejects images above the pixel limit", %{path: path} do
+    Application.put_env(:kiln_cms, :media, max_pixels: 100)
+    on_exit(fn -> Application.delete_env(:kiln_cms, :media) end)
+
+    # The fixture is 1200x800 (960k pixels) — far over a 100-pixel budget.
+    assert {:error, :too_many_pixels} = ImageProcessor.validate_upload(path)
+  end
+
   test "validate_upload/1 derives the extension from bytes, not the filename", %{path: path} do
     # PNG bytes written to a `.svg`-named file: the result must reflect the real
     # format (PNG), so a disguised upload can never be stored with an .svg key.
