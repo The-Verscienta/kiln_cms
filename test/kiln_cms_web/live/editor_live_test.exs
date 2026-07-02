@@ -975,9 +975,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "LiveBlock"
     end
 
-    test "the editor broadcasts preview updates on change", %{conn: conn} do
+    test "the editor broadcasts preview updates on change while a window is open", %{conn: conn} do
       page = draft_page()
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+      # Simulate an open pop-out window (PreviewLive tracks itself like this).
+      KilnCMSWeb.Presence.track_preview(self(), "page", page.id)
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -985,6 +987,20 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor", form: %{title: "Broadcasted"}) |> render_change()
 
       assert_receive {:preview_update, %{title: "Broadcasted"}}
+    end
+
+    # Audit P-M2: without an open preview window there's nobody to receive the
+    # payload, so the editor skips building/broadcasting it per keystroke.
+    test "no preview broadcast is built when no window is open", %{conn: conn} do
+      page = draft_page()
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "Unheard"}) |> render_change()
+
+      refute_receive {:preview_update, _}, 100
     end
 
     # Regression for #134: the broadcast payload for a rich-text block must carry
@@ -998,6 +1014,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+      KilnCMSWeb.Presence.track_preview(self(), "page", page.id)
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")

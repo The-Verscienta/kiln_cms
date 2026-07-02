@@ -57,6 +57,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
           Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+          # Preview-window joins/leaves, so broadcast_preview/1 can no-op
+          # while no pop-out is watching.
+          Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.preview_topic(kind, id))
         end
 
         {:ok,
@@ -66,6 +69,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:actor, actor)
          |> assign(:block_types, block_types())
          |> assign(:editors, Presence.editors(kind, id))
+         |> assign(:preview_open?, Presence.previews_open?(kind, id))
          |> assign(:cursors, %{})
          |> assign(:self_field, nil)
          # Debounced draft autosave: pending timer ref + status indicator state.
@@ -116,7 +120,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp content_kind(_params, socket), do: socket.assigns.live_action
 
+  # A pop-out preview window opened or closed — flip the broadcast gate.
   @impl true
+  def handle_info(
+        %Phoenix.Socket.Broadcast{event: "presence_diff", topic: "previewing:" <> _},
+        socket
+      ) do
+    open? = Presence.previews_open?(socket.assigns.kind, socket.assigns.record.id)
+    socket = assign(socket, :preview_open?, open?)
+    # Catch the window up with the latest unsaved edits the moment it opens.
+    if open?, do: broadcast_preview(socket)
+    {:noreply, socket}
+  end
+
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     editors = Presence.editors(socket.assigns.kind, socket.assigns.record.id)
     # Drop cursors for anyone who has left, so stale focus badges disappear.
@@ -615,6 +631,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Push the current title + blocks to any open decoupled preview windows.
+  # Skipped entirely while no window is watching (audit P-M2) — otherwise every
+  # editor paid the full typed→legacy block conversion per debounced keystroke
+  # for a payload nobody received.
+  defp broadcast_preview(%{assigns: %{preview_open?: false}} = socket), do: socket
+
   defp broadcast_preview(socket) do
     form = socket.assigns.form
 

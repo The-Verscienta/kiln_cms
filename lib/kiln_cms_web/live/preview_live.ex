@@ -26,6 +26,9 @@ defmodule KilnCMSWeb.PreviewLive do
 
       if connected?(socket) do
         Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic(kind, id))
+        # Announce this window so editors only build/broadcast preview
+        # payloads while someone is actually watching.
+        KilnCMSWeb.Presence.track_preview(self(), kind, id)
       end
 
       {:ok,
