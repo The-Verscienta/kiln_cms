@@ -2,25 +2,28 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   @moduledoc """
   Delivers a single content-workflow notification email.
 
-  Enqueued by `KilnCMS.Notifications` (one job per recipient). Builds the Swoosh
-  email for the event and delivers it via `KilnCMS.Mailer`; delivery failures
-  raise and Oban retries with backoff.
+  Enqueued by `KilnCMS.Notifications` (one job per recipient). Builds the
+  Swoosh email for the event and delivers it via
+  `KilnCMS.Mail.deliver_for_worker/2`: permanent (5xx) failures cancel the
+  job, transient failures raise and Oban retries on the same greylist-aware
+  backoff as `KilnCMS.Mail.DeliveryWorker`.
   """
-  use Oban.Worker, queue: :mail, max_attempts: 3
+  use Oban.Worker, queue: :mail, max_attempts: 8
   use KilnCMSWeb, :verified_routes
 
   import Swoosh.Email
 
-  alias KilnCMS.Mailer
+  alias KilnCMS.Mail
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     args
     |> build_email()
-    |> Mailer.deliver!()
-
-    :ok
+    |> Mail.deliver_for_worker()
   end
+
+  @impl Oban.Worker
+  def backoff(%Oban.Job{attempt: attempt}), do: Mail.backoff_seconds(attempt)
 
   defp build_email(%{"event" => "submitted_for_review"} = args) do
     %{"to" => to, "title" => title, "kind" => kind, "id" => id, "actor_name" => who} = args

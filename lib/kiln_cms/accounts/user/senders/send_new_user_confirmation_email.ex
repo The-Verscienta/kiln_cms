@@ -8,7 +8,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail do
 
   import Swoosh.Email
 
-  alias KilnCMS.Mailer
+  alias KilnCMS.Mail
 
   @impl true
   def send(user, token, opts) do
@@ -17,7 +17,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail do
     |> to(to_string(user.email))
     |> subject(subject(opts))
     |> html_body(body(token, opts))
-    |> Mailer.deliver!()
+    |> Mail.enqueue!()
   end
 
   # `opts[:confirmation_type]` is `:identity_link` when an OAuth2/OIDC
