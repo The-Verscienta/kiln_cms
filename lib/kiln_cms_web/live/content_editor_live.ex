@@ -84,9 +84,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:media_query, "")
          |> assign(
            :media,
+           # The picker grid needs only these fields; a select keeps 500
+           # variants/EXIF-bearing rows out of the editor's heap.
            CMS.list_media_items!(
              actor: actor,
-             query: [sort: [inserted_at: :desc], limit: @max_media]
+             query: [
+               select: [:id, :url, :alt, :caption, :filename],
+               sort: [inserted_at: :desc],
+               limit: @max_media
+             ]
            )
          )
          |> assign(:categories, CMS.list_categories!(actor: actor))
@@ -181,9 +187,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Other content of the same kind, for the "related content" picker. Bounded to
   # the same window as the media picker so a large library can't blow up the mount.
+  # Only id + title — these fill a <select>; without the select, 500 siblings
+  # would each carry their full blocks JSONB tree in this editor's heap.
   defp siblings(kind, id, actor) do
     kind
-    |> ContentTypes.list!(actor: actor, query: [sort: [updated_at: :desc], limit: @max_media])
+    |> ContentTypes.list!(
+      actor: actor,
+      query: [select: [:id, :title], sort: [updated_at: :desc], limit: @max_media]
+    )
     |> Enum.reject(&(&1.id == id))
   end
 

@@ -26,27 +26,43 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:query, "")
      |> assign(:selected, MapSet.new())
      |> assign(:confirming_bulk, nil)
+     |> assign(:max_per_type, @max_per_type)
      |> load_items()}
   end
 
+  # Only what the list renders — without a select, every row drags its whole
+  # blocks JSONB tree (plus search_text and embedding) into the LiveView heap.
+  # Workflow/destroy actions re-fetch the full record by id before acting.
+  @list_fields [:id, :title, :slug, :state, :updated_at]
+
   # Records of every content type merged into `{kind, record}` tuples, newest
-  # first.
+  # first. `truncated?` flags any type that filled its window, so the UI can say
+  # older items exist instead of letting them silently vanish (audit U-M2).
   defp load_items(socket) do
     actor = socket.assigns.actor
 
-    items =
-      ContentTypes.all()
-      |> Enum.flat_map(fn ct ->
-        ct.type
-        |> ContentTypes.list!(
-          actor: actor,
-          query: [sort: [updated_at: :desc], limit: @max_per_type]
-        )
-        |> Enum.map(&{ct.type, &1})
+    per_type =
+      Enum.map(ContentTypes.all(), fn ct ->
+        records =
+          ContentTypes.list!(ct.type,
+            actor: actor,
+            query: [select: @list_fields, sort: [updated_at: :desc], limit: @max_per_type]
+          )
+
+        {ct.type, records}
       end)
+
+    items =
+      per_type
+      |> Enum.flat_map(fn {kind, records} -> Enum.map(records, &{kind, &1}) end)
       |> Enum.sort_by(fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
 
-    assign(socket, :items, items)
+    socket
+    |> assign(:items, items)
+    |> assign(
+      :truncated?,
+      Enum.any?(per_type, fn {_kind, records} -> length(records) >= @max_per_type end)
+    )
   end
 
   defp visible_items(items, status, query) do
@@ -423,6 +439,13 @@ defmodule KilnCMSWeb.EditorLive do
             </button>
           </div>
         </div>
+
+        <p :if={@truncated?} class="text-xs text-base-content/60" role="status">
+          {gettext(
+            "Showing the newest %{max} items per content type — older items exist but aren't listed here.",
+            max: @max_per_type
+          )}
+        </p>
 
         <.empty_state :if={@items == []} icon="hero-document-text" title={gettext("No content yet")}>
           {gettext("Create your first page or post to get started.")}

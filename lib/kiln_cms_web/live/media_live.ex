@@ -33,6 +33,8 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:selected, nil)
      |> assign(:view, :library)
      |> assign(:trashed, [])
+     |> assign(:refresh_timer, nil)
+     |> assign(:max_media, @max_media)
      |> assign(:media, list_media(actor))
      |> allow_upload(:media,
        accept: @accept,
@@ -162,10 +164,23 @@ defmodule KilnCMSWeb.MediaLive do
     do: {:noreply, put_flash(socket, :info, gettext("URL copied to clipboard."))}
 
   # A background variant job finished — refresh the library so the new
-  # dimensions/thumbnail show without a manual reload.
+  # dimensions/thumbnail show without a manual reload. Completions arrive in
+  # bursts (one broadcast per file, to every open MediaLive), so coalesce them
+  # into a single re-query instead of one 500-row fetch per broadcast.
   @impl true
   def handle_info({:media_processed, _id}, socket) do
-    {:noreply, assign(socket, :media, list_media(socket.assigns.actor))}
+    if socket.assigns.refresh_timer do
+      {:noreply, socket}
+    else
+      {:noreply, assign(socket, :refresh_timer, Process.send_after(self(), :refresh_media, 200))}
+    end
+  end
+
+  def handle_info(:refresh_media, socket) do
+    {:noreply,
+     socket
+     |> assign(:refresh_timer, nil)
+     |> assign(:media, list_media(socket.assigns.actor))}
   end
 
   # --- helpers ---------------------------------------------------------------
@@ -443,6 +458,16 @@ defmodule KilnCMSWeb.MediaLive do
               />
             </form>
           </div>
+          <p
+            :if={length(@media) >= @max_media}
+            class="mb-3 text-xs text-base-content/60"
+            role="status"
+          >
+            {gettext(
+              "Showing the newest %{max} files — older files exist but aren't listed here.",
+              max: @max_media
+            )}
+          </p>
           <.empty_state :if={@media == []} icon="hero-photo" title={gettext("No media yet")}>
             {gettext("Upload an image above to start building your library.")}
           </.empty_state>

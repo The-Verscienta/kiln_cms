@@ -205,6 +205,9 @@ defmodule KilnCMSWeb.MediaLiveTest do
         {:media_processed, item.id}
       )
 
+      # Broadcast bursts are coalesced behind a short timer; fire it directly
+      # rather than sleeping through the debounce.
+      send(lv.pid, :refresh_media)
       assert render(lv) =~ ">late-arrival.png<"
     end
   end
