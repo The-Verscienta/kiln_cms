@@ -62,7 +62,8 @@ defmodule KilnCMS.MailTest do
         sent.to == [{"Two", "two@example.com"}] and sent.subject == "Hello" and
           sent.html_body == "<p>Hi</p>" and sent.text_body == "Hi" and
           sent.reply_to == {"", "replies@example.com"} and
-          sent.from == {"KilnCMS", "cms@example.com"}
+          sent.from == {"KilnCMS", "cms@example.com"} and
+          sent.headers["Message-ID"] =~ ~r/^<.+@example\.com>$/
       end)
 
       assert_email_sent(fn sent -> sent.to == [{"", "one@example.com"}] end)

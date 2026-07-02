@@ -98,6 +98,17 @@ defmodule KilnCMS.Mail do
   end
 
   @doc """
+  DKIM signing options for `KilnCMS.Mailer.DirectMX`, in the shape gen_smtp's
+  MIME encoder expects (`[s: selector, d: domain, private_key: ...]`).
+
+  Returns `nil` — unsigned sends — until DKIM key management lands (Phase 3
+  of `docs/direct-email-delivery-plan.md`), which will resolve the key through
+  `KilnCMS.Keys` and cache the result.
+  """
+  @spec dkim_config() :: keyword() | nil
+  def dkim_config, do: nil
+
+  @doc """
   Retry delay for mail workers: `attempt` is 1-based; attempts past the table
   reuse its last entry.
   """
@@ -132,8 +143,17 @@ defmodule KilnCMS.Mail do
       "subject" => email.subject,
       "html_body" => email.html_body,
       "text_body" => email.text_body,
-      "headers" => email.headers
+      # Message-ID is stamped at enqueue time so Oban retries of the same job
+      # re-send the same message rather than a "new" one, and each recipient's
+      # job (a distinct message) gets its own ID. Receivers score messages
+      # without one as spam; the domain must match the sender.
+      "headers" => Map.put_new(email.headers, "Message-ID", message_id(email))
     }
+  end
+
+  defp message_id(%Swoosh.Email{from: {_name, from_address}}) do
+    domain = from_address |> String.split("@") |> List.last()
+    "<#{Ecto.UUID.generate()}@#{domain}>"
   end
 
   defp address_args(nil), do: nil

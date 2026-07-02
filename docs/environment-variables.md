@@ -66,6 +66,28 @@ required (the latter two raise via `System.fetch_env!`). See
 | `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:179`](../config/runtime.exs#L179) |
 | `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:181`](../config/runtime.exs#L181) |
 
+## Optional — outbound email
+
+With none of these set, production uses the dev-only in-memory adapter: the
+app runs, but every delivery job fails in Oban and no email leaves. Opt into
+real delivery with `MAIL_MODE` (or, for back-compat, just `SMTP_HOST`, which
+implies `MAIL_MODE=smtp`). See
+[`docs/direct-email-delivery-plan.md`](direct-email-delivery-plan.md) for the
+direct mode's DNS requirements (SPF/DKIM/DMARC/PTR) and its big caveat: many
+cloud hosts block outbound port 25.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:260`](../config/runtime.exs#L260) |
+| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:298`](../config/runtime.exs#L298) |
+| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:299`](../config/runtime.exs#L299) |
+| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:265`](../config/runtime.exs#L265) |
+| `SMTP_PORT` | `587` | Relay port. | [`config/runtime.exs:271`](../config/runtime.exs#L271) |
+| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). | [`config/runtime.exs:272`](../config/runtime.exs#L272) |
+| `SMTP_PASSWORD` | unset | Relay password. | [`config/runtime.exs:273`](../config/runtime.exs#L273) |
+| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to `false` only for a local dev/test relay. | [`config/runtime.exs:274`](../config/runtime.exs#L274) |
+| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:289`](../config/runtime.exs#L289) |
+
 ## Optional — search (Meilisearch)
 
 Opt into the typo-tolerant search backend by setting `MEILI_URL`; otherwise
