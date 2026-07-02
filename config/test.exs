@@ -18,9 +18,14 @@ config :kiln_cms,
     KilnCMS.Firing,
     KilnCMS.History,
     KilnCMS.SearchIndex,
+    KilnCMS.Mail,
     Verscienta.Catalog
   ],
   content_domains: [KilnCMS.CMS, Verscienta.Catalog]
+
+# :persistent_term is process-global; async tests with sandboxed DB rows must
+# not share a cached DKIM config across tests.
+config :kiln_cms, KilnCMS.Mail, cache_dkim?: false
 
 # Run best-effort analytics writes (page-view + search-query recording) inline
 # rather than in a detached supervised task, so the upsert stays on the test's

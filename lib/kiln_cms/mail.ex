@@ -18,10 +18,31 @@ defmodule KilnCMS.Mail do
   outcomes onto Oban semantics — permanent (5xx) failures cancel the job and
   emit a `[:kiln_cms, :mail, :bounced]` telemetry event, transient failures
   (4xx, connection/DNS errors) raise so Oban retries with `backoff_seconds/1`.
+
+  Also the Ash domain for instance-wide mail settings (`KilnCMS.Mail.Settings`
+  — the DKIM key reference and direct-delivery state). `dkim_config/0`
+  resolves the signing key through `KilnCMS.Keys` for the DirectMX adapter.
   """
+  use Ash.Domain
+
+  require Logger
 
   alias KilnCMS.Mail.DeliveryWorker
   alias KilnCMS.Mailer
+
+  resources do
+    resource KilnCMS.Mail.Settings do
+      define :generate_dkim, action: :generate_dkim
+      define :rotate_dkim, action: :rotate_dkim
+
+      define :configure_dkim_key_source,
+        action: :configure_key_source,
+        args: [:provider, {:optional, :config}]
+
+      define :set_mail_server_ip, action: :set_server_ip
+      define :record_mail_verification, action: :record_verification
+    end
+  end
 
   defmodule TransientDeliveryError do
     @moduledoc """
@@ -97,16 +118,112 @@ defmodule KilnCMS.Mail do
     end
   end
 
+  ## Mail settings / DKIM
+
+  @dkim_cache_key {__MODULE__, :dkim_config}
+
+  @doc """
+  The settings singleton, or nil before first use. A system read
+  (`authorize?: false`): the admin-only policy guards the UI path, while the
+  delivery pipeline and DNS checks read config actorlessly.
+  """
+  @spec get_settings() :: KilnCMS.Mail.Settings.t() | nil
+  def get_settings do
+    KilnCMS.Mail.Settings
+    |> Ash.Query.limit(1)
+    |> Ash.read!(authorize?: false)
+    |> List.first()
+  end
+
+  @doc "The settings singleton, created on first call."
+  @spec ensure_settings!() :: KilnCMS.Mail.Settings.t()
+  def ensure_settings! do
+    get_settings() || create_settings!()
+  end
+
+  defp create_settings! do
+    KilnCMS.Mail.Settings
+    |> Ash.Changeset.for_create(:init, %{})
+    |> Ash.create!(authorize?: false)
+  rescue
+    # Lost a concurrent-creation race on the singleton identity: the row
+    # exists now, so read it.
+    e in [Ash.Error.Invalid, Ash.Error.Unknown] ->
+      get_settings() || reraise(e, __STACKTRACE__)
+  end
+
   @doc """
   DKIM signing options for `KilnCMS.Mailer.DirectMX`, in the shape gen_smtp's
-  MIME encoder expects (`[s: selector, d: domain, private_key: ...]`).
+  MIME encoder expects (`[s: selector, d: domain, private_key: ...]`), with
+  the key material resolved through `KilnCMS.Keys` and the domain taken from
+  the configured From address.
 
-  Returns `nil` — unsigned sends — until DKIM key management lands (Phase 3
-  of `docs/direct-email-delivery-plan.md`), which will resolve the key through
-  `KilnCMS.Keys` and cache the result.
+  `nil` — unsigned sends — when no key is configured, and (with a logged
+  warning) when a configured key can't be resolved: losing the signature
+  hurts deliverability, losing the email loses a password reset.
+
+  The computed value is cached in `:persistent_term` (settings mutations
+  invalidate via `invalidate_dkim_cache/0`); set
+  `config :kiln_cms, KilnCMS.Mail, cache_dkim?: false` to disable (test env,
+  where async sandboxes must not share a process-global cache).
   """
   @spec dkim_config() :: keyword() | nil
-  def dkim_config, do: nil
+  def dkim_config do
+    if dkim_cache_enabled?() do
+      case :persistent_term.get(@dkim_cache_key, :miss) do
+        :miss ->
+          value = compute_dkim_config()
+          :persistent_term.put(@dkim_cache_key, value)
+          value
+
+        value ->
+          value
+      end
+    else
+      compute_dkim_config()
+    end
+  end
+
+  @doc "Drop the cached DKIM options (called after settings mutations)."
+  def invalidate_dkim_cache do
+    :persistent_term.erase(@dkim_cache_key)
+    :ok
+  end
+
+  defp compute_dkim_config do
+    settings = get_settings()
+
+    with %{dkim_selector: selector} when is_binary(selector) <- settings,
+         domain when is_binary(domain) <- sending_domain() do
+      case KilnCMS.Keys.fetch(:dkim) do
+        {:ok, pem} ->
+          [s: selector, d: domain, private_key: {:pem_plain, pem}]
+
+        {:error, reason} ->
+          Logger.warning(
+            "DKIM key configured but unresolvable, sending unsigned: " <>
+              KilnCMS.Keys.describe_error(reason)
+          )
+
+          nil
+      end
+    else
+      _not_configured -> nil
+    end
+  end
+
+  defp dkim_cache_enabled? do
+    :kiln_cms
+    |> Application.get_env(__MODULE__, [])
+    |> Keyword.get(:cache_dkim?, true)
+  end
+
+  defp sending_domain do
+    case Application.get_env(:kiln_cms, :email_from) do
+      {_name, address} -> address |> String.split("@") |> List.last()
+      _unset -> nil
+    end
+  end
 
   @doc """
   Retry delay for mail workers: `attempt` is 1-based; attempts past the table

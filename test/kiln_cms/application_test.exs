@@ -6,7 +6,10 @@ defmodule KilnCMS.ApplicationTest do
   the suite booting at all already exercises these; the explicit assertions
   document the contract.
   """
-  use ExUnit.Case, async: true
+  # async: false — the cache round-trip below races concurrent media-write
+  # tests, whose BustMediaCache change clears the entire shared content cache
+  # (Cache.bust_published/0) between this test's put and get.
+  use ExUnit.Case, async: false
 
   alias KilnCMS.Cache
 

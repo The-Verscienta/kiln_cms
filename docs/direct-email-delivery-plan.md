@@ -180,8 +180,9 @@ Singleton Ash resource, new `mail_settings` table, in a new small
 Actions (all admin-only policies; document in `docs/policy-matrix.md`):
 
 - `generate_dkim` — `:public_key.generate_key({:rsa, 2048, 65537})`,
-  PEM-encode, store via the database provider; derive selector. Only valid
-  when provider = `:database`; refuses if a key exists (use `rotate_dkim`).
+  PEM-encode, store via the database provider; derive selector. From the
+  env/file providers this switches back to `:database` with fresh material;
+  with a database key already present it refuses (use `rotate_dkim`).
 - `configure_key_source` — set provider + config for env/file; on save,
   `check` the source, derive the public key from the private key found there,
   and store public key + a fresh selector (rotating the selector whenever the

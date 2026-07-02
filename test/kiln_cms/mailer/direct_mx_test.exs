@@ -5,9 +5,11 @@ defmodule KilnCMS.Mailer.DirectMXTest do
   real-socket delivery to a local gen_smtp sink server standing in for a
   recipient MX.
   """
-  use ExUnit.Case, async: true
-  # `except: from/2` — consistency with MailTest; also avoids any ambiguity
-  # if Ecto.Query ever gets imported here.
+  # DataCase (not plain ExUnit.Case): the adapter resolves DKIM options via
+  # KilnCMS.Mail.dkim_config/0, which reads the mail-settings row — the test
+  # process needs a sandboxed DB connection even when no row exists.
+  use KilnCMS.DataCase, async: true
+  # `except: from/2` — DataCase imports Ecto.Query.from/2.
   import Swoosh.Email, except: [from: 2]
 
   alias KilnCMS.Mailer.DirectMX

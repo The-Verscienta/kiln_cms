@@ -14,39 +14,15 @@
     },
     {
       "allow_nil?": false,
-      "default": "nil",
+      "default": "0",
       "generated?": false,
       "precision": null,
       "primary_key?": false,
       "references": null,
       "scale": null,
       "size": null,
-      "source": "version_action_type",
-      "type": "text"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "version_action_name",
-      "type": "text"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "version_source_id",
-      "type": "uuid"
+      "source": "singleton",
+      "type": "bigint"
     },
     {
       "allow_nil?": true,
@@ -57,7 +33,91 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "changes",
+      "source": "dkim_selector",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "\"database\"",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "dkim_key_provider",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "dkim_key_provider_config",
+      "type": "map"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "dkim_private_key_encrypted",
+      "type": "binary"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "dkim_public_key",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "server_ip",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "last_verified_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "verification_results",
       "type": "map"
     },
     {
@@ -69,7 +129,7 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "version_inserted_at",
+      "source": "inserted_at",
       "type": "utc_datetime_usec"
     },
     {
@@ -81,7 +141,7 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "version_updated_at",
+      "source": "updated_at",
       "type": "utc_datetime_usec"
     }
   ],
@@ -90,10 +150,24 @@
   "create_table_options": null,
   "custom_indexes": [],
   "custom_statements": [],
-  "drop_table_opted_out": true,
   "has_create_action": true,
-  "hash": "12CE3C3B731979EE7AC95EE7C651D59CA7CF48249156CBBA7A29653DA62F13B1",
-  "identities": [],
+  "hash": "B82B1D3F6E03C49372D1F4E191905E20DD3079469A699EA37C6CAFAE464E17B1",
+  "identities": [
+    {
+      "all_tenants?": false,
+      "base_filter": null,
+      "index_name": "mail_settings_singleton_row_index",
+      "keys": [
+        {
+          "type": "atom",
+          "value": "singleton"
+        }
+      ],
+      "name": "singleton_row",
+      "nils_distinct?": true,
+      "where": null
+    }
+  ],
   "multitenancy": {
     "attribute": null,
     "global": null,
@@ -101,5 +175,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "clinics_versions"
+  "table": "mail_settings"
 }
