@@ -256,15 +256,18 @@ Findings against the §3 risks:
    Editor `content` option — first-peer seeding must be an explicit
    `setContent` after mount (gated on `peers == 1` + empty fragment; the
    join reply carries both).
-4. **The persistence boundary is confirmed as *the* production question.**
-   The HTML-mirror → autosave path keeps working under collab (converged
-   editors produce identical HTML), but two editors autosaving still race the
-   optimistic lock — the loser sees the conflict banner even though content
-   is identical. A production phase needs one of: (a) only one designated
-   client persists (e.g. the field-lock owner), or (b) the server
-   materializes checkpoints itself — which requires rendering the ProseMirror
-   schema server-side (an `XmlFragment` serializes to prosemirror-node XML,
-   not HTML), i.e. a JS render step or storing the Yjs binary alongside HTML.
+4. **The persistence boundary — option (a) implemented: single-persister
+   election.** Under active collab, only the lowest-user-id editor present
+   autosaves (the same deterministic election as the advisory field locks; no
+   coordination needed). Because the persister's TipTap mirrors *remote* CRDT
+   edits into its own form, its autosave persists everyone's typing; the
+   others show a "Synced live — co-editor saves" indicator, and take over
+   persistence automatically when the persister leaves. Remaining edges: a
+   non-persister's *explicit* Save while the persister holds pending edits
+   still lands on the conflict banner (rare, and the banner flow is correct);
+   and option (b) — server-side checkpoint materialization — remains the
+   deeper long-term answer (needs a ProseMirror-schema render step, since an
+   `XmlFragment` serializes to prosemirror-node XML, not HTML).
 5. **Awareness carets: built.** Remote collaborators render as a colored
    caret + initials label inside the text (TipTap `CollaborationCursor` over
    `y-protocols` awareness, relayed by the same channel; a newcomer's

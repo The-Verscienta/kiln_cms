@@ -144,7 +144,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Drop cursors for anyone who has left, so stale focus badges disappear.
     present = MapSet.new(editors, & &1.id)
     cursors = Map.filter(socket.assigns.cursors, fn {id, _} -> MapSet.member?(present, id) end)
-    {:noreply, assign(socket, editors: editors, cursors: cursors)}
+    socket = assign(socket, editors: editors, cursors: cursors)
+
+    # If the departing persister left us in charge while we hold live-synced
+    # edits, take over persistence by scheduling the autosave we suppressed.
+    socket =
+      if socket.assigns.save_state == :synced and persister?(socket),
+        do: mark_dirty(socket),
+        else: socket
+
+    {:noreply, socket}
   end
 
   # A collaborator focused (field set) or left (field nil) a field. Ignore our
@@ -580,57 +589,98 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # published/in-review/archived content is changed deliberately via the
   # explicit Save button, so for those we only flip the dirty indicator
   # (and the UnsavedGuard hook warns before navigating away).
+  #
+  # Under active collaboration (CRDT prototype), only ONE editor persists:
+  # concurrent autosaves would race the optimistic lock even though the
+  # rich-text content has already converged. The persister's TipTap mirrors
+  # remote CRDT edits into its own form, so its autosave covers everyone's
+  # typing; the others show `:synced` instead of autosaving (their edits to
+  # non-CRDT fields still save via the explicit Save button).
   defp mark_dirty(socket) do
     socket = refresh_preview(socket)
 
-    if draft?(socket) do
-      socket
-      |> cancel_autosave_timer()
-      |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
-      # `:saving` from the moment of edit — the change is queued to autosave, like
-      # a "Saving…" indicator (#136). Resolves to `:saved` or `:error` on flush.
-      |> assign(:save_state, :saving)
-    else
-      assign(socket, :save_state, :unsaved)
+    cond do
+      not draft?(socket) ->
+        assign(socket, :save_state, :unsaved)
+
+      collab_active?(socket) and not persister?(socket) ->
+        socket
+        |> cancel_autosave_timer()
+        |> assign(:save_state, :synced)
+
+      true ->
+        socket
+        |> cancel_autosave_timer()
+        |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
+        # `:saving` from the moment of edit — the change is queued to autosave,
+        # like a "Saving…" indicator (#136). Resolves to `:saved`/`:error` on
+        # flush.
+        |> assign(:save_state, :saving)
     end
   end
 
+  # More than one editor present with the CRDT prototype on — text edits flow
+  # through the shared Y.Doc rather than each session's form.
+  defp collab_active?(socket),
+    do: socket.assigns.collab_token != nil and length(socket.assigns.editors) > 1
+
+  # The designated persisting editor: lowest user id among those present — the
+  # same deterministic tie-break the advisory field locks use, so every
+  # session elects the same one without coordination.
+  defp persister?(%{assigns: %{editors: []}}), do: true
+
+  defp persister?(socket) do
+    socket.assigns.actor.id ==
+      socket.assigns.editors |> Enum.map(& &1.id) |> Enum.min()
+  end
+
   defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
-    if draft?(socket) do
-      socket = assign(socket, :autosave_timer, nil)
+    cond do
+      not draft?(socket) ->
+        assign(socket, :autosave_timer, nil)
 
-      # Submit the current edits through the dedicated `:autosave` action (kept
-      # distinct from the explicit Save's `:update` so its PaperTrail versions
-      # are tagged and coalesced). A throwaway form mirrors the live one's
-      # params, leaving `socket.assigns.form` intact for the Save button.
-      autosave_form =
-        AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
-          actor: socket.assigns.actor,
-          forms: [auto?: true]
-        )
+      # A lower-id editor joined between scheduling and firing — stand down;
+      # they persist from here.
+      collab_active?(socket) and not persister?(socket) ->
+        socket |> assign(:autosave_timer, nil) |> assign(:save_state, :synced)
 
-      result =
-        EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
-          AshPhoenix.Form.submit(autosave_form,
-            params: AshPhoenix.Form.params(socket.assigns.form)
-          )
-        end)
-
-      case result do
-        {:ok, record} ->
-          reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
-          socket |> assign_record(reloaded) |> assign(:save_state, :saved)
-
-        {:error, form} ->
-          handle_autosave_error(socket, form)
-      end
-    else
-      assign(socket, :autosave_timer, nil)
+      true ->
+        do_autosave(socket)
     end
   end
 
   # Stale timer (already saved, or state moved on) — no-op.
   defp perform_autosave(socket), do: assign(socket, :autosave_timer, nil)
+
+  defp do_autosave(socket) do
+    socket = assign(socket, :autosave_timer, nil)
+
+    # Submit the current edits through the dedicated `:autosave` action (kept
+    # distinct from the explicit Save's `:update` so its PaperTrail versions
+    # are tagged and coalesced). A throwaway form mirrors the live one's
+    # params, leaving `socket.assigns.form` intact for the Save button.
+    autosave_form =
+      AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
+        actor: socket.assigns.actor,
+        forms: [auto?: true]
+      )
+
+    result =
+      EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(autosave_form,
+          params: AshPhoenix.Form.params(socket.assigns.form)
+        )
+      end)
+
+    case result do
+      {:ok, record} ->
+        reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
+        socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+
+      {:error, form} ->
+        handle_autosave_error(socket, form)
+    end
+  end
 
   # Someone else saved first → stop autosaving and surface the conflict rather
   # than retrying (which would keep losing). Otherwise mark the draft as failing
@@ -2030,6 +2080,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {gettext("Saving…")}
         <% :saved -> %>
           {gettext("Saved")}
+        <% :synced -> %>
+          <%!-- Collab: a co-editor persists; text edits are already in the
+                shared doc. Fields outside the text still need Save. --%>
+          {gettext("Synced live — co-editor saves")}
         <% :error -> %>
           {gettext("Couldn't autosave — check for errors")}
         <% _ -> %>
