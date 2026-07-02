@@ -145,7 +145,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:record, record)
     |> assign(:form, build_form(record, socket.assigns.actor))
+    |> refresh_preview()
     |> load_versions()
+  end
+
+  # The inline preview HTML is computed once per *form change* and kept in an
+  # assign — it's rendered twice (mobile + desktop copies), and recomputing the
+  # full sanitize-and-render pipeline in the template ran it on every render,
+  # including presence diffs and collaborator cursor events.
+  defp refresh_preview(socket) do
+    assign(socket, :preview_html, preview_html(socket.assigns.form))
   end
 
   defp load_versions(socket) do
@@ -486,6 +495,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # explicit Save button, so for those we only flip the dirty indicator
   # (and the UnsavedGuard hook warns before navigating away).
   defp mark_dirty(socket) do
+    socket = refresh_preview(socket)
+
     if draft?(socket) do
       socket
       |> cancel_autosave_timer()
@@ -1718,14 +1729,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <details class="rounded border border-base-content/15 p-3 lg:hidden">
               <summary class="cursor-pointer text-lg font-medium">{gettext("Preview")}</summary>
               <div class="mt-3">
-                <.preview_article form={@form} />
+                <.preview_article form={@form} html={@preview_html} />
               </div>
             </details>
 
             <%!-- Desktop: the preview sits inline as the sticky second column. --%>
             <div class="hidden lg:block">
               <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-              <.preview_article form={@form} />
+              <.preview_article form={@form} html={@preview_html} />
             </div>
           </div>
         </div>
@@ -1800,12 +1811,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # sticky column and the mobile collapsible disclosure (#138). The previewed
   # title is an h2 so the editor keeps a single logical h1 (#174).
   attr :form, :any, required: true
+  attr :html, :any, required: true
 
   defp preview_article(assigns) do
     ~H"""
     <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
       <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
-      {preview_html(@form)}
+      {@html}
     </article>
     """
   end
