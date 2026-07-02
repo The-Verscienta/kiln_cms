@@ -133,6 +133,13 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
+  # Per-IP ceiling for unauthenticated infra/SEO endpoints (`/up` runs a DB
+  # query; sitemap cache-misses do a table scan). Generous enough never to
+  # throttle real probes/crawlers — see the `:probe` bucket.
+  pipeline :probe do
+    plug KilnCMSWeb.Plugs.RateLimit, :probe
+  end
+
   scope "/", KilnCMSWeb do
     pipe_through :browser
 
@@ -245,8 +252,11 @@ defmodule KilnCMSWeb.Router do
     get "/:token", PreviewController, :show
   end
 
-  # Public SEO files (fixed content types; no pipeline needed).
+  # Public SEO files + health probe. Rate-limited (`:probe`) so an unauthenticated
+  # flood can't hammer the `/up` DB check or sitemap table scan.
   scope "/", KilnCMSWeb do
+    pipe_through :probe
+
     get "/sitemap.xml", SitemapController, :index
     get "/robots.txt", SitemapController, :robots
 

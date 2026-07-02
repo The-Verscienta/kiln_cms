@@ -28,7 +28,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     base(to)
     |> subject("Review requested: #{title}")
     |> html_body("""
-    <p>#{submitter(who)} submitted the #{kind} <strong>#{title}</strong> for review.</p>
+    <p>#{h(submitter(who))} submitted the #{h(kind)} <strong>#{h(title)}</strong> for review.</p>
     <p><a href="#{editor_url(kind, id)}">Open it in the editor</a> to review and publish.</p>
     """)
   end
@@ -39,7 +39,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     base(to)
     |> subject("Published: #{title}")
     |> html_body("""
-    <p>Your #{kind} <strong>#{title}</strong> is now live.</p>
+    <p>Your #{h(kind)} <strong>#{h(title)}</strong> is now live.</p>
     <p><a href="#{editor_url(kind, id)}">View it in the editor</a>.</p>
     """)
   end
@@ -50,7 +50,7 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     base(to)
     |> subject("Changes requested: #{title}")
     |> html_body("""
-    <p>#{reviewer(who)} requested changes on your #{kind} <strong>#{title}</strong>.</p>
+    <p>#{h(reviewer(who))} requested changes on your #{h(kind)} <strong>#{h(title)}</strong>.</p>
     <p>It has been moved back to draft so you can revise and resubmit.</p>
     <p><a href="#{editor_url(kind, id)}">Open it in the editor</a>.</p>
     """)
@@ -60,6 +60,15 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     new()
     |> from(Application.fetch_env!(:kiln_cms, :email_from))
     |> to(to)
+  end
+
+  # HTML-escape any editor/importer-controlled value before it lands in the
+  # email body. Titles and actor names are author-supplied (and copied verbatim
+  # by the Verscienta importer), so interpolating them raw would inject markup
+  # into a transactional email. `editor_url/2` values are server-generated
+  # verified routes and don't need escaping.
+  defp h(value) do
+    value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end
 
   defp submitter(nil), do: "An editor"

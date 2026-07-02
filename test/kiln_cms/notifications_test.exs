@@ -178,4 +178,20 @@ defmodule KilnCMS.NotificationsTest do
     # author's "Changes requested" notification is suppressed.
     refute Enum.any?(sent_emails("Silent Revisions"), &(&1.subject =~ "Changes requested"))
   end
+
+  test "an author-controlled title is HTML-escaped in the notification body" do
+    _admin = user(:admin)
+    editor = user(:editor)
+    marker = "XSS#{System.unique_integer([:positive])}"
+    title = "#{marker} <img src=x onerror=alert(1)>"
+
+    page = CMS.create_page!(%{title: title, slug: slug()}, actor: editor)
+    CMS.submit_page_for_review!(page, %{}, actor: editor)
+    drain()
+
+    assert [review] = sent_emails(marker)
+    # The raw tag must not survive into the HTML body — it's escaped.
+    refute review.html_body =~ "<img src=x onerror=alert(1)>"
+    assert review.html_body =~ "&lt;img src=x onerror=alert(1)&gt;"
+  end
 end

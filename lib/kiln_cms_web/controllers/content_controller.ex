@@ -149,11 +149,15 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # Highest zero-based page index we'll serve. Clamps `?page=N` so a huge value
+  # can't force Postgres into a massive OFFSET + full COUNT scan (cheap DoS).
+  @max_page 500
+
   # Zero-based page index from `?page=N` (1-based in the URL for humans).
-  # Anything missing or invalid is page 0.
+  # Anything missing or invalid is page 0; anything beyond @max_page is clamped.
   defp page_param(%{"page" => raw}) do
     case Integer.parse(to_string(raw)) do
-      {n, _} when n > 1 -> n - 1
+      {n, _} when n > 1 -> min(n - 1, @max_page)
       _ -> 0
     end
   end
