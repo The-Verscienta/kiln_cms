@@ -71,10 +71,11 @@ required (the latter two raise via `System.fetch_env!`). See
 With none of these set, production uses the dev-only in-memory adapter: the
 app runs, but every delivery job fails in Oban and no email leaves. Opt into
 real delivery with `MAIL_MODE` (or, for back-compat, just `SMTP_HOST`, which
-implies `MAIL_MODE=smtp`). See
-[`docs/direct-email-delivery-plan.md`](direct-email-delivery-plan.md) for the
-direct mode's DNS requirements (SPF/DKIM/DMARC/PTR) and its big caveat: many
-cloud hosts block outbound port 25.
+implies `MAIL_MODE=smtp`). Direct mode is configured and verified from
+`/editor/mail` — see the operator guide
+[`docs/direct-email-delivery.md`](direct-email-delivery.md) for the DNS
+requirements (SPF/DKIM/DMARC/PTR) and the big caveat: many cloud hosts block
+outbound port 25.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|

@@ -27,6 +27,12 @@ config :kiln_cms,
 # not share a cached DKIM config across tests.
 config :kiln_cms, KilnCMS.Mail, cache_dkim?: false
 
+# Keep DNS checks and the port-25 preflight off the network in tests; explicit
+# `dns:`/`tcp:` opts in DnsCheck tests still override these.
+config :kiln_cms, KilnCMS.Mail.DnsCheck,
+  dns: KilnCMS.Test.StubDNS,
+  tcp: KilnCMS.Test.StubTCP
+
 # Run best-effort analytics writes (page-view + search-query recording) inline
 # rather than in a detached supervised task, so the upsert stays on the test's
 # ExUnit SQL sandbox connection — avoids a connection leaking past the owning

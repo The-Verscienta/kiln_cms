@@ -231,6 +231,14 @@ defmodule KilnCMS.Mail do
   end
 
   @doc """
+  Deliver synchronously, bypassing the queue — the admin "send test email"
+  path, where the operator wants the SMTP outcome (receipt or error) now
+  instead of a retrying background job.
+  """
+  @spec deliver_now(Swoosh.Email.t()) :: {:ok, term()} | {:error, term()}
+  def deliver_now(%Swoosh.Email{} = email), do: Mailer.deliver(email)
+
+  @doc """
   Retry delay for mail workers: `attempt` is 1-based; attempts past the table
   reuse its last entry.
   """

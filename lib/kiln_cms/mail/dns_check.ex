@@ -405,8 +405,15 @@ defmodule KilnCMS.Mail.DnsCheck do
 
   ## Seams / helpers
 
-  defp dns(opts), do: Keyword.get(opts, :dns, InetDNS)
-  defp tcp(opts), do: Keyword.get(opts, :tcp, InetTCP)
+  # Seam resolution: explicit opts > app env > real implementation. The app
+  # env layer lets the test suite point every caller (e.g. the mail settings
+  # LiveView) at stub resolvers without threading opts through the UI.
+  defp dns(opts), do: Keyword.get(opts, :dns) || configured(:dns) || InetDNS
+  defp tcp(opts), do: Keyword.get(opts, :tcp) || configured(:tcp) || InetTCP
+
+  defp configured(key) do
+    :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(key)
+  end
 
   defp strip_whitespace(value), do: String.replace(value, ~r/\s/, "")
 

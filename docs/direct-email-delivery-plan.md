@@ -1,6 +1,8 @@
 # Direct email delivery (built-in MTA) — implementation plan
 
-Status: planned, not started.
+Status: implemented (all 5 phases). Operator guide:
+[direct-email-delivery.md](direct-email-delivery.md). This document remains as
+the design record.
 
 ## Goal
 
