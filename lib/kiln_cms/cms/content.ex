@@ -276,6 +276,9 @@ defmodule KilnCMS.CMS.Content do
           transition :publish_scheduled, from: [:draft, :in_review], to: :published
           transition :unpublish, from: :published, to: :draft
           transition :archive, from: [:draft, :in_review, :published], to: :archived
+          # Archive must not be a one-way door (audit U-H3): a mistaken (or
+          # bulk) archive is recoverable by returning the record to draft.
+          transition :unarchive, from: :archived, to: :draft
         end
       end
 
@@ -595,6 +598,11 @@ defmodule KilnCMS.CMS.Content do
         update :archive do
           require_atomic? false
           change transition_state(:archived)
+        end
+
+        update :unarchive do
+          require_atomic? false
+          change transition_state(:draft)
         end
 
         # Public delivery: fetch a single published record by slug. The `state ==

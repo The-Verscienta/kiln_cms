@@ -45,6 +45,7 @@ defmodule Verscienta.Catalog do
       define :publish_scheduled_herb, action: :publish_scheduled
       define :unpublish_herb, action: :unpublish
       define :archive_herb, action: :archive
+      define :unarchive_herb, action: :unarchive
       define :restore_herb_version, action: :restore_version
       define :destroy_herb, action: :destroy
       define :list_trashed_herbs, action: :trashed
@@ -70,6 +71,7 @@ defmodule Verscienta.Catalog do
       define :publish_scheduled_formula, action: :publish_scheduled
       define :unpublish_formula, action: :unpublish
       define :archive_formula, action: :archive
+      define :unarchive_formula, action: :unarchive
       define :restore_formula_version, action: :restore_version
       define :destroy_formula, action: :destroy
       define :list_trashed_formulas, action: :trashed
@@ -95,6 +97,7 @@ defmodule Verscienta.Catalog do
       define :publish_scheduled_condition, action: :publish_scheduled
       define :unpublish_condition, action: :unpublish
       define :archive_condition, action: :archive
+      define :unarchive_condition, action: :unarchive
       define :restore_condition_version, action: :restore_version
       define :destroy_condition, action: :destroy
       define :list_trashed_conditions, action: :trashed
@@ -120,6 +123,7 @@ defmodule Verscienta.Catalog do
       define :publish_scheduled_practitioner, action: :publish_scheduled
       define :unpublish_practitioner, action: :unpublish
       define :archive_practitioner, action: :archive
+      define :unarchive_practitioner, action: :unarchive
       define :restore_practitioner_version, action: :restore_version
       define :destroy_practitioner, action: :destroy
       define :list_trashed_practitioners, action: :trashed
@@ -145,6 +149,7 @@ defmodule Verscienta.Catalog do
       define :publish_scheduled_clinic, action: :publish_scheduled
       define :unpublish_clinic, action: :unpublish
       define :archive_clinic, action: :archive
+      define :unarchive_clinic, action: :unarchive
       define :restore_clinic_version, action: :restore_version
       define :destroy_clinic, action: :destroy
       define :list_trashed_clinics, action: :trashed
@@ -170,6 +175,7 @@ defmodule Verscienta.Catalog do
       define :publish_scheduled_modality, action: :publish_scheduled
       define :unpublish_modality, action: :unpublish
       define :archive_modality, action: :archive
+      define :unarchive_modality, action: :unarchive
       define :restore_modality_version, action: :restore_version
       define :destroy_modality, action: :destroy
       define :list_trashed_modalities, action: :trashed

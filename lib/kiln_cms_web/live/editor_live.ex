@@ -25,7 +25,7 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:status, "all")
      |> assign(:query, "")
      |> assign(:selected, MapSet.new())
-     |> assign(:confirming_delete, false)
+     |> assign(:confirming_bulk, nil)
      |> load_items()}
   end
 
@@ -97,67 +97,44 @@ defmodule KilnCMSWeb.EditorLive do
     {:noreply, assign(socket, :selected, selected)}
   end
 
+  # Every bulk verb goes through the same two-step confirmation (audit
+  # U-H3/U-M2): "Select all" can hold hundreds of items, and a single stray
+  # click could otherwise publish, unpublish or archive all of them instantly.
   def handle_event("bulk", %{"action" => verb}, socket)
-      when verb in ~w(publish unpublish archive) do
+      when verb in ~w(publish unpublish archive unarchive delete) do
+    confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
+    {:noreply, assign(socket, :confirming_bulk, confirming)}
+  end
+
+  def handle_event("cancel_bulk", _params, socket),
+    do: {:noreply, assign(socket, :confirming_bulk, nil)}
+
+  def handle_event("confirm_bulk", _params, socket) do
+    verb = socket.assigns.confirming_bulk
     actor = socket.assigns.actor
 
     {ok, skipped} =
       Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {ok, skipped} ->
         [kind, id] = String.split(key, ":", parts: 2)
 
-        case do_transition(kind, verb, get!(kind, id, actor), actor) do
+        result =
+          if verb == "delete",
+            do: destroy(kind, id, actor),
+            else: do_transition(kind, verb, get!(kind, id, actor), actor)
+
+        case result do
+          :ok -> {ok + 1, skipped}
           {:ok, _} -> {ok + 1, skipped}
           _ -> {ok, skipped + 1}
         end
       end)
 
-    flash =
-      if skipped > 0,
-        do:
-          gettext("%{action}: %{count} updated, %{skipped} skipped",
-            action: verb,
-            count: ok,
-            skipped: skipped
-          ),
-        else: gettext("%{action}: %{count} updated", action: verb, count: ok)
-
-    {:noreply,
-     socket |> load_items() |> assign(:selected, MapSet.new()) |> put_flash(:info, flash)}
-  end
-
-  # Deletes are destructive (and admin-only), so they go through a two-step
-  # confirmation rather than firing on the first click.
-  def handle_event("request_delete", _params, socket) do
-    {:noreply, assign(socket, :confirming_delete, MapSet.size(socket.assigns.selected) > 0)}
-  end
-
-  def handle_event("cancel_delete", _params, socket),
-    do: {:noreply, assign(socket, :confirming_delete, false)}
-
-  def handle_event("confirm_delete", _params, socket) do
-    actor = socket.assigns.actor
-
-    {ok, skipped} =
-      Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {ok, skipped} ->
-        [kind, id] = String.split(key, ":", parts: 2)
-
-        case destroy(kind, id, actor) do
-          :ok -> {ok + 1, skipped}
-          _ -> {ok, skipped + 1}
-        end
-      end)
-
-    flash =
-      if skipped > 0,
-        do: gettext("Deleted %{count}, %{skipped} skipped", count: ok, skipped: skipped),
-        else: gettext("Deleted %{count}", count: ok)
-
     {:noreply,
      socket
      |> load_items()
      |> assign(:selected, MapSet.new())
-     |> assign(:confirming_delete, false)
-     |> put_flash(:info, flash)}
+     |> assign(:confirming_bulk, nil)
+     |> put_flash(:info, bulk_flash(verb, ok, skipped))}
   end
 
   def handle_event("publish", params, socket),
@@ -171,6 +148,9 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("unpublish", params, socket),
     do: {:noreply, transition(socket, params, "unpublish")}
+
+  def handle_event("unarchive", params, socket),
+    do: {:noreply, transition(socket, params, "unarchive")}
 
   defp transition(socket, %{"kind" => kind, "id" => id}, verb) do
     actor = socket.assigns.actor
@@ -208,15 +188,77 @@ defmodule KilnCMSWeb.EditorLive do
     [
       {"publish", gettext("Publish")},
       {"unpublish", gettext("Unpublish")},
-      {"archive", gettext("Archive")}
+      {"archive", gettext("Archive")},
+      {"unarchive", gettext("Unarchive")}
     ]
   end
 
   defp bulk_actions(_actor) do
     [
       {"unpublish", gettext("Unpublish")},
-      {"archive", gettext("Archive")}
+      {"archive", gettext("Archive")},
+      {"unarchive", gettext("Unarchive")}
     ]
+  end
+
+  defp bulk_verb_label("publish"), do: gettext("Publish")
+  defp bulk_verb_label("unpublish"), do: gettext("Unpublish")
+  defp bulk_verb_label("archive"), do: gettext("Archive")
+  defp bulk_verb_label("unarchive"), do: gettext("Unarchive")
+  defp bulk_verb_label("delete"), do: gettext("Delete")
+
+  # What the user is about to do, spelled out with its consequence. The delete
+  # copy tells the truth about soft-delete (audit U-M1): items go to the trash,
+  # restorable for 30 days — the old "This can't be undone" scared editors off
+  # a recoverable action.
+  defp bulk_confirm_prompt("publish", n),
+    do:
+      gettext("Publish %{count} selected item(s)? They go live on the site immediately.",
+        count: n
+      )
+
+  defp bulk_confirm_prompt("unpublish", n),
+    do:
+      gettext("Unpublish %{count} selected item(s)? They come off the site and return to draft.",
+        count: n
+      )
+
+  defp bulk_confirm_prompt("archive", n),
+    do:
+      gettext(
+        "Archive %{count} selected item(s)? Archived content leaves the site; you can unarchive it later.",
+        count: n
+      )
+
+  defp bulk_confirm_prompt("unarchive", n),
+    do: gettext("Unarchive %{count} selected item(s)? They return to draft.", count: n)
+
+  defp bulk_confirm_prompt("delete", n),
+    do:
+      gettext(
+        "Move %{count} selected item(s) to trash? Admins can restore them from Trash for 30 days.",
+        count: n
+      )
+
+  defp bulk_flash("delete", ok, skipped) do
+    if skipped > 0,
+      do:
+        gettext("Moved %{count} item(s) to trash, %{skipped} skipped",
+          count: ok,
+          skipped: skipped
+        ),
+      else: gettext("Moved %{count} item(s) to trash", count: ok)
+  end
+
+  defp bulk_flash(verb, ok, skipped) do
+    if skipped > 0,
+      do:
+        gettext("%{action}: %{count} updated, %{skipped} skipped",
+          action: bulk_verb_label(verb),
+          count: ok,
+          skipped: skipped
+        ),
+      else: gettext("%{action}: %{count} updated", action: bulk_verb_label(verb), count: ok)
   end
 
   @impl true
@@ -341,7 +383,8 @@ defmodule KilnCMSWeb.EditorLive do
             <button
               :if={@actor.role == :admin}
               type="button"
-              phx-click="request_delete"
+              phx-click="bulk"
+              phx-value-action="delete"
               disabled={@selected_count == 0}
               class="rounded border border-error/40 px-3 py-1 text-xs text-error hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -351,25 +394,29 @@ defmodule KilnCMSWeb.EditorLive do
         </div>
 
         <div
-          :if={@confirming_delete}
-          class="flex flex-wrap items-center gap-3 rounded border border-error/40 bg-error/10 px-3 py-2 text-sm"
+          :if={@confirming_bulk}
+          class={[
+            "flex flex-wrap items-center gap-3 rounded border px-3 py-2 text-sm",
+            (@confirming_bulk == "delete" && "border-error/40 bg-error/10") ||
+              "border-warning/40 bg-warning/10"
+          ]}
         >
-          <span>
-            {gettext("Permanently delete %{count} item(s)? This can't be undone.",
-              count: @selected_count
-            )}
-          </span>
+          <span>{bulk_confirm_prompt(@confirming_bulk, @selected_count)}</span>
           <div class="ml-auto flex gap-2">
             <button
               type="button"
-              phx-click="confirm_delete"
-              class="rounded bg-error px-3 py-1 text-xs font-medium text-error-content hover:opacity-90"
+              phx-click="confirm_bulk"
+              class={[
+                "rounded px-3 py-1 text-xs font-medium hover:opacity-90",
+                (@confirming_bulk == "delete" && "bg-error text-error-content") ||
+                  "bg-warning text-warning-content"
+              ]}
             >
-              {gettext("Delete")}
+              {bulk_verb_label(@confirming_bulk)}
             </button>
             <button
               type="button"
-              phx-click="cancel_delete"
+              phx-click="cancel_bulk"
               class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
             >
               {gettext("Cancel")}
@@ -449,6 +496,16 @@ defmodule KilnCMSWeb.EditorLive do
                 class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
               >
                 {gettext("Unpublish")}
+              </button>
+              <button
+                :if={record.state == :archived}
+                type="button"
+                phx-click="unarchive"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+              >
+                {gettext("Unarchive")}
               </button>
               <.link
                 navigate={edit_path(kind, record.id)}

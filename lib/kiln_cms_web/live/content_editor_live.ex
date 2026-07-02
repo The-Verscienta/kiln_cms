@@ -439,7 +439,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # replaced form rather than keeping its `phx-update="ignore"` content (#135).
   defp reset_editors(socket), do: update(socket, :editor_version, &(&1 + 1))
 
-  defp run_workflow(socket, action) when action in ~w(submit return publish unpublish archive) do
+  defp run_workflow(socket, action)
+       when action in ~w(submit return publish unpublish archive unarchive) do
     # `publish` gets its own event; the rest share `:workflow` (tagged by action)
     # so the publish hot path is isolated in the metrics.
     {event, meta} =
@@ -458,7 +459,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> cancel_autosave_timer()
         |> assign_record(record)
         |> assign(:save_state, :saved)
-        |> put_flash(:info, gettext("Updated to %{state}.", state: record.state))
+        |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
 
       _ ->
         put_flash(socket, :error, gettext("That action isn't allowed right now."))
@@ -1339,7 +1340,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </.link>
             <h1 class="mt-1 text-2xl font-semibold">{gettext("Edit %{kind}", kind: @kind)}</h1>
             <p class="text-sm text-base-content/60">
-              {gettext("State:")} <span class="font-medium">{@record.state}</span>
+              {gettext("State:")} <span class="font-medium">{state_label(@record.state)}</span>
             </p>
             <.presence_roster editors={@editors} current_id={@actor.id} />
           </div>
@@ -1872,6 +1873,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Unpublish")}
+    </button>
+    <button
+      :if={@state == :archived}
+      type="button"
+      phx-click="workflow"
+      phx-value-action="unarchive"
+      phx-disable-with={gettext("Working…")}
+      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+    >
+      {gettext("Unarchive")}
     </button>
     """
   end

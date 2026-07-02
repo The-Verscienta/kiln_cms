@@ -155,7 +155,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert path =~ ~r"^/editor/content/page/"
     end
 
-    test "bulk publish transitions the selected page and post (admin only)", %{conn: conn} do
+    test "bulk publish confirms, then transitions the selected page and post (admin only)",
+         %{conn: conn} do
       page = draft_page(%{title: "BulkPage", state: :draft})
       post = draft_post(%{title: "BulkPost", state: :draft})
 
@@ -163,7 +164,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
       lv |> element(~s(input[phx-value-key="post:#{post.id}"])) |> render_click()
-      lv |> element("button[phx-value-action='publish']") |> render_click()
+
+      # First click opens the confirmation strip; nothing is published yet.
+      confirm = lv |> element("button[phx-value-action='publish']") |> render_click()
+      assert confirm =~ "go live on the site immediately"
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
+
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
 
       assert CMS.get_page!(page.id, authorize?: false).state == :published
       assert CMS.get_post!(post.id, authorize?: false).state == :published
@@ -209,17 +216,42 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert published.published_version_id
     end
 
-    test "select-all then bulk archive archives every visible item", %{conn: conn} do
+    # Audit U-H3: bulk archive used to fire on the first click with no way back.
+    test "select-all then bulk archive confirms, archives, and is reversible", %{conn: conn} do
       page = draft_page(%{title: "ArchPage"})
       post = draft_post(%{title: "ArchPost"})
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
       lv |> element("input[phx-click='toggle_select_all']") |> render_click()
-      lv |> element("button[phx-value-action='archive']") |> render_click()
 
+      # Archive asks first.
+      confirm = lv |> element("button[phx-value-action='archive']") |> render_click()
+      assert confirm =~ "you can unarchive it later"
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
+
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
       assert CMS.get_page!(page.id, authorize?: false).state == :archived
       assert CMS.get_post!(post.id, authorize?: false).state == :archived
+
+      # And archive is no longer a one-way door: the row action reverses it.
+      lv
+      |> element("button[phx-click='unarchive'][phx-value-id='#{page.id}']")
+      |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
+    end
+
+    test "bulk unarchive returns archived items to draft", %{conn: conn} do
+      page = draft_page(%{title: "UnarchPage", state: :archived})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
+      lv |> element("button[phx-value-action='unarchive']") |> render_click()
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
     end
 
     test "the bulk Delete button is admin-only", %{conn: conn} do
@@ -228,12 +260,12 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, editor_html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
-      refute editor_html =~ "request_delete"
+      refute editor_html =~ ~s(phx-value-action="delete")
 
       {:ok, _lv, admin_html} =
         build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
 
-      assert admin_html =~ "request_delete"
+      assert admin_html =~ ~s(phx-value-action="delete")
     end
 
     test "admin bulk delete asks for confirmation, then removes the items", %{conn: conn} do
@@ -243,13 +275,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
 
-      # First click only opens the guard; nothing is deleted yet.
-      confirm_html = lv |> element("button[phx-click='request_delete']") |> render_click()
-      assert confirm_html =~ "This can&#39;t be undone"
+      # First click only opens the guard; nothing is deleted yet. The copy is
+      # honest about soft-delete (audit U-M1): trash, restorable for 30 days.
+      confirm_html = lv |> element("button[phx-value-action='delete']") |> render_click()
+      assert confirm_html =~ "to trash"
+      assert confirm_html =~ "30 days"
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
 
       # Confirming performs the delete.
-      lv |> element("button[phx-click='confirm_delete']") |> render_click()
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
       refute Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
@@ -259,10 +293,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
 
       lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
-      lv |> element("button[phx-click='request_delete']") |> render_click()
-      cancelled = lv |> element("button[phx-click='cancel_delete']") |> render_click()
+      lv |> element("button[phx-value-action='delete']") |> render_click()
+      cancelled = lv |> element("button[phx-click='cancel_bulk']") |> render_click()
 
-      refute cancelled =~ "This can&#39;t be undone"
+      refute cancelled =~ "to trash?"
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
