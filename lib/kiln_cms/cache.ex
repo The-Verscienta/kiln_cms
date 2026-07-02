@@ -53,11 +53,13 @@ defmodule KilnCMS.Cache do
   @spec fetch_published(String.t(), String.t(), String.t(), (-> any())) :: any()
   def fetch_published(type, slug, locale, fun) when is_function(fun, 0) do
     if enabled?() do
-      key = key(type, slug, locale)
-
-      case Cachex.get(@cache, key) do
-        {:ok, nil} -> emit(:miss, compute_and_cache(key, fun))
+      # `Cachex.fetch` deduplicates concurrent fallback executions per key
+      # (Courier), so a burst of requests for a hot page right after an
+      # invalidation computes the value once instead of stampeding the DB.
+      case Cachex.fetch(@cache, key(type, slug, locale), fn _key -> commit(fun.(), @ttl) end) do
         {:ok, value} -> emit(:hit, value)
+        {:commit, value} -> emit(:miss, value)
+        {:ignore, value} -> emit(:miss, value)
         _ -> emit(:miss, fun.())
       end
     else
@@ -81,17 +83,13 @@ defmodule KilnCMS.Cache do
   @spec fetch(term(), pos_integer(), (-> any())) :: any()
   def fetch(key, ttl, fun) when is_function(fun, 0) do
     if enabled?() do
-      case Cachex.get(@cache, key) do
-        {:ok, nil} ->
-          value = fun.()
-          Cachex.put(@cache, key, value, expire: ttl)
-          value
-
-        {:ok, value} ->
-          value
-
-        _ ->
-          fun.()
+      # Stampede-safe like `fetch_published/4` — one concurrent rebuild per key
+      # (this also guards the sitemap, whose rebuild is expensive).
+      case Cachex.fetch(@cache, key, fn _key -> commit(fun.(), ttl) end) do
+        {:ok, value} -> value
+        {:commit, value} -> value
+        {:ignore, value} -> value
+        _ -> fun.()
       end
     else
       fun.()
@@ -144,11 +142,11 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
-  defp compute_and_cache(key, fun) do
-    value = fun.()
-    if not is_nil(value), do: Cachex.put(@cache, key, value, expire: @ttl)
-    value
-  end
+  # Fallback result for `Cachex.fetch`: cache non-nil values with a TTL; a nil
+  # (not found) is ignored, never cached, so newly published content appears
+  # immediately.
+  defp commit(nil, _ttl), do: {:ignore, nil}
+  defp commit(value, ttl), do: {:commit, value, expire: ttl}
 
   defp key(type, slug, locale), do: "published:#{type}:#{locale}:#{slug}"
 
