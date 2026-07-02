@@ -39,6 +39,15 @@ defmodule KilnCMS.CMS.Content do
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
+  @doc false
+  # Safety net for reads exposed on the public API: when neither the caller
+  # (Ash.Query.limit) nor the paginator bounded the query, cap it so a broad
+  # search can't return every matching row — and so the semantic search's
+  # distance sort keeps a LIMIT the HNSW index can serve.
+  def cap_unbounded(query, default \\ 50) do
+    if query.limit || query.page, do: query, else: Ash.Query.limit(query, default)
+  end
+
   defmacro __using__(opts) do
     type = Keyword.fetch!(opts, :type)
     plural = Keyword.get(opts, :plural, "#{type}s")
@@ -165,9 +174,11 @@ defmodule KilnCMS.CMS.Content do
           unquote(published_query)
 
           # Headless search surface. Keyword + semantic search and typo-tolerant
-          # title autocomplete, per content type.
-          list unquote(:"search_#{type}s"), :search
-          list unquote(:"semantic_search_#{type}s"), :search_semantic
+          # title autocomplete, per content type. `paginate_with: nil` keeps
+          # these plain lists (the pre-pagination schema shape); the actions'
+          # prepare caps unpaginated reads instead.
+          list unquote(:"search_#{type}s"), :search, paginate_with: nil
+          list unquote(:"semantic_search_#{type}s"), :search_semantic, paginate_with: nil
           list unquote(:"autocomplete_#{type}s"), :autocomplete
         end
       end
@@ -276,6 +287,9 @@ defmodule KilnCMS.CMS.Content do
           transition :publish_scheduled, from: [:draft, :in_review], to: :published
           transition :unpublish, from: :published, to: :draft
           transition :archive, from: [:draft, :in_review, :published], to: :archived
+          # Archive must not be a one-way door (audit U-H3): a mistaken (or
+          # bulk) archive is recoverable by returning the record to draft.
+          transition :unarchive, from: :archived, to: :draft
         end
       end
 
@@ -453,6 +467,15 @@ defmodule KilnCMS.CMS.Content do
           argument :query, :string, allow_nil?: false
           argument :locale, :string
 
+          # Exposed on the public API (JSON:API `index :search`, GraphQL list)
+          # — without a bound, a broad query returns every matching row.
+          pagination offset?: true,
+                     keyset?: true,
+                     countable: true,
+                     required?: false,
+                     max_page_size: 100,
+                     default_limit: 25
+
           # Optional facets — each is skipped when nil, so callers filter by any
           # combination of category, tags (content carrying any of them), author,
           # and workflow state.
@@ -488,6 +511,7 @@ defmodule KilnCMS.CMS.Content do
               {:search_rank, {%{locale: locale, query: q}, :desc}},
               {:inserted_at, :desc}
             ])
+            |> KilnCMS.CMS.Content.cap_unbounded()
           end
         end
 
@@ -500,6 +524,16 @@ defmodule KilnCMS.CMS.Content do
           argument :query, :string, allow_nil?: false
           argument :locale, :string
 
+          # A bound isn't just response size here: an `ORDER BY embedding <=>
+          # $1` without a LIMIT can't use the HNSW index — Postgres computes
+          # the distance for every embedded row.
+          pagination offset?: true,
+                     keyset?: true,
+                     countable: true,
+                     required?: false,
+                     max_page_size: 100,
+                     default_limit: 25
+
           # Candidates: same-locale rows that have an embedding.
           filter expr(not is_nil(^ref(:embedding)) and ^ref(:locale) == ^arg(:locale))
 
@@ -509,7 +543,9 @@ defmodule KilnCMS.CMS.Content do
 
             with true <- KilnCMS.Search.semantic?(),
                  {:ok, vector} <- KilnCMS.Search.embed(Ash.Query.get_argument(query, :query)) do
-              Ash.Query.sort(query, [{:semantic_distance, {%{query_vector: vector}, :asc}}])
+              query
+              |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+              |> KilnCMS.CMS.Content.cap_unbounded()
             else
               # Disabled, or the query couldn't be embedded — no semantic results.
               _ -> Ash.Query.limit(query, 0)
@@ -595,6 +631,11 @@ defmodule KilnCMS.CMS.Content do
         update :archive do
           require_atomic? false
           change transition_state(:archived)
+        end
+
+        update :unarchive do
+          require_atomic? false
+          change transition_state(:draft)
         end
 
         # Public delivery: fetch a single published record by slug. Consumed with

@@ -39,22 +39,56 @@ defmodule KilnCMS.History do
     :ok
   end
 
+  # Two editors can race next_seq/2; the :doc_seq identity turns the loser into
+  # a unique-constraint error, so re-read and retry a bounded number of times.
+  @seq_conflict_retries 3
+
   @doc "Append an event, assigning the next per-document sequence number."
   @spec record(atom(), term(), atom(), map(), keyword()) ::
           {:ok, DocumentEvent.t()} | {:error, term()}
   def record(document_type, document_id, kind, payload, opts \\ []) do
-    append_event(
-      %{
-        document_type: document_type,
-        document_id: document_id,
-        seq: next_seq(document_type, document_id),
-        kind: kind,
-        payload: payload,
-        actor_id: opts[:actor_id]
-      },
-      authorize?: false
-    )
+    do_record(document_type, document_id, kind, payload, opts, @seq_conflict_retries)
   end
+
+  defp do_record(document_type, document_id, kind, payload, opts, retries) do
+    result =
+      append_event(
+        %{
+          document_type: document_type,
+          document_id: document_id,
+          seq: next_seq(document_type, document_id),
+          kind: kind,
+          payload: payload,
+          actor_id: opts[:actor_id]
+        },
+        authorize?: false
+      )
+
+    case result do
+      {:error, error} when retries > 0 ->
+        if seq_conflict?(error),
+          do: do_record(document_type, document_id, kind, payload, opts, retries - 1),
+          else: result
+
+      _ ->
+        result
+    end
+  end
+
+  defp seq_conflict?(%Ash.Error.Invalid{errors: errors}) do
+    Enum.any?(errors, fn
+      %Ash.Error.Changes.InvalidAttribute{field: field} ->
+        field in [:seq, :document_id, :document_type]
+
+      %{constraint_name: "document_events_doc_seq_index"} ->
+        true
+
+      _ ->
+        false
+    end)
+  end
+
+  defp seq_conflict?(_), do: false
 
   @doc """
   Reconstruct a document's block list by folding its events. `opts`:
@@ -84,9 +118,15 @@ defmodule KilnCMS.History do
   end
 
   defp next_seq(document_type, document_id) do
-    {:ok, events} = events_for(document_type, document_id, authorize?: false)
+    last =
+      DocumentEvent
+      |> Ash.Query.filter(document_type == ^document_type and document_id == ^document_id)
+      |> Ash.Query.sort(seq: :desc)
+      |> Ash.Query.limit(1)
+      |> Ash.Query.select([:seq])
+      |> Ash.read_one!(authorize?: false)
 
-    case List.last(events) do
+    case last do
       nil -> 1
       event -> event.seq + 1
     end

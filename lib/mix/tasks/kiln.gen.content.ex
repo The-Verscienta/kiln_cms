@@ -95,6 +95,7 @@ if Code.ensure_loaded?(Igniter) do
          "define :publish_scheduled_#{type}, action: :publish_scheduled"},
         {:"unpublish_#{type}", "define :unpublish_#{type}, action: :unpublish"},
         {:"archive_#{type}", "define :archive_#{type}, action: :archive"},
+        {:"unarchive_#{type}", "define :unarchive_#{type}, action: :unarchive"},
         {:"restore_#{type}_version", "define :restore_#{type}_version, action: :restore_version"},
         {:"destroy_#{type}", "define :destroy_#{type}, action: :destroy"},
         {:"list_trashed_#{plural}", "define :list_trashed_#{plural}, action: :trashed"},

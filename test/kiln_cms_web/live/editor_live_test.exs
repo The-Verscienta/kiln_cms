@@ -155,7 +155,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert path =~ ~r"^/editor/content/page/"
     end
 
-    test "bulk publish transitions the selected page and post (admin only)", %{conn: conn} do
+    test "bulk publish confirms, then transitions the selected page and post (admin only)",
+         %{conn: conn} do
       page = draft_page(%{title: "BulkPage", state: :draft})
       post = draft_post(%{title: "BulkPost", state: :draft})
 
@@ -163,7 +164,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
       lv |> element(~s(input[phx-value-key="post:#{post.id}"])) |> render_click()
-      lv |> element("button[phx-value-action='publish']") |> render_click()
+
+      # First click opens the confirmation strip; nothing is published yet.
+      confirm = lv |> element("button[phx-value-action='publish']") |> render_click()
+      assert confirm =~ "go live on the site immediately"
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
+
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
 
       assert CMS.get_page!(page.id, authorize?: false).state == :published
       assert CMS.get_post!(post.id, authorize?: false).state == :published
@@ -209,17 +216,42 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert published.published_version_id
     end
 
-    test "select-all then bulk archive archives every visible item", %{conn: conn} do
+    # Audit U-H3: bulk archive used to fire on the first click with no way back.
+    test "select-all then bulk archive confirms, archives, and is reversible", %{conn: conn} do
       page = draft_page(%{title: "ArchPage"})
       post = draft_post(%{title: "ArchPost"})
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
       lv |> element("input[phx-click='toggle_select_all']") |> render_click()
-      lv |> element("button[phx-value-action='archive']") |> render_click()
 
+      # Archive asks first.
+      confirm = lv |> element("button[phx-value-action='archive']") |> render_click()
+      assert confirm =~ "you can unarchive it later"
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
+
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
       assert CMS.get_page!(page.id, authorize?: false).state == :archived
       assert CMS.get_post!(post.id, authorize?: false).state == :archived
+
+      # And archive is no longer a one-way door: the row action reverses it.
+      lv
+      |> element("button[phx-click='unarchive'][phx-value-id='#{page.id}']")
+      |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
+    end
+
+    test "bulk unarchive returns archived items to draft", %{conn: conn} do
+      page = draft_page(%{title: "UnarchPage", state: :archived})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
+      lv |> element("button[phx-value-action='unarchive']") |> render_click()
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
+
+      assert CMS.get_page!(page.id, authorize?: false).state == :draft
     end
 
     test "the bulk Delete button is admin-only", %{conn: conn} do
@@ -228,12 +260,12 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, editor_html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
-      refute editor_html =~ "request_delete"
+      refute editor_html =~ ~s(phx-value-action="delete")
 
       {:ok, _lv, admin_html} =
         build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
 
-      assert admin_html =~ "request_delete"
+      assert admin_html =~ ~s(phx-value-action="delete")
     end
 
     test "admin bulk delete asks for confirmation, then removes the items", %{conn: conn} do
@@ -243,13 +275,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
 
-      # First click only opens the guard; nothing is deleted yet.
-      confirm_html = lv |> element("button[phx-click='request_delete']") |> render_click()
-      assert confirm_html =~ "This can&#39;t be undone"
+      # First click only opens the guard; nothing is deleted yet. The copy is
+      # honest about soft-delete (audit U-M1): trash, restorable for 30 days.
+      confirm_html = lv |> element("button[phx-value-action='delete']") |> render_click()
+      assert confirm_html =~ "to trash"
+      assert confirm_html =~ "30 days"
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
 
       # Confirming performs the delete.
-      lv |> element("button[phx-click='confirm_delete']") |> render_click()
+      lv |> element("button[phx-click='confirm_bulk']") |> render_click()
       refute Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
@@ -259,10 +293,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
 
       lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
-      lv |> element("button[phx-click='request_delete']") |> render_click()
-      cancelled = lv |> element("button[phx-click='cancel_delete']") |> render_click()
+      lv |> element("button[phx-value-action='delete']") |> render_click()
+      cancelled = lv |> element("button[phx-click='cancel_bulk']") |> render_click()
 
-      refute cancelled =~ "This can&#39;t be undone"
+      refute cancelled =~ "to trash?"
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
@@ -316,6 +350,85 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert html =~ "Submit for review"
       refute html =~ ">Publish<"
+    end
+  end
+
+  # Audit U-M3: filter/search state lives in the URL, so refresh/back/share
+  # keep it and changing it patches the URL.
+  describe "filter state in the URL" do
+    test "mounting with query params restores the status and search filters", %{conn: conn} do
+      draft_page(%{title: "OnlyDraft"})
+      draft_page(%{title: "LivePage", state: :published})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor?status=published&q=live")
+
+      assert html =~ "LivePage"
+      refute html =~ "OnlyDraft"
+      assert html =~ ~s(value="live")
+    end
+
+    test "changing the filter patches the URL", %{conn: conn} do
+      draft_page()
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      lv |> form("#content-filter", %{status: "draft"}) |> render_change()
+      assert_patch(lv, ~p"/editor?status=draft")
+    end
+  end
+
+  # Audit U-M4: a saved schedule was invisible after saving — the editor header
+  # and content list now carry a "Scheduled" badge with a localized <time>.
+  describe "scheduled publish visibility" do
+    test "the list and the editor show a scheduled badge for a scheduled draft", %{conn: conn} do
+      at = DateTime.add(DateTime.utc_now(), 3600, :second)
+      page = draft_page(%{title: "SoonLive", scheduled_at: at})
+
+      {:ok, _lv, list_html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert list_html =~ ~s(id="scheduled-page-#{page.id}")
+      assert list_html =~ ~s(phx-hook="LocalTime")
+
+      {:ok, _lv, editor_html} =
+        build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert editor_html =~ "Scheduled to publish"
+      assert editor_html =~ ~s(id="scheduled-publish-badge")
+      # The schedule input is the local/UTC hook pair, labelled with the tz.
+      assert editor_html =~ ~s(phx-hook="UtcDatetimeInput")
+      assert editor_html =~ "Shown in your local timezone; stored as UTC."
+    end
+  end
+
+  # Audit U-H2: ApplyCustomFields errors land on :custom_fields and previously
+  # rendered nowhere — the editor got a generic flash with nothing highlighted.
+  describe "custom field validation errors" do
+    test "an invalid custom-field value renders an inline error and opens the section",
+         %{conn: conn} do
+      KilnCMS.CMS.create_field_definition!(
+        %{content_type: :page, name: "level", label: "Level", field_type: :integer},
+        actor: authed_user(:admin)
+      )
+
+      page = draft_page(%{title: "Has fields"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # The input is labelled via for/id (previously a bare sibling label).
+      assert html =~ ~s(for="custom-field-level")
+      assert html =~ ~s(id="custom-field-level")
+
+      invalid =
+        lv
+        |> form("#page-editor", form: %{custom_fields: %{level: "abc"}})
+        |> render_submit()
+
+      assert invalid =~ "Level (level) must be a whole number"
+      assert invalid =~ ~s(id="custom-field-level-errors")
+      assert invalid =~ ~s(aria-invalid="true")
+      # The collapsed "Custom fields" details opens so the error is visible.
+      assert invalid =~ ~r/<details[^>]*open/
     end
   end
 
@@ -374,6 +487,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # The published record is only changed via the explicit Save button.
       assert CMS.get_page!(page.id, authorize?: false).title == "Live"
+    end
+
+    # Audit U-H1: non-draft content gets no autosave, so unsaved edits must be
+    # tracked — the form flips data-dirty (read by the UnsavedGuard hook) and
+    # shows an "Unsaved changes" indicator until an explicit Save.
+    test "editing published content marks the form dirty until saved", %{conn: conn} do
+      page = draft_page(%{title: "Live", state: :published})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(data-dirty="false")
+
+      changed = lv |> form("#page-editor", form: %{title: "Edited live"}) |> render_change()
+      assert changed =~ ~s(data-dirty="true")
+      assert changed =~ "Unsaved changes"
+
+      saved = lv |> form("#page-editor", form: %{title: "Edited live"}) |> render_submit()
+      assert saved =~ ~s(data-dirty="false")
+      refute saved =~ "Unsaved changes"
+      assert CMS.get_page!(page.id, authorize?: false).title == "Edited live"
     end
 
     test "repeated autosaves coalesce into a single version (issue #32)", %{conn: conn} do
@@ -841,9 +975,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "LiveBlock"
     end
 
-    test "the editor broadcasts preview updates on change", %{conn: conn} do
+    test "the editor broadcasts preview updates on change while a window is open", %{conn: conn} do
       page = draft_page()
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+      # Simulate an open pop-out window (PreviewLive tracks itself like this).
+      KilnCMSWeb.Presence.track_preview(self(), "page", page.id)
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -851,6 +987,20 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor", form: %{title: "Broadcasted"}) |> render_change()
 
       assert_receive {:preview_update, %{title: "Broadcasted"}}
+    end
+
+    # Audit P-M2: without an open preview window there's nobody to receive the
+    # payload, so the editor skips building/broadcasting it per keystroke.
+    test "no preview broadcast is built when no window is open", %{conn: conn} do
+      page = draft_page()
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "Unheard"}) |> render_change()
+
+      refute_receive {:preview_update, _}, 100
     end
 
     # Regression for #134: the broadcast payload for a rich-text block must carry
@@ -864,6 +1014,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+      KilnCMSWeb.Presence.track_preview(self(), "page", page.id)
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")

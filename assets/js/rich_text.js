@@ -60,9 +60,16 @@ const toolbarButton = (editor, item) => {
   return b
 }
 
+// Unique per-instance menu ids so aria-controls/aria-activedescendant can
+// point at the right floating listbox when several editors are mounted.
+let slashMenuCount = 0
+
 // A lightweight slash-command menu. Rendered into a single floating element
 // (positioned at the caret) and driven entirely from the editor's update
-// events — no extra TipTap extensions or popup dependencies.
+// events — no extra TipTap extensions or popup dependencies. The combobox
+// ARIA lives on the editor's contenteditable (aria-haspopup/expanded/
+// controls/activedescendant), mirroring the BlockInserter pattern, so screen
+// readers hear the menu open and track the active option (audit U-M8).
 class SlashMenu {
   constructor(editor) {
     this.editor = editor
@@ -70,12 +77,18 @@ class SlashMenu {
     this.items = []
     this.active = 0
     this.range = null
+    this.id = `rt-slash-menu-${++slashMenuCount}`
 
     this.el = document.createElement("div")
+    this.el.id = this.id
     this.el.className = "rt-slash-menu"
     this.el.setAttribute("role", "listbox")
+    this.el.setAttribute("aria-label", "Block commands")
     this.el.hidden = true
     document.body.appendChild(this.el)
+
+    editor.view.dom.setAttribute("aria-haspopup", "listbox")
+    editor.view.dom.setAttribute("aria-expanded", "false")
 
     this.onKeyDown = this.onKeyDown.bind(this)
     // Capture phase so Enter/arrows are handled before ProseMirror sees them.
@@ -116,12 +129,19 @@ class SlashMenu {
     this.render()
     this.el.hidden = false
     this.position()
+    const dom = this.editor.view.dom
+    dom.setAttribute("aria-expanded", "true")
+    dom.setAttribute("aria-controls", this.id)
   }
 
   hide() {
     if (!this.open) return
     this.open = false
     this.el.hidden = true
+    const dom = this.editor.view.dom
+    dom.setAttribute("aria-expanded", "false")
+    dom.removeAttribute("aria-controls")
+    dom.removeAttribute("aria-activedescendant")
   }
 
   position() {
@@ -136,6 +156,7 @@ class SlashMenu {
     this.items.forEach((cmd, i) => {
       const row = document.createElement("button")
       row.type = "button"
+      row.id = `${this.id}-option-${i}`
       row.setAttribute("role", "option")
       row.setAttribute("aria-selected", i === this.active ? "true" : "false")
       row.className = "rt-slash-item" + (i === this.active ? " rt-slash-item-active" : "")
@@ -153,6 +174,15 @@ class SlashMenu {
       })
       this.el.appendChild(row)
     })
+
+    // Keep the screen reader's cursor on the active option while the DOM
+    // focus stays in the editor (standard combobox pattern).
+    if (this.items.length > 0) {
+      this.editor.view.dom.setAttribute(
+        "aria-activedescendant",
+        `${this.id}-option-${this.active}`
+      )
+    }
   }
 
   move(delta) {
@@ -197,75 +227,73 @@ class SlashMenu {
   }
 }
 
-export const RichText = {
-  mounted() {
-    const input = this.el.querySelector("[data-input]")
-    const toolbarEl = this.el.querySelector("[data-toolbar]")
-
-    const editor = new Editor({
-      element: this.el.querySelector("[data-editor]"),
-      extensions: [StarterKit],
-      content: this.el.dataset.content || "",
-      // Name the contenteditable surface for assistive tech — without this a
-      // screen reader lands in an unlabeled editable region (#170). The label
-      // can be overridden per block via `data-editor-label`.
-      editorProps: {
-        attributes: {
-          "aria-label": this.el.dataset.editorLabel || "Rich text editor",
-          "aria-multiline": "true",
-          role: "textbox",
-        },
-      },
-      onUpdate: ({editor}) => {
-        input.value = editor.getHTML()
-        this.slash.update()
-        this.syncToolbar()
-        // Debounced phx-change so the live preview reflects rich-text edits.
-        clearTimeout(this._debounce)
-        this._debounce = setTimeout(() => {
-          input.dispatchEvent(new Event("input", {bubbles: true}))
-        }, 300)
-      },
-      onSelectionUpdate: () => {
-        this.slash.update()
-        this.syncToolbar()
-      },
-      // Collaborative locking (#140): broadcast focus/blur on this block's field
-      // so other editors get the same lock ring + "who's editing" badge that the
-      // title/slug/DSL inputs already use. data-lock-field is the form field name.
-      onFocus: () => {
-        const field = this.el.dataset.lockField
-        if (field) this.pushEvent("field_focus", {field})
-      },
-      onBlur: () => {
-        if (this.el.dataset.lockField) this.pushEvent("field_blur", {})
-      },
-    })
-    this.editor = editor
-    this.slash = new SlashMenu(editor)
-    input.value = editor.getHTML()
-
-    this.toolbarButtons = TOOLBAR.map(item => {
-      const b = toolbarButton(editor, item)
-      toolbarEl.appendChild(b)
-      return {item, b}
-    })
-    this.syncToolbar()
-  },
+// Attach the TipTap editor to a mounted RichText hook. Called from the thin
+// lazily-loading hook in app.js (dynamic import) so this module — and TipTap /
+// ProseMirror underneath — stays out of the public-page bundle (audit P-M6).
+// State lands on the hook (`hook.editor`, `hook.slash`) so its destroyed()
+// callback can tear the editor down.
+export function mount(hook) {
+  const input = hook.el.querySelector("[data-input]")
+  const toolbarEl = hook.el.querySelector("[data-toolbar]")
 
   // Reflect the cursor's active marks/nodes on the toolbar buttons.
-  syncToolbar() {
-    if (!this.toolbarButtons) return
-    this.toolbarButtons.forEach(({item, b}) => {
+  const syncToolbar = () => {
+    if (!hook.toolbarButtons) return
+    hook.toolbarButtons.forEach(({item, b}) => {
       if (!item.active) return
-      const on = item.active(this.editor)
+      const on = item.active(hook.editor)
       b.classList.toggle("bg-base-300", on)
       b.setAttribute("aria-pressed", on ? "true" : "false")
     })
-  },
+  }
 
-  destroyed() {
-    this.slash && this.slash.destroy()
-    this.editor && this.editor.destroy()
-  },
+  const editor = new Editor({
+    element: hook.el.querySelector("[data-editor]"),
+    extensions: [StarterKit],
+    content: hook.el.dataset.content || "",
+    // Name the contenteditable surface for assistive tech — without this a
+    // screen reader lands in an unlabeled editable region (#170). The label
+    // can be overridden per block via `data-editor-label`.
+    editorProps: {
+      attributes: {
+        "aria-label": hook.el.dataset.editorLabel || "Rich text editor",
+        "aria-multiline": "true",
+        role: "textbox",
+      },
+    },
+    onUpdate: ({editor}) => {
+      input.value = editor.getHTML()
+      hook.slash.update()
+      syncToolbar()
+      // Debounced phx-change so the live preview reflects rich-text edits.
+      clearTimeout(hook._debounce)
+      hook._debounce = setTimeout(() => {
+        input.dispatchEvent(new Event("input", {bubbles: true}))
+      }, 300)
+    },
+    onSelectionUpdate: () => {
+      hook.slash.update()
+      syncToolbar()
+    },
+    // Collaborative locking (#140): broadcast focus/blur on this block's field
+    // so other editors get the same lock ring + "who's editing" badge that the
+    // title/slug/DSL inputs already use. data-lock-field is the form field name.
+    onFocus: () => {
+      const field = hook.el.dataset.lockField
+      if (field) hook.pushEvent("field_focus", {field})
+    },
+    onBlur: () => {
+      if (hook.el.dataset.lockField) hook.pushEvent("field_blur", {})
+    },
+  })
+  hook.editor = editor
+  hook.slash = new SlashMenu(editor)
+  input.value = editor.getHTML()
+
+  hook.toolbarButtons = TOOLBAR.map(item => {
+    const b = toolbarButton(editor, item)
+    toolbarEl.appendChild(b)
+    return {item, b}
+  })
+  syncToolbar()
 }

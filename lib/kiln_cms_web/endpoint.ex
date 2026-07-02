@@ -42,10 +42,14 @@ defmodule KilnCMSWeb.Endpoint do
   # production a remote adapter (S3/MinIO) would serve these instead.
   plug :secure_upload_headers
 
+  # Storage keys are UUIDs, so a blob never changes under its URL — mark the
+  # responses immutable. Without this, Plug.Static's default forces a
+  # revalidation round-trip per image per page view on media-heavy pages.
   plug Plug.Static,
     at: "/uploads",
     from: {:kiln_cms, "priv/uploads"},
-    gzip: false
+    gzip: false,
+    cache_control_for_etags: "public, max-age=31536000, immutable"
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.

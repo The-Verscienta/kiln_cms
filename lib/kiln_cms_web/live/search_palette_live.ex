@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
+     |> assign(:page_title, gettext("Search"))
      |> assign(:query, "")
      |> assign(:searched, false)
      |> assign(:retention_days, KilnCMS.Analytics.SearchQuery.retention_days())

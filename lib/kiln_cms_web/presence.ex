@@ -31,6 +31,25 @@ defmodule KilnCMSWeb.Presence do
     topic
   end
 
+  @doc "Presence topic for open pop-out preview windows of a content item."
+  def preview_topic(kind, id), do: "previewing:#{kind}:#{id}"
+
+  @doc """
+  Track an open pop-out preview window for `{kind, id}`. The editor subscribes
+  to diffs on this topic so it can skip building preview payloads when no
+  window is listening.
+  """
+  def track_preview(pid, kind, id) do
+    topic = preview_topic(kind, id)
+    track(pid, topic, "viewer", %{online_at: System.system_time(:second)})
+    topic
+  end
+
+  @doc "Whether any pop-out preview window is open for `{kind, id}`."
+  def previews_open?(kind, id) do
+    kind |> preview_topic(id) |> list() |> map_size() > 0
+  end
+
   @doc "The distinct editors currently on a content item, as `%{id, name}` maps."
   def editors(kind, id) do
     kind
