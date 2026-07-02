@@ -271,9 +271,20 @@ Each phase lands independently green (precommit + tests) and is useful on its ow
    *Acceptance met — `dynamic_delivery_test.exs`: published Recipe served
    on-site, via `GET /api/content/<name>/<slug>` (`json`/`web`), in the
    sitemap; archiving the type 404s immediately.*
-4. **Search & headless.** Full-text/semantic/autocomplete over entries,
-   on-site search + palette, generic `entries` JSON:API route + GraphQL
-   query, webhooks. *Acceptance: Recipe findable everywhere Page is.*
+4. **Search & headless.** ✅ **Done.** `Search.global` gained an `entries`
+   section (labeled by the new public `type_name` expr calculation, which
+   skips TypeDefinition's editor-only read policy); on-site `/search` and
+   the editor palette list dynamic hits; generic JSON:API `/entries`
+   collection + search/semantic/autocomplete routes (scoped by
+   `filter[type_name]`) and curated GraphQL queries (`entryBySlug`,
+   `searchEntries` + `typeName` filter, translations, autocomplete);
+   webhook events named by the dynamic type (`"recipe.published"`), with
+   dynamic types in the subscribable event list. Consumer docs updated in
+   `headless-consumer-guide.md`. Note: the per-action `type_definition_id`
+   facet sketched in §2 wasn't needed — query-composed filters and the
+   `type_name` calc cover scoping without macro surgery. *Acceptance met —
+   `dynamic_headless_test.exs` + delivery tests: Recipe findable everywhere
+   Page is.*
 5. **Field types v2.** `media` and `reference` field types (storage via
    MediaItem FK-in-map + ContentLink), editor pickers, delivery expansion.
 6. **Promotion generator + JSONB indexes** (as needed).

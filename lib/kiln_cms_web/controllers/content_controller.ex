@@ -111,18 +111,18 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   # Public on-site search (#149). Anonymous, so the read policy returns published
-  # content only; locale-scoped to the active locale. Posts and pages only
-  # (media isn't part of the public site).
+  # content only; locale-scoped to the active locale. Posts, pages and dynamic
+  # entries (media isn't part of the public site).
   def search(conn, params) do
     locale = locale(conn)
     query = params["q"] |> to_string() |> String.trim()
 
     results =
       if query == "" do
-        %{posts: [], pages: []}
+        %{posts: [], pages: [], entries: []}
       else
         r = KilnCMS.Search.global(query, authorize?: true, locale: locale, limit: 20)
-        %{posts: r.posts, pages: r.pages}
+        %{posts: r.posts, pages: r.pages, entries: entry_results(r.entries)}
       end
 
     conn
@@ -132,6 +132,28 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:page_title, "Search")
     |> assign(:locale_links, search_locale_links(locale, query))
     |> render(:search, query: query, results: results)
+  end
+
+  # Dynamic-entry hits as plain view maps: resolve each result's type through
+  # the registry for its URL segment and label, dropping hits whose type no
+  # longer resolves (archived between indexing and render).
+  defp entry_results(entries) do
+    Enum.flat_map(entries, fn entry ->
+      case ContentTypes.get_dynamic(entry.type_name) do
+        %{path_segment: segment, label: label} ->
+          [
+            %{
+              title: entry.title,
+              excerpt: Map.get(entry, :excerpt),
+              path: "/#{segment}/#{entry.slug}",
+              type_label: label
+            }
+          ]
+
+        _archived ->
+          []
+      end
+    end)
   end
 
   # Language-switcher links to the search page (preserving the query) per locale.

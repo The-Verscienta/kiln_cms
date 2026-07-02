@@ -108,6 +108,30 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
            ).id == entry.id
   end
 
+  test "the editor search palette finds dynamic entries (entries-only results)", %{conn: conn} do
+    admin = authed_user(:admin)
+    definition = define_recipe_type!(admin)
+    token = "wombat#{System.unique_integer([:positive])}"
+
+    entry =
+      ContentTypes.create!(
+        definition.name,
+        %{title: "Palette #{token}", slug: "pal-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/search")
+
+    html = lv |> form("#palette-search", %{"q" => token}) |> render_change()
+
+    # Entries are the only hits for this token — the count/section logic must
+    # treat them as results, not render "No results".
+    assert html =~ "Custom content"
+    assert html =~ "Palette #{token}"
+    assert html =~ "/editor/content/#{definition.name}/#{entry.id}"
+    refute html =~ "No results"
+  end
+
   test "the version sidebar and conflict handling work on dynamic entries", %{conn: conn} do
     admin = authed_user(:admin)
     definition = define_recipe_type!(admin)

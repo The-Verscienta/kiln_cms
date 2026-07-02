@@ -98,6 +98,15 @@ defmodule KilnCMSWeb.DynamicDeliveryTest do
     assert web["html"] =~ "Fluffy stack"
   end
 
+  test "on-site search finds published entries and labels them by type", %{conn: conn} do
+    {definition, entry, _actor} = published_entry!()
+
+    body = conn |> get("/search?q=Pancakes") |> html_response(200)
+    assert body =~ entry.slug
+    assert body =~ definition.label
+    assert body =~ "/#{definition.path_segment}/#{entry.slug}"
+  end
+
   test "the sitemap lists published entries at their public URL", %{conn: conn} do
     {definition, entry, _actor} = published_entry!()
 

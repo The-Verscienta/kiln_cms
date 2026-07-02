@@ -17,6 +17,25 @@ and knowing what you'll get back. See also [api.md](api.md) (JSON:API + auth),
 | **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching published records (metadata; no block body) |
 | A **typed query** over published content by slug/locale | GraphQL `/gql` (`postBySlug`, `pageBySlug`, …) | Selected fields; no block body, author is the opaque `authorId` only |
 
+## Admin-defined (dynamic) content types
+
+Types created in the admin UI (`/editor/types` — decision D17) are served
+through the **same surfaces** as compiled types, with one difference: instead
+of a typed schema per type, they share **one generic `entries` surface**,
+scoped by the type's name:
+
+| Surface | How |
+|---------|-----|
+| Artifact | `GET /api/content/<type name>/<slug>` — identical to compiled types; the `json` surface's `type` field is the dynamic type's name |
+| JSON:API | `GET /api/json/entries?filter[type_name]=<name>` (+ `/entries/search`, `/semantic-search`, `/autocomplete` with `?query=…`) |
+| GraphQL | `entryBySlug(slug, locale, typeDefinitionId)`, `searchEntries(query, filter: {typeName: {eq: "<name>"}})`, `entryTranslations`, `semanticSearchEntries`, `autocompleteEntries` |
+| Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` — exactly like compiled types |
+
+Admin-defined **custom fields** are delivered in each entry's `custom_fields`
+map on every surface. Per-type typed GraphQL/JSON:API schemas are deliberately
+not generated at runtime — promote the type to a compiled one when you need
+them.
+
 ## Why three different block shapes?
 
 | Surface | Blocks field | Shape |

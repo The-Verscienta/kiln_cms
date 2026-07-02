@@ -84,14 +84,15 @@ defmodule KilnCMS.CMS.Content do
           :featured_image_id
         ]
 
-    # The generic entry tier has no per-type compiled API surface: dynamic
-    # types are delivered through the fired-artifact API and (Phase 4) one
-    # generic `entries` surface, never per-type JSON:API/GraphQL schemas —
-    # that's the promotion pitch (D17).
-    extensions =
-      [AshPaperTrail.Resource, AshStateMachine, AshOban, AshArchival.Resource] ++
-        if(dynamic?, do: [], else: [AshJsonApi.Resource, AshGraphql.Resource]) ++
-        [AshAdmin.Resource]
+    extensions = [
+      AshPaperTrail.Resource,
+      AshStateMachine,
+      AshOban,
+      AshArchival.Resource,
+      AshJsonApi.Resource,
+      AshGraphql.Resource,
+      AshAdmin.Resource
+    ]
 
     excerpt_attribute =
       if excerpt? do
@@ -144,9 +145,49 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
-    # The per-type headless surface (compiled types only — see `extensions`).
+    # The headless surface. Compiled types each get their own typed schema;
+    # the entry tier gets ONE generic surface shared by every dynamic type —
+    # per-type typed schemas at runtime are impossible (Absinthe schemas are
+    # compile-time), and that's the promotion pitch (D17). Consumers scope by
+    # the filterable `type_name` calculation instead of a typed root.
     api_blocks =
-      unless dynamic? do
+      if dynamic? do
+        quote do
+          graphql do
+            type :entry
+
+            # Curated, read-only public surface (D7) — the same delivery reads
+            # compiled types expose, over the shared entry tier. All are
+            # policy/state-filtered, so anonymous callers see published rows only.
+            queries do
+              get :entry_by_slug, :public_by_slug do
+                identity false
+              end
+
+              list :entry_translations, :published_translations
+              list :search_entries, :search
+              list :semantic_search_entries, :search_semantic
+              list :autocomplete_entries, :autocomplete
+            end
+          end
+
+          json_api do
+            type "entry"
+
+            routes do
+              base "/entries"
+
+              # One collection for all dynamic types — filter by the public
+              # `type_name` calculation (`?filter[type_name]=recipe`).
+              index :read
+              index :search, route: "/search"
+              index :search_semantic, route: "/semantic-search"
+              index :autocomplete, route: "/autocomplete"
+              get :read
+            end
+          end
+        end
+      else
         quote do
           graphql do
             type unquote(type)
@@ -273,6 +314,19 @@ defmodule KilnCMS.CMS.Content do
         quote do
           belongs_to :type_definition, KilnCMS.CMS.TypeDefinition do
             allow_nil? false
+            public? true
+          end
+        end
+      end
+
+    # The owning dynamic type's name string, as an expression calculation so
+    # headless consumers can filter the generic entries surface by type
+    # (`filter[type_name]=recipe` / `filter: {typeName: {eq: "recipe"}}`)
+    # without resolving TypeDefinition ids.
+    type_name_calc =
+      if dynamic? do
+        quote do
+          calculate :type_name, :string, expr(type_definition.name) do
             public? true
           end
         end
@@ -964,6 +1018,8 @@ defmodule KilnCMS.CMS.Content do
       end
 
       calculations do
+        unquote(type_name_calc)
+
         # Convenience flag for the published state (no `?` suffix — GraphQL names
         # can't contain it).
         calculate :published, :boolean, expr(^ref(:state) == :published) do
