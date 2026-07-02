@@ -158,6 +158,14 @@ defmodule KilnCMS.CMS.MediaItem do
     read :search do
       argument :query, :string, allow_nil?: false
 
+      # Exposed on the public API — bound the response like Content's :search.
+      pagination offset?: true,
+                 keyset?: true,
+                 countable: true,
+                 required?: false,
+                 max_page_size: 100,
+                 default_limit: 25
+
       filter expr(
                fragment(
                  "to_tsvector('english', coalesce(?, '') || ' ' || coalesce(?, '') || ' ' || coalesce(?, '')) @@ plainto_tsquery('english', ?)",
@@ -171,10 +179,12 @@ defmodule KilnCMS.CMS.MediaItem do
       prepare fn query, _context ->
         q = Ash.Query.get_argument(query, :query)
 
-        Ash.Query.sort(query, [
+        query
+        |> Ash.Query.sort([
           {:search_rank, {%{query: q}, :desc}},
           {:inserted_at, :desc}
         ])
+        |> KilnCMS.CMS.Content.cap_unbounded()
       end
     end
   end

@@ -18,6 +18,51 @@ defmodule KilnCMS.CMS.ContentSearchTest do
 
   defp slug, do: "search-#{System.unique_integer([:positive])}"
 
+  # Audit P-M2: :search is exposed on the public API and previously had no
+  # bound — a broad query returned every matching row.
+  describe "result bounding" do
+    test "an unbounded search is capped by the prepare's default limit" do
+      admin = admin()
+      term = "boundless#{System.unique_integer([:positive])}"
+
+      for i <- 1..3 do
+        CMS.create_page!(%{title: "#{term} #{i}", slug: slug()}, actor: admin)
+      end
+
+      query =
+        KilnCMS.CMS.Page
+        |> Ash.Query.for_read(:search, %{query: term})
+        |> Ash.read!(actor: admin)
+
+      assert length(query) == 3
+
+      capped =
+        KilnCMS.CMS.Page
+        |> Ash.Query.for_read(:search, %{query: term})
+        |> Ash.Query.limit(2)
+        |> Ash.read!(actor: admin)
+
+      assert length(capped) == 2
+    end
+
+    test "paged search returns an offset page (API pagination works)" do
+      admin = admin()
+      term = "pageable#{System.unique_integer([:positive])}"
+
+      for i <- 1..3 do
+        CMS.create_page!(%{title: "#{term} #{i}", slug: slug()}, actor: admin)
+      end
+
+      page =
+        KilnCMS.CMS.Page
+        |> Ash.Query.for_read(:search, %{query: term})
+        |> Ash.read!(actor: admin, page: [offset: 0, limit: 2, count: true])
+
+      assert %Ash.Page.Offset{results: results, count: 3} = page
+      assert length(results) == 2
+    end
+  end
+
   test "matches a term in the title", %{} do
     admin = admin()
     tag = "zylophone#{System.unique_integer([:positive])}"
