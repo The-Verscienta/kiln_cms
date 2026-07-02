@@ -295,7 +295,17 @@ Each phase lands independently green (precommit + tests) and is useful on its ow
    variant from the original sketch was deliberately not used — snapshot
    maps keep the reference graph out of scope until a real re-fire need
    appears.
-6. **Promotion generator + JSONB indexes** (as needed).
+6. **Promotion generator.** ✅ **Done.** `mix kiln.gen.content --from <name>`
+   derives the compiled resource (flags/plural from the TypeDefinition, with
+   a URL-change warning when the segment can't serve as the plural), and
+   `mix kiln.promote_data <name>` (`KilnCMS.CMS.Promotion`) transactionally
+   moves entries (ids preserved — taggings/links survive), version history,
+   re-scopes field definitions to the compiled type, purges stale `:entry`
+   artifacts/edges, and archives the TypeDefinition. **Design correction vs
+   §2.8:** fields deliberately stay data-driven after promotion — the editor
+   renders inputs from FieldDefinition rows, not resource attributes, so
+   attribute-level promotion is a documented manual follow-up per field.
+   JSONB expression indexes remain deferred until a real query demands one.
 
 ## 6. Open questions (defaults chosen, flag to change)
 
