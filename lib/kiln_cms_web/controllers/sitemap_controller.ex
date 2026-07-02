@@ -46,7 +46,13 @@ defmodule KilnCMSWeb.SitemapController do
         # the sitemap builds can't turn into a registry-lookup miss.
         entries =
           ct
-          |> ContentTypes.list!(authorize?: true, query: [limit: remaining])
+          |> ContentTypes.list!(
+            authorize?: true,
+            # Only the three fields the XML uses — at the 50k ceiling, full
+            # rows (blocks + embeddings) would be a large memory spike per
+            # rebuild.
+            query: [select: [:slug, :locale, :updated_at], limit: remaining]
+          )
           |> page_entries(ContentTypes.public_prefix(ct))
 
         {:cont, acc ++ entries}

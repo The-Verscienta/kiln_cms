@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.TrashLive do
       {:ok,
        socket
        |> assign(:actor, actor)
+       |> assign(:page_title, gettext("Trash"))
        |> assign(:confirming_empty, false)
        |> assign(:retention_days, @retention_days)
        |> load_items()}
@@ -36,6 +37,11 @@ defmodule KilnCMSWeb.TrashLive do
     end
   end
 
+  # Display fields plus what restore/purge's after-action hooks read (slug,
+  # locale, state for cache busting / artifact cleanup) — never the heavy
+  # blocks/search_text/embedding columns the trash list doesn't show.
+  @list_fields [:id, :title, :slug, :locale, :state, :archived_at, :updated_at]
+
   # Soft-deleted records across every content type, merged into `{kind, record}`
   # tuples, newest deletion first.
   defp load_items(socket) do
@@ -49,7 +55,7 @@ defmodule KilnCMSWeb.TrashLive do
         ct
         |> ContentTypes.list_trashed!(
           actor: actor,
-          query: [sort: [archived_at: :desc], limit: @max_per_type]
+          query: [select: @list_fields, sort: [archived_at: :desc], limit: @max_per_type]
         )
         |> Enum.map(&{ct.type, &1})
       end)

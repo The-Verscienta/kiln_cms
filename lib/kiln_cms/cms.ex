@@ -35,6 +35,7 @@ defmodule KilnCMS.CMS do
       define :publish_scheduled_page, action: :publish_scheduled
       define :unpublish_page, action: :unpublish
       define :archive_page, action: :archive
+      define :unarchive_page, action: :unarchive
       define :restore_page_version, action: :restore_version
       define :destroy_page, action: :destroy
       define :list_trashed_pages, action: :trashed
@@ -63,6 +64,7 @@ defmodule KilnCMS.CMS do
       define :publish_scheduled_post, action: :publish_scheduled
       define :unpublish_post, action: :unpublish
       define :archive_post, action: :archive
+      define :unarchive_post, action: :unarchive
       define :restore_post_version, action: :restore_version
       define :destroy_post, action: :destroy
       define :list_trashed_posts, action: :trashed

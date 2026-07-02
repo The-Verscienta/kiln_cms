@@ -36,6 +36,29 @@ defmodule KilnCMS.CacheTest do
     assert :v2 = Cache.fetch_published("page", s, "en", fn -> :v2 end)
   end
 
+  # Audit P-M4: concurrent misses for the same key must compute once, not
+  # stampede the DB (Cachex.fetch's Courier deduplicates fallbacks).
+  test "concurrent misses for one key run the fallback only once" do
+    s = slug()
+    counter = :counters.new(1, [:atomics])
+
+    slow_compute = fn ->
+      :counters.add(counter, 1, 1)
+      Process.sleep(50)
+      :computed
+    end
+
+    results =
+      1..8
+      |> Enum.map(fn _ ->
+        Task.async(fn -> Cache.fetch_published("page", s, "en", slow_compute) end)
+      end)
+      |> Task.await_many()
+
+    assert Enum.all?(results, &(&1 == :computed))
+    assert :counters.get(counter, 1) == 1
+  end
+
   test "keys are namespaced by type and locale" do
     s = slug()
 

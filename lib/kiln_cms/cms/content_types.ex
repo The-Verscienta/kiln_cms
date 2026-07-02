@@ -270,7 +270,7 @@ defmodule KilnCMS.CMS.ContentTypes do
     call(type, "restore_#{atom(type)}_version", [record, %{version_id: version_id}, opts])
   end
 
-  @doc "Run a workflow transition: publish, unpublish, submit, or archive."
+  @doc "Run a workflow transition: publish, unpublish, submit, archive, or unarchive."
   def transition(type, verb, record, opts \\ []) do
     call(type, transition_fun(atom(type), verb), [record, %{}, opts])
   end
@@ -309,6 +309,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   defp transition_fun(type, "submit"), do: "submit_#{type}_for_review"
   defp transition_fun(type, "return"), do: "return_#{type}_to_draft"
   defp transition_fun(type, "archive"), do: "archive_#{type}"
+  defp transition_fun(type, "unarchive"), do: "unarchive_#{type}"
 
   # Dynamic types resolve to the generic entry tier for interface naming, so
   # convention dispatch (`publish_entry`, `list_entry_versions!`, …) just works.

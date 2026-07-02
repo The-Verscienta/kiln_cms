@@ -28,11 +28,14 @@ defmodule KilnCMSWeb.MediaLive do
     {:ok,
      socket
      |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Media library"))
      |> assign(:is_admin, actor.role == :admin)
      |> assign(:query, "")
      |> assign(:selected, nil)
      |> assign(:view, :library)
      |> assign(:trashed, [])
+     |> assign(:refresh_timer, nil)
+     |> assign(:max_media, @max_media)
      |> assign(:media, list_media(actor))
      |> allow_upload(:media,
        accept: @accept,
@@ -41,10 +44,19 @@ defmodule KilnCMSWeb.MediaLive do
      )}
   end
 
+  # The library filter lives in the URL (audit U-M3) so refresh/back/share
+  # keep it; `replace: true` avoids one history entry per debounced keystroke.
+  @impl true
+  def handle_params(params, _uri, socket),
+    do: {:noreply, assign(socket, :query, params["q"] || "")}
+
   @impl true
   def handle_event("validate", _params, socket), do: {:noreply, socket}
 
-  def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, :query, q)}
+  def handle_event("search", %{"q" => q}, socket) do
+    params = if q == "", do: %{}, else: %{q: q}
+    {:noreply, push_patch(socket, to: ~p"/media?#{params}", replace: true)}
+  end
 
   def handle_event("cancel", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :media, ref)}
@@ -55,15 +67,16 @@ defmodule KilnCMSWeb.MediaLive do
 
     results =
       consume_uploaded_entries(socket, :media, fn %{path: path}, entry ->
-        {:ok, store_entry(path, entry, actor)}
+        {:ok, {entry.client_name, store_entry(path, entry, actor)}}
       end)
 
-    {ok, failed} = Enum.split_with(results, &(&1 == :ok))
+    {ok, failed} = Enum.split_with(results, fn {_name, result} -> result == :ok end)
+    failures = for {name, {:error, reason}} <- failed, do: {name, reason}
 
     socket =
       socket
       |> assign(:media, list_media(actor))
-      |> flash_for_upload(length(ok), length(failed))
+      |> flash_for_upload(length(ok), failures)
 
     {:noreply, socket}
   end
@@ -162,10 +175,23 @@ defmodule KilnCMSWeb.MediaLive do
     do: {:noreply, put_flash(socket, :info, gettext("URL copied to clipboard."))}
 
   # A background variant job finished — refresh the library so the new
-  # dimensions/thumbnail show without a manual reload.
+  # dimensions/thumbnail show without a manual reload. Completions arrive in
+  # bursts (one broadcast per file, to every open MediaLive), so coalesce them
+  # into a single re-query instead of one 500-row fetch per broadcast.
   @impl true
   def handle_info({:media_processed, _id}, socket) do
-    {:noreply, assign(socket, :media, list_media(socket.assigns.actor))}
+    if socket.assigns.refresh_timer do
+      {:noreply, socket}
+    else
+      {:noreply, assign(socket, :refresh_timer, Process.send_after(self(), :refresh_media, 200))}
+    end
+  end
+
+  def handle_info(:refresh_media, socket) do
+    {:noreply,
+     socket
+     |> assign(:refresh_timer, nil)
+     |> assign(:media, list_media(socket.assigns.actor))}
   end
 
   # --- helpers ---------------------------------------------------------------
@@ -173,6 +199,8 @@ defmodule KilnCMSWeb.MediaLive do
   # `source`, when removed, is the server-built stripped temp file (UUID path),
   # never user input — the File.rm traversal warning is a false positive.
   # sobelow_skip ["Traversal.FileModule"]
+  # Returns :ok or {:error, reason} — the reason reaches the failure flash so
+  # editors learn WHICH file failed and why, not just a count (audit U-M5).
   defp store_entry(path, entry, actor) do
     case ImageProcessor.validate_upload(path) do
       {:ok, %{ext: ext, content_type: content_type}} ->
@@ -184,14 +212,14 @@ defmodule KilnCMSWeb.MediaLive do
         try do
           case Storage.store(key, source) do
             {:ok, ^key} -> create_from_upload(key, content_type, entry, actor)
-            _ -> :error
+            _ -> {:error, :storage_failed}
           end
         after
           if stripped?, do: File.rm(source)
         end
 
-      _ ->
-        :error
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -220,7 +248,7 @@ defmodule KilnCMSWeb.MediaLive do
 
       _ ->
         Storage.delete(key)
-        :error
+        {:error, :create_failed}
     end
   end
 
@@ -281,7 +309,7 @@ defmodule KilnCMSWeb.MediaLive do
     Enum.filter(media, &String.contains?(String.downcase(&1.filename), q))
   end
 
-  defp flash_for_upload(socket, ok, 0) when ok > 0,
+  defp flash_for_upload(socket, ok, []) when ok > 0,
     do:
       put_flash(
         socket,
@@ -289,23 +317,29 @@ defmodule KilnCMSWeb.MediaLive do
         ngettext("Uploaded %{count} file.", "Uploaded %{count} files.", ok, count: ok)
       )
 
-  defp flash_for_upload(socket, 0, failed) when failed > 0,
-    do:
-      put_flash(
-        socket,
-        :error,
-        ngettext("%{count} upload failed.", "%{count} uploads failed.", failed, count: failed)
-      )
+  defp flash_for_upload(socket, _ok, []), do: socket
 
-  defp flash_for_upload(socket, ok, failed) when ok > 0 and failed > 0,
-    do:
-      put_flash(
-        socket,
-        :info,
-        gettext("Uploaded %{ok}; %{failed} failed.", ok: ok, failed: failed)
-      )
+  # Server-side rejections name the file and the reason (audit U-M5) instead of
+  # collapsing to "2 uploads failed."
+  defp flash_for_upload(socket, ok, failures) do
+    detail =
+      Enum.map_join(failures, "; ", fn {name, reason} ->
+        "#{name} (#{upload_failure_reason(reason)})"
+      end)
 
-  defp flash_for_upload(socket, _, _), do: socket
+    message =
+      if ok > 0,
+        do: gettext("Uploaded %{ok}. Failed: %{detail}", ok: ok, detail: detail),
+        else: gettext("Upload failed: %{detail}", detail: detail)
+
+    put_flash(socket, :error, message)
+  end
+
+  defp upload_failure_reason(:too_many_pixels), do: gettext("image dimensions are too large")
+  defp upload_failure_reason(:unsupported_format), do: gettext("unsupported image format")
+  defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
+  defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")
+  defp upload_failure_reason(_invalid), do: gettext("not a valid image")
 
   defp humanize_bytes(nil), do: "—"
   defp humanize_bytes(b) when b < 1_024, do: "#{b} B"
@@ -443,6 +477,16 @@ defmodule KilnCMSWeb.MediaLive do
               />
             </form>
           </div>
+          <p
+            :if={length(@media) >= @max_media}
+            class="mb-3 text-xs text-base-content/60"
+            role="status"
+          >
+            {gettext(
+              "Showing the newest %{max} files — older files exist but aren't listed here.",
+              max: @max_media
+            )}
+          </p>
           <.empty_state :if={@media == []} icon="hero-photo" title={gettext("No media yet")}>
             {gettext("Upload an image above to start building your library.")}
           </.empty_state>
@@ -460,14 +504,20 @@ defmodule KilnCMSWeb.MediaLive do
               id={"media-#{item.id}"}
               class="group relative overflow-hidden rounded border border-base-content/10"
             >
-              <img
-                src={thumb_src(item)}
-                alt={item.alt || item.filename}
+              <button
+                type="button"
                 phx-click="select"
                 phx-value-id={item.id}
-                loading="lazy"
-                class="aspect-square w-full cursor-pointer object-cover"
-              />
+                aria-label={gettext("View details for %{name}", name: item.filename)}
+                class="block w-full focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <img
+                  src={thumb_src(item)}
+                  alt={item.alt || item.filename}
+                  loading="lazy"
+                  class="aspect-square w-full object-cover"
+                />
+              </button>
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
                 <p class="flex items-center gap-1 text-[10px] text-base-content/70">

@@ -118,7 +118,9 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
 
-      panel = lv |> element(~s(img[phx-value-id="#{item.id}"])) |> render_click()
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
       assert panel =~ "Alt text"
       assert panel =~ "2.0 KB"
       assert panel =~ "image/png"
@@ -142,7 +144,8 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
 
-      panel = lv |> element(~s(img[phx-value-id="#{item.id}"])) |> render_click()
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
 
       assert panel =~ ~s(role="dialog")
       assert panel =~ ~s(aria-modal="true")
@@ -202,6 +205,9 @@ defmodule KilnCMSWeb.MediaLiveTest do
         {:media_processed, item.id}
       )
 
+      # Broadcast bursts are coalesced behind a short timer; fire it directly
+      # rather than sleeping through the debounce.
+      send(lv.pid, :refresh_media)
       assert render(lv) =~ ">late-arrival.png<"
     end
   end
@@ -232,7 +238,10 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert render_upload(input, "fake.png")
 
       html = lv |> element("#upload-form") |> render_submit()
-      assert html =~ "failed"
+      # The flash names the file and the reason, not just a count (audit U-M5).
+      assert html =~ "Upload failed"
+      assert html =~ "fake.png"
+      assert html =~ "not a valid image"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
       refute File.exists?(Path.join(root, "fake.png"))
     end

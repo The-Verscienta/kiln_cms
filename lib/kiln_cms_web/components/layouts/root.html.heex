@@ -36,7 +36,9 @@
     />
     {assigns[:json_ld]}
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
-    <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
+    <%!-- type="module": the bundle is ESM (esbuild --splitting) so the TipTap
+          editor chunk loads on demand in the admin editor only. --%>
+    <script defer phx-track-static type="module" src={~p"/assets/js/app.js"}>
     </script>
     <script nonce={assigns[:csp_nonce]}>
       (() => {

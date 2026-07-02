@@ -25,11 +25,87 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
-import {RichText} from "./rich_text"
 import {FocusTrap} from "./focus_trap"
 
 const Hooks = {
   FocusTrap,
+  // Warn before discarding unsaved editor changes. The server keeps
+  // `data-dirty` on the form in sync with its save state; this hook guards
+  // full page unloads (tab close, hard reload, plain links) via `beforeunload`
+  // and in-app LiveView navigation (e.g. "← All content") by confirming
+  // clicks on live links while dirty.
+  UnsavedGuard: {
+    mounted() {
+      this.beforeUnload = e => {
+        if (this.dirty()) {
+          e.preventDefault()
+          e.returnValue = ""
+        }
+      }
+      window.addEventListener("beforeunload", this.beforeUnload)
+
+      this.onClick = e => {
+        if (!this.dirty()) return
+        const link = e.target.closest && e.target.closest("a[data-phx-link]")
+        if (!link || link.target === "_blank") return
+        const message =
+          this.el.dataset.unsavedMessage || "You have unsaved changes. Leave without saving?"
+        if (!window.confirm(message)) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+        }
+      }
+      document.addEventListener("click", this.onClick, true)
+    },
+    destroyed() {
+      window.removeEventListener("beforeunload", this.beforeUnload)
+      document.removeEventListener("click", this.onClick, true)
+    },
+    dirty() {
+      return this.el.dataset.dirty === "true"
+    },
+  },
+  // Bridge between a UTC-stored datetime attribute and a `datetime-local`
+  // input: the visible input shows/edits the editor's local wall-clock time, a
+  // hidden form input carries the ISO-8601 UTC instant the server stores.
+  // Without this, a non-UTC editor's entry was silently stored as UTC and
+  // published hours off.
+  UtcDatetimeInput: {
+    mounted() {
+      this.local = this.el.querySelector("[data-local-input]")
+      this.hidden = this.el.querySelector("[data-utc-input]")
+
+      if (this.hidden.value) {
+        const d = new Date(this.hidden.value.replace(" ", "T"))
+        if (!isNaN(d)) this.local.value = this.toLocalValue(d)
+      }
+
+      this.local.addEventListener("input", () => {
+        this.hidden.value = this.local.value ? new Date(this.local.value).toISOString() : ""
+        this.hidden.dispatchEvent(new Event("input", {bubbles: true}))
+      })
+    },
+    toLocalValue(d) {
+      const pad = n => String(n).padStart(2, "0")
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    },
+  },
+  // Render a <time datetime="..."> element's instant in the viewer's local
+  // timezone (the server-rendered text stays as a UTC fallback without JS).
+  LocalTime: {
+    mounted() {
+      this.format()
+    },
+    updated() {
+      this.format()
+    },
+    format() {
+      const d = new Date(this.el.dateTime)
+      if (!isNaN(d)) {
+        this.el.textContent = d.toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"})
+      }
+    },
+  },
   Clipboard: {
     mounted() {
       this.el.addEventListener("click", () => {
@@ -39,7 +115,22 @@ const Hooks = {
       })
     },
   },
-  RichText,
+  // TipTap (and ProseMirror underneath) is admin-editor-only and heavy, so the
+  // implementation is loaded on demand the first time a rich_text block mounts
+  // — public pages never download it (audit P-M6). The dynamic import is what
+  // makes esbuild split ./rich_text (+ deps) into its own chunk.
+  RichText: {
+    mounted() {
+      import("./rich_text").then(({mount}) => {
+        if (!this._destroyed) mount(this)
+      })
+    },
+    destroyed() {
+      this._destroyed = true
+      this.slash && this.slash.destroy()
+      this.editor && this.editor.destroy()
+    },
+  },
   // Notion-style slash-command block inserter (#29). The server renders the
   // trigger button + a menu of real `add_block` buttons (one per registered
   // block type); this hook layers on open/close, type-to-filter, and full

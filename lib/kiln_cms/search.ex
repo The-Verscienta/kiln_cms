@@ -212,11 +212,15 @@ defmodule KilnCMS.Search do
 
   # Run one search leg via `for_read` so both the query and locale arguments can
   # be passed (the code interfaces only take `query` positionally).
+  # The limit is set before `for_read` so the action's prepare sees it (and the
+  # semantic action's disabled branch can still zero it out) — the DB then does
+  # the truncation the old post-read `Enum.take/2` did after loading every row.
   defp run_leg(resource, action, query, locale, read_opts) do
     resource
+    |> Ash.Query.new()
+    |> Ash.Query.limit(@hybrid_candidates)
     |> Ash.Query.for_read(action, %{query: query, locale: locale})
     |> Ash.read!(read_opts)
-    |> Enum.take(@hybrid_candidates)
   end
 
   # RRF: each list contributes 1/(k + rank) to a record's score; records are

@@ -26,6 +26,17 @@ defmodule KilnCMS.ImageProcessor do
     "gifload" => {".gif", "image/gif"}
   }
 
+  # Decompression-bomb guard: a small compressed file can expand to a huge
+  # pixel buffer (a 10MB PNG can decode to multiple GB). Opening is lazy in
+  # libvips — dimensions come from the header — so this cap is checked before
+  # any full decode (metadata strip, variants) can happen. 50MP comfortably
+  # covers real photography. Runtime-configurable for tests/deployments.
+  @default_max_pixels 50_000_000
+
+  defp max_pixels do
+    :kiln_cms |> Application.get_env(:media, []) |> Keyword.get(:max_pixels, @default_max_pixels)
+  end
+
   @doc """
   Returns `{:ok, %{ext: ".png", content_type: "image/png"}}` when `path` is a
   readable raster image in an allowed format, deriving the canonical extension and
@@ -37,9 +48,8 @@ defmodule KilnCMS.ImageProcessor do
   def validate_upload(path) when is_binary(path) do
     with {:ok, image} <- Image.open(path),
          {:ok, loader} <- Vix.Vips.Image.header_value(image, "vips-loader"),
-         {:ok, {ext, content_type}} <- allowed_format(loader) do
-      # Dimensions are implicitly positive for a successfully opened raster;
-      # we do not assert here to keep Dialyzer happy on the boolean match.
+         {:ok, {ext, content_type}} <- allowed_format(loader),
+         :ok <- within_pixel_limit(image) do
       {:ok, %{ext: ext, content_type: content_type}}
     else
       {:error, reason} -> {:error, reason}
@@ -49,6 +59,19 @@ defmodule KilnCMS.ImageProcessor do
     e ->
       Logger.warning("ImageProcessor.validate_upload failed for #{path}: #{inspect(e)}")
       {:error, :invalid_image}
+  end
+
+  # Total pixels across all frames (animated GIF/WebP multiply the buffer).
+  defp within_pixel_limit(image) do
+    frames =
+      case Vix.Vips.Image.header_value(image, "n-pages") do
+        {:ok, n} when is_integer(n) and n > 0 -> n
+        _ -> 1
+      end
+
+    if Image.width(image) * Image.height(image) * frames <= max_pixels(),
+      do: :ok,
+      else: {:error, :too_many_pixels}
   end
 
   defp allowed_format(loader) when is_binary(loader) do

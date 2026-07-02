@@ -20,6 +20,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
     {:ok,
      socket
      |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Taxonomy"))
      |> assign(:edit, nil)
      |> assign(:cat_form, create_form(:category, actor))
      |> assign(:tag_form, create_form(:tag, actor))

@@ -92,11 +92,13 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     page = page_param(params)
 
+    # No `count: true` — only `more?` is used, and a count adds a full
+    # COUNT(*) over published posts to every request.
     %Ash.Page.Offset{results: posts, more?: more?} =
       CMS.list_published_posts!(
         authorize?: false,
         query: [filter: [locale: locale]],
-        page: [limit: @blog_page_size, offset: page * @blog_page_size, count: true]
+        page: [limit: @blog_page_size, offset: page * @blog_page_size]
       )
 
     conn
@@ -129,7 +131,7 @@ defmodule KilnCMSWeb.ContentController do
     # Don't cache personalized/empty query result pages on shared caches.
     |> put_resp_header("cache-control", "private, no-cache")
     |> assign(:locale, locale)
-    |> assign(:page_title, "Search")
+    |> assign(:page_title, gettext("Search"))
     |> assign(:locale_links, search_locale_links(locale, query))
     |> render(:search, query: query, results: results)
   end

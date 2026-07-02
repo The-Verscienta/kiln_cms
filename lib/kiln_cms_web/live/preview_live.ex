@@ -26,11 +26,15 @@ defmodule KilnCMSWeb.PreviewLive do
 
       if connected?(socket) do
         Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic(kind, id))
+        # Announce this window so editors only build/broadcast preview
+        # payloads while someone is actually watching.
+        KilnCMSWeb.Presence.track_preview(self(), kind, id)
       end
 
       {:ok,
        socket
        |> assign(:kind, kind)
+       |> assign(:page_title, gettext("Preview: %{title}", title: record.title))
        |> assign(:excerpt?, ContentTypes.get!(kind).excerpt?)
        |> assign(:title, record.title)
        |> assign(:excerpt, Map.get(record, :excerpt))

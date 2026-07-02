@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.SettingsLive do
 
     {:ok,
      socket
+     |> assign(:page_title, gettext("Settings"))
      |> assign(:form, prefs_form(user))
      |> assign(:profile_form, profile_form(user))
      |> assign(:password_form, password_form(user))}

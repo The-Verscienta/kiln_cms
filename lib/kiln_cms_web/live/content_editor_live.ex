@@ -57,6 +57,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
           Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
+          # Preview-window joins/leaves, so broadcast_preview/1 can no-op
+          # while no pop-out is watching.
+          Phoenix.PubSub.subscribe(KilnCMS.PubSub, Presence.preview_topic(kind, id))
         end
 
         {:ok,
@@ -66,6 +69,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:actor, actor)
          |> assign(:block_types, block_types())
          |> assign(:editors, Presence.editors(kind, id))
+         |> assign(:preview_open?, Presence.previews_open?(kind, id))
          |> assign(:cursors, %{})
          |> assign(:self_field, nil)
          # Debounced draft autosave: pending timer ref + status indicator state.
@@ -84,9 +88,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:media_query, "")
          |> assign(
            :media,
+           # The picker grid needs only these fields; a select keeps 500
+           # variants/EXIF-bearing rows out of the editor's heap.
            CMS.list_media_items!(
              actor: actor,
-             query: [sort: [inserted_at: :desc], limit: @max_media]
+             query: [
+               select: [:id, :url, :alt, :caption, :filename],
+               sort: [inserted_at: :desc],
+               limit: @max_media
+             ]
            )
          )
          |> assign(:categories, CMS.list_categories!(actor: actor))
@@ -110,7 +120,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp content_kind(_params, socket), do: socket.assigns.live_action
 
+  # A pop-out preview window opened or closed — flip the broadcast gate.
   @impl true
+  def handle_info(
+        %Phoenix.Socket.Broadcast{event: "presence_diff", topic: "previewing:" <> _},
+        socket
+      ) do
+    open? = Presence.previews_open?(socket.assigns.kind, socket.assigns.record.id)
+    socket = assign(socket, :preview_open?, open?)
+    # Catch the window up with the latest unsaved edits the moment it opens.
+    if open?, do: broadcast_preview(socket)
+    {:noreply, socket}
+  end
+
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
     editors = Presence.editors(socket.assigns.kind, socket.assigns.record.id)
     # Drop cursors for anyone who has left, so stale focus badges disappear.
@@ -138,8 +160,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp assign_record(socket, record) do
     socket
     |> assign(:record, record)
+    |> assign(:page_title, record.title)
     |> assign(:form, build_form(record, socket.assigns.actor))
+    |> refresh_preview()
     |> load_versions()
+  end
+
+  # The inline preview HTML is computed once per *form change* and kept in an
+  # assign — it's rendered twice (mobile + desktop copies), and recomputing the
+  # full sanitize-and-render pipeline in the template ran it on every render,
+  # including presence diffs and collaborator cursor events.
+  defp refresh_preview(socket) do
+    assign(socket, :preview_html, preview_html(socket.assigns.form))
   end
 
   defp load_versions(socket) do
@@ -181,9 +213,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Other content of the same kind, for the "related content" picker. Bounded to
   # the same window as the media picker so a large library can't blow up the mount.
+  # Only id + title — these fill a <select>; without the select, 500 siblings
+  # would each carry their full blocks JSONB tree in this editor's heap.
   defp siblings(kind, id, actor) do
     kind
-    |> ContentTypes.list!(actor: actor, query: [sort: [updated_at: :desc], limit: @max_media])
+    |> ContentTypes.list!(
+      actor: actor,
+      query: [select: [:id, :title], sort: [updated_at: :desc], limit: @max_media]
+    )
     |> Enum.reject(&(&1.id == id))
   end
 
@@ -250,7 +287,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("validate", %{"form" => params}, socket) do
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
-    {:noreply, schedule_autosave(socket)}
+    {:noreply, mark_dirty(socket)}
   end
 
   def handle_event("field_focus", %{"field" => field}, socket) do
@@ -278,7 +315,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("clear_featured", _params, socket) do
     params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", nil)
-    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+     |> mark_dirty()}
   end
 
   def handle_event("close_picker", _params, socket),
@@ -295,7 +336,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply,
      socket
      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> reset_picker()}
+     |> reset_picker()
+     |> mark_dirty()}
   end
 
   # Insert a library image as a brand-new image block (browser opened from the
@@ -309,7 +351,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     socket = socket |> assign(:form, form) |> reset_picker()
     broadcast_preview(socket)
-    {:noreply, socket}
+    {:noreply, mark_dirty(socket)}
   end
 
   # Insert a library image into the existing image block at `index`.
@@ -325,7 +367,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> reset_picker()
 
     broadcast_preview(socket)
-    {:noreply, socket}
+    {:noreply, mark_dirty(socket)}
   end
 
   def handle_event("add_block", %{"type" => type}, socket) do
@@ -334,16 +376,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
         params: %{"_union_type" => type}
       )
 
-    {:noreply, assign(socket, :form, form)}
+    {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
 
   def handle_event("remove_block", %{"path" => path}, socket) do
-    {:noreply, assign(socket, :form, AshPhoenix.Form.remove_form(socket.assigns.form, path))}
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
+     |> mark_dirty()}
   end
 
   def handle_event("reorder", %{"order" => order}, socket) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
-    {:noreply, assign(socket, :form, form)}
+    {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
 
   # Keyboard-accessible alternative to drag-and-drop reordering (#171): swap a
@@ -364,6 +409,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply,
        socket
        |> assign(:form, form)
+       |> mark_dirty()
        |> assign(
          :moved_announcement,
          gettext("Moved block to position %{pos} of %{count}", pos: j + 1, count: count)
@@ -438,6 +484,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          socket
          |> assign_record(record)
          |> reset_editors()
+         |> assign(:save_state, :saved)
          |> put_flash(:info, gettext("Restored that version."))}
 
       _ ->
@@ -449,7 +496,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # replaced form rather than keeping its `phx-update="ignore"` content (#135).
   defp reset_editors(socket), do: update(socket, :editor_version, &(&1 + 1))
 
-  defp run_workflow(socket, action) when action in ~w(submit return publish unpublish archive) do
+  defp run_workflow(socket, action)
+       when action in ~w(submit return publish unpublish archive unarchive) do
     # `publish` gets its own event; the rest share `:workflow` (tagged by action)
     # so the publish hot path is isolated in the metrics.
     {event, meta} =
@@ -468,7 +516,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> cancel_autosave_timer()
         |> assign_record(record)
         |> assign(:save_state, :saved)
-        |> put_flash(:info, gettext("Updated to %{state}.", state: record.state))
+        |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
 
       _ ->
         put_flash(socket, :error, gettext("That action isn't allowed right now."))
@@ -477,12 +525,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp run_workflow(socket, _action), do: socket
 
-  # --- draft autosave --------------------------------------------------------
+  # --- dirty tracking + draft autosave ----------------------------------------
 
-  # Only drafts autosave; published/in-review/archived content is changed
-  # deliberately via the explicit Save button. Each edit (re)starts the idle
-  # timer, so we save once the editor pauses rather than on every keystroke.
-  defp schedule_autosave(socket) do
+  # Every form-mutating event funnels through here. Drafts autosave;
+  # published/in-review/archived content is changed deliberately via the
+  # explicit Save button, so for those we only flip the dirty indicator
+  # (and the UnsavedGuard hook warns before navigating away).
+  defp mark_dirty(socket) do
+    socket = refresh_preview(socket)
+
     if draft?(socket) do
       socket
       |> cancel_autosave_timer()
@@ -491,7 +542,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # a "Saving…" indicator (#136). Resolves to `:saved` or `:error` on flush.
       |> assign(:save_state, :saving)
     else
-      socket
+      assign(socket, :save_state, :unsaved)
     end
   end
 
@@ -600,6 +651,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Push the current title + blocks to any open decoupled preview windows.
+  # Skipped entirely while no window is watching (audit P-M2) — otherwise every
+  # editor paid the full typed→legacy block conversion per debounced keystroke
+  # for a payload nobody received.
+  defp broadcast_preview(%{assigns: %{preview_open?: false}} = socket), do: socket
+
   defp broadcast_preview(socket) do
     form = socket.assigns.form
 
@@ -707,27 +763,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :definition, :map, required: true
   attr :name, :string, required: true
   attr :value, :any, required: true
+  attr :errors, :list, default: []
 
   defp custom_field_input(%{definition: %{field_type: :boolean}} = assigns) do
     assigns = assign(assigns, :checked, assigns.value in [true, "true", "1", "on"])
 
     ~H"""
-    <label class="flex items-center gap-2 text-sm">
-      <%!-- hidden "false" first so an unchecked box still submits a value (last wins) --%>
-      <input type="hidden" name={@name} value="false" />
-      <input type="checkbox" name={@name} value="true" checked={@checked} />
-      <span class="font-medium">{@definition.label}</span>
-      <span :if={@definition.help_text} class="text-base-content/60">— {@definition.help_text}</span>
-    </label>
+    <div>
+      <label class="flex items-center gap-2 text-sm">
+        <%!-- hidden "false" first so an unchecked box still submits a value (last wins) --%>
+        <input type="hidden" name={@name} value="false" />
+        <input
+          type="checkbox"
+          name={@name}
+          value="true"
+          checked={@checked}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        />
+        <span class="font-medium">{@definition.label}</span>
+        <span :if={@definition.help_text} class="text-base-content/60">— {@definition.help_text}</span>
+      </label>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
     """
   end
 
   defp custom_field_input(%{definition: %{field_type: :select}} = assigns) do
     ~H"""
     <div>
-      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
       <select
+        id={cf_id(@definition)}
         name={@name}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
       >
         <option value="">{gettext("— None —")}</option>
@@ -738,6 +810,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
       </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
     </div>
     """
   end
@@ -745,15 +818,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp custom_field_input(%{definition: %{field_type: :text}} = assigns) do
     ~H"""
     <div>
-      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
       <textarea
+        id={cf_id(@definition)}
         name={@name}
         required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
       >{@value}</textarea>
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
       </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
     </div>
     """
   end
@@ -763,21 +842,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     ~H"""
     <div>
-      <label class="mb-1 block text-sm font-medium">{@definition.label}</label>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
       <input
+        id={cf_id(@definition)}
         type={@input_type}
         name={@name}
         value={@value}
         required={@definition.required}
         step={@input_type == "number" && @definition.field_type == :float && "any"}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
       />
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
       </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
     </div>
     """
   end
+
+  attr :definition, :map, required: true
+  attr :errors, :list, required: true
+
+  defp custom_field_errors_list(assigns) do
+    ~H"""
+    <div :if={@errors != []} id={cf_errors_id(@definition)}>
+      <p :for={message <- @errors} class="mt-1 flex items-center gap-1 text-xs text-error">
+        <.icon name="hero-exclamation-circle" class="size-4" /> {message}
+      </p>
+    </div>
+    """
+  end
+
+  defp cf_id(definition), do: "custom-field-#{definition.name}"
+  defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
 
   defp custom_input_type(:integer), do: "number"
   defp custom_input_type(:float), do: "number"
@@ -795,6 +896,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
       _ -> nil
     end
   end
+
+  # Validation messages `ApplyCustomFields` attached for one definition — the
+  # errors land on the `:custom_fields` attribute with the field's name in
+  # `value`, so they'd otherwise never render anywhere (audit U-H2).
+  defp custom_field_errors(form, name) do
+    form
+    |> changeset_errors()
+    |> Enum.filter(fn
+      %Ash.Error.Changes.InvalidAttribute{field: :custom_fields, value: value} -> value == name
+      _ -> false
+    end)
+    |> Enum.map(& &1.message)
+  end
+
+  defp any_custom_field_errors?(form, definitions),
+    do: Enum.any?(definitions, &(custom_field_errors(form, &1.name) != []))
 
   attr :form, :any, required: true
   attr :media, :list, required: true
@@ -1275,6 +1392,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-change="validate"
         phx-submit="save"
         id={"#{@kind}-editor"}
+        phx-hook="UnsavedGuard"
+        data-dirty={to_string(@save_state != :saved)}
+        data-unsaved-message={gettext("You have unsaved changes. Leave without saving?")}
         class="space-y-6"
       >
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -1284,7 +1404,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </.link>
             <h1 class="mt-1 text-2xl font-semibold">{gettext("Edit %{kind}", kind: @kind)}</h1>
             <p class="text-sm text-base-content/60">
-              {gettext("State:")} <span class="font-medium">{@record.state}</span>
+              {gettext("State:")} <span class="font-medium">{state_label(@record.state)}</span>
+            </p>
+            <%!-- After saving a schedule, nothing else says it exists (U-M4). --%>
+            <p
+              :if={@record.scheduled_at && @record.state in [:draft, :in_review]}
+              class="mt-0.5 flex items-center gap-1 text-sm text-base-content/60"
+            >
+              <.icon name="hero-clock" class="size-4" />
+              {gettext("Scheduled to publish")}
+              <time
+                id="scheduled-publish-badge"
+                phx-hook="LocalTime"
+                datetime={DateTime.to_iso8601(@record.scheduled_at)}
+              >{Calendar.strftime(@record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
             </p>
             <.presence_roster editors={@editors} current_id={@actor.id} />
           </div>
@@ -1305,7 +1438,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
-            <.autosave_status :if={@record.state == :draft} state={@save_state} />
+            <.autosave_status
+              :if={@record.state == :draft or @save_state != :saved}
+              state={@save_state}
+            />
             <.workflow_buttons state={@record.state} actor={@actor} />
             <.button
               type="submit"
@@ -1534,7 +1670,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
               </div>
             </details>
 
-            <details :if={@field_definitions != []} class="rounded border border-base-content/15 p-3">
+            <details
+              :if={@field_definitions != []}
+              class="rounded border border-base-content/15 p-3"
+              open={any_custom_field_errors?(@form, @field_definitions)}
+            >
               <summary class="cursor-pointer text-sm font-medium">
                 {gettext("Custom fields")}
               </summary>
@@ -1544,6 +1684,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   definition={definition}
                   name={"#{@form.name}[custom_fields][#{definition.name}]"}
                   value={custom_field_value(@form, definition.name)}
+                  errors={custom_field_errors(@form, definition.name)}
                 />
               </div>
             </details>
@@ -1591,11 +1732,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.field_cursors field="canonical_url" cursors={@cursors} />
                 </div>
                 <.input field={@form[:locale]} label={gettext("Locale")} />
-                <.input
-                  field={@form[:scheduled_at]}
-                  type="datetime-local"
-                  label={gettext("Scheduled publish at")}
-                />
+                <%!-- The visible input edits local wall-clock time; the hidden
+                      input carries the UTC instant (UtcDatetimeInput hook).
+                      Keyed on editor_version so conflict reloads / restores
+                      remount it from the fresh form (as rich text does). --%>
+                <div
+                  id={"scheduled-at-#{@editor_version}"}
+                  phx-hook="UtcDatetimeInput"
+                  phx-update="ignore"
+                >
+                  <label
+                    for={"scheduled-at-local-#{@editor_version}"}
+                    class="mb-1 block text-sm font-medium"
+                  >
+                    {gettext("Scheduled publish at")}
+                  </label>
+                  <input
+                    type="datetime-local"
+                    id={"scheduled-at-local-#{@editor_version}"}
+                    data-local-input
+                    class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+                  />
+                  <input
+                    type="hidden"
+                    name={@form[:scheduled_at].name}
+                    value={@form[:scheduled_at].value && to_string(@form[:scheduled_at].value)}
+                    data-utc-input
+                  />
+                  <p class="mt-1 text-xs text-base-content/60">
+                    {gettext("Shown in your local timezone; stored as UTC.")}
+                  </p>
+                </div>
               </div>
             </details>
 
@@ -1643,14 +1810,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <details class="rounded border border-base-content/15 p-3 lg:hidden">
               <summary class="cursor-pointer text-lg font-medium">{gettext("Preview")}</summary>
               <div class="mt-3">
-                <.preview_article form={@form} />
+                <.preview_article form={@form} html={@preview_html} />
               </div>
             </details>
 
             <%!-- Desktop: the preview sits inline as the sticky second column. --%>
             <div class="hidden lg:block">
               <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-              <.preview_article form={@form} />
+              <.preview_article form={@form} html={@preview_html} />
             </div>
           </div>
         </div>
@@ -1725,12 +1892,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # sticky column and the mobile collapsible disclosure (#138). The previewed
   # title is an h2 so the editor keeps a single logical h1 (#174).
   attr :form, :any, required: true
+  attr :html, :any, required: true
 
   defp preview_article(assigns) do
     ~H"""
     <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
       <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
-      {preview_html(@form)}
+      {@html}
     </article>
     """
   end
@@ -1809,6 +1977,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
       class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
     >
       {gettext("Unpublish")}
+    </button>
+    <button
+      :if={@state == :archived}
+      type="button"
+      phx-click="workflow"
+      phx-value-action="unarchive"
+      phx-disable-with={gettext("Working…")}
+      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+    >
+      {gettext("Unarchive")}
     </button>
     """
   end
