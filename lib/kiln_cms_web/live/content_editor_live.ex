@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:categories, CMS.list_categories!(actor: actor))
          |> assign(:tags, CMS.list_tags!(actor: actor))
          |> assign(:audiences, audience_options())
-         |> assign(:field_definitions, CMS.field_definitions_for!(kind, actor: actor))
+         |> assign(:field_definitions, field_definitions(kind, actor))
          |> assign(:siblings, siblings(kind, id, actor))
          |> assign_record(record)}
     end
@@ -198,10 +198,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `related_<type>s` / `related_<type>_ids`. `to_existing_atom` (rather than
   # interpolating a new atom) keeps this safe even though `kind` originates from
   # a route param — it's already registry-validated, and the atoms are defined
-  # at compile time by `KilnCMS.CMS.Content`.
-  defp related_name(kind), do: String.to_existing_atom("related_#{kind}s")
-  defp related_field(kind), do: String.to_existing_atom("related_#{kind}_ids")
+  # at compile time by `KilnCMS.CMS.Content`. Dynamic kinds (string names) all
+  # live on the generic entry tier, so they resolve to its `related_entrys`.
+  defp related_name(kind), do: String.to_existing_atom("related_#{interface_kind(kind)}s")
+  defp related_field(kind), do: String.to_existing_atom("related_#{interface_kind(kind)}_ids")
   defp related_current(kind, record), do: Map.get(record, related_name(kind))
+
+  defp interface_kind(kind) do
+    case ContentTypes.get!(kind) do
+      %{source: :dynamic} -> :entry
+      ct -> ct.type
+    end
+  end
+
+  # A dynamic kind's custom fields are scoped by its TypeDefinition, a compiled
+  # kind's by its type atom (see FieldDefinition's two scopes).
+  defp field_definitions(kind, actor) do
+    case ContentTypes.get!(kind) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.field_definitions_for_definition!(definition.id, actor: actor)
+
+      ct ->
+        CMS.field_definitions_for!(ct.type, actor: actor)
+    end
+  end
 
   # Current ids for a (possibly unloaded) relationship list.
   defp current_ids(records) when is_list(records), do: Enum.map(records, & &1.id)

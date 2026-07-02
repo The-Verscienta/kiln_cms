@@ -248,11 +248,17 @@ Each phase lands independently green (precommit + tests) and is useful on its ow
    `/editor/types` (fields managed via the extended `/editor/fields`).
    *Acceptance met: admin creates "Recipe" and attaches typed fields in the
    UI; no entries yet.*
-2. **Entries & editor.** `Content` macro `dynamic?` option, `Entry` resource
-   + migrations (incl. search_vector trigger), `ContentEditorLive` dynamic
-   kinds, autosave/conflict/versions/workflow verified on an entry.
-   *Acceptance: create → edit blocks + custom fields → submit → publish a
-   Recipe end-to-end in the editor.*
+2. **Entries & editor.** ✅ **Done.** `Content` macro `dynamic?` option,
+   `Entry` resource + migrations (incl. search_vector trigger), merged
+   `ContentTypes.get/get_by_path` + dynamic dispatch to the entry
+   interfaces, two-scope `ApplyCustomFields`/`BustContentCache`, editor
+   index + `ContentEditorLive` + trash on dynamic kinds. Notes vs the
+   original sketch: the type facet on `search`/`autocomplete` moved to
+   Phase 4 (with the rest of search), and instead of omitting
+   `__kiln_content_type__` Entry exports a `__kiln_dynamic_entry__` marker
+   the shared changes branch on. *Acceptance met — covered by
+   `dynamic_entry_editor_test.exs`: create → edit + custom fields →
+   publish a Recipe end-to-end in the editor.*
 3. **Delivery.** Public `/:type/:slug` + locale variants, firing on publish,
    fired-artifact API surface, sitemap, cache invalidation on type/entry
    changes. *Acceptance: published Recipe served on-site and via

@@ -42,7 +42,7 @@ defmodule KilnCMSWeb.TrashLive do
     actor = socket.assigns.actor
 
     items =
-      ContentTypes.all()
+      (ContentTypes.all() ++ ContentTypes.dynamic_all())
       |> Enum.flat_map(fn ct ->
         ct.type
         |> ContentTypes.list_trashed!(

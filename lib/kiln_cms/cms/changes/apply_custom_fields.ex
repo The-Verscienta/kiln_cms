@@ -26,8 +26,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   defp apply_definitions(changeset) do
-    type = changeset.resource.__kiln_content_type__()
-    defs = KilnCMS.CMS.field_definitions_for!(type, authorize?: false)
+    defs = definitions_for(changeset)
 
     supplied = stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
 
@@ -36,6 +35,20 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
+  end
+
+  # The definitions in scope: a compiled content type's (by its type atom) or,
+  # on the generic entry tier, the owning dynamic type's (by definition id —
+  # nil while the entry is still invalid means simply no custom fields yet).
+  defp definitions_for(%{resource: resource} = changeset) do
+    if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
+      case Ash.Changeset.get_attribute(changeset, :type_definition_id) do
+        nil -> []
+        id -> KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false)
+      end
+    else
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), authorize?: false)
+    end
   end
 
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.

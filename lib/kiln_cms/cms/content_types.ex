@@ -125,23 +125,36 @@ defmodule KilnCMS.CMS.ContentTypes do
   def public_prefix(%{path_segment: nil}), do: ""
   def public_prefix(%{path_segment: segment}), do: "/" <> segment
 
-  @doc ~S(Find a content type by its public URL segment, e.g. "blog" or "products".)
+  @doc ~S"""
+  Find a content type by its public URL segment, e.g. "blog" or "products" —
+  compiled first, then dynamic (`TypeDefinition.path_segment`).
+  """
   @spec get_by_path(String.t()) :: t() | nil
-  def get_by_path(segment), do: Enum.find(all(), &(&1.path_segment == segment))
+  def get_by_path(segment) do
+    Enum.find(all(), &(&1.path_segment == segment)) ||
+      Enum.find(dynamic_all(), &(&1.path_segment == segment))
+  end
 
   @doc "The atom types of all content types."
   @spec types() :: [atom()]
   def types, do: Enum.map(all(), & &1.type)
 
-  @doc "Look up a content type by its atom or string type. Returns nil if unknown."
+  @doc """
+  Look up a content type by its atom or string type. Returns nil if unknown.
+
+  A string first resolves against compiled types (via `to_existing_atom`, so
+  request data can't mint atoms), then against dynamic types by name —
+  compiled always wins a name collision (which `TypeDefinition` validation
+  prevents anyway). Atoms only ever name compiled types.
+  """
   @spec get(atom() | String.t() | nil) :: t() | nil
   def get(nil), do: nil
   def get(type) when is_atom(type), do: Enum.find(all(), &(&1.type == type))
 
   def get(type) when is_binary(type) do
     case safe_existing_atom(type) do
-      nil -> nil
-      atom -> get(atom)
+      nil -> get_dynamic(type)
+      atom -> get(atom) || get_dynamic(type)
     end
   end
 
@@ -160,26 +173,68 @@ defmodule KilnCMS.CMS.ContentTypes do
   # Each helper accepts a type atom or string and calls the
   # convention-named code interface on that type's own domain, e.g.
   # `KilnCMS.CMS.list_pages!/1` or `Verscienta.Catalog.list_herbs!/1`.
+  #
+  # Dynamic types route to the generic `Entry` interfaces (D17): `atom/1`
+  # resolves them to `:entry` and `plural/1` to `"entries"`, so the same
+  # convention dispatch lands on `CMS.publish_entry/…` — record-shaped helpers
+  # (workflow, versions, restore, purge) need no branching at all. Only the
+  # collection reads (scoped by `type_definition_id`) and `create!` (which
+  # must stamp the type) branch explicitly.
 
-  def list!(type, opts \\ []), do: call(type, "list_#{plural(type)}!", [opts])
+  def list!(type, opts \\ []) do
+    case get!(type) do
+      %{source: :dynamic, definition: definition} -> CMS.list_entries!(scoped(opts, definition))
+      _compiled -> call(type, "list_#{plural(type)}!", [opts])
+    end
+  end
 
-  def get_record!(type, id, opts \\ []), do: call(type, "get_#{atom(type)}!", [id, opts])
+  def get_record!(type, id, opts \\ []) do
+    case get!(type) do
+      %{source: :dynamic, definition: definition} -> CMS.get_entry!(id, scoped(opts, definition))
+      _compiled -> call(type, "get_#{atom(type)}!", [id, opts])
+    end
+  end
 
   # Non-bang fetch by id (`{:ok, record} | {:error, _}`), e.g. for preview links.
-  def get_record(type, id, opts \\ []), do: call(type, "get_#{atom(type)}", [id, opts])
+  def get_record(type, id, opts \\ []) do
+    case get!(type) do
+      %{source: :dynamic, definition: definition} -> CMS.get_entry(id, scoped(opts, definition))
+      _compiled -> call(type, "get_#{atom(type)}", [id, opts])
+    end
+  end
 
   # Public delivery: fetch a single published record by slug + locale (returns
   # nil rather than raising on a miss).
   def get_published_by_slug(type, slug, locale, opts \\ []) do
-    call(type, "get_published_#{atom(type)}_by_slug!", [slug, locale, opts])
+    case get!(type) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.get_published_entry_by_slug!(slug, locale, definition.id, opts)
+
+      _compiled ->
+        call(type, "get_published_#{atom(type)}_by_slug!", [slug, locale, opts])
+    end
   end
 
   # Every published locale variant of a slug (for hreflang / language switching).
   def list_translations(type, slug, opts \\ []) do
-    call(type, "list_#{atom(type)}_translations!", [slug, opts])
+    case get!(type) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.list_entry_translations!(slug, definition.id, opts)
+
+      _compiled ->
+        call(type, "list_#{atom(type)}_translations!", [slug, opts])
+    end
   end
 
-  def create!(type, attrs, opts \\ []), do: call(type, "create_#{atom(type)}!", [attrs, opts])
+  def create!(type, attrs, opts \\ []) do
+    case get!(type) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.create_entry!(Map.put(attrs, :type_definition_id, definition.id), opts)
+
+      _compiled ->
+        call(type, "create_#{atom(type)}!", [attrs, opts])
+    end
+  end
 
   def list_versions!(type, opts \\ []), do: call(type, "list_#{atom(type)}_versions!", [opts])
 
@@ -192,7 +247,15 @@ defmodule KilnCMS.CMS.ContentTypes do
     call(type, transition_fun(atom(type), verb), [record, %{}, opts])
   end
 
-  def list_trashed!(type, opts \\ []), do: call(type, "list_trashed_#{plural(type)}!", [opts])
+  def list_trashed!(type, opts \\ []) do
+    case get!(type) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.list_trashed_entries!(scoped(opts, definition))
+
+      _compiled ->
+        call(type, "list_trashed_#{plural(type)}!", [opts])
+    end
+  end
 
   def restore(type, record, opts \\ []),
     do: call(type, "restore_#{atom(type)}", [record, %{}, opts])
@@ -219,10 +282,40 @@ defmodule KilnCMS.CMS.ContentTypes do
   defp transition_fun(type, "return"), do: "return_#{type}_to_draft"
   defp transition_fun(type, "archive"), do: "archive_#{type}"
 
+  # Dynamic types resolve to the generic entry tier for interface naming, so
+  # convention dispatch (`publish_entry`, `list_entry_versions!`, …) just works.
   defp atom(type) when is_atom(type), do: type
-  defp atom(type) when is_binary(type), do: get!(type).type
 
-  defp plural(type), do: get!(type).plural
+  defp atom(type) when is_binary(type) do
+    case get!(type) do
+      %{source: :dynamic} -> :entry
+      ct -> ct.type
+    end
+  end
+
+  defp plural(type) do
+    case get!(type) do
+      # The descriptor's `plural` is the human label ("Recipes"), not the
+      # interface-name plural — entries share one interface set.
+      %{source: :dynamic} -> "entries"
+      ct -> ct.plural
+    end
+  end
+
+  # Scope an Entry code-interface call to one dynamic type. Internal callers
+  # pass keyword `query`/`filter` opts (or none), so a keyword merge suffices.
+  defp scoped(opts, definition) do
+    query =
+      opts
+      |> Keyword.get(:query, [])
+      |> Keyword.update(
+        :filter,
+        [type_definition_id: definition.id],
+        &Keyword.put(&1, :type_definition_id, definition.id)
+      )
+
+    Keyword.put(opts, :query, query)
+  end
 
   defp safe_existing_atom(string) do
     String.to_existing_atom(string)

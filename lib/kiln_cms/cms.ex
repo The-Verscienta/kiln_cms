@@ -74,6 +74,44 @@ defmodule KilnCMS.CMS do
       define :list_post_versions, action: :read
     end
 
+    # The generic entry tier backing admin-defined dynamic content types
+    # (decision D17). One interface set serves every dynamic type; callers
+    # scope by `type_definition_id` (the reads that must be type-scoped take
+    # it as an argument, the rest go through `ContentTypes` dispatch).
+    resource KilnCMS.CMS.Entry do
+      define :list_entries, action: :read
+      define :get_entry, action: :read, get_by: [:id]
+
+      define :get_published_entry_by_slug,
+        action: :public_by_slug,
+        args: [:slug, :locale, :type_definition_id]
+
+      define :list_entry_translations,
+        action: :published_translations,
+        args: [:slug, :type_definition_id]
+
+      define :search_entries, action: :search, args: [:query]
+      define :semantic_search_entries, action: :search_semantic, args: [:query]
+      define :autocomplete_entries, action: :autocomplete, args: [:prefix]
+      define :create_entry, action: :create
+      define :update_entry, action: :update
+      define :submit_entry_for_review, action: :submit_for_review
+      define :return_entry_to_draft, action: :return_to_draft
+      define :publish_entry, action: :publish
+      define :publish_scheduled_entry, action: :publish_scheduled
+      define :unpublish_entry, action: :unpublish
+      define :archive_entry, action: :archive
+      define :restore_entry_version, action: :restore_version
+      define :destroy_entry, action: :destroy
+      define :list_trashed_entries, action: :trashed
+      define :restore_entry, action: :restore
+      define :purge_entry, action: :purge
+    end
+
+    resource KilnCMS.CMS.Entry.Version do
+      define :list_entry_versions, action: :read
+    end
+
     resource KilnCMS.CMS.MediaItem do
       define :list_media_items, action: :read
       define :search_media, action: :search, args: [:query]
