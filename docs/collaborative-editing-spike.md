@@ -24,6 +24,8 @@ research.
 - **Smallest next step:** a throwaway prototype of one rich-text block synced
   between two browsers via `y_ex` over a Channel — to de-risk `y_ex` maturity and
   the CRDT⇄Ash persistence boundary before committing.
+  *(Since built — see §6 below: the prototype landed behind the
+  `:collab_prototype` flag and both risks are now measured.)*
 
 ---
 
@@ -226,3 +228,44 @@ for D1/D2 and accept the extra service — re-weighing against D2's minimal-ops 
 - [Yjs ↔ ProseMirror / TipTap bindings (`y-prosemirror`, `y-tiptap`)](https://docs.yjs.dev/ecosystem/editor-bindings/tiptap2)
 - [Hocuspocus — self-hosted Yjs collaboration backend](https://tiptap.dev/docs/hocuspocus)
 - [Yjs](https://github.com/yjs/yjs)
+
+## 6. Prototype findings (2026-07 — scoping D1, `:collab_prototype` flag)
+
+The recommended prototype was built and verified end-to-end in a live browser
+(bidirectional convergence between the TipTap editor and an independent Yjs
+client over the channel). Where it lives:
+
+| Piece | Where |
+|---|---|
+| Authoritative Y.Doc per document | `KilnCMS.Collab.Crdt.DocServer` (Registry + DynamicSupervisor; idle shutdown) |
+| Transport | `KilnCMSWeb.CollabChannel` over `/ws/collab` (`CollabSocket`, Phoenix.Token-gated, editor-minted) |
+| Client | `assets/js/collab.js` (one shared Y.Doc + channel per document; ~70 LOC provider) + TipTap `Collaboration` per rich-text block, one `XmlFragment` per block |
+| Flag | `config :kiln_cms, :collab_prototype` — on in dev/test, off in prod; joins refuse when off |
+
+Findings against the §3 risks:
+
+1. **`y_ex` maturity: no longer a blocker.** v0.10 ships precompiled NIFs (no
+   Rust toolchain), and the whole prototype needed only four calls
+   (`Doc.new/0`, `apply_update/2`, `encode_state_as_update/1,2`,
+   `encode_state_vector/1`). Convergence, divergent-edit merge, and
+   minimal-diff encoding all verified in ExUnit with real binary updates.
+2. **The BEAM-as-Yjs-node architecture is small.** DocServer + channel +
+   socket is ~250 lines total; the re-used Phoenix machinery (channels,
+   tokens, supervision) did the heavy lifting, exactly as §4 hoped.
+3. **TipTap gotcha:** the `Collaboration` extension silently ignores the
+   Editor `content` option — first-peer seeding must be an explicit
+   `setContent` after mount (gated on `peers == 1` + empty fragment; the
+   join reply carries both).
+4. **The persistence boundary is confirmed as *the* production question.**
+   The HTML-mirror → autosave path keeps working under collab (converged
+   editors produce identical HTML), but two editors autosaving still race the
+   optimistic lock — the loser sees the conflict banner even though content
+   is identical. A production phase needs one of: (a) only one designated
+   client persists (e.g. the field-lock owner), or (b) the server
+   materializes checkpoints itself — which requires rendering the ProseMirror
+   schema server-side (an `XmlFragment` serializes to prosemirror-node XML,
+   not HTML), i.e. a JS render step or storing the Yjs binary alongside HTML.
+5. **Not built (next steps if promoted):** awareness carets on the client
+   (the channel already relays `"awareness"` ephemerally),
+   fragment-per-block-index is unstable across block reorders (blocks need
+   stable ids first), and Y.Doc durability across server restarts.

@@ -105,6 +105,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:audiences, audience_options())
          |> assign(:field_definitions, field_definitions)
          |> assign(:reference_options, reference_options(field_definitions, actor))
+         # CRDT collab prototype: when enabled, rich-text blocks sync live
+         # between editors over the collab channel (see KilnCMS.Collab.Crdt).
+         |> assign(:collab_token, collab_token(actor))
+         |> assign(:collab_topic, "collab:#{kind}:#{id}")
          |> assign(:siblings, siblings(kind, id, actor))
          |> assign_record(record)}
     end
@@ -247,6 +251,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case ContentTypes.get!(kind) do
       %{source: :dynamic} -> :entry
       ct -> ct.type
+    end
+  end
+
+  # Socket token for the CRDT collab prototype; nil (and thus no data-collab
+  # attributes, no channel) when the flag is off. Mount is editor/admin-gated,
+  # so a token only ever reaches an authorized editor.
+  defp collab_token(actor) do
+    if KilnCMS.Collab.Crdt.enabled?() do
+      Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", actor.id)
     end
   end
 
@@ -1641,6 +1654,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-content={bf[:legacy_html].value || ""}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:legacy_html].name}
+                        data-collab-token={@collab_token}
+                        data-collab-topic={@collab_token && @collab_topic}
+                        data-collab-fragment={@collab_token && "block-#{bf.index}"}
                         role="group"
                         aria-label={gettext("Rich text block")}
                       >

@@ -230,9 +230,57 @@ class SlashMenu {
 // Attach the TipTap editor to a mounted RichText hook. Called from the thin
 // lazily-loading hook in app.js (dynamic import) so this module — and TipTap /
 // ProseMirror underneath — stays out of the public-page bundle (audit P-M6).
-// State lands on the hook (`hook.editor`, `hook.slash`) so its destroyed()
-// callback can tear the editor down.
+// State lands on the hook (`hook.editor`, `hook.slash`, `hook.collab`) so its
+// destroyed() callback can tear everything down.
+//
+// When the block carries data-collab-* attributes (the CRDT prototype —
+// KilnCMS.Collab.Crdt), the editor binds to a shared Yjs document instead of
+// plain local state: concurrent edits from other browsers converge live. The
+// HTML mirror (and therefore autosave) works identically in both modes.
 export function mount(hook) {
+  const {collabToken, collabTopic, collabFragment} = hook.el.dataset
+
+  if (collabToken && collabTopic && collabFragment) {
+    mountCollab(hook, {token: collabToken, topic: collabTopic, fragment: collabFragment})
+  } else {
+    buildEditor(hook, [StarterKit], hook.el.dataset.content || "")
+  }
+}
+
+// Collaborative variant: acquire the page-shared Y.Doc for this document's
+// topic, wait for the server state, then mount TipTap bound to this block's
+// XmlFragment. Only the first peer seeds an empty fragment from the stored
+// HTML — later joiners take their content from the CRDT.
+async function mountCollab(hook, {token, topic, fragment}) {
+  const [{acquireDoc}, {default: Collaboration}] = await Promise.all([
+    import("./collab.js"),
+    import("@tiptap/extension-collaboration"),
+  ])
+
+  const handle = acquireDoc(topic, token)
+  hook.collab = handle
+  const {firstPeer} = await handle.whenReady
+  if (hook._destroyed) return
+
+  const frag = handle.doc.getXmlFragment(fragment)
+  const seed = firstPeer && frag.length === 0 ? hook.el.dataset.content || "" : null
+
+  buildEditor(hook, [
+    // Yjs owns undo/redo semantics under collaboration.
+    StarterKit.configure({history: false}),
+    Collaboration.configure({document: handle.doc, field: fragment}),
+  ])
+
+  // The Collaboration extension ignores the Editor `content` option, so the
+  // first peer seeds the empty fragment explicitly — as a normal transaction
+  // (emitUpdate: true), which both syncs it into the CRDT and refreshes the
+  // HTML mirror.
+  if (seed) hook.editor.commands.setContent(seed, true)
+}
+
+// `content` seeds the editor; omit it under collaboration, where the CRDT
+// owns the document (TipTap ignores the option there anyway — see mountCollab).
+function buildEditor(hook, extensions, content = null) {
   const input = hook.el.querySelector("[data-input]")
   const toolbarEl = hook.el.querySelector("[data-toolbar]")
 
@@ -249,8 +297,8 @@ export function mount(hook) {
 
   const editor = new Editor({
     element: hook.el.querySelector("[data-editor]"),
-    extensions: [StarterKit],
-    content: hook.el.dataset.content || "",
+    extensions,
+    ...(content != null ? {content} : {}),
     // Name the contenteditable surface for assistive tech — without this a
     // screen reader lands in an unlabeled editable region (#170). The label
     // can be overridden per block via `data-editor-label`.

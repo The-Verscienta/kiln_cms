@@ -107,3 +107,6 @@ config :phoenix,
 # Use the EXLA (XLA) backend for Nx in tests — the :exla dep is only available in
 # dev/test. Prod/e2e fall back to Nx.BinaryBackend (see config/config.exs).
 config :nx, default_backend: EXLA.Backend
+
+# Exercise the collab CRDT channel in tests (joins refuse when off).
+config :kiln_cms, :collab_prototype, true
