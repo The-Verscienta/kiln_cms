@@ -31,6 +31,10 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
   # A browser navigation (Accept: text/html) gets a readable page; everything
   # else (API clients, fetch/XHR) keeps the JSON error shape.
+  #
+  # The XSS.HTML warning is a false positive: `deny_html/1` interpolates only
+  # gettext strings and a server-computed integer — no request data.
+  # sobelow_skip ["XSS.HTML"]
   defp render_denial(conn, retry_after_s) do
     if html_request?(conn) do
       Phoenix.Controller.html(conn, deny_html(retry_after_s))
