@@ -236,8 +236,11 @@ config :kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Local
 config :esbuild,
   version: "0.25.4",
   kiln_cms: [
+    # --format=esm + --splitting: dynamic import() (the lazily loaded TipTap
+    # editor) becomes a separate content-hashed chunk instead of shipping in
+    # app.js to every public visitor. Root layout loads app.js type="module".
     args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+      ~w(js/app.js --bundle --splitting --format=esm --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]

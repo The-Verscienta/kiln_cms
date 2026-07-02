@@ -25,7 +25,6 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
-import {RichText} from "./rich_text"
 import {FocusTrap} from "./focus_trap"
 
 const Hooks = {
@@ -116,7 +115,22 @@ const Hooks = {
       })
     },
   },
-  RichText,
+  // TipTap (and ProseMirror underneath) is admin-editor-only and heavy, so the
+  // implementation is loaded on demand the first time a rich_text block mounts
+  // — public pages never download it (audit P-M6). The dynamic import is what
+  // makes esbuild split ./rich_text (+ deps) into its own chunk.
+  RichText: {
+    mounted() {
+      import("./rich_text").then(({mount}) => {
+        if (!this._destroyed) mount(this)
+      })
+    },
+    destroyed() {
+      this._destroyed = true
+      this.slash && this.slash.destroy()
+      this.editor && this.editor.destroy()
+    },
+  },
   // Notion-style slash-command block inserter (#29). The server renders the
   // trigger button + a menu of real `add_block` buttons (one per registered
   // block type); this hook layers on open/close, type-to-filter, and full
