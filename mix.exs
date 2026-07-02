@@ -123,6 +123,8 @@ defmodule KilnCMS.MixProject do
        compile: false,
        depth: 1},
       {:swoosh, "~> 1.16"},
+      # Required by Swoosh.Adapters.SMTP, the production mailer adapter (config/runtime.exs).
+      {:gen_smtp, "~> 1.0"},
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
