@@ -77,34 +77,30 @@ defmodule KilnCMS.Webhooks.SafeUrl do
     base = host |> String.downcase() |> host_only()
 
     cond do
-      ip_literal?(base) ->
-        {:ok, address} = :inet.parse_address(String.to_charlist(base))
-
-        if blocked_address?(address),
-          do: {:error, "must not target private or link-local addresses"},
-          else: {:ok, address}
-
-      not resolve_dns?() ->
-        {:ok, nil}
-
-      true ->
-        case resolve_addresses(base) do
-          {:ok, []} ->
-            {:error, "hostname could not be resolved"}
-
-          {:ok, addresses} ->
-            if Enum.any?(addresses, &blocked_ip?/1),
-              do: {:error, "must not resolve to a private or link-local address"},
-              else: {:ok, hd(addresses)}
-
-          {:error, :timeout} ->
-            {:error, "hostname resolution timed out"}
-
-          {:error, _} ->
-            {:error, "hostname could not be resolved"}
-        end
+      ip_literal?(base) -> pin_literal(base)
+      not resolve_dns?() -> {:ok, nil}
+      true -> base |> resolve_addresses() |> pin_resolved()
     end
   end
+
+  defp pin_literal(base) do
+    {:ok, address} = :inet.parse_address(String.to_charlist(base))
+
+    if blocked_address?(address),
+      do: {:error, "must not target private or link-local addresses"},
+      else: {:ok, address}
+  end
+
+  defp pin_resolved({:ok, []}), do: {:error, "hostname could not be resolved"}
+
+  defp pin_resolved({:ok, addresses}) do
+    if Enum.any?(addresses, &blocked_ip?/1),
+      do: {:error, "must not resolve to a private or link-local address"},
+      else: {:ok, hd(addresses)}
+  end
+
+  defp pin_resolved({:error, :timeout}), do: {:error, "hostname resolution timed out"}
+  defp pin_resolved({:error, _}), do: {:error, "hostname could not be resolved"}
 
   defp parse_uri(url) do
     case URI.parse(url) do
