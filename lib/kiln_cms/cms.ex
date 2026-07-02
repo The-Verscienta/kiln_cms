@@ -133,14 +133,35 @@ defmodule KilnCMS.CMS do
     # Admin-UI-defined custom fields: the runtime field registry that backs the
     # `custom_fields` map on content (decision D4 — data-driven *fields*, not a
     # runtime meta-model of *types*). `field_definitions_for` is the per-type
-    # lookup the editor and the write change call with `authorize?: false`.
+    # lookup the editor and the write change call with `authorize?: false`;
+    # `field_definitions_for_definition` is its dynamic-type twin (D17).
     resource KilnCMS.CMS.FieldDefinition do
       define :list_field_definitions, action: :read
       define :get_field_definition, action: :read, get_by: [:id]
       define :field_definitions_for, action: :for_type, args: [:content_type]
+
+      define :field_definitions_for_definition,
+        action: :for_definition,
+        args: [:type_definition_id]
+
       define :create_field_definition, action: :create
       define :update_field_definition, action: :update
       define :destroy_field_definition, action: :destroy
+    end
+
+    # Admin-defined (dynamic) content types — rows, not modules (decision D17,
+    # `docs/dynamic-content-types-plan.md`). Their schema is FieldDefinition
+    # rows scoped by `type_definition_id`; their entries live in the shared
+    # generic entry table (Phase 2).
+    resource KilnCMS.CMS.TypeDefinition do
+      define :list_type_definitions, action: :read
+      define :list_archived_type_definitions, action: :archived
+      define :get_type_definition, action: :read, get_by: [:id]
+      define :get_type_definition_by_name, action: :by_name, args: [:name]
+      define :create_type_definition, action: :create
+      define :update_type_definition, action: :update
+      define :restore_type_definition, action: :restore
+      define :destroy_type_definition, action: :destroy
     end
   end
 end

@@ -19,20 +19,39 @@ defmodule KilnCMS.CMS.ContentTypes do
   alias KilnCMS.CMS
 
   @type t :: %{
-          type: atom(),
-          resource: module(),
+          type: atom() | String.t(),
+          resource: module() | nil,
           domain: module(),
           label: String.t(),
           plural: String.t(),
           excerpt?: boolean(),
-          path_segment: String.t() | nil
+          path_segment: String.t() | nil,
+          source: :compiled | :dynamic,
+          definition: struct() | nil
         }
+
+  # First URL segments the router owns — a dynamic type's `path_segment` (its
+  # public `/<segment>/<slug>` prefix) may not shadow any of these. Compiled
+  # types' segments and configured locales are added at validation time (see
+  # `Validations.AvailableTypeName`). Keep in sync with the top-level scopes in
+  # `KilnCMSWeb.Router`.
+  @reserved_path_segments ~w(admin api auth blog content dev editor gql locale
+                             mailbox media playground preview register reset
+                             search sign_in swaggerui up)
 
   @doc "The Ash domains scanned for content types (default `[KilnCMS.CMS]`)."
   @spec content_domains() :: [module()]
   def content_domains, do: Application.get_env(:kiln_cms, :content_domains, [CMS])
 
-  @doc "All content types, sorted by label."
+  @doc """
+  All **compiled** content types, sorted by label.
+
+  Compiled-only on purpose: every consumer of `all/0` (delivery, sitemap,
+  webhooks, the `call/3` dispatch below) relies on a backing resource module
+  and code interfaces, which dynamic types don't have until the generic entry
+  tier lands (see `docs/dynamic-content-types-plan.md`, Phase 2). Use
+  `dynamic_all/0` for admin-defined types.
+  """
   @spec all() :: [t()]
   def all do
     content_domains()
@@ -41,6 +60,27 @@ defmodule KilnCMS.CMS.ContentTypes do
     |> Enum.map(&describe/1)
     |> Enum.sort_by(& &1.label)
   end
+
+  @doc """
+  All **admin-defined (dynamic)** content types, as registry descriptors,
+  sorted by label. Their `type` is the definition's name **string** — dynamic
+  types never mint atoms (D17).
+  """
+  @spec dynamic_all() :: [t()]
+  def dynamic_all do
+    KilnCMS.CMS.list_type_definitions!(authorize?: false)
+    |> Enum.map(&describe_dynamic/1)
+    |> Enum.sort_by(& &1.label)
+  end
+
+  @doc "Look up a dynamic content type by its name string. Returns nil if unknown."
+  @spec get_dynamic(String.t()) :: t() | nil
+  def get_dynamic(name) when is_binary(name),
+    do: Enum.find(dynamic_all(), &(&1.type == name))
+
+  @doc "Router-owned first URL segments a dynamic type may not use."
+  @spec reserved_path_segments() :: [String.t()]
+  def reserved_path_segments, do: @reserved_path_segments
 
   defp describe(resource) do
     type = resource.__kiln_content_type__()
@@ -53,7 +93,23 @@ defmodule KilnCMS.CMS.ContentTypes do
       label: resource |> Module.split() |> List.last(),
       plural: plural,
       excerpt?: not is_nil(Ash.Resource.Info.attribute(resource, :excerpt)),
-      path_segment: path_segment(type, plural)
+      path_segment: path_segment(type, plural),
+      source: :compiled,
+      definition: nil
+    }
+  end
+
+  defp describe_dynamic(definition) do
+    %{
+      type: definition.name,
+      resource: nil,
+      domain: CMS,
+      label: definition.label,
+      plural: definition.plural_label || definition.label,
+      excerpt?: definition.has_excerpt,
+      path_segment: definition.path_segment,
+      source: :dynamic,
+      definition: definition
     }
   end
 

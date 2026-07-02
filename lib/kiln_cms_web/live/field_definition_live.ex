@@ -6,6 +6,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   input per definition and `Changes.ApplyCustomFields` coerces/validates the
   values into each record's `custom_fields` map. Admin-only, mirroring the
   `FieldDefinition` policy.
+
+  Fields attach to either a **built-in** (compiled) content type or an
+  admin-defined **dynamic** one (`/editor/types` — decision D17). The type
+  select encodes the scope: a compiled type's atom name, or `"def:<uuid>"` for
+  a dynamic type, unpacked into `content_type` XOR `type_definition_id` by
+  `normalize/1`.
   """
   use KilnCMSWeb, :live_view
 
@@ -22,6 +28,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        socket
        |> assign(:actor, actor)
        |> assign(:content_types, ContentTypes.all())
+       |> assign(:dynamic_types, ContentTypes.dynamic_all())
        |> assign(:field_types, FieldDefinition.field_types())
        |> assign(:edit, nil)
        |> assign(:form, create_form(actor))
@@ -106,10 +113,33 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     definitions =
       CMS.list_field_definitions!(
         actor: socket.assigns.actor,
-        query: [sort: [content_type: :asc, position: :asc, name: :asc]]
+        query: [sort: [position: :asc, name: :asc]]
       )
 
-    assign(socket, :grouped, Enum.group_by(definitions, & &1.content_type))
+    grouped =
+      definitions
+      |> Enum.group_by(&scope_key/1)
+      |> Enum.sort_by(fn {scope, _definitions} ->
+        group_heading(scope, socket.assigns.dynamic_types)
+      end)
+
+    assign(socket, :grouped, grouped)
+  end
+
+  # A definition's owner: a compiled content type XOR a dynamic one.
+  defp scope_key(%{type_definition_id: nil, content_type: content_type}),
+    do: {:compiled, content_type}
+
+  defp scope_key(%{type_definition_id: id}), do: {:dynamic, id}
+
+  defp group_heading({:compiled, type}, _dynamic_types), do: content_type_label(type)
+
+  defp group_heading({:dynamic, id}, dynamic_types) do
+    case Enum.find(dynamic_types, &(&1.definition.id == id)) do
+      %{label: label} -> label
+      # Field of an archived dynamic type — still listed, just tagged as such.
+      _ -> gettext("Archived type")
+    end
   end
 
   defp create_form(actor),
@@ -126,7 +156,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # Options are entered one-per-line (or comma-separated) in a textarea and
   # stored as a string array. Split, trim and drop blanks before they reach the
-  # attribute. Only meaningful for `:select`, harmless otherwise.
+  # attribute. Only meaningful for `:select`, harmless otherwise. The scope
+  # select is unpacked into `content_type` XOR `type_definition_id` here.
   defp normalize(params) do
     options =
       params
@@ -136,7 +167,34 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.map(&String.trim/1)
       |> Enum.reject(&(&1 == ""))
 
-    Map.put(params, "options", options)
+    params |> Map.put("options", options) |> unpack_scope()
+  end
+
+  defp unpack_scope(params) do
+    case Map.pop(params, "scope") do
+      {nil, params} ->
+        params
+
+      {"def:" <> id, params} ->
+        params |> Map.put("type_definition_id", id) |> Map.put("content_type", nil)
+
+      {type, params} ->
+        params |> Map.put("content_type", type) |> Map.put("type_definition_id", nil)
+    end
+  end
+
+  # The scope select's current value, surviving re-renders during validation.
+  defp scope_value(form) do
+    case form[:type_definition_id].value do
+      empty when empty in [nil, ""] ->
+        case form[:content_type].value do
+          nil -> nil
+          type -> to_string(type)
+        end
+
+      id ->
+        "def:#{id}"
+    end
   end
 
   # Textarea value for the options field: the stored list joined by newlines.
@@ -189,12 +247,35 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             phx-submit="create"
             class="grid gap-4 rounded-lg border border-base-content/15 p-4 sm:grid-cols-2"
           >
-            <.input
-              field={@form[:content_type]}
-              type="select"
-              label={gettext("Content type")}
-              options={Enum.map(@content_types, &{&1.label, &1.type})}
-            />
+            <div>
+              <label for="new-field-scope" class="mb-1 block text-sm font-medium">
+                {gettext("Content type")}
+              </label>
+              <select
+                id="new-field-scope"
+                name="field_definition[scope]"
+                class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+              >
+                <optgroup label={gettext("Built-in")}>
+                  <option
+                    :for={ct <- @content_types}
+                    value={ct.type}
+                    selected={scope_value(@form) == to_string(ct.type)}
+                  >
+                    {ct.label}
+                  </option>
+                </optgroup>
+                <optgroup :if={@dynamic_types != []} label={gettext("Custom")}>
+                  <option
+                    :for={dt <- @dynamic_types}
+                    value={"def:#{dt.definition.id}"}
+                    selected={scope_value(@form) == "def:#{dt.definition.id}"}
+                  >
+                    {dt.label}
+                  </option>
+                </optgroup>
+              </select>
+            </div>
             <.input
               field={@form[:field_type]}
               type="select"
@@ -240,13 +321,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         <section class="space-y-6">
           <h2 class="text-lg font-medium">{gettext("Defined fields")}</h2>
 
-          <p :if={@grouped == %{}} class="text-sm text-base-content/60">
+          <p :if={@grouped == []} class="text-sm text-base-content/60">
             {gettext("No custom fields yet.")}
           </p>
 
-          <div :for={{type, definitions} <- @grouped} class="space-y-3">
+          <div :for={{scope, definitions} <- @grouped} class="space-y-3">
             <h3 class="text-sm font-semibold text-base-content/80">
-              {content_type_label(type)}
+              {group_heading(scope, @dynamic_types)}
             </h3>
             <ul class="divide-y divide-base-content/10 rounded-lg border border-base-content/15">
               <li :for={definition <- definitions} id={"field-#{definition.id}"} class="p-4">

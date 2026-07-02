@@ -12,6 +12,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
   content editor renders an input per definition, so editors add structured
   fields without a code change or migration.
 
+  A definition is scoped to **exactly one** of two owners (D17):
+
+    * `content_type` — a compiled content type's atom (`:page`), the original
+      D4 scope; or
+    * `type_definition_id` — an admin-defined dynamic type
+      (`KilnCMS.CMS.TypeDefinition`), whose entire schema is these rows.
+
   This deliberately does *not* replace hand-declared attributes: core, queryable,
   or strongly-typed fields still belong in the resource. It covers the long tail
   of editor-owned fields that would otherwise mean a migration per field.
@@ -49,6 +56,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     default_accept [
       :content_type,
+      :type_definition_id,
       :name,
       :label,
       :field_type,
@@ -75,6 +83,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
       filter expr(content_type == ^arg(:content_type))
       prepare build(sort: [position: :asc, name: :asc])
     end
+
+    # The dynamic-type equivalent of `for_type`: all field definitions owned by
+    # one `TypeDefinition`, in editor display order.
+    read :for_definition do
+      argument :type_definition_id, :uuid, allow_nil?: false
+      filter expr(type_definition_id == ^arg(:type_definition_id))
+      prepare build(sort: [position: :asc, name: :asc])
+    end
   end
 
   policies do
@@ -95,7 +111,11 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   validations do
-    # The content type must be a real, registered KilnCMS content type.
+    # A field belongs to exactly one owner: a compiled type XOR a dynamic one.
+    validate KilnCMS.CMS.Validations.OneFieldScope
+
+    # When compiled-scoped, the content type must be a real, registered
+    # KilnCMS content type (no-op when `content_type` is nil).
     validate KilnCMS.CMS.Validations.KnownContentType
 
     # `name` is the key inside the `custom_fields` map and is surfaced in the
@@ -111,8 +131,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
   attributes do
     uuid_primary_key :id
 
-    # Which content type this field is attached to (atom, e.g. `:page`).
-    attribute :content_type, :atom, allow_nil?: false, public?: true
+    # Which compiled content type this field is attached to (atom, e.g.
+    # `:page`) — nil for a field owned by a dynamic type (see the
+    # `type_definition` relationship and `Validations.OneFieldScope`).
+    attribute :content_type, :atom, public?: true
 
     # Machine key inside the `custom_fields` map.
     attribute :name, :string, allow_nil?: false, public?: true
@@ -146,8 +168,19 @@ defmodule KilnCMS.CMS.FieldDefinition do
     timestamps()
   end
 
+  relationships do
+    # The dynamic type owning this field (nil for compiled-scoped fields).
+    belongs_to :type_definition, KilnCMS.CMS.TypeDefinition do
+      allow_nil? true
+      public? true
+    end
+  end
+
   identities do
-    # One field name per content type.
+    # One field name per owner. Two identities, one per scope — Postgres treats
+    # NULLs as distinct, so each acts as a partial unique index over the rows
+    # where its scope column is set.
     identity :unique_field, [:content_type, :name]
+    identity :unique_definition_field, [:type_definition_id, :name]
   end
 end
