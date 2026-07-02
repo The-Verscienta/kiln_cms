@@ -32,6 +32,13 @@ defmodule KilnCMS.CMS.Content do
     * `:excerpt?` — include an `excerpt` attribute (listings/feeds). Default `false`.
     * `:published?` — add a `:published` read (published-only, newest first).
       Default `false`.
+    * `:dynamic?` — this resource is the shared **generic entry** tier backing
+      admin-defined content types (decision D17, used only by
+      `KilnCMS.CMS.Entry`). Adds a required `type_definition` relationship,
+      scopes the slug identity and the public reads by `type_definition_id`,
+      and **omits** the per-type JSON:API/GraphQL surface and the
+      `__kiln_content_type__` discovery hook (dynamic types are discovered
+      from `TypeDefinition` rows, not modules). Default `false`.
 
   Per-type extras (custom attributes, extra actions) are declared in the using
   module as usual — Spark merges them with what this macro injects.
@@ -55,6 +62,7 @@ defmodule KilnCMS.CMS.Content do
     domain = Keyword.get(opts, :domain, KilnCMS.CMS)
     excerpt? = Keyword.get(opts, :excerpt?, false)
     published? = Keyword.get(opts, :published?, false)
+    dynamic? = Keyword.get(opts, :dynamic?, false)
 
     # Derive the per-type names from `type` by the project's naming convention.
     resource = __CALLER__.module
@@ -70,6 +78,7 @@ defmodule KilnCMS.CMS.Content do
     accept =
       [:title, :slug] ++
         if(excerpt?, do: [:excerpt], else: []) ++
+        if(dynamic?, do: [:type_definition_id], else: []) ++
         [
           :blocks,
           :seo_title,
@@ -83,6 +92,16 @@ defmodule KilnCMS.CMS.Content do
           :category_id,
           :featured_image_id
         ]
+
+    extensions = [
+      AshPaperTrail.Resource,
+      AshStateMachine,
+      AshOban,
+      AshArchival.Resource,
+      AshJsonApi.Resource,
+      AshGraphql.Resource,
+      AshAdmin.Resource
+    ]
 
     excerpt_attribute =
       if excerpt? do
@@ -135,76 +154,228 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+    # The headless surface. Compiled types each get their own typed schema;
+    # the entry tier gets ONE generic surface shared by every dynamic type —
+    # per-type typed schemas at runtime are impossible (Absinthe schemas are
+    # compile-time), and that's the promotion pitch (D17). Consumers scope by
+    # the filterable `type_name` calculation instead of a typed root.
+    api_blocks =
+      if dynamic? do
+        quote do
+          graphql do
+            type :entry
+
+            # Curated, read-only public surface (D7) — the same delivery reads
+            # compiled types expose, over the shared entry tier. All are
+            # policy/state-filtered, so anonymous callers see published rows only.
+            queries do
+              get :entry_by_slug, :public_by_slug do
+                identity false
+              end
+
+              list :entry_translations, :published_translations
+              # `paginate_with: nil` keeps these plain lists (the pre-pagination
+              # schema shape); the actions' prepare caps unpaginated reads.
+              list :search_entries, :search, paginate_with: nil
+              list :semantic_search_entries, :search_semantic, paginate_with: nil
+              list :autocomplete_entries, :autocomplete
+            end
+          end
+
+          json_api do
+            type "entry"
+
+            routes do
+              base "/entries"
+
+              # One collection for all dynamic types — filter by the public
+              # `type_name` calculation (`?filter[type_name]=recipe`).
+              index :read
+              index :search, route: "/search"
+              index :search_semantic, route: "/semantic-search"
+              index :autocomplete, route: "/autocomplete"
+              get :read
+            end
+          end
+        end
+      else
+        quote do
+          graphql do
+            type unquote(type)
+
+            # Curated, read-only public surface (D7 — deliberate exposure). The
+            # GraphQL endpoint is a *delivery* API: it exposes published-content
+            # reads only. Authoring/workflow actions (create/update/publish/…) are
+            # intentionally NOT surfaced here — they run through the admin editor
+            # (and the bearer-authenticated JSON:API), behind the role policies.
+            queries do
+              # Published-content delivery: one record by slug+locale, and every
+              # published locale variant of a slug (hreflang alternates). Both reads
+              # are state-filtered, so anonymous callers only ever see published rows.
+              # `identity false` exposes the action's own slug/locale arguments
+              # instead of the default `id` lookup.
+              get unquote(:"#{type}_by_slug"), :public_by_slug do
+                identity false
+              end
+
+              list unquote(:"#{type}_translations"), :published_translations
+
+              # The published index (newest first) — posts only.
+              unquote(published_query)
+
+              # Headless search surface. Keyword + semantic search and typo-tolerant
+              # title autocomplete, per content type. `paginate_with: nil` keeps
+              # these plain lists (the pre-pagination schema shape); the actions'
+              # prepare caps unpaginated reads instead.
+              list unquote(:"search_#{type}s"), :search, paginate_with: nil
+              list unquote(:"semantic_search_#{type}s"), :search_semantic, paginate_with: nil
+              list unquote(:"autocomplete_#{type}s"), :autocomplete
+            end
+          end
+
+          json_api do
+            type unquote(Atom.to_string(type))
+
+            routes do
+              base unquote("/#{type}s")
+
+              # Collection + single-record reads for headless consumers. Filtering
+              # (`filter[...]`), sorting (`sort=`) and pagination (`page[...]`) are
+              # derived from the `:read` action and the resource's public fields —
+              # documented in `docs/json-api.md`.
+              index :read
+              index :search, route: "/search"
+              # Semantic (vector) search over the same surface as GraphQL's
+              # `semanticSearch*` (#186). Degrades to no results when embeddings are
+              # unavailable (KilnCMS.Search.semantic? false).
+              index :search_semantic, route: "/semantic-search"
+              index :autocomplete, route: "/autocomplete"
+              unquote(published_route)
+              # `/:id` last so it can't shadow the static sub-paths above.
+              get :read
+            end
+          end
+        end
+      end
+
+    # A slug identifies a record within its locale — and, on the generic entry
+    # tier, within its dynamic type.
+    slug_identity = if dynamic?, do: [:type_definition_id, :slug, :locale], else: [:slug, :locale]
+
+    # Public delivery reads. Both are consumed with `authorize?: false`
+    # (anonymous headless/CDN delivery), so their filter is the *sole* security
+    # boundary — it must gate the audience axis too, not just publish state
+    # (see the read policy). On the entry tier they are additionally scoped by
+    # the dynamic type, since slugs are only unique per type.
+    public_reads =
+      if dynamic? do
+        quote do
+          read :public_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+            argument :type_definition_id, :uuid, allow_nil?: false
+
+            filter expr(
+                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
+                       ^ref(:type_definition_id) == ^arg(:type_definition_id)
+                   )
+          end
+
+          read :published_translations do
+            argument :slug, :string, allow_nil?: false
+            argument :type_definition_id, :uuid, allow_nil?: false
+
+            filter expr(
+                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                       ^ref(:slug) == ^arg(:slug) and
+                       ^ref(:type_definition_id) == ^arg(:type_definition_id)
+                   )
+          end
+        end
+      else
+        quote do
+          read :public_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+
+            filter expr(
+                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
+                   )
+          end
+
+          # Every published locale variant of a slug, for hreflang alternates
+          # and the language switcher.
+          read :published_translations do
+            argument :slug, :string, allow_nil?: false
+
+            filter expr(
+                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                       ^ref(:slug) == ^arg(:slug)
+                   )
+          end
+        end
+      end
+
+    # The generic entry tier belongs to its admin-defined type; slugs, public
+    # reads and (Phase 3) delivery are all scoped through it.
+    type_definition_rel =
+      if dynamic? do
+        quote do
+          belongs_to :type_definition, KilnCMS.CMS.TypeDefinition do
+            allow_nil? false
+            public? true
+          end
+        end
+      end
+
+    # The owning dynamic type's name string, as an expression calculation so
+    # headless consumers can filter the generic entries surface by type
+    # (`filter[type_name]=recipe` / `filter: {typeName: {eq: "recipe"}}`)
+    # without resolving TypeDefinition ids.
+    type_name_calc =
+      if dynamic? do
+        quote do
+          calculate :type_name, :string, expr(type_definition.name) do
+            public? true
+          end
+        end
+      end
+
+    # Compiled types export the discovery hooks `KilnCMS.CMS.ContentTypes`
+    # scans for. The entry tier deliberately does NOT — dynamic types are
+    # discovered from `TypeDefinition` rows — and instead marks itself so
+    # shared changes (custom fields, cache busting) can branch.
+    markers =
+      if dynamic? do
+        quote do
+          @doc false
+          def __kiln_dynamic_entry__, do: true
+        end
+      else
+        quote do
+          # Marks this resource as a KilnCMS content type and records its
+          # singular type atom, so generated types appear everywhere with no
+          # extra wiring.
+          def __kiln_content_type__, do: unquote(type)
+
+          # The plural used for code-interface names, the delivery URL segment,
+          # and discovery.
+          def __kiln_content_plural__, do: unquote(plural)
+        end
+      end
+
     quote do
       use Ash.Resource,
         domain: unquote(domain),
         data_layer: AshPostgres.DataLayer,
         authorizers: [Ash.Policy.Authorizer],
-        extensions: [
-          AshPaperTrail.Resource,
-          AshStateMachine,
-          AshOban,
-          AshArchival.Resource,
-          AshJsonApi.Resource,
-          AshGraphql.Resource,
-          AshAdmin.Resource
-        ]
+        extensions: unquote(extensions)
 
-      graphql do
-        type unquote(type)
-
-        # Curated, read-only public surface (D7 — deliberate exposure). The
-        # GraphQL endpoint is a *delivery* API: it exposes published-content
-        # reads only. Authoring/workflow actions (create/update/publish/…) are
-        # intentionally NOT surfaced here — they run through the admin editor
-        # (and the bearer-authenticated JSON:API), behind the role policies.
-        queries do
-          # Published-content delivery: one record by slug+locale, and every
-          # published locale variant of a slug (hreflang alternates). Both reads
-          # are state-filtered, so anonymous callers only ever see published rows.
-          # `identity false` exposes the action's own slug/locale arguments
-          # instead of the default `id` lookup.
-          get unquote(:"#{type}_by_slug"), :public_by_slug do
-            identity false
-          end
-
-          list unquote(:"#{type}_translations"), :published_translations
-
-          # The published index (newest first) — posts only.
-          unquote(published_query)
-
-          # Headless search surface. Keyword + semantic search and typo-tolerant
-          # title autocomplete, per content type. `paginate_with: nil` keeps
-          # these plain lists (the pre-pagination schema shape); the actions'
-          # prepare caps unpaginated reads instead.
-          list unquote(:"search_#{type}s"), :search, paginate_with: nil
-          list unquote(:"semantic_search_#{type}s"), :search_semantic, paginate_with: nil
-          list unquote(:"autocomplete_#{type}s"), :autocomplete
-        end
-      end
-
-      json_api do
-        type unquote(Atom.to_string(type))
-
-        routes do
-          base unquote("/#{type}s")
-
-          # Collection + single-record reads for headless consumers. Filtering
-          # (`filter[...]`), sorting (`sort=`) and pagination (`page[...]`) are
-          # derived from the `:read` action and the resource's public fields —
-          # documented in `docs/json-api.md`.
-          index :read
-          index :search, route: "/search"
-          # Semantic (vector) search over the same surface as GraphQL's
-          # `semanticSearch*` (#186). Degrades to no results when embeddings are
-          # unavailable (KilnCMS.Search.semantic? false).
-          index :search_semantic, route: "/semantic-search"
-          index :autocomplete, route: "/autocomplete"
-          unquote(published_route)
-          # `/:id` last so it can't shadow the static sub-paths above.
-          get :read
-        end
-      end
+      unquote(api_blocks)
 
       # Content-focused AshAdmin overrides (issue #25). AshAdmin is the dev/CRUD
       # inspector, not the editor — these just make it pleasant: group the content
@@ -633,39 +804,17 @@ defmodule KilnCMS.CMS.Content do
           change transition_state(:archived)
         end
 
+        # Sends archived content back to draft (the state-machine inverse of
+        # :archive).
         update :unarchive do
           require_atomic? false
           change transition_state(:draft)
         end
 
-        # Public delivery: fetch a single published record by slug. Consumed with
-        # `authorize?: false` (anonymous headless/CDN delivery), so the filter is
-        # the *sole* security boundary — it must gate the audience axis too, not
-        # just publish state. `audience == :public` keeps world-readable content
-        # reachable while withholding audience-restricted records that the `:read`
-        # policy would otherwise protect (see the read policy below).
-        read :public_by_slug do
-          get? true
-          argument :slug, :string, allow_nil?: false
-          argument :locale, :string, allow_nil?: false
-
-          filter expr(
-                   ^ref(:state) == :published and ^ref(:audience) == :public and
-                     ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
-                 )
-        end
-
-        # Every published locale variant of a slug, for hreflang alternates and
-        # the language switcher. Also served without an actor, so it carries the
-        # same `audience == :public` boundary as `:public_by_slug`.
-        read :published_translations do
-          argument :slug, :string, allow_nil?: false
-
-          filter expr(
-                   ^ref(:state) == :published and ^ref(:audience) == :public and
-                     ^ref(:slug) == ^arg(:slug)
-                 )
-        end
+        # Public delivery reads (`:public_by_slug`, `:published_translations`)
+        # — defined above as `public_reads`, entry-tier variants scoped by
+        # `type_definition_id`.
+        unquote(public_reads)
 
         unquote(published_read)
 
@@ -853,6 +1002,8 @@ defmodule KilnCMS.CMS.Content do
       end
 
       relationships do
+        unquote(type_definition_rel)
+
         # The user who authored this record. Nullable so existing/system content
         # without an actor is valid. Exposed via the public APIs, but only the
         # safe byline fields (`id`, `name`) serialize — email, role, and notify
@@ -912,6 +1063,8 @@ defmodule KilnCMS.CMS.Content do
       end
 
       calculations do
+        unquote(type_name_calc)
+
         # Convenience flag for the published state (no `?` suffix — GraphQL names
         # can't contain it).
         calculate :published, :boolean, expr(^ref(:state) == :published) do
@@ -982,19 +1135,10 @@ defmodule KilnCMS.CMS.Content do
       end
 
       identities do
-        identity :unique_slug, [:slug, :locale]
+        identity :unique_slug, unquote(slug_identity)
       end
 
-      # Marks this resource as a KilnCMS content type and records its singular
-      # type atom. `KilnCMS.CMS.ContentTypes` uses this to discover content types
-      # automatically, so generated types appear in the admin with no extra
-      # wiring.
-      def __kiln_content_type__, do: unquote(type)
-
-      # The plural used for code-interface names, the delivery URL segment, and
-      # discovery. Defaults to `"\#{type}s"`; declare `:plural` for irregular
-      # nouns (e.g. modality → "modalities") so it matches the interfaces.
-      def __kiln_content_plural__, do: unquote(plural)
+      unquote(markers)
     end
   end
 end

@@ -52,14 +52,16 @@ defmodule KilnCMS.Firing.ReferenceEdge do
 
     attribute :from_type, :atom,
       allow_nil?: false,
-      constraints: [one_of: [:page, :post]],
+      # `:entry` is the generic tier for admin-defined dynamic types (D17).
+      constraints: [one_of: [:page, :post, :entry]],
       public?: true
 
     attribute :from_id, :uuid, allow_nil?: false, public?: true
 
     attribute :to_type, :atom,
       allow_nil?: false,
-      constraints: [one_of: [:page, :post]],
+      # `:entry` is the generic tier for admin-defined dynamic types (D17).
+      constraints: [one_of: [:page, :post, :entry]],
       public?: true
 
     attribute :to_id, :uuid, allow_nil?: false, public?: true

@@ -26,8 +26,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   defp apply_definitions(changeset) do
-    type = changeset.resource.__kiln_content_type__()
-    defs = KilnCMS.CMS.field_definitions_for!(type, authorize?: false)
+    defs = definitions_for(changeset)
 
     supplied = stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
 
@@ -36,6 +35,20 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
+  end
+
+  # The definitions in scope: a compiled content type's (by its type atom) or,
+  # on the generic entry tier, the owning dynamic type's (by definition id —
+  # nil while the entry is still invalid means simply no custom fields yet).
+  defp definitions_for(%{resource: resource} = changeset) do
+    if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
+      case Ash.Changeset.get_attribute(changeset, :type_definition_id) do
+        nil -> []
+        id -> KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false)
+      end
+    else
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), authorize?: false)
+    end
   end
 
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.
@@ -111,6 +124,40 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       {:error, "must be a date and time"}
     end
   end
+
+  # A media field: the editor submits a MediaItem id; the stored value is a
+  # small snapshot (`%{"id", "url", "alt"}`) resolved at write time, so delivery
+  # needs no extra lookup — the same embed-at-write-time stance image blocks
+  # take. Re-saving refreshes the snapshot. Accepts a previously stored map too
+  # (API writers may round-trip the stored shape).
+  defp coerce(value, %{field_type: :media}) do
+    with {:ok, id} <- extract_id(value),
+         {:ok, media} <- KilnCMS.CMS.get_media_item(id, authorize?: false) do
+      {:ok, %{"id" => media.id, "url" => media.url, "alt" => media.alt}}
+    else
+      _ -> {:error, "must be an existing media item"}
+    end
+  end
+
+  # A content reference: resolves the target id against the field's declared
+  # `target_type` (compiled or dynamic) and stores a snapshot
+  # (`%{"id", "type", "slug", "title"}`) — id/type are the stable keys
+  # consumers fetch fresh content with; slug/title are display labels that may
+  # go stale until the next save.
+  defp coerce(value, %{field_type: :reference, target_type: target}) do
+    with {:ok, id} <- extract_id(value),
+         ct when not is_nil(ct) <- KilnCMS.CMS.ContentTypes.get(target),
+         {:ok, record} <- KilnCMS.CMS.ContentTypes.get_record(ct, id, authorize?: false) do
+      {:ok,
+       %{"id" => record.id, "type" => target, "slug" => record.slug, "title" => record.title}}
+    else
+      _ -> {:error, "must be an existing #{target || "content"} record"}
+    end
+  end
+
+  defp extract_id(%{"id" => id}) when is_binary(id) and id != "", do: {:ok, id}
+  defp extract_id(id) when is_binary(id), do: {:ok, id}
+  defp extract_id(_other), do: :error
 
   defp parse_datetime(str) do
     case NaiveDateTime.from_iso8601(str) do

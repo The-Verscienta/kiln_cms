@@ -21,7 +21,7 @@ defmodule KilnCMSWeb.EditorLive do
      socket
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:page_title, gettext("Content"))
-     |> assign(:content_types, ContentTypes.all())
+     |> assign(:content_types, editable_types())
      |> assign(:statuses, @statuses)
      |> assign(:status, "all")
      |> assign(:query, "")
@@ -43,9 +43,11 @@ defmodule KilnCMSWeb.EditorLive do
     actor = socket.assigns.actor
 
     per_type =
-      Enum.map(ContentTypes.all(), fn ct ->
+      Enum.map(editable_types(), fn ct ->
+        # Dispatch on the descriptor itself so a type archived between listing
+        # and dispatch can't turn into a registry-lookup miss.
         records =
-          ContentTypes.list!(ct.type,
+          ContentTypes.list!(ct,
             actor: actor,
             query: [select: @list_fields, sort: [updated_at: :desc], limit: @max_per_type]
           )
@@ -65,6 +67,11 @@ defmodule KilnCMSWeb.EditorLive do
       Enum.any?(per_type, fn {_kind, records} -> length(records) >= @max_per_type end)
     )
   end
+
+  # Everything editable here: compiled content types plus admin-defined dynamic
+  # ones (D17) — the descriptors share a shape, and `ContentTypes` dispatch
+  # routes dynamic kinds (name strings) to the generic entry tier.
+  defp editable_types, do: ContentTypes.all() ++ ContentTypes.dynamic_all()
 
   defp visible_items(items, status, query) do
     q = String.downcase(query)

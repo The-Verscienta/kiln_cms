@@ -29,7 +29,7 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
   # pre-change slug, `record` the post-change one — busting both covers a slug
   # rename (and collapses to one key when unchanged).
   defp bust(changeset, record) do
-    type = to_string(changeset.resource.__kiln_content_type__())
+    type = cache_type(changeset.resource, record)
 
     [changeset.data, record]
     |> Enum.map(&Map.get(&1, :slug))
@@ -40,6 +40,21 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
     # A publish/unpublish changes the set of public URLs, so the cached sitemap
     # (keyed separately from per-record entries) must be dropped too.
     Cache.bust_sitemap()
+  end
+
+  # The cache key's type segment. Compiled types use their type atom; entries
+  # (the generic dynamic tier) are cached under their dynamic type's name, so
+  # one dynamic type's invalidation can't touch another's keys.
+  defp cache_type(resource, record) do
+    if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
+      case KilnCMS.CMS.get_type_definition(record.type_definition_id, authorize?: false) do
+        {:ok, definition} -> definition.name
+        # Archived/gone definition: bust under a namespaced fallback key.
+        _ -> "entry"
+      end
+    else
+      to_string(resource.__kiln_content_type__())
+    end
   end
 
   defp published_involved?(changeset, record) do

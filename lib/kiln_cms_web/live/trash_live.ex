@@ -48,9 +48,11 @@ defmodule KilnCMSWeb.TrashLive do
     actor = socket.assigns.actor
 
     items =
-      ContentTypes.all()
+      (ContentTypes.all() ++ ContentTypes.dynamic_all())
       |> Enum.flat_map(fn ct ->
-        ct.type
+        # Dispatch on the descriptor itself so a type archived between listing
+        # and dispatch can't turn into a registry-lookup miss.
+        ct
         |> ContentTypes.list_trashed!(
           actor: actor,
           query: [select: @list_fields, sort: [archived_at: :desc], limit: @max_per_type]

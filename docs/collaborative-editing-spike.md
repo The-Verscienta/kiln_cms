@@ -19,8 +19,8 @@ research.
   the LiveView tension D5 flagged.
 - **Recommendation:** keep **locked single-editor for v1**, but **harden it now**
   with optimistic-concurrency conflict detection (cheap, removes today's silent
-  last-write-wins). Pursue full CRDT **post-v1, phased**: first rich-text-within-a-block
-  (lower risk), then the block tree.
+  last-write-wins). *(Since implemented — PR #81 + #137; see §1.)* Pursue full CRDT
+  **post-v1, phased**: first rich-text-within-a-block (lower risk), then the block tree.
 - **Smallest next step:** a throwaway prototype of one rich-text block synced
   between two browsers via `y_ex` over a Channel — to de-risk `y_ex` maturity and
   the CRDT⇄Ash persistence boundary before committing.
@@ -40,8 +40,8 @@ conflict resolution**.
 | Advisory field locks | ⚠️ advisory only | lowest-user-id "owns" a field; inputs go readonly **but still submit** |
 | Debounced autosave (drafts) | ✅ | 2 s debounce → `AshPhoenix.Form.submit` |
 | Version history | ✅ | AshPaperTrail, full `blocks` snapshot per save |
-| **Concurrency control** | ❌ **none** | whole-document `:update`, **last-write-wins**, no version check |
-| **Edit merging** | ❌ **none** | the entire `blocks` array is replaced on save |
+| **Concurrency control** | ✅ optimistic lock (PR #81) | `optimistic_lock(:lock_version)` on `:update`/`:autosave`; editor surfaces a conflict banner + reload flow on `StaleRecord` |
+| **Edit merging** | ❌ **none** | the entire `blocks` array is replaced on save; a stale save is *rejected*, not merged |
 
 **The crux for CRDT feasibility is the save/sync mechanism:**
 
@@ -84,7 +84,7 @@ are read-only with a "request control / take over" affordance. Cheap, honest, no
 data loss.
 - **Effort:** S. **Risk:** low. **Delivers:** safety, not concurrency.
 
-### B. Optimistic concurrency (conflict *detection*) — *recommended now*
+### B. Optimistic concurrency (conflict *detection*) — *✅ implemented (PR #81)*
 Add a monotonic `lock_version` (or compare `updated_at`) to the content `:update`.
 If the record changed since the editor loaded it, reject the save with a
 "someone else edited this — reload/merge" prompt instead of silently clobbering.
@@ -194,7 +194,7 @@ Key design commitments:
 | Approach | Real concurrency | Data-loss safe | Effort | New infra | Fits D2 minimal-ops | Verdict |
 |---|---|---|---|---|---|---|
 | A. Harden locking | No | Yes | S | none | ✅ | v1 option |
-| **B. Optimistic concurrency** | No | **Yes** | S–M | none | ✅ | **Do now** |
+| **B. Optimistic concurrency** | No | **Yes** | S–M | none | ✅ | **✅ Done (PR #81)** |
 | C. OT | Yes | Yes | XL | none | ✅ | Reject (cost) |
 | **D1. CRDT rich-text** | Yes (text) | Yes | L | `y_ex` (or Hocuspocus) | ✅ with `y_ex` | **Post-v1, first** |
 | D2. CRDT whole-doc | Yes (full) | Yes | XL | `y_ex` (or Hocuspocus) | ✅ with `y_ex` | Post-v1, later |
