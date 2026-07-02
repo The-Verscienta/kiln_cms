@@ -353,6 +353,31 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Audit U-M3: filter/search state lives in the URL, so refresh/back/share
+  # keep it and changing it patches the URL.
+  describe "filter state in the URL" do
+    test "mounting with query params restores the status and search filters", %{conn: conn} do
+      draft_page(%{title: "OnlyDraft"})
+      draft_page(%{title: "LivePage", state: :published})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor?status=published&q=live")
+
+      assert html =~ "LivePage"
+      refute html =~ "OnlyDraft"
+      assert html =~ ~s(value="live")
+    end
+
+    test "changing the filter patches the URL", %{conn: conn} do
+      draft_page()
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      lv |> form("#content-filter", %{status: "draft"}) |> render_change()
+      assert_patch(lv, ~p"/editor?status=draft")
+    end
+  end
+
   # Audit U-M4: a saved schedule was invisible after saving — the editor header
   # and content list now carry a "Scheduled" badge with a localized <time>.
   describe "scheduled publish visibility" do

@@ -44,10 +44,19 @@ defmodule KilnCMSWeb.MediaLive do
      )}
   end
 
+  # The library filter lives in the URL (audit U-M3) so refresh/back/share
+  # keep it; `replace: true` avoids one history entry per debounced keystroke.
+  @impl true
+  def handle_params(params, _uri, socket),
+    do: {:noreply, assign(socket, :query, params["q"] || "")}
+
   @impl true
   def handle_event("validate", _params, socket), do: {:noreply, socket}
 
-  def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, :query, q)}
+  def handle_event("search", %{"q" => q}, socket) do
+    params = if q == "", do: %{}, else: %{q: q}
+    {:noreply, push_patch(socket, to: ~p"/media?#{params}", replace: true)}
+  end
 
   def handle_event("cancel", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :media, ref)}

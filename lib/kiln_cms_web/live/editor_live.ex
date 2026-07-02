@@ -86,10 +86,14 @@ defmodule KilnCMSWeb.EditorLive do
     {:noreply, push_navigate(socket, to: edit_path(kind, record.id))}
   end
 
+  # Filter state lives in the URL (audit U-M3): refresh, back button, and
+  # shared links keep the active status/search. Typing replaces the history
+  # entry so a search doesn't leave one entry per debounced keystroke.
   def handle_event("filter", %{"status" => status}, socket),
-    do: {:noreply, assign(socket, :status, status)}
+    do: {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query))}
 
-  def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, :query, q)}
+  def handle_event("search", %{"q" => q}, socket),
+    do: {:noreply, push_patch(socket, to: list_path(socket.assigns.status, q), replace: true)}
 
   def handle_event("toggle_select", %{"key" => key}, socket) do
     selected = socket.assigns.selected
@@ -168,6 +172,25 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("unarchive", params, socket),
     do: {:noreply, transition(socket, params, "unarchive")}
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    status = if params["status"] in @statuses, do: params["status"], else: "all"
+
+    {:noreply,
+     socket
+     |> assign(:status, status)
+     |> assign(:query, params["q"] || "")}
+  end
+
+  defp list_path(status, q) do
+    params =
+      [status: status, q: q]
+      |> Enum.reject(fn {k, v} -> v == "" or (k == :status and v == "all") end)
+      |> Map.new()
+
+    ~p"/editor?#{params}"
+  end
 
   defp transition(socket, %{"kind" => kind, "id" => id}, verb) do
     actor = socket.assigns.actor
