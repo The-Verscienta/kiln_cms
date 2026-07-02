@@ -58,15 +58,16 @@ defmodule KilnCMSWeb.MediaLive do
 
     results =
       consume_uploaded_entries(socket, :media, fn %{path: path}, entry ->
-        {:ok, store_entry(path, entry, actor)}
+        {:ok, {entry.client_name, store_entry(path, entry, actor)}}
       end)
 
-    {ok, failed} = Enum.split_with(results, &(&1 == :ok))
+    {ok, failed} = Enum.split_with(results, fn {_name, result} -> result == :ok end)
+    failures = for {name, {:error, reason}} <- failed, do: {name, reason}
 
     socket =
       socket
       |> assign(:media, list_media(actor))
-      |> flash_for_upload(length(ok), length(failed))
+      |> flash_for_upload(length(ok), failures)
 
     {:noreply, socket}
   end
@@ -189,6 +190,8 @@ defmodule KilnCMSWeb.MediaLive do
   # `source`, when removed, is the server-built stripped temp file (UUID path),
   # never user input — the File.rm traversal warning is a false positive.
   # sobelow_skip ["Traversal.FileModule"]
+  # Returns :ok or {:error, reason} — the reason reaches the failure flash so
+  # editors learn WHICH file failed and why, not just a count (audit U-M5).
   defp store_entry(path, entry, actor) do
     case ImageProcessor.validate_upload(path) do
       {:ok, %{ext: ext, content_type: content_type}} ->
@@ -200,14 +203,14 @@ defmodule KilnCMSWeb.MediaLive do
         try do
           case Storage.store(key, source) do
             {:ok, ^key} -> create_from_upload(key, content_type, entry, actor)
-            _ -> :error
+            _ -> {:error, :storage_failed}
           end
         after
           if stripped?, do: File.rm(source)
         end
 
-      _ ->
-        :error
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -236,7 +239,7 @@ defmodule KilnCMSWeb.MediaLive do
 
       _ ->
         Storage.delete(key)
-        :error
+        {:error, :create_failed}
     end
   end
 
@@ -297,7 +300,7 @@ defmodule KilnCMSWeb.MediaLive do
     Enum.filter(media, &String.contains?(String.downcase(&1.filename), q))
   end
 
-  defp flash_for_upload(socket, ok, 0) when ok > 0,
+  defp flash_for_upload(socket, ok, []) when ok > 0,
     do:
       put_flash(
         socket,
@@ -305,23 +308,28 @@ defmodule KilnCMSWeb.MediaLive do
         ngettext("Uploaded %{count} file.", "Uploaded %{count} files.", ok, count: ok)
       )
 
-  defp flash_for_upload(socket, 0, failed) when failed > 0,
-    do:
-      put_flash(
-        socket,
-        :error,
-        ngettext("%{count} upload failed.", "%{count} uploads failed.", failed, count: failed)
-      )
+  defp flash_for_upload(socket, _ok, []), do: socket
 
-  defp flash_for_upload(socket, ok, failed) when ok > 0 and failed > 0,
-    do:
-      put_flash(
-        socket,
-        :info,
-        gettext("Uploaded %{ok}; %{failed} failed.", ok: ok, failed: failed)
-      )
+  # Server-side rejections name the file and the reason (audit U-M5) instead of
+  # collapsing to "2 uploads failed."
+  defp flash_for_upload(socket, ok, failures) do
+    detail =
+      Enum.map_join(failures, "; ", fn {name, reason} ->
+        "#{name} (#{upload_failure_reason(reason)})"
+      end)
 
-  defp flash_for_upload(socket, _, _), do: socket
+    message =
+      if ok > 0,
+        do: gettext("Uploaded %{ok}. Failed: %{detail}", ok: ok, detail: detail),
+        else: gettext("Upload failed: %{detail}", detail: detail)
+
+    put_flash(socket, :error, message)
+  end
+
+  defp upload_failure_reason(:unsupported_format), do: gettext("unsupported image format")
+  defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
+  defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")
+  defp upload_failure_reason(_invalid), do: gettext("not a valid image")
 
   defp humanize_bytes(nil), do: "—"
   defp humanize_bytes(b) when b < 1_024, do: "#{b} B"

@@ -238,7 +238,10 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert render_upload(input, "fake.png")
 
       html = lv |> element("#upload-form") |> render_submit()
-      assert html =~ "failed"
+      # The flash names the file and the reason, not just a count (audit U-M5).
+      assert html =~ "Upload failed"
+      assert html =~ "fake.png"
+      assert html =~ "not a valid image"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
       refute File.exists?(Path.join(root, "fake.png"))
     end
