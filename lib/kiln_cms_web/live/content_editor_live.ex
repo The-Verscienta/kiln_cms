@@ -1365,6 +1365,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <p class="text-sm text-base-content/60">
               {gettext("State:")} <span class="font-medium">{state_label(@record.state)}</span>
             </p>
+            <%!-- After saving a schedule, nothing else says it exists (U-M4). --%>
+            <p
+              :if={@record.scheduled_at && @record.state in [:draft, :in_review]}
+              class="mt-0.5 flex items-center gap-1 text-sm text-base-content/60"
+            >
+              <.icon name="hero-clock" class="size-4" />
+              {gettext("Scheduled to publish")}
+              <time
+                id="scheduled-publish-badge"
+                phx-hook="LocalTime"
+                datetime={DateTime.to_iso8601(@record.scheduled_at)}
+              >{Calendar.strftime(@record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
+            </p>
             <.presence_roster editors={@editors} current_id={@actor.id} />
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -1678,11 +1691,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.field_cursors field="canonical_url" cursors={@cursors} />
                 </div>
                 <.input field={@form[:locale]} label={gettext("Locale")} />
-                <.input
-                  field={@form[:scheduled_at]}
-                  type="datetime-local"
-                  label={gettext("Scheduled publish at")}
-                />
+                <%!-- The visible input edits local wall-clock time; the hidden
+                      input carries the UTC instant (UtcDatetimeInput hook).
+                      Keyed on editor_version so conflict reloads / restores
+                      remount it from the fresh form (as rich text does). --%>
+                <div
+                  id={"scheduled-at-#{@editor_version}"}
+                  phx-hook="UtcDatetimeInput"
+                  phx-update="ignore"
+                >
+                  <label
+                    for={"scheduled-at-local-#{@editor_version}"}
+                    class="mb-1 block text-sm font-medium"
+                  >
+                    {gettext("Scheduled publish at")}
+                  </label>
+                  <input
+                    type="datetime-local"
+                    id={"scheduled-at-local-#{@editor_version}"}
+                    data-local-input
+                    class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+                  />
+                  <input
+                    type="hidden"
+                    name={@form[:scheduled_at].name}
+                    value={@form[:scheduled_at].value && to_string(@form[:scheduled_at].value)}
+                    data-utc-input
+                  />
+                  <p class="mt-1 text-xs text-base-content/60">
+                    {gettext("Shown in your local timezone; stored as UTC.")}
+                  </p>
+                </div>
               </div>
             </details>
 

@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.EditorLive do
   # Only what the list renders — without a select, every row drags its whole
   # blocks JSONB tree (plus search_text and embedding) into the LiveView heap.
   # Workflow/destroy actions re-fetch the full record by id before acting.
-  @list_fields [:id, :title, :slug, :state, :updated_at]
+  @list_fields [:id, :title, :slug, :state, :updated_at, :scheduled_at]
 
   # Records of every content type merged into `{kind, record}` tuples, newest
   # first. `truncated?` flags any type that filled its window, so the UI can say
@@ -480,6 +480,18 @@ defmodule KilnCMSWeb.EditorLive do
               <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
+            <span
+              :if={record.scheduled_at && record.state in [:draft, :in_review]}
+              class="flex items-center gap-1 text-xs text-base-content/60"
+              title={gettext("Scheduled to publish")}
+            >
+              <.icon name="hero-clock" class="size-3.5" />
+              <time
+                id={"scheduled-#{kind}-#{record.id}"}
+                phx-hook="LocalTime"
+                datetime={DateTime.to_iso8601(record.scheduled_at)}
+              >{Calendar.strftime(record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
+            </span>
             <div class="flex w-full items-center justify-end gap-2 sm:w-auto">
               <button
                 :if={record.state == :draft and @actor.role == :editor}

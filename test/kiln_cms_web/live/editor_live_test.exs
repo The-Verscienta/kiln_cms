@@ -353,6 +353,28 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Audit U-M4: a saved schedule was invisible after saving — the editor header
+  # and content list now carry a "Scheduled" badge with a localized <time>.
+  describe "scheduled publish visibility" do
+    test "the list and the editor show a scheduled badge for a scheduled draft", %{conn: conn} do
+      at = DateTime.add(DateTime.utc_now(), 3600, :second)
+      page = draft_page(%{title: "SoonLive", scheduled_at: at})
+
+      {:ok, _lv, list_html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert list_html =~ ~s(id="scheduled-page-#{page.id}")
+      assert list_html =~ ~s(phx-hook="LocalTime")
+
+      {:ok, _lv, editor_html} =
+        build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert editor_html =~ "Scheduled to publish"
+      assert editor_html =~ ~s(id="scheduled-publish-badge")
+      # The schedule input is the local/UTC hook pair, labelled with the tz.
+      assert editor_html =~ ~s(phx-hook="UtcDatetimeInput")
+      assert editor_html =~ "Shown in your local timezone; stored as UTC."
+    end
+  end
+
   # Audit U-H2: ApplyCustomFields errors land on :custom_fields and previously
   # rendered nowhere — the editor got a generic flash with nothing highlighted.
   describe "custom field validation errors" do

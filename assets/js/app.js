@@ -66,6 +66,47 @@ const Hooks = {
       return this.el.dataset.dirty === "true"
     },
   },
+  // Bridge between a UTC-stored datetime attribute and a `datetime-local`
+  // input: the visible input shows/edits the editor's local wall-clock time, a
+  // hidden form input carries the ISO-8601 UTC instant the server stores.
+  // Without this, a non-UTC editor's entry was silently stored as UTC and
+  // published hours off.
+  UtcDatetimeInput: {
+    mounted() {
+      this.local = this.el.querySelector("[data-local-input]")
+      this.hidden = this.el.querySelector("[data-utc-input]")
+
+      if (this.hidden.value) {
+        const d = new Date(this.hidden.value.replace(" ", "T"))
+        if (!isNaN(d)) this.local.value = this.toLocalValue(d)
+      }
+
+      this.local.addEventListener("input", () => {
+        this.hidden.value = this.local.value ? new Date(this.local.value).toISOString() : ""
+        this.hidden.dispatchEvent(new Event("input", {bubbles: true}))
+      })
+    },
+    toLocalValue(d) {
+      const pad = n => String(n).padStart(2, "0")
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    },
+  },
+  // Render a <time datetime="..."> element's instant in the viewer's local
+  // timezone (the server-rendered text stays as a UTC fallback without JS).
+  LocalTime: {
+    mounted() {
+      this.format()
+    },
+    updated() {
+      this.format()
+    },
+    format() {
+      const d = new Date(this.el.dateTime)
+      if (!isNaN(d)) {
+        this.el.textContent = d.toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"})
+      }
+    },
+  },
   Clipboard: {
     mounted() {
       this.el.addEventListener("click", () => {
