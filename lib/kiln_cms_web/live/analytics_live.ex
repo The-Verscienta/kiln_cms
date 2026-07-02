@@ -9,20 +9,53 @@ defmodule KilnCMSWeb.AnalyticsLive do
   alias KilnCMS.Analytics
   alias KilnCMS.CMS.ContentTypes
 
+  @top_limit 50
+
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
-    rows = Analytics.list_views!(actor: actor)
+    # Only the rows the table shows — the total is a DB-side SUM, so mount no
+    # longer loads one counter row per ever-viewed content item.
+    rows = Analytics.list_views!(actor: actor, query: [limit: @top_limit])
 
     {:ok,
      socket
-     |> assign(:total, Enum.sum_by(rows, & &1.views))
-     |> assign(:rows, rows |> Enum.take(50) |> Enum.map(&decorate/1))}
+     |> assign(:total, total_views(actor))
+     |> assign(:rows, decorate_all(rows))}
   end
 
-  # Resolve a counter row to display data, tolerating content that has since
+  defp total_views(actor) do
+    Ash.sum!(KilnCMS.Analytics.ContentView, :views, actor: actor) || 0
+  end
+
+  # Resolve counter rows to display data with one id-batched query per content
+  # type (instead of a point query per row), tolerating content that has since
   # been deleted or whose type was removed.
-  defp decorate(row) do
+  defp decorate_all(rows) do
+    titles =
+      rows
+      |> Enum.group_by(& &1.content_type)
+      |> Enum.flat_map(fn {type, type_rows} ->
+        case ContentTypes.get(type) do
+          nil -> []
+          ct -> batch_lookup(ct, Enum.map(type_rows, & &1.content_id))
+        end
+      end)
+      |> Map.new()
+
+    Enum.map(rows, &decorate(&1, titles))
+  end
+
+  defp batch_lookup(ct, ids) do
+    ct.type
+    |> ContentTypes.list!(
+      authorize?: false,
+      query: [filter: [id: [in: ids]], select: [:id, :title, :slug]]
+    )
+    |> Enum.map(&{&1.id, {&1.title, &1.slug}})
+  end
+
+  defp decorate(row, titles) do
     case ContentTypes.get(row.content_type) do
       nil ->
         %{
@@ -34,7 +67,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
         }
 
       ct ->
-        {title, slug} = lookup(ct, row.content_id)
+        {title, slug} = Map.get(titles, row.content_id, {"(deleted)", nil})
 
         %{
           title: title,
@@ -44,13 +77,6 @@ defmodule KilnCMSWeb.AnalyticsLive do
           views: row.views,
           last: row.last_viewed_at
         }
-    end
-  end
-
-  defp lookup(ct, id) do
-    case ContentTypes.get_record(ct.type, id, authorize?: false) do
-      {:ok, record} -> {record.title, record.slug}
-      _ -> {"(deleted)", nil}
     end
   end
 
