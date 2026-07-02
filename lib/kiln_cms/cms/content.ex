@@ -375,7 +375,7 @@ defmodule KilnCMS.CMS.Content do
         authorizers: [Ash.Policy.Authorizer],
         extensions: unquote(extensions)
 
-unquote(api_blocks)
+      unquote(api_blocks)
 
       # Content-focused AshAdmin overrides (issue #25). AshAdmin is the dev/CRUD
       # inspector, not the editor — these just make it pleasant: group the content

@@ -103,6 +103,7 @@ defmodule KilnCMS.CMS do
       define :publish_scheduled_entry, action: :publish_scheduled
       define :unpublish_entry, action: :unpublish
       define :archive_entry, action: :archive
+      define :unarchive_entry, action: :unarchive
       define :restore_entry_version, action: :restore_version
       define :destroy_entry, action: :destroy
       define :list_trashed_entries, action: :trashed

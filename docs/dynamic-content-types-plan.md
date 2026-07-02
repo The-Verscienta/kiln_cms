@@ -285,8 +285,16 @@ Each phase lands independently green (precommit + tests) and is useful on its ow
    `type_name` calc cover scoping without macro surgery. *Acceptance met —
    `dynamic_headless_test.exs` + delivery tests: Recipe findable everywhere
    Page is.*
-5. **Field types v2.** `media` and `reference` field types (storage via
-   MediaItem FK-in-map + ContentLink), editor pickers, delivery expansion.
+5. **Field types v2.** ✅ **Done.** `media` and `reference` field types with
+   **write-time snapshots** instead of delivery-time expansion (media:
+   `{id,url,alt}`; reference: `{id,type,slug,title}` against a validated
+   `target_type` — compiled or dynamic) — the same embed-at-write stance
+   image blocks take, so delivery needed zero changes. Editor renders
+   bounded pick-lists (media library window; per-definition target lists);
+   `/editor/fields` gains the target-type select. The ContentLink-backed
+   variant from the original sketch was deliberately not used — snapshot
+   maps keep the reference graph out of scope until a real re-fire need
+   appears.
 6. **Promotion generator + JSONB indexes** (as needed).
 
 ## 6. Open questions (defaults chosen, flag to change)

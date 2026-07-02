@@ -32,8 +32,21 @@ defmodule KilnCMS.CMS.FieldDefinition do
   # The value types a custom field can declare. Each maps to an HTML input and a
   # coercion/validation rule in `Changes.ApplyCustomFields`. Kept JSON-native so
   # values round-trip cleanly through the `custom_fields` jsonb column (dates are
-  # stored as ISO-8601 strings).
-  @field_types [:string, :text, :integer, :float, :boolean, :date, :datetime, :url, :select]
+  # stored as ISO-8601 strings; `:media`/`:reference` store small snapshot maps
+  # resolved at write time — see the coercion module).
+  @field_types [
+    :string,
+    :text,
+    :integer,
+    :float,
+    :boolean,
+    :date,
+    :datetime,
+    :url,
+    :select,
+    :media,
+    :reference
+  ]
 
   @doc "The value types a custom field may declare."
   @spec field_types() :: [atom()]
@@ -62,6 +75,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :field_type,
       :required,
       :options,
+      :target_type,
       :help_text,
       :position,
       :default
@@ -126,6 +140,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # A :select field is meaningless without choices.
     validate KilnCMS.CMS.Validations.SelectOptions
+
+    # A :reference field must target a known content type (compiled or dynamic).
+    validate KilnCMS.CMS.Validations.ReferenceTarget
   end
 
   attributes do
@@ -154,6 +171,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # Choices for a `:select` field (ignored otherwise).
     attribute :options, {:array, :string}, allow_nil?: false, default: [], public?: true
+
+    # The content type a `:reference` field points at — a type name string
+    # ("page", "recipe", …), compiled or dynamic (ignored otherwise).
+    attribute :target_type, :string, public?: true
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string, public?: true

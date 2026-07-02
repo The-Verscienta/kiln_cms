@@ -32,9 +32,13 @@ scoped by the type's name:
 | Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` — exactly like compiled types |
 
 Admin-defined **custom fields** are delivered in each entry's `custom_fields`
-map on every surface. Per-type typed GraphQL/JSON:API schemas are deliberately
-not generated at runtime — promote the type to a compiled one when you need
-them.
+map on every surface. Scalar fields are JSON-native values; `media` and
+`reference` fields are **write-time snapshots** — `{"id", "url", "alt"}` for
+media, `{"id", "type", "slug", "title"}` for references — so no extra
+resolution is needed to render them (fetch fresh content by `id`/`type` when
+you need more than the label). Per-type typed GraphQL/JSON:API schemas are
+deliberately not generated at runtime — promote the type to a compiled one
+when you need them.
 
 ## Why three different block shapes?
 

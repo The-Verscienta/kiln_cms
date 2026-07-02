@@ -53,6 +53,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       kind ->
         actor = socket.assigns.current_user
         record = fetch!(kind, id, actor)
+        field_definitions = field_definitions(kind, actor)
 
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
@@ -102,7 +103,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:categories, CMS.list_categories!(actor: actor))
          |> assign(:tags, CMS.list_tags!(actor: actor))
          |> assign(:audiences, audience_options())
-         |> assign(:field_definitions, field_definitions(kind, actor))
+         |> assign(:field_definitions, field_definitions)
+         |> assign(:reference_options, reference_options(field_definitions, actor))
          |> assign(:siblings, siblings(kind, id, actor))
          |> assign_record(record)}
     end
@@ -259,6 +261,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
         CMS.field_definitions_for!(ct.type, actor: actor)
     end
   end
+
+  # Pick-lists for `:reference` custom fields: per definition, the target
+  # type's records as `{title, id}` options — narrow select and the same window
+  # cap as the media picker, so a large library can't blow up the mount.
+  defp reference_options(definitions, actor) do
+    definitions
+    |> Enum.filter(&(&1.field_type == :reference))
+    |> Map.new(fn definition ->
+      options =
+        case ContentTypes.get(definition.target_type) do
+          nil ->
+            []
+
+          ct ->
+            ct
+            |> ContentTypes.list!(
+              actor: actor,
+              query: [select: [:id, :title], sort: [title: :asc], limit: @max_media]
+            )
+            |> Enum.map(&{&1.title, &1.id})
+        end
+
+      {definition.name, options}
+    end)
+  end
+
+  # Options for the pick-list custom fields; other field types need none.
+  defp custom_field_options(%{field_type: :media}, media, _refs),
+    do: Enum.map(media, &{&1.filename, &1.id})
+
+  defp custom_field_options(%{field_type: :reference, name: name}, _media, refs),
+    do: Map.get(refs, name, [])
+
+  defp custom_field_options(_definition, _media, _refs), do: []
 
   # Current ids for a (possibly unloaded) relationship list.
   defp current_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
@@ -764,6 +800,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :name, :string, required: true
   attr :value, :any, required: true
   attr :errors, :list, default: []
+  attr :options, :list, default: []
+
+  # Media / reference pick-lists: the select posts the target id; the stored
+  # value is the write-time snapshot map (see ApplyCustomFields), so the
+  # current selection is its "id".
+  defp custom_field_input(%{definition: %{field_type: type}} = assigns)
+       when type in [:media, :reference] do
+    assigns = assign(assigns, :selected_id, snapshot_id(assigns.value))
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <select
+        id={cf_id(@definition)}
+        name={@name}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+      >
+        <option value="">{gettext("— None —")}</option>
+        <option :for={{label, id} <- @options} value={id} selected={@selected_id == id}>
+          {label}
+        </option>
+      </select>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
 
   defp custom_field_input(%{definition: %{field_type: :boolean}} = assigns) do
     assigns = assign(assigns, :checked, assigns.value in [true, "true", "1", "on"])
@@ -879,6 +948,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp cf_id(definition), do: "custom-field-#{definition.name}"
   defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
+
+  # The current selection for a pick-list field: the stored snapshot's id, or
+  # the raw id while a change is mid-validate.
+  defp snapshot_id(%{"id" => id}), do: id
+  defp snapshot_id(id) when is_binary(id) and id != "", do: id
+  defp snapshot_id(_other), do: nil
 
   defp custom_input_type(:integer), do: "number"
   defp custom_input_type(:float), do: "number"
@@ -1685,6 +1760,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   name={"#{@form.name}[custom_fields][#{definition.name}]"}
                   value={custom_field_value(@form, definition.name)}
                   errors={custom_field_errors(@form, definition.name)}
+                  options={custom_field_options(definition, @media, @reference_options)}
                 />
               </div>
             </details>

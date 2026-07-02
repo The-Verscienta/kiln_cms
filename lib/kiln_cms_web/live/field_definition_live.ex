@@ -31,6 +31,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        |> assign(:content_types, ContentTypes.all())
        |> assign(:dynamic_types, ContentTypes.dynamic_all())
        |> assign(:field_types, FieldDefinition.field_types())
+       |> assign(:target_types, target_types())
        |> assign(:edit, nil)
        |> assign(:form, create_form(actor))
        |> load_definitions()}
@@ -171,6 +172,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     params |> Map.put("options", options) |> unpack_scope()
   end
 
+  # What a `:reference` field may point at: every type, compiled or dynamic,
+  # as `{label, name string}` select options.
+  defp target_types do
+    Enum.map(ContentTypes.all() ++ ContentTypes.dynamic_all(), &{&1.label, to_string(&1.type)})
+  end
+
+  # Whether the reference-target select applies to the form's current type.
+  defp reference?(form), do: to_string(form[:field_type].value) == "reference"
+
   defp unpack_scope(params) do
     case Map.pop(params, "scope") do
       {nil, params} ->
@@ -289,6 +299,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               label={gettext("Machine name")}
               placeholder="toxicity_level"
             />
+            <.input
+              :if={reference?(@form)}
+              field={@form[:target_type]}
+              type="select"
+              label={gettext("References content of type")}
+              options={@target_types}
+              prompt={gettext("— Pick a type —")}
+            />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.input field={@form[:position]} type="number" label={gettext("Position")} />
             <div class="sm:col-span-2">
@@ -400,6 +418,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     options={Enum.map(@field_types, &{type_label(&1), &1})}
                   />
                   <.input field={@edit.form[:label]} label={gettext("Label")} />
+                  <.input
+                    :if={reference?(@edit.form)}
+                    field={@edit.form[:target_type]}
+                    type="select"
+                    label={gettext("References content of type")}
+                    options={@target_types}
+                    prompt={gettext("— Pick a type —")}
+                  />
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
                   <.input field={@edit.form[:position]} type="number" label={gettext("Position")} />
                   <div class="sm:col-span-2">

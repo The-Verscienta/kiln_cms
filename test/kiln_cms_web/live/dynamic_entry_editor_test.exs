@@ -108,6 +108,83 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
            ).id == entry.id
   end
 
+  test "media and reference pickers render and save write-time snapshots", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "pick#{System.unique_integer([:positive])}", label: "Pickable"},
+        actor: admin
+      )
+
+    media =
+      Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+        filename: "hero-#{System.unique_integer([:positive])}.png",
+        url: "/uploads/hero.png",
+        alt: "hero"
+      })
+
+    page =
+      CMS.create_page!(
+        %{title: "Target page", slug: "tp-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    CMS.create_field_definition!(
+      %{type_definition_id: definition.id, name: "hero", label: "Hero", field_type: :media},
+      actor: admin
+    )
+
+    CMS.create_field_definition!(
+      %{
+        type_definition_id: definition.id,
+        name: "related_page",
+        label: "Related page",
+        field_type: :reference,
+        target_type: "page"
+      },
+      actor: admin
+    )
+
+    entry =
+      ContentTypes.create!(
+        definition.name,
+        %{title: "Pickers", slug: "pick-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    conn = log_in(conn, admin)
+    {:ok, lv, html} = live(conn, ~p"/editor/content/#{definition.name}/#{entry.id}")
+
+    # Both pickers render with their choices.
+    assert html =~ ~s(<option value="#{media.id}")
+    assert html =~ ~s(<option value="#{page.id}")
+
+    lv
+    |> form("##{definition.name}-editor", %{
+      "form" => %{
+        "custom_fields" => %{"hero" => media.id, "related_page" => page.id}
+      }
+    })
+    |> render_submit()
+
+    saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
+
+    assert saved.custom_fields["hero"] == %{
+             "id" => media.id,
+             "url" => media.url,
+             "alt" => media.alt
+           }
+
+    assert saved.custom_fields["related_page"]["id"] == page.id
+    assert saved.custom_fields["related_page"]["type"] == "page"
+
+    # The re-rendered pickers show the saved selections.
+    html = render(lv)
+    assert html =~ ~s(<option value="#{media.id}" selected)
+    assert html =~ ~s(<option value="#{page.id}" selected)
+  end
+
   test "the editor search palette finds dynamic entries (entries-only results)", %{conn: conn} do
     admin = authed_user(:admin)
     definition = define_recipe_type!(admin)
