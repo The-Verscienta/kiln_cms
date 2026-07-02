@@ -1,5 +1,17 @@
 # Performance & Usability Audit — July 2026
 
+> **Status (2026-07-01):** all HIGH findings and the following mediums are FIXED on
+> this branch (commits 759f68a..1109059): P-M1 (indexes), P-M2 (search bounds),
+> P-M3 (double preview render), P-M4 (stampede), P-M5 (uploads max-age),
+> P-M7 (media refetch coalescing), P-M9/P-M10 (analytics, sitemap select),
+> U-M1/U-M2-partial (honest delete copy, bulk confirms, truncation notices),
+> U-M6 (page titles), U-M7 (429 HTML), U-M9 (branded 500/403), plus lows L-blog-COUNT,
+> raw state atoms, "Search" gettext. Still open: P-M6 (TipTap in public bundle),
+> P-M8 (sync image re-encode + pixel cap), broadcast_preview-when-unsubscribed,
+> U-M3 (filters in URL), U-M4 (scheduled-publish timezone/badge), U-M5 (upload
+> failure reasons), U-M8 (TipTap slash-menu ARIA), full server-side list
+> pagination, and most LOW items.
+
 Scope: current `main`-equivalent code (branch `claude/happy-darwin-6c4a55`, clean at e118963).
 Method: four parallel evidence-based reviews (data-layer performance, web/runtime
 performance, admin/editor UX, accessibility & error states), with high-severity claims
