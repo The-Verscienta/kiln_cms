@@ -218,7 +218,12 @@ defmodule KilnCMS.Mail do
     |> Keyword.get(:cache_dkim?, true)
   end
 
-  defp sending_domain do
+  @doc """
+  The domain mail is sent from (and DKIM-signed for) — the domain of the
+  configured From address, or nil when `:email_from` is unset.
+  """
+  @spec sending_domain() :: String.t() | nil
+  def sending_domain do
     case Application.get_env(:kiln_cms, :email_from) do
       {_name, address} -> address |> String.split("@") |> List.last()
       _unset -> nil
