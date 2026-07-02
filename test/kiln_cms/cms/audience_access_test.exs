@@ -81,6 +81,38 @@ defmodule KilnCMS.CMS.AudienceAccessTest do
     end
   end
 
+  # The public delivery reads (`public_by_slug`, `published_translations`) are
+  # consumed with `authorize?: false` by the artifact controller and GraphQL
+  # by-slug queries, so the read *policy* doesn't apply — the action filter is
+  # the sole audience boundary. Regression coverage for that filter.
+  describe "by-slug delivery reads (authorize?: false)" do
+    alias KilnCMS.CMS.ContentTypes
+
+    test ":public published content is served by slug" do
+      p = page(:public)
+      record = ContentTypes.get_published_by_slug(:page, p.slug, "en", authorize?: false)
+      assert record.id == p.id
+    end
+
+    test "audience-restricted published content is not served by slug" do
+      p = page(:member)
+      # The get-by-slug interface raises "not found" (the artifact controller
+      # rescues this to a 404) — the record is filtered out, not delivered.
+      assert_raise Ash.Error.Invalid, fn ->
+        ContentTypes.get_published_by_slug(:page, p.slug, "en", authorize?: false)
+      end
+    end
+
+    test "audience-restricted published content is excluded from translations" do
+      p = page(:member)
+
+      ids =
+        :page |> ContentTypes.list_translations(p.slug, authorize?: false) |> Enum.map(& &1.id)
+
+      refute p.id in ids
+    end
+  end
+
   describe "draft content" do
     test "is hidden from anonymous readers even when :public" do
       refute can_read?(page(:public, :draft), nil)

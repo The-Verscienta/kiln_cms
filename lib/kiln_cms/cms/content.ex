@@ -597,25 +597,33 @@ defmodule KilnCMS.CMS.Content do
           change transition_state(:archived)
         end
 
-        # Public delivery: fetch a single published record by slug. The `state ==
-        # :published` filter is the security boundary, so it's safe without an
-        # actor (anonymous site visitors).
+        # Public delivery: fetch a single published record by slug. Consumed with
+        # `authorize?: false` (anonymous headless/CDN delivery), so the filter is
+        # the *sole* security boundary — it must gate the audience axis too, not
+        # just publish state. `audience == :public` keeps world-readable content
+        # reachable while withholding audience-restricted records that the `:read`
+        # policy would otherwise protect (see the read policy below).
         read :public_by_slug do
           get? true
           argument :slug, :string, allow_nil?: false
           argument :locale, :string, allow_nil?: false
 
           filter expr(
-                   ^ref(:state) == :published and ^ref(:slug) == ^arg(:slug) and
-                     ^ref(:locale) == ^arg(:locale)
+                   ^ref(:state) == :published and ^ref(:audience) == :public and
+                     ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
                  )
         end
 
         # Every published locale variant of a slug, for hreflang alternates and
-        # the language switcher.
+        # the language switcher. Also served without an actor, so it carries the
+        # same `audience == :public` boundary as `:public_by_slug`.
         read :published_translations do
           argument :slug, :string, allow_nil?: false
-          filter expr(^ref(:state) == :published and ^ref(:slug) == ^arg(:slug))
+
+          filter expr(
+                   ^ref(:state) == :published and ^ref(:audience) == :public and
+                     ^ref(:slug) == ^arg(:slug)
+                 )
         end
 
         unquote(published_read)

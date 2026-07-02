@@ -11,7 +11,12 @@ defmodule KilnCMSWeb.Endpoint do
     key: "_kiln_cms_key",
     signing_salt: "Dsoh9oKb",
     encryption_salt: "8fso5iqxDfI",
-    same_site: "Lax"
+    same_site: "Lax",
+    http_only: true,
+    # Mark the cookie `Secure` in production (served over HTTPS via `force_ssl`);
+    # left off in dev/test/e2e, which run over plain HTTP where a Secure cookie
+    # would never be sent. Config-driven so each env opts in explicitly.
+    secure: Application.compile_env(:kiln_cms, :secure_session_cookie, false)
   ]
 
   socket "/live", Phoenix.LiveView.Socket,

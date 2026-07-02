@@ -19,6 +19,10 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
     ]
   ]
 
+# Mark the session cookie `Secure` in production (traffic is HTTPS via
+# `force_ssl`). Compile-time, read by `KilnCMSWeb.Endpoint`'s `@session_options`.
+config :kiln_cms, :secure_session_cookie, true
+
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
 

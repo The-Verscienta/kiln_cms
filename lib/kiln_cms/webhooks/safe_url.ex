@@ -36,6 +36,76 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   def validate(_), do: {:error, "must be a valid URL with a host"}
 
+  @doc """
+  Like `validate/1`, but also resolves the host and returns the single validated
+  IP address to connect to.
+
+  The caller must connect to *this* address (preserving the original `Host`
+  header and TLS SNI) rather than letting the HTTP client re-resolve the name.
+  Re-resolution opens a DNS-rebinding / TOCTOU window: an attacker controlling
+  the target's DNS can answer with a public IP during validation and a
+  private/metadata IP at connect time. Pinning the resolved address closes it.
+
+  Returns `{:ok, address}` with an `:inet.ip_address()` tuple, `{:ok, nil}` when
+  DNS resolution is disabled (test env — the caller then uses the original URL),
+  or `{:error, message}`.
+  """
+  @spec resolve_pinned(String.t()) ::
+          {:ok, :inet.ip_address() | nil} | {:error, String.t()}
+  def resolve_pinned(url) when is_binary(url) do
+    url = String.trim(url)
+
+    with %URI{} = uri <- parse_uri(url),
+         :ok <- validate_scheme(uri.scheme),
+         host when is_binary(host) and host != "" <- uri.host,
+         :ok <- validate_host(host) do
+      pin_address(host)
+    else
+      nil -> {:error, "must be a valid URL with a host"}
+      "" -> {:error, "must be a valid URL with a host"}
+      {:error, message} -> {:error, message}
+    end
+  end
+
+  def resolve_pinned(_), do: {:error, "must be a valid URL with a host"}
+
+  # Resolve the host to the one address the caller should pin to. IP literals
+  # pin to themselves; hostnames resolve once here (and every answer must be
+  # safe, matching `validate/1`'s all-or-nothing check). When DNS resolution is
+  # disabled (test env), return `nil` so the caller falls back to the raw URL.
+  defp pin_address(host) do
+    base = host |> String.downcase() |> host_only()
+
+    cond do
+      ip_literal?(base) ->
+        {:ok, address} = :inet.parse_address(String.to_charlist(base))
+
+        if blocked_address?(address),
+          do: {:error, "must not target private or link-local addresses"},
+          else: {:ok, address}
+
+      not resolve_dns?() ->
+        {:ok, nil}
+
+      true ->
+        case resolve_addresses(base) do
+          {:ok, []} ->
+            {:error, "hostname could not be resolved"}
+
+          {:ok, addresses} ->
+            if Enum.any?(addresses, &blocked_ip?/1),
+              do: {:error, "must not resolve to a private or link-local address"},
+              else: {:ok, hd(addresses)}
+
+          {:error, :timeout} ->
+            {:error, "hostname resolution timed out"}
+
+          {:error, _} ->
+            {:error, "hostname could not be resolved"}
+        end
+    end
+  end
+
   defp parse_uri(url) do
     case URI.parse(url) do
       %URI{host: host} = uri when is_binary(host) -> uri
