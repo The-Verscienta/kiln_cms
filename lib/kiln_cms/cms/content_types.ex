@@ -169,7 +169,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   compiled always wins a name collision (which `TypeDefinition` validation
   prevents anyway). Atoms only ever name compiled types.
   """
-  @spec get(atom() | String.t() | map() | nil) :: t() | nil
+  @spec get(atom() | String.t() | t() | nil) :: t() | nil
   def get(nil), do: nil
 
   # An already-resolved descriptor passes through — iteration call sites hand
@@ -186,8 +186,8 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
-  @doc "Like `get/1` but raises for an unknown type."
-  @spec get!(atom() | String.t()) :: t()
+  @doc "Like `get/1` but raises for an unknown type (descriptors pass through)."
+  @spec get!(atom() | String.t() | t()) :: t()
   def get!(type) do
     get(type) || raise ArgumentError, "unknown content type: #{inspect(type)}"
   end
