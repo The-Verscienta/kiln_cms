@@ -1,16 +1,19 @@
 # Performance & Usability Audit — July 2026
 
-> **Status (2026-07-01):** all HIGH findings and the following mediums are FIXED on
-> this branch (commits 759f68a..1109059): P-M1 (indexes), P-M2 (search bounds),
-> P-M3 (double preview render), P-M4 (stampede), P-M5 (uploads max-age),
-> P-M7 (media refetch coalescing), P-M9/P-M10 (analytics, sitemap select),
-> U-M1/U-M2-partial (honest delete copy, bulk confirms, truncation notices),
-> U-M6 (page titles), U-M7 (429 HTML), U-M9 (branded 500/403), plus lows L-blog-COUNT,
-> raw state atoms, "Search" gettext. Still open: P-M6 (TipTap in public bundle),
-> P-M8 (sync image re-encode + pixel cap), broadcast_preview-when-unsubscribed,
-> U-M3 (filters in URL), U-M4 (scheduled-publish timezone/badge), U-M5 (upload
-> failure reasons), U-M8 (TipTap slash-menu ARIA), full server-side list
-> pagination, and most LOW items.
+> **Status (2026-07-02): CLOSED.** All HIGH and MEDIUM findings are fixed — the
+> highs plus 14 mediums landed in PR #254; the remainder (P-M6, P-M8,
+> broadcast_preview-when-unsubscribed, U-M3, U-M4, U-M5, U-M8) shipped with it
+> too. The follow-up branch completed the rest: full server-side search +
+> keyset "Load more" pagination for the editor/media/trash lists and the media
+> picker (U-M2/P-H2/P-H3 tail), and the LOW items — trashed-media bound,
+> webhook dispatch DB filter, backfill-task selects, bulk reference-edge
+> rebuild + batched block-indexer hash reads, snapshot-aware history replay,
+> local-timezone timestamps, localized blog dates/plurals/byte units, search
+> palette media deep-links, media filter over alt/caption with a11y labels +
+> live region, untitled-draft sweep (AshOban trigger), webhook-dot sr-only
+> text, session-aware `<html lang>` + switcher `aria-current`, and
+> `scope="col"` headers. Only the search-palette FTS watch item ("acceptable,
+> watch it") remains as-is by design.
 
 Scope: current `main`-equivalent code (branch `claude/happy-darwin-6c4a55`, clean at e118963).
 Method: four parallel evidence-based reviews (data-layer performance, web/runtime

@@ -5,6 +5,8 @@ defmodule KilnCMSWeb.MediaLive do
   """
   use KilnCMSWeb, :live_view
 
+  import Ash.Expr, only: [expr: 1]
+
   alias KilnCMS.CMS
   alias KilnCMS.ImageProcessor
   alias KilnCMS.Storage
@@ -12,9 +14,12 @@ defmodule KilnCMSWeb.MediaLive do
   @accept ~w(.jpg .jpeg .png .webp .gif)
   @max_entries 10
   @max_file_size 10_000_000
-  # Bound the library window loaded into the LiveView (newest first) so a large
-  # media library can't grow one editor's heap without limit.
-  @max_media 500
+  # Server-side page size: the grid loads pages of newest-first items and any
+  # older item is reachable via Load more or the (server-side) filter.
+  @page_size 60
+  # Bound on the trashed-media list — trash restores are recent-item work, and
+  # an unbounded read would grow the LiveView heap with the trash.
+  @max_trashed 500
 
   @impl true
   def mount(_params, _session, socket) do
@@ -27,16 +32,17 @@ defmodule KilnCMSWeb.MediaLive do
 
     {:ok,
      socket
+     # `query: nil` is a sentinel: the first handle_params always loads.
      |> assign(:actor, actor)
      |> assign(:page_title, gettext("Media library"))
      |> assign(:is_admin, actor.role == :admin)
-     |> assign(:query, "")
+     |> assign(:query, nil)
      |> assign(:selected, nil)
      |> assign(:view, :library)
      |> assign(:trashed, [])
      |> assign(:refresh_timer, nil)
-     |> assign(:max_media, @max_media)
-     |> assign(:media, list_media(actor))
+     |> assign(:media, [])
+     |> assign(:more?, false)
      |> allow_upload(:media,
        accept: @accept,
        max_entries: @max_entries,
@@ -44,18 +50,42 @@ defmodule KilnCMSWeb.MediaLive do
      )}
   end
 
-  # The library filter lives in the URL (audit U-M3) so refresh/back/share
-  # keep it; `replace: true` avoids one history entry per debounced keystroke.
+  # The library filter and the open item live in the URL (audit U-M3) so
+  # refresh/back/share keep them; the search patch uses `replace: true` to
+  # avoid one history entry per debounced keystroke. The filter runs in the
+  # database (audit U-M2), so it finds items beyond the loaded pages.
   @impl true
-  def handle_params(params, _uri, socket),
-    do: {:noreply, assign(socket, :query, params["q"] || "")}
+  def handle_params(params, _uri, socket) do
+    q = params["q"] || ""
+
+    socket =
+      if q == socket.assigns.query,
+        do: socket,
+        else: socket |> assign(:query, q) |> load_media()
+
+    {:noreply, assign_selected(socket, params["id"])}
+  end
 
   @impl true
   def handle_event("validate", _params, socket), do: {:noreply, socket}
 
   def handle_event("search", %{"q" => q}, socket) do
-    params = if q == "", do: %{}, else: %{q: q}
-    {:noreply, push_patch(socket, to: ~p"/media?#{params}", replace: true)}
+    {:noreply, push_patch(socket, to: media_path(q, nil), replace: true)}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    case List.last(socket.assigns.media) do
+      nil ->
+        {:noreply, assign(socket, :more?, false)}
+
+      last ->
+        {page, more?} = fetch_media(socket, last.inserted_at, @page_size)
+
+        {:noreply,
+         socket
+         |> assign(:media, socket.assigns.media ++ page)
+         |> assign(:more?, more?)}
+    end
   end
 
   def handle_event("cancel", %{"ref" => ref}, socket) do
@@ -75,7 +105,7 @@ defmodule KilnCMSWeb.MediaLive do
 
     socket =
       socket
-      |> assign(:media, list_media(actor))
+      |> reload_media()
       |> flash_for_upload(length(ok), failures)
 
     {:noreply, socket}
@@ -90,7 +120,7 @@ defmodule KilnCMSWeb.MediaLive do
         _ -> put_flash(socket, :error, gettext("That item no longer exists."))
       end
 
-    {:noreply, socket |> assign(:selected, nil) |> assign(:media, list_media(actor))}
+    {:noreply, socket |> assign(:selected, nil) |> reload_media()}
   end
 
   # --- trash -----------------------------------------------------------------
@@ -126,8 +156,7 @@ defmodule KilnCMSWeb.MediaLive do
           end
       end
 
-    {:noreply,
-     socket |> assign(:trashed, list_trashed(actor)) |> assign(:media, list_media(actor))}
+    {:noreply, socket |> assign(:trashed, list_trashed(actor)) |> reload_media()}
   end
 
   def handle_event("purge", %{"id" => id}, socket) do
@@ -142,14 +171,13 @@ defmodule KilnCMSWeb.MediaLive do
     {:noreply, assign(socket, :trashed, list_trashed(actor))}
   end
 
-  def handle_event("select", %{"id" => id}, socket) do
-    case CMS.get_media_item(id, actor: socket.assigns.actor) do
-      {:ok, item} -> {:noreply, assign(socket, :selected, item)}
-      _ -> {:noreply, socket}
-    end
-  end
+  # Selection lives in the URL, so an open drawer survives refresh and can be
+  # deep-linked (e.g. from the search palette).
+  def handle_event("select", %{"id" => id}, socket),
+    do: {:noreply, push_patch(socket, to: media_path(socket.assigns.query, id))}
 
-  def handle_event("close", _params, socket), do: {:noreply, assign(socket, :selected, nil)}
+  def handle_event("close", _params, socket),
+    do: {:noreply, push_patch(socket, to: media_path(socket.assigns.query, nil))}
 
   def handle_event("save_meta", %{"alt" => alt, "caption" => caption}, socket) do
     actor = socket.assigns.actor
@@ -161,7 +189,7 @@ defmodule KilnCMSWeb.MediaLive do
         {:ok, item} ->
           socket
           |> assign(:selected, item)
-          |> assign(:media, list_media(actor))
+          |> reload_media()
           |> put_flash(:info, gettext("Saved details."))
 
         _ ->
@@ -188,10 +216,7 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   def handle_info(:refresh_media, socket) do
-    {:noreply,
-     socket
-     |> assign(:refresh_timer, nil)
-     |> assign(:media, list_media(socket.assigns.actor))}
+    {:noreply, socket |> assign(:refresh_timer, nil) |> reload_media()}
   end
 
   # --- helpers ---------------------------------------------------------------
@@ -290,7 +315,10 @@ defmodule KilnCMSWeb.MediaLive do
   defp find_trashed(socket, id), do: Enum.find(socket.assigns.trashed, &(&1.id == id))
 
   defp list_trashed(actor) do
-    CMS.list_trashed_media_items!(actor: actor, query: [sort: [updated_at: :desc]])
+    CMS.list_trashed_media_items!(
+      actor: actor,
+      query: [sort: [updated_at: :desc], limit: @max_trashed]
+    )
   end
 
   # The thumbnail to show in the grid — the small variant when available, else
@@ -298,15 +326,67 @@ defmodule KilnCMSWeb.MediaLive do
   defp thumb_src(%{variants: %{"thumb" => %{"url" => url}}}), do: url
   defp thumb_src(item), do: item.url
 
-  defp list_media(actor) do
-    CMS.list_media_items!(actor: actor, query: [sort: [inserted_at: :desc], limit: @max_media])
+  # First page under the current filter.
+  defp load_media(socket) do
+    {items, more?} = fetch_media(socket, nil, @page_size)
+    socket |> assign(:media, items) |> assign(:more?, more?)
   end
 
-  defp visible_media(media, ""), do: media
+  # Refresh the loaded items in place (after uploads, deletes, metadata edits,
+  # variant completions) without collapsing Load more depth.
+  defp reload_media(socket) do
+    depth = max(@page_size, length(socket.assigns.media))
+    {items, more?} = fetch_media(socket, nil, depth)
+    socket |> assign(:media, items) |> assign(:more?, more?)
+  end
 
-  defp visible_media(media, query) do
-    q = String.downcase(query)
-    Enum.filter(media, &String.contains?(String.downcase(&1.filename), q))
+  defp fetch_media(socket, cursor, limit) do
+    items =
+      CMS.list_media_items!(
+        actor: socket.assigns.actor,
+        query: media_query(socket.assigns.query, cursor, limit)
+      )
+
+    {items, length(items) >= limit}
+  end
+
+  defp media_query(q, cursor, limit) do
+    [
+      q not in [nil, ""] && {:filter, search_filter(q)},
+      cursor && {:filter, expr(inserted_at < ^cursor)}
+    ]
+    |> Enum.filter(&is_tuple/1)
+    |> Kernel.++(sort: [inserted_at: :desc], limit: limit)
+  end
+
+  # Case-insensitive match on filename, alt text or caption — what the filter
+  # placeholder promises; %, _ and \ in the input match literally.
+  defp search_filter(q) do
+    pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
+    expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern))
+  end
+
+  defp media_path(q, id) do
+    params =
+      [q: q, id: id]
+      |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+      |> Map.new()
+
+    ~p"/media?#{params}"
+  end
+
+  defp assign_selected(socket, nil), do: assign(socket, :selected, nil)
+
+  defp assign_selected(socket, id) do
+    case CMS.get_media_item(id, actor: socket.assigns.actor) do
+      {:ok, item} ->
+        assign(socket, :selected, item)
+
+      _ ->
+        socket
+        |> assign(:selected, nil)
+        |> put_flash(:error, gettext("That item no longer exists."))
+    end
   end
 
   defp flash_for_upload(socket, ok, []) when ok > 0,
@@ -342,9 +422,12 @@ defmodule KilnCMSWeb.MediaLive do
   defp upload_failure_reason(_invalid), do: gettext("not a valid image")
 
   defp humanize_bytes(nil), do: "—"
-  defp humanize_bytes(b) when b < 1_024, do: "#{b} B"
-  defp humanize_bytes(b) when b < 1_048_576, do: "#{Float.round(b / 1_024, 1)} KB"
-  defp humanize_bytes(b), do: "#{Float.round(b / 1_048_576, 1)} MB"
+  defp humanize_bytes(b) when b < 1_024, do: gettext("%{size} B", size: b)
+
+  defp humanize_bytes(b) when b < 1_048_576,
+    do: gettext("%{size} KB", size: Float.round(b / 1_024, 1))
+
+  defp humanize_bytes(b), do: gettext("%{size} MB", size: Float.round(b / 1_048_576, 1))
 
   defp error_to_string(:too_large), do: gettext("too large (max 10 MB)")
   defp error_to_string(:too_many_files), do: gettext("too many files (max 10)")
@@ -353,7 +436,7 @@ defmodule KilnCMSWeb.MediaLive do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :visible, visible_media(assigns.media, assigns.query))
+    assigns = assign(assigns, :filtering?, assigns.query not in [nil, ""])
 
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
@@ -463,44 +546,53 @@ defmodule KilnCMSWeb.MediaLive do
         <div :if={@view == :library}>
           <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <h2 class="text-lg font-medium">
-              {gettext("Library (%{count})", count: length(@visible))}
+              {gettext("Library (%{count})", count: length(@media))}
             </h2>
-            <form :if={@media != []} id="media-filter" phx-change="search" class="sm:w-auto">
+            <form
+              :if={@media != [] or @filtering?}
+              id="media-filter"
+              phx-change="search"
+              class="sm:w-auto"
+            >
+              <label for="media-filter-input" class="sr-only">
+                {gettext("Filter by filename, alt text or caption")}
+              </label>
               <input
+                id="media-filter-input"
                 type="text"
                 name="q"
                 value={@query}
-                placeholder={gettext("Filter by filename")}
+                placeholder={gettext("Filter by filename, alt or caption")}
+                aria-label={gettext("Filter by filename, alt text or caption")}
                 phx-debounce="200"
                 autocomplete="off"
                 class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm sm:w-auto"
               />
             </form>
           </div>
-          <p
-            :if={length(@media) >= @max_media}
-            class="mb-3 text-xs text-base-content/60"
-            role="status"
-          >
-            {gettext(
-              "Showing the newest %{max} files — older files exist but aren't listed here.",
-              max: @max_media
+          <p class="sr-only" role="status">
+            {ngettext("%{count} file shown", "%{count} files shown", length(@media),
+              count: length(@media)
             )}
           </p>
-          <.empty_state :if={@media == []} icon="hero-photo" title={gettext("No media yet")}>
+          <.empty_state
+            :if={@media == [] and not @filtering?}
+            icon="hero-photo"
+            title={gettext("No media yet")}
+          >
             {gettext("Upload an image above to start building your library.")}
           </.empty_state>
-          <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+          <p :if={@media == [] and @filtering?} class="text-sm text-base-content/60">
             {gettext("No media matches “%{query}”.", query: @query)}
           </p>
           <ul
-            :if={@visible != []}
+            :if={@media != []}
             class="grid grid-cols-2 gap-4 sm:grid-cols-3"
             id="media-grid"
             phx-update="replace"
           >
             <li
-              :for={item <- @visible}
+              :for={item <- @media}
               id={"media-#{item.id}"}
               class="group relative overflow-hidden rounded border border-base-content/10"
             >
@@ -539,6 +631,17 @@ defmodule KilnCMSWeb.MediaLive do
               </button>
             </li>
           </ul>
+
+          <div :if={@more?} class="mt-4 flex justify-center">
+            <button
+              type="button"
+              phx-click="load_more"
+              phx-disable-with={gettext("Loading…")}
+              class="rounded border border-base-content/20 px-4 py-1.5 text-sm hover:bg-base-200"
+            >
+              {gettext("Load more")}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -552,9 +655,17 @@ defmodule KilnCMSWeb.MediaLive do
   # Trashed (soft-deleted) media: restore brings an item back to the library;
   # delete permanently purges the row and reclaims its storage blobs.
   defp trash_panel(assigns) do
+    assigns = assign(assigns, :max_trashed, @max_trashed)
+
     ~H"""
     <div>
       <h2 class="mb-3 text-lg font-medium">{gettext("Trash (%{count})", count: length(@items))}</h2>
+      <p :if={length(@items) >= @max_trashed} class="mb-3 text-xs text-base-content/60" role="status">
+        {gettext(
+          "Showing the %{max} most recently deleted files — older trashed files exist but aren't listed here.",
+          max: @max_trashed
+        )}
+      </p>
       <p :if={@items == []} class="text-sm text-base-content/60">{gettext("Trash is empty.")}</p>
       <ul
         :if={@items != []}
@@ -570,7 +681,12 @@ defmodule KilnCMSWeb.MediaLive do
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">{item.filename}</p>
             <p class="text-xs text-base-content/70">
-              {gettext("deleted %{at}", at: Calendar.strftime(item.updated_at, "%Y-%m-%d %H:%M"))}
+              {gettext("deleted")}
+              <time
+                id={"trash-time-#{item.id}"}
+                phx-hook="LocalTime"
+                datetime={DateTime.to_iso8601(item.updated_at)}
+              >{Calendar.strftime(item.updated_at, "%Y-%m-%d %H:%M")} UTC</time>
             </p>
           </div>
           <button
@@ -641,7 +757,13 @@ defmodule KilnCMSWeb.MediaLive do
           <dt :if={@item.width} class="text-base-content/70">{gettext("Dimensions")}</dt>
           <dd :if={@item.width}>{@item.width} × {@item.height} px</dd>
           <dt class="text-base-content/70">{gettext("Uploaded")}</dt>
-          <dd>{Calendar.strftime(@item.inserted_at, "%Y-%m-%d %H:%M")}</dd>
+          <dd>
+            <time
+              id="media-detail-uploaded"
+              phx-hook="LocalTime"
+              datetime={DateTime.to_iso8601(@item.inserted_at)}
+            >{Calendar.strftime(@item.inserted_at, "%Y-%m-%d %H:%M")} UTC</time>
+          </dd>
         </dl>
 
         <div :if={@item.variants not in [nil, %{}]} class="mt-4">

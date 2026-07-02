@@ -541,8 +541,8 @@ defmodule KilnCMSWeb.CoreComponents do
     <table class="table table-zebra">
       <thead>
         <tr>
-          <th :for={col <- @col}>{col[:label]}</th>
-          <th :if={@action != []}>
+          <th :for={col <- @col} scope="col">{col[:label]}</th>
+          <th :if={@action != []} scope="col">
             <span class="sr-only">{gettext("Actions")}</span>
           </th>
         </tr>

@@ -96,11 +96,44 @@ defmodule KilnCMS.History do
   """
   @spec replay(atom(), term(), keyword()) :: [map()]
   def replay(document_type, document_id, opts \\ []) do
-    {:ok, events} = events_for(document_type, document_id, authorize?: false)
-
-    events
-    |> filter_upto(opts)
+    document_type
+    |> events_since_snapshot(document_id, opts)
     |> Enum.reduce([], &fold/2)
+  end
+
+  # Fetch only the events the fold can actually use: those at or before the
+  # cutoff, starting from the latest snapshot at-or-before it (fold/2 resets
+  # its accumulator on a :snapshot, so earlier events never affect the result).
+  defp events_since_snapshot(document_type, document_id, opts) do
+    base =
+      DocumentEvent
+      |> Ash.Query.filter(document_type == ^document_type and document_id == ^document_id)
+      |> upto_query(opts)
+
+    from_seq =
+      base
+      |> Ash.Query.filter(kind == :snapshot)
+      |> Ash.Query.sort(seq: :desc)
+      |> Ash.Query.limit(1)
+      |> Ash.Query.select([:seq])
+      |> Ash.read_one!(authorize?: false)
+      |> case do
+        nil -> 1
+        snapshot -> snapshot.seq
+      end
+
+    base
+    |> Ash.Query.filter(seq >= ^from_seq)
+    |> Ash.Query.sort(seq: :asc)
+    |> Ash.read!(authorize?: false)
+  end
+
+  defp upto_query(query, opts) do
+    cond do
+      seq = opts[:upto_seq] -> Ash.Query.filter(query, seq <= ^seq)
+      at = opts[:upto] -> Ash.Query.filter(query, inserted_at <= ^at)
+      true -> query
+    end
   end
 
   @doc "Render a past state for time-travel preview (reuses the typed serializers)."
@@ -129,14 +162,6 @@ defmodule KilnCMS.History do
     case last do
       nil -> 1
       event -> event.seq + 1
-    end
-  end
-
-  defp filter_upto(events, opts) do
-    cond do
-      seq = opts[:upto_seq] -> Enum.filter(events, &(&1.seq <= seq))
-      at = opts[:upto] -> Enum.filter(events, &(DateTime.compare(&1.inserted_at, at) != :gt))
-      true -> events
     end
   end
 

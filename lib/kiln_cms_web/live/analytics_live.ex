@@ -66,6 +66,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
     case ContentTypes.get(row.content_type) do
       nil ->
         %{
+          id: row.content_id,
           title: "(unknown type: #{row.content_type})",
           type: row.content_type,
           href: nil,
@@ -77,6 +78,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
         {title, slug} = Map.get(titles, row.content_id, {"(deleted)", nil})
 
         %{
+          id: row.content_id,
           title: title,
           type: row.content_type,
           href: editor_href(ct, row.content_id),
@@ -92,7 +94,6 @@ defmodule KilnCMSWeb.AnalyticsLive do
   defp public_href(_ct, nil), do: nil
   defp public_href(ct, slug), do: "#{ContentTypes.public_prefix(ct)}/#{slug}"
 
-  defp humanize(nil), do: "—"
   defp humanize(dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
 
   @impl true
@@ -124,10 +125,10 @@ defmodule KilnCMSWeb.AnalyticsLive do
           <table :if={@rows != []} class="w-full text-sm">
             <thead class="text-left text-xs uppercase tracking-wide text-base-content/70">
               <tr class="border-b border-base-content/10">
-                <th class="py-2">{gettext("Content")}</th>
-                <th class="py-2">{gettext("Type")}</th>
-                <th class="py-2 text-right">{gettext("Views")}</th>
-                <th class="py-2 text-right">{gettext("Last viewed")}</th>
+                <th scope="col" class="py-2">{gettext("Content")}</th>
+                <th scope="col" class="py-2">{gettext("Type")}</th>
+                <th scope="col" class="py-2 text-right">{gettext("Views")}</th>
+                <th scope="col" class="py-2 text-right">{gettext("Last viewed")}</th>
               </tr>
             </thead>
             <tbody>
@@ -149,7 +150,15 @@ defmodule KilnCMSWeb.AnalyticsLive do
                 </td>
                 <td class="py-2 capitalize text-base-content/70">{row.type}</td>
                 <td class="py-2 text-right font-medium">{row.views}</td>
-                <td class="py-2 text-right text-base-content/60">{humanize(row.last)}</td>
+                <td class="py-2 text-right text-base-content/60">
+                  <time
+                    :if={row.last}
+                    id={"last-viewed-#{row.type}-#{row.id}"}
+                    phx-hook="LocalTime"
+                    datetime={DateTime.to_iso8601(row.last)}
+                  >{humanize(row.last)} UTC</time>
+                  <span :if={!row.last}>—</span>
+                </td>
               </tr>
             </tbody>
           </table>

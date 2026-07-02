@@ -19,6 +19,8 @@ defmodule KilnCMS.Firing.References do
   alias KilnCMS.Firing
   alias KilnCMS.Firing.{Engine, RefireWorker}
 
+  require Ash.Query
+
   # `"entry"` is the generic tier holding every admin-defined dynamic type
   # (D17) — one storage key, the dynamic name is recoverable from the row.
   @types %{"page" => :page, "post" => :post, "entry" => :entry}
@@ -47,17 +49,23 @@ defmodule KilnCMS.Firing.References do
   @doc "Replace a document's outgoing edges to match its current block tree."
   @spec rebuild(atom(), term(), [struct()]) :: :ok
   def rebuild(from_type, from_id, typed_blocks) do
-    {:ok, existing} = Firing.edges_from(from_type, from_id, authorize?: false)
-    Enum.each(existing, &Ash.destroy!(&1, authorize?: false))
+    Firing.ReferenceEdge
+    |> Ash.Query.filter(from_type == ^from_type and from_id == ^from_id)
+    |> Ash.bulk_destroy!(:destroy, %{}, authorize?: false)
 
     typed_blocks
     |> extract()
-    |> Enum.each(fn {to_type, to_id} ->
-      Firing.upsert_edge(
-        %{from_type: from_type, from_id: from_id, to_type: to_type, to_id: to_id},
-        authorize?: false
-      )
+    |> Enum.map(fn {to_type, to_id} ->
+      %{from_type: from_type, from_id: from_id, to_type: to_type, to_id: to_id}
     end)
+    |> Ash.bulk_create!(Firing.ReferenceEdge, :upsert,
+      authorize?: false,
+      return_errors?: true,
+      stop_on_error?: true,
+      # The :edge identity spans every attribute, so a conflicting row is
+      # already identical — bulk upsert just needs *some* field to "update".
+      upsert_fields: [:to_id]
+    )
 
     :ok
   end
