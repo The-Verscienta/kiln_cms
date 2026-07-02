@@ -72,6 +72,15 @@ defmodule KilnCMSWeb.CollabChannelTest do
     assert_push "awareness", %{"cursor" => %{"anchor" => 3}, "name" => "A"}
   end
 
+  test "a newcomer's awareness_request is relayed so peers re-announce" do
+    topic = topic()
+    {_reply, _sock_a} = join!(topic)
+    {_reply2, sock_b} = join!(topic)
+
+    push(sock_b, "awareness_request", %{})
+    assert_push "awareness_request", %{}
+  end
+
   test "joins are refused while the prototype flag is off" do
     Application.put_env(:kiln_cms, :collab_prototype, false)
     on_exit(fn -> Application.put_env(:kiln_cms, :collab_prototype, true) end)

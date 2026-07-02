@@ -252,10 +252,12 @@ export function mount(hook) {
 // XmlFragment. Only the first peer seeds an empty fragment from the stored
 // HTML — later joiners take their content from the CRDT.
 async function mountCollab(hook, {token, topic, fragment}) {
-  const [{acquireDoc}, {default: Collaboration}] = await Promise.all([
-    import("./collab.js"),
-    import("@tiptap/extension-collaboration"),
-  ])
+  const [{acquireDoc}, {default: Collaboration}, {default: CollaborationCursor}] =
+    await Promise.all([
+      import("./collab.js"),
+      import("@tiptap/extension-collaboration"),
+      import("@tiptap/extension-collaboration-cursor"),
+    ])
 
   const handle = acquireDoc(topic, token)
   hook.collab = handle
@@ -269,6 +271,15 @@ async function mountCollab(hook, {token, topic, fragment}) {
     // Yjs owns undo/redo semantics under collaboration.
     StarterKit.configure({history: false}),
     Collaboration.configure({document: handle.doc, field: fragment}),
+    // Remote carets labeled with each collaborator's initials, in the same
+    // color as their roster chip / lock badges.
+    CollaborationCursor.configure({
+      provider: {awareness: handle.awareness},
+      user: {
+        name: hook.el.dataset.collabUser || "?",
+        color: hook.el.dataset.collabColor || "#f43f5e",
+      },
+    }),
   ])
 
   // The Collaboration extension ignores the Editor `content` option, so the

@@ -265,7 +265,12 @@ Findings against the §3 risks:
    materializes checkpoints itself — which requires rendering the ProseMirror
    schema server-side (an `XmlFragment` serializes to prosemirror-node XML,
    not HTML), i.e. a JS render step or storing the Yjs binary alongside HTML.
-5. **Not built (next steps if promoted):** awareness carets on the client
-   (the channel already relays `"awareness"` ephemerally),
-   fragment-per-block-index is unstable across block reorders (blocks need
-   stable ids first), and Y.Doc durability across server restarts.
+5. **Awareness carets: built.** Remote collaborators render as a colored
+   caret + initials label inside the text (TipTap `CollaborationCursor` over
+   `y-protocols` awareness, relayed by the same channel; a newcomer's
+   `"awareness_request"` makes existing carets appear immediately). Initials
+   and colors match the editor's presence-roster chips, which themselves now
+   show two-letter initials + a live "N editing" count.
+6. **Not built (next steps if promoted):** fragment-per-block-index is
+   unstable across block reorders (blocks need stable ids first), and Y.Doc
+   durability across server restarts.

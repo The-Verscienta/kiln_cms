@@ -50,4 +50,11 @@ defmodule KilnCMSWeb.CollabChannel do
     broadcast_from!(socket, "awareness", payload)
     {:noreply, socket}
   end
+
+  # A newcomer asking the room to re-announce its awareness states (so remote
+  # carets appear immediately instead of on the next periodic refresh).
+  def handle_in("awareness_request", _payload, socket) do
+    broadcast_from!(socket, "awareness_request", %{})
+    {:noreply, socket}
+  end
 end

@@ -10,10 +10,15 @@
 // enough for a prototype) signal to seed fragments from the stored HTML.
 import {Socket} from "phoenix"
 import * as Y from "yjs"
+import {
+  Awareness,
+  applyAwarenessUpdate,
+  encodeAwarenessUpdate,
+} from "y-protocols/awareness"
 
 // Re-exported for debugging/verification consoles (a second in-page client
-// can build its own Y.Doc against the same channel protocol).
-export {Y}
+// can build its own Y.Doc + awareness against the same channel protocol).
+export {Y, Awareness, applyAwarenessUpdate, encodeAwarenessUpdate}
 
 const REMOTE_ORIGIN = "kiln-collab-remote"
 
@@ -52,18 +57,45 @@ export function acquireDoc(topic, token) {
     doc.on("update", pushLocal)
     chan.on("update", ({update}) => Y.applyUpdate(doc, fromBase64(update), REMOTE_ORIGIN))
 
+    // Presence carets/names (the Yjs awareness protocol) ride the same
+    // channel. Awareness handles liveness itself — local state re-broadcasts
+    // periodically and stale peers expire — we only relay the updates.
+    const awareness = new Awareness(doc)
+
+    const pushAwareness = ({added, updated, removed}, origin) => {
+      if (origin === REMOTE_ORIGIN) return
+      const changed = added.concat(updated, removed)
+      chan.push("awareness", {update: toBase64(encodeAwarenessUpdate(awareness, changed))})
+    }
+    awareness.on("update", pushAwareness)
+
+    chan.on("awareness", ({update}) =>
+      applyAwarenessUpdate(awareness, fromBase64(update), REMOTE_ORIGIN)
+    )
+
+    // A newcomer asks the room for current awareness states (otherwise
+    // existing carets only appear on their next periodic refresh).
+    chan.on("awareness_request", () => {
+      const state = awareness.getLocalState()
+      if (!state) return
+      chan.push("awareness", {
+        update: toBase64(encodeAwarenessUpdate(awareness, [doc.clientID])),
+      })
+    })
+
     const whenReady = new Promise(resolve => {
       chan
         .join()
         .receive("ok", ({state, peers}) => {
           Y.applyUpdate(doc, fromBase64(state), REMOTE_ORIGIN)
+          if (peers > 1) chan.push("awareness_request", {})
           resolve({firstPeer: peers === 1})
         })
         // Join refused (flag off / stale token): behave like a lone editor.
         .receive("error", () => resolve({firstPeer: true}))
     })
 
-    docs[topic] = {doc, chan, whenReady, refs: 0, pushLocal}
+    docs[topic] = {doc, chan, awareness, whenReady, refs: 0, pushLocal, pushAwareness}
   }
 
   const entry = docs[topic]
@@ -71,9 +103,14 @@ export function acquireDoc(topic, token) {
 
   return {
     doc: entry.doc,
+    awareness: entry.awareness,
     whenReady: entry.whenReady,
     release() {
       if (--entry.refs > 0) return
+      // Announce the departure so remote carets disappear immediately.
+      entry.awareness.setLocalState(null)
+      entry.awareness.off("update", entry.pushAwareness)
+      entry.awareness.destroy()
       entry.doc.off("update", entry.pushLocal)
       entry.chan.leave()
       entry.doc.destroy()

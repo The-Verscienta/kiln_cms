@@ -1228,6 +1228,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp color_for(id),
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
 
+  # Hex twins of @cursor_colors (same order), for the CRDT caret labels —
+  # TipTap's CollaborationCursor needs CSS color values, not Tailwind classes.
+  @cursor_colors_hex ~w(#f43f5e #f59e0b #10b981 #0ea5e9 #8b5cf6 #ec4899)
+
+  defp color_hex_for(id),
+    do: Enum.at(@cursor_colors_hex, rem(:erlang.phash2(id), length(@cursor_colors_hex)))
+
+  # Up-to-two-letter initials from a display name ("Jane Doe" → "JD",
+  # "editor" → "E"), for the roster chips and remote caret labels.
+  defp initials(nil), do: "?"
+
+  defp initials(name) do
+    case name |> String.split(~r/\s+/, trim: true) |> Enum.take(2) do
+      [] -> "?"
+      words -> Enum.map_join(words, &(&1 |> String.first() |> String.upcase()))
+    end
+  end
+
   # Focus-tracking attributes for an input; `field` keys the cursor badge.
   # `phx-debounce` coalesces the per-keystroke `validate` events (and the
   # `broadcast_preview/1` they trigger) so fast typing with a pop-out preview
@@ -1657,6 +1675,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-collab-token={@collab_token}
                         data-collab-topic={@collab_token && @collab_topic}
                         data-collab-fragment={@collab_token && "block-#{bf.index}"}
+                        data-collab-user={@collab_token && initials(Presence.display_name(@actor))}
+                        data-collab-color={@collab_token && color_hex_for(@actor.id)}
                         role="group"
                         aria-label={gettext("Rich text block")}
                       >
@@ -1945,7 +1965,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             color_for(e.id)
           ]}
         >
-          {e.name |> String.first() |> Kernel.||("?") |> String.upcase()}
+          {initials(e.name)}
         </span>
       </div>
       <span class="text-xs text-base-content/60">{gettext("%{count} editing", count: @count)}</span>
