@@ -25,8 +25,14 @@ defmodule KilnCMSWeb.AnalyticsLive do
      |> assign(:rows, decorate_all(rows))}
   end
 
+  # SUM over zero rows yields nil (despite Ash.sum's number() typing, which is
+  # why this is a pattern match rather than `|| 0` — dialyzer rejects the
+  # latter as an impossible guard).
   defp total_views(actor) do
-    Ash.sum!(KilnCMS.Analytics.ContentView, :views, actor: actor) || 0
+    case Ash.sum(KilnCMS.Analytics.ContentView, :views, actor: actor) do
+      {:ok, total} when is_integer(total) -> total
+      _ -> 0
+    end
   end
 
   # Resolve counter rows to display data with one id-batched query per content
