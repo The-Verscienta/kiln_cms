@@ -22,12 +22,19 @@ if Code.ensure_loaded?(Igniter) do
 
     * `name` - the content type, e.g. `Product` or a fully-qualified module
       (`KilnCMS.CMS.Product`). Bare names are placed under `KilnCMS.CMS`.
+      Optional with `--from` (defaults to the dynamic type's name, camelized).
 
     ## Options
 
     * `--excerpt` / `-e` - add an `excerpt` field (for listings/feeds).
     * `--published` / `-p` - add a `:published` read + `list_published_*` interface.
     * `--plural` - override the plural used in interface names (default `<type>s`).
+    * `--from <name>` - **promote an admin-defined dynamic type** (decision
+      D17): derives the module, flags and plural from its `TypeDefinition`.
+      After the migration, run `mix kiln.promote_data <name>` to move its
+      entries, versions and custom-field definitions over. Fields stay
+      data-driven (the editor renders from `FieldDefinition` rows); promote
+      individual fields to real attributes by hand when querying demands it.
 
     After running, generate and apply the migration:
 
@@ -43,17 +50,18 @@ if Code.ensure_loaded?(Igniter) do
     @impl Igniter.Mix.Task
     def info(_argv, _parent) do
       %Igniter.Mix.Task.Info{
-        positional: [:name],
+        positional: [name: [optional: true]],
         example: @example,
-        schema: [excerpt: :boolean, published: :boolean, plural: :string],
+        schema: [excerpt: :boolean, published: :boolean, plural: :string, from: :string],
         aliases: [e: :excerpt, p: :published]
       }
     end
 
     @impl Igniter.Mix.Task
     def igniter(igniter) do
-      opts = igniter.args.options
-      module = resource_module(igniter.args.positional.name)
+      opts = derive_opts(igniter.args.options)
+      name = igniter.args.positional[:name] || default_name!(opts)
+      module = resource_module(name)
       type = type_atom(module)
       plural = opts[:plural] || "#{type}s"
       version = Module.concat(module, Version)
@@ -67,6 +75,82 @@ if Code.ensure_loaded?(Igniter) do
         {:"list_#{type}_versions", "define :list_#{type}_versions, action: :read"}
       ])
       |> Igniter.add_notice(notice(module, plural))
+      |> maybe_add_promotion_notice(opts)
+    end
+
+    # With --from, flags/plural come from the dynamic type's TypeDefinition
+    # (explicit CLI flags still win).
+    defp derive_opts(opts) do
+      case opts[:from] do
+        nil ->
+          opts
+
+        name ->
+          Mix.Task.run("app.start")
+          definition = KilnCMS.CMS.get_type_definition_by_name!(name, authorize?: false)
+          Keyword.merge(promotion_opts(definition), opts)
+      end
+    end
+
+    # The generator options a TypeDefinition maps to. Public for unit testing.
+    # A path_segment that isn't a valid identifier fragment can't become the
+    # interface-name plural — fall back to the default and note the URL change.
+    @doc false
+    def promotion_opts(definition) do
+      plural =
+        if definition.path_segment =~ ~r/\A[a-z][a-z0-9_]*\z/ do
+          definition.path_segment
+        end
+
+      [excerpt: definition.has_excerpt, published: definition.has_published_feed] ++
+        if(plural, do: [plural: plural], else: [])
+    end
+
+    defp default_name!(opts) do
+      case opts[:from] do
+        nil ->
+          Mix.raise(
+            "usage: mix kiln.gen.content <Name> [flags] | mix kiln.gen.content --from <name>"
+          )
+
+        name ->
+          Macro.camelize(name)
+      end
+    end
+
+    defp maybe_add_promotion_notice(igniter, opts) do
+      case opts[:from] do
+        nil ->
+          igniter
+
+        name ->
+          plural = opts[:plural] || "#{name}s"
+
+          Igniter.add_notice(igniter, """
+          Promoting dynamic type "#{name}" (D17). After the migration above, move
+          its data over:
+
+              mix kiln.promote_data #{name}
+
+          That relocates its entries (ids preserved), version history, and
+          custom-field definitions, then archives the TypeDefinition. Its custom
+          fields stay data-driven — promote individual fields to real attributes
+          by hand when querying/indexing demands it.#{url_change_note(name, plural)}
+          """)
+      end
+    end
+
+    # Compiled types serve at /<plural>/<slug>; if the dynamic type used a
+    # different segment, its public URLs move.
+    defp url_change_note(name, plural) do
+      definition = KilnCMS.CMS.get_type_definition_by_name!(name, authorize?: false)
+
+      if definition.path_segment == plural do
+        ""
+      else
+        "\n\nNOTE: public URLs move from /#{definition.path_segment}/<slug> to " <>
+          "/#{plural}/<slug> (the segment isn't usable as an interface plural)."
+      end
     end
 
     defp add_interfaces(igniter, resource, interfaces) do
