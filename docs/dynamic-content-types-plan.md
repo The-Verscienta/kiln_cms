@@ -259,10 +259,18 @@ Each phase lands independently green (precommit + tests) and is useful on its ow
    the shared changes branch on. *Acceptance met — covered by
    `dynamic_entry_editor_test.exs`: create → edit + custom fields →
    publish a Recipe end-to-end in the editor.*
-3. **Delivery.** Public `/:type/:slug` + locale variants, firing on publish,
-   fired-artifact API surface, sitemap, cache invalidation on type/entry
-   changes. *Acceptance: published Recipe served on-site and via
-   `GET /api/content/recipes/<slug>` with `web`/`json`/`json_ld` surfaces.*
+3. **Delivery.** ✅ **Done.** Public `/:type/:slug` (needed zero controller
+   changes — the merged registry + dispatch carried it), firing on publish
+   (`:entry` in the References whitelist/edge/artifact constraints; the
+   `json` surface's `type` carries the dynamic name via
+   `Engine.public_type/1`), fired-artifact API (storage key from the record
+   struct, not the requested name), sitemap, and the registry cache
+   (`Cache.fetch` + `BustTypeRegistry` on every TypeDefinition write; off in
+   tests — global key vs per-test sandboxes). Iteration call sites now pass
+   descriptors into dispatch, closing an archive-mid-request race.
+   *Acceptance met — `dynamic_delivery_test.exs`: published Recipe served
+   on-site, via `GET /api/content/<name>/<slug>` (`json`/`web`), in the
+   sitemap; archiving the type 404s immediately.*
 4. **Search & headless.** Full-text/semantic/autocomplete over entries,
    on-site search + palette, generic `entries` JSON:API route + GraphQL
    query, webhooks. *Acceptance: Recipe findable everywhere Page is.*

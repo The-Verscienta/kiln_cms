@@ -19,7 +19,9 @@ defmodule KilnCMS.Firing.References do
   alias KilnCMS.Firing
   alias KilnCMS.Firing.{Engine, RefireWorker}
 
-  @types %{"page" => :page, "post" => :post}
+  # `"entry"` is the generic tier holding every admin-defined dynamic type
+  # (D17) — one storage key, the dynamic name is recoverable from the row.
+  @types %{"page" => :page, "post" => :post, "entry" => :entry}
 
   @doc "Reference edges out of a document: `[%{from: {type,id}, to: {type,id}}]`."
   @spec references(struct()) :: [%{from: {atom(), term()}, to: {atom(), term()}}]
@@ -95,6 +97,7 @@ defmodule KilnCMS.Firing.References do
   @spec load_published(atom(), term()) :: {:ok, struct()} | :error
   def load_published(:page, id), do: published(CMS.get_page(id, authorize?: false))
   def load_published(:post, id), do: published(CMS.get_post(id, authorize?: false))
+  def load_published(:entry, id), do: published(CMS.get_entry(id, authorize?: false))
   def load_published(_type, _id), do: :error
 
   defp published({:ok, %{state: :published} = doc}), do: {:ok, doc}

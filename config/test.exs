@@ -27,6 +27,10 @@ config :kiln_cms,
 # ExUnit SQL sandbox connection — avoids a connection leaking past the owning
 # test and racing assertions. See ContentController / SearchPaletteLive.
 config :kiln_cms, :async_analytics, false
+# Never cache the dynamic-type registry in tests: the cache is one global
+# Cachex key while test sandboxes are per-test, so a cached registry would
+# leak one async test's TypeDefinitions into another's requests.
+config :kiln_cms, KilnCMS.CMS.ContentTypes, cache_registry?: false
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
 

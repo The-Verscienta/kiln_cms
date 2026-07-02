@@ -118,6 +118,21 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
+  @doc "Cache key for the dynamic content-type registry (D17) descriptors."
+  def type_registry_key, do: "content_types:dynamic"
+
+  @doc """
+  Drop the cached dynamic-type registry so a TypeDefinition write is visible on
+  the next request instead of waiting out the TTL. Like the sitemap key, this
+  aggregate isn't touched by per-record `bust/2`, so `Changes.BustTypeRegistry`
+  calls it explicitly.
+  """
+  @spec bust_type_registry() :: :ok
+  def bust_type_registry do
+    if enabled?(), do: Cachex.del(@cache, type_registry_key())
+    :ok
+  end
+
   @doc "Cache key for the generated sitemap XML (shared with the sitemap controller)."
   def sitemap_key, do: "sitemap:xml"
 

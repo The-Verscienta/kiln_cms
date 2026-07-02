@@ -61,16 +61,38 @@ defmodule KilnCMS.CMS.ContentTypes do
     |> Enum.sort_by(& &1.label)
   end
 
+  # TTL backstop for the cached dynamic registry; the real freshness signal is
+  # `Changes.BustTypeRegistry` on every TypeDefinition write.
+  @registry_ttl :timer.minutes(5)
+
   @doc """
   All **admin-defined (dynamic)** content types, as registry descriptors,
   sorted by label. Their `type` is the definition's name **string** — dynamic
   types never mint atoms (D17).
+
+  Cached (`KilnCMS.Cache`): this sits on the anonymous delivery path via
+  `get_by_path/1`, so it must not cost a DB round-trip per request. Busted on
+  every TypeDefinition write, TTL as the backstop.
   """
   @spec dynamic_all() :: [t()]
   def dynamic_all do
+    if cache_registry?() do
+      KilnCMS.Cache.fetch(KilnCMS.Cache.type_registry_key(), @registry_ttl, &load_dynamic/0)
+    else
+      load_dynamic()
+    end
+  end
+
+  defp load_dynamic do
     KilnCMS.CMS.list_type_definitions!(authorize?: false)
     |> Enum.map(&describe_dynamic/1)
     |> Enum.sort_by(& &1.label)
+  end
+
+  # Off in tests: the cache is a global Cachex key while test sandboxes are
+  # per-test, so a cached registry would leak one test's types into another.
+  defp cache_registry? do
+    :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:cache_registry?, true)
   end
 
   @doc "Look up a dynamic content type by its name string. Returns nil if unknown."
@@ -147,8 +169,14 @@ defmodule KilnCMS.CMS.ContentTypes do
   compiled always wins a name collision (which `TypeDefinition` validation
   prevents anyway). Atoms only ever name compiled types.
   """
-  @spec get(atom() | String.t() | nil) :: t() | nil
+  @spec get(atom() | String.t() | map() | nil) :: t() | nil
   def get(nil), do: nil
+
+  # An already-resolved descriptor passes through — iteration call sites hand
+  # the descriptor straight to the dispatch helpers, so a type archived between
+  # listing and dispatch can't turn into a lookup miss mid-request.
+  def get(%{type: _} = descriptor), do: descriptor
+
   def get(type) when is_atom(type), do: Enum.find(all(), &(&1.type == type))
 
   def get(type) when is_binary(type) do
@@ -284,6 +312,8 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   # Dynamic types resolve to the generic entry tier for interface naming, so
   # convention dispatch (`publish_entry`, `list_entry_versions!`, …) just works.
+  defp atom(%{source: :dynamic}), do: :entry
+  defp atom(%{type: type}), do: type
   defp atom(type) when is_atom(type), do: type
 
   defp atom(type) when is_binary(type) do

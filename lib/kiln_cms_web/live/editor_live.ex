@@ -37,7 +37,9 @@ defmodule KilnCMSWeb.EditorLive do
     items =
       editable_types()
       |> Enum.flat_map(fn ct ->
-        ct.type
+        # Dispatch on the descriptor itself so a type archived between listing
+        # and dispatch can't turn into a registry-lookup miss.
+        ct
         |> ContentTypes.list!(
           actor: actor,
           query: [sort: [updated_at: :desc], limit: @max_per_type]

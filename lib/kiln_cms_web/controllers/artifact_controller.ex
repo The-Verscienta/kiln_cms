@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.ArtifactController do
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
          record when not is_nil(record) <- published(ct.type, slug, locale),
-         {:ok, body} <- artifact(ct.type, record, surface) do
+         {:ok, body} <- artifact(record, surface) do
       serve(conn, record, params["surface"] || "json", body)
     else
       :backfilling -> backfilling(conn)
@@ -89,7 +89,12 @@ defmodule KilnCMSWeb.ArtifactController do
   # Serve the fired artifact. On a miss, enqueue a background firing job (deduped
   # by FireWorker's uniqueness) and signal `:backfilling` rather than compiling
   # 3 surfaces synchronously on this request.
-  defp artifact(type, record, surface) do
+  # Artifacts are stored under the record's *storage* type — for dynamic types
+  # that's the generic `:entry` tier (D17), not the requested type name, so the
+  # key comes from the record struct rather than the registry descriptor.
+  defp artifact(record, surface) do
+    type = Engine.document_type(record)
+
     case Engine.read(type, record.id, surface) do
       {:ok, body} ->
         {:ok, body}

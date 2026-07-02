@@ -75,9 +75,11 @@ defmodule KilnCMS.CMS.TypeDefinition do
     end
 
     # Soft-delete (AshArchival): the type disappears from the registry but its
-    # entries and history survive; `:restore` undoes it.
+    # entries and history survive; `:restore` undoes it. Non-atomic so the
+    # registry cache-bust after_action can run.
     destroy :destroy do
       primary? true
+      require_atomic? false
     end
 
     update :restore do
@@ -113,6 +115,12 @@ defmodule KilnCMS.CMS.TypeDefinition do
     policy action_type([:create, :update, :destroy]) do
       forbid_if always()
     end
+  end
+
+  # Every write reshapes the public type registry — drop its cache (and the
+  # sitemap's) so delivery picks the change up immediately.
+  changes do
+    change KilnCMS.CMS.Changes.BustTypeRegistry, on: [:create, :update, :destroy]
   end
 
   validations do
