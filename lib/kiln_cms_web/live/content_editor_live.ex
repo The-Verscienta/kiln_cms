@@ -16,6 +16,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   """
   use KilnCMSWeb, :live_view
 
+  import Ash.Expr, only: [expr: 1]
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.EditorTelemetry
@@ -87,6 +89,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # `:new` (insert a new image block — opened from the editor chrome).
          |> assign(:picking, nil)
          |> assign(:media_query, "")
+         # nil = not searching (browse the mounted window); a list = DB search
+         # results, so the picker also finds items beyond that window.
+         |> assign(:picker_media, nil)
          |> assign(
            :media,
            # The picker grid needs only these fields; a select keeps 500
@@ -362,8 +367,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: {:noreply, reset_picker(socket)}
 
   # Live-filter the browser grid as the user types.
-  def handle_event("search_media", %{"q" => q}, socket),
-    do: {:noreply, assign(socket, :media_query, q)}
+  def handle_event("search_media", %{"q" => q}, socket) do
+    results = if q == "", do: nil, else: search_media(q, socket.assigns.actor)
+    {:noreply, socket |> assign(:media_query, q) |> assign(:picker_media, results)}
+  end
 
   # Set the featured image from the library (#154).
   def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
@@ -747,7 +754,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # nil (image hidden) for rejected schemes like `javascript:`/`data:`.
   defp safe_preview_src(url), do: KilnCMS.HTMLSanitizer.safe_image_src(url)
 
-  defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
+  defp reset_picker(socket),
+    do: socket |> assign(:picking, nil) |> assign(:media_query, "") |> assign(:picker_media, nil)
 
   # Accessible tag picker (#153): a labeled checkbox group replacing the native
   # <select multiple> (no ⌘/Ctrl needed). Each tag is its own labeled control;
@@ -1035,18 +1043,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # Substring filter over filename/alt/caption — instant, no DB round-trip, and
-  # matches partial input as the user types (the library's `:search` action is
-  # whole-word tsquery, less forgiving for a live picker).
-  defp filter_media(media, ""), do: media
+  # Server-side substring search over filename/alt/caption (audit U-M2): finds
+  # items beyond the mounted picker window, and matches partial input as the
+  # user types (the library's `:search` action is whole-word tsquery, less
+  # forgiving for a live picker). %, _ and \ in the input match literally.
+  defp search_media(q, actor) do
+    pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
 
-  defp filter_media(media, query) do
-    q = String.downcase(query)
-
-    Enum.filter(media, fn item ->
-      [item.filename, item.alt, item.caption]
-      |> Enum.any?(fn v -> v && String.contains?(String.downcase(v), q) end)
-    end)
+    CMS.list_media_items!(
+      actor: actor,
+      query: [
+        filter:
+          expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern)),
+        select: [:id, :url, :alt, :caption, :filename],
+        sort: [inserted_at: :desc],
+        limit: @max_media
+      ]
+    )
   end
 
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
@@ -1133,13 +1146,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   attr :index, :any, required: true
   attr :media, :list, required: true
+  attr :results, :list, default: nil
   attr :query, :string, required: true
 
   # Full media-library browser modal. Reachable from the editor chrome (to
   # insert a new image block, `index = :new`) and from each image block (to fill
-  # that block, `index` = its integer index). Browse + search + insert.
+  # that block, `index` = its integer index). Browse + search + insert; while a
+  # query is active, `results` (a DB search) replaces the browse window.
   defp image_picker(assigns) do
-    assigns = assign(assigns, :visible, filter_media(assigns.media, assigns.query))
+    assigns = assign(assigns, :visible, assigns.results || assigns.media)
 
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
@@ -1175,6 +1190,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             name="q"
             value={@query}
             placeholder={gettext("Search by filename, alt or caption")}
+            aria-label={gettext("Search by filename, alt text or caption")}
             phx-debounce="150"
             autocomplete="off"
             class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
@@ -1182,7 +1198,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </form>
 
         <p :if={@media == []} class="text-sm text-base-content/60">
-          No media yet — upload some in the <.link navigate={~p"/media"} class="underline">media library</.link>.
+          {gettext("No media yet — upload some in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
         </p>
         <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
           {gettext("No media matches “%{query}”.", query: @query)}
@@ -1899,7 +1918,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </div>
       </.form>
 
-      <.image_picker :if={@picking != nil} index={@picking} media={@media} query={@media_query} />
+      <.image_picker
+        :if={@picking != nil}
+        index={@picking}
+        media={@media}
+        results={@picker_media}
+        query={@media_query}
+      />
     </Layouts.app>
     """
   end

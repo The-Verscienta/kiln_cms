@@ -10,6 +10,8 @@ defmodule KilnCMS.Webhooks do
   alias KilnCMS.CMS
   alias KilnCMS.Webhooks.DeliveryWorker
 
+  require Ash.Query
+
   @signature_header "x-kilncms-signature"
   @event_header "x-kilncms-event"
 
@@ -28,8 +30,10 @@ defmodule KilnCMS.Webhooks do
   """
   @spec dispatch(String.t(), map()) :: :ok
   def dispatch(event, payload) do
-    CMS.list_webhook_endpoints!(authorize?: false)
-    |> Enum.filter(&(&1.active && event in &1.events))
+    CMS.list_webhook_endpoints!(
+      authorize?: false,
+      query: Ash.Query.filter(CMS.WebhookEndpoint, active == true and ^event in events)
+    )
     |> Enum.each(fn endpoint ->
       %{endpoint_id: endpoint.id, event: event, payload: payload}
       |> DeliveryWorker.new()

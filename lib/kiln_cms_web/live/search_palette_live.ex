@@ -135,7 +135,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           <.section :if={@results.media != []} title={gettext("Media")}>
             <.link
               :for={m <- @results.media}
-              navigate={~p"/media"}
+              navigate={~p"/media?#{%{id: m.id}}"}
               class="block rounded px-3 py-2 hover:bg-base-200"
             >
               <span class="font-medium">{m.filename}</span>

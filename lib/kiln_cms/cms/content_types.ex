@@ -336,16 +336,12 @@ defmodule KilnCMS.CMS.ContentTypes do
   # Scope an Entry code-interface call to one dynamic type. Internal callers
   # pass keyword `query`/`filter` opts (or none), so a keyword merge suffices.
   defp scoped(opts, definition) do
-    query =
-      opts
-      |> Keyword.get(:query, [])
-      |> Keyword.update(
-        :filter,
-        [type_definition_id: definition.id],
-        &Keyword.put(&1, :type_definition_id, definition.id)
-      )
+    query = Keyword.get(opts, :query, [])
 
-    Keyword.put(opts, :query, query)
+    # Prepend a second :filter entry rather than Keyword-merging into the
+    # caller's — Ash.Query.build applies every :filter (ANDed), and this stays
+    # correct when the caller's filter is an expression, not a keyword list.
+    Keyword.put(opts, :query, [{:filter, [type_definition_id: definition.id]} | query])
   end
 
   defp safe_existing_atom(string) do

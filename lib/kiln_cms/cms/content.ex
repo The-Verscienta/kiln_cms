@@ -46,6 +46,10 @@ defmodule KilnCMS.CMS.Content do
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
+  # Days before an abandoned "Untitled …" scaffold draft (never given content)
+  # is swept to the trash.
+  @untitled_sweep_days Application.compile_env(:kiln_cms, [:drafts, :untitled_sweep_days], 7)
+
   @doc false
   # Safety net for reads exposed on the public API: when neither the caller
   # (Ash.Query.limit) nor the paginator bounded the query, cap it so a broad
@@ -74,6 +78,8 @@ defmodule KilnCMS.CMS.Content do
     pub_scheduler = Module.concat([resource, Schedulers, PublishScheduled])
     purge_worker = Module.concat([resource, Workers, PurgeTrashed])
     purge_scheduler = Module.concat([resource, Schedulers, PurgeTrashed])
+    sweep_worker = Module.concat([resource, Workers, SweepUntitled])
+    sweep_scheduler = Module.concat([resource, Schedulers, SweepUntitled])
 
     accept =
       [:title, :slug] ++
@@ -493,6 +499,28 @@ defmodule KilnCMS.CMS.Content do
 
             worker_module_name unquote(purge_worker)
             scheduler_module_name unquote(purge_scheduler)
+          end
+
+          # "New page/post" persists an "Untitled …" record immediately, so
+          # abandoning the editor leaves an empty scaffold behind. Sweep drafts
+          # that still have the scaffold title, no blocks, and no edits for
+          # @untitled_sweep_days into the trash (soft delete — restorable for
+          # the retention window above).
+          trigger :sweep_untitled do
+            action :destroy
+            queue :default
+            scheduler_cron "45 3 * * *"
+
+            where expr(
+                    ^ref(:state) == :draft and
+                      like(^ref(:title), "Untitled %") and
+                      fragment("coalesce(cardinality(?), 0) = 0", ^ref(:blocks)) and
+                      ^ref(:updated_at) <= ago(unquote(@untitled_sweep_days), :day)
+                  )
+
+            worker_read_action :read
+            worker_module_name unquote(sweep_worker)
+            scheduler_module_name unquote(sweep_scheduler)
           end
         end
       end
