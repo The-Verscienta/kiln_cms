@@ -18,9 +18,16 @@ config :kiln_cms,
     KilnCMS.Firing,
     KilnCMS.History,
     KilnCMS.SearchIndex,
+    KilnCMS.Mail,
     Verscienta.Catalog
   ],
   content_domains: [KilnCMS.CMS, Verscienta.Catalog]
+
+# Keep DNS checks and the port-25 preflight off the network in tests; explicit
+# `dns:`/`tcp:` opts in DnsCheck tests still override these.
+config :kiln_cms, KilnCMS.Mail.DnsCheck,
+  dns: KilnCMS.Test.StubDNS,
+  tcp: KilnCMS.Test.StubTCP
 
 # Run best-effort analytics writes (page-view + search-query recording) inline
 # rather than in a detached supervised task, so the upsert stays on the test's

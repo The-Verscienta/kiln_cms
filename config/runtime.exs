@@ -241,26 +241,80 @@ if config_env() == :prod do
   #
   # config/config.exs defaults to Swoosh.Adapters.Local — a dev-only in-memory
   # mailbox with no delivery, and no supervised storage process outside `mix
-  # phx.server`. Auth confirmation/reset emails are sent synchronously inside
-  # the triggering Ash action, so with no real adapter configured, production
-  # registration/reset requests crash outright (GenServer call to a process
-  # that was never started) rather than just failing to deliver silently.
+  # phx.server`. All outbound email is queued through KilnCMS.Mail onto the
+  # Oban :mail queue, so with no real adapter configured in production the
+  # triggering requests still succeed but every delivery job fails and retries
+  # in Oban (visible in the oban_jobs table / logs) — no email actually leaves.
   #
-  # Opt into real delivery via SMTP (works with Postmark, SES, Gmail, or any
-  # mail server) by setting SMTP_HOST. TLS is on by default (STARTTLS on 587);
-  # set SMTP_TLS=false for an unencrypted relay (e.g. a local dev/test relay).
-  if smtp_host = System.get_env("SMTP_HOST") do
-    config :kiln_cms, KilnCMS.Mailer,
-      adapter: Swoosh.Adapters.SMTP,
-      relay: smtp_host,
-      port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
-      username: System.get_env("SMTP_USERNAME"),
-      password: System.get_env("SMTP_PASSWORD"),
-      tls: if(System.get_env("SMTP_TLS") == "false", do: :never, else: :always),
-      auth: :always
-
-    if from_email = System.get_env("MAIL_FROM_EMAIL") do
-      config :kiln_cms, email_from: {System.get_env("MAIL_FROM_NAME") || "KilnCMS", from_email}
+  # Two real-delivery modes (docs/direct-email-delivery-plan.md):
+  #
+  #   * MAIL_MODE=smtp (or just setting SMTP_HOST, the pre-MAIL_MODE opt-in) —
+  #     relay through any SMTP server (Postmark, SES, Gmail, ...). TLS is on
+  #     by default (STARTTLS on 587); set SMTP_TLS=false for an unencrypted
+  #     relay (e.g. a local dev/test relay).
+  #   * MAIL_MODE=direct — no relay: deliver straight to each recipient
+  #     domain's MX hosts on port 25, DKIM-signed once a key is configured.
+  #     Requires MAIL_FROM_EMAIL (its domain is the sending domain) and
+  #     correct DNS (SPF/DKIM/DMARC/PTR) — see /editor/mail once Phase 5
+  #     lands, and mind that many cloud hosts block outbound port 25.
+  # Treat a blank MAIL_MODE ("" — a common `MAIL_MODE=` .env/compose artifact)
+  # as unset rather than an unknown mode: an empty string is truthy in Elixir,
+  # so without this it would fall through to the `other -> raise` clause and
+  # crash boot (and mask a set SMTP_HOST, since `||` wouldn't fall back).
+  mail_mode =
+    case System.get_env("MAIL_MODE") do
+      blank when blank in [nil, ""] -> System.get_env("SMTP_HOST") && "smtp"
+      mode -> mode
     end
+
+  case mail_mode do
+    "smtp" ->
+      smtp_host =
+        System.get_env("SMTP_HOST") ||
+          raise "MAIL_MODE=smtp requires SMTP_HOST (the relay to send through)"
+
+      config :kiln_cms, KilnCMS.Mailer,
+        adapter: Swoosh.Adapters.SMTP,
+        relay: smtp_host,
+        port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
+        username: System.get_env("SMTP_USERNAME"),
+        password: System.get_env("SMTP_PASSWORD"),
+        tls: if(System.get_env("SMTP_TLS") == "false", do: :never, else: :always),
+        auth: :always
+
+    "direct" ->
+      unless System.get_env("MAIL_FROM_EMAIL") do
+        raise """
+        MAIL_MODE=direct requires MAIL_FROM_EMAIL: its domain is the sending
+        (and DKIM signing) domain, and async bounces are delivered to it.
+        """
+      end
+
+      helo_host =
+        case System.get_env("MAIL_HELO_HOST") do
+          empty when empty in [nil, ""] -> host
+          helo -> helo
+        end
+
+      config :kiln_cms, KilnCMS.Mailer,
+        adapter: KilnCMS.Mailer.DirectMX,
+        # HELO name; deliverability requires the sending IP's PTR record to
+        # resolve to this host.
+        hostname: helo_host
+
+    nil ->
+      :ok
+
+    other ->
+      raise "unknown MAIL_MODE #{inspect(other)} — expected \"smtp\" or \"direct\""
+  end
+
+  # Persist the resolved mode so the admin mail page reports it authoritatively
+  # instead of reverse-inferring it from the adapter module (which mislabels a
+  # downstream project's custom Swoosh adapter as "no real delivery").
+  config :kiln_cms, :mail_mode, mail_mode
+
+  if from_email = System.get_env("MAIL_FROM_EMAIL") do
+    config :kiln_cms, email_from: {System.get_env("MAIL_FROM_NAME") || "KilnCMS", from_email}
   end
 end

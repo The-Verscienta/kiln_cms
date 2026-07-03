@@ -190,6 +190,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor/webhooks", WebhookLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
+      live "/editor/mail", MailSettingsLive, :index
 
       # Plugin admin panels (D18) — compiled in from each installed plugin's
       # `admin_routes/0`, admin-gated by this live_session like the rest.

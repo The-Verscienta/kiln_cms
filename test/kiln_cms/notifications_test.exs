@@ -61,6 +61,11 @@ defmodule KilnCMS.NotificationsTest do
     assert review.subject == "Review requested: My Draft"
     assert recipients(review) == [to_string(admin.email)]
     refute to_string(editor.email) in recipients(review)
+
+    # Workflow emails are built in the worker (not via Mail.enqueue!), so they
+    # must still carry a domain-correct Message-ID rather than letting gen_smtp
+    # invent one from the container hostname.
+    assert review.headers["Message-ID"] =~ ~r/^<workflow-\d+@kilncms\.dev>$/
   end
 
   test "publishing emails the author, not the publisher" do
