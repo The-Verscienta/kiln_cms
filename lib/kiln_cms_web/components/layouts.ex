@@ -269,6 +269,17 @@ defmodule KilnCMSWeb.Layouts do
     >
       {gettext("Calendar")}
     </a>
+    <%!-- Only meaningful with more than one configured locale. --%>
+    <a
+      :if={
+        @current_user && @current_user.role in [:editor, :admin] &&
+          length(KilnCMS.I18n.locales()) > 1
+      }
+      href={~p"/editor/translations"}
+      class={@item}
+    >
+      {gettext("Translations")}
+    </a>
     <a
       :if={@current_user && @current_user.role in [:editor, :admin]}
       href={~p"/editor/settings"}

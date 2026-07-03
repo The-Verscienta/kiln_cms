@@ -184,6 +184,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> refresh_preview()
     |> load_versions()
+    |> load_translations()
+  end
+
+  # Per-locale coverage for the Translations panel (only rendered when the
+  # install has more than one locale).
+  defp load_translations(socket) do
+    assign(
+      socket,
+      :translations,
+      KilnCMS.CMS.Translations.coverage(socket.assigns.kind, socket.assigns.record,
+        actor: socket.assigns.actor
+      )
+    )
   end
 
   # The inline preview HTML is computed once per *form change* and kept in an
@@ -545,6 +558,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("workflow", %{"action" => action}, socket) do
     {:noreply, run_workflow(socket, action)}
+  end
+
+  # One-click translation: duplicate this record's content into a new draft in
+  # the target locale and jump to its editor.
+  def handle_event("create_translation", %{"locale" => locale}, socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    translation =
+      KilnCMS.CMS.Translations.create_translation!(kind, record, locale, actor: actor)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, gettext("Draft translation created (%{locale}).", locale: locale))
+     |> push_navigate(to: ~p"/editor/content/#{kind}/#{translation.id}")}
+  rescue
+    _error ->
+      {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end
 
   def handle_event("restore", %{"version_id" => version_id}, socket) do
@@ -2014,6 +2044,61 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   </p>
                 </div>
               </div>
+            </details>
+
+            <details
+              :if={length(@translations) > 1}
+              class="rounded border border-base-content/15 p-3"
+              open
+            >
+              <summary class="cursor-pointer text-sm font-medium">
+                {gettext("Translations")}
+              </summary>
+              <ul class="mt-3 space-y-2">
+                <li
+                  :for={cov <- @translations}
+                  class="flex items-center justify-between gap-3 text-sm"
+                >
+                  <span class="flex items-center gap-2">
+                    <span class="font-mono text-xs font-semibold uppercase">{cov.locale}</span>
+                    <span
+                      :if={cov.record && cov.record.id == @record.id}
+                      class="text-xs text-base-content/50"
+                    >
+                      {gettext("(this one)")}
+                    </span>
+                    <span
+                      :if={cov.stale?}
+                      class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warning"
+                      title={gettext("The source locale was updated after this translation.")}
+                    >
+                      {gettext("Outdated")}
+                    </span>
+                  </span>
+                  <span
+                    :if={cov.record && cov.record.id == @record.id}
+                    class="text-xs text-base-content/70"
+                  >
+                    {state_label(cov.status)}
+                  </span>
+                  <.link
+                    :if={cov.record && cov.record.id != @record.id}
+                    navigate={~p"/editor/content/#{@kind}/#{cov.record.id}"}
+                    class="text-xs text-primary hover:underline"
+                  >
+                    {state_label(cov.status)} — {gettext("edit")}
+                  </.link>
+                  <button
+                    :if={is_nil(cov.record)}
+                    type="button"
+                    phx-click="create_translation"
+                    phx-value-locale={cov.locale}
+                    class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+                  >
+                    {gettext("Create translation")}
+                  </button>
+                </li>
+              </ul>
             </details>
 
             <details class="rounded border border-base-content/15 p-3">
