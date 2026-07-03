@@ -23,7 +23,16 @@ config :kiln_cms, Oban,
   # accordingly in production (see config/runtime.exs and docs/performance.md).
   queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, default: 10],
   repo: KilnCMS.Repo,
-  plugins: [{Oban.Plugins.Cron, []}]
+  plugins: [
+    {Oban.Plugins.Cron, []},
+    # Delete finished jobs after 7 days. Without this, `oban_jobs` grows
+    # without bound AND retains job args indefinitely — and mail jobs carry
+    # rendered email bodies containing live auth-token URLs (magic links,
+    # password resets). Those tokens expire in hours, well inside this window,
+    # so pruning bounds both the table size and how long token/PII data sits
+    # in the database (and in backups).
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}
+  ]
 
 config :kiln_cms,
   ash_domains: [
@@ -32,7 +41,8 @@ config :kiln_cms,
     KilnCMS.Analytics,
     KilnCMS.Firing,
     KilnCMS.History,
-    KilnCMS.SearchIndex
+    KilnCMS.SearchIndex,
+    KilnCMS.Mail
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the

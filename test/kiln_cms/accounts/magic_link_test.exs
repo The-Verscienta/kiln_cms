@@ -28,6 +28,10 @@ defmodule KilnCMS.Accounts.MagicLinkTest do
 
     assert :ok = request_magic_link(to_string(user.email))
 
+    # The sender enqueues delivery on the :mail queue (KilnCMS.Mail); the
+    # email only reaches the test adapter once the job runs.
+    KilnCMS.DataCase.drain_oban()
+
     assert_email_sent(fn email ->
       email.subject == "Your KilnCMS sign-in link" and
         email.to == [{"", to_string(user.email)}]
@@ -36,6 +40,8 @@ defmodule KilnCMS.Accounts.MagicLinkTest do
 
   test "requesting a magic link for an unknown email sends nothing (registration disabled)" do
     assert :ok = request_magic_link("nobody-#{System.unique_integer([:positive])}@example.com")
+
+    KilnCMS.DataCase.drain_oban()
 
     refute_email_sent()
   end

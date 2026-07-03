@@ -114,6 +114,17 @@ inline assets).
 Endpoint configuration is admin-only. The delivery worker reads endpoints as the
 **system** (`authorize?: false`).
 
+## Mail settings — `Mail.Settings`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read, `init`, `generate_dkim`, `rotate_dkim`, `configure_key_source`, `set_server_ip`, `record_verification` | ✅ | ❌ | ❌ | ❌ |
+
+Instance-wide mail/DKIM configuration (`/editor/mail`) is admin-only. The
+delivery pipeline resolves the DKIM key as the **system**
+(`authorize?: false` via `KilnCMS.Mail.dkim_config/0`), as does the lazy
+singleton creation (`ensure_settings!/0`, reached only from the admin page).
+
 ## Custom fields — `FieldDefinition`
 
 | Action | admin | editor | viewer | anonymous |

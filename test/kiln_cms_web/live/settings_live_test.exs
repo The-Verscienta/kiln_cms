@@ -2,7 +2,7 @@ defmodule KilnCMSWeb.SettingsLiveTest do
   @moduledoc false
   use KilnCMSWeb.ConnCase, async: true
 
-  @tag :capture_log
+  @moduletag :capture_log
 
   import Phoenix.LiveViewTest
 

@@ -11,7 +11,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendMagicLink do
 
   import Swoosh.Email
 
-  alias KilnCMS.Mailer
+  alias KilnCMS.Mail
 
   @impl true
   def send(user_or_email, token, _opts) do
@@ -20,7 +20,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendMagicLink do
     |> to(recipient(user_or_email))
     |> subject("Your KilnCMS sign-in link")
     |> html_body(body(token))
-    |> Mailer.deliver!()
+    |> Mail.enqueue!()
   end
 
   defp recipient(%{email: email}), do: to_string(email)

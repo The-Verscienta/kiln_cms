@@ -8,7 +8,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
 
   import Swoosh.Email
 
-  alias KilnCMS.Mailer
+  alias KilnCMS.Mail
 
   @impl true
   def send(user, token, _) do
@@ -17,7 +17,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
     |> to(to_string(user.email))
     |> subject("Reset your password")
     |> html_body(body(token: token))
-    |> Mailer.deliver!()
+    |> Mail.enqueue!()
   end
 
   defp body(params) do

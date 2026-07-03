@@ -10,6 +10,13 @@ defmodule KilnCMS.Application do
     assert_dev_routes_disabled_in_prod!()
     setup_observability()
 
+    # Log Oban job lifecycle/exceptions. Without this, a failing delivery job
+    # (e.g. a misconfigured mailer in prod) fails and retries silently — only
+    # visible by querying `oban_jobs`. Attaching here makes those failures
+    # show up in the logs, as the mailer config comment in runtime.exs assumes.
+    _ = Oban.Telemetry.attach_default_logger(level: :info)
+    warn_if_no_mailer_in_prod()
+
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
     _ = Code.ensure_loaded(KilnCMSWeb.AshFormErrors)
@@ -118,6 +125,27 @@ defmodule KilnCMS.Application do
       without authentication. Rebuild the release without `config :kiln_cms,
       dev_routes: true` (it should only ever be set in config/dev.exs).
       """
+    end
+  end
+
+  # Warn loudly at boot if a :prod release has no real mailer configured. All
+  # outbound mail is queued, so registration/reset requests now *succeed* even
+  # with no adapter (the Local adapter's storage process isn't started in a
+  # release, so every delivery job just fails and retries) — which means a
+  # missing MAIL_MODE/SMTP_HOST is otherwise silent. A warning (not a hard
+  # raise) keeps genuinely mail-less deployments bootable.
+  defp warn_if_no_mailer_in_prod do
+    adapter = Application.get_env(:kiln_cms, KilnCMS.Mailer, [])[:adapter]
+
+    if Application.get_env(:kiln_cms, :compile_env) == :prod and
+         adapter in [nil, Swoosh.Adapters.Local] do
+      require Logger
+
+      Logger.warning(
+        "No mail delivery is configured (MAIL_MODE / SMTP_HOST unset). Outbound " <>
+          "email — confirmations, password resets, notifications — will be queued " <>
+          "but never delivered. Set MAIL_MODE=smtp (with SMTP_HOST) or MAIL_MODE=direct."
+      )
     end
   end
 
