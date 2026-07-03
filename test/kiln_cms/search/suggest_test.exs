@@ -38,4 +38,12 @@ defmodule KilnCMS.Search.SuggestTest do
   test "nothing close means no suggestion" do
     assert Search.suggest("zqxvbnmlkj", authorize?: true) == nil
   end
+
+  test "an exact word match means the query isn't a typo — no suggestion" do
+    actor = admin()
+    page = CMS.create_page!(%{title: "Fermentation Basics", slug: slug()}, actor: actor)
+    CMS.publish_page!(page, %{}, actor: actor)
+
+    assert Search.suggest("fermentation", authorize?: true) == nil
+  end
 end

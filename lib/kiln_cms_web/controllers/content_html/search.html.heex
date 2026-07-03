@@ -22,14 +22,51 @@
     class="mt-8 text-base-content/60"
   >
     {gettext("No results for “%{query}”.", query: @query)}
+  </p>
+
+  <%!-- Shown for sparse results too — the fuzzy leg may have rescued hits
+       from a typo, and this names the corrected term. --%>
+  <p :if={@suggestion} class="mt-4 text-base-content/60">
     <a
-      :if={@suggestion}
       href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@suggestion)}
       class="text-primary hover:underline"
     >
       {gettext("Did you mean “%{suggestion}”?", suggestion: @suggestion)}
     </a>
   </p>
+
+  <%!-- Category facets over the match set — filter and clear links keep the
+       query; counts always show the unfiltered distribution. --%>
+  <nav :if={@facets != []} aria-label={gettext("Filter by category")} class="mt-6">
+    <ul class="flex flex-wrap items-center gap-2 text-sm">
+      <li :if={@active_category}>
+        <a
+          href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@query)}
+          class="inline-block rounded-full border border-base-content/20 px-3 py-1 hover:border-primary"
+        >
+          {gettext("All results")}
+        </a>
+      </li>
+      <li :for={facet <- @facets}>
+        <a
+          href={
+            KilnCMS.I18n.localized_path(@locale, "/search") <>
+              "?q=" <> URI.encode_www_form(@query) <> "&category=" <> URI.encode_www_form(facet.slug)
+          }
+          aria-current={if @active_category && @active_category.slug == facet.slug, do: "true"}
+          class={[
+            "inline-block rounded-full border px-3 py-1 hover:border-primary",
+            if(@active_category && @active_category.slug == facet.slug,
+              do: "border-primary bg-primary/10",
+              else: "border-base-content/20"
+            )
+          ]}
+        >
+          {facet.name} <span class="text-base-content/60">({facet.count})</span>
+        </a>
+      </li>
+    </ul>
+  </nav>
 
   <section :if={@results.posts != []} class="mt-8">
     <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">

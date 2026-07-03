@@ -733,8 +733,21 @@ defmodule KilnCMS.CMS.Content do
                      max_page_size: 100,
                      default_limit: 25
 
+          # The same optional facets as `:search`, so `hybrid/3` can apply one
+          # filter set to both legs.
+          argument :category_id, :uuid
+          argument :author_id, :uuid
+          argument :state, :atom
+          argument :tag_ids, {:array, :uuid}
+
           # Candidates: same-locale rows that have an embedding.
-          filter expr(not is_nil(^ref(:embedding)) and ^ref(:locale) == ^arg(:locale))
+          filter expr(
+                   not is_nil(^ref(:embedding)) and ^ref(:locale) == ^arg(:locale) and
+                     (is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)) and
+                     (is_nil(^arg(:author_id)) or ^ref(:author_id) == ^arg(:author_id)) and
+                     (is_nil(^arg(:state)) or ^ref(:state) == ^arg(:state)) and
+                     (is_nil(^arg(:tag_ids)) or exists(tags, ^ref(:id) in ^arg(:tag_ids)))
+                 )
 
           prepare fn query, _context ->
             locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()

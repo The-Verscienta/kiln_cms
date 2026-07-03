@@ -111,6 +111,37 @@ defmodule KilnCMS.Search.HybridTest do
     assert entry.id in (Search.hybrid(KilnCMS.CMS.Entry, "alpha", actor: admin) |> ids())
   end
 
+  test "a typo is rescued by the fuzzy leg when the keyword leg comes up short" do
+    admin = admin()
+    # "fermentaton" survives stemming as its own token (no tsquery match) but
+    # is trigram-close to "fermentation" — the keyword leg is empty, so the
+    # fuzzy fallback fires and rescues the hit.
+    page = CMS.create_page!(%{title: "Fermentation Guide", slug: slug()}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    put_search_env(semantic: false)
+
+    assert page.id in (Search.hybrid(:page, "fermentaton", actor: admin) |> ids())
+  end
+
+  test "the fuzzy leg stays out when the keyword leg has enough hits" do
+    admin = admin()
+
+    for n <- 1..3 do
+      CMS.create_page!(%{title: "alpha #{n}", slug: slug()}, actor: admin)
+    end
+
+    # Matches the fuzzy leg (title ILIKE "alpha%") but not the keyword leg
+    # ("alphaa" doesn't stem to "alpha") — it can only surface if the fallback
+    # runs, which the three keyword hits keep switched off.
+    near_miss = CMS.create_page!(%{title: "alphaa", slug: slug()}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    put_search_env(semantic: false)
+
+    refute near_miss.id in (Search.hybrid(:page, "alpha", actor: admin) |> ids())
+  end
+
   test "global/2 sections are hybrid: semantic-only matches surface" do
     admin = admin()
     keyword_hit = CMS.create_page!(%{title: "alpha", slug: slug()}, actor: admin)

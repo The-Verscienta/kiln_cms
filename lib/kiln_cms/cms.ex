@@ -140,6 +140,7 @@ defmodule KilnCMS.CMS do
       define :list_categories, action: :read
       define :get_category, action: :read, get_by: [:id]
       define :get_category_by_slug, action: :by_slug, args: [:slug]
+      define :search_categories, action: :search, args: [:query]
       define :create_category, action: :create
       define :update_category, action: :update
       define :destroy_category, action: :destroy
@@ -149,6 +150,7 @@ defmodule KilnCMS.CMS do
       define :list_tags, action: :read
       define :get_tag, action: :read, get_by: [:id]
       define :get_tag_by_slug, action: :by_slug, args: [:slug]
+      define :search_tags, action: :search, args: [:query]
       define :create_tag, action: :create
       define :update_tag, action: :update
       define :destroy_tag, action: :destroy
