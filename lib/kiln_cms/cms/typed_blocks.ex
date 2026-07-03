@@ -163,6 +163,16 @@ defmodule KilnCMS.CMS.TypedBlocks do
     end
   end
 
+  @doc """
+  A typed block (struct or `%Ash.Union{}`) as a string-keyed input map — the
+  shape `BlockUnion.cast_input` accepts. Used by callers that rebuild a
+  record's `blocks` param from its current value with targeted edits (e.g.
+  the collab checkpoint materializer replacing one block's `legacy_html`).
+  """
+  @spec input_map(struct() | Ash.Union.t()) :: %{String.t() => term()}
+  def input_map(%Ash.Union{value: value}), do: input_map(value)
+  def input_map(%_{} = struct), do: struct |> attrs_of() |> drop_nils()
+
   @doc "Convert a stored legacy block list into typed block structs."
   @spec from_legacy([struct() | map()] | nil) :: [struct()]
   def from_legacy(blocks) do

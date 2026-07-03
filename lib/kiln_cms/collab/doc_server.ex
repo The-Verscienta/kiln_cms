@@ -66,7 +66,9 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
       # Lazy restore on first use — not in init — so a supervised start never
       # blocks on the database (and tests own the connection by then).
       restored?: not persist?(),
-      dirty?: false
+      dirty?: false,
+      # Updates since the last server-side materialization (spike §8).
+      materialize_dirty?: false
     }
 
     {:ok, state, @idle_shutdown}
@@ -98,7 +100,17 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    {:noreply, %{state | clients: MapSet.delete(state.clients, pid)}, @idle_shutdown}
+    state = %{state | clients: MapSet.delete(state.clients, pid)}
+
+    # The last editor is gone — the client persister can no longer save, so
+    # the server materializes the converged text into the record itself
+    # (spike §8). Never runs while editors are present: they own persistence.
+    state =
+      if MapSet.size(state.clients) == 0,
+        do: materialize(state),
+        else: state
+
+    {:noreply, state, @idle_shutdown}
   end
 
   def handle_info(:checkpoint, state) do
@@ -122,7 +134,10 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
 
   @impl true
   def terminate(_reason, state) do
-    persist(state)
+    state = persist(state)
+    # A shutdown mid-session (deploy) also flushes prose to the record — the
+    # attached clients' LiveViews are going down with this node anyway.
+    materialize(state)
     :ok
   end
 
@@ -137,6 +152,8 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
   defp mark_dirty(%{dirty?: true} = state), do: state
 
   defp mark_dirty(state) do
+    state = if materialize?(), do: %{state | materialize_dirty?: true}, else: state
+
     if persist?() do
       Process.send_after(self(), :checkpoint, @checkpoint_after)
       %{state | dirty?: true}
@@ -160,6 +177,19 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
     )
 
     %{state | dirty?: false}
+  end
+
+  defp materialize? do
+    :kiln_cms
+    |> Application.get_env(KilnCMS.Collab.Crdt, [])
+    |> Keyword.get(:materialize?, true)
+  end
+
+  defp materialize(%{materialize_dirty?: false} = state), do: state
+
+  defp materialize(state) do
+    KilnCMS.Collab.Crdt.Checkpoint.write_back(state.doc_key, state.doc)
+    %{state | materialize_dirty?: false}
   end
 
   defp maybe_restore(%{restored?: true} = state), do: state

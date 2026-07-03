@@ -110,7 +110,8 @@ config :nx, default_backend: EXLA.Backend
 
 # Exercise the collab CRDT channel in tests (joins refuse when off).
 config :kiln_cms, :collab_prototype, true
-# Collab doc persistence is exercised by its own (sync) durability tests; off
-# by default so DocServers spawned by async channel/editor tests never touch
-# the sandboxed database from an unowned process.
-config :kiln_cms, KilnCMS.Collab.Crdt, persist?: false
+# Collab doc persistence + checkpoint materialization are exercised by their
+# own (sync) test suites; off by default so DocServers spawned by async
+# channel/editor tests never touch the sandboxed database from an unowned
+# process.
+config :kiln_cms, KilnCMS.Collab.Crdt, persist?: false, materialize?: false
