@@ -54,10 +54,9 @@ defmodule KilnCMS.Keys do
   def fetch_for(settings),
     do: provider!(settings.dkim_key_provider).fetch(provider_config(settings))
 
-  @doc "Run the configured provider's source check for a settings row."
-  @spec check(KilnCMS.Mail.Settings.t()) :: :ok | {:error, term()}
-  def check(settings),
-    do: provider!(settings.dkim_key_provider).check(provider_config(settings))
+  @doc "Whether `provider` accepts a generated key (vs pointing at an external source)."
+  @spec writable?(atom()) :: boolean()
+  def writable?(provider), do: provider!(provider).writable?()
 
   # The database provider's material is a column, not part of the persisted
   # provider-config map; assemble its in-memory config here.

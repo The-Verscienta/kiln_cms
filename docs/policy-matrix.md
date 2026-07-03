@@ -125,6 +125,17 @@ delivery pipeline resolves the DKIM key as the **system**
 (`authorize?: false` via `KilnCMS.Mail.dkim_config/0`), as does the lazy
 singleton creation (`ensure_settings!/0`, reached only from the admin page).
 
+## Bounce suppression — `Mail.SuppressedRecipient`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read, `suppress`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Managed from `/editor/mail` (admin-only). The delivery pipeline writes
+suppressions on a hard bounce and consults them before queuing as the
+**system** (`authorize?: false`). As with reads elsewhere, a non-admin read is
+filtered to nothing rather than erroring, so the list never leaks.
+
 ## Custom fields — `FieldDefinition`
 
 | Action | admin | editor | viewer | anonymous |

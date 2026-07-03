@@ -221,6 +221,10 @@ delivered — the app logs a warning about this at boot.
 
 ## Monitoring delivery
 
+- **The Delivery health panel** on `/editor/mail` — recent permanent failures
+  (with the recipient domain and redacted reason) and the **suppressed
+  addresses** below (see next section). The first place to look when mail
+  isn't arriving.
 - **Logs** — Oban's default logger is attached, so job failures show up in the
   application logs. A permanent (5xx) reject additionally logs a
   `Mail permanently rejected …` warning with the (address-redacted) SMTP
@@ -235,6 +239,20 @@ delivered — the app logs a warning about this at boot.
   args contain rendered token URLs, so they aren't kept indefinitely). If you
   need a longer audit window, adjust the `Oban.Plugins.Pruner` `max_age` in
   `config/config.exs`.
+
+### Bounce suppression
+
+When a message is **permanently rejected** (a 5xx hard bounce — e.g. "user
+unknown"), KilnCMS records that address on a **suppression list** and skips it
+on future sends. This stops the system from re-mailing a known-dead address on
+every subsequent password reset or notification, which wastes retries and
+signals spamminess to receivers.
+
+Suppressed addresses are listed on `/editor/mail` under **Delivery health**.
+If an address was suppressed in error (or the mailbox is fixed), click
+**Remove** and it can receive mail again. Suppression is by address and
+case-insensitive; the admin test-send is *not* suppressed, so you can always
+re-test a fixed address.
 
 ## Operational notes
 

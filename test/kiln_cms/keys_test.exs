@@ -76,7 +76,6 @@ defmodule KilnCMS.KeysTest do
       on_exit(fn -> System.delete_env(var) end)
 
       assert {:ok, ^pem} = Providers.Env.fetch(%{"var" => var})
-      assert :ok = Providers.Env.check(%{"var" => var})
       refute Providers.Env.writable?()
     end
 
@@ -90,7 +89,6 @@ defmodule KilnCMS.KeysTest do
 
       File.write!(path, pem)
       assert {:ok, ^pem} = Providers.File.fetch(%{"path" => path})
-      assert :ok = Providers.File.check(%{"path" => path})
       refute Providers.File.writable?()
     end
 
@@ -99,17 +97,14 @@ defmodule KilnCMS.KeysTest do
       encrypted = Vault.encrypt(pem)
 
       assert {:ok, ^pem} = Providers.Database.fetch(%{"encrypted" => encrypted})
-      assert :ok = Providers.Database.check(%{"encrypted" => encrypted})
       assert {:error, :no_key_generated} = Providers.Database.fetch(%{"encrypted" => nil})
       assert Providers.Database.writable?()
     end
 
-    test "check catches a source that holds a non-key" do
-      var = "KILN_TEST_DKIM_#{System.unique_integer([:positive])}"
-      System.put_env(var, "hello")
-      on_exit(fn -> System.delete_env(var) end)
-
-      assert {:error, :invalid_pem} = Providers.Env.check(%{"var" => var})
+    test "writable?/1 distinguishes generate-here (database) from point-at-source providers" do
+      assert Keys.writable?(:database)
+      refute Keys.writable?(:env)
+      refute Keys.writable?(:file)
     end
   end
 end

@@ -25,6 +25,7 @@ defmodule KilnCMS.Mail do
   """
   use Ash.Domain
 
+  require Ecto.Query
   require Logger
 
   alias KilnCMS.Mail.DeliveryWorker
@@ -43,6 +44,13 @@ defmodule KilnCMS.Mail do
 
       define :set_mail_server_ip, action: :set_server_ip
       define :record_mail_verification, action: :record_verification
+    end
+
+    resource KilnCMS.Mail.SuppressedRecipient do
+      define :suppress_recipient, action: :suppress
+      define :list_suppressed_recipients, action: :read
+      define :get_suppressed_recipient, action: :read, get_by: [:email]
+      define :unsuppress_recipient, action: :destroy
     end
   end
 
@@ -91,7 +99,12 @@ defmodule KilnCMS.Mail do
       end
     end)
 
-    Enum.each(email.to, fn recipient ->
+    email.to
+    # Drop recipients that previously hard-bounced: re-attempting a dead
+    # address wastes retries and signals spamminess. An admin clears the
+    # suppression from /editor/mail to resume.
+    |> Enum.reject(fn {_name, address} -> suppressed?(address) end)
+    |> Enum.each(fn recipient ->
       email
       |> serialize(recipient)
       |> DeliveryWorker.new()
@@ -99,6 +112,66 @@ defmodule KilnCMS.Mail do
     end)
 
     :ok
+  end
+
+  @doc """
+  Recent mail jobs that ended in a permanent failure (`cancelled` = hard 5xx)
+  or exhausted retries (`discarded`), newest first — for the admin delivery
+  panel. Returns maps with the recipient **domain** (never the full address),
+  state, timestamp, and the already-redacted reason.
+  """
+  @spec recent_delivery_failures(pos_integer()) :: [map()]
+  def recent_delivery_failures(limit \\ 20) do
+    Ecto.Query.from(j in Oban.Job,
+      where: j.queue == "mail" and j.state in ["cancelled", "discarded"],
+      order_by: [desc: j.attempted_at],
+      limit: ^limit
+    )
+    |> KilnCMS.Repo.all()
+    |> Enum.map(&summarize_failure/1)
+  end
+
+  defp summarize_failure(job) do
+    %{
+      domain: failure_domain(job.args),
+      state: job.state,
+      at: job.attempted_at,
+      reason: last_error(job.errors)
+    }
+  end
+
+  defp failure_domain(%{"to" => [_name, address]}) when is_binary(address), do: domain_of(address)
+  defp failure_domain(_args), do: "unknown"
+
+  defp last_error(errors) when is_list(errors) do
+    case List.last(errors) do
+      %{"error" => error} -> error
+      _other -> nil
+    end
+  end
+
+  defp last_error(_errors), do: nil
+
+  @doc "Whether `address` is on the bounce-suppression list (case-insensitive)."
+  @spec suppressed?(String.t()) :: boolean()
+  def suppressed?(address) do
+    # Bang variant returns the record or nil directly; the non-bang one wraps
+    # it in `{:ok, _}`, which would read as "always suppressed".
+    case get_suppressed_recipient!(address, authorize?: false, not_found_error?: false) do
+      nil -> false
+      _record -> true
+    end
+  end
+
+  # Suppress every recipient of a hard-bounced message. Best-effort: a failure
+  # to record must not mask the delivery outcome, so the result is ignored and
+  # any unexpected raise is swallowed.
+  defp suppress_recipients(email, reason) do
+    Enum.each(email.to, fn {_name, address} ->
+      _ = suppress_recipient(%{email: address, reason: reason}, authorize?: false)
+    end)
+  rescue
+    _error -> :ok
   end
 
   @doc """
@@ -135,6 +208,9 @@ defmodule KilnCMS.Mail do
             # (and the cancel reason below) may reach Sentry/OTLP exporters.
             %{recipient_domains: recipient_domains(email), reason: safe_reason}
           )
+
+          # Remember the dead address so future sends skip it (enqueue!).
+          suppress_recipients(email, safe_reason)
 
           {:cancel, "permanent delivery failure: #{safe_reason}"}
         else

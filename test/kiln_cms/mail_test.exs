@@ -182,10 +182,104 @@ defmodule KilnCMS.MailTest do
         Mail.deliver_for_worker(email(), adapter: TransientFailureAdapter)
       end
     end
+
+    @tag :capture_log
+    test "a permanent failure suppresses the recipient so future sends skip it" do
+      refute Mail.suppressed?("one@example.com")
+
+      assert {:cancel, _reason} =
+               Mail.deliver_for_worker(email(), adapter: PermanentFailureAdapter)
+
+      assert Mail.suppressed?("one@example.com")
+      # Case-insensitive.
+      assert Mail.suppressed?("One@Example.com")
+
+      # A later enqueue to the suppressed address queues nothing...
+      :ok = email() |> put_to([{"", "one@example.com"}]) |> Mail.enqueue!()
+      drain_oban()
+      refute_email_sent()
+
+      # ...while other recipients are unaffected.
+      :ok = email() |> put_to([{"", "live@example.com"}]) |> Mail.enqueue!()
+      drain_oban()
+      assert_email_sent(fn sent -> sent.to == [{"", "live@example.com"}] end)
+    end
+  end
+
+  describe "suppression list" do
+    test "suppress is idempotent (upsert) and refreshes the reason" do
+      admin = admin_user()
+
+      {:ok, first} =
+        Mail.suppress_recipient(%{email: "dupe@example.com", reason: "550 one"}, actor: admin)
+
+      {:ok, second} =
+        Mail.suppress_recipient(%{email: "dupe@example.com", reason: "550 two"}, actor: admin)
+
+      assert first.id == second.id
+      assert second.reason == "550 two"
+      assert [_only] = Mail.list_suppressed_recipients!(actor: admin)
+    end
+
+    test "unsuppress lets an address receive mail again" do
+      admin = admin_user()
+      {:ok, record} = Mail.suppress_recipient(%{email: "back@example.com"}, actor: admin)
+      assert Mail.suppressed?("back@example.com")
+
+      :ok = Mail.unsuppress_recipient(record, actor: admin)
+      refute Mail.suppressed?("back@example.com")
+    end
+
+    test "managing suppressions is admin-only" do
+      admin = admin_user()
+      editor = user(:editor)
+      {:ok, _} = Mail.suppress_recipient(%{email: "hidden@example.com"}, actor: admin)
+
+      # Writes are forbidden outright...
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Mail.suppress_recipient(%{email: "x@example.com"}, actor: editor)
+
+      # ...and the read policy filters non-admins to nothing (never leaks the list).
+      assert {:ok, []} = Mail.list_suppressed_recipients(actor: editor)
+      assert [_one] = Mail.list_suppressed_recipients!(actor: admin)
+    end
+  end
+
+  test "recent_delivery_failures summarizes failed mail jobs with domain only (no address)" do
+    # Insert a cancelled mail job directly; a unique domain scopes the assertion
+    # against the shared oban_jobs table.
+    domain = "boom-#{System.unique_integer([:positive])}.test"
+
+    {:ok, _job} =
+      KilnCMS.Repo.insert(%Oban.Job{
+        worker: "KilnCMS.Mail.DeliveryWorker",
+        queue: "mail",
+        state: "cancelled",
+        args: %{"to" => ["", "dead@#{domain}"], "subject" => "x"},
+        errors: [%{"error" => "permanent delivery failure: 550 [address redacted]"}],
+        attempted_at: DateTime.utc_now()
+      })
+
+    failure = Enum.find(Mail.recent_delivery_failures(), &(&1.domain == domain))
+
+    assert failure.state == "cancelled"
+    assert failure.reason =~ "550"
+    refute failure.reason =~ "dead@"
   end
 
   test "backoff follows the greylist-aware schedule and plateaus" do
     schedule = Enum.map(1..8, &DeliveryWorker.backoff(%Oban.Job{attempt: &1}))
     assert schedule == [60, 300, 900, 3600, 7200, 14_400, 28_800, 28_800]
+  end
+
+  defp admin_user, do: user(:admin)
+
+  defp user(role) do
+    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+      email: "mail-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+      confirmed_at: DateTime.utc_now(),
+      role: role
+    })
   end
 end

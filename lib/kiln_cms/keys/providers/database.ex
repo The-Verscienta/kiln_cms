@@ -23,12 +23,5 @@ defmodule KilnCMS.Keys.Providers.Database do
   end
 
   @impl true
-  def check(config) do
-    with {:ok, pem} <- fetch(config) do
-      KilnCMS.Keys.validate_private_key_pem(pem)
-    end
-  end
-
-  @impl true
   def writable?, do: true
 end
