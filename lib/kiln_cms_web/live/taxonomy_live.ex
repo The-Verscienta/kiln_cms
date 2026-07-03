@@ -261,7 +261,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
           <.input
             field={@form[:name]}
             label={gettext("Name")}
-            placeholder={gettext("New %{kind} name", kind: @kind)}
+            placeholder={gettext("New %{kind} name", kind: kind_label(@kind))}
           />
           <.input
             field={@form[:slug]}
@@ -275,7 +275,9 @@ defmodule KilnCMSWeb.TaxonomyLive do
           type="textarea"
           label={gettext("Description")}
         />
-        <.button type="submit" variant="primary">{gettext("Add %{kind}", kind: @kind)}</.button>
+        <.button type="submit" variant="primary">
+          {gettext("Add %{kind}", kind: kind_label(@kind))}
+        </.button>
       </.form>
 
       <p :if={@records == []} class="text-sm text-base-content/60">
@@ -378,4 +380,10 @@ defmodule KilnCMSWeb.TaxonomyLive do
   defp none_yet("category"), do: gettext("No categories yet.")
   defp none_yet("tag"), do: gettext("No tags yet.")
   defp none_yet(_kind), do: gettext("Nothing here yet.")
+
+  # The translated noun for interpolations like "Add %{kind}" — the raw kind
+  # string would surface untranslated English ("Ajouter category").
+  defp kind_label("category"), do: gettext("category")
+  defp kind_label("tag"), do: gettext("tag")
+  defp kind_label(kind), do: kind
 end
