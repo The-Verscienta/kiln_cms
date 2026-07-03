@@ -58,25 +58,32 @@ defmodule KilnCMS.Search do
   @rrf_k 60
 
   @doc """
-  Hybrid search over a content `type` (`:page` or `:post`): fuse the keyword
-  (`:search`, ts_rank) and semantic (`:search_semantic`, cosine) result lists by
-  Reciprocal Rank Fusion and return the merged records, best first.
+  Hybrid search over any content type: fuse the keyword (`:search`, ts_rank)
+  and semantic (`:search_semantic`, cosine) result lists by Reciprocal Rank
+  Fusion and return the merged records, best first.
+
+  `type` is anything the content registry resolves — `:page`, `:post`, a
+  generated type's atom, a dynamic type's name string (searched on the shared
+  entry tier) — or a content resource module directly.
 
   Degrades to keyword-only when semantic search is disabled — the semantic leg
   then returns nothing. Read options (`:actor`, `:authorize?`) pass through to
   both legs, so visibility is respected. `:limit` caps the result count
-  (default 20); `:k` overrides the RRF constant.
+  (default 20); `:k` overrides the RRF constant; `:load` applies to both legs
+  (e.g. the `highlight` snippet calc); `rerank: true` reorders the fused
+  results with the configured reranker (still gated by `rerank?()`).
   """
-  @spec hybrid(:page | :post, String.t(), keyword()) :: [struct()]
+  @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
-    resource = resource_for(type)
+    resource = search_resource(type)
     read_opts = Keyword.take(opts, [:actor, :authorize?])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     limit = Keyword.get(opts, :limit, 20)
     k = Keyword.get(opts, :k, @rrf_k)
+    load = Keyword.get(opts, :load, [])
 
-    keyword = run_leg(resource, :search, query, locale, read_opts)
-    semantic = run_leg(resource, :search_semantic, query, locale, read_opts)
+    keyword = run_leg(resource, :search, query, locale, read_opts, load)
+    semantic = run_leg(resource, :search_semantic, query, locale, read_opts, load)
 
     fused =
       [keyword, semantic]
@@ -87,6 +94,18 @@ defmodule KilnCMS.Search do
       rerank(query, fused)
     else
       fused
+    end
+  end
+
+  # Resolve what to search: a registered content type (compiled → its
+  # resource; dynamic → the shared entry tier) or a resource module as-is.
+  defp search_resource(resource) when resource in [KilnCMS.CMS.Entry], do: resource
+
+  defp search_resource(type) do
+    case KilnCMS.CMS.ContentTypes.get(type) do
+      %{source: :dynamic} -> KilnCMS.CMS.Entry
+      %{resource: resource} when not is_nil(resource) -> resource
+      nil when is_atom(type) -> type
     end
   end
 
@@ -114,15 +133,22 @@ defmodule KilnCMS.Search do
   end
 
   @doc """
-  Global keyword search across content types and media, returning sectioned
+  Global **hybrid** search across content types and media, returning sectioned
   results: `%{pages: [...], posts: [...], entries: [...], media: [...]}`.
+
+  Every content section fuses the keyword and semantic legs (RRF via
+  `hybrid/3`), so meaning-based matches surface everywhere search is offered —
+  the public `/search` page, the editor palette, the search API — and degrade
+  to keyword-only when semantic search is disabled. With reranking enabled
+  (`rerank?()`), each section's fused results are reordered by the reranker.
+
   Content sections are locale-scoped (via `:locale`, default configured);
-  media is locale-agnostic. `entries` spans every admin-defined dynamic type
-  (D17), each record carrying the `type_name` calc for labeling/linking.
-  Read options (`:actor`, `:authorize?`) pass through; `:limit` caps each
-  section (default 10). Pass `highlight: true` to load the `highlight` snippet
-  calc on the content sections (rendered by the admin palette via
-  `KilnCMS.Search.Highlight.to_safe_html/1`); media has no such calc.
+  media is keyword-only and locale-agnostic (no embeddings). `entries` spans
+  every admin-defined dynamic type (D17), each record carrying the `type_name`
+  calc for labeling/linking. Read options (`:actor`, `:authorize?`) pass
+  through; `:limit` caps each section (default 10). Pass `highlight: true` to
+  load the `highlight` snippet calc on the content sections (rendered
+  escape-safely via `KilnCMS.Search.Highlight.to_safe_html/1`).
   """
   @spec global(String.t(), keyword()) :: %{
           pages: [struct()],
@@ -140,39 +166,61 @@ defmodule KilnCMS.Search do
         do: [highlight: %{query: query, locale: locale}],
         else: []
 
+    hybrid_opts =
+      read_opts ++ [locale: locale, limit: limit, rerank: true]
+
     %{
-      pages:
-        section(
-          KilnCMS.CMS.Page,
-          :search,
-          %{query: query, locale: locale},
-          read_opts,
-          limit,
-          content_load
-        ),
-      posts:
-        section(
-          KilnCMS.CMS.Post,
-          :search,
-          %{query: query, locale: locale},
-          read_opts,
-          limit,
-          content_load
-        ),
+      pages: hybrid(KilnCMS.CMS.Page, query, [load: content_load] ++ hybrid_opts),
+      posts: hybrid(KilnCMS.CMS.Post, query, [load: content_load] ++ hybrid_opts),
       # One section across every dynamic type. `type_name` (an expression
       # calc, so it doesn't run TypeDefinition's editor-only read policy for
       # anonymous callers) labels each hit with its dynamic type.
       entries:
-        section(
+        hybrid(
           KilnCMS.CMS.Entry,
-          :search,
-          %{query: query, locale: locale},
-          read_opts,
-          limit,
-          [:type_name | content_load]
+          query,
+          [load: [:type_name | content_load]] ++ hybrid_opts
         ),
       media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, [])
     }
+  end
+
+  @doc """
+  A "did you mean" suggestion for a query that found nothing: the most
+  word-similar published title across content types (backed by the same
+  trigram machinery as autocomplete), or `nil` when nothing comes close or the
+  best match is just the query itself. Read options pass through, so anonymous
+  callers only ever see published titles.
+  """
+  @spec suggest(String.t(), keyword()) :: String.t() | nil
+  def suggest(query, opts \\ []) when is_binary(query) do
+    read_opts = Keyword.take(opts, [:actor, :authorize?])
+    locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+    down = String.downcase(query)
+
+    [KilnCMS.CMS.Page, KilnCMS.CMS.Post, KilnCMS.CMS.Entry]
+    |> Enum.flat_map(fn resource ->
+      resource
+      |> Ash.Query.for_read(:autocomplete, %{prefix: query, locale: locale})
+      |> Ash.read!(read_opts)
+    end)
+    |> Enum.map(&{&1.title, best_word_similarity(down, &1.title)})
+    |> Enum.filter(fn {title, score} -> score >= 0.83 and String.downcase(title) != down end)
+    |> Enum.max_by(&elem(&1, 1), fn -> nil end)
+    |> case do
+      {title, _score} -> title
+      nil -> nil
+    end
+  end
+
+  # The query's closeness to its best-matching word in a title ("databse" vs
+  # "The Database Guide" → jaro("databse", "database")).
+  defp best_word_similarity(down_query, title) do
+    title
+    |> String.downcase()
+    |> String.split(~r/[^[:alnum:]]+/u, trim: true)
+    |> Enum.map(&String.jaro_distance(down_query, &1))
+    |> Enum.max(fn -> 0.0 end)
   end
 
   @doc """
@@ -207,19 +255,17 @@ defmodule KilnCMS.Search do
     |> Ash.read!(read_opts)
   end
 
-  defp resource_for(:page), do: KilnCMS.CMS.Page
-  defp resource_for(:post), do: KilnCMS.CMS.Post
-
   # Run one search leg via `for_read` so both the query and locale arguments can
   # be passed (the code interfaces only take `query` positionally).
   # The limit is set before `for_read` so the action's prepare sees it (and the
   # semantic action's disabled branch can still zero it out) — the DB then does
   # the truncation the old post-read `Enum.take/2` did after loading every row.
-  defp run_leg(resource, action, query, locale, read_opts) do
+  defp run_leg(resource, action, query, locale, read_opts, load) do
     resource
     |> Ash.Query.new()
     |> Ash.Query.limit(@hybrid_candidates)
     |> Ash.Query.for_read(action, %{query: query, locale: locale})
+    |> Ash.Query.load(load)
     |> Ash.read!(read_opts)
   end
 

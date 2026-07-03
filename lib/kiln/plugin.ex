@@ -48,7 +48,14 @@ defmodule Kiln.Plugin do
       @behaviour Kiln.Plugin
 
       @impl Kiln.Plugin
-      def name, do: __MODULE__ |> Module.split() |> List.last() |> Macro.underscore()
+      def name do
+        # `MyThing.Plugin` → "my_thing" (a trailing `Plugin` segment names the
+        # convention, not the plugin).
+        case __MODULE__ |> Module.split() |> Enum.reverse() do
+          ["Plugin", parent | _] -> Macro.underscore(parent)
+          [last | _] -> Macro.underscore(last)
+        end
+      end
 
       @impl Kiln.Plugin
       def domains, do: []

@@ -5,6 +5,14 @@ Builds on the shipped keyword (`:search`, ts_rank + GIN), semantic
 search. Each item below is specced to be independently buildable; suggested
 phasing is at the end.
 
+> **Status refresh (2026-07-03).** Hybrid is no longer dark-launched: it powers
+> every `Search.global/2` content section (public `/search`, the ⌘K palette)
+> with the rerank pass applied when enabled, works over any content type
+> (dynamic entries included), and is exposed headlessly at `GET /api/search`
+> (sectioned hits + public paths + safe highlights + "did you mean").
+> Remaining below: facet *counts* (#2), the fuzzy hybrid leg (#6 tail),
+> taxonomy coverage (#7 tail), and the multilingual embedding model (#1 caveat).
+
 Conventions: **Effort** S (<½ day) / M (½–1½ days) / L (2+ days). **Risk** is
 implementation risk, not blast radius.
 
@@ -39,7 +47,7 @@ English rules, and results aren't scoped to a locale.
 **Touches.** `content.ex` (actions, calc, replace index with stored vector),
 new `Search.Language`, `SetSearchText`, migration, config. Pairs with #5.
 
-## 2. Faceted filtering  ·  Effort M · Risk L
+## 2. Faceted filtering  ·  Effort M · Risk L · *filter args shipped; counts remain*
 
 **Goal.** Combine search with filters: `category_id`, `tag_ids`, `author_id`,
 `state`, `locale`, published-date range.
@@ -73,7 +81,7 @@ matches with `<mark>`), rendered escape-safely via
 
 **Touches.** `content.ex` (calc), optional default load on `:search`.
 
-## 4. Headless exposure + autocomplete  ·  Effort M · Risk L–M
+## 4. Headless exposure + autocomplete  ·  Effort M · Risk L–M · *shipped (incl. `GET /api/search` hybrid)*
 
 **Problem.** Search is code-interface-only — **not** in GraphQL or JSON:API, so
 external frontends can't use it.
@@ -102,7 +110,7 @@ want the same materialized vector, so build them together.
 
 **Touches.** `SetSearchText` / generated column, `search_rank` calc.
 
-## 6. Typo tolerance  ·  Effort M · Risk L
+## 6. Typo tolerance  ·  Effort M · Risk L · *autocomplete trigram + "did you mean" shipped; fuzzy hybrid leg remains*
 
 **Goal.** Match misspellings ("databse" → "database") and power "did you mean".
 
@@ -114,7 +122,7 @@ yields few hits) or a low-weight third leg in `hybrid/3`. Suggestions via
 **Touches.** `Repo.installed_extensions`, migration, `hybrid/3` (optional leg),
 an `:fuzzy`/suggestion action.
 
-## 7. Broaden coverage  ·  Effort M–L · Risk L–M
+## 7. Broaden coverage  ·  Effort M–L · Risk L–M · *media + entries + `Search.global` shipped; taxonomy remains*
 
 **Goal.** Search media (alt/caption/filename) and taxonomy (category/tag
 name+description), not just Page/Post.
@@ -126,7 +134,7 @@ name+description), not just Page/Post.
 
 **Touches.** `media_item.ex` (+ taxonomy), a global facade. Feeds #10.
 
-## 8. Reranking  ·  Effort M–L · Risk M · *already on the roadmap*
+## 8. Reranking  ·  Effort M–L · Risk M · *shipped (Bumblebee cross-encoder adapter, applied in hybrid/global when enabled)*
 
 **Goal.** Reorder the top-k hybrid results with a stronger relevance model.
 
@@ -137,7 +145,7 @@ rerank API. Gated like semantic search; off by default.
 
 **Touches.** new `Search.Reranker` + adapter, `hybrid/3`, config, supervision.
 
-## 9. Search analytics  ·  Effort M · Risk L
+## 9. Search analytics  ·  Effort M · Risk L · *shipped*
 
 **Goal.** Learn what users search for — especially **zero-result** queries
 (content gaps).
@@ -150,7 +158,7 @@ internal/backfill). Reports: top queries, zero-result queries, no-result rate.
 **Touches.** `analytics.ex` + new resource + migration, recording hook in the
 search facade, a dashboard panel.
 
-## 10. Admin ⌘K global search  ·  Effort M · Risk L
+## 10. Admin ⌘K global search  ·  Effort M · Risk L · *shipped*
 
 **Goal.** Editor command palette to jump straight to content.
 

@@ -63,6 +63,49 @@ defmodule Kiln.PluginsTest do
     assert is_pid(pid) and Process.alive?(pid)
   end
 
+  describe "the Verscienta retrofit (the plan's 'first plugin/consumer')" do
+    test "Verscienta is an installed plugin declaring its catalog domain" do
+      assert Verscienta.Plugin in Kiln.Plugins.all()
+      assert Verscienta.Plugin.name() == "verscienta"
+      assert Verscienta.Plugin.domains() == [Verscienta.Catalog]
+      # Its domains are registered where the doctor demands (test config).
+      assert Verscienta.Catalog in Application.get_env(:kiln_cms, :ash_domains)
+      assert Verscienta.Catalog in Application.get_env(:kiln_cms, :content_domains)
+    end
+  end
+
+  describe "mix kiln.gen.plugin sources" do
+    test "the generated plugin module compiles against the contract" do
+      camel = "GenPluginT#{System.unique_integer([:positive])}"
+      compiled = Code.compile_string(Mix.Tasks.Kiln.Gen.Plugin.plugin_source(camel, nil))
+      mod = Module.concat([camel, Plugin])
+
+      assert List.keymember?(compiled, mod, 0)
+      # `X.Plugin` names itself after X, not the convention suffix.
+      assert mod.name() == Macro.underscore(camel)
+      assert mod.blocks() == []
+      assert mod.nav_items() == []
+    end
+
+    @tag :capture_log
+    test "the generated sample block compiles, renders escaped, and searches" do
+      camel = "GenBlockT#{System.unique_integer([:positive])}"
+      Code.compile_string(Mix.Tasks.Kiln.Gen.Plugin.block_source(camel, "star_rating"))
+
+      # Spark emits several modules (EctoType etc.) — assert on the block
+      # module itself rather than the compile-return list. (Strings, not bare
+      # aliases: the test's `alias KilnCMS.Blocks` would capture `Blocks`.)
+      mod = Module.concat([camel, "Blocks", "StarRating"])
+      assert Code.ensure_loaded?(mod)
+      assert Kiln.Block.Info.name(mod) == :star_rating
+
+      block = struct(mod, text: "Nice & shiny")
+      html = block |> mod.render(:web) |> IO.iodata_to_binary()
+      assert html == ~s(<div class="star_rating">Nice &amp; shiny</div>)
+      assert mod.search_text(block) == "Nice & shiny"
+    end
+  end
+
   describe "mix kiln.plugins.doctor" do
     # put_env is global — keep these in one sync-safe block by restoring.
     setup do

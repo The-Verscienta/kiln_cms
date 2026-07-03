@@ -127,13 +127,18 @@ defmodule KilnCMSWeb.ContentController do
         %{posts: r.posts, pages: r.pages, entries: entry_results(r.entries)}
       end
 
+    # A zero-result query gets a trigram "did you mean" (published titles only).
+    suggestion =
+      if query != "" and results.posts == [] and results.pages == [] and results.entries == [],
+        do: KilnCMS.Search.suggest(query, authorize?: true, locale: locale)
+
     conn
     # Don't cache personalized/empty query result pages on shared caches.
     |> put_resp_header("cache-control", "private, no-cache")
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Search"))
     |> assign(:locale_links, search_locale_links(locale, query))
-    |> render(:search, query: query, results: results)
+    |> render(:search, query: query, results: results, suggestion: suggestion)
   end
 
   # Dynamic-entry hits as plain view maps: resolve each result's type through

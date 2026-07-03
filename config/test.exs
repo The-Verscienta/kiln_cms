@@ -125,4 +125,4 @@ config :kiln_cms, KilnCMS.Collab.Crdt, persist?: false, materialize?: false
 
 # The test-suite plugin (D18): exercises every plugin seam — block union
 # membership, admin nav/route, supervision child, Oban queue merge.
-config :kiln_cms, :plugins, [KilnCMS.FixturePlugin]
+config :kiln_cms, :plugins, [KilnCMS.FixturePlugin, Verscienta.Plugin]
