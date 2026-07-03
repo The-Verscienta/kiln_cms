@@ -76,6 +76,8 @@ defmodule KilnCMS.CMS.Content do
     # AshOban worker/scheduler module names (kept identical to hand-written ones).
     pub_worker = Module.concat([resource, Workers, PublishScheduled])
     pub_scheduler = Module.concat([resource, Schedulers, PublishScheduled])
+    unpub_worker = Module.concat([resource, Workers, UnpublishScheduled])
+    unpub_scheduler = Module.concat([resource, Schedulers, UnpublishScheduled])
     purge_worker = Module.concat([resource, Workers, PurgeTrashed])
     purge_scheduler = Module.concat([resource, Schedulers, PurgeTrashed])
     sweep_worker = Module.concat([resource, Workers, SweepUntitled])
@@ -95,6 +97,7 @@ defmodule KilnCMS.CMS.Content do
           :audience,
           :custom_fields,
           :scheduled_at,
+          :unpublish_at,
           :category_id,
           :featured_image_id
         ]
@@ -403,6 +406,7 @@ defmodule KilnCMS.CMS.Content do
 
         format_fields published_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       scheduled_at: {KilnCMS.CMS.Admin, :format_datetime, []},
+                      unpublish_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       inserted_at: {KilnCMS.CMS.Admin, :format_datetime, []},
                       updated_at: {KilnCMS.CMS.Admin, :format_datetime, []}
 
@@ -463,6 +467,7 @@ defmodule KilnCMS.CMS.Content do
           transition :publish, from: [:draft, :in_review], to: :published
           transition :publish_scheduled, from: [:draft, :in_review], to: :published
           transition :unpublish, from: :published, to: :draft
+          transition :unpublish_scheduled, from: :published, to: :draft
           transition :archive, from: [:draft, :in_review, :published], to: :archived
           # Archive must not be a one-way door (audit U-H3): a mistaken (or
           # bulk) archive is recoverable by returning the record to draft.
@@ -486,6 +491,24 @@ defmodule KilnCMS.CMS.Content do
             worker_read_action :read
             worker_module_name unquote(pub_worker)
             scheduler_module_name unquote(pub_scheduler)
+          end
+
+          # The embargo end: take published content back down once its
+          # `unpublish_at` passes (same minute-cron cadence as scheduled
+          # publishing).
+          trigger :unpublish_scheduled do
+            action :unpublish_scheduled
+            queue :default
+            scheduler_cron "* * * * *"
+
+            where expr(
+                    ^ref(:state) == :published and not is_nil(^ref(:unpublish_at)) and
+                      ^ref(:unpublish_at) <= now()
+                  )
+
+            worker_read_action :read
+            worker_module_name unquote(unpub_worker)
+            scheduler_module_name unquote(unpub_scheduler)
           end
 
           trigger :purge_trashed do
@@ -601,6 +624,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           validate KilnCMS.CMS.Validations.SeoUrls
+          validate KilnCMS.CMS.Validations.ScheduleOrder
         end
 
         update :update do
@@ -627,6 +651,7 @@ defmodule KilnCMS.CMS.Content do
           # `only_when: :published` keeps draft edits and autosaves silent.
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
           validate KilnCMS.CMS.Validations.SeoUrls
+          validate KilnCMS.CMS.Validations.ScheduleOrder
         end
 
         # Debounced draft autosave from the editor. Writes the same content as
@@ -652,6 +677,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
           validate KilnCMS.CMS.Validations.SeoUrls
+          validate KilnCMS.CMS.Validations.ScheduleOrder
         end
 
         # Full-text search over the denormalized `search_text`. Goes through the
@@ -840,6 +866,18 @@ defmodule KilnCMS.CMS.Content do
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
         end
 
+        update :unpublish_scheduled do
+          # Run by the AshOban scheduler once `unpublish_at` has passed — the
+          # scheduled mirror of `:unpublish`, clearing the schedule so the
+          # trigger can't re-fire.
+          require_atomic? false
+          change transition_state(:draft)
+          change set_attribute(:unpublish_at, nil)
+          change KilnCMS.CMS.Changes.ClearPublishedVersion
+          change KilnCMS.CMS.Changes.DeleteArtifacts
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+        end
+
         update :archive do
           require_atomic? false
           change transition_state(:archived)
@@ -1023,6 +1061,11 @@ defmodule KilnCMS.CMS.Content do
         # When set in the future, the AshOban scheduler publishes this record once
         # the time passes (cleared on publish).
         attribute :scheduled_at, :utc_datetime_usec, public?: true
+
+        # The embargo end: when set, the AshOban scheduler unpublishes this
+        # record (back to draft, artifacts deleted) once the time passes
+        # (cleared on unpublish).
+        attribute :unpublish_at, :utc_datetime_usec, public?: true
 
         # Denormalized plain-text maintained by `Changes.SetSearchText` and
         # queried by the `search` action. Internal.

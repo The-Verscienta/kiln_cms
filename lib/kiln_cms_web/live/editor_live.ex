@@ -32,7 +32,7 @@ defmodule KilnCMSWeb.EditorLive do
   # Only what the list renders — without a select, every row drags its whole
   # blocks JSONB tree (plus search_text and embedding) into the LiveView heap.
   # Workflow/destroy actions re-fetch the full record by id before acting.
-  @list_fields [:id, :title, :slug, :state, :updated_at, :scheduled_at]
+  @list_fields [:id, :title, :slug, :state, :updated_at, :scheduled_at, :unpublish_at]
 
   # (Re)load the first page under the active status/search filter.
   defp load_items(socket) do
@@ -549,6 +549,18 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-hook="LocalTime"
                 datetime={DateTime.to_iso8601(record.scheduled_at)}
               >{Calendar.strftime(record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
+            </span>
+            <span
+              :if={record.unpublish_at && record.state == :published}
+              class="flex items-center gap-1 text-xs text-base-content/60"
+              title={gettext("Scheduled to unpublish")}
+            >
+              <.icon name="hero-clock" class="size-3.5" />
+              <time
+                id={"unpublish-#{kind}-#{record.id}"}
+                phx-hook="LocalTime"
+                datetime={DateTime.to_iso8601(record.unpublish_at)}
+              >{Calendar.strftime(record.unpublish_at, "%Y-%m-%d %H:%M")} UTC</time>
             </span>
             <div class="flex w-full items-center justify-end gap-2 sm:w-auto">
               <button
