@@ -1,7 +1,9 @@
 defmodule KilnCMS.CMS.ScheduledPublishingTest do
   @moduledoc """
   The AshOban `publish_scheduled` trigger publishes draft content once its
-  `scheduled_at` has passed, and leaves future-scheduled content alone.
+  `scheduled_at` has passed (and leaves future-scheduled content alone);
+  the `unpublish_scheduled` trigger takes published content back down once
+  its `unpublish_at` passes (the embargo end).
   """
   # Oban runs in :manual mode; `schedule_and_run_triggers/2` drains the queue
   # inline in this process, so the test's own sandbox connection is used and we
@@ -62,6 +64,85 @@ defmodule KilnCMS.CMS.ScheduledPublishingTest do
     reloaded = CMS.get_page!(page.id, actor: admin)
     assert reloaded.state == :draft
     assert reloaded.scheduled_at
+  end
+
+  defp published_page(admin, attrs \\ %{}) do
+    page =
+      CMS.create_page!(
+        Map.merge(
+          %{title: "Live", slug: "sched-#{System.unique_integer([:positive])}"},
+          attrs
+        ),
+        actor: admin
+      )
+
+    CMS.publish_page!(page, %{}, actor: admin)
+  end
+
+  test "unpublishes a page whose unpublish_at has passed" do
+    admin = admin()
+    page = published_page(admin)
+
+    # Set the embargo end in the past (updates are allowed on published rows).
+    page =
+      CMS.update_page!(
+        page,
+        %{unpublish_at: DateTime.add(DateTime.utc_now(), -60, :second)},
+        actor: admin
+      )
+
+    assert page.state == :published
+
+    AshOban.schedule_and_run_triggers(KilnCMS.CMS.Page,
+      drain_queues?: true,
+      with_recursion: true,
+      with_scheduled: true
+    )
+
+    reloaded = CMS.get_page!(page.id, actor: admin)
+    assert reloaded.state == :draft
+    assert is_nil(reloaded.unpublish_at)
+    assert is_nil(reloaded.published_version_id)
+  end
+
+  test "leaves published content with a future unpublish_at alone" do
+    admin = admin()
+    page = published_page(admin)
+
+    page =
+      CMS.update_page!(
+        page,
+        %{unpublish_at: DateTime.add(DateTime.utc_now(), 3600, :second)},
+        actor: admin
+      )
+
+    AshOban.schedule_and_run_triggers(KilnCMS.CMS.Page,
+      drain_queues?: true,
+      with_recursion: true,
+      with_scheduled: true
+    )
+
+    reloaded = CMS.get_page!(page.id, actor: admin)
+    assert reloaded.state == :published
+    assert reloaded.unpublish_at
+  end
+
+  test "an embargo end before the scheduled publish is rejected" do
+    admin = admin()
+    now = DateTime.utc_now()
+
+    assert {:error, error} =
+             CMS.create_page(
+               %{
+                 title: "Backwards",
+                 slug: "sched-#{System.unique_integer([:positive])}",
+                 scheduled_at: DateTime.add(now, 7200, :second),
+                 unpublish_at: DateTime.add(now, 3600, :second)
+               },
+               actor: admin
+             )
+
+    assert Exception.message(error) =~ "must be after the scheduled publish time"
   end
 
   test "the scheduled publish is authorized as a system job (no actor needed)" do

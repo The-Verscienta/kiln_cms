@@ -264,6 +264,13 @@ defmodule KilnCMSWeb.Layouts do
     </a>
     <a
       :if={@current_user && @current_user.role in [:editor, :admin]}
+      href={~p"/editor/calendar"}
+      class={@item}
+    >
+      {gettext("Calendar")}
+    </a>
+    <a
+      :if={@current_user && @current_user.role in [:editor, :admin]}
       href={~p"/editor/settings"}
       class={@item}
     >
