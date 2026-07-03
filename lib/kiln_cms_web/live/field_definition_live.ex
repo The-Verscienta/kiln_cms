@@ -217,7 +217,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
-  defp type_label(type), do: Phoenix.Naming.humanize(type)
+  # Core types humanize; plugin field types carry their own label.
+  defp type_label(type) do
+    case KilnCMS.CMS.FieldTypes.get(type) do
+      nil -> Phoenix.Naming.humanize(type)
+      module -> module.label()
+    end
+  end
 
   defp content_type_label(type) do
     case ContentTypes.get(type) do

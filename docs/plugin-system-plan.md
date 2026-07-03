@@ -24,7 +24,7 @@ just unnamed and undocumented:
 | **Admin nav** | hardcoded `nav_links/1` in the layout | ❌ |
 | **Supervision children / Oban queues** | hardcoded in `application.ex` / config | ❌ |
 | **Admin routes** (plugin LiveViews) | hardcoded router scopes | ❌ |
-| Custom field types | hardcoded `@field_types` + coercion switch | ❌ (deferred — see §5) |
+| Custom field types | `Kiln.FieldType` registry (`KilnCMS.CMS.FieldTypes`) | ✅ shipped (was deferred) |
 
 So this plan is **not a new subsystem**: it's (a) a small contract that names
 the existing pattern, (b) four seam closures, (c) the scaffold + docs, and
@@ -110,9 +110,14 @@ the block union and the router need the list during compilation.
 
 ## 5. Deliberately deferred
 
-- **Custom field types** — needs a coercion-behaviour registry in
-  `ApplyCustomFields`; nothing blocks it later, but it's not needed to prove
-  the contract.
+- **Custom field types** — ~~needs a coercion-behaviour registry in
+  `ApplyCustomFields`~~ **shipped (2026-07-03)**: `Kiln.FieldType`
+  (`name`/`label`/`cast`/`input_type`/`input_attrs` with `use` defaults),
+  a `field_types/0` plugin callback, the compile-baked
+  `KilnCMS.CMS.FieldTypes` registry, dispatch in `ApplyCustomFields`,
+  runtime `KnownFieldType` validation (replacing the `one_of` constraint),
+  editor + fields-admin rendering, doctor contract/collision checks, and
+  `mix kiln.gen.plugin --field <name>`.
 - **Marketplace/discovery** — the plan marks it "future"; installers +
   hexdocs are the v1 distribution story.
 - **Public plugin routes** — content types already get public delivery;

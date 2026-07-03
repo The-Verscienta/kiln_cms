@@ -123,7 +123,7 @@ a **plugin** — compile-time OTP code (a `projects/` directory or a hex dep)
 with one entry module and one config line:
 
 ```bash
-mix kiln.gen.plugin Ratings --block star_rating
+mix kiln.gen.plugin Ratings --block star_rating --field stars
 ```
 
 ```elixir
@@ -132,7 +132,11 @@ config :kiln_cms, :plugins, [Ratings.Plugin]
 
 A `Kiln.Plugin` module contributes, per callback (all optional): **block
 types** (`Kiln.Block` modules — they join the storage union, editor palette,
-firing and search automatically), **admin nav items** and **admin panel
+firing and search automatically), **custom field types** (`Kiln.FieldType`
+modules — admins pick them in the fields admin like any built-in; the
+plugin's `cast/2` coerces + validates every content write to a JSON-native
+value, and the editor renders `<input type={input_type()}
+{input_attrs(definition)}>`), **admin nav items** and **admin panel
 routes** (role-gated, mounted in the admin live session), **supervision
 children**, and **Oban queues** (merged at boot). Content types need no
 callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
@@ -140,6 +144,6 @@ and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
 webhooks, delivery, search and workers follow automatically.
 
 `mix kiln.plugins.doctor` (also part of precommit) verifies an install:
-domains registered, no block/queue collisions, well-formed paths.
+domains registered, no block/field-type/queue collisions, well-formed paths.
 `Verscienta.Plugin` (projects/verscienta) is the reference — the project the
 plan always called "the first plugin/consumer".

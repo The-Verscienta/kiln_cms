@@ -990,8 +990,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  # Everything else renders as a plain `<input>`. Plugin field types
+  # (`Kiln.FieldType`) pick their HTML input kind + extra attributes
+  # (min/max/step/…) via the registry; core types map below.
   defp custom_field_input(assigns) do
-    assigns = assign(assigns, :input_type, custom_input_type(assigns.definition.field_type))
+    definition = assigns.definition
+
+    {input_type, extra} =
+      case KilnCMS.CMS.FieldTypes.get(definition.field_type) do
+        nil -> {custom_input_type(definition.field_type), %{}}
+        module -> {module.input_type(), module.input_attrs(definition)}
+      end
+
+    extra =
+      if input_type == "number" and definition.field_type == :float,
+        do: Map.put_new(extra, :step, "any"),
+        else: extra
+
+    assigns = assigns |> assign(:input_type, input_type) |> assign(:extra, extra)
 
     ~H"""
     <div>
@@ -1004,10 +1020,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         name={@name}
         value={@value}
         required={@definition.required}
-        step={@input_type == "number" && @definition.field_type == :float && "any"}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
         class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+        {@extra}
       />
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}

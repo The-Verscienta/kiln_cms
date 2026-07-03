@@ -9,6 +9,8 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       `:content_domains` (plugins can't auto-wire those — Ash's own mix tasks
       read them straight from config, so the install step must add them);
     * block type names don't collide (across core and all plugins);
+    * field-type modules implement `Kiln.FieldType` and their names don't
+      collide (across core and all plugins);
     * plugin Oban queues don't redefine core queues;
     * nav paths and admin routes are well-formed (`/editor/...`).
 
@@ -24,7 +26,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
     problems =
       Enum.flat_map(plugins, &plugin_problems/1) ++
-        block_collisions(plugins) ++ queue_collisions(plugins)
+        block_collisions(plugins) ++ field_type_problems(plugins) ++ queue_collisions(plugins)
 
     case problems do
       [] ->
@@ -98,6 +100,40 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         true -> []
       end
     end)
+  end
+
+  # Field types must implement the contract; names must be unique across core
+  # and all plugins (same stance as blocks).
+  defp field_type_problems(plugins) do
+    declared =
+      Enum.flat_map(plugins, fn plugin ->
+        for mod <- plugin.field_types(), do: {plugin, mod}
+      end)
+
+    contract =
+      for {plugin, mod} <- declared,
+          not (Code.ensure_loaded?(mod) and function_exported?(mod, :cast, 2) and
+                 function_exported?(mod, :name, 0)) do
+        "#{plugin.name()}: field type #{inspect(mod)} does not implement Kiln.FieldType"
+      end
+
+    core = KilnCMS.CMS.FieldTypes.core()
+
+    collisions =
+      declared
+      |> Enum.filter(fn {_plugin, mod} ->
+        Code.ensure_loaded?(mod) and function_exported?(mod, :name, 0)
+      end)
+      |> Enum.group_by(fn {_plugin, mod} -> mod.name() end)
+      |> Enum.flat_map(fn {name, owners} ->
+        cond do
+          name in core -> ["field type #{inspect(name)} collides with a core field type"]
+          length(owners) > 1 -> ["field type #{inspect(name)} declared by multiple plugins"]
+          true -> []
+        end
+      end)
+
+    contract ++ collisions
   end
 
   defp queue_collisions(plugins) do

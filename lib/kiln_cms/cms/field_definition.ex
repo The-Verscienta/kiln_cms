@@ -29,28 +29,12 @@ defmodule KilnCMS.CMS.FieldDefinition do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshAdmin.Resource]
 
-  # The value types a custom field can declare. Each maps to an HTML input and a
-  # coercion/validation rule in `Changes.ApplyCustomFields`. Kept JSON-native so
-  # values round-trip cleanly through the `custom_fields` jsonb column (dates are
-  # stored as ISO-8601 strings; `:media`/`:reference` store small snapshot maps
-  # resolved at write time — see the coercion module).
-  @field_types [
-    :string,
-    :text,
-    :integer,
-    :float,
-    :boolean,
-    :date,
-    :datetime,
-    :url,
-    :select,
-    :media,
-    :reference
-  ]
-
-  @doc "The value types a custom field may declare."
+  @doc """
+  The value types a custom field may declare: the built-ins plus every
+  plugin-contributed `Kiln.FieldType` (see `KilnCMS.CMS.FieldTypes`).
+  """
   @spec field_types() :: [atom()]
-  def field_types, do: @field_types
+  def field_types, do: KilnCMS.CMS.FieldTypes.names()
 
   admin do
     resource_group :content
@@ -132,6 +116,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # KilnCMS content type (no-op when `content_type` is nil).
     validate KilnCMS.CMS.Validations.KnownContentType
 
+    # `field_type` must be registered: a built-in or a plugin `Kiln.FieldType`.
+    validate KilnCMS.CMS.Validations.KnownFieldType
+
     # `name` is the key inside the `custom_fields` map and is surfaced in the
     # delivery API, so keep it a safe machine identifier.
     validate match(:name, ~r/\A[a-z][a-z0-9_]*\z/) do
@@ -159,8 +146,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Human label shown in the editor and (optionally) on delivery.
     attribute :label, :string, allow_nil?: false, public?: true
 
+    # No `one_of` constraint: the allowed set includes plugin-registered types
+    # (`KilnCMS.CMS.FieldTypes.names/0`), enforced by `Validations.KnownFieldType`
+    # so the check reads the registry rather than a compile-baked constraint.
     attribute :field_type, :atom do
-      constraints one_of: @field_types
       default :string
       allow_nil? false
       public? true
