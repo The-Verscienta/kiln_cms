@@ -119,17 +119,47 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     query = params["q"] |> to_string() |> String.trim()
 
+    # Optional category facet (`?category=<slug>`): filters both hybrid legs.
+    # An unknown slug matches nothing rather than silently unfiltering.
+    category = category_filter(params["category"])
+
+    filters =
+      case category do
+        %{id: id} -> %{category_id: id}
+        :unknown -> %{category_id: Ecto.UUID.generate()}
+        nil -> %{}
+      end
+
     results =
       if query == "" do
         %{posts: [], pages: [], entries: []}
       else
-        r = KilnCMS.Search.global(query, authorize?: true, locale: locale, limit: 20)
+        r =
+          KilnCMS.Search.global(query,
+            authorize?: true,
+            locale: locale,
+            limit: 20,
+            filters: filters
+          )
+
         %{posts: r.posts, pages: r.pages, entries: entry_results(r.entries)}
       end
 
-    # A zero-result query gets a trigram "did you mean" (published titles only).
+    # Category counts over the unfiltered match set — the sidebar shows the
+    # full distribution to switch between (tag facets are API-only for now).
+    facets =
+      if query == "",
+        do: [],
+        else: KilnCMS.Search.facets(query, authorize?: true, locale: locale).categories
+
+    # A sparse result set gets a trigram "did you mean" (published titles
+    # only) — the fuzzy hybrid leg may have rescued a typo's hits, and the
+    # suggestion then names the corrected term. Exact-match queries never
+    # suggest (`Search.suggest/2` skips exact word matches).
+    total = length(results.posts) + length(results.pages) + length(results.entries)
+
     suggestion =
-      if query != "" and results.posts == [] and results.pages == [] and results.entries == [],
+      if query != "" and total < 3,
         do: KilnCMS.Search.suggest(query, authorize?: true, locale: locale)
 
     conn
@@ -138,8 +168,25 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Search"))
     |> assign(:locale_links, search_locale_links(locale, query))
-    |> render(:search, query: query, results: results, suggestion: suggestion)
+    |> render(:search,
+      query: query,
+      results: results,
+      suggestion: suggestion,
+      facets: facets,
+      active_category: if(is_struct(category), do: category)
+    )
   end
+
+  # Resolve a `?category=` slug world-readably: nil when absent, the category
+  # when known, `:unknown` otherwise.
+  defp category_filter(slug) when is_binary(slug) and slug != "" do
+    case KilnCMS.CMS.get_category_by_slug(slug, authorize?: true) do
+      {:ok, category} -> category
+      _not_found -> :unknown
+    end
+  end
+
+  defp category_filter(_absent), do: nil
 
   # Dynamic-entry hits as plain view maps: resolve each result's type through
   # the registry for its URL segment and label, dropping hits whose type no

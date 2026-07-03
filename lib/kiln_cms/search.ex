@@ -57,6 +57,20 @@ defmodule KilnCMS.Search do
   @hybrid_candidates 50
   @rrf_k 60
 
+  # The typo-tolerance fallback: when the keyword leg finds fewer hits than
+  # this, a trigram leg joins the fusion — at reduced weight, so fuzzy
+  # near-misses never outrank real keyword/semantic matches.
+  @fuzzy_fallback_threshold 3
+  @fuzzy_weight 0.5
+
+  # The facet arguments shared by `:search` and `:search_semantic`.
+  @facet_filters [:category_id, :author_id, :state, :tag_ids]
+
+  # Facet counts scan at most this many top keyword matches per content type —
+  # counts are exact for anything smaller and become "counts over the best N"
+  # beyond it, keeping the scan bounded on large sites.
+  @facet_scan_cap 500
+
   @doc """
   Hybrid search over any content type: fuse the keyword (`:search`, ts_rank)
   and semantic (`:search_semantic`, cosine) result lists by Reciprocal Rank
@@ -67,11 +81,18 @@ defmodule KilnCMS.Search do
   entry tier) — or a content resource module directly.
 
   Degrades to keyword-only when semantic search is disabled — the semantic leg
-  then returns nothing. Read options (`:actor`, `:authorize?`) pass through to
-  both legs, so visibility is respected. `:limit` caps the result count
-  (default 20); `:k` overrides the RRF constant; `:load` applies to both legs
+  then returns nothing. When the keyword leg finds almost nothing, a trigram
+  fuzzy leg (the `:autocomplete` machinery — word similarity on titles) joins
+  the fusion at reduced weight, so typos like "databse" still surface
+  "Database Guide". Read options (`:actor`, `:authorize?`) pass through to
+  every leg, so visibility is respected. `:limit` caps the result count
+  (default 20); `:k` overrides the RRF constant; `:load` applies to all legs
   (e.g. the `highlight` snippet calc); `rerank: true` reorders the fused
   results with the configured reranker (still gated by `rerank?()`).
+
+  `:filters` (a map of the search actions' facet arguments — `:category_id`,
+  `:author_id`, `:state`, `:tag_ids`) narrows both legs; the fuzzy leg sits
+  out under filters since `:autocomplete` can't apply them.
   """
   @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
@@ -81,12 +102,22 @@ defmodule KilnCMS.Search do
     limit = Keyword.get(opts, :limit, 20)
     k = Keyword.get(opts, :k, @rrf_k)
     load = Keyword.get(opts, :load, [])
+    filters = opts |> Keyword.get(:filters, %{}) |> Map.take(@facet_filters)
 
-    keyword = run_leg(resource, :search, query, locale, read_opts, load)
-    semantic = run_leg(resource, :search_semantic, query, locale, read_opts, load)
+    args = Map.merge(%{query: query, locale: locale}, filters)
+
+    keyword = run_leg(resource, :search, args, read_opts, load)
+    semantic = run_leg(resource, :search_semantic, args, read_opts, load)
+
+    fuzzy =
+      if filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
+        run_leg(resource, :autocomplete, %{prefix: query, locale: locale}, read_opts, load)
+      else
+        []
+      end
 
     fused =
-      [keyword, semantic]
+      [{keyword, 1.0}, {semantic, 1.0}, {fuzzy, @fuzzy_weight}]
       |> reciprocal_rank_fusion(k)
       |> Enum.take(limit)
 
@@ -133,8 +164,9 @@ defmodule KilnCMS.Search do
   end
 
   @doc """
-  Global **hybrid** search across content types and media, returning sectioned
-  results: `%{pages: [...], posts: [...], entries: [...], media: [...]}`.
+  Global **hybrid** search across content types, media, and taxonomy,
+  returning sectioned results:
+  `%{pages: [...], posts: [...], entries: [...], media: [...], categories: [...], tags: [...]}`.
 
   Every content section fuses the keyword and semantic legs (RRF via
   `hybrid/3`), so meaning-based matches surface everywhere search is offered —
@@ -143,18 +175,22 @@ defmodule KilnCMS.Search do
   (`rerank?()`), each section's fused results are reordered by the reranker.
 
   Content sections are locale-scoped (via `:locale`, default configured);
-  media is keyword-only and locale-agnostic (no embeddings). `entries` spans
-  every admin-defined dynamic type (D17), each record carrying the `type_name`
-  calc for labeling/linking. Read options (`:actor`, `:authorize?`) pass
-  through; `:limit` caps each section (default 10). Pass `highlight: true` to
-  load the `highlight` snippet calc on the content sections (rendered
-  escape-safely via `KilnCMS.Search.Highlight.to_safe_html/1`).
+  media and taxonomy are keyword/trigram-only and locale-agnostic (no
+  embeddings). `entries` spans every admin-defined dynamic type (D17), each
+  record carrying the `type_name` calc for labeling/linking. Read options
+  (`:actor`, `:authorize?`) pass through; `:limit` caps each section (default
+  10). Pass `highlight: true` to load the `highlight` snippet calc on the
+  content sections (rendered escape-safely via
+  `KilnCMS.Search.Highlight.to_safe_html/1`). `:filters` (see `hybrid/3`)
+  narrows the content sections — media and taxonomy don't carry facets.
   """
   @spec global(String.t(), keyword()) :: %{
           pages: [struct()],
           posts: [struct()],
           entries: [struct()],
-          media: [struct()]
+          media: [struct()],
+          categories: [struct()],
+          tags: [struct()]
         }
   def global(query, opts \\ []) when is_binary(query) do
     read_opts = Keyword.take(opts, [:actor, :authorize?])
@@ -167,7 +203,13 @@ defmodule KilnCMS.Search do
         else: []
 
     hybrid_opts =
-      read_opts ++ [locale: locale, limit: limit, rerank: true]
+      read_opts ++
+        [
+          locale: locale,
+          limit: limit,
+          rerank: true,
+          filters: Keyword.get(opts, :filters, %{})
+        ]
 
     %{
       pages: hybrid(KilnCMS.CMS.Page, query, [load: content_load] ++ hybrid_opts),
@@ -181,16 +223,89 @@ defmodule KilnCMS.Search do
           query,
           [load: [:type_name | content_load]] ++ hybrid_opts
         ),
-      media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, [])
+      media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []),
+      # Taxonomy (name/description, typo-tolerant) — matched categories and
+      # tags so editors and headless frontends can jump to filtered listings.
+      categories: section(KilnCMS.CMS.Category, :search, %{query: query}, read_opts, limit, []),
+      tags: section(KilnCMS.CMS.Tag, :search, %{query: query}, read_opts, limit, [])
     }
   end
 
   @doc """
-  A "did you mean" suggestion for a query that found nothing: the most
+  Facet counts for a query — how many matching documents carry each category
+  and each tag, for "Category (12)"-style filter UIs:
+
+      %{categories: [%{id: ..., name: ..., slug: ..., count: 12}, ...],
+        tags:       [%{id: ..., name: ..., slug: ..., count: 7}, ...]}
+
+  Sorted by count (name breaks ties). Computed over the policy-respecting
+  keyword match set (top #{@facet_scan_cap} matches per content type), so
+  anonymous callers only ever count published documents. Locale-scoped like
+  the search itself. Counts are for the *unfiltered* query — apply a facet
+  and the counts still show the full distribution to switch between.
+  """
+  @spec facets(String.t(), keyword()) :: %{categories: [map()], tags: [map()]}
+  def facets(query, opts \\ []) when is_binary(query) do
+    read_opts = Keyword.take(opts, [:actor, :authorize?])
+    locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
+
+    matches =
+      [KilnCMS.CMS.Page, KilnCMS.CMS.Post, KilnCMS.CMS.Entry]
+      |> Enum.flat_map(fn resource ->
+        resource
+        |> Ash.Query.new()
+        |> Ash.Query.limit(@facet_scan_cap)
+        |> Ash.Query.for_read(:search, %{query: query, locale: locale})
+        |> Ash.Query.select([:id, :category_id])
+        |> Ash.Query.load(tags: [:id, :name, :slug])
+        |> Ash.read!(read_opts)
+      end)
+
+    %{categories: category_facets(matches, read_opts), tags: tag_facets(matches)}
+  end
+
+  # Count matches per category id, then resolve names/slugs in one read
+  # (taxonomy is world-readable, but go through the policy anyway).
+  defp category_facets(matches, read_opts) do
+    counts =
+      matches |> Enum.map(& &1.category_id) |> Enum.reject(&is_nil/1) |> Enum.frequencies()
+
+    case Map.keys(counts) do
+      [] ->
+        []
+
+      ids ->
+        KilnCMS.CMS.Category
+        |> Ash.Query.filter_input(id: [in: ids])
+        |> Ash.read!(read_opts)
+        |> Enum.map(&%{id: &1.id, name: &1.name, slug: &1.slug, count: counts[&1.id]})
+        |> sort_facets()
+    end
+  end
+
+  # Tags come pre-loaded on the matches, so counting needs no extra read.
+  defp tag_facets(matches) do
+    matches
+    |> Enum.flat_map(& &1.tags)
+    |> Enum.group_by(& &1.id)
+    |> Enum.map(fn {id, [tag | _] = hits} ->
+      %{id: id, name: tag.name, slug: tag.slug, count: length(hits)}
+    end)
+    |> sort_facets()
+  end
+
+  defp sort_facets(facets), do: Enum.sort_by(facets, &{-&1.count, &1.name})
+
+  @doc """
+  A "did you mean" suggestion for a query that looks like a typo: the most
   word-similar published title across content types (backed by the same
-  trigram machinery as autocomplete), or `nil` when nothing comes close or the
-  best match is just the query itself. Read options pass through, so anonymous
-  callers only ever see published titles.
+  trigram machinery as autocomplete), or `nil` when nothing comes close — or
+  when a title word matches the query *exactly*, because then the query isn't
+  a typo and there's nothing to correct. Callers show it when a search comes
+  back sparse (the fuzzy hybrid leg may still have rescued some hits — the
+  suggestion then names the corrected term, "showing results for…"-style).
+  Read options pass through, so anonymous callers only ever see published
+  titles.
   """
   @spec suggest(String.t(), keyword()) :: String.t() | nil
   def suggest(query, opts \\ []) when is_binary(query) do
@@ -205,7 +320,9 @@ defmodule KilnCMS.Search do
       |> Ash.read!(read_opts)
     end)
     |> Enum.map(&{&1.title, best_word_similarity(down, &1.title)})
-    |> Enum.filter(fn {title, score} -> score >= 0.83 and String.downcase(title) != down end)
+    |> Enum.filter(fn {title, score} ->
+      score >= 0.83 and score < 1.0 and String.downcase(title) != down
+    end)
     |> Enum.max_by(&elem(&1, 1), fn -> nil end)
     |> case do
       {title, _score} -> title
@@ -255,28 +372,29 @@ defmodule KilnCMS.Search do
     |> Ash.read!(read_opts)
   end
 
-  # Run one search leg via `for_read` so both the query and locale arguments can
-  # be passed (the code interfaces only take `query` positionally).
+  # Run one search leg via `for_read` so all the action's arguments can be
+  # passed (the code interfaces only take `query` positionally).
   # The limit is set before `for_read` so the action's prepare sees it (and the
   # semantic action's disabled branch can still zero it out) — the DB then does
   # the truncation the old post-read `Enum.take/2` did after loading every row.
-  defp run_leg(resource, action, query, locale, read_opts, load) do
+  defp run_leg(resource, action, args, read_opts, load) do
     resource
     |> Ash.Query.new()
     |> Ash.Query.limit(@hybrid_candidates)
-    |> Ash.Query.for_read(action, %{query: query, locale: locale})
+    |> Ash.Query.for_read(action, args)
     |> Ash.Query.load(load)
     |> Ash.read!(read_opts)
   end
 
-  # RRF: each list contributes 1/(k + rank) to a record's score; records are
-  # deduplicated by id and returned sorted by summed score, highest first.
-  defp reciprocal_rank_fusion(lists, k) do
-    lists
-    |> Enum.flat_map(fn list ->
+  # Weighted RRF: each `{list, weight}` contributes `weight / (k + rank)` to a
+  # record's score; records are deduplicated by id and returned sorted by
+  # summed score, highest first.
+  defp reciprocal_rank_fusion(weighted_lists, k) do
+    weighted_lists
+    |> Enum.flat_map(fn {list, weight} ->
       list
       |> Enum.with_index(1)
-      |> Enum.map(fn {record, rank} -> {record, 1.0 / (k + rank)} end)
+      |> Enum.map(fn {record, rank} -> {record, weight / (k + rank)} end)
     end)
     |> Enum.reduce(%{}, fn {record, score}, acc ->
       Map.update(acc, record.id, {record, score}, fn {existing, total} ->

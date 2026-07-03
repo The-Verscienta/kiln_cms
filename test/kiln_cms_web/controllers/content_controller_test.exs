@@ -181,4 +181,39 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert conn |> get("/widgets/anything") |> response(404)
     end
   end
+
+  describe "search page" do
+    test "shows category facet counts and filters by ?category=<slug>", %{conn: conn} do
+      term = "harvest#{uniq()}"
+
+      category =
+        Ash.Seed.seed!(KilnCMS.CMS.Category, %{name: "Recipes #{uniq()}", slug: "cat-#{uniq()}"})
+
+      _inside = page(%{title: "#{term} inside", category_id: category.id})
+      _outside = page(%{title: "#{term} outside"})
+
+      html = conn |> get(~p"/search?q=#{term}") |> html_response(200)
+      assert html =~ "#{term} inside"
+      assert html =~ "#{term} outside"
+      assert html =~ "(1)"
+      assert html =~ category.name
+
+      filtered =
+        conn |> get(~p"/search?q=#{term}&category=#{category.slug}") |> html_response(200)
+
+      assert filtered =~ "#{term} inside"
+      refute filtered =~ "#{term} outside"
+      # The clear-filter link appears once a facet is active.
+      assert filtered =~ "All results"
+    end
+
+    test "a typo gets fuzzy-rescued results plus a did-you-mean link", %{conn: conn} do
+      page = page(%{title: "Fermentation Handbook #{uniq()}"})
+
+      html = conn |> get(~p"/search?q=fermentaton") |> html_response(200)
+
+      assert html =~ page.title
+      assert html =~ "Did you mean"
+    end
+  end
 end

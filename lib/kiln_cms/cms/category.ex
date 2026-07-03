@@ -70,6 +70,28 @@ defmodule KilnCMS.CMS.Category do
       argument :slug, :string, allow_nil?: false
       filter expr(slug == ^arg(:slug))
     end
+
+    # Taxonomy leg of global search: name matched by substring or trigram word
+    # similarity (typo-tolerant, same operator as content autocomplete),
+    # description by substring. Closest names first, capped — taxonomy is a
+    # small lookup table, so no trigram index is needed.
+    read :search do
+      argument :query, :string, allow_nil?: false
+
+      filter expr(
+               fragment("? ILIKE '%' || ? || '%'", name, ^arg(:query)) or
+                 fragment("? <% ?", ^arg(:query), name) or
+                 fragment("? ILIKE '%' || ? || '%'", description, ^arg(:query))
+             )
+
+      prepare fn query, _context ->
+        q = Ash.Query.get_argument(query, :query)
+
+        query
+        |> Ash.Query.sort([{:name_similarity, {%{query: q}, :desc}}])
+        |> Ash.Query.limit(10)
+      end
+    end
   end
 
   policies do
@@ -114,6 +136,16 @@ defmodule KilnCMS.CMS.Category do
 
     has_many :posts, KilnCMS.CMS.Post do
       public? true
+    end
+  end
+
+  calculations do
+    # Trigram closeness (0–1) of a search query to the category name — orders
+    # `:search`. Internal (sorting only).
+    calculate :name_similarity,
+              :float,
+              expr(fragment("word_similarity(?, ?)", ^arg(:query), name)) do
+      argument :query, :string, allow_nil?: false
     end
   end
 

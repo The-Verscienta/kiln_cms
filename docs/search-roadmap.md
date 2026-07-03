@@ -10,8 +10,18 @@ phasing is at the end.
 > with the rerank pass applied when enabled, works over any content type
 > (dynamic entries included), and is exposed headlessly at `GET /api/search`
 > (sectioned hits + public paths + safe highlights + "did you mean").
-> Remaining below: facet *counts* (#2), the fuzzy hybrid leg (#6 tail),
-> taxonomy coverage (#7 tail), and the multilingual embedding model (#1 caveat).
+>
+> **Tail closed (same day):** the fuzzy trigram leg now joins the fusion at
+> reduced weight when the keyword leg comes up short (#6 — typos return
+> results, with "did you mean" naming the correction on sparse result sets);
+> categories/tags are searchable and sectioned into `global/2`, the palette,
+> and the API (#7); and `Search.facets/2` computes category/tag counts over
+> the policy-respecting match set, surfaced as `GET /api/search?facets=true`
+> and a category filter bar on the public `/search` page, with `:filters`
+> threaded through both hybrid legs (#2). **The roadmap below is fully
+> shipped** except #1's semantic-model caveat: `config :kiln_cms,
+> KilnCMS.Search` already accepts any embedding model/dim (e.g. `bge-m3`,
+> dim 1024) — switching is a config + re-embed decision, not a code gap.
 
 Conventions: **Effort** S (<½ day) / M (½–1½ days) / L (2+ days). **Risk** is
 implementation risk, not blast radius.
@@ -47,7 +57,7 @@ English rules, and results aren't scoped to a locale.
 **Touches.** `content.ex` (actions, calc, replace index with stored vector),
 new `Search.Language`, `SetSearchText`, migration, config. Pairs with #5.
 
-## 2. Faceted filtering  ·  Effort M · Risk L · *filter args shipped; counts remain*
+## 2. Faceted filtering  ·  Effort M · Risk L · *shipped (filter args on both legs + `Search.facets/2` counts + public filter bar)*
 
 **Goal.** Combine search with filters: `category_id`, `tag_ids`, `author_id`,
 `state`, `locale`, published-date range.
@@ -110,7 +120,7 @@ want the same materialized vector, so build them together.
 
 **Touches.** `SetSearchText` / generated column, `search_rank` calc.
 
-## 6. Typo tolerance  ·  Effort M · Risk L · *autocomplete trigram + "did you mean" shipped; fuzzy hybrid leg remains*
+## 6. Typo tolerance  ·  Effort M · Risk L · *shipped (fuzzy fallback leg in `hybrid/3` + sparse-result "did you mean")*
 
 **Goal.** Match misspellings ("databse" → "database") and power "did you mean".
 
@@ -122,7 +132,7 @@ yields few hits) or a low-weight third leg in `hybrid/3`. Suggestions via
 **Touches.** `Repo.installed_extensions`, migration, `hybrid/3` (optional leg),
 an `:fuzzy`/suggestion action.
 
-## 7. Broaden coverage  ·  Effort M–L · Risk L–M · *media + entries + `Search.global` shipped; taxonomy remains*
+## 7. Broaden coverage  ·  Effort M–L · Risk L–M · *shipped (media + entries + taxonomy sections in `Search.global`)*
 
 **Goal.** Search media (alt/caption/filename) and taxonomy (category/tag
 name+description), not just Page/Post.

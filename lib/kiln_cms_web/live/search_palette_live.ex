@@ -21,7 +21,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
      |> assign(:results, empty())}
   end
 
-  defp empty, do: %{pages: [], posts: [], entries: [], media: []}
+  defp empty, do: %{pages: [], posts: [], entries: [], media: [], categories: [], tags: []}
 
   @impl true
   def handle_event("search", %{"q" => raw}, socket) do
@@ -34,6 +34,8 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         results =
           Search.global(query, actor: socket.assigns.current_user, limit: 8, highlight: true)
 
+        # Content + media hits; taxonomy name matches don't count as found
+        # documents for analytics.
         total =
           length(results.pages) + length(results.posts) + length(results.entries) +
             length(results.media)
@@ -67,8 +69,8 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     _ -> :ok
   end
 
-  defp result_count(%{pages: p, posts: o, entries: e, media: m}),
-    do: length(p) + length(o) + length(e) + length(m)
+  defp result_count(%{pages: p, posts: o, entries: e, media: m, categories: c, tags: t}),
+    do: length(p) + length(o) + length(e) + length(m) + length(c) + length(t)
 
   @impl true
   def render(assigns) do
@@ -140,6 +142,31 @@ defmodule KilnCMSWeb.SearchPaletteLive do
             >
               <span class="font-medium">{m.filename}</span>
               <span :if={m.alt} class="ml-2 text-xs text-base-content/70">{m.alt}</span>
+            </.link>
+          </.section>
+          <.section
+            :if={@results.categories != [] or @results.tags != []}
+            title={gettext("Taxonomy")}
+          >
+            <.link
+              :for={c <- @results.categories}
+              navigate={~p"/editor/taxonomy"}
+              class="block rounded px-3 py-2 hover:bg-base-200"
+            >
+              <span class="font-medium">{c.name}</span>
+              <span class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
+                {gettext("Category")}
+              </span>
+            </.link>
+            <.link
+              :for={t <- @results.tags}
+              navigate={~p"/editor/taxonomy"}
+              class="block rounded px-3 py-2 hover:bg-base-200"
+            >
+              <span class="font-medium">{t.name}</span>
+              <span class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
+                {gettext("Tag")}
+              </span>
             </.link>
           </.section>
         </div>

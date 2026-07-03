@@ -5,7 +5,10 @@ the rerank pass shipped (Bumblebee cross-encoder adapter), and hybrid now
 powers every user-facing surface — `Search.global/2` sections (public
 `/search`, editor palette) fuse both legs over every content type incl.
 dynamic entries, and `GET /api/search` exposes it headlessly with
-"did you mean" suggestions. **Decisions locked
+"did you mean" suggestions. The search-roadmap tail closed the same day: a
+fuzzy trigram fallback leg in the fusion, taxonomy sections, and facet
+counts/filters (`Search.facets/2`, `?facets=true`, public category filter
+bar) — see `search-roadmap.md`. **Decisions locked
 (2026-06-23):** pgvector available in production Postgres; **local Bumblebee**
 embeddings (no hosted API), model `BAAI/bge-small-en-v1.5` (384-d, CLS pooling +
 L2 norm); Bumblebee/Nx/EXLA included in the build but the serving only starts

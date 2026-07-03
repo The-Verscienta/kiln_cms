@@ -1,8 +1,9 @@
 defmodule KilnCMS.Search.CoverageTest do
   @moduledoc """
-  Phase D (#7): media is searchable (filename/alt/caption) and
-  `KilnCMS.Search.global/2` returns sectioned results across pages, posts, and
-  media.
+  Phase D (#7): media is searchable (filename/alt/caption), taxonomy is
+  searchable (category/tag names, typo-tolerant), and
+  `KilnCMS.Search.global/2` returns sectioned results across pages, posts,
+  media, and taxonomy.
   """
   use KilnCMS.DataCase, async: true
 
@@ -57,4 +58,42 @@ defmodule KilnCMS.Search.CoverageTest do
     assert post.id in Enum.map(results.posts, & &1.id)
     assert media.id in Enum.map(results.media, & &1.id)
   end
+
+  test "global/2 covers taxonomy: categories and tags match by name" do
+    admin = admin()
+    term = "orchard#{uniq()}"
+
+    category =
+      CMS.create_category!(
+        %{name: "#{term} ideas", slug: slug(), description: "Seasonal"},
+        actor: admin
+      )
+
+    tag = CMS.create_tag!(%{name: "#{term}-tag", slug: slug()}, actor: admin)
+
+    results = Search.global(term, actor: admin)
+
+    assert category.id in Enum.map(results.categories, & &1.id)
+    assert tag.id in Enum.map(results.tags, & &1.id)
+  end
+
+  test "category search matches descriptions and tolerates typos in names" do
+    admin = admin()
+
+    by_description =
+      CMS.create_category!(
+        %{name: "Misc #{uniq()}", slug: slug(), description: "All about viticulture"},
+        actor: admin
+      )
+
+    # Same stemmer-proof typo pair as the suggestion tests: "fermentaton" is
+    # trigram-close to "fermentation" but no keyword/substring match.
+    by_typo =
+      CMS.create_category!(%{name: "Fermentation #{uniq()}", slug: slug()}, actor: admin)
+
+    assert by_description.id in ids(CMS.search_categories!("viticulture", actor: admin))
+    assert by_typo.id in ids(CMS.search_categories!("fermentaton", actor: admin))
+  end
+
+  defp ids(records), do: Enum.map(records, & &1.id)
 end
