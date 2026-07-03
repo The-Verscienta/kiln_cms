@@ -77,6 +77,12 @@ defmodule KilnCMS.Mail do
       raise ArgumentError, "email has no recipients"
     end
 
+    Enum.each(email.to, fn {_name, address} ->
+      unless valid_address?(address) do
+        raise ArgumentError, "invalid recipient address: #{inspect(address)}"
+      end
+    end)
+
     Enum.each(email.to, fn recipient ->
       email
       |> serialize(recipient)
@@ -101,26 +107,36 @@ defmodule KilnCMS.Mail do
         :ok
 
       {:error, reason} ->
+        safe_reason = redact_reason(reason)
+
         if permanent_failure?(reason) do
+          # Log so a systematic 5xx (e.g. a rotated relay password) is visible
+          # in server logs and Sentry, not just as `cancelled` rows in
+          # `oban_jobs` — a cancel is otherwise silent (no job exception, and
+          # Sentry's Oban integration ignores `{:cancel, _}`).
+          Logger.warning(
+            "Mail permanently rejected for #{Enum.join(recipient_domains(email), ", ")}, " <>
+              "cancelling: #{safe_reason}"
+          )
+
           :telemetry.execute(
             [:kiln_cms, :mail, :bounced],
             %{count: 1},
-            # Recipient domains only — full addresses are PII and telemetry
-            # metadata may reach Sentry/OTLP exporters.
-            %{recipient_domains: recipient_domains(email), reason: inspect(reason)}
+            # Recipient domains only, and the reason is scrubbed of any address:
+            # 5xx reject texts routinely echo the recipient, and this metadata
+            # (and the cancel reason below) may reach Sentry/OTLP exporters.
+            %{recipient_domains: recipient_domains(email), reason: safe_reason}
           )
 
-          {:cancel, "permanent delivery failure: #{inspect(reason)}"}
+          {:cancel, "permanent delivery failure: #{safe_reason}"}
         else
           raise TransientDeliveryError,
-            message: "transient delivery failure: #{inspect(reason)}"
+            message: "transient delivery failure: #{safe_reason}"
         end
     end
   end
 
   ## Mail settings / DKIM
-
-  @dkim_cache_key {__MODULE__, :dkim_config}
 
   @doc """
   The settings singleton, or nil before first use. A system read
@@ -162,40 +178,20 @@ defmodule KilnCMS.Mail do
   warning) when a configured key can't be resolved: losing the signature
   hurts deliverability, losing the email loses a password reset.
 
-  The computed value is cached in `:persistent_term` (settings mutations
-  invalidate via `invalidate_dkim_cache/0`); set
-  `config :kiln_cms, KilnCMS.Mail, cache_dkim?: false` to disable (test env,
-  where async sandboxes must not share a process-global cache).
+  Computed fresh per call from a single settings read. There is deliberately
+  no process-global cache: an outbound mail job is already an async network
+  round-trip, so one indexed read plus a key resolution is negligible against
+  the SMTP dialog — and a cache invites a rotation race (a stale selector/key
+  cached after invalidation), pins an error-produced `nil` until restart, and
+  goes stale on other cluster nodes. Correctness beats the microseconds.
   """
   @spec dkim_config() :: keyword() | nil
   def dkim_config do
-    if dkim_cache_enabled?() do
-      case :persistent_term.get(@dkim_cache_key, :miss) do
-        :miss ->
-          value = compute_dkim_config()
-          :persistent_term.put(@dkim_cache_key, value)
-          value
-
-        value ->
-          value
-      end
-    else
-      compute_dkim_config()
-    end
-  end
-
-  @doc "Drop the cached DKIM options (called after settings mutations)."
-  def invalidate_dkim_cache do
-    :persistent_term.erase(@dkim_cache_key)
-    :ok
-  end
-
-  defp compute_dkim_config do
-    settings = get_settings()
-
-    with %{dkim_selector: selector} when is_binary(selector) <- settings,
+    with %{dkim_selector: selector} = settings when is_binary(selector) <- get_settings(),
          domain when is_binary(domain) <- sending_domain() do
-      case KilnCMS.Keys.fetch(:dkim) do
+      # Resolve the key from the same row we just read, so the selector and the
+      # key material are always from one consistent snapshot.
+      case KilnCMS.Keys.fetch_for(settings) do
         {:ok, pem} ->
           [s: selector, d: domain, private_key: {:pem_plain, pem}]
 
@@ -210,12 +206,6 @@ defmodule KilnCMS.Mail do
     else
       _not_configured -> nil
     end
-  end
-
-  defp dkim_cache_enabled? do
-    :kiln_cms
-    |> Application.get_env(__MODULE__, [])
-    |> Keyword.get(:cache_dkim?, true)
   end
 
   @doc """
@@ -265,7 +255,30 @@ defmodule KilnCMS.Mail do
     |> headers(args["headers"] || %{})
   end
 
+  @doc """
+  Stamp a `Message-ID` header on `email` unless it already has one.
+
+  Receivers score messages without a Message-ID as spam, and gen_smtp
+  otherwise auto-fills one from the local (container) hostname, which won't
+  match the From domain. Pass `token` to make the ID stable across retries
+  that rebuild the same email (e.g. a worker keying on its Oban job id);
+  omit it for a fresh random ID.
+  """
+  @spec ensure_message_id(Swoosh.Email.t(), String.t() | nil) :: Swoosh.Email.t()
+  def ensure_message_id(%Swoosh.Email{headers: headers} = email, token \\ nil) do
+    if Map.has_key?(headers, "Message-ID") do
+      email
+    else
+      Swoosh.Email.header(email, "Message-ID", message_id(email, token))
+    end
+  end
+
   defp serialize(email, recipient) do
+    # Stamp the Message-ID here (at enqueue time) so Oban retries of the same
+    # job re-send the same message rather than a "new" one; each recipient's
+    # job is a distinct message and gets its own ID.
+    email = ensure_message_id(email)
+
     %{
       "from" => address_args(email.from),
       "to" => address_args(recipient),
@@ -273,17 +286,43 @@ defmodule KilnCMS.Mail do
       "subject" => email.subject,
       "html_body" => email.html_body,
       "text_body" => email.text_body,
-      # Message-ID is stamped at enqueue time so Oban retries of the same job
-      # re-send the same message rather than a "new" one, and each recipient's
-      # job (a distinct message) gets its own ID. Receivers score messages
-      # without one as spam; the domain must match the sender.
-      "headers" => Map.put_new(email.headers, "Message-ID", message_id(email))
+      "headers" => email.headers
     }
   end
 
-  defp message_id(%Swoosh.Email{from: {_name, from_address}}) do
-    domain = from_address |> String.split("@") |> List.last()
-    "<#{Ecto.UUID.generate()}@#{domain}>"
+  defp message_id(email, token) do
+    id = token || Ecto.UUID.generate()
+    "<#{id}@#{message_domain(email)}>"
+  end
+
+  # Prefer the From domain (the domain a DKIM signature and SPF align to);
+  # fall back to the configured sending domain, then a last-resort literal so
+  # a from-less email still gets a syntactically valid ID instead of crashing.
+  defp message_domain(%Swoosh.Email{from: {_name, address}}) when is_binary(address),
+    do: address |> String.split("@") |> List.last()
+
+  defp message_domain(_email), do: sending_domain() || "localhost"
+
+  # A minimally-valid address has exactly one "@" with non-empty local and
+  # domain parts. Guards against a malformed recipient becoming the SMTP relay
+  # in DirectMX (where the whole string would be MX-looked-up and retried for
+  # hours as a "transient" DNS failure).
+  defp valid_address?(address) when is_binary(address) do
+    case String.split(address, "@") do
+      [local, domain] -> local != "" and domain != "" and not String.contains?(domain, " ")
+      _ -> false
+    end
+  end
+
+  defp valid_address?(_address), do: false
+
+  # Scrub anything address-shaped from an inspected error term so recipient
+  # PII in 5xx reject texts doesn't leak into telemetry, logs, or the stored
+  # Oban cancel reason. Keeps the structure/SMTP status useful for debugging.
+  defp redact_reason(reason) do
+    reason
+    |> inspect()
+    |> String.replace(~r/[\w.!#$%&'*+\/=?^`{|}~-]+@[\w.-]+/, "[address redacted]")
   end
 
   defp address_args(nil), do: nil

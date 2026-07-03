@@ -192,5 +192,19 @@ defmodule KilnCMSWeb.MailSettingsLiveTest do
       # Test adapter accepts everything — the point is the outcome rendering.
       assert lv |> element(~s{[data-test-result="ok"]}) |> has_element?()
     end
+
+    test "a blank recipient is rejected without crashing the LiveView", %{conn: conn} do
+      {lv, _html} = mount_as_admin(conn)
+
+      # A whitespace-only address (the HTML `required` attr is client-side only)
+      # would raise in Swoosh.Email.to/2 and crash the process without a guard.
+      html =
+        lv
+        |> form(~s{form[phx-submit="send_test"]}, test: %{to: "   "})
+        |> render_submit()
+
+      assert html =~ "Enter an address"
+      refute lv |> element(~s{[data-test-result]}) |> has_element?()
+    end
   end
 end

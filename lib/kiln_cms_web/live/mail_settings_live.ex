@@ -126,36 +126,61 @@ defmodule KilnCMSWeb.MailSettingsLive do
   def handle_event("verify", _params, socket) do
     settings = socket.assigns.settings
 
-    {:noreply,
-     socket
-     |> assign(:verifying?, true)
-     |> start_async(:verify, fn -> DnsCheck.run(settings) end)}
+    # Ignore a re-click while a run is already in flight: the disabled button
+    # attribute is client-side only, so a fast double-click (or a replayed
+    # event) would otherwise start a second concurrent run.
+    if socket.assigns.verifying? do
+      {:noreply, socket}
+    else
+      {:noreply,
+       socket
+       |> assign(:verifying?, true)
+       |> start_async(:verify, fn -> DnsCheck.run(settings) end)}
+    end
   end
 
   def handle_event("preflight", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:preflighting?, true)
-     |> start_async(:preflight, fn -> DnsCheck.check_port25() end)}
+    if socket.assigns.preflighting? do
+      {:noreply, socket}
+    else
+      {:noreply,
+       socket
+       |> assign(:preflighting?, true)
+       |> start_async(:preflight, fn -> DnsCheck.check_port25() end)}
+    end
   end
 
   def handle_event("send_test", %{"test" => %{"to" => to}}, socket) do
-    email =
-      Swoosh.Email.new()
-      |> Swoosh.Email.from(socket.assigns.from)
-      |> Swoosh.Email.to(String.trim(to))
-      |> Swoosh.Email.subject(gettext("KilnCMS test email"))
-      |> Swoosh.Email.html_body(
-        "<p>#{gettext("This is a test email from your KilnCMS instance.")}</p>"
-      )
-      |> Swoosh.Email.text_body(gettext("This is a test email from your KilnCMS instance."))
+    recipient = String.trim(to)
 
-    {:noreply,
-     socket
-     |> assign(:sending_test?, true)
-     |> assign(:test_to, to)
-     |> assign(:test_result, nil)
-     |> start_async(:send_test, fn -> Mail.deliver_now(email) end)}
+    cond do
+      socket.assigns.sending_test? ->
+        {:noreply, socket}
+
+      recipient == "" ->
+        {:noreply,
+         socket
+         |> assign(:test_to, to)
+         |> put_flash(:error, gettext("Enter an address to send the test to."))}
+
+      true ->
+        email =
+          Swoosh.Email.new()
+          |> Swoosh.Email.from(socket.assigns.from)
+          |> Swoosh.Email.to(recipient)
+          |> Swoosh.Email.subject(gettext("KilnCMS test email"))
+          |> Swoosh.Email.html_body(
+            "<p>#{gettext("This is a test email from your KilnCMS instance.")}</p>"
+          )
+          |> Swoosh.Email.text_body(gettext("This is a test email from your KilnCMS instance."))
+
+        {:noreply,
+         socket
+         |> assign(:sending_test?, true)
+         |> assign(:test_to, to)
+         |> assign(:test_result, nil)
+         |> start_async(:send_test, fn -> Mail.deliver_now(email) end)}
+    end
   end
 
   def handle_event("copied", _params, socket) do

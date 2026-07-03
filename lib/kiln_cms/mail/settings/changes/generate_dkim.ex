@@ -13,10 +13,7 @@ defmodule KilnCMS.Mail.Settings.Changes.GenerateDkim do
   @impl true
   def change(changeset, opts, _context) do
     rotate? = Keyword.get(opts, :rotate, false)
-
-    changeset
-    |> Ash.Changeset.before_action(&generate(&1, rotate?))
-    |> invalidate_dkim_cache_after()
+    Ash.Changeset.before_action(changeset, &generate(&1, rotate?))
   end
 
   defp generate(changeset, rotate?) do
@@ -47,13 +44,5 @@ defmodule KilnCMS.Mail.Settings.Changes.GenerateDkim do
         |> Ash.Changeset.force_change_attribute(:dkim_public_key, public_key)
         |> Ash.Changeset.force_change_attribute(:dkim_selector, Keys.new_selector())
     end
-  end
-
-  @doc false
-  def invalidate_dkim_cache_after(changeset) do
-    Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
-      KilnCMS.Mail.invalidate_dkim_cache()
-      result
-    end)
   end
 end

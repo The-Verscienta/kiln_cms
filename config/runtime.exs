@@ -257,7 +257,15 @@ if config_env() == :prod do
   #     Requires MAIL_FROM_EMAIL (its domain is the sending domain) and
   #     correct DNS (SPF/DKIM/DMARC/PTR) — see /editor/mail once Phase 5
   #     lands, and mind that many cloud hosts block outbound port 25.
-  mail_mode = System.get_env("MAIL_MODE") || (System.get_env("SMTP_HOST") && "smtp")
+  # Treat a blank MAIL_MODE ("" — a common `MAIL_MODE=` .env/compose artifact)
+  # as unset rather than an unknown mode: an empty string is truthy in Elixir,
+  # so without this it would fall through to the `other -> raise` clause and
+  # crash boot (and mask a set SMTP_HOST, since `||` wouldn't fall back).
+  mail_mode =
+    case System.get_env("MAIL_MODE") do
+      blank when blank in [nil, ""] -> System.get_env("SMTP_HOST") && "smtp"
+      mode -> mode
+    end
 
   case mail_mode do
     "smtp" ->

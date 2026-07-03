@@ -257,7 +257,7 @@ defmodule KilnCMS.Mail.DnsCheck do
         }
 
       record ->
-        if String.contains?(record, spf_mechanism(server_ip)) do
+        if spf_names_ip?(record, server_ip) do
           %{status: :ok, detail: "SPF record covers #{server_ip}", found: record}
         else
           %{
@@ -269,6 +269,18 @@ defmodule KilnCMS.Mail.DnsCheck do
           }
         end
     end
+  end
+
+  # Match the mechanism as a whole token, not a substring: a bare
+  # `String.contains?` would accept "ip4:203.0.113.90" as covering
+  # "203.0.113.9" (prefix), a false green. SPF mechanisms are space-separated,
+  # so split and compare each token exactly.
+  defp spf_names_ip?(record, ip) do
+    mechanism = spf_mechanism(ip)
+
+    record
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.member?(mechanism)
   end
 
   defp spf_mechanism(ip) do
@@ -328,21 +340,55 @@ defmodule KilnCMS.Mail.DnsCheck do
   ## DMARC
 
   defp check_dmarc(domain, opts) do
-    name = "_dmarc.#{domain}"
+    case find_dmarc("_dmarc.#{domain}", opts) do
+      {:ok, record} -> %{status: :ok, detail: "DMARC record present", found: record}
+      :none -> check_dmarc_parent(domain, opts)
+    end
+  end
 
+  # DMARC is applied at the From domain and, failing that, its organizational
+  # (parent) domain (RFC 7489 §3.2). A subdomain sender like
+  # cms@mail.example.com is covered by a policy at _dmarc.example.com, so check
+  # the parent before reporting "missing". One-label fallback, not a full
+  # Public Suffix List walk.
+  defp check_dmarc_parent(domain, opts) do
+    with parent when is_binary(parent) <- parent_domain(domain),
+         {:ok, record} <- find_dmarc("_dmarc.#{parent}", opts) do
+      %{
+        status: :ok,
+        detail: "DMARC policy inherited from the organizational domain #{parent}",
+        found: record
+      }
+    else
+      _no_parent_policy -> dmarc_missing()
+    end
+  end
+
+  defp find_dmarc(name, opts) do
     case Enum.find(dns(opts).txt(name), &String.starts_with?(&1, "v=DMARC1")) do
-      nil ->
-        %{
-          status: :warn,
-          detail:
-            "no DMARC record — mail can flow without one, but Gmail/Yahoo " <>
-              "bulk-sender rules increasingly expect it",
-          found: nil,
-          expected: "v=DMARC1; p=quarantine"
-        }
+      nil -> :none
+      record -> {:ok, record}
+    end
+  end
 
-      record ->
-        %{status: :ok, detail: "DMARC record present", found: record}
+  defp dmarc_missing do
+    %{
+      status: :warn,
+      detail:
+        "no DMARC record — mail can flow without one, but Gmail/Yahoo " <>
+          "bulk-sender rules increasingly expect it",
+      found: nil,
+      expected: "v=DMARC1; p=quarantine"
+    }
+  end
+
+  # The immediate parent (drop the leftmost label); nil for a bare
+  # two-label-or-shorter domain, where there is no distinct parent to check.
+  defp parent_domain(domain) do
+    case String.split(domain, ".") do
+      [_leaf, _tld] -> nil
+      [_leftmost | rest] when rest != [] -> Enum.join(rest, ".")
+      _ -> nil
     end
   end
 
@@ -387,7 +433,9 @@ defmodule KilnCMS.Mail.DnsCheck do
               found: name
             }
 
-          helo != nil and name != helo ->
+          # DNS names are case-insensitive (RFC 4343) and reverse zones often
+          # store mixed case, so compare case-folded to avoid a spurious warn.
+          helo != nil and String.downcase(name) != String.downcase(helo) ->
             %{
               status: :warn,
               detail:

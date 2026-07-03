@@ -45,6 +45,30 @@ defmodule KilnCMS.Mail.DnsCheckTest do
     def addresses(_name), do: [{198, 51, 100, 1}]
   end
 
+  defmodule PrefixSpfDNS do
+    def txt("example.com"), do: ["v=spf1 ip4:203.0.113.90 -all"]
+    def txt(_name), do: []
+    def mx(_domain), do: []
+    def ptr(_address), do: {:error, :nxdomain}
+    def addresses(_name), do: []
+  end
+
+  defmodule MixedCasePtrDNS do
+    def txt(_name), do: []
+    def mx(_domain), do: []
+    def ptr({203, 0, 113, 9}), do: {:ok, "Mail.Example.COM"}
+    def addresses("Mail.Example.COM"), do: [{203, 0, 113, 9}]
+    def addresses(_name), do: []
+  end
+
+  defmodule ParentDmarcDNS do
+    def txt("_dmarc.example.com"), do: ["v=DMARC1; p=quarantine"]
+    def txt(_name), do: []
+    def mx(_domain), do: []
+    def ptr(_address), do: {:error, :nxdomain}
+    def addresses(_name), do: []
+  end
+
   defmodule OpenTCP do
     def banner(_host, 25, _timeout), do: {:ok, "220 mx.probe.test ESMTP ready\r\n"}
   end
@@ -120,6 +144,27 @@ defmodule KilnCMS.Mail.DnsCheckTest do
 
       results = DnsCheck.run(settings(), domain: nil, dns: HappyDNS)
       assert Enum.all?(Map.values(results), &(&1.status == :skip))
+    end
+
+    test "SPF only passes on an exact IP mechanism, not a prefix substring" do
+      # server_ip 203.0.113.9, but the record authorizes 203.0.113.90 — a bare
+      # substring match would report this covered (false green).
+      assert %{status: :warn} = run(settings(), PrefixSpfDNS).spf
+    end
+
+    test "PTR that differs from HELO only by letter case is not warned (RFC 4343)" do
+      # helo_host is "mail.example.com"; PTR is "Mail.Example.COM" —
+      # case-folded they match → :ok, not a spurious :warn.
+      assert %{status: :ok} = run(settings(), MixedCasePtrDNS).ptr
+    end
+
+    test "DMARC is inherited from the organizational (parent) domain" do
+      # From cms@mail.example.com: no record at _dmarc.mail.example.com, but a
+      # policy exists at the parent _dmarc.example.com (RFC 7489 §3.2).
+      result = DnsCheck.run(settings(), domain: "mail.example.com", dns: ParentDmarcDNS).dmarc
+
+      assert %{status: :ok} = result
+      assert result.detail =~ "organizational domain example.com"
     end
   end
 

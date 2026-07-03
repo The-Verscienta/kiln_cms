@@ -20,6 +20,16 @@ defmodule KilnCMS.Mail.Settings do
   postgres do
     table "mail_settings"
     repo KilnCMS.Repo
+
+    # The provider set is enforced in the Ash layer (`one_of` below), but Ash
+    # casts this column to an atom on *read*, so an out-of-band write of any
+    # other string would crash every read of the singleton — taking down the
+    # whole outbound-mail pipeline. A DB-level CHECK makes the bad write
+    # impossible in the first place.
+    check_constraints do
+      check_constraint :dkim_key_provider, "dkim_key_provider_must_be_known",
+        check: "dkim_key_provider IN ('database', 'env', 'file')"
+    end
   end
 
   actions do
@@ -105,7 +115,7 @@ defmodule KilnCMS.Mail.Settings do
 
     # Provider-specific pointer (%{"var" => ...} / %{"path" => ...}); never
     # key material. Empty for the database provider.
-    attribute :dkim_key_provider_config, :map, default: %{}, public?: true
+    attribute :dkim_key_provider_config, :map, allow_nil?: false, default: %{}, public?: true
 
     attribute :dkim_private_key_encrypted, :binary do
       sensitive? true

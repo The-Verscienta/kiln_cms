@@ -23,10 +23,6 @@ config :kiln_cms,
   ],
   content_domains: [KilnCMS.CMS, Verscienta.Catalog]
 
-# :persistent_term is process-global; async tests with sandboxed DB rows must
-# not share a cached DKIM config across tests.
-config :kiln_cms, KilnCMS.Mail, cache_dkim?: false
-
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.
 config :kiln_cms, KilnCMS.Mail.DnsCheck,

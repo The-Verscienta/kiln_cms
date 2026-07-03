@@ -41,9 +41,18 @@ defmodule KilnCMS.Keys do
   def fetch(:dkim) do
     case KilnCMS.Mail.get_settings() do
       nil -> {:error, :not_configured}
-      settings -> provider!(settings.dkim_key_provider).fetch(provider_config(settings))
+      settings -> fetch_for(settings)
     end
   end
+
+  @doc """
+  Resolve the DKIM key material from an already-loaded settings row — lets
+  callers that have just read the singleton (e.g. `KilnCMS.Mail.dkim_config/0`)
+  avoid a second read and keep the selector and key from one snapshot.
+  """
+  @spec fetch_for(KilnCMS.Mail.Settings.t()) :: {:ok, binary()} | {:error, term()}
+  def fetch_for(settings),
+    do: provider!(settings.dkim_key_provider).fetch(provider_config(settings))
 
   @doc "Run the configured provider's source check for a settings row."
   @spec check(KilnCMS.Mail.Settings.t()) :: :ok | {:error, term()}

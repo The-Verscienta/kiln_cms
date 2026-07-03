@@ -9,13 +9,10 @@ defmodule KilnCMS.Mail.Settings.Changes.ConfigureKeySource do
   use Ash.Resource.Change
 
   alias KilnCMS.Keys
-  alias KilnCMS.Mail.Settings.Changes.GenerateDkim
 
   @impl true
   def change(changeset, _opts, _context) do
-    changeset
-    |> Ash.Changeset.before_action(&configure/1)
-    |> GenerateDkim.invalidate_dkim_cache_after()
+    Ash.Changeset.before_action(changeset, &configure/1)
   end
 
   defp configure(changeset) do

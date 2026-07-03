@@ -16,9 +16,14 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   alias KilnCMS.Mail
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: args}) do
+  def perform(%Oban.Job{id: id, args: args}) do
     args
     |> build_email()
+    # This worker builds its email at perform time (not via Mail.enqueue!), so
+    # stamp a domain-correct Message-ID here too — keyed on the job id so all
+    # retries of this job carry the *same* ID rather than a fresh one each
+    # attempt (and so gen_smtp doesn't fill in one from the container hostname).
+    |> Mail.ensure_message_id("workflow-#{id}")
     |> Mail.deliver_for_worker()
   end
 

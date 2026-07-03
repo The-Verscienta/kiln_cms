@@ -18,10 +18,14 @@ defmodule KilnCMS.MailTest do
   defmodule PermanentFailureAdapter do
     use Swoosh.Adapter
 
+    # The 5xx text echoes the recipient address, as real MTAs routinely do —
+    # so the redaction path is exercised.
     def deliver(_email, _config),
       do:
         {:error,
-         {:no_more_hosts, {:permanent_failure, ~c"mx.example.com", "550 5.1.1 no such user"}}}
+         {:no_more_hosts,
+          {:permanent_failure, ~c"mx.example.com",
+           "550 5.1.1 <one@example.com>: Recipient address rejected"}}}
   end
 
   defmodule TransientFailureAdapter do
@@ -84,6 +88,39 @@ defmodule KilnCMS.MailTest do
         email() |> Map.put(:to, []) |> enqueue_opaquely!()
       end
     end
+
+    test "rejects a malformed recipient address instead of queuing an undeliverable job" do
+      # Without the guard, a no-@ address becomes the SMTP relay in DirectMX
+      # and retries for ~16h as a "transient" DNS failure.
+      for bad <- ["userexample.com", "user@", "@example.com", "a@b@c"] do
+        assert_raise ArgumentError, ~r/invalid recipient/, fn ->
+          email() |> put_to([{"", bad}]) |> enqueue_opaquely!()
+        end
+      end
+    end
+  end
+
+  describe "ensure_message_id/2" do
+    test "stamps a From-domain Message-ID and is idempotent" do
+      stamped = Mail.ensure_message_id(email())
+      id = stamped.headers["Message-ID"]
+      assert id =~ ~r/^<.+@example\.com>$/
+      # Idempotent: a second call keeps the existing ID.
+      assert Mail.ensure_message_id(stamped).headers["Message-ID"] == id
+    end
+
+    test "a token makes the ID stable across rebuilds (retry safety)" do
+      one = Mail.ensure_message_id(email(), "workflow-42").headers["Message-ID"]
+      two = Mail.ensure_message_id(email(), "workflow-42").headers["Message-ID"]
+      assert one == two
+      assert one == "<workflow-42@example.com>"
+    end
+
+    test "falls back to the configured sending domain when From is unset" do
+      # :email_from default in test is noreply@kilncms.dev (config/config.exs).
+      no_from = new() |> to("a@b.test") |> subject("x")
+      assert Mail.ensure_message_id(no_from).headers["Message-ID"] =~ ~r/@kilncms\.dev>$/
+    end
   end
 
   describe "deliver_for_worker/2" do
@@ -92,6 +129,7 @@ defmodule KilnCMS.MailTest do
       assert_email_sent()
     end
 
+    @tag :capture_log
     test "cancels on a permanent (5xx) failure and emits a bounce event" do
       ref = make_ref()
       handler_id = "mail-bounce-#{inspect(ref)}"
@@ -112,11 +150,17 @@ defmodule KilnCMS.MailTest do
                Mail.deliver_for_worker(email(), adapter: PermanentFailureAdapter)
 
       assert reason =~ "permanent delivery failure"
+      # The address the 5xx echoed is scrubbed from the cancel reason...
+      refute reason =~ "one@example.com"
+      assert reason =~ "[address redacted]"
 
       assert_receive {^ref, %{count: 1}, metadata}
-      # Domains only — never full addresses (telemetry may reach exporters).
+      # ...and from the telemetry metadata (domains only; may reach exporters).
       assert metadata.recipient_domains == ["example.com"]
-      refute metadata.reason =~ "one@"
+      refute metadata.reason =~ "one@example.com"
+      assert metadata.reason =~ "[address redacted]"
+      # The SMTP status is preserved so the reason stays useful for debugging.
+      assert metadata.reason =~ "550"
     end
 
     test "raises for transient failures so Oban retries" do
