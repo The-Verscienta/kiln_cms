@@ -289,8 +289,19 @@ Findings against the §3 risks:
    *history*; the prose itself is still safe via the autosave path. Dead
    sessions prune after 30 days. Persistence is config-gated off in the test
    suite (sandbox ownership), exercised by its own sync durability tests.
-8. **Still open (the one remaining production item):** server-side checkpoint
-   materialization (§6.4's option (b)) — rendering Yjs state to HTML on the
-   BEAM needs a ProseMirror-schema render step, since an `XmlFragment`
-   serializes to prosemirror-node XML, not HTML. The persister-election
-   autosave covers persistence until then.
+8. **Server-side checkpoint materialization: built** (§6.4's option (b) —
+   the last item). `Crdt.Materializer` renders a fragment's ProseMirror-node
+   XML to sanitized HTML on the BEAM: the StarterKit node/mark set is closed
+   and mirrors the rich-text sanitizer's allowlist, so a ~100-line total
+   mapping (unknown nodes degrade to their children) replaces the feared JS
+   render step. `Crdt.Checkpoint` writes changed `legacy_html` back through
+   the `:autosave` action when the **last client detaches** (and on server
+   shutdown) — never while editors are present, so it can't race the elected
+   client persister; drafts only; no-change checkpoints skip; a stale-record
+   failure means an editor already saved the converged content. This closes
+   the one gap client persistence couldn't cover: every editor crashing
+   before their autosave debounce fired.
+
+   **The spike is fully graduated** — every item from §3's recommendation and
+   §6's findings is implemented and tested. What remains is product surface
+   (e.g. enabling the flag per deployment), not architecture.
