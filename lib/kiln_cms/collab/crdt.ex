@@ -15,10 +15,10 @@ defmodule KilnCMS.Collab.Crdt do
   Behind the `:collab_prototype` config flag (on in dev, off in prod) — the
   channel refuses joins when disabled, so shipping the code is inert.
 
-  Durability is deliberately out of scope for the prototype: the Y.Doc lives
-  as long as editors are attached (plus an idle grace), and persistence still
-  flows through the editor's existing HTML-mirror autosave. See the spike doc
-  for findings and what a production phase would add.
+  Docs are **durable across restarts**: each DocServer lazy-restores its Yjs
+  state from `collab_doc_states`, checkpoints while dirty, and flushes on
+  shutdown (see `DocServer`). Content durability additionally flows through
+  the editor's HTML-mirror autosave, so even a hard kill loses no prose.
   """
 
   alias KilnCMS.Collab.Crdt.DocServer

@@ -281,5 +281,16 @@ Findings against the §3 risks:
    backfilled ids into all pre-id stored rows (both legacy and union-envelope
    shapes, idempotent); truly id-less blocks fall back to the old positional
    key until their next blocks-carrying save.
-7. **Not built (next steps if promoted):** Y.Doc durability across server
-   restarts, and server-side checkpoint materialization (§6.4's option (b)).
+7. **Y.Doc durability: built.** Doc servers lazy-restore their Yjs state from
+   `collab_doc_states` on first use, checkpoint while dirty (15 s), and flush
+   on shutdown (exits trapped, so idle stops and deploys both persist) — a
+   restart mid-session no longer resets live docs, and late joiners restore
+   full CRDT history. A hard kill loses at most one checkpoint interval of
+   *history*; the prose itself is still safe via the autosave path. Dead
+   sessions prune after 30 days. Persistence is config-gated off in the test
+   suite (sandbox ownership), exercised by its own sync durability tests.
+8. **Still open (the one remaining production item):** server-side checkpoint
+   materialization (§6.4's option (b)) — rendering Yjs state to HTML on the
+   BEAM needs a ProseMirror-schema render step, since an `XmlFragment`
+   serializes to prosemirror-node XML, not HTML. The persister-election
+   autosave covers persistence until then.
