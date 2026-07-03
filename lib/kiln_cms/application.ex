@@ -35,7 +35,7 @@ defmodule KilnCMS.Application do
       {Oban,
        AshOban.config(
          Application.fetch_env!(:kiln_cms, :ash_domains),
-         Application.fetch_env!(:kiln_cms, Oban)
+         oban_config()
        )},
       {Phoenix.PubSub, name: KilnCMS.PubSub},
       # Fire-and-forget tasks off the request hot path (best-effort page-view
@@ -64,7 +64,20 @@ defmodule KilnCMS.Application do
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
-    Supervisor.start_link(children ++ embedding_children() ++ reranker_children(), opts)
+
+    Supervisor.start_link(
+      children ++ embedding_children() ++ reranker_children() ++ Kiln.Plugins.children(),
+      opts
+    )
+  end
+
+  # The core Oban config with plugin queues merged in (D18) — plugins declare
+  # queues in code (`oban_queues/0`) instead of editing the host's config.
+  defp oban_config do
+    Application.fetch_env!(:kiln_cms, Oban)
+    |> Keyword.update(:queues, Kiln.Plugins.oban_queues(), fn queues ->
+      Keyword.merge(Kiln.Plugins.oban_queues(), queues)
+    end)
   end
 
   # Wire up production observability. Both halves are no-ops unless configured,

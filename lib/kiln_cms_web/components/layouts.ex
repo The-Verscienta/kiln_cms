@@ -283,10 +283,25 @@ defmodule KilnCMSWeb.Layouts do
     >
       {gettext("Types")}
     </a>
+    <%!-- Plugin-contributed nav (D18), each gated by its declared role. --%>
+    <a
+      :for={item <- Kiln.Plugins.nav_items()}
+      :if={@current_user && nav_item_visible?(item, @current_user)}
+      href={item.path}
+      class={@item}
+    >
+      {item.label}
+    </a>
     <a :if={is_nil(@current_user)} href={~p"/sign-in"} class={@item}>{gettext("Sign in")}</a>
     <a :if={@current_user} href={~p"/sign-out"} class={@item}>{gettext("Sign out")}</a>
     """
   end
+
+  # A plugin nav item is visible when the user meets its declared role
+  # (`:editor` admits admins too, mirroring the core links).
+  defp nav_item_visible?(%{role: :admin}, user), do: user.role == :admin
+  defp nav_item_visible?(%{role: :editor}, user), do: user.role in [:editor, :admin]
+  defp nav_item_visible?(_item, _user), do: false
 
   @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.

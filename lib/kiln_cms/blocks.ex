@@ -9,13 +9,50 @@ defmodule KilnCMS.Blocks do
   build on.
   """
 
-  @doc "All block modules using `Kiln.Block`."
+  # The core block set. Plugins (D18) extend it via `Kiln.Plugin.blocks/0`;
+  # `union_types/0` below is the single compile-time source the storage union
+  # and the legacy bridge derive from.
+  @core_blocks [
+    heading: KilnCMS.Blocks.Heading,
+    image: KilnCMS.Blocks.Image,
+    rich_text: KilnCMS.Blocks.RichText,
+    quote: KilnCMS.Blocks.Quote,
+    embed: KilnCMS.Blocks.Embed,
+    divider: KilnCMS.Blocks.Divider,
+    custom: KilnCMS.Blocks.Custom
+  ]
+
+  @doc """
+  The `Ash.Type.Union` member spec for `KilnCMS.CMS.BlockUnion`: the core
+  blocks plus every installed plugin's blocks, keyed by each module's
+  `Kiln.Block` name. Evaluated at **compile time** (the union is a storage
+  type), which is why the plugin list is `Application.compile_env`.
+  """
+  @spec union_types() :: keyword()
+  def union_types do
+    plugin = for mod <- Kiln.Plugins.blocks(), do: {Kiln.Block.Info.name(mod), mod}
+
+    for {name, mod} <- @core_blocks ++ plugin do
+      {name, [type: mod, tag: :_type, tag_value: to_string(name)]}
+    end
+  end
+
+  @doc "The core block type names (excluding plugin contributions)."
+  @spec core_types() :: [atom()]
+  def core_types, do: Keyword.keys(@core_blocks)
+
+  @doc "All block modules using `Kiln.Block` — the app's own plus plugin-contributed."
   @spec modules() :: [module()]
   def modules do
-    case :application.get_key(:kiln_cms, :modules) do
-      {:ok, mods} -> Enum.filter(mods, &kiln_block?/1)
-      _ -> []
-    end
+    app_modules =
+      case :application.get_key(:kiln_cms, :modules) do
+        {:ok, mods} -> Enum.filter(mods, &kiln_block?/1)
+        _ -> []
+      end
+
+    # Plugin blocks may live in another OTP app (hex-dep plugins), which the
+    # app-modules scan can't see.
+    Enum.uniq(app_modules ++ Kiln.Plugins.blocks())
   end
 
   @doc "Map of `_type` discriminator → block module."
