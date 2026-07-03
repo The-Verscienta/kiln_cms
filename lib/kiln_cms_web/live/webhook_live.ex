@@ -222,6 +222,9 @@ defmodule KilnCMSWeb.WebhookLive do
                       endpoint.active && "bg-success",
                       !endpoint.active && "bg-base-content/30"
                     ]} />
+                    <span class="sr-only">
+                      {if endpoint.active, do: gettext("Active"), else: gettext("Disabled")}
+                    </span>
                     <code class="truncate text-sm">{endpoint.url}</code>
                   </div>
                   <div class="flex flex-wrap gap-1">

@@ -17,19 +17,22 @@ defmodule KilnCMS.Search.BlockIndexer do
   def reindex(document) do
     type = Engine.document_type(document)
     context = document_context(document)
+    hashes = existing_hashes(type, document.id)
 
     embedded =
       document
       |> Map.get(:blocks)
       |> TypedBlocks.to_typed()
       |> Enum.with_index()
-      |> Enum.map(fn {block, index} -> index_block(type, document.id, block, index, context) end)
+      |> Enum.map(fn {block, index} ->
+        index_block(type, document.id, block, index, context, hashes)
+      end)
       |> Enum.count(&(&1 == :embedded))
 
     {:ok, embedded}
   end
 
-  defp index_block(type, document_id, %module{} = block, index, context) do
+  defp index_block(type, document_id, %module{} = block, index, context, hashes) do
     text = Blocks.search_text(block)
 
     if text == "" do
@@ -38,7 +41,7 @@ defmodule KilnCMS.Search.BlockIndexer do
       block_key = block_key(block, index)
       hash = hash(text, context)
 
-      if unchanged?(type, document_id, block_key, hash) do
+      if hashes[block_key] == hash do
         :unchanged
       else
         embed_and_store(type, document_id, block_key, module, hash, context, text)
@@ -70,11 +73,15 @@ defmodule KilnCMS.Search.BlockIndexer do
     end
   end
 
-  defp unchanged?(type, document_id, block_key, hash) do
-    case SearchIndex.get_block_embedding(type, document_id, block_key, authorize?: false) do
-      {:ok, %{content_hash: ^hash}} -> true
-      _ -> false
-    end
+  # One batched read of the document's stored hashes (embedding vectors stay in
+  # the DB) instead of a lookup query per block.
+  defp existing_hashes(type, document_id) do
+    type
+    |> SearchIndex.block_embeddings_for!(document_id,
+      authorize?: false,
+      query: [select: [:block_key, :content_hash]]
+    )
+    |> Map.new(&{&1.block_key, &1.content_hash})
   end
 
   defp block_key(block, index), do: Map.get(block, :id) || "idx-#{index}"

@@ -36,13 +36,15 @@ defmodule Mix.Tasks.Kiln.EmbedAll do
   end
 
   defp enqueue_source({resource, lister}, acc) do
-    records = lister.(authorize?: false)
+    # Only ids are needed — don't drag blocks/search_text/embedding along.
+    records = lister.(authorize?: false, query: [select: [:id]])
 
-    Enum.each(records, fn %{id: id} ->
-      %{"resource" => to_string(resource), "id" => id}
-      |> EmbeddingWorker.new()
-      |> Oban.insert!()
+    records
+    |> Enum.map(fn %{id: id} ->
+      EmbeddingWorker.new(%{"resource" => to_string(resource), "id" => id})
     end)
+    |> Enum.chunk_every(500)
+    |> Enum.each(&Oban.insert_all/1)
 
     acc + length(records)
   end

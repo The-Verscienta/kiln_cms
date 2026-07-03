@@ -224,6 +224,7 @@ defmodule KilnCMSWeb.Layouts do
       <.link
         :for={loc <- @locales}
         href={~p"/locale/#{loc}"}
+        aria-current={loc == @current && "true"}
         class={[
           "rounded px-1.5 py-1 uppercase",
           if(loc == @current,

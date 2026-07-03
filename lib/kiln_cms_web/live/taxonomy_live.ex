@@ -279,7 +279,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
       </.form>
 
       <p :if={@records == []} class="text-sm text-base-content/60">
-        {gettext("No %{kind}s yet.", kind: @kind)}
+        {none_yet(@kind)}
       </p>
 
       <ul
@@ -292,9 +292,10 @@ defmodule KilnCMSWeb.TaxonomyLive do
               <p class="truncate font-medium">{record.name}</p>
               <p class="truncate text-xs text-base-content/70">
                 <code>{record.slug}</code>
-                · {record.page_count} {pluralize(record.page_count, "page")}, {record.post_count} {pluralize(
-                  record.post_count,
-                  "post"
+                · {ngettext("%{count} page", "%{count} pages", record.page_count,
+                  count: record.page_count
+                )}, {ngettext("%{count} post", "%{count} posts", record.post_count,
+                  count: record.post_count
                 )}
               </p>
             </div>
@@ -372,6 +373,9 @@ defmodule KilnCMSWeb.TaxonomyLive do
     end
   end
 
-  defp pluralize(1, word), do: word
-  defp pluralize(_, word), do: word <> "s"
+  # Whole translatable sentences instead of interpolating a naively
+  # pluralized English noun ("No categorys yet.").
+  defp none_yet("category"), do: gettext("No categories yet.")
+  defp none_yet("tag"), do: gettext("No tags yet.")
+  defp none_yet(_kind), do: gettext("Nothing here yet.")
 end
