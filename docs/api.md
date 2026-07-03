@@ -163,6 +163,17 @@ by an Oban worker with retry/backoff. Every request carries an
 secret — verify it before trusting the payload. Selectable events are derived at
 runtime from every registered content type × verb.
 
+**Reliability.** Every delivery is recorded on a ledger shown at
+`/editor/webhooks`: per-attempt status, last HTTP code, and last error. A
+delivery that exhausts its retries (5 attempts, exponential backoff) is marked
+failed; after 10 exhausted deliveries in a row the endpoint is
+**auto-disabled** (any success — or an admin edit — resets the count). Admins
+can **redeliver** any recorded delivery (a fresh ledger row, same payload) and
+**ping** an endpoint with a test `"ping"` event, which delivers even while the
+endpoint is disabled. Delivery history is pruned after 30 days; both knobs are
+configurable (`config :kiln_cms, KilnCMS.Webhooks, auto_disable_after: …` and
+`config :kiln_cms, :webhooks, delivery_retention_days: …`).
+
 ## Preview tokens
 
 `GET /preview/:token` returns a single referenced **draft** Page/Post as JSON

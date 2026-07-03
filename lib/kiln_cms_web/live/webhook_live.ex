@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.WebhookLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.WebhookEndpoint
+  alias KilnCMS.Webhooks
 
   @impl true
   def mount(_params, _session, socket) do
@@ -22,7 +23,8 @@ defmodule KilnCMSWeb.WebhookLive do
        |> assign(:available_events, WebhookEndpoint.events())
        |> assign(:edit, nil)
        |> assign(:form, create_form(actor))
-       |> load_endpoints()}
+       |> load_endpoints()
+       |> load_deliveries()}
     else
       # Defense-in-depth: the `:live_admin_required` on_mount guard already
       # redirects non-admins with this flash before mount runs; mirror it here so
@@ -101,6 +103,44 @@ defmodule KilnCMSWeb.WebhookLive do
     {:noreply, socket}
   end
 
+  # Send a test "ping" delivery to one endpoint (works while disabled too, so
+  # a receiver can be verified before enabling).
+  def handle_event("ping", %{"id" => id}, socket) do
+    actor = socket.assigns.actor
+
+    socket =
+      case CMS.get_webhook_endpoint(id, actor: actor) do
+        {:ok, endpoint} ->
+          Webhooks.ping(endpoint)
+
+          socket
+          |> load_deliveries()
+          |> put_flash(:info, gettext("Test ping queued — see deliveries below."))
+
+        _ ->
+          put_flash(socket, :error, gettext("Couldn't ping that webhook."))
+      end
+
+    {:noreply, socket}
+  end
+
+  # Replay a delivery as a fresh ledger row.
+  def handle_event("redeliver", %{"id" => id}, socket) do
+    actor = socket.assigns.actor
+
+    socket =
+      case CMS.get_webhook_delivery(id, actor: actor) do
+        {:ok, delivery} ->
+          Webhooks.redeliver(delivery)
+          socket |> load_deliveries() |> put_flash(:info, gettext("Redelivery queued."))
+
+        _ ->
+          put_flash(socket, :error, gettext("Couldn't redeliver that webhook."))
+      end
+
+    {:noreply, socket}
+  end
+
   def handle_event("delete", %{"id" => id}, socket) do
     actor = socket.assigns.actor
 
@@ -122,6 +162,14 @@ defmodule KilnCMSWeb.WebhookLive do
       socket,
       :endpoints,
       CMS.list_webhook_endpoints!(actor: socket.assigns.actor, query: [sort: [inserted_at: :asc]])
+    )
+  end
+
+  defp load_deliveries(socket) do
+    assign(
+      socket,
+      :deliveries,
+      CMS.recent_webhook_deliveries!(actor: socket.assigns.actor, load: [:endpoint])
     )
   end
 
@@ -226,6 +274,20 @@ defmodule KilnCMSWeb.WebhookLive do
                       {if endpoint.active, do: gettext("Active"), else: gettext("Disabled")}
                     </span>
                     <code class="truncate text-sm">{endpoint.url}</code>
+                    <span
+                      :if={endpoint.auto_disabled_at}
+                      class="rounded bg-error/15 px-1.5 py-0.5 text-xs font-medium text-error"
+                    >
+                      {gettext("Auto-disabled after %{count} failed deliveries",
+                        count: endpoint.consecutive_failures
+                      )}
+                    </span>
+                    <span
+                      :if={is_nil(endpoint.auto_disabled_at) && endpoint.consecutive_failures > 0}
+                      class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
+                    >
+                      {gettext("%{count} failing", count: endpoint.consecutive_failures)}
+                    </span>
                   </div>
                   <div class="flex flex-wrap gap-1">
                     <span
@@ -240,6 +302,14 @@ defmodule KilnCMSWeb.WebhookLive do
                   </p>
                 </div>
                 <div class="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    phx-click="ping"
+                    phx-value-id={endpoint.id}
+                    class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                  >
+                    {gettext("Ping")}
+                  </button>
                   <button
                     type="button"
                     phx-click="toggle_active"
@@ -307,10 +377,83 @@ defmodule KilnCMSWeb.WebhookLive do
             </li>
           </ul>
         </section>
+
+        <section class="space-y-4">
+          <h2 class="text-lg font-medium">{gettext("Recent deliveries")}</h2>
+          <p class="text-xs text-base-content/60">
+            {gettext(
+              "Every delivery attempt is recorded; failures retry with backoff, and %{count} exhausted deliveries in a row disable an endpoint. History is kept for %{days} days.",
+              count: Webhooks.auto_disable_after(),
+              days: KilnCMS.CMS.WebhookDelivery.retention_days()
+            )}
+          </p>
+
+          <p :if={@deliveries == []} class="text-sm text-base-content/60">
+            {gettext("No deliveries yet.")}
+          </p>
+
+          <div :if={@deliveries != []} class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr class="border-b border-base-content/15 text-xs uppercase tracking-wide text-base-content/60">
+                  <th class="py-2 pr-3">{gettext("When")}</th>
+                  <th class="py-2 pr-3">{gettext("Event")}</th>
+                  <th class="py-2 pr-3">{gettext("Endpoint")}</th>
+                  <th class="py-2 pr-3">{gettext("Status")}</th>
+                  <th class="py-2 pr-3">{gettext("Attempts")}</th>
+                  <th class="py-2 pr-3">{gettext("HTTP")}</th>
+                  <th class="py-2 pr-3">{gettext("Error")}</th>
+                  <th class="py-2"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-base-content/5">
+                <tr :for={delivery <- @deliveries} id={"delivery-#{delivery.id}"}>
+                  <td class="whitespace-nowrap py-2 pr-3 text-base-content/70">
+                    {Calendar.strftime(delivery.inserted_at, "%Y-%m-%d %H:%M")}
+                  </td>
+                  <td class="py-2 pr-3"><code class="text-xs">{delivery.event}</code></td>
+                  <td class="max-w-48 truncate py-2 pr-3">
+                    <code class="text-xs">{delivery.endpoint && delivery.endpoint.url}</code>
+                  </td>
+                  <td class="py-2 pr-3">
+                    <span class={[
+                      "rounded px-1.5 py-0.5 text-xs font-medium",
+                      delivery.status == :succeeded && "bg-success/15 text-success",
+                      delivery.status == :failed && "bg-error/15 text-error",
+                      delivery.status == :pending && "bg-warning/15 text-warning"
+                    ]}>
+                      {delivery_status_label(delivery.status)}
+                    </span>
+                  </td>
+                  <td class="py-2 pr-3">{delivery.attempts}</td>
+                  <td class="py-2 pr-3">{delivery.last_status}</td>
+                  <td class="max-w-56 truncate py-2 pr-3 text-xs text-base-content/70">
+                    {delivery.last_error}
+                  </td>
+                  <td class="py-2 text-right">
+                    <button
+                      :if={delivery.status != :pending}
+                      type="button"
+                      phx-click="redeliver"
+                      phx-value-id={delivery.id}
+                      class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+                    >
+                      {gettext("Redeliver")}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </Layouts.app>
     """
   end
+
+  defp delivery_status_label(:succeeded), do: gettext("Delivered")
+  defp delivery_status_label(:failed), do: gettext("Failed")
+  defp delivery_status_label(:pending), do: gettext("Retrying")
 
   attr :form, :any, required: true
   attr :available_events, :list, required: true

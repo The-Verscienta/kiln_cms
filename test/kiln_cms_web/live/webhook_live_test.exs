@@ -117,4 +117,70 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       assert {:error, _} = CMS.get_webhook_endpoint(endpoint.id, authorize?: false)
     end
   end
+
+  describe "deliveries panel" do
+    defp seed_delivery(endpoint, attrs) do
+      Ash.Seed.seed!(
+        KilnCMS.CMS.WebhookDelivery,
+        Map.merge(%{endpoint_id: endpoint.id, event: "page.published", payload: %{}}, attrs)
+      )
+    end
+
+    test "recent deliveries render with status, and failures offer redelivery", %{conn: conn} do
+      endpoint = seed_endpoint()
+
+      failed =
+        seed_delivery(endpoint, %{
+          status: :failed,
+          attempts: 5,
+          last_status: 503,
+          last_error: "endpoint returned HTTP 503"
+        })
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
+
+      assert html =~ "Recent deliveries"
+      assert html =~ "Failed"
+      assert html =~ "HTTP 503"
+
+      # Redeliver queues a fresh (pending) ledger row.
+      lv
+      |> element(~s(button[phx-click="redeliver"][phx-value-id="#{failed.id}"]))
+      |> render_click()
+
+      rows = CMS.recent_webhook_deliveries!(authorize?: false)
+      assert length(rows) == 2
+      assert Enum.any?(rows, &(&1.status == :pending))
+    end
+
+    test "ping queues a test delivery", %{conn: conn} do
+      endpoint = seed_endpoint()
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
+
+      html =
+        lv
+        |> element(~s(button[phx-click="ping"][phx-value-id="#{endpoint.id}"]))
+        |> render_click()
+
+      assert html =~ "Test ping queued"
+
+      assert [%{event: "ping", status: :pending}] =
+               CMS.recent_webhook_deliveries!(authorize?: false)
+    end
+
+    test "an auto-disabled endpoint wears the badge", %{conn: conn} do
+      endpoint = seed_endpoint()
+
+      Ash.Seed.update!(endpoint, %{
+        active: false,
+        consecutive_failures: 10,
+        auto_disabled_at: DateTime.utc_now()
+      })
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
+
+      assert html =~ "Auto-disabled after 10 failed deliveries"
+    end
+  end
 end

@@ -133,6 +133,16 @@ defmodule KilnCMS.CMS do
       define :create_webhook_endpoint, action: :create
       define :update_webhook_endpoint, action: :update
       define :destroy_webhook_endpoint, action: :destroy
+      define :record_webhook_success, action: :record_delivery_success
+      define :record_webhook_failure, action: :record_delivery_failure
+    end
+
+    # The delivery ledger — written by the pipeline, read by /editor/webhooks.
+    resource KilnCMS.CMS.WebhookDelivery do
+      define :create_webhook_delivery, action: :create
+      define :get_webhook_delivery, action: :read, get_by: [:id]
+      define :recent_webhook_deliveries, action: :recent
+      define :record_webhook_delivery_attempt, action: :record_attempt
     end
 
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).

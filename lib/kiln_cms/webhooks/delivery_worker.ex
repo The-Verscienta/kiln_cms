@@ -1,8 +1,12 @@
 defmodule KilnCMS.Webhooks.DeliveryWorker do
   @moduledoc """
   Delivers a single webhook: POSTs the signed JSON payload to one endpoint.
-  Retried with backoff by Oban; non-2xx responses and transport errors fail the
-  job so it retries. A deleted/inactive endpoint is a no-op (job succeeds).
+  Retried with backoff by Oban; non-2xx responses and transport errors fail
+  the job so it retries. Every attempt is recorded on the `WebhookDelivery`
+  ledger row; exhausting the retries marks it `:failed` and counts against
+  the endpoint's `consecutive_failures` (auto-disable — see
+  `KilnCMS.Webhooks`). A deleted endpoint settles the row and succeeds; an
+  inactive one only receives `"ping"` test deliveries.
   """
   use Oban.Worker, queue: :webhooks, max_attempts: 5
 
@@ -11,12 +15,94 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   alias KilnCMS.Webhooks.SafeUrl
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"endpoint_id" => id, "event" => event, "payload" => payload}}) do
-    case CMS.get_webhook_endpoint(id, authorize?: false) do
-      {:ok, %{active: true} = endpoint} -> deliver(endpoint, event, payload)
+  def perform(%Oban.Job{args: %{"delivery_id" => id}} = job) do
+    case CMS.get_webhook_delivery(id, authorize?: false, load: [:endpoint]) do
+      {:ok, delivery} -> attempt(delivery, job)
+      # Ledger row pruned/deleted from under the job — nothing to deliver.
       _ -> :ok
     end
   end
+
+  # Legacy args shape: jobs enqueued before the ledger existed may still sit
+  # in the queue across a deploy. Deliver without recording.
+  def perform(%Oban.Job{args: %{"endpoint_id" => id, "event" => event, "payload" => payload}}) do
+    case CMS.get_webhook_endpoint(id, authorize?: false) do
+      {:ok, %{active: true} = endpoint} ->
+        case deliver(endpoint, event, payload) do
+          {:ok, _status} -> :ok
+          error -> error
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp attempt(%{endpoint: endpoint} = delivery, job) do
+    cond do
+      is_nil(endpoint) or match?(%Ash.NotLoaded{}, endpoint) ->
+        settle(delivery, job, {:error, "endpoint deleted"}, true)
+        :ok
+
+      not endpoint.active and delivery.event != "ping" ->
+        settle(delivery, job, {:error, "endpoint inactive"}, true)
+        :ok
+
+      true ->
+        outcome = deliver(endpoint, delivery.event, delivery.payload)
+        settle(delivery, job, outcome, job.attempt >= job.max_attempts)
+
+        case outcome do
+          {:ok, _status} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # Record this attempt on the ledger row — and, when the outcome is final,
+  # on the endpoint's health counters (success resets, exhaustion bumps and
+  # may auto-disable).
+  defp settle(delivery, job, {:ok, status}, _final?) do
+    CMS.record_webhook_delivery_attempt!(
+      delivery,
+      %{
+        status: :succeeded,
+        attempts: job.attempt,
+        last_status: status,
+        last_error: nil,
+        delivered_at: DateTime.utc_now()
+      },
+      authorize?: false
+    )
+
+    if delivery.endpoint do
+      CMS.record_webhook_success!(delivery.endpoint, %{}, authorize?: false)
+    end
+  end
+
+  defp settle(delivery, job, {:error, reason}, final?) do
+    CMS.record_webhook_delivery_attempt!(
+      delivery,
+      %{
+        status: if(final?, do: :failed, else: :pending),
+        attempts: job.attempt,
+        last_status: parse_status(reason),
+        last_error: reason
+      },
+      authorize?: false
+    )
+
+    # Bump health only for a live endpoint that truly exhausted its retries —
+    # a failed ping against an already-disabled endpoint proves nothing new.
+    if final? and is_struct(delivery.endpoint, KilnCMS.CMS.WebhookEndpoint) and
+         delivery.endpoint.active do
+      CMS.record_webhook_failure!(delivery.endpoint, %{}, authorize?: false)
+    end
+  end
+
+  # "endpoint returned HTTP 503" → 503, for the ledger's status column.
+  defp parse_status("endpoint returned HTTP " <> code), do: String.to_integer(code)
+  defp parse_status(_reason), do: nil
 
   defp deliver(endpoint, event, payload) do
     # Resolve + validate in one step and pin the resulting address. Connecting to
@@ -54,7 +140,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         Webhooks.req_options()
 
     case Req.request(Req.new(options)) do
-      {:ok, %{status: status}} when status in 200..299 -> :ok
+      {:ok, %{status: status}} when status in 200..299 -> {:ok, status}
       {:ok, %{status: status}} -> {:error, "endpoint returned HTTP #{status}"}
       {:error, reason} -> {:error, "delivery failed: #{inspect(reason)}"}
     end
