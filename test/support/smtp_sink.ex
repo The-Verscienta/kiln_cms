@@ -61,8 +61,10 @@ defmodule KilnCMS.SMTPSink do
   @impl true
   def handle_RSET(state), do: state
 
+  # gen_smtp's handle_VRFY spec requires an Erlang string() (charlist), unlike
+  # handle_DATA's permissive protocol_message(); a binary here trips dialyzer.
   @impl true
-  def handle_VRFY(_address, state), do: {:error, "252 VRFY disabled", state}
+  def handle_VRFY(_address, state), do: {:error, ~c"252 VRFY disabled", state}
 
   @impl true
   def handle_STARTTLS(state), do: state
