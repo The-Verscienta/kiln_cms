@@ -32,7 +32,8 @@ defmodule KilnCMSWeb.MailSettingsLive do
        |> assign(:preflight, nil)
        |> assign(:test_result, nil)
        |> assign(:test_to, to_string(actor.email))
-       |> load_settings(Mail.ensure_settings!())}
+       |> load_settings(Mail.ensure_settings!())
+       |> load_delivery_health()}
     else
       # Defense-in-depth: the `:live_admin_required` on_mount guard already
       # redirects non-admins before mount runs; mirror it for consistency.
@@ -187,6 +188,22 @@ defmodule KilnCMSWeb.MailSettingsLive do
     {:noreply, put_flash(socket, :info, gettext("Copied to clipboard."))}
   end
 
+  def handle_event("unsuppress", %{"id" => id}, socket) do
+    actor = socket.assigns.actor
+
+    socket =
+      with {:ok, record} <- fetch_suppressed(id, actor),
+           :ok <- Mail.unsuppress_recipient(record, actor: actor) do
+        socket
+        |> load_delivery_health()
+        |> put_flash(:info, gettext("Address removed — it can receive mail again."))
+      else
+        _error -> put_flash(socket, :error, gettext("Couldn't remove that address."))
+      end
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_async(:verify, {:ok, results}, socket) do
     results = stringify(results)
@@ -253,6 +270,24 @@ defmodule KilnCMSWeb.MailSettingsLive do
     |> assign(:results, settings.verification_results || %{})
   end
 
+  defp load_delivery_health(socket) do
+    actor = socket.assigns.actor
+
+    socket
+    |> assign(:failures, Mail.recent_delivery_failures())
+    |> assign(
+      :suppressed,
+      Mail.list_suppressed_recipients!(actor: actor, query: [sort: [last_failure_at: :desc]])
+    )
+  end
+
+  defp fetch_suppressed(id, actor) do
+    case Enum.find(Mail.list_suppressed_recipients!(actor: actor), &(&1.id == id)) do
+      nil -> :error
+      record -> {:ok, record}
+    end
+  end
+
   # Prefer the mode runtime.exs resolved; only fall back to inferring it from
   # the configured adapter (dev/test, where :mail_mode isn't set). A real
   # adapter we don't recognise is reported as :custom, not :local — otherwise
@@ -274,10 +309,15 @@ defmodule KilnCMSWeb.MailSettingsLive do
     end
   end
 
-  # Check output uses atoms; the stored verification_results round-trip
-  # through JSONB as strings. Normalise to the stored (string) shape so the
-  # template reads one format.
-  defp stringify(term), do: term |> Jason.encode!() |> Jason.decode!()
+  # DnsCheck returns atom-keyed maps with atom status values (a clean Elixir
+  # API); the stored verification_results and reloaded results are string-keyed
+  # (JSONB). Convert freshly-computed results to that string shape so the
+  # template reads one format regardless of source.
+  defp stringify(map) when is_map(map),
+    do: Map.new(map, fn {k, v} -> {to_string(k), stringify(v)} end)
+
+  defp stringify(atom) when is_atom(atom) and not is_nil(atom), do: Atom.to_string(atom)
+  defp stringify(other), do: other
 
   defp error_message(%{errors: [%{message: message} | _rest]}) when is_binary(message),
     do: message
@@ -414,8 +454,8 @@ defmodule KilnCMSWeb.MailSettingsLive do
             </label>
           </div>
 
-          <div :if={@selected_provider == :database} class="flex items-center gap-3">
-            <%= if @settings.dkim_key_provider == :database and @settings.dkim_public_key do %>
+          <div :if={Keys.writable?(@selected_provider)} class="flex items-center gap-3">
+            <%= if @settings.dkim_key_provider == @selected_provider and @settings.dkim_public_key do %>
               <.button
                 type="button"
                 phx-click="rotate"
@@ -438,7 +478,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
           </div>
 
           <form
-            :if={@selected_provider in [:env, :file]}
+            :if={not Keys.writable?(@selected_provider)}
             id="key-source-form"
             phx-submit="save_key_source"
             class="flex flex-wrap items-end gap-3"
@@ -580,6 +620,86 @@ defmodule KilnCMSWeb.MailSettingsLive do
               "For an outside opinion on deliverability (SPF/DKIM/DMARC scoring), send a test to a service like mail-tester.com."
             )}
           </p>
+        </section>
+
+        <section class="space-y-6">
+          <div>
+            <h2 class="text-lg font-medium">{gettext("Delivery health")}</h2>
+            <p class="text-sm text-base-content/70">
+              {gettext(
+                "Recent permanent failures and the addresses KilnCMS has stopped mailing as a result."
+              )}
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <h3 class="text-sm font-medium text-base-content/80">
+              {gettext("Recent failures")}
+            </h3>
+            <p :if={@failures == []} class="text-sm text-base-content/60">
+              {gettext("No recent delivery failures.")}
+            </p>
+            <ul :if={@failures != []} class="space-y-2">
+              <li
+                :for={failure <- @failures}
+                class="rounded border border-base-content/10 p-3 text-sm"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class={[
+                    "rounded px-1.5 py-0.5 text-xs font-medium",
+                    if(failure.state == "cancelled",
+                      do: "bg-error/20 text-error",
+                      else: "bg-warning/20 text-warning"
+                    )
+                  ]}>
+                    {if failure.state == "cancelled",
+                      do: gettext("hard bounce"),
+                      else: gettext("gave up")}
+                  </span>
+                  <code class="font-medium">{failure.domain}</code>
+                  <span :if={failure.at} class="ml-auto text-xs text-base-content/50">
+                    {Calendar.strftime(failure.at, "%Y-%m-%d %H:%M UTC")}
+                  </span>
+                </div>
+                <code :if={failure.reason} class="mt-1 block break-all text-xs text-base-content/60">
+                  {failure.reason}
+                </code>
+              </li>
+            </ul>
+          </div>
+
+          <div class="space-y-2">
+            <h3 class="text-sm font-medium text-base-content/80">
+              {gettext("Suppressed addresses")}
+            </h3>
+            <p class="text-xs text-base-content/50">
+              {gettext(
+                "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
+              )}
+            </p>
+            <p :if={@suppressed == []} class="text-sm text-base-content/60">
+              {gettext("No suppressed addresses.")}
+            </p>
+            <ul :if={@suppressed != []} class="space-y-2">
+              <li
+                :for={entry <- @suppressed}
+                class="flex flex-wrap items-center gap-2 rounded border border-base-content/10 p-3 text-sm"
+              >
+                <code class="font-medium">{entry.email}</code>
+                <span :if={entry.last_failure_at} class="text-xs text-base-content/50">
+                  {gettext("since")} {Calendar.strftime(entry.last_failure_at, "%Y-%m-%d")}
+                </span>
+                <.button
+                  type="button"
+                  phx-click="unsuppress"
+                  phx-value-id={entry.id}
+                  class="ml-auto"
+                >
+                  {gettext("Remove")}
+                </.button>
+              </li>
+            </ul>
+          </div>
         </section>
       </div>
     </Layouts.app>

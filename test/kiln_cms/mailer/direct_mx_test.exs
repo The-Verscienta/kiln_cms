@@ -52,24 +52,24 @@ defmodule KilnCMS.Mailer.DirectMXTest do
     )
   end
 
-  describe "per-domain fan-out (capture adapter)" do
-    test "groups recipients by domain, keeping to/cc fields truthful" do
-      sent =
-        email()
-        |> to({"Two", "two@beta.test"})
-        |> cc("three@alpha.test")
+  describe "single-domain delivery (capture adapter)" do
+    test "refuses a multi-domain send (route through Mail.enqueue!/1 instead)" do
+      sent = email() |> to({"Two", "two@beta.test"})
 
-      assert {:ok, %{receipts: [_, _]}} = DirectMX.deliver(sent, capture_config())
+      assert_raise ArgumentError, ~r/single recipient domain/, fn ->
+        DirectMX.deliver(sent, capture_config())
+      end
+    end
 
-      assert_receive {:smtp_call, beta_email, beta_config}
-      assert beta_email.to == [{"Two", "two@beta.test"}]
-      assert beta_email.cc == []
-      assert beta_config[:relay] == "beta.test"
+    test "delivers a single-domain, multi-recipient message with the domain as relay" do
+      sent = email() |> to({"Two", "two@alpha.test"})
 
-      assert_receive {:smtp_call, alpha_email, alpha_config}
-      assert alpha_email.to == [{"", "one@alpha.test"}]
-      assert alpha_email.cc == [{"", "three@alpha.test"}]
-      assert alpha_config[:relay] == "alpha.test"
+      assert {:ok, %{receipts: [_]}} = DirectMX.deliver(sent, capture_config())
+
+      assert_receive {:smtp_call, sent_email, config}
+      # The whole message goes in one SMTP dialog — headers untouched.
+      assert sent_email.to == [{"Two", "two@alpha.test"}, {"", "one@alpha.test"}]
+      assert config[:relay] == "alpha.test"
     end
 
     test "builds MTA-shaped SMTP config: port 25, MX lookup, no auth, opportunistic TLS" do
@@ -97,11 +97,9 @@ defmodule KilnCMS.Mailer.DirectMXTest do
       assert config[:dkim] == dkim
     end
 
-    test "a failing domain fails the delivery" do
-      sent = email() |> to("two@beta.test")
-
+    test "a failing SMTP delivery propagates as an error" do
       assert {:error, {:permanent_failure, _host, _msg}} =
-               DirectMX.deliver(sent,
+               DirectMX.deliver(email(),
                  smtp_adapter: FailFor,
                  test_pid: self(),
                  fail_domain: "alpha.test"
