@@ -190,6 +190,11 @@ defmodule KilnCMSWeb.Router do
       live "/editor/webhooks", WebhookLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
+
+      # Plugin admin panels (D18) — compiled in from each installed plugin's
+      # `admin_routes/0`, admin-gated by this live_session like the rest.
+      import KilnCMSWeb.PluginRouter
+      plugin_admin_routes()
     end
 
     # Self-service data export (#212). Controller route (file download), gated by
