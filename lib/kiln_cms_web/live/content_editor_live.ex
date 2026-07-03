@@ -263,6 +263,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # The Yjs fragment key for one rich-text block: its **stable block id**
+  # (blocks carry a writable uuid primary key precisely so identity survives
+  # reorders, restores and round-trips), so two sessions always bind the same
+  # text to the same fragment regardless of block positions. Pre-id legacy
+  # blocks (stored before ids existed and not yet backfilled) fall back to the
+  # index — the old, positional behavior — until their next save assigns one.
+  defp collab_fragment(bf) do
+    case bf[:id] && bf[:id].value do
+      id when is_binary(id) and id != "" -> "block-#{id}"
+      _missing -> "block-idx-#{bf.index}"
+    end
+  end
+
   # Socket token for the CRDT collab prototype; nil (and thus no data-collab
   # attributes, no channel) when the flag is off. Mount is editor/admin-gated,
   # so a token only ever reaches an authorized editor.
@@ -1724,7 +1737,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-lock-field={bf[:legacy_html].name}
                         data-collab-token={@collab_token}
                         data-collab-topic={@collab_token && @collab_topic}
-                        data-collab-fragment={@collab_token && "block-#{bf.index}"}
+                        data-collab-fragment={@collab_token && collab_fragment(bf)}
                         data-collab-user={@collab_token && initials(Presence.display_name(@actor))}
                         data-collab-color={@collab_token && color_hex_for(@actor.id)}
                         role="group"

@@ -274,6 +274,12 @@ Findings against the §3 risks:
    `"awareness_request"` makes existing carets appear immediately). Initials
    and colors match the editor's presence-roster chips, which themselves now
    show two-letter initials + a live "N editing" count.
-6. **Not built (next steps if promoted):** fragment-per-block-index is
-   unstable across block reorders (blocks need stable ids first), and Y.Doc
-   durability across server restarts.
+6. **Stable fragment identity: built.** Yjs fragments are now keyed by each
+   block's **stable id** (blocks already carried a writable uuid primary key
+   for restore/round-trip identity — verified: ids generate at write time and
+   reads never mint them, so sessions can't diverge). A data migration
+   backfilled ids into all pre-id stored rows (both legacy and union-envelope
+   shapes, idempotent); truly id-less blocks fall back to the old positional
+   key until their next blocks-carrying save.
+7. **Not built (next steps if promoted):** Y.Doc durability across server
+   restarts, and server-side checkpoint materialization (§6.4's option (b)).
