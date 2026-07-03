@@ -34,6 +34,37 @@ defmodule KilnCMS.FixturePlugin.CalloutBlock do
   defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end
 
+defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
+  @moduledoc """
+  A plugin-contributed custom field type (test fixture, D18): a 1–5 star
+  rating. Exercises the field-type registry end to end — the fields admin
+  offers it, `ApplyCustomFields` dispatches writes to `cast/2`, and the
+  content editor renders a number input with the declared min/max.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def cast(value, _definition) do
+    case value do
+      n when is_integer(n) and n in 1..5 -> {:ok, n}
+      other -> parse(other)
+    end
+  end
+
+  defp parse(value) do
+    case Integer.parse(to_string(value)) do
+      {n, ""} when n in 1..5 -> {:ok, n}
+      _ -> {:error, "must be a rating from 1 to 5"}
+    end
+  end
+
+  @impl Kiln.FieldType
+  def input_type, do: "number"
+
+  @impl Kiln.FieldType
+  def input_attrs(_definition), do: %{min: 1, max: 5}
+end
+
 defmodule KilnCMS.FixturePlugin.PanelLive do
   @moduledoc "A plugin admin panel (test fixture) mounted via `admin_routes/0`."
   use KilnCMSWeb, :live_view
@@ -67,6 +98,9 @@ defmodule KilnCMS.FixturePlugin do
 
   @impl true
   def blocks, do: [KilnCMS.FixturePlugin.CalloutBlock]
+
+  @impl true
+  def field_types, do: [KilnCMS.FixturePlugin.FieldTypes.Rating]
 
   @impl true
   def nav_items, do: [%{label: "Fixture", path: "/editor/fixture", role: :admin}]

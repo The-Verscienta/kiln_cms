@@ -12,6 +12,9 @@ defmodule Kiln.Plugin do
 
     * `blocks/0` — `Kiln.Block` modules: joined into the block union, the
       editor palette, firing/search serialization, automatically.
+    * `field_types/0` — `Kiln.FieldType` modules: custom-field value types
+      admins can pick in the fields admin, coerced/validated by the plugin's
+      `cast/2` on every content write.
     * `nav_items/0` — links in the admin top nav
       (`%{label: "...", path: "/editor/...", role: :editor | :admin}`).
     * `admin_routes/0` — LiveViews mounted in the admin-gated live session
@@ -38,6 +41,7 @@ defmodule Kiln.Plugin do
 
   @callback domains() :: [module()]
   @callback blocks() :: [module()]
+  @callback field_types() :: [module()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
   @callback children() :: [Supervisor.child_spec() | {module(), term()} | module()]
@@ -64,6 +68,9 @@ defmodule Kiln.Plugin do
       def blocks, do: []
 
       @impl Kiln.Plugin
+      def field_types, do: []
+
+      @impl Kiln.Plugin
       def nav_items, do: []
 
       @impl Kiln.Plugin
@@ -78,6 +85,7 @@ defmodule Kiln.Plugin do
       defoverridable name: 0,
                      domains: 0,
                      blocks: 0,
+                     field_types: 0,
                      nav_items: 0,
                      admin_routes: 0,
                      children: 0,

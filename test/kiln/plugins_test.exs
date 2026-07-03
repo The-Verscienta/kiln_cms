@@ -87,6 +87,23 @@ defmodule Kiln.PluginsTest do
       assert mod.nav_items() == []
     end
 
+    test "the generated sample field type compiles against the contract" do
+      camel = "GenFieldT#{System.unique_integer([:positive])}"
+      Code.compile_string(Mix.Tasks.Kiln.Gen.Plugin.field_source(camel, "hex_color"))
+
+      # (Strings, not bare aliases — same capture caveat as below.)
+      mod = Module.concat([camel, "FieldTypes", "HexColor"])
+      assert Code.ensure_loaded?(mod)
+      assert mod.name() == :hex_color
+      assert mod.label() == "Hex color"
+      assert mod.cast("  #aabbcc  ", nil) == {:ok, "#aabbcc"}
+      assert mod.input_type() == "text"
+
+      # A --field plugin wires the module into field_types/0.
+      source = Mix.Tasks.Kiln.Gen.Plugin.plugin_source(camel, nil, "hex_color")
+      assert source =~ "def field_types, do: [#{camel}.FieldTypes.HexColor]"
+    end
+
     @tag :capture_log
     test "the generated sample block compiles, renders escaped, and searches" do
       camel = "GenBlockT#{System.unique_integer([:positive])}"
@@ -131,6 +148,28 @@ defmodule Kiln.PluginsTest do
       assert error.message =~ "missing from :ash_domains"
       assert error.message =~ "missing from :content_domains"
       assert error.message =~ "block :heading collides with a core block"
+    end
+
+    test "flags field-type contract violations and name collisions" do
+      defmodule NotAFieldType do
+      end
+
+      defmodule ShadowString do
+        use Kiln.FieldType
+        def name, do: :string
+        def cast(value, _definition), do: {:ok, value}
+      end
+
+      defmodule FieldTypePlugin do
+        use Kiln.Plugin
+        def field_types, do: [NotAFieldType, ShadowString]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [FieldTypePlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ "does not implement Kiln.FieldType"
+      assert error.message =~ "field type :string collides with a core field type"
     end
 
     test "flags queue redefinitions and malformed paths" do

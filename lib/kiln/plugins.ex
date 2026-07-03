@@ -18,6 +18,10 @@ defmodule Kiln.Plugins do
   @spec blocks() :: [module()]
   def blocks, do: Enum.flat_map(all(), & &1.blocks())
 
+  @doc "Every plugin-contributed `Kiln.FieldType` module."
+  @spec field_types() :: [module()]
+  def field_types, do: Enum.flat_map(all(), & &1.field_types())
+
   @doc "Every plugin-declared admin nav item."
   @spec nav_items() :: [Kiln.Plugin.nav_item()]
   def nav_items, do: Enum.flat_map(all(), & &1.nav_items())

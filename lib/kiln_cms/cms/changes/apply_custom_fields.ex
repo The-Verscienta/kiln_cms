@@ -8,8 +8,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   enforces `required`, and checks `:select` membership — then writes back a
   cleaned map containing only defined keys with JSON-native values (dates as
   ISO-8601 strings), so unknown/stale keys are dropped and the jsonb column
-  round-trips cleanly. Definitions are read with `authorize?: false` (registry
-  metadata, not user data).
+  round-trips cleanly. Types beyond the built-ins dispatch to their registered
+  `Kiln.FieldType`'s `cast/2` (see `KilnCMS.CMS.FieldTypes`). Definitions are
+  read with `authorize?: false` (registry metadata, not user data).
   """
   use Ash.Resource.Change
 
@@ -152,6 +153,29 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
        %{"id" => record.id, "type" => target, "slug" => record.slug, "title" => record.title}}
     else
       _ -> {:error, "must be an existing #{target || "content"} record"}
+    end
+  end
+
+  # A plugin-contributed field type (`Kiln.FieldType`): the plugin's `cast/2`
+  # owns coercion + validation. The contract requires a JSON-native return —
+  # anything else is a loud contract violation, not a swallowed write.
+  defp coerce(value, %{field_type: type} = definition) do
+    case KilnCMS.CMS.FieldTypes.get(type) do
+      nil ->
+        {:error, "has an unregistered field type"}
+
+      module ->
+        case module.cast(value, definition) do
+          {:ok, cast} ->
+            {:ok, cast}
+
+          {:error, message} when is_binary(message) ->
+            {:error, message}
+
+          other ->
+            raise "#{inspect(module)}.cast/2 must return {:ok, value} | {:error, message}, " <>
+                    "got: #{inspect(other)}"
+        end
     end
   end
 
