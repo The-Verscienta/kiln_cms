@@ -21,7 +21,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
      |> assign(:results, empty())}
   end
 
-  defp empty, do: %{pages: [], posts: [], media: []}
+  defp empty, do: %{pages: [], posts: [], entries: [], media: []}
 
   @impl true
   def handle_event("search", %{"q" => raw}, socket) do
@@ -34,7 +34,10 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         results =
           Search.global(query, actor: socket.assigns.current_user, limit: 8, highlight: true)
 
-        total = length(results.pages) + length(results.posts) + length(results.media)
+        total =
+          length(results.pages) + length(results.posts) + length(results.entries) +
+            length(results.media)
+
         record_query_async(query, total)
 
         socket |> assign(:query, query) |> assign(:searched, true) |> assign(:results, results)
@@ -64,7 +67,8 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     _ -> :ok
   end
 
-  defp result_count(%{pages: p, posts: o, media: m}), do: length(p) + length(o) + length(m)
+  defp result_count(%{pages: p, posts: o, entries: e, media: m}),
+    do: length(p) + length(o) + length(e) + length(m)
 
   @impl true
   def render(assigns) do
@@ -125,10 +129,13 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           <.section :if={@results.posts != []} title={gettext("Posts")}>
             <.content_row :for={p <- @results.posts} type="post" record={p} />
           </.section>
+          <.section :if={@results.entries != []} title={gettext("Custom content")}>
+            <.content_row :for={e <- @results.entries} type={e.type_name} record={e} />
+          </.section>
           <.section :if={@results.media != []} title={gettext("Media")}>
             <.link
               :for={m <- @results.media}
-              navigate={~p"/media"}
+              navigate={~p"/media?#{%{id: m.id}}"}
               class="block rounded px-3 py-2 hover:bg-base-200"
             >
               <span class="font-medium">{m.filename}</span>

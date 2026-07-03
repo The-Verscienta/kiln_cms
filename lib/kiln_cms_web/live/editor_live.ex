@@ -6,14 +6,16 @@ defmodule KilnCMSWeb.EditorLive do
   """
   use KilnCMSWeb, :live_view
 
+  import Ash.Expr, only: [expr: 1]
+
   alias KilnCMS.CMS.ContentTypes
 
   @statuses ~w(all draft in_review published archived)
 
-  # Bound the per-type rows loaded into the index so a large library can't grow
-  # one LiveView's heap without limit (filtering/search is client-side over this
-  # window). Most-recently-updated first.
-  @max_per_type 500
+  # Server-side page size. Each page pulls at most @page_size rows per content
+  # type from the DB (status/search filtered there too — audit U-M2) and keeps
+  # the merged newest @page_size, so any item is reachable via Load more.
+  @page_size 50
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,14 +23,10 @@ defmodule KilnCMSWeb.EditorLive do
      socket
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:page_title, gettext("Content"))
-     |> assign(:content_types, ContentTypes.all())
+     |> assign(:content_types, editable_types())
      |> assign(:statuses, @statuses)
-     |> assign(:status, "all")
-     |> assign(:query, "")
      |> assign(:selected, MapSet.new())
-     |> assign(:confirming_bulk, nil)
-     |> assign(:max_per_type, @max_per_type)
-     |> load_items()}
+     |> assign(:confirming_bulk, nil)}
   end
 
   # Only what the list renders — without a select, every row drags its whole
@@ -36,44 +34,64 @@ defmodule KilnCMSWeb.EditorLive do
   # Workflow/destroy actions re-fetch the full record by id before acting.
   @list_fields [:id, :title, :slug, :state, :updated_at, :scheduled_at]
 
-  # Records of every content type merged into `{kind, record}` tuples, newest
-  # first. `truncated?` flags any type that filled its window, so the UI can say
-  # older items exist instead of letting them silently vanish (audit U-M2).
+  # (Re)load the first page under the active status/search filter.
   defp load_items(socket) do
-    actor = socket.assigns.actor
-
-    per_type =
-      Enum.map(ContentTypes.all(), fn ct ->
-        records =
-          ContentTypes.list!(ct.type,
-            actor: actor,
-            query: [select: @list_fields, sort: [updated_at: :desc], limit: @max_per_type]
-          )
-
-        {ct.type, records}
-      end)
-
-    items =
-      per_type
-      |> Enum.flat_map(fn {kind, records} -> Enum.map(records, &{kind, &1}) end)
-      |> Enum.sort_by(fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
+    {items, more?} = fetch_page(socket, nil)
 
     socket
     |> assign(:items, items)
-    |> assign(
-      :truncated?,
-      Enum.any?(per_type, fn {_kind, records} -> length(records) >= @max_per_type end)
-    )
+    |> assign(:more?, more?)
   end
 
-  defp visible_items(items, status, query) do
-    q = String.downcase(query)
+  # One page of `{kind, record}` tuples merged across every content type,
+  # newest-updated first, from `cursor` (exclusive) downwards. Keeping the
+  # merged newest @page_size is exact: the true next page can't contain more
+  # than @page_size rows of any single type.
+  defp fetch_page(socket, cursor) do
+    actor = socket.assigns.actor
+    query = page_query(socket.assigns.status, socket.assigns.query, cursor)
 
-    Enum.filter(items, fn {_kind, r} ->
-      (status == "all" or to_string(r.state) == status) and
-        (q == "" or String.contains?(String.downcase(r.title), q))
-    end)
+    per_type =
+      Enum.map(editable_types(), fn ct ->
+        # Dispatch on the descriptor itself so a type archived between listing
+        # and dispatch can't turn into a registry-lookup miss.
+        ct
+        |> ContentTypes.list!(actor: actor, query: query)
+        |> Enum.map(&{ct.type, &1})
+      end)
+
+    merged =
+      per_type
+      |> List.flatten()
+      |> Enum.sort_by(fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
+
+    {page, rest} = Enum.split(merged, @page_size)
+
+    # More pages exist if we dropped merged rows, or any type filled its
+    # window (it may have more behind it even when everything merged fit).
+    {page, rest != [] or Enum.any?(per_type, &(length(&1) >= @page_size))}
   end
+
+  defp page_query(status, q, cursor) do
+    [
+      status != "all" && {:filter, [state: String.to_existing_atom(status)]},
+      q != "" && {:filter, search_filter(q)},
+      cursor && {:filter, expr(updated_at < ^cursor)}
+    ]
+    |> Enum.filter(&is_tuple/1)
+    |> Kernel.++(select: @list_fields, sort: [updated_at: :desc], limit: @page_size)
+  end
+
+  # Case-insensitive title/slug match; %, _ and \ in the input match literally.
+  defp search_filter(q) do
+    pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
+    expr(ilike(title, ^pattern) or ilike(slug, ^pattern))
+  end
+
+  # Everything editable here: compiled content types plus admin-defined dynamic
+  # ones (D17) — the descriptors share a shape, and `ContentTypes` dispatch
+  # routes dynamic kinds (name strings) to the generic entry tier.
+  defp editable_types, do: ContentTypes.all() ++ ContentTypes.dynamic_all()
 
   @impl true
   def handle_event("new", %{"kind" => kind}, socket) do
@@ -173,6 +191,21 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("unarchive", params, socket),
     do: {:noreply, transition(socket, params, "unarchive")}
 
+  def handle_event("load_more", _params, socket) do
+    case List.last(socket.assigns.items) do
+      nil ->
+        {:noreply, assign(socket, :more?, false)}
+
+      {_kind, last} ->
+        {page, more?} = fetch_page(socket, last.updated_at)
+
+        {:noreply,
+         socket
+         |> assign(:items, socket.assigns.items ++ page)
+         |> assign(:more?, more?)}
+    end
+  end
+
   @impl true
   def handle_params(params, _uri, socket) do
     status = if params["status"] in @statuses, do: params["status"], else: "all"
@@ -180,7 +213,8 @@ defmodule KilnCMSWeb.EditorLive do
     {:noreply,
      socket
      |> assign(:status, status)
-     |> assign(:query, params["q"] || "")}
+     |> assign(:query, params["q"] || "")
+     |> load_items()}
   end
 
   defp list_path(status, q) do
@@ -214,12 +248,10 @@ defmodule KilnCMSWeb.EditorLive do
   defp destroy(kind, id, actor),
     do: ContentTypes.destroy(kind, get!(kind, id, actor), actor: actor)
 
-  # The set of selection keys ("kind:id") for the items currently visible under
-  # the active status/title filter.
+  # The set of selection keys ("kind:id") for the currently loaded items (the
+  # status/search filter already ran server-side).
   defp visible_keys(socket) do
-    socket.assigns.items
-    |> visible_items(socket.assigns.status, socket.assigns.query)
-    |> MapSet.new(fn {kind, r} -> "#{kind}:#{r.id}" end)
+    MapSet.new(socket.assigns.items, fn {kind, r} -> "#{kind}:#{r.id}" end)
   end
 
   defp edit_path(type, id), do: ~p"/editor/content/#{type}/#{id}"
@@ -303,12 +335,11 @@ defmodule KilnCMSWeb.EditorLive do
 
   @impl true
   def render(assigns) do
-    visible = visible_items(assigns.items, assigns.status, assigns.query)
-    visible_keys = MapSet.new(visible, fn {kind, r} -> "#{kind}:#{r.id}" end)
+    visible_keys = MapSet.new(assigns.items, fn {kind, r} -> "#{kind}:#{r.id}" end)
 
     assigns =
       assigns
-      |> assign(:visible, visible)
+      |> assign(:filtering?, assigns.status != "all" or assigns.query != "")
       |> assign(:selected_count, MapSet.size(assigns.selected))
       |> assign(
         :all_selected?,
@@ -373,7 +404,7 @@ defmodule KilnCMSWeb.EditorLive do
           </div>
         </div>
 
-        <div :if={@items != []} class="flex flex-wrap items-center gap-3">
+        <div :if={@items != [] or @filtering?} class="flex flex-wrap items-center gap-3">
           <form id="content-filter" phx-change="filter">
             <label for="content-status-filter" class="sr-only">{gettext("Filter by status")}</label>
             <select
@@ -404,7 +435,7 @@ defmodule KilnCMSWeb.EditorLive do
         </div>
 
         <div
-          :if={@visible != []}
+          :if={@items != []}
           class="flex flex-wrap items-center gap-3 rounded border border-base-content/10 bg-base-200/40 px-3 py-2"
         >
           <label class="flex items-center gap-2 text-sm">
@@ -471,26 +502,23 @@ defmodule KilnCMSWeb.EditorLive do
           </div>
         </div>
 
-        <p :if={@truncated?} class="text-xs text-base-content/60" role="status">
-          {gettext(
-            "Showing the newest %{max} items per content type — older items exist but aren't listed here.",
-            max: @max_per_type
-          )}
-        </p>
-
-        <.empty_state :if={@items == []} icon="hero-document-text" title={gettext("No content yet")}>
+        <.empty_state
+          :if={@items == [] and not @filtering?}
+          icon="hero-document-text"
+          title={gettext("No content yet")}
+        >
           {gettext("Create your first page or post to get started.")}
         </.empty_state>
-        <p :if={@items != [] and @visible == []} class="text-sm text-base-content/60">
+        <p :if={@items == [] and @filtering?} class="text-sm text-base-content/60" role="status">
           {gettext("Nothing matches the current filter.")}
         </p>
 
         <ul
-          :if={@visible != []}
+          :if={@items != []}
           class="divide-y divide-base-content/10 rounded border border-base-content/10"
         >
           <li
-            :for={{kind, record} <- @visible}
+            :for={{kind, record} <- @items}
             id={"#{kind}-#{record.id}"}
             class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3"
           >
@@ -582,6 +610,17 @@ defmodule KilnCMSWeb.EditorLive do
             </div>
           </li>
         </ul>
+
+        <div :if={@more?} class="flex justify-center">
+          <button
+            type="button"
+            phx-click="load_more"
+            phx-disable-with={gettext("Loading…")}
+            class="rounded border border-base-content/20 px-4 py-1.5 text-sm hover:bg-base-200"
+          >
+            {gettext("Load more")}
+          </button>
+        </div>
       </div>
     </Layouts.app>
     """

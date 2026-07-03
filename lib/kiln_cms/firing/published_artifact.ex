@@ -68,9 +68,11 @@ defmodule KilnCMS.Firing.PublishedArtifact do
   attributes do
     uuid_primary_key :id
 
+    # `:entry` is the generic tier for admin-defined dynamic types (D17): one
+    # storage key for all of them, the dynamic name lives on the entry row.
     attribute :document_type, :atom do
       allow_nil? false
-      constraints one_of: [:page, :post]
+      constraints one_of: [:page, :post, :entry]
       public? true
     end
 

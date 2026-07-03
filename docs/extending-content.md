@@ -93,3 +93,25 @@ record — independent of role. See `KilnCMS.CMS.Audiences` and
 
 To serve gated content on the public site, pass the signed-in user as the actor
 on the delivery read — anonymous callers only ever see `:public` content.
+
+## 4. Dynamic content types, and promoting them (D17)
+
+Admins define whole content types at `/editor/types` with no code deploy —
+entries live on the shared generic tier (`KilnCMS.CMS.Entry`), authorable and
+deliverable everywhere compiled types are (see
+`docs/dynamic-content-types-plan.md`). When a dynamic type outgrows the tier
+(you want its own table, typed GraphQL/JSON:API schema, per-field columns),
+**promote** it:
+
+```bash
+mix kiln.gen.content --from recipe        # generate the compiled resource
+mix ash.codegen add_recipes && mix ash.migrate
+mix kiln.promote_data recipe              # move entries + versions + fields
+```
+
+The data move is transactional and preserves record ids, so taggings and
+content links survive untouched; custom-field definitions are re-scoped to the
+compiled type (the editor keeps rendering them), and the `TypeDefinition` is
+archived. Fields stay data-driven after promotion — promote an individual
+field to a real attribute by hand (add the attribute, migrate the JSONB key,
+drop the definition) when querying or indexing demands it.

@@ -19,11 +19,13 @@ research.
   the LiveView tension D5 flagged.
 - **Recommendation:** keep **locked single-editor for v1**, but **harden it now**
   with optimistic-concurrency conflict detection (cheap, removes today's silent
-  last-write-wins). Pursue full CRDT **post-v1, phased**: first rich-text-within-a-block
-  (lower risk), then the block tree.
+  last-write-wins). *(Since implemented — PR #81 + #137; see §1.)* Pursue full CRDT
+  **post-v1, phased**: first rich-text-within-a-block (lower risk), then the block tree.
 - **Smallest next step:** a throwaway prototype of one rich-text block synced
   between two browsers via `y_ex` over a Channel — to de-risk `y_ex` maturity and
   the CRDT⇄Ash persistence boundary before committing.
+  *(Since built — see §6 below: the prototype landed behind the
+  `:collab_prototype` flag and both risks are now measured.)*
 
 ---
 
@@ -40,8 +42,8 @@ conflict resolution**.
 | Advisory field locks | ⚠️ advisory only | lowest-user-id "owns" a field; inputs go readonly **but still submit** |
 | Debounced autosave (drafts) | ✅ | 2 s debounce → `AshPhoenix.Form.submit` |
 | Version history | ✅ | AshPaperTrail, full `blocks` snapshot per save |
-| **Concurrency control** | ❌ **none** | whole-document `:update`, **last-write-wins**, no version check |
-| **Edit merging** | ❌ **none** | the entire `blocks` array is replaced on save |
+| **Concurrency control** | ✅ optimistic lock (PR #81) | `optimistic_lock(:lock_version)` on `:update`/`:autosave`; editor surfaces a conflict banner + reload flow on `StaleRecord` |
+| **Edit merging** | ❌ **none** | the entire `blocks` array is replaced on save; a stale save is *rejected*, not merged |
 
 **The crux for CRDT feasibility is the save/sync mechanism:**
 
@@ -84,7 +86,7 @@ are read-only with a "request control / take over" affordance. Cheap, honest, no
 data loss.
 - **Effort:** S. **Risk:** low. **Delivers:** safety, not concurrency.
 
-### B. Optimistic concurrency (conflict *detection*) — *recommended now*
+### B. Optimistic concurrency (conflict *detection*) — *✅ implemented (PR #81)*
 Add a monotonic `lock_version` (or compare `updated_at`) to the content `:update`.
 If the record changed since the editor loaded it, reject the save with a
 "someone else edited this — reload/merge" prompt instead of silently clobbering.
@@ -194,7 +196,7 @@ Key design commitments:
 | Approach | Real concurrency | Data-loss safe | Effort | New infra | Fits D2 minimal-ops | Verdict |
 |---|---|---|---|---|---|---|
 | A. Harden locking | No | Yes | S | none | ✅ | v1 option |
-| **B. Optimistic concurrency** | No | **Yes** | S–M | none | ✅ | **Do now** |
+| **B. Optimistic concurrency** | No | **Yes** | S–M | none | ✅ | **✅ Done (PR #81)** |
 | C. OT | Yes | Yes | XL | none | ✅ | Reject (cost) |
 | **D1. CRDT rich-text** | Yes (text) | Yes | L | `y_ex` (or Hocuspocus) | ✅ with `y_ex` | **Post-v1, first** |
 | D2. CRDT whole-doc | Yes (full) | Yes | XL | `y_ex` (or Hocuspocus) | ✅ with `y_ex` | Post-v1, later |
@@ -226,3 +228,80 @@ for D1/D2 and accept the extra service — re-weighing against D2's minimal-ops 
 - [Yjs ↔ ProseMirror / TipTap bindings (`y-prosemirror`, `y-tiptap`)](https://docs.yjs.dev/ecosystem/editor-bindings/tiptap2)
 - [Hocuspocus — self-hosted Yjs collaboration backend](https://tiptap.dev/docs/hocuspocus)
 - [Yjs](https://github.com/yjs/yjs)
+
+## 6. Prototype findings (2026-07 — scoping D1, `:collab_prototype` flag)
+
+The recommended prototype was built and verified end-to-end in a live browser
+(bidirectional convergence between the TipTap editor and an independent Yjs
+client over the channel). Where it lives:
+
+| Piece | Where |
+|---|---|
+| Authoritative Y.Doc per document | `KilnCMS.Collab.Crdt.DocServer` (Registry + DynamicSupervisor; idle shutdown) |
+| Transport | `KilnCMSWeb.CollabChannel` over `/ws/collab` (`CollabSocket`, Phoenix.Token-gated, editor-minted) |
+| Client | `assets/js/collab.js` (one shared Y.Doc + channel per document; ~70 LOC provider) + TipTap `Collaboration` per rich-text block, one `XmlFragment` per block |
+| Flag | `config :kiln_cms, :collab_prototype` — on in dev/test, off in prod; joins refuse when off |
+
+Findings against the §3 risks:
+
+1. **`y_ex` maturity: no longer a blocker.** v0.10 ships precompiled NIFs (no
+   Rust toolchain), and the whole prototype needed only four calls
+   (`Doc.new/0`, `apply_update/2`, `encode_state_as_update/1,2`,
+   `encode_state_vector/1`). Convergence, divergent-edit merge, and
+   minimal-diff encoding all verified in ExUnit with real binary updates.
+2. **The BEAM-as-Yjs-node architecture is small.** DocServer + channel +
+   socket is ~250 lines total; the re-used Phoenix machinery (channels,
+   tokens, supervision) did the heavy lifting, exactly as §4 hoped.
+3. **TipTap gotcha:** the `Collaboration` extension silently ignores the
+   Editor `content` option — first-peer seeding must be an explicit
+   `setContent` after mount (gated on `peers == 1` + empty fragment; the
+   join reply carries both).
+4. **The persistence boundary — option (a) implemented: single-persister
+   election.** Under active collab, only the lowest-user-id editor present
+   autosaves (the same deterministic election as the advisory field locks; no
+   coordination needed). Because the persister's TipTap mirrors *remote* CRDT
+   edits into its own form, its autosave persists everyone's typing; the
+   others show a "Synced live — co-editor saves" indicator, and take over
+   persistence automatically when the persister leaves. Remaining edges: a
+   non-persister's *explicit* Save while the persister holds pending edits
+   still lands on the conflict banner (rare, and the banner flow is correct);
+   and option (b) — server-side checkpoint materialization — remains the
+   deeper long-term answer (needs a ProseMirror-schema render step, since an
+   `XmlFragment` serializes to prosemirror-node XML, not HTML).
+5. **Awareness carets: built.** Remote collaborators render as a colored
+   caret + initials label inside the text (TipTap `CollaborationCursor` over
+   `y-protocols` awareness, relayed by the same channel; a newcomer's
+   `"awareness_request"` makes existing carets appear immediately). Initials
+   and colors match the editor's presence-roster chips, which themselves now
+   show two-letter initials + a live "N editing" count.
+6. **Stable fragment identity: built.** Yjs fragments are now keyed by each
+   block's **stable id** (blocks already carried a writable uuid primary key
+   for restore/round-trip identity — verified: ids generate at write time and
+   reads never mint them, so sessions can't diverge). A data migration
+   backfilled ids into all pre-id stored rows (both legacy and union-envelope
+   shapes, idempotent); truly id-less blocks fall back to the old positional
+   key until their next blocks-carrying save.
+7. **Y.Doc durability: built.** Doc servers lazy-restore their Yjs state from
+   `collab_doc_states` on first use, checkpoint while dirty (15 s), and flush
+   on shutdown (exits trapped, so idle stops and deploys both persist) — a
+   restart mid-session no longer resets live docs, and late joiners restore
+   full CRDT history. A hard kill loses at most one checkpoint interval of
+   *history*; the prose itself is still safe via the autosave path. Dead
+   sessions prune after 30 days. Persistence is config-gated off in the test
+   suite (sandbox ownership), exercised by its own sync durability tests.
+8. **Server-side checkpoint materialization: built** (§6.4's option (b) —
+   the last item). `Crdt.Materializer` renders a fragment's ProseMirror-node
+   XML to sanitized HTML on the BEAM: the StarterKit node/mark set is closed
+   and mirrors the rich-text sanitizer's allowlist, so a ~100-line total
+   mapping (unknown nodes degrade to their children) replaces the feared JS
+   render step. `Crdt.Checkpoint` writes changed `legacy_html` back through
+   the `:autosave` action when the **last client detaches** (and on server
+   shutdown) — never while editors are present, so it can't race the elected
+   client persister; drafts only; no-change checkpoints skip; a stale-record
+   failure means an editor already saved the converged content. This closes
+   the one gap client persistence couldn't cover: every editor crashing
+   before their autosave debounce fired.
+
+   **The spike is fully graduated** — every item from §3's recommendation and
+   §6's findings is implemented and tested. What remains is product surface
+   (e.g. enabling the flag per deployment), not architecture.

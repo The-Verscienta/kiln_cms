@@ -25,6 +25,10 @@ defmodule KilnCMSWeb.Endpoint do
 
   socket "/ws/gql", KilnCMSWeb.GraphqlSocket, websocket: true, longpoll: true
 
+  # Collaborative-editing CRDT prototype (token-authenticated; joins refuse
+  # unless :collab_prototype is enabled — see KilnCMSWeb.CollabChannel).
+  socket "/ws/collab", KilnCMSWeb.CollabSocket, websocket: true, longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

@@ -4,7 +4,8 @@ defmodule KilnCMSWeb.Plugs.SetLocale do
 
   A known-locale prefix (`/fr/about`, `/en/blog/x`) is stripped from the path —
   so the normal routes match the remainder — and the locale is stashed in
-  `conn.assigns.locale`. Requests without a recognised prefix use the default
+  `conn.assigns.locale`. Requests without a recognised prefix fall back to the
+  session preference set by the admin language switcher, then to the default
   locale. The Gettext locale is set too, so UI strings localise once templates
   are wrapped.
 
@@ -33,9 +34,23 @@ defmodule KilnCMSWeb.Plugs.SetLocale do
     if I18n.supported?(seg) do
       {seg, %{conn | path_info: rest, request_path: "/" <> Enum.join(rest, "/")}}
     else
-      {I18n.default_locale(), conn}
+      session_locale(conn)
     end
   end
 
-  defp pop_locale(conn), do: {I18n.default_locale(), conn}
+  defp pop_locale(conn), do: session_locale(conn)
+
+  # No path prefix: use the session preference (admin language switcher) so
+  # dead renders — including `<html lang>` — match the locale the LiveView
+  # `:restore_locale` on_mount hook applies after connect. `Plug.Session` runs
+  # just before this plug in the endpoint; conns without it (bare test conns)
+  # fall back to the default locale rather than raising on fetch.
+  defp session_locale(conn) do
+    if conn.private[:plug_session_fetch] do
+      conn = fetch_session(conn)
+      {conn |> get_session("locale") |> I18n.normalize(), conn}
+    else
+      {I18n.default_locale(), conn}
+    end
+  end
 end

@@ -38,4 +38,27 @@ defmodule KilnCMSWeb.Plugs.SetLocaleTest do
     assert conn.assigns.locale == "en"
     assert conn.path_info == ["fr"]
   end
+
+  describe "session fallback (admin language switcher)" do
+    defp run_with_session(path, session) do
+      conn(:get, path)
+      |> Plug.Test.init_test_session(session)
+      |> SetLocale.call([])
+    end
+
+    test "uses the session locale when there is no path prefix" do
+      conn = run_with_session("/editor", %{"locale" => "fr"})
+      assert conn.assigns.locale == "fr"
+    end
+
+    test "a path prefix wins over the session preference" do
+      conn = run_with_session("/en/blog/post", %{"locale" => "fr"})
+      assert conn.assigns.locale == "en"
+    end
+
+    test "an unsupported session locale falls back to the default" do
+      conn = run_with_session("/editor", %{"locale" => "xx"})
+      assert conn.assigns.locale == "en"
+    end
+  end
 end

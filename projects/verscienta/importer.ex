@@ -189,13 +189,17 @@ defmodule Verscienta.Importer do
   end
 
   defp existing_field_names(type) do
-    case CMS.list_field_definitions(authorize?: false) do
-      {:ok, defs} ->
-        defs |> Enum.filter(&(&1.content_type == type)) |> MapSet.new(& &1.name)
+    # Single MapSet.new/2 construction path: unioning MapSet.new/0 (raw %{}
+    # internals) with MapSet.new/2 (opaque :sets.set/0 internals on
+    # Elixir 1.20+) across case branches strips the opaque type and trips
+    # dialyzer's call_without_opaque on OTP 29.
+    defs =
+      case CMS.list_field_definitions(authorize?: false) do
+        {:ok, defs} -> defs
+        _ -> []
+      end
 
-      _ ->
-        MapSet.new()
-    end
+    defs |> Enum.filter(&(&1.content_type == type)) |> MapSet.new(& &1.name)
   end
 
   defp import_record(cfg, plan, state, ctx) do

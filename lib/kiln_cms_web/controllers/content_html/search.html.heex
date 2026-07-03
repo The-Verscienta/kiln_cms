@@ -15,7 +15,10 @@
   </form>
 
   <p
-    :if={@query != "" and @results.posts == [] and @results.pages == []}
+    :if={
+      @query != "" and @results.posts == [] and @results.pages == [] and
+        @results.entries == []
+    }
     class="mt-8 text-base-content/60"
   >
     {gettext("No results for “%{query}”.", query: @query)}
@@ -49,6 +52,23 @@
           class="font-medium hover:underline"
         >
           {page.title}
+        </a>
+      </li>
+    </ul>
+  </section>
+
+  <section :if={@results.entries != []} class="mt-8">
+    <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+      {gettext("More content")}
+    </h2>
+    <ul class="mt-3 space-y-4">
+      <li :for={entry <- @results.entries}>
+        <a href={KilnCMS.I18n.localized_path(@locale, entry.path)} class="group block">
+          <span class="font-medium group-hover:underline">{entry.title}</span>
+          <span class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
+            {entry.type_label}
+          </span>
+          <p :if={entry.excerpt} class="mt-1 text-sm text-base-content/70">{entry.excerpt}</p>
         </a>
       </li>
     </ul>

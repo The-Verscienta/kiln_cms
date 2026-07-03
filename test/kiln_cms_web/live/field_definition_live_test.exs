@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     lv
     |> form("#new-field-form",
       field_definition: %{
-        content_type: "page",
+        scope: "page",
         name: "toxicity_level",
         label: "Toxicity",
         field_type: "string"

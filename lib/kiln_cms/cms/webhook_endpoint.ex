@@ -18,12 +18,14 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   def verbs, do: @verbs
 
   @doc """
-  Every selectable event name: each registered content type crossed with each
-  lifecycle verb (e.g. `"page.published"`, `"post.updated"`). Derived at runtime
-  so content types generated via `mix kiln.gen.content` get events for free.
+  Every selectable event name: each registered content type — compiled and
+  admin-defined dynamic (D17) — crossed with each lifecycle verb (e.g.
+  `"page.published"`, `"recipe.updated"`). Derived at runtime so generated and
+  admin-defined types get events for free.
   """
   def events do
-    for ct <- KilnCMS.CMS.ContentTypes.all(), verb <- @verbs, do: "#{ct.type}.#{verb}"
+    types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all()
+    for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
   end
 
   # AshAdmin: keep system config out of the content groups (issue #25). The

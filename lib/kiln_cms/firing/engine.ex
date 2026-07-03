@@ -76,11 +76,27 @@ defmodule KilnCMS.Firing.Engine do
     :ok
   end
 
-  @doc "The content type atom for a document struct (`:page` / `:post`)."
+  @doc "The content type atom for a document struct (`:page` / `:post` / `:entry`)."
   @spec document_type(struct()) :: atom()
   def document_type(%{__struct__: module}) do
     module |> Module.split() |> List.last() |> String.downcase() |> String.to_existing_atom()
   end
+
+  @doc """
+  The consumer-facing type string for a document: a compiled type's atom name,
+  or the owning dynamic type's name for a generic entry (D17) — the `:entry`
+  storage key is an implementation detail headless consumers never see.
+  """
+  @spec public_type(struct()) :: String.t()
+  def public_type(%{type_definition_id: id}) when not is_nil(id) do
+    case KilnCMS.CMS.get_type_definition(id, authorize?: false) do
+      {:ok, definition} -> definition.name
+      # Archived/removed definition — fall back to the storage key.
+      _ -> "entry"
+    end
+  end
+
+  def public_type(document), do: to_string(document_type(document))
 
   defp persist(document, type, artifacts) do
     fired_at = DateTime.utc_now()
@@ -115,7 +131,7 @@ defmodule KilnCMS.Firing.Engine do
 
   defp compose(document, typed, :json) do
     %{
-      "type" => to_string(document_type(document)),
+      "type" => public_type(document),
       "title" => Map.get(document, :title),
       "slug" => Map.get(document, :slug),
       "blocks" => Enum.map(typed, &Blocks.render(&1, :json))

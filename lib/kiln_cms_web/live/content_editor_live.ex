@@ -16,6 +16,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   """
   use KilnCMSWeb, :live_view
 
+  import Ash.Expr, only: [expr: 1]
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.EditorTelemetry
@@ -53,6 +55,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       kind ->
         actor = socket.assigns.current_user
         record = fetch!(kind, id, actor)
+        field_definitions = field_definitions(kind, actor)
 
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
@@ -86,6 +89,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # `:new` (insert a new image block — opened from the editor chrome).
          |> assign(:picking, nil)
          |> assign(:media_query, "")
+         # nil = not searching (browse the mounted window); a list = DB search
+         # results, so the picker also finds items beyond that window.
+         |> assign(:picker_media, nil)
          |> assign(
            :media,
            # The picker grid needs only these fields; a select keeps 500
@@ -102,7 +108,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:categories, CMS.list_categories!(actor: actor))
          |> assign(:tags, CMS.list_tags!(actor: actor))
          |> assign(:audiences, audience_options())
-         |> assign(:field_definitions, CMS.field_definitions_for!(kind, actor: actor))
+         |> assign(:field_definitions, field_definitions)
+         |> assign(:reference_options, reference_options(field_definitions, actor))
+         # CRDT collab prototype: when enabled, rich-text blocks sync live
+         # between editors over the collab channel (see KilnCMS.Collab.Crdt).
+         |> assign(:collab_token, collab_token(actor))
+         |> assign(:collab_topic, "collab:#{kind}:#{id}")
          |> assign(:siblings, siblings(kind, id, actor))
          |> assign_record(record)}
     end
@@ -138,7 +149,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Drop cursors for anyone who has left, so stale focus badges disappear.
     present = MapSet.new(editors, & &1.id)
     cursors = Map.filter(socket.assigns.cursors, fn {id, _} -> MapSet.member?(present, id) end)
-    {:noreply, assign(socket, editors: editors, cursors: cursors)}
+    socket = assign(socket, editors: editors, cursors: cursors)
+
+    # If the departing persister left us in charge while we hold live-synced
+    # edits, take over persistence by scheduling the autosave we suppressed.
+    socket =
+      if socket.assigns.save_state == :synced and persister?(socket),
+        do: mark_dirty(socket),
+        else: socket
+
+    {:noreply, socket}
   end
 
   # A collaborator focused (field set) or left (field nil) a field. Ignore our
@@ -235,10 +255,86 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `related_<type>s` / `related_<type>_ids`. `to_existing_atom` (rather than
   # interpolating a new atom) keeps this safe even though `kind` originates from
   # a route param — it's already registry-validated, and the atoms are defined
-  # at compile time by `KilnCMS.CMS.Content`.
-  defp related_name(kind), do: String.to_existing_atom("related_#{kind}s")
-  defp related_field(kind), do: String.to_existing_atom("related_#{kind}_ids")
+  # at compile time by `KilnCMS.CMS.Content`. Dynamic kinds (string names) all
+  # live on the generic entry tier, so they resolve to its `related_entrys`.
+  defp related_name(kind), do: String.to_existing_atom("related_#{interface_kind(kind)}s")
+  defp related_field(kind), do: String.to_existing_atom("related_#{interface_kind(kind)}_ids")
   defp related_current(kind, record), do: Map.get(record, related_name(kind))
+
+  defp interface_kind(kind) do
+    case ContentTypes.get!(kind) do
+      %{source: :dynamic} -> :entry
+      ct -> ct.type
+    end
+  end
+
+  # The Yjs fragment key for one rich-text block: its **stable block id**
+  # (blocks carry a writable uuid primary key precisely so identity survives
+  # reorders, restores and round-trips), so two sessions always bind the same
+  # text to the same fragment regardless of block positions. Pre-id legacy
+  # blocks (stored before ids existed and not yet backfilled) fall back to the
+  # index — the old, positional behavior — until their next save assigns one.
+  defp collab_fragment(bf) do
+    case bf[:id] && bf[:id].value do
+      id when is_binary(id) and id != "" -> "block-#{id}"
+      _missing -> "block-idx-#{bf.index}"
+    end
+  end
+
+  # Socket token for the CRDT collab prototype; nil (and thus no data-collab
+  # attributes, no channel) when the flag is off. Mount is editor/admin-gated,
+  # so a token only ever reaches an authorized editor.
+  defp collab_token(actor) do
+    if KilnCMS.Collab.Crdt.enabled?() do
+      Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", actor.id)
+    end
+  end
+
+  # A dynamic kind's custom fields are scoped by its TypeDefinition, a compiled
+  # kind's by its type atom (see FieldDefinition's two scopes).
+  defp field_definitions(kind, actor) do
+    case ContentTypes.get!(kind) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.field_definitions_for_definition!(definition.id, actor: actor)
+
+      ct ->
+        CMS.field_definitions_for!(ct.type, actor: actor)
+    end
+  end
+
+  # Pick-lists for `:reference` custom fields: per definition, the target
+  # type's records as `{title, id}` options — narrow select and the same window
+  # cap as the media picker, so a large library can't blow up the mount.
+  defp reference_options(definitions, actor) do
+    definitions
+    |> Enum.filter(&(&1.field_type == :reference))
+    |> Map.new(fn definition ->
+      options =
+        case ContentTypes.get(definition.target_type) do
+          nil ->
+            []
+
+          ct ->
+            ct
+            |> ContentTypes.list!(
+              actor: actor,
+              query: [select: [:id, :title], sort: [title: :asc], limit: @max_media]
+            )
+            |> Enum.map(&{&1.title, &1.id})
+        end
+
+      {definition.name, options}
+    end)
+  end
+
+  # Options for the pick-list custom fields; other field types need none.
+  defp custom_field_options(%{field_type: :media}, media, _refs),
+    do: Enum.map(media, &{&1.filename, &1.id})
+
+  defp custom_field_options(%{field_type: :reference, name: name}, _media, refs),
+    do: Map.get(refs, name, [])
+
+  defp custom_field_options(_definition, _media, _refs), do: []
 
   # Current ids for a (possibly unloaded) relationship list.
   defp current_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
@@ -306,8 +402,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: {:noreply, reset_picker(socket)}
 
   # Live-filter the browser grid as the user types.
-  def handle_event("search_media", %{"q" => q}, socket),
-    do: {:noreply, assign(socket, :media_query, q)}
+  def handle_event("search_media", %{"q" => q}, socket) do
+    results = if q == "", do: nil, else: search_media(q, socket.assigns.actor)
+    {:noreply, socket |> assign(:media_query, q) |> assign(:picker_media, results)}
+  end
 
   # Set the featured image from the library (#154).
   def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
@@ -511,57 +609,98 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # published/in-review/archived content is changed deliberately via the
   # explicit Save button, so for those we only flip the dirty indicator
   # (and the UnsavedGuard hook warns before navigating away).
+  #
+  # Under active collaboration (CRDT prototype), only ONE editor persists:
+  # concurrent autosaves would race the optimistic lock even though the
+  # rich-text content has already converged. The persister's TipTap mirrors
+  # remote CRDT edits into its own form, so its autosave covers everyone's
+  # typing; the others show `:synced` instead of autosaving (their edits to
+  # non-CRDT fields still save via the explicit Save button).
   defp mark_dirty(socket) do
     socket = refresh_preview(socket)
 
-    if draft?(socket) do
-      socket
-      |> cancel_autosave_timer()
-      |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
-      # `:saving` from the moment of edit — the change is queued to autosave, like
-      # a "Saving…" indicator (#136). Resolves to `:saved` or `:error` on flush.
-      |> assign(:save_state, :saving)
-    else
-      assign(socket, :save_state, :unsaved)
+    cond do
+      not draft?(socket) ->
+        assign(socket, :save_state, :unsaved)
+
+      collab_active?(socket) and not persister?(socket) ->
+        socket
+        |> cancel_autosave_timer()
+        |> assign(:save_state, :synced)
+
+      true ->
+        socket
+        |> cancel_autosave_timer()
+        |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
+        # `:saving` from the moment of edit — the change is queued to autosave,
+        # like a "Saving…" indicator (#136). Resolves to `:saved`/`:error` on
+        # flush.
+        |> assign(:save_state, :saving)
     end
   end
 
+  # More than one editor present with the CRDT prototype on — text edits flow
+  # through the shared Y.Doc rather than each session's form.
+  defp collab_active?(socket),
+    do: socket.assigns.collab_token != nil and length(socket.assigns.editors) > 1
+
+  # The designated persisting editor: lowest user id among those present — the
+  # same deterministic tie-break the advisory field locks use, so every
+  # session elects the same one without coordination.
+  defp persister?(%{assigns: %{editors: []}}), do: true
+
+  defp persister?(socket) do
+    socket.assigns.actor.id ==
+      socket.assigns.editors |> Enum.map(& &1.id) |> Enum.min()
+  end
+
   defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
-    if draft?(socket) do
-      socket = assign(socket, :autosave_timer, nil)
+    cond do
+      not draft?(socket) ->
+        assign(socket, :autosave_timer, nil)
 
-      # Submit the current edits through the dedicated `:autosave` action (kept
-      # distinct from the explicit Save's `:update` so its PaperTrail versions
-      # are tagged and coalesced). A throwaway form mirrors the live one's
-      # params, leaving `socket.assigns.form` intact for the Save button.
-      autosave_form =
-        AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
-          actor: socket.assigns.actor,
-          forms: [auto?: true]
-        )
+      # A lower-id editor joined between scheduling and firing — stand down;
+      # they persist from here.
+      collab_active?(socket) and not persister?(socket) ->
+        socket |> assign(:autosave_timer, nil) |> assign(:save_state, :synced)
 
-      result =
-        EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
-          AshPhoenix.Form.submit(autosave_form,
-            params: AshPhoenix.Form.params(socket.assigns.form)
-          )
-        end)
-
-      case result do
-        {:ok, record} ->
-          reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
-          socket |> assign_record(reloaded) |> assign(:save_state, :saved)
-
-        {:error, form} ->
-          handle_autosave_error(socket, form)
-      end
-    else
-      assign(socket, :autosave_timer, nil)
+      true ->
+        do_autosave(socket)
     end
   end
 
   # Stale timer (already saved, or state moved on) — no-op.
   defp perform_autosave(socket), do: assign(socket, :autosave_timer, nil)
+
+  defp do_autosave(socket) do
+    socket = assign(socket, :autosave_timer, nil)
+
+    # Submit the current edits through the dedicated `:autosave` action (kept
+    # distinct from the explicit Save's `:update` so its PaperTrail versions
+    # are tagged and coalesced). A throwaway form mirrors the live one's
+    # params, leaving `socket.assigns.form` intact for the Save button.
+    autosave_form =
+      AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
+        actor: socket.assigns.actor,
+        forms: [auto?: true]
+      )
+
+    result =
+      EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(autosave_form,
+          params: AshPhoenix.Form.params(socket.assigns.form)
+        )
+      end)
+
+    case result do
+      {:ok, record} ->
+        reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
+        socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+
+      {:error, form} ->
+        handle_autosave_error(socket, form)
+    end
+  end
 
   # Someone else saved first → stop autosaving and surface the conflict rather
   # than retrying (which would keep losing). Otherwise mark the draft as failing
@@ -691,7 +830,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # nil (image hidden) for rejected schemes like `javascript:`/`data:`.
   defp safe_preview_src(url), do: KilnCMS.HTMLSanitizer.safe_image_src(url)
 
-  defp reset_picker(socket), do: socket |> assign(:picking, nil) |> assign(:media_query, "")
+  defp reset_picker(socket),
+    do: socket |> assign(:picking, nil) |> assign(:media_query, "") |> assign(:picker_media, nil)
 
   # Accessible tag picker (#153): a labeled checkbox group replacing the native
   # <select multiple> (no ⌘/Ctrl needed). Each tag is its own labeled control;
@@ -744,6 +884,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :name, :string, required: true
   attr :value, :any, required: true
   attr :errors, :list, default: []
+  attr :options, :list, default: []
+
+  # Media / reference pick-lists: the select posts the target id; the stored
+  # value is the write-time snapshot map (see ApplyCustomFields), so the
+  # current selection is its "id".
+  defp custom_field_input(%{definition: %{field_type: type}} = assigns)
+       when type in [:media, :reference] do
+    assigns = assign(assigns, :selected_id, snapshot_id(assigns.value))
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <select
+        id={cf_id(@definition)}
+        name={@name}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+      >
+        <option value="">{gettext("— None —")}</option>
+        <option :for={{label, id} <- @options} value={id} selected={@selected_id == id}>
+          {label}
+        </option>
+      </select>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
 
   defp custom_field_input(%{definition: %{field_type: :boolean}} = assigns) do
     assigns = assign(assigns, :checked, assigns.value in [true, "true", "1", "on"])
@@ -860,6 +1033,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp cf_id(definition), do: "custom-field-#{definition.name}"
   defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
 
+  # The current selection for a pick-list field: the stored snapshot's id, or
+  # the raw id while a change is mid-validate.
+  defp snapshot_id(%{"id" => id}), do: id
+  defp snapshot_id(id) when is_binary(id) and id != "", do: id
+  defp snapshot_id(_other), do: nil
+
   defp custom_input_type(:integer), do: "number"
   defp custom_input_type(:float), do: "number"
   defp custom_input_type(:date), do: "date"
@@ -940,18 +1119,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # Substring filter over filename/alt/caption — instant, no DB round-trip, and
-  # matches partial input as the user types (the library's `:search` action is
-  # whole-word tsquery, less forgiving for a live picker).
-  defp filter_media(media, ""), do: media
+  # Server-side substring search over filename/alt/caption (audit U-M2): finds
+  # items beyond the mounted picker window, and matches partial input as the
+  # user types (the library's `:search` action is whole-word tsquery, less
+  # forgiving for a live picker). %, _ and \ in the input match literally.
+  defp search_media(q, actor) do
+    pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
 
-  defp filter_media(media, query) do
-    q = String.downcase(query)
-
-    Enum.filter(media, fn item ->
-      [item.filename, item.alt, item.caption]
-      |> Enum.any?(fn v -> v && String.contains?(String.downcase(v), q) end)
-    end)
+    CMS.list_media_items!(
+      actor: actor,
+      query: [
+        filter:
+          expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern)),
+        select: [:id, :url, :alt, :caption, :filename],
+        sort: [inserted_at: :desc],
+        limit: @max_media
+      ]
+    )
   end
 
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
@@ -1038,13 +1222,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   attr :index, :any, required: true
   attr :media, :list, required: true
+  attr :results, :list, default: nil
   attr :query, :string, required: true
 
   # Full media-library browser modal. Reachable from the editor chrome (to
   # insert a new image block, `index = :new`) and from each image block (to fill
-  # that block, `index` = its integer index). Browse + search + insert.
+  # that block, `index` = its integer index). Browse + search + insert; while a
+  # query is active, `results` (a DB search) replaces the browse window.
   defp image_picker(assigns) do
-    assigns = assign(assigns, :visible, filter_media(assigns.media, assigns.query))
+    assigns = assign(assigns, :visible, assigns.results || assigns.media)
 
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
@@ -1080,6 +1266,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             name="q"
             value={@query}
             placeholder={gettext("Search by filename, alt or caption")}
+            aria-label={gettext("Search by filename, alt text or caption")}
             phx-debounce="150"
             autocomplete="off"
             class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
@@ -1087,7 +1274,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </form>
 
         <p :if={@media == []} class="text-sm text-base-content/60">
-          No media yet — upload some in the <.link navigate={~p"/media"} class="underline">media library</.link>.
+          {gettext("No media yet — upload some in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
         </p>
         <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
           {gettext("No media matches “%{query}”.", query: @query)}
@@ -1119,6 +1309,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp color_for(id),
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
+
+  # Hex twins of @cursor_colors (same order), for the CRDT caret labels —
+  # TipTap's CollaborationCursor needs CSS color values, not Tailwind classes.
+  @cursor_colors_hex ~w(#f43f5e #f59e0b #10b981 #0ea5e9 #8b5cf6 #ec4899)
+
+  defp color_hex_for(id),
+    do: Enum.at(@cursor_colors_hex, rem(:erlang.phash2(id), length(@cursor_colors_hex)))
+
+  # Up-to-two-letter initials from a display name ("Jane Doe" → "JD",
+  # "editor" → "E"), for the roster chips and remote caret labels.
+  defp initials(nil), do: "?"
+
+  defp initials(name) do
+    case name |> String.split(~r/\s+/, trim: true) |> Enum.take(2) do
+      [] -> "?"
+      words -> Enum.map_join(words, &(&1 |> String.first() |> String.upcase()))
+    end
+  end
 
   # Focus-tracking attributes for an input; `field` keys the cursor badge.
   # `phx-debounce` coalesces the per-keystroke `validate` events (and the
@@ -1546,6 +1754,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-content={bf[:legacy_html].value || ""}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:legacy_html].name}
+                        data-collab-token={@collab_token}
+                        data-collab-topic={@collab_token && @collab_topic}
+                        data-collab-fragment={@collab_token && collab_fragment(bf)}
+                        data-collab-user={@collab_token && initials(Presence.display_name(@actor))}
+                        data-collab-color={@collab_token && color_hex_for(@actor.id)}
                         role="group"
                         aria-label={gettext("Rich text block")}
                       >
@@ -1665,6 +1878,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   name={"#{@form.name}[custom_fields][#{definition.name}]"}
                   value={custom_field_value(@form, definition.name)}
                   errors={custom_field_errors(@form, definition.name)}
+                  options={custom_field_options(definition, @media, @reference_options)}
                 />
               </div>
             </details>
@@ -1803,7 +2017,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </div>
       </.form>
 
-      <.image_picker :if={@picking != nil} index={@picking} media={@media} query={@media_query} />
+      <.image_picker
+        :if={@picking != nil}
+        index={@picking}
+        media={@media}
+        results={@picker_media}
+        query={@media_query}
+      />
     </Layouts.app>
     """
   end
@@ -1833,7 +2053,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             color_for(e.id)
           ]}
         >
-          {e.name |> String.first() |> Kernel.||("?") |> String.upcase()}
+          {initials(e.name)}
         </span>
       </div>
       <span class="text-xs text-base-content/60">{gettext("%{count} editing", count: @count)}</span>
@@ -1898,6 +2118,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {gettext("Saving…")}
         <% :saved -> %>
           {gettext("Saved")}
+        <% :synced -> %>
+          <%!-- Collab: a co-editor persists; text edits are already in the
+                shared doc. Fields outside the text still need Save. --%>
+          {gettext("Synced live — co-editor saves")}
         <% :error -> %>
           {gettext("Couldn't autosave — check for errors")}
         <% _ -> %>

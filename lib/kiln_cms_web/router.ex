@@ -189,6 +189,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
+      live "/editor/types", TypeDefinitionLive, :index
       live "/editor/mail", MailSettingsLive, :index
     end
 

@@ -129,6 +129,9 @@ const Hooks = {
       this._destroyed = true
       this.slash && this.slash.destroy()
       this.editor && this.editor.destroy()
+      // Collab prototype: drop this block's claim on the shared Y.Doc (the
+      // channel is left once the last block releases it).
+      this.collab && this.collab.release()
     },
   },
   // Notion-style slash-command block inserter (#29). The server renders the

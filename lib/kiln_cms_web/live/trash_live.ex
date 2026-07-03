@@ -6,13 +6,16 @@ defmodule KilnCMSWeb.TrashLive do
   """
   use KilnCMSWeb, :live_view
 
+  import Ash.Expr, only: [expr: 1]
+
   alias KilnCMS.CMS.ContentTypes
 
   @retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
-  # Bound the trashed rows loaded per content type (most-recently-deleted first)
-  # so a large trash can't grow the LiveView heap without limit.
-  @max_per_type 500
+  # Server-side page size: each page pulls at most this many trashed rows per
+  # content type (most-recently-deleted first) and keeps the merged newest
+  # @page_size, so any trashed item is reachable via Load more (audit U-M2).
+  @page_size 50
 
   @impl true
   def mount(_params, _session, socket) do
@@ -42,25 +45,48 @@ defmodule KilnCMSWeb.TrashLive do
   # blocks/search_text/embedding columns the trash list doesn't show.
   @list_fields [:id, :title, :slug, :locale, :state, :archived_at, :updated_at]
 
-  # Soft-deleted records across every content type, merged into `{kind, record}`
-  # tuples, newest deletion first.
+  # (Re)load the first page of soft-deleted records.
   defp load_items(socket) do
-    actor = socket.assigns.actor
+    {items, more?} = fetch_page(socket, nil)
 
-    items =
-      ContentTypes.all()
-      |> Enum.flat_map(fn ct ->
-        ct.type
-        |> ContentTypes.list_trashed!(
-          actor: actor,
-          query: [select: @list_fields, sort: [archived_at: :desc], limit: @max_per_type]
-        )
+    socket
+    |> assign(:items, items)
+    |> assign(:more?, more?)
+  end
+
+  # One page of trashed `{kind, record}` tuples merged across every content
+  # type, newest deletion first, from `cursor` (exclusive) downwards. Keeping
+  # the merged newest @page_size is exact: the true next page can't contain
+  # more than @page_size rows of any single type.
+  defp fetch_page(socket, cursor) do
+    actor = socket.assigns.actor
+    query = page_query(cursor)
+
+    per_type =
+      Enum.map(editable_types(), fn ct ->
+        # Dispatch on the descriptor itself so a type archived between listing
+        # and dispatch can't turn into a registry-lookup miss.
+        ct
+        |> ContentTypes.list_trashed!(actor: actor, query: query)
         |> Enum.map(&{ct.type, &1})
       end)
+
+    merged =
+      per_type
+      |> List.flatten()
       |> Enum.sort_by(fn {_kind, r} -> r.archived_at end, {:desc, DateTime})
 
-    assign(socket, :items, items)
+    {page, rest} = Enum.split(merged, @page_size)
+
+    {page, rest != [] or Enum.any?(per_type, &(length(&1) >= @page_size))}
   end
+
+  defp page_query(cursor) do
+    if(cursor, do: [{:filter, expr(archived_at < ^cursor)}], else: []) ++
+      [select: @list_fields, sort: [archived_at: :desc], limit: @page_size]
+  end
+
+  defp editable_types, do: ContentTypes.all() ++ ContentTypes.dynamic_all()
 
   @impl true
   def handle_event("restore", %{"kind" => kind, "id" => id}, socket) do
@@ -114,12 +140,11 @@ defmodule KilnCMSWeb.TrashLive do
   def handle_event("confirm_empty", _params, socket) do
     actor = socket.assigns.actor
 
+    # Everything in the trash, not just the loaded page — walk each type in
+    # bounded batches so a huge trash never materializes in memory at once.
     {ok, skipped} =
-      Enum.reduce(socket.assigns.items, {0, 0}, fn {kind, record}, {ok, skipped} ->
-        case do_purge(to_string(kind), record, actor) do
-          :ok -> {ok + 1, skipped}
-          _ -> {ok, skipped + 1}
-        end
+      Enum.reduce(editable_types(), {0, 0}, fn ct, acc ->
+        purge_all(ct, actor, acc, nil)
       end)
 
     flash =
@@ -135,7 +160,47 @@ defmodule KilnCMSWeb.TrashLive do
      |> put_flash(:info, flash)}
   end
 
+  def handle_event("load_more", _params, socket) do
+    case List.last(socket.assigns.items) do
+      nil ->
+        {:noreply, assign(socket, :more?, false)}
+
+      {_kind, last} ->
+        {page, more?} = fetch_page(socket, last.archived_at)
+
+        {:noreply,
+         socket
+         |> assign(:items, socket.assigns.items ++ page)
+         |> assign(:more?, more?)}
+    end
+  end
+
   defp do_purge(kind, record, actor), do: ContentTypes.purge(kind, record, actor: actor)
+
+  # Purge one type's trash in @page_size batches, walking oldest-first behind
+  # an archived_at cursor so rows whose purge failed are never refetched (and
+  # never loop). Totals are {purged, skipped}.
+  defp purge_all(ct, actor, {ok, skipped}, cursor) do
+    query =
+      if(cursor, do: [{:filter, expr(archived_at > ^cursor)}], else: []) ++
+        [select: @list_fields, sort: [archived_at: :asc], limit: @page_size]
+
+    batch = ContentTypes.list_trashed!(ct, actor: actor, query: query)
+
+    totals =
+      Enum.reduce(batch, {ok, skipped}, fn record, {o, s} ->
+        case ContentTypes.purge(ct, record, actor: actor) do
+          :ok -> {o + 1, s}
+          _ -> {o, s + 1}
+        end
+      end)
+
+    case batch do
+      [] -> totals
+      _ when length(batch) < @page_size -> totals
+      _ -> purge_all(ct, actor, totals, List.last(batch).archived_at)
+    end
+  end
 
   defp find_item(items, kind, id) do
     Enum.find_value(items, fn {k, r} ->
@@ -217,7 +282,12 @@ defmodule KilnCMSWeb.TrashLive do
               <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
             <span class="text-xs text-base-content/70">
-              {gettext("deleted %{at}", at: Calendar.strftime(record.archived_at, "%Y-%m-%d %H:%M"))}
+              {gettext("deleted")}
+              <time
+                id={"trash-time-#{kind}-#{record.id}"}
+                phx-hook="LocalTime"
+                datetime={DateTime.to_iso8601(record.archived_at)}
+              >{Calendar.strftime(record.archived_at, "%Y-%m-%d %H:%M")} UTC</time>
             </span>
             <button
               type="button"
@@ -242,6 +312,17 @@ defmodule KilnCMSWeb.TrashLive do
             </button>
           </li>
         </ul>
+
+        <div :if={@more?} class="flex justify-center">
+          <button
+            type="button"
+            phx-click="load_more"
+            phx-disable-with={gettext("Loading…")}
+            class="rounded border border-base-content/20 px-4 py-1.5 text-sm hover:bg-base-200"
+          >
+            {gettext("Load more")}
+          </button>
+        </div>
       </div>
     </Layouts.app>
     """

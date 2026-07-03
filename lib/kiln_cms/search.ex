@@ -115,16 +115,19 @@ defmodule KilnCMS.Search do
 
   @doc """
   Global keyword search across content types and media, returning sectioned
-  results: `%{pages: [...], posts: [...], media: [...]}`. Pages/posts are
-  locale-scoped (via `:locale`, default configured); media is locale-agnostic.
+  results: `%{pages: [...], posts: [...], entries: [...], media: [...]}`.
+  Content sections are locale-scoped (via `:locale`, default configured);
+  media is locale-agnostic. `entries` spans every admin-defined dynamic type
+  (D17), each record carrying the `type_name` calc for labeling/linking.
   Read options (`:actor`, `:authorize?`) pass through; `:limit` caps each
   section (default 10). Pass `highlight: true` to load the `highlight` snippet
-  calc on the page/post sections (rendered by the admin palette via
+  calc on the content sections (rendered by the admin palette via
   `KilnCMS.Search.Highlight.to_safe_html/1`); media has no such calc.
   """
   @spec global(String.t(), keyword()) :: %{
           pages: [struct()],
           posts: [struct()],
+          entries: [struct()],
           media: [struct()]
         }
   def global(query, opts \\ []) when is_binary(query) do
@@ -155,6 +158,18 @@ defmodule KilnCMS.Search do
           read_opts,
           limit,
           content_load
+        ),
+      # One section across every dynamic type. `type_name` (an expression
+      # calc, so it doesn't run TypeDefinition's editor-only read policy for
+      # anonymous callers) labels each hit with its dynamic type.
+      entries:
+        section(
+          KilnCMS.CMS.Entry,
+          :search,
+          %{query: query, locale: locale},
+          read_opts,
+          limit,
+          [:type_name | content_load]
         ),
       media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, [])
     }

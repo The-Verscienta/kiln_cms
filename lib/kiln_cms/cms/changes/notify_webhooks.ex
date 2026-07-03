@@ -39,7 +39,14 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   # Derive the event namespace from the content type's module name
   # (`KilnCMS.CMS.Page` -> `"page"`), so every content type — including ones
   # generated via `mix kiln.gen.content` — dispatches webhooks without changes
-  # here.
-  defp event_prefix(%resource{}),
-    do: resource |> Module.split() |> List.last() |> Macro.underscore()
+  # here. Generic entries (D17) use their dynamic type's *name* instead
+  # (`"recipe.published"`, not `"entry.published"`), so subscribers filter
+  # dynamic types exactly like compiled ones.
+  defp event_prefix(%resource{} = record) do
+    if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
+      KilnCMS.Firing.Engine.public_type(record)
+    else
+      resource |> Module.split() |> List.last() |> Macro.underscore()
+    end
+  end
 end

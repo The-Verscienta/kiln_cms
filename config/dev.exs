@@ -100,3 +100,7 @@ config :swoosh, :api_client, false
 # Use the EXLA (XLA) backend for Nx locally — the :exla dep is only available in
 # dev/test. Prod/e2e fall back to Nx.BinaryBackend (see config/config.exs).
 config :nx, default_backend: EXLA.Backend
+
+# Collaborative-editing CRDT prototype (KilnCMS.Collab.Crdt) — dev-only while
+# it's a spike; the collab channel refuses joins when this is off.
+config :kiln_cms, :collab_prototype, true

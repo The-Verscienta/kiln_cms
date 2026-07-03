@@ -80,6 +80,8 @@ defmodule KilnCMS.MixProject do
       {:ash_phoenix, "~> 2.0"},
       {:ash_postgres, "~> 2.0"},
       {:ash, "~> 3.0"},
+      # Yjs CRDTs on the BEAM (collab-editing prototype — see the spike doc).
+      {:y_ex, "~> 0.10.5"},
       {:phoenix, "~> 1.8.8"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},

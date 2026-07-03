@@ -76,6 +76,45 @@ defmodule KilnCMS.CMS do
       define :list_post_versions, action: :read
     end
 
+    # The generic entry tier backing admin-defined dynamic content types
+    # (decision D17). One interface set serves every dynamic type; callers
+    # scope by `type_definition_id` (the reads that must be type-scoped take
+    # it as an argument, the rest go through `ContentTypes` dispatch).
+    resource KilnCMS.CMS.Entry do
+      define :list_entries, action: :read
+      define :get_entry, action: :read, get_by: [:id]
+
+      define :get_published_entry_by_slug,
+        action: :public_by_slug,
+        args: [:slug, :locale, :type_definition_id]
+
+      define :list_entry_translations,
+        action: :published_translations,
+        args: [:slug, :type_definition_id]
+
+      define :search_entries, action: :search, args: [:query]
+      define :semantic_search_entries, action: :search_semantic, args: [:query]
+      define :autocomplete_entries, action: :autocomplete, args: [:prefix]
+      define :create_entry, action: :create
+      define :update_entry, action: :update
+      define :submit_entry_for_review, action: :submit_for_review
+      define :return_entry_to_draft, action: :return_to_draft
+      define :publish_entry, action: :publish
+      define :publish_scheduled_entry, action: :publish_scheduled
+      define :unpublish_entry, action: :unpublish
+      define :archive_entry, action: :archive
+      define :unarchive_entry, action: :unarchive
+      define :restore_entry_version, action: :restore_version
+      define :destroy_entry, action: :destroy
+      define :list_trashed_entries, action: :trashed
+      define :restore_entry, action: :restore
+      define :purge_entry, action: :purge
+    end
+
+    resource KilnCMS.CMS.Entry.Version do
+      define :list_entry_versions, action: :read
+    end
+
     resource KilnCMS.CMS.MediaItem do
       define :list_media_items, action: :read
       define :search_media, action: :search, args: [:query]
@@ -135,14 +174,35 @@ defmodule KilnCMS.CMS do
     # Admin-UI-defined custom fields: the runtime field registry that backs the
     # `custom_fields` map on content (decision D4 — data-driven *fields*, not a
     # runtime meta-model of *types*). `field_definitions_for` is the per-type
-    # lookup the editor and the write change call with `authorize?: false`.
+    # lookup the editor and the write change call with `authorize?: false`;
+    # `field_definitions_for_definition` is its dynamic-type twin (D17).
     resource KilnCMS.CMS.FieldDefinition do
       define :list_field_definitions, action: :read
       define :get_field_definition, action: :read, get_by: [:id]
       define :field_definitions_for, action: :for_type, args: [:content_type]
+
+      define :field_definitions_for_definition,
+        action: :for_definition,
+        args: [:type_definition_id]
+
       define :create_field_definition, action: :create
       define :update_field_definition, action: :update
       define :destroy_field_definition, action: :destroy
+    end
+
+    # Admin-defined (dynamic) content types — rows, not modules (decision D17,
+    # `docs/dynamic-content-types-plan.md`). Their schema is FieldDefinition
+    # rows scoped by `type_definition_id`; their entries live in the shared
+    # generic entry table (Phase 2).
+    resource KilnCMS.CMS.TypeDefinition do
+      define :list_type_definitions, action: :read
+      define :list_archived_type_definitions, action: :archived
+      define :get_type_definition, action: :read, get_by: [:id]
+      define :get_type_definition_by_name, action: :by_name, args: [:name]
+      define :create_type_definition, action: :create
+      define :update_type_definition, action: :update
+      define :restore_type_definition, action: :restore
+      define :destroy_type_definition, action: :destroy
     end
   end
 end

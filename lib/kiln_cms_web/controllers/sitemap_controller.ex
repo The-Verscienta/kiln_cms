@@ -34,15 +34,18 @@ defmodule KilnCMSWeb.SitemapController do
   # No actor + `authorize?: true` ⇒ the read policy returns published records
   # only, which is exactly what belongs in a public sitemap. Each type's read is
   # capped, and accumulation stops once the overall ceiling is reached.
+  # Dynamic types (D17) are included — their entries carry the same read policy.
   defp build_urls do
-    Enum.reduce_while(ContentTypes.all(), [], fn ct, acc ->
+    Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(), [], fn ct, acc ->
       remaining = @max_urls - length(acc)
 
       if remaining <= 0 do
         {:halt, acc}
       else
+        # Pass the descriptor itself (not `ct.type`) so a type archived while
+        # the sitemap builds can't turn into a registry-lookup miss.
         entries =
-          ct.type
+          ct
           |> ContentTypes.list!(
             authorize?: true,
             # Only the three fields the XML uses — at the 50k ceiling, full

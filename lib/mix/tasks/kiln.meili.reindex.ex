@@ -45,17 +45,17 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
   end
 
   defp enqueue_source({_resource, lister}, acc) do
+    # Filter in the DB and select only what the job args need.
     published =
-      lister.(authorize?: false)
-      |> Enum.filter(&(&1.state == :published))
+      lister.(authorize?: false, query: [filter: [state: :published], select: [:id, :state]])
 
-    Enum.each(published, fn record ->
+    published
+    |> Enum.map(fn record ->
       type = Engine.document_type(record)
-
-      %{"op" => "upsert", "type" => to_string(type), "id" => record.id}
-      |> MeilisearchWorker.new()
-      |> Oban.insert!()
+      MeilisearchWorker.new(%{"op" => "upsert", "type" => to_string(type), "id" => record.id})
     end)
+    |> Enum.chunk_every(500)
+    |> Enum.each(&Oban.insert_all/1)
 
     acc + length(published)
   end
