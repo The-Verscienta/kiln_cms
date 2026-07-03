@@ -110,6 +110,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:audiences, audience_options())
          |> assign(:field_definitions, field_definitions)
          |> assign(:reference_options, reference_options(field_definitions, actor))
+         # CRDT collab prototype: when enabled, rich-text blocks sync live
+         # between editors over the collab channel (see KilnCMS.Collab.Crdt).
+         |> assign(:collab_token, collab_token(actor))
+         |> assign(:collab_topic, "collab:#{kind}:#{id}")
          |> assign(:siblings, siblings(kind, id, actor))
          |> assign_record(record)}
     end
@@ -145,7 +149,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Drop cursors for anyone who has left, so stale focus badges disappear.
     present = MapSet.new(editors, & &1.id)
     cursors = Map.filter(socket.assigns.cursors, fn {id, _} -> MapSet.member?(present, id) end)
-    {:noreply, assign(socket, editors: editors, cursors: cursors)}
+    socket = assign(socket, editors: editors, cursors: cursors)
+
+    # If the departing persister left us in charge while we hold live-synced
+    # edits, take over persistence by scheduling the autosave we suppressed.
+    socket =
+      if socket.assigns.save_state == :synced and persister?(socket),
+        do: mark_dirty(socket),
+        else: socket
+
+    {:noreply, socket}
   end
 
   # A collaborator focused (field set) or left (field nil) a field. Ignore our
@@ -252,6 +265,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case ContentTypes.get!(kind) do
       %{source: :dynamic} -> :entry
       ct -> ct.type
+    end
+  end
+
+  # The Yjs fragment key for one rich-text block: its **stable block id**
+  # (blocks carry a writable uuid primary key precisely so identity survives
+  # reorders, restores and round-trips), so two sessions always bind the same
+  # text to the same fragment regardless of block positions. Pre-id legacy
+  # blocks (stored before ids existed and not yet backfilled) fall back to the
+  # index — the old, positional behavior — until their next save assigns one.
+  defp collab_fragment(bf) do
+    case bf[:id] && bf[:id].value do
+      id when is_binary(id) and id != "" -> "block-#{id}"
+      _missing -> "block-idx-#{bf.index}"
+    end
+  end
+
+  # Socket token for the CRDT collab prototype; nil (and thus no data-collab
+  # attributes, no channel) when the flag is off. Mount is editor/admin-gated,
+  # so a token only ever reaches an authorized editor.
+  defp collab_token(actor) do
+    if KilnCMS.Collab.Crdt.enabled?() do
+      Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", actor.id)
     end
   end
 
@@ -574,57 +609,98 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # published/in-review/archived content is changed deliberately via the
   # explicit Save button, so for those we only flip the dirty indicator
   # (and the UnsavedGuard hook warns before navigating away).
+  #
+  # Under active collaboration (CRDT prototype), only ONE editor persists:
+  # concurrent autosaves would race the optimistic lock even though the
+  # rich-text content has already converged. The persister's TipTap mirrors
+  # remote CRDT edits into its own form, so its autosave covers everyone's
+  # typing; the others show `:synced` instead of autosaving (their edits to
+  # non-CRDT fields still save via the explicit Save button).
   defp mark_dirty(socket) do
     socket = refresh_preview(socket)
 
-    if draft?(socket) do
-      socket
-      |> cancel_autosave_timer()
-      |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
-      # `:saving` from the moment of edit — the change is queued to autosave, like
-      # a "Saving…" indicator (#136). Resolves to `:saved` or `:error` on flush.
-      |> assign(:save_state, :saving)
-    else
-      assign(socket, :save_state, :unsaved)
+    cond do
+      not draft?(socket) ->
+        assign(socket, :save_state, :unsaved)
+
+      collab_active?(socket) and not persister?(socket) ->
+        socket
+        |> cancel_autosave_timer()
+        |> assign(:save_state, :synced)
+
+      true ->
+        socket
+        |> cancel_autosave_timer()
+        |> assign(:autosave_timer, Process.send_after(self(), :autosave, @autosave_debounce_ms))
+        # `:saving` from the moment of edit — the change is queued to autosave,
+        # like a "Saving…" indicator (#136). Resolves to `:saved`/`:error` on
+        # flush.
+        |> assign(:save_state, :saving)
     end
   end
 
+  # More than one editor present with the CRDT prototype on — text edits flow
+  # through the shared Y.Doc rather than each session's form.
+  defp collab_active?(socket),
+    do: socket.assigns.collab_token != nil and length(socket.assigns.editors) > 1
+
+  # The designated persisting editor: lowest user id among those present — the
+  # same deterministic tie-break the advisory field locks use, so every
+  # session elects the same one without coordination.
+  defp persister?(%{assigns: %{editors: []}}), do: true
+
+  defp persister?(socket) do
+    socket.assigns.actor.id ==
+      socket.assigns.editors |> Enum.map(& &1.id) |> Enum.min()
+  end
+
   defp perform_autosave(%{assigns: %{save_state: :saving}} = socket) do
-    if draft?(socket) do
-      socket = assign(socket, :autosave_timer, nil)
+    cond do
+      not draft?(socket) ->
+        assign(socket, :autosave_timer, nil)
 
-      # Submit the current edits through the dedicated `:autosave` action (kept
-      # distinct from the explicit Save's `:update` so its PaperTrail versions
-      # are tagged and coalesced). A throwaway form mirrors the live one's
-      # params, leaving `socket.assigns.form` intact for the Save button.
-      autosave_form =
-        AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
-          actor: socket.assigns.actor,
-          forms: [auto?: true]
-        )
+      # A lower-id editor joined between scheduling and firing — stand down;
+      # they persist from here.
+      collab_active?(socket) and not persister?(socket) ->
+        socket |> assign(:autosave_timer, nil) |> assign(:save_state, :synced)
 
-      result =
-        EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
-          AshPhoenix.Form.submit(autosave_form,
-            params: AshPhoenix.Form.params(socket.assigns.form)
-          )
-        end)
-
-      case result do
-        {:ok, record} ->
-          reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
-          socket |> assign_record(reloaded) |> assign(:save_state, :saved)
-
-        {:error, form} ->
-          handle_autosave_error(socket, form)
-      end
-    else
-      assign(socket, :autosave_timer, nil)
+      true ->
+        do_autosave(socket)
     end
   end
 
   # Stale timer (already saved, or state moved on) — no-op.
   defp perform_autosave(socket), do: assign(socket, :autosave_timer, nil)
+
+  defp do_autosave(socket) do
+    socket = assign(socket, :autosave_timer, nil)
+
+    # Submit the current edits through the dedicated `:autosave` action (kept
+    # distinct from the explicit Save's `:update` so its PaperTrail versions
+    # are tagged and coalesced). A throwaway form mirrors the live one's
+    # params, leaving `socket.assigns.form` intact for the Save button.
+    autosave_form =
+      AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
+        actor: socket.assigns.actor,
+        forms: [auto?: true]
+      )
+
+    result =
+      EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(autosave_form,
+          params: AshPhoenix.Form.params(socket.assigns.form)
+        )
+      end)
+
+    case result do
+      {:ok, record} ->
+        reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
+        socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+
+      {:error, form} ->
+        handle_autosave_error(socket, form)
+    end
+  end
 
   # Someone else saved first → stop autosaving and surface the conflict rather
   # than retrying (which would keep losing). Otherwise mark the draft as failing
@@ -1234,6 +1310,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp color_for(id),
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
 
+  # Hex twins of @cursor_colors (same order), for the CRDT caret labels —
+  # TipTap's CollaborationCursor needs CSS color values, not Tailwind classes.
+  @cursor_colors_hex ~w(#f43f5e #f59e0b #10b981 #0ea5e9 #8b5cf6 #ec4899)
+
+  defp color_hex_for(id),
+    do: Enum.at(@cursor_colors_hex, rem(:erlang.phash2(id), length(@cursor_colors_hex)))
+
+  # Up-to-two-letter initials from a display name ("Jane Doe" → "JD",
+  # "editor" → "E"), for the roster chips and remote caret labels.
+  defp initials(nil), do: "?"
+
+  defp initials(name) do
+    case name |> String.split(~r/\s+/, trim: true) |> Enum.take(2) do
+      [] -> "?"
+      words -> Enum.map_join(words, &(&1 |> String.first() |> String.upcase()))
+    end
+  end
+
   # Focus-tracking attributes for an input; `field` keys the cursor badge.
   # `phx-debounce` coalesces the per-keystroke `validate` events (and the
   # `broadcast_preview/1` they trigger) so fast typing with a pop-out preview
@@ -1660,6 +1754,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         data-content={bf[:legacy_html].value || ""}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:legacy_html].name}
+                        data-collab-token={@collab_token}
+                        data-collab-topic={@collab_token && @collab_topic}
+                        data-collab-fragment={@collab_token && collab_fragment(bf)}
+                        data-collab-user={@collab_token && initials(Presence.display_name(@actor))}
+                        data-collab-color={@collab_token && color_hex_for(@actor.id)}
                         role="group"
                         aria-label={gettext("Rich text block")}
                       >
@@ -1954,7 +2053,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             color_for(e.id)
           ]}
         >
-          {e.name |> String.first() |> Kernel.||("?") |> String.upcase()}
+          {initials(e.name)}
         </span>
       </div>
       <span class="text-xs text-base-content/60">{gettext("%{count} editing", count: @count)}</span>
@@ -2019,6 +2118,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {gettext("Saving…")}
         <% :saved -> %>
           {gettext("Saved")}
+        <% :synced -> %>
+          <%!-- Collab: a co-editor persists; text edits are already in the
+                shared doc. Fields outside the text still need Save. --%>
+          {gettext("Synced live — co-editor saves")}
         <% :error -> %>
           {gettext("Couldn't autosave — check for errors")}
         <% _ -> %>

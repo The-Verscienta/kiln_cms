@@ -24,6 +24,8 @@ research.
 - **Smallest next step:** a throwaway prototype of one rich-text block synced
   between two browsers via `y_ex` over a Channel — to de-risk `y_ex` maturity and
   the CRDT⇄Ash persistence boundary before committing.
+  *(Since built — see §6 below: the prototype landed behind the
+  `:collab_prototype` flag and both risks are now measured.)*
 
 ---
 
@@ -226,3 +228,69 @@ for D1/D2 and accept the extra service — re-weighing against D2's minimal-ops 
 - [Yjs ↔ ProseMirror / TipTap bindings (`y-prosemirror`, `y-tiptap`)](https://docs.yjs.dev/ecosystem/editor-bindings/tiptap2)
 - [Hocuspocus — self-hosted Yjs collaboration backend](https://tiptap.dev/docs/hocuspocus)
 - [Yjs](https://github.com/yjs/yjs)
+
+## 6. Prototype findings (2026-07 — scoping D1, `:collab_prototype` flag)
+
+The recommended prototype was built and verified end-to-end in a live browser
+(bidirectional convergence between the TipTap editor and an independent Yjs
+client over the channel). Where it lives:
+
+| Piece | Where |
+|---|---|
+| Authoritative Y.Doc per document | `KilnCMS.Collab.Crdt.DocServer` (Registry + DynamicSupervisor; idle shutdown) |
+| Transport | `KilnCMSWeb.CollabChannel` over `/ws/collab` (`CollabSocket`, Phoenix.Token-gated, editor-minted) |
+| Client | `assets/js/collab.js` (one shared Y.Doc + channel per document; ~70 LOC provider) + TipTap `Collaboration` per rich-text block, one `XmlFragment` per block |
+| Flag | `config :kiln_cms, :collab_prototype` — on in dev/test, off in prod; joins refuse when off |
+
+Findings against the §3 risks:
+
+1. **`y_ex` maturity: no longer a blocker.** v0.10 ships precompiled NIFs (no
+   Rust toolchain), and the whole prototype needed only four calls
+   (`Doc.new/0`, `apply_update/2`, `encode_state_as_update/1,2`,
+   `encode_state_vector/1`). Convergence, divergent-edit merge, and
+   minimal-diff encoding all verified in ExUnit with real binary updates.
+2. **The BEAM-as-Yjs-node architecture is small.** DocServer + channel +
+   socket is ~250 lines total; the re-used Phoenix machinery (channels,
+   tokens, supervision) did the heavy lifting, exactly as §4 hoped.
+3. **TipTap gotcha:** the `Collaboration` extension silently ignores the
+   Editor `content` option — first-peer seeding must be an explicit
+   `setContent` after mount (gated on `peers == 1` + empty fragment; the
+   join reply carries both).
+4. **The persistence boundary — option (a) implemented: single-persister
+   election.** Under active collab, only the lowest-user-id editor present
+   autosaves (the same deterministic election as the advisory field locks; no
+   coordination needed). Because the persister's TipTap mirrors *remote* CRDT
+   edits into its own form, its autosave persists everyone's typing; the
+   others show a "Synced live — co-editor saves" indicator, and take over
+   persistence automatically when the persister leaves. Remaining edges: a
+   non-persister's *explicit* Save while the persister holds pending edits
+   still lands on the conflict banner (rare, and the banner flow is correct);
+   and option (b) — server-side checkpoint materialization — remains the
+   deeper long-term answer (needs a ProseMirror-schema render step, since an
+   `XmlFragment` serializes to prosemirror-node XML, not HTML).
+5. **Awareness carets: built.** Remote collaborators render as a colored
+   caret + initials label inside the text (TipTap `CollaborationCursor` over
+   `y-protocols` awareness, relayed by the same channel; a newcomer's
+   `"awareness_request"` makes existing carets appear immediately). Initials
+   and colors match the editor's presence-roster chips, which themselves now
+   show two-letter initials + a live "N editing" count.
+6. **Stable fragment identity: built.** Yjs fragments are now keyed by each
+   block's **stable id** (blocks already carried a writable uuid primary key
+   for restore/round-trip identity — verified: ids generate at write time and
+   reads never mint them, so sessions can't diverge). A data migration
+   backfilled ids into all pre-id stored rows (both legacy and union-envelope
+   shapes, idempotent); truly id-less blocks fall back to the old positional
+   key until their next blocks-carrying save.
+7. **Y.Doc durability: built.** Doc servers lazy-restore their Yjs state from
+   `collab_doc_states` on first use, checkpoint while dirty (15 s), and flush
+   on shutdown (exits trapped, so idle stops and deploys both persist) — a
+   restart mid-session no longer resets live docs, and late joiners restore
+   full CRDT history. A hard kill loses at most one checkpoint interval of
+   *history*; the prose itself is still safe via the autosave path. Dead
+   sessions prune after 30 days. Persistence is config-gated off in the test
+   suite (sandbox ownership), exercised by its own sync durability tests.
+8. **Still open (the one remaining production item):** server-side checkpoint
+   materialization (§6.4's option (b)) — rendering Yjs state to HTML on the
+   BEAM needs a ProseMirror-schema render step, since an `XmlFragment`
+   serializes to prosemirror-node XML, not HTML. The persister-election
+   autosave covers persistence until then.

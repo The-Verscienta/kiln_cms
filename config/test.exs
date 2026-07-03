@@ -107,3 +107,10 @@ config :phoenix,
 # Use the EXLA (XLA) backend for Nx in tests — the :exla dep is only available in
 # dev/test. Prod/e2e fall back to Nx.BinaryBackend (see config/config.exs).
 config :nx, default_backend: EXLA.Backend
+
+# Exercise the collab CRDT channel in tests (joins refuse when off).
+config :kiln_cms, :collab_prototype, true
+# Collab doc persistence is exercised by its own (sync) durability tests; off
+# by default so DocServers spawned by async channel/editor tests never touch
+# the sandboxed database from an unowned process.
+config :kiln_cms, KilnCMS.Collab.Crdt, persist?: false

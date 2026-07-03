@@ -40,6 +40,11 @@ defmodule KilnCMS.Application do
       {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 50},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
+      # Collaborative-editing CRDT prototype (KilnCMS.Collab.Crdt): one
+      # DocServer per open document, registered by channel topic. Idle-cheap —
+      # servers only exist while editors are attached (+ a grace period).
+      {Registry, keys: :unique, name: KilnCMS.Collab.Crdt.Registry},
+      {DynamicSupervisor, name: KilnCMS.Collab.Crdt.DocSupervisor, strategy: :one_for_one},
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry

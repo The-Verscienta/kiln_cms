@@ -293,3 +293,30 @@
   font-size: 0.75rem;
   color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
 }
+
+/* Collaborative-editing carets (CRDT prototype): TipTap's CollaborationCursor
+   renders a colored caret + a small label with the collaborator's initials.
+   Colors come inline from the extension (the user's roster-chip color). */
+.collaboration-cursor__caret {
+  border-left: 1px solid;
+  border-right: 1px solid;
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+  position: relative;
+  word-break: normal;
+}
+
+.collaboration-cursor__label {
+  border-radius: 3px 3px 3px 0;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  left: -1px;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  position: absolute;
+  top: -1.3em;
+  user-select: none;
+  white-space: nowrap;
+}
