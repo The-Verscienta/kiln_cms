@@ -207,4 +207,24 @@ defmodule KilnCMSWeb.MailSettingsLiveTest do
       refute lv |> element(~s{[data-test-result]}) |> has_element?()
     end
   end
+
+  describe "delivery health" do
+    test "lists suppressed addresses and removing one clears it", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, record} = KilnCMS.Mail.suppress_recipient(%{email: "bad@example.com"}, actor: admin)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/mail")
+      assert html =~ "Suppressed addresses"
+      assert html =~ "bad@example.com"
+
+      html =
+        lv
+        |> element(~s{button[phx-click="unsuppress"][phx-value-id="#{record.id}"]})
+        |> render_click()
+
+      assert html =~ "can receive mail again"
+      refute html =~ "bad@example.com"
+      refute KilnCMS.Mail.suppressed?("bad@example.com")
+    end
+  end
 end

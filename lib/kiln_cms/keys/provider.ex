@@ -16,11 +16,9 @@ defmodule KilnCMS.Keys.Provider do
   @callback fetch(config :: map()) :: {:ok, binary()} | {:error, term()}
 
   @doc """
-  Verify the source is usable (readable, well-formed PEM) without returning
-  the secret — for settings-page feedback.
+  Whether the app can write key material to this provider — i.e. whether the
+  admin UI offers *generate/rotate* (database) rather than a *point-at-source*
+  input (env/file).
   """
-  @callback check(config :: map()) :: :ok | {:error, term()}
-
-  @doc "Whether the app can write key material to this provider (UI generate/rotate)."
   @callback writable?() :: boolean()
 end

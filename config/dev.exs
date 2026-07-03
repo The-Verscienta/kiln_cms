@@ -104,3 +104,7 @@ config :nx, default_backend: EXLA.Backend
 # Collaborative-editing CRDT prototype (KilnCMS.Collab.Crdt) — dev-only while
 # it's a spike; the collab channel refuses joins when this is off.
 config :kiln_cms, :collab_prototype, true
+
+# All localized UI locales enabled in dev so the fr/es translations can be
+# exercised locally (prod opts in via its own config).
+config :kiln_cms, :i18n, default_locale: "en", locales: ["en", "fr", "es"]
