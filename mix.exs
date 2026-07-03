@@ -193,6 +193,7 @@ defmodule KilnCMS.MixProject do
         "format --check-formatted",
         "credo --strict",
         "sobelow --config",
+        "kiln.plugins.doctor",
         "test"
       ]
     ]

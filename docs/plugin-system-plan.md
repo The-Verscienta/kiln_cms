@@ -136,7 +136,13 @@ the block union and the router need the list during compilation.
    callout block round-trips storage and renders escaped HTML, appears in
    the editor palette, its nav item is role-gated, its panel mounts
    admin-only, its Agent child runs.
-3. **Verscienta retrofit + scaffold.** `Verscienta.Plugin` module replaces
-   the loose config comments as the documented integration
-   ("first plugin/consumer" per the plan), `mix kiln.gen.plugin`, and an
-   `docs/extending-content.md` §5 with the plugin story.
+3. **Verscienta retrofit + scaffold.** ✅ **Done.** `Verscienta.Plugin`
+   (projects/verscienta) makes the plan's "first plugin/consumer" literal —
+   domains declared on the contract, doctor-verified against the host
+   config. `mix kiln.gen.plugin <Name> [--block <name>]` scaffolds a plugin
+   (contract module with stubbed callbacks + optional working sample block +
+   config registration); its generated sources are compile-tested against
+   the real contract in the suite. `mix kiln.plugins.doctor` joined the
+   precommit pipeline. Plugin story documented in
+   `docs/extending-content.md` §5. Contract polish: `X.Plugin` default-names
+   itself after `X`, not the convention suffix.

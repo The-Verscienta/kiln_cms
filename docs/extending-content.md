@@ -115,3 +115,31 @@ compiled type (the editor keeps rendering them), and the `TypeDefinition` is
 archived. Fields stay data-driven after promotion — promote an individual
 field to a real attribute by hand (add the attribute, migrate the JSONB key,
 drop the definition) when querying or indexing demands it.
+
+## 5. Plugins (D18)
+
+For everything beyond one project's content model, package your extension as
+a **plugin** — compile-time OTP code (a `projects/` directory or a hex dep)
+with one entry module and one config line:
+
+```bash
+mix kiln.gen.plugin Ratings --block star_rating
+```
+
+```elixir
+config :kiln_cms, :plugins, [Ratings.Plugin]
+```
+
+A `Kiln.Plugin` module contributes, per callback (all optional): **block
+types** (`Kiln.Block` modules — they join the storage union, editor palette,
+firing and search automatically), **admin nav items** and **admin panel
+routes** (role-gated, mounted in the admin live session), **supervision
+children**, and **Oban queues** (merged at boot). Content types need no
+callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
+and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
+webhooks, delivery, search and workers follow automatically.
+
+`mix kiln.plugins.doctor` (also part of precommit) verifies an install:
+domains registered, no block/queue collisions, well-formed paths.
+`Verscienta.Plugin` (projects/verscienta) is the reference — the project the
+plan always called "the first plugin/consumer".
