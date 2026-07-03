@@ -16,19 +16,12 @@ defmodule KilnCMS.CMS.BlockUnion do
   > Flipping the stored column + the native-union editor is the remaining Phase C
   > increment.
   """
+  # The member list is the compile-time union of core + plugin blocks (D18) —
+  # see `KilnCMS.Blocks.union_types/0`. A plugin's `blocks/0` joins storage,
+  # the editor palette, and firing with no core edits.
   use Ash.Type.NewType,
     subtype_of: :union,
-    constraints: [
-      types: [
-        heading: [type: KilnCMS.Blocks.Heading, tag: :_type, tag_value: "heading"],
-        image: [type: KilnCMS.Blocks.Image, tag: :_type, tag_value: "image"],
-        rich_text: [type: KilnCMS.Blocks.RichText, tag: :_type, tag_value: "rich_text"],
-        quote: [type: KilnCMS.Blocks.Quote, tag: :_type, tag_value: "quote"],
-        embed: [type: KilnCMS.Blocks.Embed, tag: :_type, tag_value: "embed"],
-        divider: [type: KilnCMS.Blocks.Divider, tag: :_type, tag_value: "divider"],
-        custom: [type: KilnCMS.Blocks.Custom, tag: :_type, tag_value: "custom"]
-      ]
-    ]
+    constraints: [types: KilnCMS.Blocks.union_types()]
 
   alias KilnCMS.CMS.TypedBlocks
 

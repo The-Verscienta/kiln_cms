@@ -19,7 +19,9 @@ defmodule KilnCMS.CMS.TypedBlocks do
   alias KilnCMS.Blocks.{Custom, Divider, Embed, Heading, Image, Quote, RichText}
   alias KilnCMS.HTMLSanitizer
 
-  @block_modules [Heading, Image, RichText, Quote, Embed, Divider, Custom]
+  # Every block module in the storage union — core + plugin (D18), from the
+  # same compile-time source as `BlockUnion` itself.
+  @block_modules Enum.map(KilnCMS.Blocks.union_types(), fn {_name, opts} -> opts[:type] end)
 
   @doc """
   Normalize any block representation to typed block structs.
@@ -140,15 +142,9 @@ defmodule KilnCMS.CMS.TypedBlocks do
     end
   end
 
-  @type_atoms %{
-    "heading" => :heading,
-    "image" => :image,
-    "rich_text" => :rich_text,
-    "quote" => :quote,
-    "embed" => :embed,
-    "divider" => :divider,
-    "custom" => :custom
-  }
+  @type_atoms Map.new(KilnCMS.Blocks.union_types(), fn {name, _opts} ->
+                {to_string(name), name}
+              end)
   defp block_type_atom(map), do: Map.get(@type_atoms, to_string(get(map, :_type)), :custom)
 
   defp typed_struct_kv(mod, map) do
