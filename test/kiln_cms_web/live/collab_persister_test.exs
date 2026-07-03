@@ -50,9 +50,15 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     html = render(lv)
 
     cond do
-      fun.(html) -> html
-      tries == 0 -> flunk("condition never held; last render:\n#{html}")
-      true -> (Process.sleep(25); await(lv, fun, tries - 1))
+      fun.(html) ->
+        html
+
+      tries == 0 ->
+        flunk("condition never held; last render:\n#{html}")
+
+      true ->
+        Process.sleep(25)
+        await(lv, fun, tries - 1)
     end
   end
 
