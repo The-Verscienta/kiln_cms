@@ -251,6 +251,10 @@ defmodule KilnCMSWeb.Router do
     pipe_through :api
 
     get "/content/:type/:slug", ArtifactController, :show
+
+    # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
+    # expressible as one Ash action, so it gets a thin controller (roadmap #4).
+    get "/search", SearchApiController, :index
   end
 
   scope "/preview", KilnCMSWeb do

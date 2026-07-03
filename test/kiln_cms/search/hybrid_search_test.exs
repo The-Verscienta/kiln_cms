@@ -89,4 +89,40 @@ defmodule KilnCMS.Search.HybridTest do
 
     assert length(Search.hybrid(:page, "alpha", actor: admin, limit: 3)) == 3
   end
+
+  test "resolves dynamic types and the entry tier (not just :page/:post)" do
+    admin = admin()
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "hy#{System.unique_integer([:positive])}", label: "Hy"},
+        actor: admin
+      )
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(definition.name, %{title: "alpha", slug: slug()},
+        actor: admin
+      )
+
+    KilnCMS.DataCase.drain_oban()
+
+    # By dynamic type name string and by the entry resource itself.
+    assert entry.id in (Search.hybrid(definition.name, "alpha", actor: admin) |> ids())
+    assert entry.id in (Search.hybrid(KilnCMS.CMS.Entry, "alpha", actor: admin) |> ids())
+  end
+
+  test "global/2 sections are hybrid: semantic-only matches surface" do
+    admin = admin()
+    keyword_hit = CMS.create_page!(%{title: "alpha", slug: slug()}, actor: admin)
+    # No keyword overlap with the query — reachable only through the
+    # semantic leg, which the old keyword-only global/2 never ran.
+    semantic_only = CMS.create_page!(%{title: "gamma", slug: slug()}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    sections = Search.global("alpha", actor: admin)
+    page_ids = ids(sections.pages)
+
+    assert keyword_hit.id in page_ids
+    assert semantic_only.id in page_ids
+  end
 end

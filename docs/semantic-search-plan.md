@@ -1,8 +1,11 @@
 # Semantic / Hybrid Search — Implementation Plan
 
-**Status:** Phases 0 ✅, 1 ✅, 2 ✅, 3 ✅ done — semantic + hybrid search are
-usable. Only the optional Phase 3 rerank pass remains (deferred until hybrid
-quality proves insufficient). **Decisions locked
+**Status:** Phases 0 ✅, 1 ✅, 2 ✅, 3 ✅ done — **and wired in (2026-07-03)**:
+the rerank pass shipped (Bumblebee cross-encoder adapter), and hybrid now
+powers every user-facing surface — `Search.global/2` sections (public
+`/search`, editor palette) fuse both legs over every content type incl.
+dynamic entries, and `GET /api/search` exposes it headlessly with
+"did you mean" suggestions. **Decisions locked
 (2026-06-23):** pgvector available in production Postgres; **local Bumblebee**
 embeddings (no hosted API), model `BAAI/bge-small-en-v1.5` (384-d, CLS pooling +
 L2 norm); Bumblebee/Nx/EXLA included in the build but the serving only starts

@@ -22,6 +22,13 @@
     class="mt-8 text-base-content/60"
   >
     {gettext("No results for “%{query}”.", query: @query)}
+    <a
+      :if={@suggestion}
+      href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@suggestion)}
+      class="text-primary hover:underline"
+    >
+      {gettext("Did you mean “%{suggestion}”?", suggestion: @suggestion)}
+    </a>
   </p>
 
   <section :if={@results.posts != []} class="mt-8">
