@@ -37,11 +37,17 @@ defmodule KilnCMS.Mail.DnsCheck do
     @moduledoc false
     @behaviour DNS
 
+    # Bound every lookup: without an explicit timeout/retry, a hung or
+    # firewalled resolver blocks for the OS resolver default, tying up the
+    # settings LiveView's verify task. 2s × 1 retry caps a single lookup at
+    # ~4s (mirrors the hardening on KilnCMS.Webhooks.SafeUrl).
+    @resolver_opts [timeout: 2_000, retry: 1]
+
     @impl true
     def txt(name) do
       name
       |> String.to_charlist()
-      |> :inet_res.lookup(:in, :txt)
+      |> :inet_res.lookup(:in, :txt, @resolver_opts)
       |> Enum.map(fn chunks -> Enum.map_join(chunks, "", &List.to_string/1) end)
     end
 
@@ -49,14 +55,15 @@ defmodule KilnCMS.Mail.DnsCheck do
     def mx(name) do
       name
       |> String.to_charlist()
-      |> :inet_res.lookup(:in, :mx)
+      |> :inet_res.lookup(:in, :mx, @resolver_opts)
       |> Enum.sort()
       |> Enum.map(fn {_preference, host} -> List.to_string(host) end)
     end
 
     @impl true
     def ptr(address) do
-      case :inet_res.gethostbyaddr(address) do
+      # gethostbyaddr takes a bare timeout (ms), not the resolver-opts list.
+      case :inet_res.gethostbyaddr(address, 2_000) do
         {:ok, hostent} -> {:ok, hostent |> elem(1) |> List.to_string()}
         {:error, reason} -> {:error, reason}
       end
@@ -66,7 +73,8 @@ defmodule KilnCMS.Mail.DnsCheck do
     def addresses(name) do
       charlist = String.to_charlist(name)
 
-      :inet_res.lookup(charlist, :in, :a) ++ :inet_res.lookup(charlist, :in, :aaaa)
+      :inet_res.lookup(charlist, :in, :a, @resolver_opts) ++
+        :inet_res.lookup(charlist, :in, :aaaa, @resolver_opts)
     end
   end
 
@@ -194,36 +202,54 @@ defmodule KilnCMS.Mail.DnsCheck do
     dns = dns(opts)
     tcp = tcp(opts)
 
-    @probe_domains
-    |> Enum.reduce_while([], fn domain, failures ->
-      with [mx_host | _rest] <- dns.mx(domain),
-           {:ok, "220" <> _rest} <- tcp.banner(mx_host, 25, @probe_timeout) do
-        {:halt, :ok}
-      else
-        [] ->
-          {:cont, [{domain, :no_mx} | failures]}
+    probes = Enum.map(@probe_domains, &probe_port25(&1, dns, tcp))
 
-        {:ok, banner} ->
-          {:cont, [{domain, {:unexpected_banner, String.slice(banner, 0, 40)}} | failures]}
-
-        {:error, reason} ->
-          {:cont, [{domain, reason} | failures]}
-      end
-    end)
-    |> case do
-      :ok ->
+    cond do
+      # A 220 from any probe: the port is open and mail can leave.
+      Enum.any?(probes, &match?({:ok, _domain}, &1)) ->
         %{status: :ok, detail: "outbound port 25 is reachable"}
 
-      failures ->
+      # We connected and got a banner, just not a 220 (e.g. a 554 greeting for
+      # a blocklisted IP). The port is demonstrably open — this is a reputation
+      # or policy problem, not a blocked port, so don't send the operator
+      # chasing their host's firewall.
+      banner = Enum.find_value(probes, &non_220_banner/1) ->
+        %{
+          status: :warn,
+          detail:
+            "outbound port 25 is reachable, but the probe MX rejected the greeting " <>
+              "(#{banner}) — this is usually IP reputation (a blocklisted sending IP), " <>
+              "not a blocked port. Check the IP against Spamhaus and warm it up."
+        }
+
+      # No probe connected at all: the port is (almost certainly) blocked.
+      true ->
         %{
           status: :fail,
           detail:
-            "cannot reach any probe MX on port 25 (#{format_failures(failures)}) — " <>
+            "cannot reach any probe MX on port 25 (#{format_failures(probes)}) — " <>
               "your host likely blocks outbound SMTP; direct delivery cannot work here, " <>
               "use MAIL_MODE=smtp with a relay instead"
         }
     end
   end
+
+  defp probe_port25(domain, dns, tcp) do
+    case dns.mx(domain) do
+      [mx_host | _rest] ->
+        case tcp.banner(mx_host, 25, @probe_timeout) do
+          {:ok, "220" <> _rest} -> {:ok, domain}
+          {:ok, banner} -> {:banner, domain, String.slice(banner, 0, 40)}
+          {:error, reason} -> {:error, domain, reason}
+        end
+
+      [] ->
+        {:error, domain, :no_mx}
+    end
+  end
+
+  defp non_220_banner({:banner, _domain, banner}), do: banner
+  defp non_220_banner(_other), do: nil
 
   @doc """
   The HELO/EHLO hostname direct delivery uses: the DirectMX `:hostname`
@@ -465,10 +491,8 @@ defmodule KilnCMS.Mail.DnsCheck do
 
   defp strip_whitespace(value), do: String.replace(value, ~r/\s/, "")
 
-  defp format_failures(failures) do
-    failures
-    |> Enum.reverse()
-    |> Enum.map_join(", ", fn {domain, reason} -> "#{domain}: #{inspect(reason)}" end)
+  defp format_failures(probes) do
+    Enum.map_join(probes, ", ", fn {:error, domain, reason} -> "#{domain}: #{inspect(reason)}" end)
   end
 
   defp mailer_hostname do

@@ -84,6 +84,10 @@ defmodule KilnCMS.MailTest do
         email() |> Map.put(:cc, [{"", "cc@example.com"}]) |> enqueue_opaquely!()
       end
 
+      assert_raise ArgumentError, ~r/provider_options/, fn ->
+        email() |> Map.put(:provider_options, %{foo: :bar}) |> enqueue_opaquely!()
+      end
+
       assert_raise ArgumentError, ~r/no recipients/, fn ->
         email() |> Map.put(:to, []) |> enqueue_opaquely!()
       end
@@ -121,6 +125,16 @@ defmodule KilnCMS.MailTest do
       no_from = new() |> to("a@b.test") |> subject("x")
       assert Mail.ensure_message_id(no_from).headers["Message-ID"] =~ ~r/@kilncms\.dev>$/
     end
+
+    test "lowercases the domain (single source of truth via domain_of/1)" do
+      mixed = new() |> Swoosh.Email.from({"K", "Cms@Example.COM"}) |> to("a@b.test")
+      assert Mail.ensure_message_id(mixed).headers["Message-ID"] =~ ~r/@example\.com>$/
+    end
+  end
+
+  test "domain_of/1 returns the lowercased domain part" do
+    assert Mail.domain_of("User@Example.COM") == "example.com"
+    assert Mail.domain_of("a@b.test") == "b.test"
   end
 
   describe "deliver_for_worker/2" do

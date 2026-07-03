@@ -32,6 +32,8 @@ defmodule KilnCMS.Mail do
 
   resources do
     resource KilnCMS.Mail.Settings do
+      define :init_settings, action: :init
+      define :list_settings, action: :read
       define :generate_dkim, action: :generate_dkim
       define :rotate_dkim, action: :rotate_dkim
 
@@ -71,6 +73,12 @@ defmodule KilnCMS.Mail do
 
     if email.cc != [] or email.bcc != [] do
       raise ArgumentError, "KilnCMS.Mail does not support cc/bcc yet"
+    end
+
+    if email.provider_options != %{} do
+      # Provider options don't survive the Oban args round-trip; reject them
+      # explicitly (like attachments/cc/bcc) rather than dropping them silently.
+      raise ArgumentError, "KilnCMS.Mail does not support provider_options yet"
     end
 
     if email.to == [] do
@@ -145,10 +153,12 @@ defmodule KilnCMS.Mail do
   """
   @spec get_settings() :: KilnCMS.Mail.Settings.t() | nil
   def get_settings do
-    KilnCMS.Mail.Settings
-    |> Ash.Query.limit(1)
-    |> Ash.read!(authorize?: false)
-    |> List.first()
+    # The row is a singleton (unique `singleton` column), so a bare read
+    # returns at most one record.
+    case list_settings!(authorize?: false) do
+      [settings | _rest] -> settings
+      [] -> nil
+    end
   end
 
   @doc "The settings singleton, created on first call."
@@ -158,9 +168,7 @@ defmodule KilnCMS.Mail do
   end
 
   defp create_settings! do
-    KilnCMS.Mail.Settings
-    |> Ash.Changeset.for_create(:init, %{})
-    |> Ash.create!(authorize?: false)
+    init_settings!(%{}, authorize?: false)
   rescue
     # Lost a concurrent-creation race on the singleton identity: the row
     # exists now, so read it.
@@ -215,10 +223,20 @@ defmodule KilnCMS.Mail do
   @spec sending_domain() :: String.t() | nil
   def sending_domain do
     case Application.get_env(:kiln_cms, :email_from) do
-      {_name, address} -> address |> String.split("@") |> List.last()
+      {_name, address} -> domain_of(address)
       _unset -> nil
     end
   end
+
+  @doc """
+  The lowercased domain part of an email address. Single source of truth so
+  every consumer (DKIM `d=`, Message-ID, DirectMX per-domain grouping, bounce
+  telemetry) normalizes case identically — otherwise mixed-case addresses
+  split into distinct telemetry buckets and produce case-varying Message-IDs.
+  """
+  @spec domain_of(String.t()) :: String.t()
+  def domain_of(address) when is_binary(address),
+    do: address |> String.split("@") |> List.last() |> String.downcase()
 
   @doc """
   Deliver synchronously, bypassing the queue — the admin "send test email"
@@ -299,7 +317,7 @@ defmodule KilnCMS.Mail do
   # fall back to the configured sending domain, then a last-resort literal so
   # a from-less email still gets a syntactically valid ID instead of crashing.
   defp message_domain(%Swoosh.Email{from: {_name, address}}) when is_binary(address),
-    do: address |> String.split("@") |> List.last()
+    do: domain_of(address)
 
   defp message_domain(_email), do: sending_domain() || "localhost"
 
@@ -342,7 +360,7 @@ defmodule KilnCMS.Mail do
 
   defp recipient_domains(email) do
     email.to
-    |> Enum.map(fn {_name, address} -> address |> String.split("@") |> List.last() end)
+    |> Enum.map(fn {_name, address} -> domain_of(address) end)
     |> Enum.uniq()
   end
 

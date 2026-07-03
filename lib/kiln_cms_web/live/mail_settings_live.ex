@@ -253,11 +253,24 @@ defmodule KilnCMSWeb.MailSettingsLive do
     |> assign(:results, settings.verification_results || %{})
   end
 
+  # Prefer the mode runtime.exs resolved; only fall back to inferring it from
+  # the configured adapter (dev/test, where :mail_mode isn't set). A real
+  # adapter we don't recognise is reported as :custom, not :local — otherwise
+  # a downstream project's own Swoosh adapter reads as "no real delivery".
   defp mailer_mode do
+    case Application.get_env(:kiln_cms, :mail_mode) do
+      "direct" -> :direct
+      "smtp" -> :smtp
+      _unset -> infer_mailer_mode()
+    end
+  end
+
+  defp infer_mailer_mode do
     case Application.get_env(:kiln_cms, KilnCMS.Mailer, [])[:adapter] do
       KilnCMS.Mailer.DirectMX -> :direct
       Swoosh.Adapters.SMTP -> :smtp
-      _local_or_test -> :local
+      adapter when adapter in [nil, Swoosh.Adapters.Local, Swoosh.Adapters.Test] -> :local
+      _custom -> :custom
     end
   end
 
@@ -331,6 +344,8 @@ defmodule KilnCMSWeb.MailSettingsLive do
                     {gettext("Direct (built-in MTA)")}
                   <% :smtp -> %>
                     {gettext("SMTP relay")}
+                  <% :custom -> %>
+                    {gettext("Custom adapter")}
                   <% :local -> %>
                     {gettext("Local mailbox (no real delivery)")}
                 <% end %>
@@ -361,7 +376,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
               </dd>
             </div>
           </dl>
-          <p :if={@mode != :direct} class="mt-3 text-sm text-base-content/70">
+          <p :if={@mode == :local} class="mt-3 text-sm text-base-content/70">
             {gettext(
               "Direct delivery is off. Set MAIL_MODE=direct (with MAIL_FROM_EMAIL) to send straight to recipient mail servers; you can prepare the key and DNS records first."
             )}
@@ -429,21 +444,19 @@ defmodule KilnCMSWeb.MailSettingsLive do
             class="flex flex-wrap items-end gap-3"
           >
             <input type="hidden" name="source[provider]" value={@selected_provider} />
-            <label class="flex min-w-64 flex-1 flex-col gap-1 text-sm">
-              <span class="text-base-content/70">
-                <%= if @selected_provider == :env do %>
-                  {gettext("Environment variable name")}
-                <% else %>
-                  {gettext("Absolute file path (e.g. /run/secrets/dkim.pem)")}
-                <% end %>
-              </span>
-              <input
+            <div class="min-w-64 flex-1">
+              <.input
                 type="text"
+                id="key-source-pointer"
                 name="source[pointer]"
                 value={pointer_value(@settings, @selected_provider)}
-                class="rounded border border-base-content/20 bg-base-100 px-2 py-1.5"
+                label={
+                  if @selected_provider == :env,
+                    do: gettext("Environment variable name"),
+                    else: gettext("Absolute file path (e.g. /run/secrets/dkim.pem)")
+                }
               />
-            </label>
+            </div>
             <.button type="submit">{gettext("Save & check source")}</.button>
           </form>
         </section>
@@ -469,18 +482,16 @@ defmodule KilnCMSWeb.MailSettingsLive do
           </div>
 
           <form id="server-ip-form" phx-submit="save_server_ip" class="flex flex-wrap items-end gap-3">
-            <label class="flex flex-col gap-1 text-sm">
-              <span class="text-base-content/70">
-                {gettext("Server public IP (for the SPF and reverse-DNS checks)")}
-              </span>
-              <input
+            <div>
+              <.input
                 type="text"
+                id="server-ip-input"
                 name="settings[server_ip]"
                 value={@settings.server_ip}
+                label={gettext("Server public IP (for the SPF and reverse-DNS checks)")}
                 placeholder="203.0.113.9"
-                class="rounded border border-base-content/20 bg-base-100 px-2 py-1.5"
               />
-            </label>
+            </div>
             <.button type="submit">{gettext("Save IP")}</.button>
           </form>
 
@@ -538,16 +549,16 @@ defmodule KilnCMSWeb.MailSettingsLive do
           </div>
 
           <form id="send-test-form" phx-submit="send_test" class="flex flex-wrap items-end gap-3">
-            <label class="flex min-w-64 flex-col gap-1 text-sm">
-              <span class="text-base-content/70">{gettext("Send a test email to")}</span>
-              <input
+            <div class="min-w-64">
+              <.input
                 type="email"
+                id="test-to-input"
                 name="test[to]"
                 value={@test_to}
+                label={gettext("Send a test email to")}
                 required
-                class="rounded border border-base-content/20 bg-base-100 px-2 py-1.5"
               />
-            </label>
+            </div>
             <.button type="submit" disabled={@sending_test?}>
               <%= if @sending_test? do %>
                 {gettext("Sending…")}

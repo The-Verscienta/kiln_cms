@@ -309,6 +309,11 @@ if config_env() == :prod do
       raise "unknown MAIL_MODE #{inspect(other)} — expected \"smtp\" or \"direct\""
   end
 
+  # Persist the resolved mode so the admin mail page reports it authoritatively
+  # instead of reverse-inferring it from the adapter module (which mislabels a
+  # downstream project's custom Swoosh adapter as "no real delivery").
+  config :kiln_cms, :mail_mode, mail_mode
+
   if from_email = System.get_env("MAIL_FROM_EMAIL") do
     config :kiln_cms, email_from: {System.get_env("MAIL_FROM_NAME") || "KilnCMS", from_email}
   end

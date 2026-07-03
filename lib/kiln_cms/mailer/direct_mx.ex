@@ -78,8 +78,7 @@ defmodule KilnCMS.Mailer.DirectMX do
   defp filter(recipients, domain),
     do: Enum.filter(recipients, fn {_name, address} -> domain_of(address) == domain end)
 
-  defp domain_of(address),
-    do: address |> String.split("@") |> List.last() |> String.downcase()
+  defp domain_of(address), do: KilnCMS.Mail.domain_of(address)
 
   # Unrecognised config keys pass through to the SMTP adapter (matching
   # Swoosh convention); only this adapter's own seam keys are stripped.

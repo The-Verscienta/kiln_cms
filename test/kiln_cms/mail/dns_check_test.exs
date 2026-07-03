@@ -218,8 +218,17 @@ defmodule KilnCMS.Mail.DnsCheckTest do
       assert result.detail =~ ":timeout"
     end
 
-    test "a non-220 banner or missing MX counts as failure" do
-      assert %{status: :fail} = DnsCheck.check_port25(dns: HappyDNS, tcp: WeirdTCP)
+    test "a received non-220 banner warns (port open, reputation) rather than failing" do
+      # WeirdTCP connects and returns "554 ..." — the port is demonstrably open,
+      # so this must not be reported as a blocked port.
+      result = DnsCheck.check_port25(dns: HappyDNS, tcp: WeirdTCP)
+      assert result.status == :warn
+      assert result.detail =~ "reachable"
+      assert result.detail =~ "reputation"
+      refute result.detail =~ "blocks outbound"
+    end
+
+    test "no reachable MX counts as failure" do
       assert %{status: :fail} = DnsCheck.check_port25(dns: EmptyDNS, tcp: OpenTCP)
     end
   end
