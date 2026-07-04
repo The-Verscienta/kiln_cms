@@ -97,6 +97,66 @@ local default; an `Http` adapter (Voyage/OpenAI) stays opt-in.
   or a volume to avoid cold-start downloads; size the box for inference.
 - **Observability:** telemetry on embed latency, queue depth, query `ef_search`.
 
+## Multilingual semantic search
+
+The default model (`bge-small-en-v1.5`) is English-centric: non-English
+content embeds poorly and cross-language matches don't work. Swap in a
+multilingual model via config — the embedder now exposes the knobs each model
+family needs:
+
+- **`pooling`** — `:cls_token_pooling` (default, bge) or `:mean_pooling`
+  (MiniLM / e5). Must match the model's training.
+- **`query_prefix` / `document_prefix`** — instruction prefixes prepended
+  before embedding (`Search.embed_query/1` / `embed_document/1`). Default
+  `""`; e5 needs `"query: "` / `"passage: "`.
+- **`model` / `dim`** — the HF id and its vector width. `dim` is read at
+  **compile time** by `KilnCMS.Search.Vector`, so it defines the
+  `vector(N)` column type.
+
+### Recommended: a 384-dim drop-in (no column migration)
+
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` is 384-dim
+(same as bge-small) and covers 50+ languages, so switching needs **no
+migration** — only a re-embed:
+
+```elixir
+config :kiln_cms, KilnCMS.Search,
+  semantic: true,
+  model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  dim: 384,
+  pooling: :mean_pooling
+```
+
+Then `mix kiln.embed_all` (now covers Page, Post, **and** dynamic entries) —
+old English embeddings are meaningless under the new model, so every record
+must be recomputed.
+
+### Higher quality: a different-dimension model (needs a migration)
+
+`BAAI/bge-m3` (1024-dim, CLS pooling) or `intfloat/multilingual-e5-base`
+(768-dim, mean pooling, `query:`/`passage:` prefixes) are stronger but change
+the vector width. Set `dim:` to match, then migrate every content table's
+`embedding` column and its HNSW index (the dimension is fixed in the column
+type, so this is a one-time destructive-to-embeddings step, followed by
+`mix kiln.embed_all`):
+
+```elixir
+# priv/repo/migrations/..._widen_embedding.exs
+for table <- ~w(pages posts entries)a do
+  execute "DROP INDEX IF EXISTS #{table}_embedding_hnsw_index"
+  # Old vectors are the wrong width; clear then re-type, then re-embed.
+  execute "UPDATE #{table} SET embedding = NULL, embedded_at = NULL"
+  alter table(table), do: modify(:embedding, :"vector(1024)")
+  execute """
+  CREATE INDEX #{table}_embedding_hnsw_index ON #{table}
+  USING hnsw (embedding vector_cosine_ops)
+  """
+end
+```
+
+**Reranking** (`bge-reranker-base`) is likewise English-centric; pair a
+multilingual embedder with `BAAI/bge-reranker-v2-m3` via `rerank_model:`.
+
 ## Risks / open items
 1. pgvector in production — **confirmed available**.
 2. Local vs hosted embeddings — **local Bumblebee** chosen.

@@ -8,8 +8,10 @@ defmodule KilnCMS.Search.Serving do
   skips it entirely.
 
   The model (`BAAI/bge-small-en-v1.5` by default) is a BERT encoder; embeddings
-  use CLS-token pooling with L2 normalization, matching how the bge family is
-  meant to be used.
+  use L2 normalization and the configured `pooling` (`:cls_token_pooling` for
+  the bge family, `:mean_pooling` for multilingual MiniLM / e5), matching how
+  the chosen model was trained. See `docs/semantic-search-plan.md` for the
+  multilingual model recipe.
   """
   @name __MODULE__
 
@@ -33,7 +35,7 @@ defmodule KilnCMS.Search.Serving do
       compile: [batch_size: 8, sequence_length: 512],
       defn_options: KilnCMS.Search.defn_options(),
       output_attribute: :hidden_state,
-      output_pool: :cls_token_pooling,
+      output_pool: KilnCMS.Search.pooling(),
       embedding_processor: :l2_norm
     )
   end

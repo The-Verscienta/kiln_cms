@@ -93,4 +93,25 @@ defmodule KilnCMS.Search.EmbeddingPipelineTest do
     assert %{success: 0, failure: 0} = KilnCMS.DataCase.drain_oban()
     assert is_nil(CMS.get_page!(page.id, authorize?: false).embedding)
   end
+
+  test "dynamic entries embed through the same pipeline (so `mix kiln.embed_all` covers them)" do
+    admin = admin()
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "em#{System.unique_integer([:positive])}", label: "Em"},
+        actor: admin
+      )
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(
+        definition.name,
+        %{title: "Otters in the entry tier", slug: slug()},
+        actor: admin
+      )
+
+    KilnCMS.DataCase.drain_oban()
+
+    assert is_list(CMS.get_entry!(entry.id, authorize?: false).embedding)
+  end
 end

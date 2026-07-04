@@ -46,7 +46,7 @@ defmodule KilnCMS.Search.EmbeddingWorker do
   end
 
   defp write_embedding(record, text) do
-    with {:ok, vector} <- Search.embed(text),
+    with {:ok, vector} <- Search.embed_document(text),
          {:ok, _record} <-
            record
            |> Ash.Changeset.for_update(:set_embedding, %{embedding: vector}, authorize?: false)
