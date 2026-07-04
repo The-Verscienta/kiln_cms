@@ -146,7 +146,12 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={gettext("Content types")}
+      active={:types}
+    >
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -167,7 +172,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
             id="new-type-form"
             phx-change="validate"
             phx-submit="create"
-            class="grid gap-4 rounded-lg border border-base-content/15 p-4 sm:grid-cols-2"
+            class="card card-pad grid gap-4 sm:grid-cols-2"
           >
             <.input field={@form[:label]} label={gettext("Name")} placeholder="Recipe" />
             <.input
@@ -225,7 +230,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
           <ul
             :if={@definitions != []}
-            class="divide-y divide-base-content/10 rounded-lg border border-base-content/15"
+            class="card divide-y divide-base-content/10 overflow-hidden"
           >
             <li :for={definition <- @definitions} id={"type-#{definition.id}"} class="p-4">
               <div
@@ -259,7 +264,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                     type="button"
                     phx-click="edit"
                     phx-value-id={definition.id}
-                    class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                    class="btn btn-sm btn-default"
                   >
                     {gettext("Edit")}
                   </button>
@@ -273,7 +278,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                       )
                     }
                     aria-label={gettext("Archive content type")}
-                    class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                    class="btn btn-sm btn-ghost hover:text-error"
                   >
                     <.icon name="hero-archive-box" class="size-4" />
                   </button>
@@ -319,7 +324,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                   <button
                     type="button"
                     phx-click="cancel_edit"
-                    class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                    class="btn btn-default"
                   >
                     {gettext("Cancel")}
                   </button>
@@ -331,7 +336,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
         <section :if={@archived != []} class="space-y-3">
           <h2 class="text-lg font-medium">{gettext("Archived types")}</h2>
-          <ul class="divide-y divide-base-content/10 rounded-lg border border-base-content/15">
+          <ul class="card divide-y divide-base-content/10 overflow-hidden">
             <li
               :for={definition <- @archived}
               id={"archived-type-#{definition.id}"}
@@ -345,7 +350,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                 type="button"
                 phx-click="restore"
                 phx-value-id={definition.id}
-                class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {gettext("Restore")}
               </button>
@@ -353,7 +358,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
           </ul>
         </section>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

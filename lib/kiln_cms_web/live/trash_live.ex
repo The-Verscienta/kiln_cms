@@ -213,29 +213,36 @@ defmodule KilnCMSWeb.TrashLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:trash}
+    >
+      <:actions>
+        <.button
+          :if={@items != []}
+          type="button"
+          phx-click="request_empty"
+          variant="danger"
+          size="sm"
+        >
+          {gettext("Empty trash")}
+        </.button>
+      </:actions>
+
       <div class="space-y-6">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <div>
-            <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-              &larr; {gettext("All content")}
-            </.link>
-            <h1 class="mt-1 text-2xl font-semibold">{gettext("Trash")}</h1>
-            <p class="text-sm text-base-content/60">
-              {gettext(
-                "Soft-deleted content. Restore brings it back to where it was. Trash is purged automatically after %{days} days.",
-                days: @retention_days
-              )}
-            </p>
-          </div>
-          <button
-            :if={@items != []}
-            type="button"
-            phx-click="request_empty"
-            class="rounded border border-error/40 px-3 py-1.5 text-sm text-error hover:bg-error/10"
-          >
-            {gettext("Empty trash")}
-          </button>
+        <div>
+          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
+            &larr; {gettext("All content")}
+          </.link>
+          <h1 class="mt-1 text-2xl font-semibold">{gettext("Trash")}</h1>
+          <p class="text-sm text-base-content/60">
+            {gettext(
+              "Soft-deleted content. Restore brings it back to where it was. Trash is purged automatically after %{days} days.",
+              days: @retention_days
+            )}
+          </p>
         </div>
 
         <div
@@ -249,15 +256,11 @@ defmodule KilnCMSWeb.TrashLive do
             <button
               type="button"
               phx-click="confirm_empty"
-              class="rounded bg-error px-3 py-1 text-xs font-medium text-error-content hover:opacity-90"
+              class="btn btn-sm bg-error text-error-content border-transparent hover:opacity-90"
             >
               {gettext("Delete everything")}
             </button>
-            <button
-              type="button"
-              phx-click="cancel_empty"
-              class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
-            >
+            <button type="button" phx-click="cancel_empty" class="btn btn-sm btn-default">
               {gettext("Cancel")}
             </button>
           </div>
@@ -269,7 +272,7 @@ defmodule KilnCMSWeb.TrashLive do
 
         <ul
           :if={@items != []}
-          class="divide-y divide-base-content/10 rounded border border-base-content/10"
+          class="card divide-y divide-base-content/10 overflow-hidden"
         >
           <li
             :for={{kind, record} <- @items}
@@ -294,7 +297,7 @@ defmodule KilnCMSWeb.TrashLive do
               phx-click="restore"
               phx-value-kind={kind}
               phx-value-id={record.id}
-              class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
+              class="btn btn-sm btn-default"
             >
               {gettext("Restore")}
             </button>
@@ -306,7 +309,7 @@ defmodule KilnCMSWeb.TrashLive do
               data-confirm={
                 gettext("Permanently delete “%{title}”? This can't be undone.", title: record.title)
               }
-              class="rounded border border-error/30 px-3 py-1 text-xs text-error hover:bg-error/10"
+              class="btn btn-sm btn-danger"
             >
               {gettext("Delete permanently")}
             </button>
@@ -318,13 +321,13 @@ defmodule KilnCMSWeb.TrashLive do
             type="button"
             phx-click="load_more"
             phx-disable-with={gettext("Loading…")}
-            class="rounded border border-base-content/20 px-4 py-1.5 text-sm hover:bg-base-200"
+            class="btn btn-default"
           >
             {gettext("Load more")}
           </button>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

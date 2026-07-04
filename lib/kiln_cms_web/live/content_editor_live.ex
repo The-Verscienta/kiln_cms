@@ -933,7 +933,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         name={@name}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
-        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+        class="field-select"
       >
         <option value="">{gettext("— None —")}</option>
         <option :for={{label, id} <- @options} value={id} selected={@selected_id == id}>
@@ -983,7 +983,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         name={@name}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
-        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+        class="field-select"
       >
         <option value="">{gettext("— None —")}</option>
         <option :for={opt <- @definition.options} value={opt} selected={to_string(@value) == opt}>
@@ -1010,7 +1010,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         required={@definition.required}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
-        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+        class="field-input"
       >{@value}</textarea>
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
@@ -1052,7 +1052,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         required={@definition.required}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
-        class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+        class="field-input"
         {@extra}
       />
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
@@ -1148,7 +1148,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <button
           type="button"
           phx-click="open_featured_picker"
-          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+          class="btn btn-sm btn-default"
         >
           {gettext("Choose from library")}
         </button>
@@ -1598,7 +1598,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:related_current, related_current(assigns.kind, assigns.record))
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:content}
+    >
       <div
         :if={@conflict}
         id="edit-conflict"
@@ -1616,7 +1621,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           type="button"
           phx-click="reload_conflict"
           data-confirm={gettext("Reload and discard your unsaved changes?")}
-          class="rounded bg-warning px-3 py-1.5 text-xs font-medium text-warning-content hover:opacity-90"
+          class="btn btn-sm border-transparent bg-warning text-warning-content hover:opacity-90"
         >
           {gettext("Reload latest")}
         </button>
@@ -1671,7 +1676,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <button
               type="button"
               phx-click="open_media_browser"
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+              class="btn btn-sm btn-default"
             >
               <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Media library")}
             </button>
@@ -1679,7 +1684,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               href={~p"/editor/preview/#{@kind}/#{@record.id}"}
               target="_blank"
               rel="noopener noreferrer"
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+              class="btn btn-sm btn-default"
             >
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
@@ -2003,7 +2008,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     type="datetime-local"
                     id={"scheduled-at-local-#{@editor_version}"}
                     data-local-input
-                    class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+                    class="field-input"
                   />
                   <input
                     type="hidden"
@@ -2031,7 +2036,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     type="datetime-local"
                     id={"unpublish-at-local-#{@editor_version}"}
                     data-local-input
-                    class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+                    class="field-input"
                   />
                   <input
                     type="hidden"
@@ -2093,7 +2098,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     type="button"
                     phx-click="create_translation"
                     phx-value-locale={cov.locale}
-                    class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+                    class="btn btn-sm btn-default"
                   >
                     {gettext("Create translation")}
                   </button>
@@ -2130,7 +2135,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     phx-click="restore"
                     phx-value-version_id={version.id}
                     data-confirm={gettext("Restore content to this version?")}
-                    class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+                    class="btn btn-sm btn-default"
                   >
                     {gettext("Restore")}
                   </button>
@@ -2165,7 +2170,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         results={@picker_media}
         query={@media_query}
       />
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 
@@ -2283,7 +2288,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-click="workflow"
       phx-value-action="submit"
       phx-disable-with={gettext("Submitting…")}
-      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      class="btn btn-sm btn-default"
     >
       {gettext("Submit for review")}
     </button>
@@ -2293,7 +2298,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-click="workflow"
       phx-value-action="publish"
       phx-disable-with={gettext("Publishing…")}
-      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      class="btn btn-sm btn-default"
     >
       {if @state == :in_review, do: gettext("Approve & publish"), else: gettext("Publish")}
     </button>
@@ -2303,7 +2308,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-click="workflow"
       phx-value-action="return"
       phx-disable-with={gettext("Working…")}
-      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      class="btn btn-sm btn-default"
     >
       {gettext("Request changes")}
     </button>
@@ -2319,7 +2324,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-click="workflow"
       phx-value-action="unpublish"
       phx-disable-with={gettext("Working…")}
-      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      class="btn btn-sm btn-default"
     >
       {gettext("Unpublish")}
     </button>
@@ -2329,7 +2334,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       phx-click="workflow"
       phx-value-action="unarchive"
       phx-disable-with={gettext("Working…")}
-      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      class="btn btn-sm btn-default"
     >
       {gettext("Unarchive")}
     </button>

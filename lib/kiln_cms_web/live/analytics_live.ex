@@ -99,7 +99,12 @@ defmodule KilnCMSWeb.AnalyticsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:analytics}
+    >
       <div class="space-y-6">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -111,7 +116,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
           </p>
         </div>
 
-        <div class="rounded-lg border border-base-content/10 p-4">
+        <div class="card card-pad">
           <p class="text-xs uppercase tracking-wide text-base-content/70">{gettext("Total views")}</p>
           <p class="mt-1 text-3xl font-semibold">{@total}</p>
         </div>
@@ -164,7 +169,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
           </table>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

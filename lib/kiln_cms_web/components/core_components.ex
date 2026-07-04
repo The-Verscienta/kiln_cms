@@ -111,30 +111,25 @@ defmodule KilnCMSWeb.CoreComponents do
   """
   attr :rest, :global, include: ~w(href navigate patch method download name value disabled type)
   attr :class, :any
-  attr :variant, :string, values: ~w(primary danger)
+  attr :variant, :string, values: ~w(primary danger ghost)
+  attr :size, :string, default: nil, values: [nil, "sm"]
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
-    base =
-      "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition " <>
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-base-100 " <>
-        "disabled:cursor-not-allowed disabled:opacity-50"
-
-    variants = %{
-      "primary" =>
-        base <>
-          " bg-primary text-primary-content shadow-sm hover:bg-primary/90 focus-visible:ring-primary/40",
-      "danger" =>
-        base <>
-          " border border-error/40 text-error hover:bg-error/10 focus-visible:ring-error/30",
-      nil =>
-        base <>
-          " border border-base-content/15 bg-base-100 hover:bg-base-200 hover:border-base-content/25 focus-visible:ring-base-content/20"
-    }
+    # The `.btn` family lives in the Kiln component kit (assets/css/app.css) so
+    # buttons stay identical whether written as `<.button>` or a raw `class="btn
+    # …"` in a template. See docs/design-language.md.
+    variant =
+      case assigns[:variant] do
+        "primary" -> "btn-primary"
+        "danger" -> "btn-danger"
+        "ghost" -> "btn-ghost"
+        nil -> "btn-default"
+      end
 
     assigns =
       assign_new(assigns, :class, fn ->
-        Map.fetch!(variants, assigns[:variant])
+        ["btn", variant, assigns[:size] == "sm" && "btn-sm"]
       end)
 
     if rest[:href] || rest[:navigate] || rest[:patch] do

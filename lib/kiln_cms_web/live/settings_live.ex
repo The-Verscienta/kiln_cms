@@ -113,19 +113,21 @@ defmodule KilnCMSWeb.SettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:settings}
+    >
       <div class="space-y-6">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
-          <h1 class="mt-1 text-2xl font-semibold">{gettext("Settings")}</h1>
+          <h1 class="text-2xl font-semibold">{gettext("Settings")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext("Manage your profile, password, and notification preferences.")}
           </p>
         </div>
 
-        <section class="max-w-xl rounded-lg border border-base-content/10 p-4">
+        <section class="card card-pad max-w-xl">
           <h2 class="mb-1 text-lg font-medium">{gettext("Profile")}</h2>
           <p class="mb-4 text-sm text-base-content/60">
             {gettext("Your display name is used as the author byline on content you publish.")}
@@ -143,7 +145,7 @@ defmodule KilnCMSWeb.SettingsLive do
           </.form>
         </section>
 
-        <section class="max-w-xl rounded-lg border border-base-content/10 p-4">
+        <section class="card card-pad max-w-xl">
           <h2 class="mb-1 text-lg font-medium">{gettext("Password")}</h2>
           <p class="mb-4 text-sm text-base-content/60">
             {gettext("Enter your current password, then choose a new one (at least 8 characters).")}
@@ -178,7 +180,7 @@ defmodule KilnCMSWeb.SettingsLive do
           </.form>
         </section>
 
-        <section class="max-w-xl rounded-lg border border-base-content/10 p-4">
+        <section class="card card-pad max-w-xl">
           <h2 class="mb-1 text-lg font-medium">{gettext("Email notifications")}</h2>
           <p class="mb-4 text-sm text-base-content/60">
             {gettext("All notifications are on by default. Uncheck any you'd rather not receive.")}
@@ -213,7 +215,7 @@ defmodule KilnCMSWeb.SettingsLive do
           </.form>
         </section>
 
-        <section class="max-w-xl rounded-lg border border-base-content/10 p-4">
+        <section class="card card-pad max-w-xl">
           <h2 class="mb-1 text-lg font-medium">{gettext("Your data")}</h2>
           <p class="mb-4 text-sm text-base-content/60">
             {gettext("Download a copy of your account profile and notification preferences as JSON.")}
@@ -222,14 +224,14 @@ defmodule KilnCMSWeb.SettingsLive do
           <.link
             href={~p"/editor/account/export.json"}
             download="kiln-account-export.json"
-            class="inline-flex items-center gap-2 rounded-lg border border-base-content/20 px-3 py-2 text-sm font-medium hover:bg-base-200"
+            class="btn btn-default"
           >
             <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
             {gettext("Export my data")}
           </.link>
         </section>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

@@ -471,7 +471,12 @@ defmodule KilnCMSWeb.MediaLive do
     assigns = assign(assigns, :filtering?, assigns.query not in [nil, ""])
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:media}
+    >
       <div class="space-y-8">
         <div class="flex items-end justify-between gap-4">
           <div>
@@ -598,7 +603,7 @@ defmodule KilnCMSWeb.MediaLive do
                 aria-label={gettext("Filter by filename, alt text or caption")}
                 phx-debounce="200"
                 autocomplete="off"
-                class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm sm:w-auto"
+                class="field-input w-full sm:w-auto"
               />
             </form>
           </div>
@@ -669,7 +674,7 @@ defmodule KilnCMSWeb.MediaLive do
               type="button"
               phx-click="load_more"
               phx-disable-with={gettext("Loading…")}
-              class="rounded border border-base-content/20 px-4 py-1.5 text-sm hover:bg-base-200"
+              class="btn btn-default"
             >
               {gettext("Load more")}
             </button>
@@ -678,7 +683,7 @@ defmodule KilnCMSWeb.MediaLive do
       </div>
 
       <.media_detail :if={@selected} item={@selected} />
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 
@@ -701,7 +706,7 @@ defmodule KilnCMSWeb.MediaLive do
       <p :if={@items == []} class="text-sm text-base-content/60">{gettext("Trash is empty.")}</p>
       <ul
         :if={@items != []}
-        class="divide-y divide-base-content/10 rounded border border-base-content/10"
+        class="card divide-y divide-base-content/10 overflow-hidden"
       >
         <li :for={item <- @items} id={"trash-#{item.id}"} class="flex items-center gap-4 p-3">
           <img
@@ -725,7 +730,7 @@ defmodule KilnCMSWeb.MediaLive do
             type="button"
             phx-click="restore"
             phx-value-id={item.id}
-            class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
+            class="btn btn-sm btn-default"
           >
             {gettext("Restore")}
           </button>
@@ -736,7 +741,7 @@ defmodule KilnCMSWeb.MediaLive do
             data-confirm={
               gettext("Permanently delete %{name}? This can't be undone.", name: item.filename)
             }
-            class="rounded border border-error/40 px-3 py-1 text-xs text-error hover:bg-error/10"
+            class="btn btn-sm btn-danger"
           >
             {gettext("Delete permanently")}
           </button>
@@ -818,7 +823,7 @@ defmodule KilnCMSWeb.MediaLive do
             phx-value-op={op}
             title={label}
             aria-label={label}
-            class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+            class="btn btn-sm btn-default"
           >
             <.icon name={icon} class="size-4" />
           </button>
@@ -872,14 +877,14 @@ defmodule KilnCMSWeb.MediaLive do
               type="text"
               value={@item.url}
               readonly
-              class="min-w-0 flex-1 rounded border border-base-content/20 bg-base-200/40 px-2 py-1 text-xs"
+              class="field-input min-w-0 flex-1"
             />
             <button
               type="button"
               id="copy-url"
               phx-hook="Clipboard"
               data-clipboard-text={@item.url}
-              class="shrink-0 rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+              class="btn btn-sm btn-default shrink-0"
             >
               {gettext("Copy")}
             </button>
@@ -894,7 +899,7 @@ defmodule KilnCMSWeb.MediaLive do
               name="alt"
               value={@item.alt}
               placeholder={gettext("Describe the image for screen readers")}
-              class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+              class="field-input mt-1"
             />
           </div>
           <div>
@@ -903,7 +908,7 @@ defmodule KilnCMSWeb.MediaLive do
               id="media-caption"
               name="caption"
               rows="2"
-              class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+              class="field-input mt-1"
             >{@item.caption}</textarea>
           </div>
           <.button type="submit" variant="primary">{gettext("Save details")}</.button>

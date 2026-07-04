@@ -171,7 +171,12 @@ defmodule KilnCMSWeb.FormLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:forms}
+    >
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -187,18 +192,10 @@ defmodule KilnCMSWeb.FormLive do
 
         <section class="space-y-3">
           <h2 class="text-lg font-medium">{gettext("Add a form")}</h2>
-          <form
-            phx-submit="create_form"
-            class="grid gap-3 rounded-lg border border-base-content/15 p-4 sm:grid-cols-2"
-          >
+          <form phx-submit="create_form" class="card card-pad grid gap-3 sm:grid-cols-2">
             <div>
               <label for="form-name" class="text-sm font-medium">{gettext("Name")}</label>
-              <input
-                id="form-name"
-                name="form[name]"
-                required
-                class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-              />
+              <input id="form-name" name="form[name]" required class="field-input mt-1" />
             </div>
             <div>
               <label for="form-slug" class="text-sm font-medium">{gettext("Slug")}</label>
@@ -207,7 +204,7 @@ defmodule KilnCMSWeb.FormLive do
                 name="form[slug]"
                 required
                 placeholder="contact"
-                class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+                class="field-input mt-1"
               />
             </div>
             <div class="sm:col-span-2">
@@ -219,10 +216,7 @@ defmodule KilnCMSWeb.FormLive do
         <section class="space-y-3">
           <h2 class="text-lg font-medium">{gettext("Your forms")} ({length(@forms)})</h2>
           <p :if={@forms == []} class="text-sm text-base-content/60">{gettext("No forms yet.")}</p>
-          <ul
-            :if={@forms != []}
-            class="divide-y divide-base-content/10 rounded-lg border border-base-content/15"
-          >
+          <ul :if={@forms != []} class="card divide-y divide-base-content/10 overflow-hidden">
             <li :for={form <- @forms} class="flex items-center justify-between gap-3 p-3">
               <button
                 type="button"
@@ -245,7 +239,7 @@ defmodule KilnCMSWeb.FormLive do
                 phx-value-id={form.id}
                 data-confirm={gettext("Delete this form and all its submissions?")}
                 aria-label={gettext("Delete form")}
-                class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                class="btn btn-sm btn-ghost hover:text-error"
               >
                 <.icon name="hero-trash" class="size-4" />
               </button>
@@ -253,7 +247,7 @@ defmodule KilnCMSWeb.FormLive do
           </ul>
         </section>
 
-        <section :if={@selected} class="space-y-6 rounded-lg border border-primary/30 p-4">
+        <section :if={@selected} class="card card-pad space-y-6 border-primary/30">
           <div class="flex items-start justify-between gap-3">
             <h2 class="text-lg font-medium">{@selected.form.name}</h2>
             <button
@@ -272,7 +266,7 @@ defmodule KilnCMSWeb.FormLive do
               <input
                 name="form[success_message]"
                 value={@selected.form.success_message}
-                class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+                class="field-input mt-1"
               />
             </div>
             <div>
@@ -281,7 +275,7 @@ defmodule KilnCMSWeb.FormLive do
                 name="form[notify_email]"
                 value={@selected.form.notify_email}
                 placeholder="team@example.com"
-                class="mt-1 w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+                class="field-input mt-1"
               />
             </div>
             <label class="flex items-center gap-2 text-sm">
@@ -322,7 +316,7 @@ defmodule KilnCMSWeb.FormLive do
                   phx-click="delete_field"
                   phx-value-id={field.id}
                   aria-label={gettext("Delete field")}
-                  class="rounded px-1.5 py-0.5 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                  class="btn btn-sm btn-ghost hover:text-error"
                 >
                   <.icon name="hero-trash" class="size-3.5" />
                 </button>
@@ -336,7 +330,7 @@ defmodule KilnCMSWeb.FormLive do
                 name="field[label]"
                 required
                 placeholder={gettext("Label")}
-                class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+                class="field-input"
               />
               <label for="new-field-name" class="sr-only">{gettext("Field machine name")}</label>
               <input
@@ -344,14 +338,10 @@ defmodule KilnCMSWeb.FormLive do
                 name="field[name]"
                 required
                 placeholder="machine_name"
-                class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+                class="field-input"
               />
               <label for="new-field-type" class="sr-only">{gettext("Field type")}</label>
-              <select
-                id="new-field-type"
-                name="field[field_type]"
-                class="rounded border border-base-content/20 bg-base-100 px-2 py-1 text-sm"
-              >
+              <select id="new-field-type" name="field[field_type]" class="field-select">
                 <option :for={type <- @field_types} value={type}>{type}</option>
               </select>
               <label class="flex items-center gap-1 text-xs">
@@ -366,7 +356,7 @@ defmodule KilnCMSWeb.FormLive do
                 id="new-field-options"
                 name="field[options]"
                 placeholder={gettext("Select options — one per line (select fields only)")}
-                class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-xs sm:col-span-5"
+                class="field-input text-xs sm:col-span-5"
               ></textarea>
             </form>
           </div>
@@ -398,7 +388,7 @@ defmodule KilnCMSWeb.FormLive do
                     phx-value-id={submission.id}
                     data-confirm={gettext("Delete this submission?")}
                     aria-label={gettext("Delete submission")}
-                    class="rounded px-1.5 py-0.5 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                    class="btn btn-sm btn-ghost hover:text-error"
                   >
                     <.icon name="hero-trash" class="size-3.5" />
                   </button>
@@ -414,7 +404,7 @@ defmodule KilnCMSWeb.FormLive do
           </div>
         </section>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

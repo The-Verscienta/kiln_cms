@@ -121,7 +121,12 @@ defmodule KilnCMSWeb.TranslationsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:translations}
+    >
       <div class="mx-auto max-w-5xl space-y-4">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -196,7 +201,7 @@ defmodule KilnCMSWeb.TranslationsLive do
           </table>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end
