@@ -213,8 +213,8 @@ defmodule KilnCMS.ImageProcessor do
       {:error, e}
   end
 
-  defp apply_op(image, :rotate_left), do: Image.rotate(image, -90)
-  defp apply_op(image, :rotate_right), do: Image.rotate(image, 90)
+  defp apply_op(image, :rotate_left), do: Image.rotate(image, -90.0)
+  defp apply_op(image, :rotate_right), do: Image.rotate(image, 90.0)
   defp apply_op(image, :flip_horizontal), do: Image.flip(image, :horizontal)
   defp apply_op(image, :flip_vertical), do: Image.flip(image, :vertical)
 

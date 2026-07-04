@@ -60,7 +60,7 @@ defmodule KilnCMS.KeysTest do
     test "selectors are DNS-label-safe and unique" do
       selectors = for _i <- 1..20, do: Keys.new_selector()
 
-      assert Enum.all?(selectors, &(&1 =~ ~r/^kiln\d{6}[0-9a-f]{4}$/))
+      assert Enum.all?(selectors, &(&1 =~ ~r/^kiln\d{6}[0-9a-f]{8}$/))
       assert selectors == Enum.uniq(selectors)
     end
   end
