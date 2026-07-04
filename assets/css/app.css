@@ -290,6 +290,74 @@
     font-weight: 600;
     color: color-mix(in oklch, var(--color-base-content) 65%, transparent);
   }
+
+  /* ---- Tabs (segmented control) ----------------------------------------
+     A pill container with a raised active segment. Drive the active state
+     with `aria-selected="true"` (accessible + no extra class). */
+  .tabs {
+    display: inline-flex;
+    gap: 0.2rem;
+    padding: 0.2rem;
+    border-radius: var(--radius-md);
+    background: var(--color-base-200);
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: color-mix(in oklch, var(--color-base-content) 68%, transparent);
+    cursor: pointer;
+    transition: background-color 0.12s, color 0.12s, box-shadow 0.12s;
+  }
+  .tab:hover {
+    color: var(--color-base-content);
+  }
+  .tab[aria-selected="true"],
+  .tab-active {
+    background: var(--color-base-100);
+    color: var(--color-base-content);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  }
+
+  /* ---- Tables ----------------------------------------------------------
+     Apply `.table` to a raw <table> for consistent header/cell/row styling;
+     add `.table-zebra` for striped rows. Cells keep their own alignment /
+     width / color utilities; `.table` owns padding, borders and the header
+     treatment. Wrap wide tables in `overflow-x-auto` (see design-language). */
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .table th {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 12%, transparent);
+  }
+  .table td {
+    padding: 0.55rem 0.75rem;
+    vertical-align: middle;
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 8%, transparent);
+  }
+  .table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .table tbody tr:hover td {
+    background: color-mix(in oklch, var(--color-base-200) 55%, transparent);
+  }
+  .table-zebra tbody tr:nth-child(2n) td {
+    background: color-mix(in oklch, var(--color-base-200) 32%, transparent);
+  }
 }
 
 /* This file is for your main application CSS */

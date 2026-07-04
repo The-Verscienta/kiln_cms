@@ -483,26 +483,22 @@ defmodule KilnCMSWeb.MediaLive do
             <h1 class="text-2xl font-semibold">{gettext("Media library")}</h1>
             <p class="text-sm text-base-content/70">{gettext("Upload and manage images.")}</p>
           </div>
-          <div :if={@is_admin} class="flex gap-1 text-sm">
+          <div :if={@is_admin} class="tabs" role="tablist">
             <button
               type="button"
+              role="tab"
+              aria-selected={to_string(@view == :library)}
               phx-click="show_library"
-              class={[
-                "rounded px-3 py-1.5",
-                @view == :library && "bg-base-200 font-medium",
-                @view != :library && "text-base-content/60 hover:bg-base-200"
-              ]}
+              class="tab"
             >
               {gettext("Library")}
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={to_string(@view == :trash)}
               phx-click="show_trash"
-              class={[
-                "rounded px-3 py-1.5",
-                @view == :trash && "bg-base-200 font-medium",
-                @view != :trash && "text-base-content/60 hover:bg-base-200"
-              ]}
+              class="tab"
             >
               {gettext("Trash")}
             </button>

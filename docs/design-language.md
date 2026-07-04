@@ -65,6 +65,13 @@ written as a function component or a raw `class="…"` in a template.
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
   ring). The `<.input>` component is the richer, label+error-aware form control;
   these bare classes are for inline filters/toolbars.
+- **Tabs** — `.tabs` (segmented-control container) + `.tab`; drive the active
+  segment with `aria-selected="true"` (accessible, no extra class). Used for the
+  media Library/Trash switch.
+- **Tables** — `.table` on a raw `<table>` for consistent header/cell/row
+  styling (+ `.table-zebra` for stripes). Cells keep their own alignment / width
+  / colour utilities; `.table` owns padding, borders and the header treatment.
+  Wrap wide tables in `overflow-x-auto`. Also styles the `<.table>` component.
 - **Shell nav** — `.side-link` (+ `aria-current="page"` for the active item),
   `.side-section` (group label).
 - **Misc** — `.kbd` (keyboard hint, used by the ⌘K search affordance).
@@ -120,12 +127,14 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
    kit — analytics, calendar, content editor, fields, forms, mail, media, search
    palette, settings, taxonomy, translations, trash, content types, webhooks.
    Compiles clean under `--warnings-as-errors`; verified in light + dark.
-3. **Remaining:** a few intentional patterns were left on bespoke markup by
-   design and could graduate into the kit if we want them shared — a **tab**
-   component (media Library/Trash toggle, translations locale chips), a **table**
-   treatment (analytics, webhooks deliveries), and **icon-only / subtle
-   destructive** buttons (kept as `btn-ghost` + `hover:text-error` rather than a
-   solid `btn-danger`). Extend the kit here first, then adopt.
+3. **Done:** the **tab** pattern (`.tabs`/`.tab`) and **table** treatment
+   (`.table`) graduated into the kit and adopted — media Library/Trash switch on
+   tabs; the analytics, webhook-deliveries and translation-coverage tables on
+   `.table`. Defining `.table` also revived the previously dead `<.table>` /
+   `.table-zebra` references (leftover DaisyUI class names).
+   Still deliberately bespoke: **icon-only / subtle destructive** buttons (kept
+   as `btn-ghost` + `hover:text-error` rather than a solid `btn-danger`) and the
+   translation locale **chips** (a matched link/button pair, not tabs).
 4. `Layouts.app/1` is **still used** by the `/` marketing landing
    (`page_html/home.html.heex`) — a public-facing page, not an authoring tool —
    so it is intentionally retained. Retire it only if/when the home page moves to

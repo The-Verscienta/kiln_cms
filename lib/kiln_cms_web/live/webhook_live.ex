@@ -394,29 +394,29 @@ defmodule KilnCMSWeb.WebhookLive do
           </p>
 
           <div :if={@deliveries != []} class="overflow-x-auto">
-            <table class="w-full text-left text-sm">
+            <table class="table">
               <thead>
-                <tr class="border-b border-base-content/15 text-xs uppercase tracking-wide text-base-content/60">
-                  <th class="py-2 pr-3">{gettext("When")}</th>
-                  <th class="py-2 pr-3">{gettext("Event")}</th>
-                  <th class="py-2 pr-3">{gettext("Endpoint")}</th>
-                  <th class="py-2 pr-3">{gettext("Status")}</th>
-                  <th class="py-2 pr-3">{gettext("Attempts")}</th>
-                  <th class="py-2 pr-3">{gettext("HTTP")}</th>
-                  <th class="py-2 pr-3">{gettext("Error")}</th>
-                  <th class="py-2"></th>
+                <tr>
+                  <th>{gettext("When")}</th>
+                  <th>{gettext("Event")}</th>
+                  <th>{gettext("Endpoint")}</th>
+                  <th>{gettext("Status")}</th>
+                  <th>{gettext("Attempts")}</th>
+                  <th>{gettext("HTTP")}</th>
+                  <th>{gettext("Error")}</th>
+                  <th></th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-base-content/5">
+              <tbody>
                 <tr :for={delivery <- @deliveries} id={"delivery-#{delivery.id}"}>
-                  <td class="whitespace-nowrap py-2 pr-3 text-base-content/70">
+                  <td class="whitespace-nowrap text-base-content/70">
                     {Calendar.strftime(delivery.inserted_at, "%Y-%m-%d %H:%M")}
                   </td>
-                  <td class="py-2 pr-3"><code class="text-xs">{delivery.event}</code></td>
-                  <td class="max-w-48 truncate py-2 pr-3">
+                  <td><code class="text-xs">{delivery.event}</code></td>
+                  <td class="max-w-48 truncate">
                     <code class="text-xs">{delivery.endpoint && delivery.endpoint.url}</code>
                   </td>
-                  <td class="py-2 pr-3">
+                  <td>
                     <span class={[
                       "rounded px-1.5 py-0.5 text-xs font-medium",
                       delivery.status == :succeeded && "bg-success/15 text-success",
@@ -426,12 +426,12 @@ defmodule KilnCMSWeb.WebhookLive do
                       {delivery_status_label(delivery.status)}
                     </span>
                   </td>
-                  <td class="py-2 pr-3">{delivery.attempts}</td>
-                  <td class="py-2 pr-3">{delivery.last_status}</td>
-                  <td class="max-w-56 truncate py-2 pr-3 text-xs text-base-content/70">
+                  <td>{delivery.attempts}</td>
+                  <td>{delivery.last_status}</td>
+                  <td class="max-w-56 truncate text-xs text-base-content/70">
                     {delivery.last_error}
                   </td>
-                  <td class="py-2 text-right">
+                  <td class="text-right">
                     <button
                       :if={delivery.status != :pending}
                       type="button"

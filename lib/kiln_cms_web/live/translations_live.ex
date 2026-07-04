@@ -149,21 +149,21 @@ defmodule KilnCMSWeb.TranslationsLive do
         </p>
 
         <div :if={@rows != [] and length(@locales) > 1} class="overflow-x-auto">
-          <table class="w-full text-left text-sm">
+          <table class="table">
             <thead>
-              <tr class="border-b border-base-content/15 text-xs uppercase tracking-wide text-base-content/60">
-                <th class="py-2 pr-3">{gettext("Content")}</th>
-                <th class="py-2 pr-3">{gettext("Type")}</th>
-                <th :for={locale <- @locales} class="py-2 pr-3 font-mono">{locale}</th>
+              <tr>
+                <th>{gettext("Content")}</th>
+                <th>{gettext("Type")}</th>
+                <th :for={locale <- @locales} class="font-mono">{locale}</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-base-content/5">
+            <tbody>
               <tr :for={row <- @rows} id={"row-#{row.kind}-#{row.source.id}"}>
-                <td class="max-w-64 truncate py-2 pr-3 font-medium">{row.title}</td>
-                <td class="py-2 pr-3 text-xs uppercase tracking-wide text-base-content/60">
+                <td class="max-w-64 truncate font-medium">{row.title}</td>
+                <td class="text-xs uppercase tracking-wide text-base-content/60">
                   {row.label}
                 </td>
-                <td :for={cell <- row.cells} class="py-2 pr-3">
+                <td :for={cell <- row.cells}>
                   <.link
                     :if={cell.record}
                     navigate={~p"/editor/content/#{row.kind}/#{cell.record.id}"}
