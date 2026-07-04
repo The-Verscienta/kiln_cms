@@ -1,11 +1,24 @@
 defmodule KilnCMS.Webhooks do
   @moduledoc """
-  Outbound webhook dispatch.
+  Outbound webhook dispatch, with a **delivery ledger**.
 
-  When content is published, `dispatch/2` enqueues one `DeliveryWorker` Oban
-  job per active, subscribed endpoint. Deliveries are signed with HMAC-SHA256
-  over the request body using the endpoint's secret, so receivers can verify
-  authenticity.
+  When content is published, `dispatch/2` records one `WebhookDelivery` row
+  and enqueues one `DeliveryWorker` Oban job per active, subscribed endpoint.
+  Deliveries are signed with HMAC-SHA256 over the request body using the
+  endpoint's secret, so receivers can verify authenticity.
+
+  Reliability model (surfaced at `/editor/webhooks`):
+
+    * every attempt updates the delivery row (attempt count, last HTTP
+      status, last error); Oban retries with exponential backoff up to the
+      worker's `max_attempts`;
+    * a delivery that exhausts its retries is marked `:failed` and counts
+      against the endpoint's `consecutive_failures` — after
+      `auto_disable_after/0` in a row the endpoint is **auto-disabled**
+      (any success, or an admin edit, resets the count);
+    * `redeliver/1` replays any delivery as a fresh ledger row;
+    * `ping/1` sends a test `"ping"` event so admins can verify a receiver
+      before (or after) going live — it delivers even to inactive endpoints.
   """
   alias KilnCMS.CMS
   alias KilnCMS.Webhooks.DeliveryWorker
@@ -24,9 +37,14 @@ defmodule KilnCMS.Webhooks do
     :hmac |> :crypto.mac(:sha256, secret, body) |> Base.encode16(case: :lower)
   end
 
+  @doc "Exhausted deliveries in a row before an endpoint is auto-disabled."
+  @spec auto_disable_after() :: pos_integer()
+  def auto_disable_after,
+    do: Keyword.get(Application.get_env(:kiln_cms, __MODULE__, []), :auto_disable_after, 10)
+
   @doc """
-  Enqueue a delivery job for every active endpoint subscribed to `event`.
-  Reads endpoints as a system job (`authorize?: false`).
+  Record + enqueue a delivery for every active endpoint subscribed to `event`.
+  Runs as a system job (`authorize?: false`).
   """
   @spec dispatch(String.t(), map()) :: :ok
   def dispatch(event, payload) do
@@ -34,11 +52,41 @@ defmodule KilnCMS.Webhooks do
       authorize?: false,
       query: Ash.Query.filter(CMS.WebhookEndpoint, active == true and ^event in events)
     )
-    |> Enum.each(fn endpoint ->
-      %{endpoint_id: endpoint.id, event: event, payload: payload}
-      |> DeliveryWorker.new()
-      |> Oban.insert!()
-    end)
+    |> Enum.each(&enqueue(&1.id, event, payload))
+  end
+
+  @doc """
+  Replay a delivery: a fresh ledger row (and job) for the same endpoint,
+  event, and payload — history stays immutable. Admin-triggered.
+  """
+  @spec redeliver(struct()) :: struct()
+  def redeliver(delivery), do: enqueue(delivery.endpoint_id, delivery.event, delivery.payload)
+
+  @doc """
+  Send a test `"ping"` event to one endpoint (delivers even when inactive, so
+  a receiver can be verified before enabling). Admin-triggered.
+  """
+  @spec ping(struct()) :: struct()
+  def ping(endpoint) do
+    enqueue(endpoint.id, "ping", %{
+      message: "KilnCMS webhook test",
+      endpoint_url: endpoint.url,
+      sent_at: DateTime.to_iso8601(DateTime.utc_now())
+    })
+  end
+
+  defp enqueue(endpoint_id, event, payload) do
+    delivery =
+      CMS.create_webhook_delivery!(
+        %{endpoint_id: endpoint_id, event: event, payload: payload},
+        authorize?: false
+      )
+
+    %{delivery_id: delivery.id}
+    |> DeliveryWorker.new()
+    |> Oban.insert!()
+
+    delivery
   end
 
   @doc false

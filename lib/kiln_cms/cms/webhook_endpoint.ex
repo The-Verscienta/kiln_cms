@@ -55,6 +55,36 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       primary? true
       require_atomic? false
       validate KilnCMS.CMS.Validations.WebhookUrl
+      # Re-enabling (or any edit) gives the endpoint a clean slate.
+      change set_attribute(:consecutive_failures, 0)
+      change set_attribute(:auto_disabled_at, nil)
+    end
+
+    # A delivery got through: the endpoint is healthy again (system action,
+    # called by the delivery pipeline with authorize?: false).
+    update :record_delivery_success do
+      change set_attribute(:consecutive_failures, 0)
+      change set_attribute(:auto_disabled_at, nil)
+    end
+
+    # A delivery exhausted its retries. After the configured run of these in a
+    # row, the endpoint is auto-disabled — a dead receiver shouldn't burn the
+    # queue every publish, forever (system action).
+    update :record_delivery_failure do
+      require_atomic? false
+
+      change fn changeset, _context ->
+        failures = (changeset.data.consecutive_failures || 0) + 1
+        changeset = Ash.Changeset.change_attribute(changeset, :consecutive_failures, failures)
+
+        if failures >= KilnCMS.Webhooks.auto_disable_after() do
+          changeset
+          |> Ash.Changeset.change_attribute(:active, false)
+          |> Ash.Changeset.change_attribute(:auto_disabled_at, DateTime.utc_now())
+        else
+          changeset
+        end
+      end
     end
   end
 
@@ -84,6 +114,12 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       sensitive? true
       writable? false
     end
+
+    # Health: exhausted deliveries in a row (reset by any success or edit).
+    # At `KilnCMS.Webhooks.auto_disable_after/0` the endpoint is auto-disabled
+    # and `auto_disabled_at` stamped, so the admin UI can say why it's off.
+    attribute :consecutive_failures, :integer, allow_nil?: false, default: 0, public?: true
+    attribute :auto_disabled_at, :utc_datetime_usec, public?: true
 
     timestamps()
   end
