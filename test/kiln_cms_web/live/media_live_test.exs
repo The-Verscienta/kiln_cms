@@ -155,16 +155,30 @@ defmodule KilnCMSWeb.MediaLiveTest do
       panel =
         lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
 
-      # The focal editor renders with the marker at the default center.
+      # The focal editor renders with the marker at the default center, and is
+      # keyboard-operable (focusable button + current point as data attrs the
+      # arrow-key handler reads).
       assert panel =~ "focal-editor-#{item.id}"
       assert panel =~ "left: 50.0%"
+      assert panel =~ ~s(role="button")
+      assert panel =~ ~s(tabindex="0")
+      assert panel =~ ~s(data-focal-x="0.5")
 
-      # The FocalPoint hook pushes fractional coordinates.
+      # The FocalPoint hook pushes fractional coordinates (click or keyboard
+      # nudge both arrive as this event).
       render_hook(lv, "set_focal", %{"x" => 0.25, "y" => 0.75})
 
       saved = CMS.get_media_item!(item.id, authorize?: false)
       assert saved.focal_x == 0.25
       assert saved.focal_y == 0.75
+
+      # After a move, the data attributes reflect the new point so the next
+      # keyboard nudge starts from the right place.
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
+      assert panel =~ ~s(data-focal-x="0.25")
+      assert panel =~ ~s(data-focal-y="0.75")
     end
 
     test "the rotate button edits the image and reports regeneration", %{conn: conn} do

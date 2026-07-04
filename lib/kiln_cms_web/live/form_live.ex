@@ -330,19 +330,25 @@ defmodule KilnCMSWeb.FormLive do
             </ul>
 
             <form phx-submit="add_field" class="mt-3 grid gap-2 sm:grid-cols-5">
+              <label for="new-field-label" class="sr-only">{gettext("Field label")}</label>
               <input
+                id="new-field-label"
                 name="field[label]"
                 required
                 placeholder={gettext("Label")}
                 class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
               />
+              <label for="new-field-name" class="sr-only">{gettext("Field machine name")}</label>
               <input
+                id="new-field-name"
                 name="field[name]"
                 required
                 placeholder="machine_name"
                 class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
               />
+              <label for="new-field-type" class="sr-only">{gettext("Field type")}</label>
               <select
+                id="new-field-type"
                 name="field[field_type]"
                 class="rounded border border-base-content/20 bg-base-100 px-2 py-1 text-sm"
               >
@@ -353,7 +359,11 @@ defmodule KilnCMSWeb.FormLive do
                 <input type="checkbox" name="field[required]" value="true" /> {gettext("required")}
               </label>
               <.button type="submit">{gettext("Add field")}</.button>
+              <label for="new-field-options" class="sr-only">
+                {gettext("Select options, one per line")}
+              </label>
               <textarea
+                id="new-field-options"
                 name="field[options]"
                 placeholder={gettext("Select options — one per line (select fields only)")}
                 class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-xs sm:col-span-5"

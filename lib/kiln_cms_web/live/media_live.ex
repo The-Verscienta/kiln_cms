@@ -775,14 +775,19 @@ defmodule KilnCMSWeb.MediaLive do
           </button>
         </div>
 
-        <%!-- Raster images get the focal-point editor: click the preview to
-             move the point crops center on. Non-images keep a plain preview. --%>
+        <%!-- Raster images get the focal-point editor: click (or focus and use
+             arrow keys) to move the point crops center on. Non-images keep a
+             plain preview. --%>
         <div :if={@item.width} class="mt-4 flex justify-center">
           <div
             id={"focal-editor-#{@item.id}"}
             phx-hook="FocalPoint"
-            class="relative inline-block cursor-crosshair"
-            title={gettext("Click to set the focal point")}
+            role="button"
+            tabindex="0"
+            aria-label={gettext("Focal point — click or use arrow keys to set where crops center")}
+            data-focal-x={@item.focal_x || 0.5}
+            data-focal-y={@item.focal_y || 0.5}
+            class="relative inline-block cursor-crosshair rounded focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <img src={@item.url} alt={@item.alt || @item.filename} class="block max-h-64 rounded" />
             <span
