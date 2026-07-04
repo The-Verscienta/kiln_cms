@@ -113,14 +113,14 @@ defmodule KilnCMS.Keys do
   end
 
   @doc """
-  A fresh DKIM selector, e.g. `kiln202607x3f9` — month-stamped for humans,
+  A fresh DKIM selector, e.g. `kiln2026073f9ea1b2` — month-stamped for humans,
   random-suffixed so every rotation gets a distinct DNS name (the old TXT
   record can stay up while mail signed with the old key is in transit).
   """
   @spec new_selector() :: String.t()
   def new_selector do
     stamp = Calendar.strftime(Date.utc_today(), "%Y%m")
-    suffix = 2 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+    suffix = 4 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
     "kiln#{stamp}#{suffix}"
   end
 
