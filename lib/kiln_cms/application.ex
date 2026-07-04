@@ -57,7 +57,6 @@ defmodule KilnCMS.Application do
       # Start to serve requests, typically the last entry
       KilnCMSWeb.Endpoint,
       {Absinthe.Subscription, KilnCMSWeb.Endpoint},
-      AshGraphql.Subscription.Batcher,
       {AshAuthentication.Supervisor, [otp_app: :kiln_cms]}
     ]
 
@@ -66,7 +65,9 @@ defmodule KilnCMS.Application do
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
 
     Supervisor.start_link(
-      children ++ embedding_children() ++ reranker_children() ++ Kiln.Plugins.children(),
+      children ++
+        subscription_batcher() ++
+        embedding_children() ++ reranker_children() ++ Kiln.Plugins.children(),
       opts
     )
   end
@@ -152,6 +153,15 @@ defmodule KilnCMS.Application do
   # The embedding serving is only started when semantic search is enabled with
   # the local Bumblebee adapter — loading the model is expensive, so the default
   # install (and any deployment using a remote embedder) skips it entirely.
+  # GraphQL subscription resolution batches through this out-of-band worker in
+  # prod. In test it is off: AshGraphql then falls back to resolving in the
+  # publishing process, which keeps reads on the test's sandbox connection.
+  defp subscription_batcher do
+    if Application.get_env(:kiln_cms, :start_subscription_batcher, true),
+      do: [AshGraphql.Subscription.Batcher],
+      else: []
+  end
+
   defp embedding_children do
     if KilnCMS.Search.semantic?() and
          KilnCMS.Search.embedder() == KilnCMS.Search.Embedder.Bumblebee do

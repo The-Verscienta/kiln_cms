@@ -61,6 +61,10 @@ config :kiln_cms, KilnCMS.Storage.S3,
 # Extra locales so the locale-aware delivery tests have something to switch to.
 config :kiln_cms, :i18n, default_locale: "en", locales: ["en", "fr", "es"]
 
+# Resolve GraphQL subscriptions synchronously in the publishing (test) process
+# so reads stay on the test's sandbox connection.
+config :kiln_cms, start_subscription_batcher: false
+
 config :kiln_cms, token_signing_secret: "DxVOH7q7LauTIqk0KY8Mj2auM6QzdpHw"
 config :bcrypt_elixir, log_rounds: 1
 config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true

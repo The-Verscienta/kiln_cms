@@ -148,6 +148,10 @@ config :kiln_cms, :search_analytics, retention_days: 90
 
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
+# GraphQL subscriptions (real-time headless): the DSL is opt-in while beta.
+# Fields are declared per content resource (see KilnCMS.CMS.Content).
+config :ash_graphql, :subscriptions, true
+
 config :mime,
   extensions: %{"json" => "application/vnd.api+json"},
   types: %{"application/vnd.api+json" => ["json"]}

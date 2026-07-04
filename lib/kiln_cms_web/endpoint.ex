@@ -1,6 +1,9 @@
 defmodule KilnCMSWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :kiln_cms
-  use Absinthe.Phoenix.Endpoint
+  # Absinthe.Phoenix.Endpoint + AshGraphql's run_docset override, which routes
+  # subscription resolution through the Batcher (skipping data the subscriber
+  # isn't allowed to see instead of erroring).
+  use AshGraphql.Subscription.Endpoint
 
   # The session is stored in the cookie, signed (tamper-proof) and encrypted
   # (`encryption_salt`) so its contents aren't readable client-side either —

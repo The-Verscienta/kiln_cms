@@ -74,6 +74,37 @@ categories) `pages` / `posts` relationships.
 
 `health: String` — a lightweight probe that returns `"ok"`.
 
+## Subscriptions (real-time)
+
+Every content type exposes a `<type>Changed` subscription (`pageChanged`,
+`postChanged`, downstream catalog types alike — plus `entryChanged`, one feed
+shared by every admin-defined dynamic type), delivered over the Absinthe
+websocket at **`/ws/gql`** (`absinthe_phoenix` protocol; pass an optional
+bearer token as a `token` connection param):
+
+```graphql
+subscription {
+  pageChanged {
+    created { id title slug }
+    updated { id title slug }
+    destroyed
+  }
+}
+```
+
+Each push carries the record under `created`/`updated` (or its id under
+`destroyed`), resolved **per subscriber through the same read policies as
+queries**: an anonymous subscriber only ever receives published-visible data
+— draft edits simply never arrive — while a bearer-authed editor also sees
+draft activity. A record's *publish* arrives as an `updated` push (the
+workflow transition is an update); note that unpublishing makes the record
+invisible to anonymous subscribers, so they receive no event for it — poll or
+refetch on reconnect if you need deletion semantics.
+
+Under load, notification fan-out batches through an out-of-band worker
+(`AshGraphql.Subscription.Batcher`), so publishing never blocks on slow
+subscribers.
+
 ## Deliberately *not* exposed
 
 - **Mutations.** No create/update/publish/delete. Authoring is admin-only.

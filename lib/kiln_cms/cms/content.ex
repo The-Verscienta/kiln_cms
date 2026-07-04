@@ -174,6 +174,18 @@ defmodule KilnCMS.CMS.Content do
           graphql do
             type :entry
 
+            # Real-time headless: notifies on every entry write, resolved per
+            # subscriber through the policy-scoped :read — anonymous
+            # subscribers only ever receive published-visible data.
+            subscriptions do
+              pubsub KilnCMSWeb.Endpoint
+
+              subscribe :entry_changed do
+                action_types [:create, :update, :destroy]
+                read_action :read
+              end
+            end
+
             # Curated, read-only public surface (D7) — the same delivery reads
             # compiled types expose, over the shared entry tier. All are
             # policy/state-filtered, so anonymous callers see published rows only.
@@ -211,6 +223,18 @@ defmodule KilnCMS.CMS.Content do
         quote do
           graphql do
             type unquote(type)
+
+            # Real-time headless: notifies on create/update/destroy, resolved
+            # per subscriber through the policy-scoped :read — anonymous
+            # subscribers only ever receive published-visible data.
+            subscriptions do
+              pubsub KilnCMSWeb.Endpoint
+
+              subscribe unquote(:"#{type}_changed") do
+                action_types [:create, :update, :destroy]
+                read_action :read
+              end
+            end
 
             # Curated, read-only public surface (D7 — deliberate exposure). The
             # GraphQL endpoint is a *delivery* API: it exposes published-content
