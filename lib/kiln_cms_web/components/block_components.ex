@@ -35,6 +35,7 @@ defmodule KilnCMSWeb.BlockComponents do
             alt={@block[:alt] || ""}
             width={@block[:width]}
             height={@block[:height]}
+            style={@block[:focal]}
             loading="lazy"
             class="max-w-full rounded"
           />

@@ -1,7 +1,11 @@
 defmodule KilnCMS.CMS.MediaItem do
   @moduledoc """
   A media library item. Metadata only — the binary lives in object storage
-  (local dev or S3/MinIO). Variants/focal-point/processing pipeline land in v1.0.
+  (local dev or S3/MinIO). The processing pipeline (`KilnCMS.ImageProcessor` +
+  `Media.VariantWorker`) derives responsive variants and a focal-aware `card`
+  crop centered on `focal_x`/`focal_y` (set by clicking the preview in the
+  media library); `Media.Transform` provides in-admin rotate/flip edits — see
+  docs/media-pipeline.md.
 
   Deletes are soft (AshArchival): `destroy` stamps `archived_at` and hides the
   row from reads, but keeps both the record and its storage blobs intact. That

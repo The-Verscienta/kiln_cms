@@ -90,6 +90,22 @@ const Hooks = {
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
     },
   },
+  // Click-to-set focal point on a media preview: pushes the click position as
+  // fractions of the rendered image (the <img> is display:block and unpadded,
+  // so its element box equals the rendered image — no letterbox math needed).
+  FocalPoint: {
+    mounted() {
+      this.el.addEventListener("click", (e) => {
+        const img = this.el.querySelector("img")
+        if (!img) return
+        const rect = img.getBoundingClientRect()
+        if (rect.width === 0 || rect.height === 0) return
+        const x = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
+        const y = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1)
+        this.pushEvent("set_focal", {x, y})
+      })
+    },
+  },
   // Render a <time datetime="..."> element's instant in the viewer's local
   // timezone (the server-rendered text stays as a UTC fallback without JS).
   LocalTime: {

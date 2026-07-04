@@ -138,6 +138,78 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert saved.caption == "At dusk"
     end
 
+    test "clicking the preview sets the focal point (clamped) and re-queues variants", %{
+      conn: conn
+    } do
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "focal.png",
+          url: "/uploads/focal",
+          content_type: "image/png",
+          width: 1200,
+          height: 800
+        })
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      panel =
+        lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
+      # The focal editor renders with the marker at the default center.
+      assert panel =~ "focal-editor-#{item.id}"
+      assert panel =~ "left: 50.0%"
+
+      # The FocalPoint hook pushes fractional coordinates.
+      render_hook(lv, "set_focal", %{"x" => 0.25, "y" => 0.75})
+
+      saved = CMS.get_media_item!(item.id, authorize?: false)
+      assert saved.focal_x == 0.25
+      assert saved.focal_y == 0.75
+    end
+
+    test "the rotate button edits the image and reports regeneration", %{conn: conn} do
+      root = Path.join(System.tmp_dir!(), "kiln_ui_edit_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      Application.put_env(:kiln_cms, KilnCMS.Storage.Local, root: root, base_url: "/uploads")
+
+      on_exit(fn ->
+        File.rm_rf!(root)
+        Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+      end)
+
+      src = Path.join(System.tmp_dir!(), "ui-src-#{System.unique_integer([:positive])}.png")
+      {:ok, image} = Image.new(600, 400, color: :green)
+      {:ok, _} = Image.write(image, src)
+      key = "ui-orig-#{System.unique_integer([:positive])}.png"
+      {:ok, ^key} = KilnCMS.Storage.store(key, src)
+      File.rm(src)
+
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "rotate.png",
+          url: "/uploads/#{key}",
+          storage_key: key,
+          content_type: "image/png",
+          width: 600,
+          height: 400
+        })
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+      lv |> element(~s(button[phx-click="select"][phx-value-id="#{item.id}"])) |> render_click()
+
+      html =
+        lv
+        |> element(~s(button[phx-click="transform"][phx-value-op="rotate_right"]))
+        |> render_click()
+
+      assert html =~ "variants are regenerating"
+
+      saved = CMS.get_media_item!(item.id, authorize?: false)
+      assert saved.width == 400
+      assert saved.height == 600
+      refute saved.storage_key == key
+    end
+
     # Regression for #169: the drawer is a labeled modal dialog with a focus trap.
     test "the detail drawer exposes dialog semantics and a focus trap", %{conn: conn} do
       item = Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "dlg.png", url: "/uploads/dlg"})

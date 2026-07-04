@@ -52,7 +52,9 @@ defmodule KilnCMS.Media.VariantWorker do
   end
 
   defp generate(item, path, ext) do
-    case ImageProcessor.process(path, ext) do
+    focal = %{x: item.focal_x || 0.5, y: item.focal_y || 0.5}
+
+    case ImageProcessor.process(path, ext, focal) do
       {:ok, %{width: width, height: height, variants: files}} ->
         {:ok, _item} =
           CMS.update_media_item(
