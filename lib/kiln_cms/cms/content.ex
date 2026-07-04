@@ -125,6 +125,14 @@ defmodule KilnCMS.CMS.Content do
           # Public delivery: published content, newest first.
           read :published do
             filter expr(^ref(:state) == :published)
+
+            # Filter/sort by admin-defined custom fields (typed JSONB access —
+            # see the preparation). Declared before the default-sort build so a
+            # `custom_sort` outranks `published_at` but not an explicit `sort`.
+            argument :custom_filter, :map
+            argument :custom_sort, :string
+            prepare KilnCMS.CMS.Preparations.CustomFieldQuery
+
             prepare build(sort: [published_at: :desc])
 
             # Paginated for headless feed consumers (offset + keyset). `required?:
@@ -406,7 +414,11 @@ defmodule KilnCMS.CMS.Content do
         domain: unquote(domain),
         data_layer: AshPostgres.DataLayer,
         authorizers: [Ash.Policy.Authorizer],
-        extensions: unquote(extensions)
+        extensions: unquote(extensions),
+        # The primary :read carries the (optional) custom-field filter/sort
+        # arguments + preparation, which no-op when absent — internal uses of
+        # the primary read (relationship loads, policy checks) are unaffected.
+        primary_read_warning?: false
 
       unquote(api_blocks)
 
@@ -616,6 +628,14 @@ defmodule KilnCMS.CMS.Content do
         read :read do
           primary? true
 
+          # Filter/sort by admin-defined custom fields — one JSONB map, so the
+          # derived `filter[...]`/`sort=` machinery can't reach into it. The
+          # preparation turns these into typed `get_path` predicates/sort keys
+          # validated against the FieldDefinition registry (docs/json-api.md).
+          argument :custom_filter, :map
+          argument :custom_sort, :string
+          prepare KilnCMS.CMS.Preparations.CustomFieldQuery
+
           pagination offset?: true,
                      keyset?: true,
                      countable: true,
@@ -733,6 +753,10 @@ defmodule KilnCMS.CMS.Content do
           argument :state, :atom
           argument :tag_ids, {:array, :uuid}
 
+          # Custom-field facet (no `custom_sort` — relevance owns the order).
+          argument :custom_filter, :map
+          prepare KilnCMS.CMS.Preparations.CustomFieldQuery
+
           filter expr(
                    ^ref(:locale) == ^arg(:locale) and
                      fragment(
@@ -789,6 +813,10 @@ defmodule KilnCMS.CMS.Content do
           argument :author_id, :uuid
           argument :state, :atom
           argument :tag_ids, {:array, :uuid}
+
+          # Custom-field facet (no `custom_sort` — distance owns the order).
+          argument :custom_filter, :map
+          prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
           # Candidates: same-locale rows that have an embedding.
           filter expr(

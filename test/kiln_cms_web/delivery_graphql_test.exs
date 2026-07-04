@@ -54,6 +54,49 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
                run(query, %{"slug" => draft_slug, "locale" => "en"})
     end
 
+    test "publishedPosts filters and sorts by admin-defined custom fields" do
+      admin = admin()
+      price = "price#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: price, label: "Price", field_type: :integer},
+        actor: admin
+      )
+
+      publish = fn value ->
+        CMS.create_post!(
+          %{title: "P#{value}", slug: slug(), custom_fields: %{price => value}},
+          actor: admin
+        )
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+      end
+
+      cheap = publish.(9)
+      mid = publish.(10)
+      dear = publish.(30)
+
+      query = """
+      query ($cf: JsonString, $cs: String) {
+        publishedPosts(limit: 100, customFilter: $cf, customSort: $cs) { results { id } }
+      }
+      """
+
+      # Numeric gt — a text comparison would also match 9.
+      assert {:ok, %{data: %{"publishedPosts" => %{"results" => results}}}} =
+               run(query, %{"cf" => Jason.encode!(%{price => %{"gt" => 10}})})
+
+      assert Enum.map(results, & &1["id"]) == [dear.id]
+
+      # Ascending typed sort; null=false scopes to this test's rows.
+      assert {:ok, %{data: %{"publishedPosts" => %{"results" => sorted}}}} =
+               run(query, %{
+                 "cf" => Jason.encode!(%{price => %{"null" => false}}),
+                 "cs" => price
+               })
+
+      assert Enum.map(sorted, & &1["id"]) == [cheap.id, mid.id, dear.id]
+    end
+
     test "pageBySlug returns a published page" do
       admin = admin()
       page_slug = slug()

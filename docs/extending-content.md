@@ -26,6 +26,10 @@ UI" workflow, scoped to fields.
   stored JSON-native (dates as ISO-8601 strings) so the jsonb column round-trips.
 - **Edit**: the content editor renders one input per definition automatically.
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
+- **Query**: list/search reads accept `custom_filter`/`custom_sort` (JSON:API)
+  and `customFilter`/`customSort` (GraphQL) — typed, registry-validated
+  filtering and sorting on individual custom fields (see
+  [json-api.md](json-api.md) → "Custom fields").
 
 ```elixir
 # Defined once in the UI (or in code/seeds):
@@ -40,10 +44,10 @@ CMS.create_page!(%{title: "Aconite", slug: "aconite",
 ```
 
 **When to use a real attribute instead.** Custom fields cover the long tail of
-editor-owned fields. A field that is core, frequently queried/sorted, or needs a
-DB constraint/index still belongs as a hand-declared Ash attribute on the
-resource (with a `mix ash.codegen` migration). Custom fields are jsonb — they are
-not indexed columns.
+editor-owned fields. A field that is core, needs a DB constraint/index, or is
+filtered/sorted on every request still belongs as a hand-declared Ash attribute
+on the resource (with a `mix ash.codegen` migration). Custom fields are jsonb —
+queryable via `custom_filter`/`custom_sort`, but never index-backed.
 
 ## 2. Relations that carry data
 

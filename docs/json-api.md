@@ -83,6 +83,66 @@ Any sortable public field may be used. The collection routes have no implicit
 ordering unless you pass `sort` (except `/posts/published`, which defaults to
 `-published_at`).
 
+## Custom fields (`custom_filter` / `custom_sort`)
+
+Admin-defined custom fields (see
+[extending-content.md](extending-content.md)) live in one `custom_fields`
+JSONB map, so the derived `filter[...]`/`sort=` machinery above can't reach
+them. Two dedicated params close the gap:
+
+```
+# Equality (bare value) and operators
+GET /api/json/posts?custom_filter[color]=red
+GET /api/json/posts?custom_filter[price][gt]=10
+
+# Combined, and mixed with regular filters
+GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-price
+```
+
+**Filtering** — `custom_filter[<name>]=<value>` (equality) or
+`custom_filter[<name>][<op>]=<value>` with `eq`, `not_eq`, `gt`, `gte`, `lt`,
+`lte`, `in`, `ilike`, `null`. Conditions are ANDed (with each other and with
+`filter[...]`). Semantics:
+
+- Field names are validated against the `FieldDefinition` registry — an
+  unknown name is a **400**, not an empty result.
+- Values are cast to the field's declared type and compared **as jsonb**, so
+  an `integer`/`float` field compares numerically (`9 < 10`), `boolean` as a
+  boolean, and `date`/`datetime` (ISO-8601 strings) chronologically.
+- `in` matches any of a list: `custom_filter[color][in][]=red&custom_filter[color][in][]=blue`.
+- `ilike` (text-like fields only) takes the usual `%` wildcards:
+  `custom_filter[subtitle][ilike]=%herb%`.
+- `null` takes `true`/`false` and tests whether the record has the field at
+  all.
+- `media`/`reference` fields match on their snapshot's stable `id`
+  (`custom_filter[hero_image]=<media uuid>`) and support `eq`/`not_eq`/`in`/`null` only.
+- Records without the field are excluded by every comparison (they're SQL
+  `NULL`), and a record whose stored value has another JSON type simply
+  doesn't match — it can't error the query.
+
+**Sorting** — `custom_sort=<name>` (ascending) or `custom_sort=-<name>`,
+comma-separated for multi-key. Records lacking the field always sort last.
+`custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but
+`custom_sort` outranks an action's *default* order (e.g. `/posts/published`'s
+`-published_at`). `media`/`reference` fields are not sortable.
+
+**Entries (dynamic types)** — the same params work on `/api/json/entries`,
+where the field's type is resolved through the query's
+`filter[type_name]=<name>` (or `filter[type_definition_id]=<uuid>`) scope.
+Unscoped queries still work when every dynamic type declaring the field agrees
+on its type; if declarations diverge, the API asks you to scope rather than
+guessing a cast.
+
+**Search facets** — `/…/search` and `/…/semantic-search` accept
+`custom_filter` too (not `custom_sort` — relevance/distance owns the order).
+
+> **Performance.** These predicates run on unindexed JSONB extractions. They're
+> built for the long tail of editor-owned fields; a field you filter or sort by
+> on every request belongs as a real attribute (promote the type / add the
+> column, D4). GraphQL exposes the same capability as `customFilter` /
+> `customSort` arguments — see
+> [headless-graphql-api.md](headless-graphql-api.md).
+
 ## Pagination
 
 All collection reads support **offset** and **keyset** pagination via the

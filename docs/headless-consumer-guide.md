@@ -32,7 +32,9 @@ scoped by the type's name:
 | Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` — exactly like compiled types |
 
 Admin-defined **custom fields** are delivered in each entry's `custom_fields`
-map on every surface. Scalar fields are JSON-native values; `media` and
+map on every surface, and are **filterable/sortable** on the JSON:API and
+GraphQL list surfaces via `custom_filter`/`custom_sort` (see
+[json-api.md](json-api.md) → "Custom fields"). Scalar fields are JSON-native values; `media` and
 `reference` fields are **write-time snapshots** — `{"id", "url", "alt"}` for
 media, `{"id", "type", "slug", "title"}` for references — so no extra
 resolution is needed to render them (fetch fresh content by `id`/`type` when
