@@ -27,6 +27,8 @@ import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
 
+const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
+
 const Hooks = {
   FocusTrap,
   // Warn before discarding unsaved editor changes. The server keeps
@@ -90,9 +92,11 @@ const Hooks = {
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
     },
   },
-  // Click-to-set focal point on a media preview: pushes the click position as
+  // Set the focal point on a media preview. Pointer: click position as
   // fractions of the rendered image (the <img> is display:block and unpadded,
   // so its element box equals the rendered image — no letterbox math needed).
+  // Keyboard: the container is focusable; arrow keys nudge the point by 5%
+  // from its current position (read off data-focal-*, refreshed each render).
   FocalPoint: {
     mounted() {
       this.el.addEventListener("click", (e) => {
@@ -100,9 +104,23 @@ const Hooks = {
         if (!img) return
         const rect = img.getBoundingClientRect()
         if (rect.width === 0 || rect.height === 0) return
-        const x = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
-        const y = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1)
+        const x = clamp01((e.clientX - rect.left) / rect.width)
+        const y = clamp01((e.clientY - rect.top) / rect.height)
         this.pushEvent("set_focal", {x, y})
+      })
+
+      this.el.addEventListener("keydown", (e) => {
+        const step = 0.05
+        const deltas = {
+          ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+          ArrowUp: [0, -step], ArrowDown: [0, step],
+        }
+        const d = deltas[e.key]
+        if (!d) return
+        e.preventDefault()
+        const cx = parseFloat(this.el.dataset.focalX) || 0.5
+        const cy = parseFloat(this.el.dataset.focalY) || 0.5
+        this.pushEvent("set_focal", {x: clamp01(cx + d[0]), y: clamp01(cy + d[1])})
       })
     },
   },
