@@ -24,7 +24,43 @@ defmodule KilnCMS.Search do
   @spec dim() :: pos_integer()
   def dim, do: cfg(:dim, 384)
 
-  @doc "Embed a single string into a list of floats via the active adapter."
+  @doc """
+  Hidden-state pooling for the embedding serving. `:cls_token_pooling` (the
+  default) suits the bge family; multilingual models like
+  `paraphrase-multilingual-MiniLM-L12-v2` and the e5 family use
+  `:mean_pooling`. Must match how the configured model was trained.
+  """
+  @spec pooling() :: atom()
+  def pooling, do: cfg(:pooling, :cls_token_pooling)
+
+  @doc """
+  Instruction prefixes some retrieval models expect, prepended before
+  embedding. Asymmetric models (e.g. multilingual-e5) need `query: ` on the
+  query and `passage: ` on the document; bge query instructions go here too.
+  Both default to `""` (no prefix), preserving the bge-small default.
+  """
+  @spec query_prefix() :: String.t()
+  def query_prefix, do: cfg(:query_prefix, "")
+
+  @spec document_prefix() :: String.t()
+  def document_prefix, do: cfg(:document_prefix, "")
+
+  @doc """
+  Embed a **search query** — applies `query_prefix/0` before the adapter. Use
+  this for the query side of semantic search; `embed_document/1` for content.
+  """
+  @spec embed_query(String.t()) :: {:ok, [float()]} | {:error, term()}
+  def embed_query(text) when is_binary(text), do: embed(query_prefix() <> text)
+
+  @doc "Embed a **document** (content) — applies `document_prefix/0` before the adapter."
+  @spec embed_document(String.t()) :: {:ok, [float()]} | {:error, term()}
+  def embed_document(text) when is_binary(text), do: embed(document_prefix() <> text)
+
+  @doc """
+  Embed a single string into a list of floats via the active adapter (no
+  instruction prefix). Prefer `embed_query/1` / `embed_document/1` on the
+  search and indexing paths so instruction-tuned models work correctly.
+  """
   @spec embed(String.t()) :: {:ok, [float()]} | {:error, term()}
   def embed(text) when is_binary(text), do: embedder().embed(text)
 

@@ -804,7 +804,8 @@ defmodule KilnCMS.CMS.Content do
             query = Ash.Query.set_argument(query, :locale, locale)
 
             with true <- KilnCMS.Search.semantic?(),
-                 {:ok, vector} <- KilnCMS.Search.embed(Ash.Query.get_argument(query, :query)) do
+                 {:ok, vector} <-
+                   KilnCMS.Search.embed_query(Ash.Query.get_argument(query, :query)) do
               query
               |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
               |> KilnCMS.CMS.Content.cap_unbounded()

@@ -1,9 +1,11 @@
 defmodule Mix.Tasks.Kiln.EmbedAll do
   @shortdoc "Enqueue embedding jobs for all existing content (semantic search backfill)"
   @moduledoc """
-  Enqueues a `KilnCMS.Search.EmbeddingWorker` for every existing Page and Post so
-  their semantic embeddings are (re)computed in the background. Run once after
-  enabling semantic search, or after changing the embedding model.
+  Enqueues a `KilnCMS.Search.EmbeddingWorker` for every existing Page, Post,
+  and dynamic Entry so their semantic embeddings are (re)computed in the
+  background. Run once after enabling semantic search, or after changing the
+  embedding model (e.g. switching to a multilingual model — see
+  `docs/semantic-search-plan.md`).
 
       mix kiln.embed_all
 
@@ -17,9 +19,13 @@ defmodule Mix.Tasks.Kiln.EmbedAll do
 
   @requirements ["app.start"]
 
+  # Every embeddable content tier: the compiled Page/Post plus the shared
+  # dynamic entry tier (D17), so a re-embed after a model change covers
+  # admin-defined types too.
   @sources [
     {KilnCMS.CMS.Page, &CMS.list_pages!/1},
-    {KilnCMS.CMS.Post, &CMS.list_posts!/1}
+    {KilnCMS.CMS.Post, &CMS.list_posts!/1},
+    {KilnCMS.CMS.Entry, &CMS.list_entries!/1}
   ]
 
   @impl Mix.Task
