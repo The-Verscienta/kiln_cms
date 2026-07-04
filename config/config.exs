@@ -18,10 +18,13 @@ config :kiln_cms, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
   # Split by workload so a bulk publish / embedding backfill can't starve mail,
-  # webhooks, or the cron-driven scheduled-publish & trash-purge triggers (which
-  # stay on :default). Total worker concurrency here is ~29 — size POOL_SIZE
-  # accordingly in production (see config/runtime.exs and docs/performance.md).
-  queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, default: 10],
+  # webhooks, or the cron-driven triggers. The every-minute scheduled
+  # publish/unpublish (embargo) triggers get their own :scheduling queue so a
+  # busy :default (bulk work, daily purge/sweep) can't leave them queued past
+  # their one-minute cadence. Total worker concurrency here is ~34 — size
+  # POOL_SIZE accordingly in production (see config/runtime.exs and
+  # docs/performance.md).
+  queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, default: 10],
   repo: KilnCMS.Repo,
   plugins: [
     {Oban.Plugins.Cron, []},
