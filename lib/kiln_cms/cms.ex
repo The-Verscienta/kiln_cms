@@ -145,6 +145,30 @@ defmodule KilnCMS.CMS do
       define :record_webhook_delivery_attempt, action: :record_attempt
     end
 
+    # Admin-defined public forms (contact/signup/…) + their submissions.
+    resource KilnCMS.CMS.Form do
+      define :list_forms, action: :read
+      define :get_form, action: :read, get_by: [:id]
+      define :get_active_form_by_slug, action: :active_by_slug, args: [:slug]
+      define :create_form, action: :create
+      define :update_form, action: :update
+      define :destroy_form, action: :destroy
+    end
+
+    resource KilnCMS.CMS.FormField do
+      define :form_fields_for, action: :for_form, args: [:form_id]
+      define :create_form_field, action: :create
+      define :update_form_field, action: :update
+      define :destroy_form_field, action: :destroy
+    end
+
+    resource KilnCMS.CMS.FormSubmission do
+      define :create_form_submission, action: :create
+      define :get_form_submission, action: :read, get_by: [:id]
+      define :recent_form_submissions, action: :recent_for_form, args: [:form_id]
+      define :destroy_form_submission, action: :destroy
+    end
+
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).
     resource KilnCMS.CMS.Category do
       define :list_categories, action: :read

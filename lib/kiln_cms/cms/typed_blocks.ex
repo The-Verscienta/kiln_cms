@@ -16,7 +16,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
   accessors tolerate both.
   """
 
-  alias KilnCMS.Blocks.{Custom, Divider, Embed, Heading, Image, Quote, RichText}
+  alias KilnCMS.Blocks.{Custom, Divider, Embed, Form, Heading, Image, Quote, RichText}
   alias KilnCMS.HTMLSanitizer
 
   # Every block module in the storage union — core + plugin (D18), from the
@@ -215,6 +215,9 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp typed(:divider, id, _content, _data, _block),
     do: %Divider{id: id, _type: "divider"}
 
+  defp typed(:form, id, content, data, _block),
+    do: %Form{id: id, _type: "form", form_slug: data_str(data, "form_slug") || content}
+
   # columns, custom, and anything unmapped → the total fallback.
   defp typed(other, id, content, data, _block) do
     %Custom{
@@ -259,6 +262,9 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_legacy(%Embed{} = b), do: %{type: :embed, content: b.url, data: %{}, id: b.id}
 
   defp one_to_legacy(%Divider{} = b), do: %{type: :divider, content: nil, data: %{}, id: b.id}
+
+  defp one_to_legacy(%Form{} = b),
+    do: %{type: :form, content: b.form_slug, data: %{"form_slug" => b.form_slug}, id: b.id}
 
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}

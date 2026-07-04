@@ -296,6 +296,13 @@ defmodule KilnCMSWeb.Layouts do
     </a>
     <a
       :if={@current_user && @current_user.role == :admin}
+      href={~p"/editor/forms"}
+      class={@item}
+    >
+      {gettext("Forms")}
+    </a>
+    <a
+      :if={@current_user && @current_user.role == :admin}
       href={~p"/editor/types"}
       class={@item}
     >

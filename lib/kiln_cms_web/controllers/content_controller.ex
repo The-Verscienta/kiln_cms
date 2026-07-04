@@ -384,7 +384,22 @@ defmodule KilnCMSWeb.ContentController do
       |> Enum.map(&struct(KilnCMS.CMS.Block, &1))
 
     media = load_block_media(raw)
-    Enum.map(raw, &enrich_block(&1, media))
+    forms = load_block_forms(raw)
+    Enum.map(raw, &enrich_block(&1, media, forms))
+  end
+
+  # Batch-load the active forms referenced by form blocks (fields included),
+  # keyed by slug — inactive/unknown slugs simply don't enrich.
+  defp load_block_forms(blocks) do
+    slugs =
+      for b <- blocks,
+          to_string(b.type) == "form",
+          slug = b.data["form_slug"] || b.content,
+          is_binary(slug) and slug != "",
+          uniq: true,
+          do: slug
+
+    Map.new(slugs, &{&1, KilnCMS.Forms.get_active(&1)})
   end
 
   # Batch-load the media items referenced by image blocks (so we render one
@@ -408,11 +423,13 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  defp enrich_block(block, media) do
+  defp enrich_block(block, media, forms) do
     base = %{type: to_string(block.type), content: block.content}
 
-    case media[block.data["media_id"]] do
-      %{} = item when block.type == :image ->
+    cond do
+      block.type == :image && match?(%{}, media[block.data["media_id"]]) ->
+        item = media[block.data["media_id"]]
+
         Map.merge(base, %{
           srcset: srcset(item),
           alt: item.alt,
@@ -421,7 +438,11 @@ defmodule KilnCMSWeb.ContentController do
           focal: focal_style(item)
         })
 
-      _ ->
+      block.type == :form ->
+        # nil form (inactive/unknown slug) → the component renders nothing.
+        Map.put(base, :form, forms[block.data["form_slug"] || block.content])
+
+      true ->
         base
     end
   end

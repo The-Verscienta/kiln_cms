@@ -123,6 +123,51 @@ defmodule KilnCMSWeb.ContentControllerTest do
       refute html =~ "/uploads/f-card"
     end
 
+    test "form blocks render the live public form on-site", %{conn: conn} do
+      actor =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "fb-#{uniq()}@example.com",
+          hashed_password: "x",
+          role: :admin
+        })
+
+      form =
+        KilnCMS.CMS.create_form!(
+          %{name: "Contact", slug: "fb-#{uniq()}", description: "Say hello"},
+          actor: actor
+        )
+
+      KilnCMS.CMS.create_form_field!(
+        %{
+          form_id: form.id,
+          name: "email",
+          label: "Your email",
+          field_type: :email,
+          required: true
+        },
+        actor: actor
+      )
+
+      page =
+        page(%{
+          title: "Form Page",
+          blocks: [
+            %{type: :form, content: form.slug, data: %{"form_slug" => form.slug}, order: 0}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ ~s(action="/forms/#{form.slug}")
+      assert html =~ "Your email"
+      assert html =~ ~s(name="website")
+
+      # Deactivating the form removes it from the page entirely.
+      KilnCMS.CMS.update_form!(form, %{active: false}, authorize?: false)
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+      refute html =~ "Your email"
+    end
+
     test "sets SEO metadata in the document head", %{conn: conn} do
       page = page(%{seo_title: "Meta Title", seo_description: "A great page."})
 
