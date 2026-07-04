@@ -4,7 +4,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
   # global app env.
   use KilnCMSWeb.ConnCase, async: false
 
-  @tag :capture_log
+  @moduletag :capture_log
 
   import Phoenix.LiveViewTest
 
