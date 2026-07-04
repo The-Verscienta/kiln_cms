@@ -7,6 +7,16 @@
       "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && exec mix phx.server"],
       "port": 4000,
       "autoPort": false
+    },
+    {
+      "name": "phoenix_showcase",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=/opt/homebrew/bin:$PATH && cd examples/phoenix_showcase && exec mix phx.server"
+      ],
+      "port": 4002,
+      "autoPort": false
     }
   ]
 }
