@@ -133,6 +133,17 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
+  # Public form submissions (admin-defined forms). No CSRF — the endpoints
+  # are anonymous and fired artifacts couldn't carry a token; abuse is
+  # bounded by the honeypot + the tight :form rate bucket.
+  pipeline :public_form do
+    plug :accepts, ["html", "json"]
+    # The thank-you page is static server HTML (no scripts) — the strict
+    # browser CSP applies as-is, no per-request nonce needed.
+    plug :put_secure_browser_headers, @browser_csp_headers
+    plug KilnCMSWeb.Plugs.RateLimit, :form
+  end
+
   # Per-IP ceiling for unauthenticated infra/SEO endpoints (`/up` runs a DB
   # query; sitemap cache-misses do a table scan). Generous enough never to
   # throttle real probes/crawlers — see the `:probe` bucket.
@@ -193,6 +204,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
       live "/editor/mail", MailSettingsLive, :index
+      live "/editor/forms", FormLive, :index
 
       # Plugin admin panels (D18) — compiled in from each installed plugin's
       # `admin_routes/0`, admin-gated by this live_session like the rest.
@@ -254,9 +266,21 @@ defmodule KilnCMSWeb.Router do
 
     get "/content/:type/:slug", ArtifactController, :show
 
+    # Admin-defined form schemas, for headless frontends hydrating
+    # `data-kiln-form` placeholders (submissions POST via :public_form below).
+    get "/forms/:slug", FormController, :schema
+
     # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
     # expressible as one Ash action, so it gets a thin controller (roadmap #4).
     get "/search", SearchApiController, :index
+  end
+
+  # Public form submissions (on-site form-encoded + headless JSON).
+  scope "/", KilnCMSWeb do
+    pipe_through :public_form
+
+    post "/forms/:slug", FormController, :submit
+    post "/api/forms/:slug", FormController, :submit_json
   end
 
   scope "/preview", KilnCMSWeb do

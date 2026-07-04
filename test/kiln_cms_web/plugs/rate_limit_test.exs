@@ -29,6 +29,19 @@ defmodule KilnCMSWeb.Plugs.RateLimitTest do
     assert denied.status == 429
   end
 
+  test "returns 429 when the form bucket is exceeded", %{conn: conn} do
+    suffix = rem(System.unique_integer([:positive]), 200) + 1
+    conn = Map.put(conn, :remote_ip, {10, 3, 0, suffix})
+
+    for _ <- 1..20 do
+      refute RateLimit.call(conn, :form).halted
+    end
+
+    denied = RateLimit.call(conn, :form)
+    assert denied.halted
+    assert denied.status == 429
+  end
+
   # #225: the always-on Swagger UI explorer has its own `docs` bucket.
   test "returns 429 when the docs (Swagger UI) bucket is exceeded", %{conn: conn} do
     suffix = rem(System.unique_integer([:positive]), 200) + 1

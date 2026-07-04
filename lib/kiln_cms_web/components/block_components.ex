@@ -41,6 +41,9 @@ defmodule KilnCMSWeb.BlockComponents do
           />
         <% @type == "divider" -> %>
           <hr class="border-base-300" />
+        <% @type == "form" -> %>
+          <%!-- nil form (inactive/unknown slug) renders nothing on-site. --%>
+          <.public_form :if={@block[:form]} form={@block[:form]} />
         <% @type == "embed" -> %>
           <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
             <iframe
@@ -57,4 +60,82 @@ defmodule KilnCMSWeb.BlockComponents do
     </div>
     """
   end
+
+  # The live public form for a form block (see `KilnCMS.CMS.Form`): one input
+  # per admin-defined field, a visually-hidden honeypot, POSTing to
+  # /forms/<slug> (no CSRF — the endpoint is anonymous and honeypot +
+  # rate-limited, and fired artifacts couldn't carry a token anyway).
+  attr :form, :map, required: true
+
+  defp public_form(assigns) do
+    ~H"""
+    <form
+      method="post"
+      action={"/forms/" <> @form.slug}
+      class="kiln-form space-y-4 rounded-lg border border-base-300 p-4"
+    >
+      <p :if={@form.description} class="text-sm text-base-content/70">{@form.description}</p>
+
+      <%!-- Honeypot: hidden from humans, irresistible to bots. --%>
+      <div style="position:absolute;left:-9999px" aria-hidden="true">
+        <label>
+          {gettext("Leave this field empty")}
+          <input type="text" name={KilnCMS.Forms.honeypot_field()} tabindex="-1" autocomplete="off" />
+        </label>
+      </div>
+
+      <div :for={field <- @form.fields}>
+        <label :if={field.field_type != :boolean} class="mb-1 block text-sm font-medium">
+          {field.label}
+          <span :if={field.required} aria-hidden="true" class="text-error">*</span>
+        </label>
+
+        <%= case field.field_type do %>
+          <% :text -> %>
+            <textarea
+              name={field.name}
+              required={field.required}
+              class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+            ></textarea>
+          <% :select -> %>
+            <select
+              name={field.name}
+              required={field.required}
+              class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+            >
+              <option value="">—</option>
+              <option :for={opt <- field.options} value={opt}>{opt}</option>
+            </select>
+          <% :boolean -> %>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="hidden" name={field.name} value="false" />
+              <input type="checkbox" name={field.name} value="true" />
+              <span class="font-medium">{field.label}</span>
+            </label>
+          <% other -> %>
+            <input
+              type={form_input_type(other)}
+              name={field.name}
+              required={field.required}
+              class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+            />
+        <% end %>
+
+        <p :if={field.help_text} class="mt-1 text-xs text-base-content/60">{field.help_text}</p>
+      </div>
+
+      <button
+        type="submit"
+        class="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-content"
+      >
+        {gettext("Submit")}
+      </button>
+    </form>
+    """
+  end
+
+  defp form_input_type(:email), do: "email"
+  defp form_input_type(:integer), do: "number"
+  defp form_input_type(:date), do: "date"
+  defp form_input_type(_), do: "text"
 end

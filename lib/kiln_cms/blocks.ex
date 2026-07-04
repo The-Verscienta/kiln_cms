@@ -19,6 +19,7 @@ defmodule KilnCMS.Blocks do
     quote: KilnCMS.Blocks.Quote,
     embed: KilnCMS.Blocks.Embed,
     divider: KilnCMS.Blocks.Divider,
+    form: KilnCMS.Blocks.Form,
     custom: KilnCMS.Blocks.Custom
   ]
 

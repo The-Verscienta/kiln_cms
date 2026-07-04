@@ -12,6 +12,9 @@ defmodule KilnCMSWeb.RateLimit do
     delivery: {300, :timer.minutes(1)},
     # Signed preview links — tight, to slow token enumeration / draft scraping.
     preview: {30, :timer.minutes(1)},
+    # Public form submissions — tight per IP; a human fills a handful of
+    # forms a minute, a spammer fills hundreds.
+    form: {20, :timer.minutes(1)},
     # Always-on Swagger UI explorer (#225) — generous for human browsing, caps
     # crawler/abuse traffic against the docs UI.
     docs: {60, :timer.minutes(1)},
