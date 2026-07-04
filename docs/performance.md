@@ -41,22 +41,28 @@ These are origin-side targets (excluding network/CDN). The delivery path is desi
 ## Oban queues & pool sizing
 
 Workers are split by workload so a bulk publish or embedding backfill can't starve mail or
-the cron publish/purge triggers (`config/config.exs`):
+the cron triggers (`config/config.exs`):
 
 ```elixir
-queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, default: 10]
+queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, default: 10]
 ```
 
-| Queue      | Workers                                                |
-| ---------- | ----------------------------------------------------- |
-| `firing`   | `FireWorker`, `RefireWorker`                           |
-| `search`   | `EmbeddingWorker`, `BlockEmbeddingWorker`, `MeilisearchWorker` |
-| `mail`     | `WorkflowMailWorker`                                   |
-| `media`    | `VariantWorker`                                        |
-| `webhooks` | `DeliveryWorker`                                       |
-| `default`  | AshOban triggers (scheduled publish, trash purge)      |
+| Queue        | Workers                                                |
+| ------------ | ----------------------------------------------------- |
+| `firing`     | `FireWorker`, `RefireWorker`                           |
+| `search`     | `EmbeddingWorker`, `BlockEmbeddingWorker`, `MeilisearchWorker` |
+| `mail`       | `WorkflowMailWorker`                                   |
+| `media`      | `VariantWorker`                                        |
+| `webhooks`   | `DeliveryWorker`                                       |
+| `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
+| `default`    | Daily AshOban triggers (trash purge, untitled sweep)   |
 
-**Pool sizing.** Total worker concurrency above is ~29, all sharing the Ecto pool with web
+The `scheduling` queue is isolated because its triggers run on a `* * * * *` cron: if they
+share `default` with bulk publish/embedding work, the scheduler and worker jobs can sit queued
+longer than their one-minute cadence, drifting scheduled publish/unpublish past their target
+time.
+
+**Pool sizing.** Total worker concurrency above is ~34, all sharing the Ecto pool with web
 requests. Size `POOL_SIZE` (in `config/runtime.exs`) so jobs and web requests don't starve
 each other:
 

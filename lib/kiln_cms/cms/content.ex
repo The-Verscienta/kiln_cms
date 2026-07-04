@@ -504,7 +504,7 @@ defmodule KilnCMS.CMS.Content do
         triggers do
           trigger :publish_scheduled do
             action :publish_scheduled
-            queue :default
+            queue :scheduling
             scheduler_cron "* * * * *"
 
             where expr(
@@ -522,7 +522,7 @@ defmodule KilnCMS.CMS.Content do
           # publishing).
           trigger :unpublish_scheduled do
             action :unpublish_scheduled
-            queue :default
+            queue :scheduling
             scheduler_cron "* * * * *"
 
             where expr(
