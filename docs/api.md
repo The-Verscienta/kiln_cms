@@ -30,6 +30,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **JSON:API**           | `/api/json`                       | Structured, filterable reads of Page/Post/MediaItem.  | [json-api.md](json-api.md) |
 | **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](../examples/README.md) |
+| **Locales**            | `GET /api/locales`                | Discover configured content locales + the default.    | [§ Locale discovery](#locale-discovery) |
 | **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
 | **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [§ Webhooks](#webhooks) |
 | **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
@@ -99,6 +100,33 @@ strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 token = user.__metadata__.token
 ```
 
+### API keys (third-party read access)
+
+For unattended integrators (a build pipeline, another app), issue a long-lived
+**API key** instead of sharing user credentials. An admin mints keys at
+**`/editor/api-keys`**; the plaintext is shown **once** at creation (only a hash
+is stored) and looks like `kiln_<base62>_<crc>`.
+
+Send it on the same `Authorization: Bearer` header — the `kiln_` prefix tells it
+apart from a JWT:
+
+```bash
+curl -s 'http://localhost:4000/api/json/posts' \
+  -H 'accept: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+- A key **authenticates as its owning user**, inheriting that user's read scope
+  (role + audiences). For public-content-only access, mint the key on a `:viewer`
+  account.
+- Keys are **read-only**: the headless surface exposes only reads, and any
+  mutation attempted with a key is forbidden at the policy layer regardless of
+  the owner's role.
+- Keys always **expire** and can be **revoked** immediately from the admin UI; an
+  expired/revoked key returns **401**.
+- Works on both JSON:API (`/api/json`) and GraphQL (`/gql`, incl. the
+  subscription WebSocket via the `token` connection param).
+
 ### Reading drafts
 
 A bearer token widens the **`:read` and `:search`** policies for editors/admins,
@@ -153,6 +181,22 @@ curl -s 'http://localhost:4000/api/json/posts?filter[state]=draft' \
   -H 'authorization: Bearer <token>'
 ```
 
+## Locale discovery
+
+`GET /api/locales` returns the site's configured content locales and the
+default, so a headless frontend can build a locale switcher or hreflang set
+without hard-coding the language configuration. No auth required; the response
+is cacheable (`Cache-Control: public, max-age=300`) since locales change only on
+redeploy.
+
+```bash
+curl -s http://localhost:4000/api/locales
+# {"default":"en","locales":["en","fr"]}
+```
+
+Pass the returned codes as the `locale` argument/param to the other surfaces
+(`GET /api/content/:type/:slug?locale=fr`, `postBySlug(slug:, locale:)`, etc.).
+
 ## Webhooks
 
 Admins register receivers in the editor UI (`/editor/webhooks`); each endpoint
@@ -180,6 +224,25 @@ configurable (`config :kiln_cms, KilnCMS.Webhooks, auto_disable_after: …` and
 (curated public fields only). The token is a stateless `Phoenix.Token` with a
 **1-hour** expiry — share a draft without granting a standing credential.
 
+## Cross-origin (CORS)
+
+The headless surfaces (`/api/*` and `/gql`) support CORS so a browser client on
+another origin — a decoupled SPA, browser-side `fetch`, a third-party
+integrator — can read them. Authentication is header-based (bearer token or API
+key), never cookies, so no ambient credentials are exposed.
+
+Allowed origins come from the `CORS_ORIGINS` env var, resolved at runtime:
+
+| `CORS_ORIGINS`                         | Effect                                             |
+|----------------------------------------|----------------------------------------------------|
+| *(unset, production default)*          | Same-origin only — no cross-origin reads.          |
+| `*`                                    | Echo any origin (dev default).                     |
+| `https://a.example,https://b.example`  | Allowlist of exact origins (comma-separated).      |
+
+Preflight `OPTIONS` requests are answered ahead of routing and are **not**
+counted against the caller's rate-limit budget. Browser/HTML routes are
+unaffected — CORS applies to the API paths only.
+
 ## Rate limits
 
 API and auth endpoints are rate-limited per client IP (Hammer fixed window).
@@ -187,7 +250,7 @@ Over the limit returns **429** with a `retry-after` header.
 
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
-| `api`  | `/api/json/*` and `GET /api/content/:type/:slug` (fired artifacts) | 120 requests / minute |
+| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search` | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 20 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |

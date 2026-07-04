@@ -87,6 +87,7 @@ defmodule KilnCMS.MixProject do
       {:ecto_sql, "~> 3.13"},
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
+      {:corsica, "~> 2.1"},
       {:html_sanitize_ex, "~> 1.4"},
       {:cachex, "~> 4.0"},
       {:image, "~> 0.69"},
