@@ -49,6 +49,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.DisableGraphqlIntrospection
     plug :load_from_bearer
     plug :set_actor, :user
+    # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
+    plug KilnCMSWeb.Plugs.ApiKeyAuth
     plug AshGraphql.Plug
   end
 
@@ -82,6 +84,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :api
     plug :load_from_bearer
     plug :set_actor, :user
+    # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
+    plug KilnCMSWeb.Plugs.ApiKeyAuth
   end
 
   # Headless sign-in — exchanges credentials for a bearer token (issue #37).
@@ -205,6 +209,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor/types", TypeDefinitionLive, :index
       live "/editor/mail", MailSettingsLive, :index
       live "/editor/forms", FormLive, :index
+      live "/editor/api-keys", ApiKeyLive, :index
 
       # Plugin admin panels (D18) — compiled in from each installed plugin's
       # `admin_routes/0`, admin-gated by this live_session like the rest.
@@ -265,6 +270,10 @@ defmodule KilnCMSWeb.Router do
     pipe_through :api
 
     get "/content/:type/:slug", ArtifactController, :show
+
+    # Locale discovery — lets a headless consumer build a locale switcher /
+    # hreflang set without hard-coding the site's configured languages.
+    get "/locales", LocalesController, :index
 
     # Admin-defined form schemas, for headless frontends hydrating
     # `data-kiln-form` placeholders (submissions POST via :public_form below).

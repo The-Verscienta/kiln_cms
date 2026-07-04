@@ -63,6 +63,14 @@ defmodule KilnCMS.Accounts.User do
       end
 
       remember_me :remember_me
+
+      # Third-party / headless read access. A key signs in as this user, so it
+      # inherits the user's read scope; the relationship below is pre-filtered to
+      # non-revoked, unexpired keys. See KilnCMS.Accounts.ApiKey.
+      api_key :api_key do
+        api_key_relationship :valid_api_keys
+        api_key_hash_attribute :api_key_hash
+      end
     end
   end
 
@@ -115,6 +123,15 @@ defmodule KilnCMS.Accounts.User do
       argument :subject, :string, allow_nil?: false
       get? true
       prepare AshAuthentication.Preparations.FilterBySubject
+    end
+
+    # Sign in via an API key (`api_key` strategy). Resolves the presented key to
+    # its owning user and stamps `using_api_key?` metadata, which the content
+    # policy reads to keep API-key actors read-only.
+    read :sign_in_with_api_key do
+      description "Authenticate a request presenting a valid API key."
+      argument :api_key, :string, allow_nil?: false, sensitive?: true
+      prepare AshAuthentication.Strategy.ApiKey.SignInPreparation
     end
 
     # Set the public display name (used as the JSON-LD author byline). A user can
@@ -445,6 +462,12 @@ defmodule KilnCMS.Accounts.User do
 
     has_many :authored_posts, KilnCMS.CMS.Post do
       destination_attribute :author_id
+    end
+
+    # The `api_key` strategy trusts this relationship to be *valid* keys only, so
+    # revoked/expired keys are filtered out here (not at sign-in time).
+    has_many :valid_api_keys, KilnCMS.Accounts.ApiKey do
+      filter expr(is_nil(revoked_at) and expires_at > now())
     end
   end
 

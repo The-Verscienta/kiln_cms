@@ -59,6 +59,17 @@ if otlp_endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
     otlp_endpoint: otlp_endpoint
 end
 
+# ## Cross-origin (CORS) for the headless API surfaces
+#
+# Set CORS_ORIGINS to allow browser clients from other origins to read
+# `/api/*` and `/gql` (comma-separated allowlist, or `*` to echo any origin).
+# Only overrides the per-env default when the var is present, so dev keeps its
+# permissive default and prod stays same-origin-only (`[]`) unless configured.
+# See KilnCMSWeb.CORS.
+if cors_origins = System.get_env("CORS_ORIGINS") do
+  config :kiln_cms, :cors_origins, KilnCMSWeb.CORS.parse_env(cors_origins)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

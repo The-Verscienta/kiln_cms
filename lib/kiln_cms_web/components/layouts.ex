@@ -308,6 +308,13 @@ defmodule KilnCMSWeb.Layouts do
     >
       {gettext("Types")}
     </a>
+    <a
+      :if={@current_user && @current_user.role == :admin}
+      href={~p"/editor/api-keys"}
+      class={@item}
+    >
+      {gettext("API keys")}
+    </a>
     <%!-- Plugin-contributed nav (D18), each gated by its declared role. --%>
     <a
       :for={item <- Kiln.Plugins.nav_items()}

@@ -12,6 +12,16 @@ defmodule KilnCMS.Accounts do
   resources do
     resource KilnCMS.Accounts.Token
 
+    # API keys for third-party / headless read access (admin-managed). Pass
+    # `actor: admin` — the resource policies restrict management to admins.
+    resource KilnCMS.Accounts.ApiKey do
+      define :mint_api_key, action: :create, args: [:user_id, :name, :expires_at]
+      define :list_api_keys, action: :for_user, args: [:user_id]
+      define :list_all_api_keys, action: :read
+      define :get_api_key, action: :read, get_by: [:id]
+      define :revoke_api_key, action: :revoke
+    end
+
     resource KilnCMS.Accounts.User do
       define :list_users, action: :read
       define :get_user_by_email, action: :get_by_email, args: [:email]

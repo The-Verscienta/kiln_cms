@@ -101,6 +101,11 @@ defmodule KilnCMSWeb.Endpoint do
   # double-report). See KilnCMS.Application.setup_observability/0.
   plug Sentry.PlugContext
 
+  # CORS for the headless API surfaces (`/api/*`, `/gql`). Ahead of the router so
+  # it can answer preflight `OPTIONS` requests, which never match a `get`/`post`
+  # route. Scoped to API paths — browser pages stay same-origin.
+  plug KilnCMSWeb.Plugs.ApiCORS
+
   plug KilnCMSWeb.Router
 
   # Force user-uploaded media to download rather than render inline, and disable

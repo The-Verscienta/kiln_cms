@@ -108,3 +108,8 @@ config :kiln_cms, :collab_prototype, true
 # All localized UI locales enabled in dev so the fr/es translations can be
 # exercised locally (prod opts in via its own config).
 config :kiln_cms, :i18n, default_locale: "en", locales: ["en", "fr", "es"]
+
+# Allow any origin to hit the headless API in dev, so a locally-run decoupled
+# frontend (e.g. the Phoenix showcase on :4002, or a browser SPA) can consume it
+# without extra setup. Prod stays same-origin-only unless CORS_ORIGINS is set.
+config :kiln_cms, :cors_origins, :all

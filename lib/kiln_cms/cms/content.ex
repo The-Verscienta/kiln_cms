@@ -976,6 +976,15 @@ defmodule KilnCMS.CMS.Content do
           authorize_if always()
         end
 
+        # API keys grant **read-only** access (headless/third-party delivery).
+        # Even a key minted on an editor/admin account can never mutate content —
+        # this runs before the admin bypass below so it isn't short-circuited.
+        # Defense-in-depth: the headless HTTP surface exposes only reads anyway.
+        policy action_type([:create, :update, :destroy]) do
+          forbid_if AshAuthentication.Checks.UsingApiKey
+          authorize_if always()
+        end
+
         # Admins may do anything.
         bypass actor_attribute_equals(:role, :admin) do
           authorize_if always()
