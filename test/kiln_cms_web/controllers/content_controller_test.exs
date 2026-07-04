@@ -84,6 +84,45 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ ~s(width="1600")
     end
 
+    test "focal point flows to object-position; cropped variants stay out of srcset", %{
+      conn: conn
+    } do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "f.jpg",
+          url: "/uploads/f-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          focal_x: 0.2,
+          focal_y: 0.8,
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/f-thumb",
+              "width" => 400,
+              "height" => 267
+            },
+            # A focal-aware crop: different aspect — must NOT enter the srcset.
+            "card" => %{"key" => "c", "url" => "/uploads/f-card", "width" => 800, "height" => 450}
+          }
+        })
+
+      page =
+        page(%{
+          title: "Focal Page",
+          blocks: [
+            %{type: :image, content: "/uploads/f-orig", data: %{"media_id" => media.id}, order: 0}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ ~s(style="object-position: 20% 80%")
+      assert html =~ "/uploads/f-thumb 400w"
+      refute html =~ "/uploads/f-card"
+    end
+
     test "sets SEO metadata in the document head", %{conn: conn} do
       page = page(%{seo_title: "Meta Title", seo_description: "A great page."})
 

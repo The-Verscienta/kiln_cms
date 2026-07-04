@@ -417,7 +417,8 @@ defmodule KilnCMSWeb.ContentController do
           srcset: srcset(item),
           alt: item.alt,
           width: item.width,
-          height: item.height
+          height: item.height,
+          focal: focal_style(item)
         })
 
       _ ->
@@ -425,11 +426,26 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # `object-position` from the media item's focal point, so any theme (or the
+  # inline styles below) cropping via `object-fit` keeps the subject in frame.
+  # Omitted at the default center — no styling noise for untouched media.
+  defp focal_style(%{focal_x: x, focal_y: y})
+       when is_number(x) and is_number(y) and (x != 0.5 or y != 0.5) do
+    "object-position: #{round(x * 100)}% #{round(y * 100)}%"
+  end
+
+  defp focal_style(_item), do: nil
+
   # Builds an `srcset` value from a media item's variants plus the original,
   # e.g. "/uploads/thumb 400w, /uploads/medium 1024w, /uploads/orig 1600w".
+  # Cropped variants (different aspect ratio) are excluded — they're for
+  # consumers that ask for that framing by label, not for responsive scaling.
   defp srcset(item) do
+    cropped = KilnCMS.ImageProcessor.cropped_labels()
+
     variant_parts =
-      for {_label, %{"url" => url, "width" => w}} <- item.variants || %{},
+      for {label, %{"url" => url, "width" => w}} <- item.variants || %{},
+          label not in cropped,
           safe = KilnCMS.HTMLSanitizer.safe_image_src(url),
           is_binary(safe),
           do: "#{safe} #{w}w"

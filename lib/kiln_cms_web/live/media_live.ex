@@ -179,6 +179,38 @@ defmodule KilnCMSWeb.MediaLive do
   def handle_event("close", _params, socket),
     do: {:noreply, push_patch(socket, to: media_path(socket.assigns.query, nil))}
 
+  # Click on the focal editor: move the point the focal-aware crops center on.
+  def handle_event("set_focal", %{"x" => x, "y" => y}, socket)
+      when is_number(x) and is_number(y) do
+    case KilnCMS.Media.Transform.set_focal_point(socket.assigns.selected, x, y,
+           actor: socket.assigns.actor
+         ) do
+      {:ok, item} -> {:noreply, socket |> assign(:selected, item) |> reload_media()}
+      _error -> {:noreply, put_flash(socket, :error, gettext("Couldn't set the focal point."))}
+    end
+  end
+
+  # Rotate/flip the original (a new file — the previous one keeps serving
+  # already-published snapshots), then variants regenerate in the background.
+  def handle_event("transform", %{"op" => op}, socket)
+      when op in ~w(rotate_left rotate_right flip_horizontal flip_vertical) do
+    case KilnCMS.Media.Transform.apply(
+           socket.assigns.selected,
+           String.to_existing_atom(op),
+           actor: socket.assigns.actor
+         ) do
+      {:ok, item} ->
+        {:noreply,
+         socket
+         |> assign(:selected, item)
+         |> reload_media()
+         |> put_flash(:info, gettext("Image updated — variants are regenerating."))}
+
+      _error ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't edit that image."))}
+    end
+  end
+
   def handle_event("save_meta", %{"alt" => alt, "caption" => caption}, socket) do
     actor = socket.assigns.actor
 
@@ -743,11 +775,52 @@ defmodule KilnCMSWeb.MediaLive do
           </button>
         </div>
 
+        <%!-- Raster images get the focal-point editor: click the preview to
+             move the point crops center on. Non-images keep a plain preview. --%>
+        <div :if={@item.width} class="mt-4 flex justify-center">
+          <div
+            id={"focal-editor-#{@item.id}"}
+            phx-hook="FocalPoint"
+            class="relative inline-block cursor-crosshair"
+            title={gettext("Click to set the focal point")}
+          >
+            <img src={@item.url} alt={@item.alt || @item.filename} class="block max-h-64 rounded" />
+            <span
+              class="pointer-events-none absolute -ml-2 -mt-2 size-4 rounded-full border-2 border-white bg-primary/70 shadow"
+              style={"left: #{(@item.focal_x || 0.5) * 100}%; top: #{(@item.focal_y || 0.5) * 100}%"}
+            />
+          </div>
+        </div>
         <img
+          :if={!@item.width}
           src={@item.url}
           alt={@item.alt || @item.filename}
           class="mt-4 max-h-64 w-full rounded object-contain"
         />
+
+        <div :if={@item.width} class="mt-2 flex flex-wrap items-center justify-center gap-1">
+          <button
+            :for={
+              {op, label, icon} <- [
+                {"rotate_left", gettext("Rotate left"), "hero-arrow-uturn-left"},
+                {"rotate_right", gettext("Rotate right"), "hero-arrow-uturn-right"},
+                {"flip_horizontal", gettext("Flip horizontally"), "hero-arrows-right-left"},
+                {"flip_vertical", gettext("Flip vertically"), "hero-arrows-up-down"}
+              ]
+            }
+            type="button"
+            phx-click="transform"
+            phx-value-op={op}
+            title={label}
+            aria-label={label}
+            class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+          >
+            <.icon name={icon} class="size-4" />
+          </button>
+          <span class="ml-1 text-[10px] text-base-content/50">
+            {gettext("Edits keep the previous file for already-published content.")}
+          </span>
+        </div>
 
         <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-base-content/70">
           <dt class="text-base-content/70">{gettext("Type")}</dt>

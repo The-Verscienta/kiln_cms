@@ -19,15 +19,96 @@ defmodule KilnCMS.ImageProcessorTest do
   test "generates downscaled variants and never upscales", %{path: path} do
     {:ok, %{variants: variants}} = ImageProcessor.process(path, ".png")
 
-    # Source is 1200px wide: both targets (400, 1024) are smaller, so both run.
+    # Source is 1200px wide: both targets (400, 1024) are smaller, so both
+    # run — plus the focal-aware 16:9 card crop (source covers 800×450).
     by_label = Map.new(variants, &{&1.label, &1})
-    assert Map.keys(by_label) |> Enum.sort() == ["medium", "thumb"]
+    assert Map.keys(by_label) |> Enum.sort() == ["card", "medium", "thumb"]
 
     assert by_label["thumb"].width == 400
     assert by_label["medium"].width == 1024
+    assert by_label["card"].width == 800
+    assert by_label["card"].height == 450
     assert File.exists?(by_label["thumb"].path)
 
     Enum.each(variants, &File.rm(&1.path))
+  end
+
+  describe "focal-aware card crop" do
+    # An 800×800 image, black except a white square at the very top. A 16:9
+    # card crop of a square source keeps the full width and crops vertically —
+    # so where the window lands shows up as brightness (the mark in or out).
+    defp marked_image do
+      path = Path.join(System.tmp_dir!(), "focal-#{System.unique_integer([:positive])}.png")
+      {:ok, base} = Image.new(800, 800, color: :black)
+      {:ok, mark} = Image.new(120, 120, color: :white)
+      {:ok, marked} = Image.compose(base, mark, x: 340, y: 0)
+      {:ok, _} = Image.write(marked, path)
+      path
+    end
+
+    defp average_brightness(path) do
+      {:ok, image} = Image.open(path)
+      image |> Image.average() |> List.first() |> round()
+    end
+
+    test "the crop window follows the focal point (clamped to the bounds)" do
+      path = marked_image()
+      on_exit(fn -> File.rm(path) end)
+
+      # Focal on the top mark (clamped to the top edge)…
+      {:ok, %{variants: focused}} = ImageProcessor.process(path, ".png", %{x: 0.5, y: 0.05})
+      # …vs the default center, whose 450px window (175..625) misses the mark.
+      {:ok, %{variants: centered}} = ImageProcessor.process(path, ".png", %{x: 0.5, y: 0.5})
+
+      focused_card = Enum.find(focused, &(&1.label == "card"))
+      centered_card = Enum.find(centered, &(&1.label == "card"))
+
+      assert average_brightness(focused_card.path) > average_brightness(centered_card.path)
+      assert average_brightness(centered_card.path) == 0
+
+      Enum.each(focused ++ centered, &File.rm(&1.path))
+    end
+
+    test "no crop when the source is smaller than the target box" do
+      small = Path.join(System.tmp_dir!(), "small-#{System.unique_integer([:positive])}.png")
+      {:ok, image} = Image.new(600, 400, color: :red)
+      {:ok, _} = Image.write(image, small)
+      on_exit(fn -> File.rm(small) end)
+
+      {:ok, %{variants: variants}} = ImageProcessor.process(small, ".png")
+      refute Enum.any?(variants, &(&1.label == "card"))
+
+      Enum.each(variants, &File.rm(&1.path))
+    end
+
+    test "cropped labels are published for srcset exclusion" do
+      assert "card" in ImageProcessor.cropped_labels()
+    end
+  end
+
+  describe "transform/3" do
+    test "rotation swaps the dimensions", %{path: path} do
+      assert {:ok, %{path: out, width: 800, height: 1200}} =
+               ImageProcessor.transform(path, ".png", :rotate_right)
+
+      assert File.exists?(out)
+      File.rm(out)
+    end
+
+    test "flips keep the dimensions", %{path: path} do
+      assert {:ok, %{path: out, width: 1200, height: 800}} =
+               ImageProcessor.transform(path, ".png", :flip_horizontal)
+
+      File.rm(out)
+    end
+
+    test "returns an error for non-image input" do
+      bad = Path.join(System.tmp_dir!(), "bad-#{System.unique_integer([:positive])}.png")
+      File.write!(bad, "not an image")
+      on_exit(fn -> File.rm(bad) end)
+
+      assert {:error, _} = ImageProcessor.transform(bad, ".png", :rotate_left)
+    end
   end
 
   test "validate_upload/1 accepts a readable raster image", %{path: path} do
