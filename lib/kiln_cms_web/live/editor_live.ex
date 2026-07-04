@@ -369,7 +369,7 @@ defmodule KilnCMSWeb.EditorLive do
 
       <div class="space-y-5">
         <div>
-          <h2 class="text-xl font-semibold tracking-tight">{gettext("Content")}</h2>
+          <h1 class="text-xl font-semibold tracking-tight">{gettext("Content")}</h1>
           <p class="text-sm text-base-content/60">
             {gettext("Pages, posts and custom types across your site.")}
           </p>

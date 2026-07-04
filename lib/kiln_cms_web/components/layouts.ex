@@ -194,9 +194,12 @@ defmodule KilnCMSWeb.Layouts do
             <.icon name="hero-bars-3" class="size-5" />
             <span class="sr-only">{gettext("Menu")}</span>
           </label>
-          <h1 :if={@page_title} class="truncate text-sm font-semibold tracking-tight">
+          <%!-- Chrome label, not a heading: each page body owns the single <h1>
+                (its main heading), so this stays a plain element to preserve
+                one-h1-per-page (regression #174). --%>
+          <div :if={@page_title} class="truncate text-sm font-semibold tracking-tight">
             {@page_title}
-          </h1>
+          </div>
           <div class="ml-auto flex items-center gap-2">
             <.link
               navigate={~p"/editor/search"}
