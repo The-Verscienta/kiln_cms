@@ -120,6 +120,23 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   `NULL`), and a record whose stored value has another JSON type simply
   doesn't match — it can't error the query.
 
+**Cross-field OR** — the reserved keys `or` and `and` take a *list* of nested
+condition groups. Fields inside a group AND together; groups nest (up to 5
+deep) and compose with sibling field conditions:
+
+```
+# price > 10 OR color = red
+GET /api/json/posts?custom_filter[or][0][price][gt]=10&custom_filter[or][1][color]=red
+
+# locale = en AND (in_stock = true OR price < 5)
+GET /api/json/posts?filter[locale]=en&custom_filter[or][0][in_stock]=true&custom_filter[or][1][price][lt]=5
+```
+
+GraphQL takes the same shape as JSON:
+`customFilter: "{\"or\":[{\"price\":{\"gt\":10}},{\"color\":\"red\"}]}"`.
+Because `or`/`and` are combinator keys, they're rejected as custom-field
+*names* when defining fields.
+
 **Sorting** — `custom_sort=<name>` (ascending) or `custom_sort=-<name>`,
 comma-separated for multi-key. Records lacking the field always sort last.
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but

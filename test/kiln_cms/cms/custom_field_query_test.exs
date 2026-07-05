@@ -173,6 +173,114 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
     end
   end
 
+  describe "cross-field OR (or/and combinator groups)" do
+    test "or matches rows satisfying either field's condition" do
+      admin = admin()
+      price = field_name("price")
+      color = field_name("color")
+      define!(%{name: price, field_type: :integer}, admin)
+      define!(%{name: color, field_type: :string}, admin)
+
+      dear = page!(%{price => 30, color => "blue"}, admin)
+      red = page!(%{price => 5, color => "red"}, admin)
+      _neither = page!(%{price => 5, color => "blue"}, admin)
+
+      filter = %{"or" => [%{price => %{"gt" => "10"}}, %{color => "red"}]}
+
+      assert %{custom_filter: filter}
+             |> list_ids!(admin)
+             |> Enum.sort() == Enum.sort([dear.id, red.id])
+    end
+
+    test "fields inside a branch AND together; groups nest" do
+      admin = admin()
+      price = field_name("price")
+      color = field_name("color")
+      organic = field_name("organic")
+      define!(%{name: price, field_type: :integer}, admin)
+      define!(%{name: color, field_type: :string}, admin)
+      define!(%{name: organic, field_type: :boolean}, admin)
+
+      # (price > 10 AND color = blue) OR (organic AND price < 5)
+      match_branch1 = page!(%{price => 30, color => "blue", organic => false}, admin)
+      match_branch2 = page!(%{price => 2, color => "red", organic => true}, admin)
+      _cheap_blue = page!(%{price => 2, color => "blue", organic => false}, admin)
+      _dear_red = page!(%{price => 30, color => "red", organic => false}, admin)
+
+      filter = %{
+        "or" => [
+          %{price => %{"gt" => "10"}, color => "blue"},
+          %{"and" => [%{organic => "true"}, %{price => %{"lt" => "5"}}]}
+        ]
+      }
+
+      assert %{custom_filter: filter}
+             |> list_ids!(admin)
+             |> Enum.sort() == Enum.sort([match_branch1.id, match_branch2.id])
+    end
+
+    test "an or group composes with sibling field conditions (ANDed)" do
+      admin = admin()
+      price = field_name("price")
+      color = field_name("color")
+      define!(%{name: price, field_type: :integer}, admin)
+      define!(%{name: color, field_type: :string}, admin)
+
+      match = page!(%{price => 30, color => "red"}, admin)
+      _wrong_color = page!(%{price => 30, color => "blue"}, admin)
+      cheap_red = page!(%{price => 2, color => "red"}, admin)
+
+      # color = red AND (price > 10 OR price < 5)
+      filter = %{
+        color => "red",
+        "or" => [%{price => %{"gt" => "10"}}, %{price => %{"lt" => "5"}}]
+      }
+
+      assert %{custom_filter: filter}
+             |> list_ids!(admin)
+             |> Enum.sort() == Enum.sort([match.id, cheap_red.id])
+    end
+
+    test "malformed combinators are rejected" do
+      admin = admin()
+      price = field_name("price")
+      define!(%{name: price, field_type: :integer}, admin)
+
+      assert_invalid(
+        %{custom_filter: %{"or" => "nonsense"}},
+        admin,
+        "takes a non-empty list of condition groups"
+      )
+
+      assert_invalid(
+        %{custom_filter: %{"or" => []}},
+        admin,
+        "needs at least one condition group"
+      )
+
+      assert_invalid(
+        %{custom_filter: %{"or" => [%{}]}},
+        admin,
+        "each or branch needs a condition"
+      )
+
+      assert_invalid(
+        %{custom_filter: %{"or" => [%{field_name("ghost") => "x"}]}},
+        admin,
+        "unknown custom field"
+      )
+
+      too_deep =
+        Enum.reduce(1..5, %{price => "1"}, fn _depth, inner -> %{"or" => [inner]} end)
+
+      assert_invalid(
+        %{custom_filter: too_deep},
+        admin,
+        "nest too deeply"
+      )
+    end
+  end
+
   describe "validation errors" do
     test "rejects unknown field names, unknown operators and uncastable values" do
       admin = admin()

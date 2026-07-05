@@ -470,6 +470,34 @@ defmodule KilnCMSWeb.JsonApiTest do
                  "/api/json/posts?custom_filter[ghost#{System.unique_integer([:positive])}]=x"
                )
     end
+
+    test "cross-field OR via indexed bracket params" do
+      admin = user(:admin)
+      unique = System.unique_integer([:positive])
+      price = "price#{unique}"
+      color = "color#{unique}"
+
+      for {name, type} <- [{price, :integer}, {color, :string}] do
+        CMS.create_field_definition!(
+          %{content_type: :post, name: name, label: name, field_type: type},
+          actor: admin
+        )
+      end
+
+      dear = published_post(%{title: "Dear", custom_fields: %{price => 30}}, admin)
+      red = published_post(%{title: "Red", custom_fields: %{price => 5, color => "red"}}, admin)
+      _plain = published_post(%{title: "Plain", custom_fields: %{price => 5}}, admin)
+
+      # Plug parses [0]/[1] into an integer-keyed map, not a list — the
+      # normalization under test.
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?custom_filter[or][0][#{price}][gt]=10" <>
+                   "&custom_filter[or][1][#{color}]=red"
+               )
+
+      assert Enum.sort(ids(body)) == Enum.sort([dear.id, red.id])
+    end
   end
 
   # Page equivalent of `published_post/2`.

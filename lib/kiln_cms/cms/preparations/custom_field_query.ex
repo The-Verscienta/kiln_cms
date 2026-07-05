@@ -11,6 +11,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     * `custom_filter` — `%{"price" => %{"gt" => "10"}, "color" => "red"}`;
       a bare value means equality, a map holds operators (`eq`, `not_eq`,
       `gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `null`). Conditions are ANDed.
+      Cross-field OR: the reserved keys `or`/`and` take a *list* of nested
+      groups — `%{"or" => [%{"price" => %{"gt" => 10}}, %{"color" => "red"}]}`
+      — recursively, capped at `@max_group_depth`. (`FieldDefinition` rejects
+      `or`/`and` as field names, so the keys can't collide.)
     * `custom_sort` — comma-separated field names, `-` prefix for descending
       (`"-price,title"`), appended to any explicit `sort` so it wins over an
       action's *default* order but not over a caller's.
@@ -122,22 +126,111 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # --- filtering ---------------------------------------------------------------
 
-  defp apply_filter(query, filter, defs) when is_map(filter) do
-    Enum.reduce(filter, query, fn {name, condition}, query ->
-      name = to_string(name)
+  # How deep `or`/`and` groups may nest (the whole filter is depth 1). A cap,
+  # not a real limit anyone should hit — it bounds adversarial nesting.
+  @max_group_depth 5
 
-      with {:ok, definition} <- resolve(defs, name),
-           {:ok, exprs} <- conditions(definition, condition) do
-        Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
-      else
-        {:error, message} -> invalid(query, :custom_filter, message)
-      end
-    end)
+  defp apply_filter(query, filter, defs) when is_map(filter) do
+    case group_condition(filter, defs, 1) do
+      {:ok, nil} -> query
+      {:ok, condition} -> Ash.Query.do_filter(query, condition)
+      {:error, message} -> invalid(query, :custom_filter, message)
+    end
   end
 
   defp apply_filter(query, _filter, _defs) do
     invalid(query, :custom_filter, "must be a map of custom field names to conditions")
   end
+
+  # One filter group: field conditions plus nested `or`/`and` combinators,
+  # ANDed together. Returns {:ok, nil} for an empty group (contributes no
+  # condition).
+  defp group_condition(_group, _defs, depth) when depth > @max_group_depth do
+    {:error, "custom_filter groups nest too deeply (max #{@max_group_depth})"}
+  end
+
+  defp group_condition(group, defs, depth) when is_map(group) do
+    Enum.reduce_while(group, {:ok, nil}, fn {key, value}, {:ok, acc} ->
+      case entry_condition(to_string(key), value, defs, depth) do
+        {:ok, condition} -> {:cont, {:ok, combine(acc, condition, :and)}}
+        {:error, _message} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp group_condition(_group, _defs, _depth) do
+    {:error, "each custom_filter group must be a map of field names to conditions"}
+  end
+
+  # `or`/`and` are reserved combinator keys (FieldDefinition rejects them as
+  # field names): a list of nested groups, OR'd/AND'd together — cross-field
+  # OR lives here. Everything else is a field condition.
+  defp entry_condition(combinator, value, defs, depth) when combinator in ["or", "and"] do
+    with {:ok, groups} <- combinator_groups(value, combinator) do
+      combine_groups(groups, combinator, defs, depth)
+    end
+  end
+
+  defp entry_condition(name, condition, defs, _depth) do
+    with {:ok, definition} <- resolve(defs, name),
+         {:ok, exprs} <- conditions(definition, condition) do
+      {:ok, Enum.reduce(exprs, nil, &combine(&2, &1, :and))}
+    end
+  end
+
+  defp combine_groups(groups, combinator, defs, depth) do
+    connective = String.to_existing_atom(combinator)
+
+    groups
+    |> Enum.reduce_while({:ok, nil}, fn group, {:ok, acc} ->
+      case branch_condition(group, combinator, defs, depth) do
+        {:ok, condition} -> {:cont, {:ok, combine(acc, condition, connective)}}
+        {:error, _message} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, nil} -> {:error, "#{combinator} needs at least one condition group"}
+      result -> result
+    end
+  end
+
+  # An empty branch would be "always true" — reject it rather than silently
+  # changing what the OR means.
+  defp branch_condition(group, combinator, defs, depth) do
+    case group_condition(group, defs, depth + 1) do
+      {:ok, nil} -> {:error, "each #{combinator} branch needs a condition"}
+      result -> result
+    end
+  end
+
+  # The nested groups of a combinator. JSON callers (GraphQL) send a real
+  # list; the query-param form (`custom_filter[or][0][price][gt]=10`) arrives
+  # as an integer-keyed map — normalize it by index order.
+  defp combinator_groups(value, _combinator) when is_list(value), do: {:ok, value}
+
+  defp combinator_groups(value, combinator) when is_map(value) and value != %{} do
+    keys = Map.keys(value)
+
+    if Enum.all?(keys, &(to_string(&1) =~ ~r/\A\d+\z/)) do
+      {:ok,
+       value
+       |> Enum.sort_by(fn {key, _group} -> String.to_integer(to_string(key)) end)
+       |> Enum.map(fn {_key, group} -> group end)}
+    else
+      {:error,
+       "#{combinator} takes a list of condition groups " <>
+         "(e.g. custom_filter[#{combinator}][0][field]=value)"}
+    end
+  end
+
+  defp combinator_groups(_value, combinator) do
+    {:error, "#{combinator} takes a non-empty list of condition groups"}
+  end
+
+  defp combine(nil, condition, _combinator), do: condition
+  defp combine(acc, nil, _combinator), do: acc
+  defp combine(acc, condition, :and), do: expr(^acc and ^condition)
+  defp combine(acc, condition, :or), do: expr(^acc or ^condition)
 
   # A bare value is an equality match; a map is `%{operator => value}`.
   defp conditions(definition, condition) when not is_map(condition) do

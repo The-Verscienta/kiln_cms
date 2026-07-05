@@ -120,9 +120,12 @@ defmodule KilnCMS.CMS.FieldDefinition do
     validate KilnCMS.CMS.Validations.KnownFieldType
 
     # `name` is the key inside the `custom_fields` map and is surfaced in the
-    # delivery API, so keep it a safe machine identifier.
-    validate match(:name, ~r/\A[a-z][a-z0-9_]*\z/) do
-      message "must be lowercase letters, digits and underscores, starting with a letter"
+    # delivery API, so keep it a safe machine identifier. `or`/`and` are
+    # excluded: they're the reserved combinator keys of the `custom_filter`
+    # query syntax (see `Preparations.CustomFieldQuery`).
+    validate match(:name, ~r/\A(?!(?:or|and)\z)[a-z][a-z0-9_]*\z/) do
+      message "must be lowercase letters, digits and underscores, starting with a letter " <>
+                "(\"or\" and \"and\" are reserved)"
     end
 
     # A :select field is meaningless without choices.

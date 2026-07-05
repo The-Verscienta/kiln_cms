@@ -72,6 +72,21 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
                )
     end
 
+    test "rejects the reserved custom_filter combinator names or/and" do
+      admin = admin()
+
+      for name <- ["or", "and"] do
+        assert {:error, _} =
+                 CMS.create_field_definition(
+                   %{content_type: :page, name: name, label: "X"},
+                   actor: admin
+                 )
+      end
+
+      # …but names merely containing them stay valid.
+      assert define!(%{name: "order_priority", label: "Order"}, admin)
+    end
+
     test "a select field requires options" do
       assert {:error, _} =
                CMS.create_field_definition(
