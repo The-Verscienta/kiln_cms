@@ -122,14 +122,19 @@ defmodule KilnCMSWeb.CalendarLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
-      <div class="mx-auto max-w-6xl space-y-4">
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:calendar}
+    >
+      <div class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h1 class="text-2xl font-semibold">{gettext("Editorial calendar")}</h1>
           <div class="flex items-center gap-2">
             <.link
               patch={~p"/editor/calendar?month=#{shift_month(@month, -1)}"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+              class="btn btn-sm btn-default"
               aria-label={gettext("Previous month")}
             >
               &larr;
@@ -137,15 +142,12 @@ defmodule KilnCMSWeb.CalendarLive do
             <span class="min-w-36 text-center text-sm font-medium">{month_label(@month)}</span>
             <.link
               patch={~p"/editor/calendar?month=#{shift_month(@month, 1)}"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+              class="btn btn-sm btn-default"
               aria-label={gettext("Next month")}
             >
               &rarr;
             </.link>
-            <.link
-              patch={~p"/editor/calendar"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
+            <.link patch={~p"/editor/calendar"} class="btn btn-sm btn-default">
               {gettext("Today")}
             </.link>
           </div>
@@ -223,7 +225,7 @@ defmodule KilnCMSWeb.CalendarLive do
           </table>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

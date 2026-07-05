@@ -121,7 +121,12 @@ defmodule KilnCMSWeb.TranslationsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:translations}
+    >
       <div class="mx-auto max-w-5xl space-y-4">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -144,21 +149,21 @@ defmodule KilnCMSWeb.TranslationsLive do
         </p>
 
         <div :if={@rows != [] and length(@locales) > 1} class="overflow-x-auto">
-          <table class="w-full text-left text-sm">
+          <table class="table">
             <thead>
-              <tr class="border-b border-base-content/15 text-xs uppercase tracking-wide text-base-content/60">
-                <th class="py-2 pr-3">{gettext("Content")}</th>
-                <th class="py-2 pr-3">{gettext("Type")}</th>
-                <th :for={locale <- @locales} class="py-2 pr-3 font-mono">{locale}</th>
+              <tr>
+                <th>{gettext("Content")}</th>
+                <th>{gettext("Type")}</th>
+                <th :for={locale <- @locales} class="font-mono">{locale}</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-base-content/5">
+            <tbody>
               <tr :for={row <- @rows} id={"row-#{row.kind}-#{row.source.id}"}>
-                <td class="max-w-64 truncate py-2 pr-3 font-medium">{row.title}</td>
-                <td class="py-2 pr-3 text-xs uppercase tracking-wide text-base-content/60">
+                <td class="max-w-64 truncate font-medium">{row.title}</td>
+                <td class="text-xs uppercase tracking-wide text-base-content/60">
                   {row.label}
                 </td>
-                <td :for={cell <- row.cells} class="py-2 pr-3">
+                <td :for={cell <- row.cells}>
                   <.link
                     :if={cell.record}
                     navigate={~p"/editor/content/#{row.kind}/#{cell.record.id}"}
@@ -196,7 +201,7 @@ defmodule KilnCMSWeb.TranslationsLive do
           </table>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

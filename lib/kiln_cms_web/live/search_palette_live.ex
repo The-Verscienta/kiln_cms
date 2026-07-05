@@ -77,7 +77,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     assigns = assign(assigns, :count, result_count(assigns.results))
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console flash={@flash} current_user={@current_user} page_title={@page_title}>
       <div class="mx-auto max-w-2xl space-y-6">
         <div>
           <h1 class="text-2xl font-semibold">{gettext("Search")}</h1>
@@ -105,7 +105,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
             autocomplete="off"
             autofocus
             phx-debounce="150"
-            class="w-full rounded-lg border border-base-content/20 bg-transparent px-4 py-2.5 text-base"
+            class="field-input text-base"
           />
         </form>
 
@@ -171,7 +171,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           </.section>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 
@@ -184,7 +184,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
       <h2 class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/70">
         {@title}
       </h2>
-      <div class="divide-y divide-base-content/5 rounded border border-base-content/10">
+      <div class="card divide-y divide-base-content/5">
         {render_slot(@inner_block)}
       </div>
     </div>

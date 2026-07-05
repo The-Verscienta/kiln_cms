@@ -208,7 +208,12 @@ defmodule KilnCMSWeb.WebhookLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:webhooks}
+    >
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -229,7 +234,7 @@ defmodule KilnCMSWeb.WebhookLive do
             id="new-webhook-form"
             phx-change="validate"
             phx-submit="create"
-            class="space-y-4 rounded-lg border border-base-content/15 p-4"
+            class="card card-pad space-y-4"
           >
             <.input
               field={@form[:url]}
@@ -256,7 +261,7 @@ defmodule KilnCMSWeb.WebhookLive do
 
           <ul
             :if={@endpoints != []}
-            class="divide-y divide-base-content/10 rounded-lg border border-base-content/15"
+            class="card divide-y divide-base-content/10 overflow-hidden"
           >
             <li :for={endpoint <- @endpoints} id={"webhook-#{endpoint.id}"} class="p-4">
               <div
@@ -306,7 +311,7 @@ defmodule KilnCMSWeb.WebhookLive do
                     type="button"
                     phx-click="ping"
                     phx-value-id={endpoint.id}
-                    class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                    class="btn btn-sm btn-default"
                   >
                     {gettext("Ping")}
                   </button>
@@ -314,7 +319,7 @@ defmodule KilnCMSWeb.WebhookLive do
                     type="button"
                     phx-click="toggle_active"
                     phx-value-id={endpoint.id}
-                    class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                    class="btn btn-sm btn-default"
                   >
                     {if endpoint.active, do: gettext("Disable"), else: gettext("Enable")}
                   </button>
@@ -322,7 +327,7 @@ defmodule KilnCMSWeb.WebhookLive do
                     type="button"
                     phx-click="edit"
                     phx-value-id={endpoint.id}
-                    class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                    class="btn btn-sm btn-default"
                   >
                     {gettext("Edit")}
                   </button>
@@ -332,7 +337,7 @@ defmodule KilnCMSWeb.WebhookLive do
                     phx-value-id={endpoint.id}
                     data-confirm={gettext("Delete this webhook? Deliveries will stop.")}
                     aria-label={gettext("Delete webhook")}
-                    class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                    class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
                   >
                     <.icon name="hero-trash" class="size-4" />
                   </button>
@@ -365,11 +370,7 @@ defmodule KilnCMSWeb.WebhookLive do
                 </fieldset>
                 <div class="flex gap-2">
                   <.button type="submit" variant="primary">{gettext("Save")}</.button>
-                  <button
-                    type="button"
-                    phx-click="cancel_edit"
-                    class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-                  >
+                  <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-default">
                     {gettext("Cancel")}
                   </button>
                 </div>
@@ -393,29 +394,29 @@ defmodule KilnCMSWeb.WebhookLive do
           </p>
 
           <div :if={@deliveries != []} class="overflow-x-auto">
-            <table class="w-full text-left text-sm">
+            <table class="table">
               <thead>
-                <tr class="border-b border-base-content/15 text-xs uppercase tracking-wide text-base-content/60">
-                  <th class="py-2 pr-3">{gettext("When")}</th>
-                  <th class="py-2 pr-3">{gettext("Event")}</th>
-                  <th class="py-2 pr-3">{gettext("Endpoint")}</th>
-                  <th class="py-2 pr-3">{gettext("Status")}</th>
-                  <th class="py-2 pr-3">{gettext("Attempts")}</th>
-                  <th class="py-2 pr-3">{gettext("HTTP")}</th>
-                  <th class="py-2 pr-3">{gettext("Error")}</th>
-                  <th class="py-2"></th>
+                <tr>
+                  <th>{gettext("When")}</th>
+                  <th>{gettext("Event")}</th>
+                  <th>{gettext("Endpoint")}</th>
+                  <th>{gettext("Status")}</th>
+                  <th>{gettext("Attempts")}</th>
+                  <th>{gettext("HTTP")}</th>
+                  <th>{gettext("Error")}</th>
+                  <th></th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-base-content/5">
+              <tbody>
                 <tr :for={delivery <- @deliveries} id={"delivery-#{delivery.id}"}>
-                  <td class="whitespace-nowrap py-2 pr-3 text-base-content/70">
+                  <td class="whitespace-nowrap text-base-content/70">
                     {Calendar.strftime(delivery.inserted_at, "%Y-%m-%d %H:%M")}
                   </td>
-                  <td class="py-2 pr-3"><code class="text-xs">{delivery.event}</code></td>
-                  <td class="max-w-48 truncate py-2 pr-3">
+                  <td><code class="text-xs">{delivery.event}</code></td>
+                  <td class="max-w-48 truncate">
                     <code class="text-xs">{delivery.endpoint && delivery.endpoint.url}</code>
                   </td>
-                  <td class="py-2 pr-3">
+                  <td>
                     <span class={[
                       "rounded px-1.5 py-0.5 text-xs font-medium",
                       delivery.status == :succeeded && "bg-success/15 text-success",
@@ -425,18 +426,18 @@ defmodule KilnCMSWeb.WebhookLive do
                       {delivery_status_label(delivery.status)}
                     </span>
                   </td>
-                  <td class="py-2 pr-3">{delivery.attempts}</td>
-                  <td class="py-2 pr-3">{delivery.last_status}</td>
-                  <td class="max-w-56 truncate py-2 pr-3 text-xs text-base-content/70">
+                  <td>{delivery.attempts}</td>
+                  <td>{delivery.last_status}</td>
+                  <td class="max-w-56 truncate text-xs text-base-content/70">
                     {delivery.last_error}
                   </td>
-                  <td class="py-2 text-right">
+                  <td class="text-right">
                     <button
                       :if={delivery.status != :pending}
                       type="button"
                       phx-click="redeliver"
                       phx-value-id={delivery.id}
-                      class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+                      class="btn btn-sm btn-default"
                     >
                       {gettext("Redeliver")}
                     </button>
@@ -447,7 +448,7 @@ defmodule KilnCMSWeb.WebhookLive do
           </div>
         </section>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 

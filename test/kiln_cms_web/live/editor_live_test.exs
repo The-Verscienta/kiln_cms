@@ -1355,16 +1355,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  # Regression for #133: every authoring LiveView must pass current_user to
-  # Layouts.app so the header shows Sign out / Editor / Settings instead of
-  # Sign in while the editor is actively working.
+  # Regression for #133: every authoring LiveView must pass current_user to the
+  # layout so the console shell shows the authenticated nav (Sign out + sidebar
+  # sections like Media / Settings) instead of Sign in while the editor works.
   describe "header navigation (current_user in layout)" do
     test "content list shows authenticated nav for a signed-in editor", %{conn: conn} do
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
       assert html =~ "Sign out"
       refute html =~ ~r/>\s*Sign in\s*</
-      assert html =~ "Editor"
+      assert html =~ "Media"
       assert html =~ "Settings"
       # #166: the icon-only theme toggle buttons are labeled.
       assert html =~ ~s(aria-label="Use dark theme")

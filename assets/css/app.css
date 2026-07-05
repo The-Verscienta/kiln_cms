@@ -137,6 +137,229 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* ===========================================================================
+   Kiln component kit — the shared design language
+   ===========================================================================
+   A small, self-owned component vocabulary that borrows DaisyUI's *naming*
+   (`btn`, `card`, `field-*`, `kbd`) without the dependency. Every rule is driven
+   by the semantic tokens above, so both themes and any brand retune flow through
+   automatically. These are the primitives the console shell and editor pages
+   compose; see docs/design-language.md for the full spec and usage rules. */
+@layer components {
+  /* ---- Buttons ---------------------------------------------------------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s,
+      box-shadow 0.15s;
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+  }
+  .btn:disabled,
+  .btn[disabled] {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .btn-sm {
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    border-radius: var(--radius-sm);
+  }
+  .btn-block {
+    width: 100%;
+  }
+  .btn-primary {
+    background: var(--color-primary);
+    color: var(--color-primary-content);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  }
+  .btn-primary:hover {
+    background: color-mix(in oklch, var(--color-primary) 88%, black);
+  }
+  .btn-default {
+    border-color: color-mix(in oklch, var(--color-base-content) 15%, transparent);
+    background: var(--color-base-100);
+    color: var(--color-base-content);
+  }
+  .btn-default:hover {
+    background: var(--color-base-200);
+    border-color: color-mix(in oklch, var(--color-base-content) 28%, transparent);
+  }
+  .btn-ghost {
+    color: color-mix(in oklch, var(--color-base-content) 78%, transparent);
+  }
+  .btn-ghost:hover {
+    background: var(--color-base-200);
+    color: var(--color-base-content);
+  }
+  .btn-danger {
+    border-color: color-mix(in oklch, var(--color-error) 40%, transparent);
+    color: var(--color-error);
+  }
+  .btn-danger:hover {
+    background: color-mix(in oklch, var(--color-error) 12%, transparent);
+  }
+
+  /* ---- Surfaces --------------------------------------------------------- */
+  /* `card` is the one raised container: a base-100 surface, hairline border,
+     large radius. Compose with `card-pad` for standard interior spacing. */
+  .card {
+    background: var(--color-base-100);
+    border: 1px solid color-mix(in oklch, var(--color-base-content) 10%, transparent);
+    border-radius: var(--radius-lg);
+  }
+  .card-pad {
+    padding: 1rem 1.25rem;
+  }
+
+  /* ---- Form fields ------------------------------------------------------ */
+  .field-input,
+  .field-select {
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in oklch, var(--color-base-content) 15%, transparent);
+    background: var(--color-base-100);
+    padding: 0.45rem 0.7rem;
+    font-size: 0.875rem;
+    color: var(--color-base-content);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field-input:focus,
+  .field-select:focus {
+    outline: none;
+    border-color: color-mix(in oklch, var(--color-primary) 55%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 18%, transparent);
+  }
+
+  /* ---- Console shell: sidebar navigation -------------------------------- */
+  .side-link {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    border-radius: var(--radius-md);
+    padding: 0.45rem 0.65rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: color-mix(in oklch, var(--color-base-content) 72%, transparent);
+    transition: background-color 0.12s, color 0.12s;
+  }
+  .side-link:hover {
+    background: var(--color-base-200);
+    color: var(--color-base-content);
+  }
+  .side-link[aria-current] {
+    background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+    color: var(--color-primary);
+  }
+  .side-section {
+    padding: 0 0.65rem;
+    margin: 1.15rem 0 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+  }
+
+  /* ---- Keyboard key ----------------------------------------------------- */
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.4rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid color-mix(in oklch, var(--color-base-content) 18%, transparent);
+    border-bottom-width: 2px;
+    background: var(--color-base-100);
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: color-mix(in oklch, var(--color-base-content) 65%, transparent);
+  }
+
+  /* ---- Tabs (segmented control) ----------------------------------------
+     A pill container with a raised active segment. Drive the active state
+     with `aria-selected="true"` (accessible + no extra class). */
+  .tabs {
+    display: inline-flex;
+    gap: 0.2rem;
+    padding: 0.2rem;
+    border-radius: var(--radius-md);
+    background: var(--color-base-200);
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: color-mix(in oklch, var(--color-base-content) 68%, transparent);
+    cursor: pointer;
+    transition: background-color 0.12s, color 0.12s, box-shadow 0.12s;
+  }
+  .tab:hover {
+    color: var(--color-base-content);
+  }
+  .tab[aria-selected="true"],
+  .tab-active {
+    background: var(--color-base-100);
+    color: var(--color-base-content);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  }
+
+  /* ---- Tables ----------------------------------------------------------
+     Apply `.table` to a raw <table> for consistent header/cell/row styling;
+     add `.table-zebra` for striped rows. Cells keep their own alignment /
+     width / color utilities; `.table` owns padding, borders and the header
+     treatment. Wrap wide tables in `overflow-x-auto` (see design-language). */
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .table th {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 12%, transparent);
+  }
+  .table td {
+    padding: 0.55rem 0.75rem;
+    vertical-align: middle;
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 8%, transparent);
+  }
+  .table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .table tbody tr:hover td {
+    background: color-mix(in oklch, var(--color-base-200) 55%, transparent);
+  }
+  .table-zebra tbody tr:nth-child(2n) td {
+    background: color-mix(in oklch, var(--color-base-200) 32%, transparent);
+  }
+}
+
 /* This file is for your main application CSS */
 
 /* TipTap (ProseMirror) rich-text editor in the block editor */

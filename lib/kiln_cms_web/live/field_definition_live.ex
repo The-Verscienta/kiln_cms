@@ -241,7 +241,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:fields}
+    >
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -262,7 +267,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             id="new-field-form"
             phx-change="validate"
             phx-submit="create"
-            class="grid gap-4 rounded-lg border border-base-content/15 p-4 sm:grid-cols-2"
+            class="card card-pad grid gap-4 sm:grid-cols-2"
           >
             <div>
               <label for="new-field-scope" class="mb-1 block text-sm font-medium">
@@ -271,7 +276,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               <select
                 id="new-field-scope"
                 name="field_definition[scope]"
-                class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+                class="field-select"
               >
                 <optgroup label={gettext("Built-in")}>
                   <option
@@ -323,7 +328,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 id="new-field-options"
                 name="field_definition[options]"
                 rows="3"
-                class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+                class="field-input"
               >{options_text(@form)}</textarea>
             </div>
             <.input field={@form[:default]} label={gettext("Default value")} />
@@ -355,7 +360,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <h3 class="text-sm font-semibold text-base-content/80">
               {group_heading(scope, @dynamic_types)}
             </h3>
-            <ul class="divide-y divide-base-content/10 rounded-lg border border-base-content/15">
+            <ul class="card divide-y divide-base-content/10">
               <li :for={definition <- definitions} id={"field-#{definition.id}"} class="p-4">
                 <div
                   :if={!editing?(@edit, definition.id)}
@@ -390,7 +395,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       type="button"
                       phx-click="edit"
                       phx-value-id={definition.id}
-                      class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                      class="btn btn-sm btn-default"
                     >
                       {gettext("Edit")}
                     </button>
@@ -445,7 +450,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       id={"edit-field-options-#{@edit.id}"}
                       name="field_definition[options]"
                       rows="3"
-                      class="w-full rounded border border-base-content/20 bg-base-100 px-3 py-2 text-sm"
+                      class="field-input"
                     >{options_text(@edit.form)}</textarea>
                   </div>
                   <.input field={@edit.form[:default]} label={gettext("Default value")} />
@@ -465,7 +470,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     <button
                       type="button"
                       phx-click="cancel_edit"
-                      class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                      class="btn btn-sm btn-default"
                     >
                       {gettext("Cancel")}
                     </button>
@@ -476,7 +481,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           </div>
         </section>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

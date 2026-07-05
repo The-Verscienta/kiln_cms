@@ -347,61 +347,32 @@ defmodule KilnCMSWeb.EditorLive do
       )
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
-      <div class="space-y-6">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h1 class="text-2xl font-semibold">{gettext("Content")}</h1>
-          <div class="flex flex-wrap items-center gap-2">
-            <%!-- Media library discoverability from the editor (#156). --%>
-            <.link
-              navigate={~p"/media"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
-              {gettext("Media")}
-            </.link>
-            <.link
-              navigate={~p"/editor/taxonomy"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
-              {gettext("Taxonomy")}
-            </.link>
-            <.link
-              navigate={~p"/editor/analytics"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
-              {gettext("Analytics")}
-            </.link>
-            <.link
-              :if={@actor.role == :admin}
-              navigate={~p"/editor/webhooks"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
-              {gettext("Webhooks")}
-            </.link>
-            <.link
-              :if={@actor.role == :admin}
-              navigate={~p"/editor/mail"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
-              {gettext("Mail")}
-            </.link>
-            <.link
-              :if={@actor.role == :admin}
-              navigate={~p"/editor/trash"}
-              class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
-            >
-              {gettext("Trash")}
-            </.link>
-            <.button
-              :for={ct <- @content_types}
-              type="button"
-              phx-click="new"
-              phx-value-kind={ct.type}
-              variant="primary"
-            >
-              {gettext("New %{type}", type: String.downcase(ct.label))}
-            </.button>
-          </div>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={gettext("Content")}
+      active={:content}
+    >
+      <:actions>
+        <.button
+          :for={ct <- @content_types}
+          type="button"
+          phx-click="new"
+          phx-value-kind={ct.type}
+          variant="primary"
+          size="sm"
+        >
+          <.icon name="hero-plus" class="size-4" />
+          {gettext("New %{type}", type: String.downcase(ct.label))}
+        </.button>
+      </:actions>
+
+      <div class="space-y-5">
+        <div>
+          <h1 class="text-xl font-semibold tracking-tight">{gettext("Content")}</h1>
+          <p class="text-sm text-base-content/60">
+            {gettext("Pages, posts and custom types across your site.")}
+          </p>
         </div>
 
         <div :if={@items != [] or @filtering?} class="flex flex-wrap items-center gap-3">
@@ -411,7 +382,7 @@ defmodule KilnCMSWeb.EditorLive do
               id="content-status-filter"
               name="status"
               aria-label={gettext("Filter by status")}
-              class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+              class="field-select w-auto"
             >
               <option :for={status <- @statuses} value={status} selected={status == @status}>
                 {status_filter_label(status)}
@@ -429,17 +400,22 @@ defmodule KilnCMSWeb.EditorLive do
               aria-label={gettext("Search by title")}
               phx-debounce="200"
               autocomplete="off"
-              class="w-full max-w-xs rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+              class="field-input max-w-xs"
             />
           </form>
         </div>
 
         <div
           :if={@items != []}
-          class="flex flex-wrap items-center gap-3 rounded border border-base-content/10 bg-base-200/40 px-3 py-2"
+          class="flex flex-wrap items-center gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-2"
         >
           <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={@all_selected?} phx-click="toggle_select_all" />
+            <input
+              type="checkbox"
+              checked={@all_selected?}
+              phx-click="toggle_select_all"
+              class="size-4 rounded border-base-content/30 accent-primary"
+            />
             {gettext("Select all")}
           </label>
           <span class="text-sm text-base-content/60">
@@ -454,7 +430,7 @@ defmodule KilnCMSWeb.EditorLive do
               phx-click="bulk"
               phx-value-action={verb}
               disabled={@selected_count == 0}
-              class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-40"
+              class="btn btn-sm btn-default"
             >
               {label}
             </button>
@@ -464,7 +440,7 @@ defmodule KilnCMSWeb.EditorLive do
               phx-click="bulk"
               phx-value-action="delete"
               disabled={@selected_count == 0}
-              class="rounded border border-error/40 px-3 py-1 text-xs text-error hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-40"
+              class="btn btn-sm btn-danger"
             >
               {gettext("Delete")}
             </button>
@@ -485,18 +461,14 @@ defmodule KilnCMSWeb.EditorLive do
               type="button"
               phx-click="confirm_bulk"
               class={[
-                "rounded px-3 py-1 text-xs font-medium hover:opacity-90",
+                "btn btn-sm border-transparent hover:opacity-90",
                 (@confirming_bulk == "delete" && "bg-error text-error-content") ||
                   "bg-warning text-warning-content"
               ]}
             >
               {bulk_verb_label(@confirming_bulk)}
             </button>
-            <button
-              type="button"
-              phx-click="cancel_bulk"
-              class="rounded border border-base-content/20 px-3 py-1 text-xs hover:bg-base-200"
-            >
+            <button type="button" phx-click="cancel_bulk" class="btn btn-sm btn-default">
               {gettext("Cancel")}
             </button>
           </div>
@@ -515,12 +487,12 @@ defmodule KilnCMSWeb.EditorLive do
 
         <ul
           :if={@items != []}
-          class="divide-y divide-base-content/10 rounded border border-base-content/10"
+          class="card divide-y divide-base-content/10 overflow-hidden"
         >
           <li
             :for={{kind, record} <- @items}
             id={"#{kind}-#{record.id}"}
-            class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3"
+            class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 transition-colors hover:bg-base-200/40"
           >
             <input
               type="checkbox"
@@ -569,7 +541,7 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-click="submit"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
-                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {gettext("Submit")}
               </button>
@@ -579,7 +551,7 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-click="publish"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
-                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {if record.state == :in_review, do: gettext("Approve"), else: gettext("Publish")}
               </button>
@@ -589,7 +561,7 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-click="return"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
-                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {gettext("Return")}
               </button>
@@ -599,7 +571,7 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-click="unpublish"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
-                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {gettext("Unpublish")}
               </button>
@@ -609,13 +581,13 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-click="unarchive"
                 phx-value-kind={kind}
                 phx-value-id={record.id}
-                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {gettext("Unarchive")}
               </button>
               <.link
                 navigate={edit_path(kind, record.id)}
-                class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {gettext("Edit")}
               </.link>
@@ -628,13 +600,13 @@ defmodule KilnCMSWeb.EditorLive do
             type="button"
             phx-click="load_more"
             phx-disable-with={gettext("Loading…")}
-            class="rounded border border-base-content/20 px-4 py-1.5 text-sm hover:bg-base-200"
+            class="btn btn-default"
           >
             {gettext("Load more")}
           </button>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 

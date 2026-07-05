@@ -99,7 +99,12 @@ defmodule KilnCMSWeb.AnalyticsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:analytics}
+    >
       <div class="space-y-6">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -111,7 +116,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
           </p>
         </div>
 
-        <div class="rounded-lg border border-base-content/10 p-4">
+        <div class="card card-pad">
           <p class="text-xs uppercase tracking-wide text-base-content/70">{gettext("Total views")}</p>
           <p class="mt-1 text-3xl font-semibold">{@total}</p>
         </div>
@@ -122,18 +127,18 @@ defmodule KilnCMSWeb.AnalyticsLive do
             {gettext("No views recorded yet.")}
           </p>
 
-          <table :if={@rows != []} class="w-full text-sm">
-            <thead class="text-left text-xs uppercase tracking-wide text-base-content/70">
-              <tr class="border-b border-base-content/10">
-                <th scope="col" class="py-2">{gettext("Content")}</th>
-                <th scope="col" class="py-2">{gettext("Type")}</th>
-                <th scope="col" class="py-2 text-right">{gettext("Views")}</th>
-                <th scope="col" class="py-2 text-right">{gettext("Last viewed")}</th>
+          <table :if={@rows != []} class="table">
+            <thead>
+              <tr>
+                <th scope="col">{gettext("Content")}</th>
+                <th scope="col">{gettext("Type")}</th>
+                <th scope="col" class="text-right">{gettext("Views")}</th>
+                <th scope="col" class="text-right">{gettext("Last viewed")}</th>
               </tr>
             </thead>
             <tbody>
-              <tr :for={row <- @rows} class="border-b border-base-content/5">
-                <td class="py-2">
+              <tr :for={row <- @rows}>
+                <td>
                   <.link :if={row.href} navigate={row.href} class="font-medium hover:underline">
                     {row.title}
                   </.link>
@@ -148,9 +153,9 @@ defmodule KilnCMSWeb.AnalyticsLive do
                     view &nearr; <span class="sr-only">{gettext("(opens in a new tab)")}</span>
                   </a>
                 </td>
-                <td class="py-2 capitalize text-base-content/70">{row.type}</td>
-                <td class="py-2 text-right font-medium">{row.views}</td>
-                <td class="py-2 text-right text-base-content/60">
+                <td class="capitalize text-base-content/70">{row.type}</td>
+                <td class="text-right font-medium">{row.views}</td>
+                <td class="text-right text-base-content/60">
                   <time
                     :if={row.last}
                     id={"last-viewed-#{row.type}-#{row.id}"}
@@ -164,7 +169,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
           </table>
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

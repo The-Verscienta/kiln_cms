@@ -188,7 +188,12 @@ defmodule KilnCMSWeb.TaxonomyLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:taxonomy}
+    >
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -227,7 +232,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
           />
         </div>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 
@@ -255,7 +260,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
         id={"new-#{@kind}-form"}
         phx-change={@validate}
         phx-submit={@submit}
-        class="space-y-3 rounded-lg border border-base-content/15 p-4"
+        class="card card-pad space-y-3"
       >
         <div class="grid gap-3 sm:grid-cols-2">
           <.input
@@ -286,7 +291,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
 
       <ul
         :if={@records != []}
-        class="divide-y divide-base-content/10 rounded-lg border border-base-content/15"
+        class="card divide-y divide-base-content/10 overflow-hidden"
       >
         <li :for={record <- @records} class="p-3">
           <div :if={!editing?(@edit, @kind, record.id)} class="flex items-start justify-between gap-3">
@@ -307,7 +312,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
                 phx-click="edit"
                 phx-value-type={@kind}
                 phx-value-id={record.id}
-                class="rounded px-2 py-1 text-xs hover:bg-base-200"
+                class="btn btn-sm btn-ghost"
               >
                 {gettext("Edit")}
               </button>
@@ -319,7 +324,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
                 phx-value-id={record.id}
                 data-confirm={delete_confirm(record)}
                 aria-label={gettext("Delete %{name}", name: record.name)}
-                class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
               >
                 <.icon name="hero-trash" class="size-4" />
               </button>
@@ -349,7 +354,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
               <button
                 type="button"
                 phx-click="cancel_edit"
-                class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                class="btn btn-sm btn-default"
               >
                 {gettext("Cancel")}
               </button>

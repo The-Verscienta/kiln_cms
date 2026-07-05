@@ -359,7 +359,12 @@ defmodule KilnCMSWeb.MailSettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} current_user={@current_user}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      page_title={@page_title}
+      active={:mail}
+    >
       <div class="space-y-8">
         <div>
           <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
@@ -373,7 +378,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
           </p>
         </div>
 
-        <section class="rounded border border-base-content/10 p-4">
+        <section class="card card-pad">
           <h2 class="text-lg font-medium">{gettext("Status")}</h2>
           <dl class="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
             <div class="flex justify-between gap-4 sm:block">
@@ -550,7 +555,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
                   id={"copy-#{record.check}"}
                   phx-hook="Clipboard"
                   data-clipboard-text={record.value}
-                  class="ml-auto shrink-0 rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                  class="btn btn-sm btn-default ml-auto shrink-0"
                 >
                   {gettext("Copy value")}
                 </button>
@@ -702,7 +707,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
           </div>
         </section>
       </div>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 
