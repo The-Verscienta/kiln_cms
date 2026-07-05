@@ -307,3 +307,10 @@ config :opentelemetry, traces_exporter: :none
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
+
+# Downstream project overlay. A deployment that layers a `projects/<name>/`
+# subproject onto this repo (see projects/README.md) drops a `config/project.exs`
+# next to this file to register its domains and plugin. Imported after the env
+# config so the overlay can build on (and override) it. The reusable core never
+# ships this file — the conditional makes a clean checkout a no-op.
+if File.exists?(Path.join(__DIR__, "project.exs")), do: import_config("project.exs")
