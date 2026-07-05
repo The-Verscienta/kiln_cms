@@ -1395,6 +1395,152 @@ defmodule KilnCMSWeb.EditorLiveTest do
   # Regression for #170: rich-text blocks must be labeled in the accessibility
   # tree — a named editor surface and a labeled formatting toolbar. (The TipTap
   # contenteditable's own aria-label is applied client-side from data-editor-label.)
+  describe "custom-field filtering and sorting in the content list" do
+    defp define_field!(attrs) do
+      admin = authed_user(:admin)
+
+      KilnCMS.CMS.create_field_definition!(
+        Map.merge(%{label: "Field", content_type: :page}, attrs),
+        actor: admin
+      )
+    end
+
+    defp cf_name(base), do: "#{base}#{System.unique_integer([:positive])}"
+
+    test "scoping the list to one type hides other types" do
+      page = draft_page(%{title: "CF scoped page #{System.unique_integer([:positive])}"})
+      post = draft_post(%{title: "CF scoped post #{System.unique_integer([:positive])}"})
+
+      {:ok, _lv, html} =
+        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor?type=page")
+
+      assert html =~ page.title
+      refute html =~ post.title
+    end
+
+    test "filters rows by a custom field, numerically, and shows the value chip" do
+      price = cf_name("price")
+      define_field!(%{name: price, field_type: :integer})
+
+      # Lexically "9" > "10" — only the numeric cast excludes it.
+      _cheap = draft_page(%{title: "CF cheap #{price}", custom_fields: %{price => 9}})
+      dear = draft_page(%{title: "CF dear #{price}", custom_fields: %{price => 30}})
+
+      {:ok, _lv, html} =
+        build_conn()
+        |> log_in(authed_user(:admin))
+        |> live(~p"/editor?type=page&field=#{price}&op=gt&value=10")
+
+      assert html =~ dear.title
+      refute html =~ "CF cheap #{price}"
+      # The filtered field's value is surfaced per row.
+      assert html =~ "Field: 30"
+    end
+
+    test "sorts rows by a custom field in both directions" do
+      price = cf_name("price")
+      define_field!(%{name: price, field_type: :integer})
+
+      cheap = draft_page(%{title: "CF sort cheap #{price}", custom_fields: %{price => 9}})
+      mid = draft_page(%{title: "CF sort mid #{price}", custom_fields: %{price => 10}})
+      dear = draft_page(%{title: "CF sort dear #{price}", custom_fields: %{price => 30}})
+
+      # Rows without the field (from concurrent tests) sort after these three,
+      # so only their relative order is asserted.
+      order = fn html ->
+        Enum.map([cheap.title, mid.title, dear.title], fn title ->
+          {pos, _len} = :binary.match(html, title)
+          pos
+        end)
+      end
+
+      {:ok, _lv, asc} =
+        build_conn()
+        |> log_in(authed_user(:admin))
+        |> live(~p"/editor?type=page&csort=#{price}")
+
+      assert order.(asc) == Enum.sort(order.(asc))
+
+      {:ok, _lv, desc} =
+        build_conn()
+        |> log_in(authed_user(:admin))
+        |> live(~p"/editor?type=page&csort=-#{price}")
+
+      assert order.(desc) == Enum.sort(order.(desc), :desc)
+    end
+
+    test "filters a dynamic type's entries through the same controls" do
+      admin = authed_user(:admin)
+      rating = cf_name("rating")
+
+      type =
+        KilnCMS.CMS.create_type_definition!(
+          %{name: "edcf#{System.unique_integer([:positive])}", label: "EdCF"},
+          actor: admin
+        )
+
+      KilnCMS.CMS.create_field_definition!(
+        %{type_definition_id: type.id, name: rating, label: "Rating", field_type: :integer},
+        actor: admin
+      )
+
+      entry! = fn title, value ->
+        KilnCMS.CMS.ContentTypes.create!(
+          type.name,
+          %{
+            title: title,
+            slug: "edcf-#{System.unique_integer([:positive])}",
+            custom_fields: %{rating => value}
+          },
+          actor: admin
+        )
+      end
+
+      low = entry!.("CF entry low #{rating}", 2)
+      high = entry!.("CF entry high #{rating}", 5)
+
+      {:ok, _lv, html} =
+        build_conn()
+        |> log_in(admin)
+        |> live(~p"/editor?type=#{type.name}&field=#{rating}&op=gte&value=3")
+
+      assert html =~ high.title
+      refute html =~ low.title
+    end
+
+    test "an unknown field or unparsable value degrades to no filter, not an error" do
+      price = cf_name("price")
+      define_field!(%{name: price, field_type: :integer})
+      page = draft_page(%{title: "CF degrade #{price}", custom_fields: %{price => 5}})
+      conn = build_conn() |> log_in(authed_user(:admin))
+
+      # Hand-edited URL with a field the type doesn't have.
+      {:ok, _lv, html} = live(conn, ~p"/editor?type=page&field=ghost&op=eq&value=x")
+      assert html =~ page.title
+
+      # A half-typed number filters nothing rather than raising.
+      {:ok, _lv, html} = live(conn, ~p"/editor?type=page&field=#{price}&op=gt&value=abc")
+      assert html =~ page.title
+    end
+
+    test "switching type resets the field filter" do
+      price = cf_name("price")
+      define_field!(%{name: price, field_type: :integer})
+      draft_page(%{title: "CF reset #{price}", custom_fields: %{price => 5}})
+
+      {:ok, lv, _html} =
+        build_conn()
+        |> log_in(authed_user(:admin))
+        |> live(~p"/editor?type=page&field=#{price}&op=gt&value=1")
+
+      lv |> element("#content-refine") |> render_change(%{"type" => ""})
+      path = assert_patch(lv)
+
+      refute path =~ "field="
+      refute path =~ "type="
+    end
+  end
+
   describe "rich-text block accessibility (#170)" do
     test "rich-text block renders group + toolbar semantics and an editor label", %{conn: conn} do
       page =

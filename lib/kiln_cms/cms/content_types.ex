@@ -209,10 +209,18 @@ defmodule KilnCMS.CMS.ContentTypes do
   # collection reads (scoped by `type_definition_id`) and `create!` (which
   # must stamp the type) branch explicitly.
 
+  # The `:args` opt carries action *arguments* (e.g. `custom_filter` /
+  # `custom_sort` — the editor list's custom-field filtering), which code
+  # interfaces take as a params map, not query opts.
   def list!(type, opts \\ []) do
+    {args, opts} = Keyword.pop(opts, :args, %{})
+
     case get!(type) do
-      %{source: :dynamic, definition: definition} -> CMS.list_entries!(scoped(opts, definition))
-      _compiled -> call(type, "list_#{plural(type)}!", [opts])
+      %{source: :dynamic, definition: definition} ->
+        CMS.list_entries!(args, scoped(opts, definition))
+
+      _compiled ->
+        call(type, "list_#{plural(type)}!", [args, opts])
     end
   end
 

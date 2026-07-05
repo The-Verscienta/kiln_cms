@@ -25,6 +25,9 @@ UI" workflow, scoped to fields.
   membership, applies defaults, and drops keys with no definition. Values are
   stored JSON-native (dates as ISO-8601 strings) so the jsonb column round-trips.
 - **Edit**: the content editor renders one input per definition automatically.
+- **Browse**: the content list (`/editor`) scopes to one type and then filters
+  and sorts by any of its custom fields (field + operator + typed value,
+  persisted in the URL like the status/search filters).
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
 - **Query**: list/search reads accept `custom_filter`/`custom_sort` (JSON:API)
   and `customFilter`/`customSort` (GraphQL) — typed, registry-validated

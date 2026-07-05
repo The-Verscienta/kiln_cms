@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.EditorLive do
   # Workflow/destroy actions re-fetch the full record by id before acting.
   @list_fields [:id, :title, :slug, :state, :updated_at, :scheduled_at, :unpublish_at]
 
-  # (Re)load the first page under the active status/search filter.
+  # (Re)load the first page under the active status/search/custom-field filter.
   defp load_items(socket) do
     {items, more?} = fetch_page(socket, nil)
 
@@ -43,27 +43,42 @@ defmodule KilnCMSWeb.EditorLive do
     |> assign(:more?, more?)
   end
 
-  # One page of `{kind, record}` tuples merged across every content type,
-  # newest-updated first, from `cursor` (exclusive) downwards. Keeping the
+  # One page of `{kind, record}` tuples, from `cursor` (exclusive) downwards.
+  #
+  # Unscoped, this merges every content type newest-updated first; keeping the
   # merged newest @page_size is exact: the true next page can't contain more
-  # than @page_size rows of any single type.
+  # than @page_size rows of any single type. Scoped to one type (the
+  # custom-field filter requires that — field definitions are per type), it's a
+  # single list, and with a custom sort the `cursor` is a plain row offset
+  # because the order no longer follows `updated_at`.
   defp fetch_page(socket, cursor) do
     actor = socket.assigns.actor
-    query = page_query(socket.assigns.status, socket.assigns.query, cursor)
+    query = page_query(socket.assigns, cursor)
+    args = custom_query_args(socket.assigns)
+
+    types =
+      case socket.assigns.scoped_type do
+        nil -> editable_types()
+        scoped -> [scoped]
+      end
 
     per_type =
-      Enum.map(editable_types(), fn ct ->
+      Enum.map(types, fn ct ->
         # Dispatch on the descriptor itself so a type archived between listing
         # and dispatch can't turn into a registry-lookup miss.
         ct
-        |> ContentTypes.list!(actor: actor, query: query)
+        |> ContentTypes.list!(actor: actor, query: query, args: args)
         |> Enum.map(&{ct.type, &1})
       end)
 
+    merged = List.flatten(per_type)
+
+    # Under a custom sort the (single-type) rows already arrive in field
+    # order from the DB — re-sorting by updated_at would undo it.
     merged =
-      per_type
-      |> List.flatten()
-      |> Enum.sort_by(fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
+      if custom_sort?(socket.assigns),
+        do: merged,
+        else: Enum.sort_by(merged, fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
 
     {page, rest} = Enum.split(merged, @page_size)
 
@@ -72,20 +87,175 @@ defmodule KilnCMSWeb.EditorLive do
     {page, rest != [] or Enum.any?(per_type, &(length(&1) >= @page_size))}
   end
 
-  defp page_query(status, q, cursor) do
+  defp page_query(assigns, cursor) do
+    csort? = custom_sort?(assigns)
+
+    # The displayed custom-field chip needs the map; everything else renders
+    # from the slim @list_fields select.
+    select = @list_fields ++ if(assigns.show_def, do: [:custom_fields], else: [])
+
     [
-      status != "all" && {:filter, [state: String.to_existing_atom(status)]},
-      q != "" && {:filter, search_filter(q)},
-      cursor && {:filter, expr(updated_at < ^cursor)}
+      assigns.status != "all" && {:filter, [state: String.to_existing_atom(assigns.status)]},
+      assigns.query != "" && {:filter, search_filter(assigns.query)},
+      # With a custom sort the CustomFieldQuery preparation owns the order (a
+      # sort set here would outrank it), so page by row offset instead of the
+      # updated_at keyset. Equal field values have no tiebreak across pages —
+      # acceptable for an admin list.
+      not csort? && cursor && {:filter, expr(updated_at < ^cursor)},
+      not csort? && {:sort, [updated_at: :desc]},
+      csort? && {:offset, cursor || 0}
     ]
     |> Enum.filter(&is_tuple/1)
-    |> Kernel.++(select: @list_fields, sort: [updated_at: :desc], limit: @page_size)
+    |> Kernel.++(select: select, limit: @page_size)
   end
 
   # Case-insensitive title/slug match; %, _ and \ in the input match literally.
   defp search_filter(q) do
-    pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
+    pattern = "%" <> escape_like(q) <> "%"
     expr(ilike(title, ^pattern) or ilike(slug, ^pattern))
+  end
+
+  defp escape_like(text), do: String.replace(text, ~r/([\\%_])/, "\\\\\\1")
+
+  # --- custom-field filter/sort (scoped to one content type) -----------------
+
+  defp custom_sort?(assigns), do: assigns.custom_sort != ""
+
+  # The `custom_filter`/`custom_sort` action arguments for the current filter
+  # state (see `Preparations.CustomFieldQuery`) — %{} when inactive.
+  defp custom_query_args(assigns) do
+    args =
+      case active_condition(assigns) do
+        nil -> %{}
+        {name, condition} -> %{custom_filter: %{name => condition}}
+      end
+
+    if custom_sort?(assigns), do: Map.put(args, :custom_sort, assigns.custom_sort), else: args
+  end
+
+  # The validated {field name, condition} for the active filter, or nil when
+  # incomplete (no field, blank value) or the value can't be of the field's
+  # type — a half-typed date shouldn't error the list, just not filter yet.
+  defp active_condition(%{filter_def: nil}), do: nil
+
+  defp active_condition(%{filter_def: definition, filter_op: op, filter_value: value}) do
+    case op_condition(definition, op, String.trim(value)) do
+      nil -> nil
+      condition -> {definition.name, condition}
+    end
+  end
+
+  defp op_condition(_definition, "set", _value), do: %{"null" => "false"}
+  defp op_condition(_definition, "unset", _value), do: %{"null" => "true"}
+  defp op_condition(_definition, _op, ""), do: nil
+
+  defp op_condition(_definition, "contains", text),
+    do: %{"ilike" => "%" <> escape_like(text) <> "%"}
+
+  defp op_condition(definition, op, text) do
+    case normalize_value(definition.field_type, text) do
+      {:ok, normalized} when op == "eq" -> normalized
+      {:ok, normalized} -> %{op => normalized}
+      :error -> nil
+    end
+  end
+
+  # Pre-validate (and normalize) the raw input so an unparsable value never
+  # reaches the query as an error; values stay strings — the preparation casts.
+  defp normalize_value(:integer, text) do
+    case Integer.parse(text) do
+      {_n, ""} -> {:ok, text}
+      _ -> :error
+    end
+  end
+
+  defp normalize_value(:float, text) do
+    case Float.parse(text) do
+      {_n, ""} -> {:ok, text}
+      _ -> :error
+    end
+  end
+
+  defp normalize_value(:boolean, text) when text in ["true", "false"], do: {:ok, text}
+  defp normalize_value(:boolean, _text), do: :error
+
+  defp normalize_value(:date, text) do
+    case Date.from_iso8601(text) do
+      {:ok, _} -> {:ok, text}
+      _ -> :error
+    end
+  end
+
+  # datetime-local inputs omit seconds; the stored ISO-8601 (and the cast)
+  # carries them.
+  defp normalize_value(:datetime, text) do
+    padded = if byte_size(text) == 16, do: text <> ":00", else: text
+
+    case NaiveDateTime.from_iso8601(padded) do
+      {:ok, _} -> {:ok, padded}
+      _ -> :error
+    end
+  end
+
+  defp normalize_value(_type, text), do: {:ok, text}
+
+  # Operators offered per field type (mirrors what the value's type can
+  # meaningfully do; media/reference only carry presence here — filter by id
+  # belongs to the API).
+  defp ops_for(:boolean), do: ~w(eq set unset)
+
+  defp ops_for(type) when type in [:integer, :float, :date, :datetime],
+    do: ~w(eq gt gte lt lte set unset)
+
+  defp ops_for(:select), do: ~w(eq not_eq set unset)
+  defp ops_for(type) when type in [:media, :reference], do: ~w(set unset)
+  defp ops_for(_type), do: ~w(eq contains not_eq set unset)
+
+  defp op_label("eq"), do: gettext("is")
+  defp op_label("not_eq"), do: gettext("is not")
+  defp op_label("gt"), do: ">"
+  defp op_label("gte"), do: "≥"
+  defp op_label("lt"), do: "<"
+  defp op_label("lte"), do: "≤"
+  defp op_label("contains"), do: gettext("contains")
+  defp op_label("set"), do: gettext("is set")
+  defp op_label("unset"), do: gettext("is not set")
+
+  defp sortable?(definition), do: definition.field_type not in [:media, :reference]
+
+  # Which input the filter value renders as. `:select` becomes a dropdown
+  # (options for select fields, true/false for booleans); everything else maps
+  # to the matching HTML input type, defaulting to text.
+  defp value_input_kind(%{field_type: type}) when type in [:select, :boolean], do: :select
+  defp value_input_kind(%{field_type: type}) when type in [:integer, :float], do: "number"
+  defp value_input_kind(%{field_type: :date}), do: "date"
+  defp value_input_kind(%{field_type: :datetime}), do: "datetime-local"
+  defp value_input_kind(_definition), do: "text"
+
+  defp value_options(%{field_type: :boolean}), do: ~w(true false)
+  defp value_options(%{options: options}), do: options
+
+  # The custom-field definitions of the scoped type ([] otherwise — the merged
+  # multi-type list can't filter on per-type fields).
+  defp custom_defs(nil, _actor), do: []
+
+  defp custom_defs(%{source: :dynamic, definition: definition}, actor),
+    do: KilnCMS.CMS.field_definitions_for_definition!(definition.id, actor: actor)
+
+  defp custom_defs(%{type: type}, actor),
+    do: KilnCMS.CMS.field_definitions_for!(type, actor: actor)
+
+  defp find_type(nil), do: nil
+  defp find_type(""), do: nil
+  defp find_type(param), do: Enum.find(editable_types(), &(to_string(&1.type) == param))
+
+  # The chip value shown per row when a custom field is filtered/sorted on.
+  defp display_custom_value(record, definition) do
+    case Map.get(record.custom_fields || %{}, definition.name) do
+      nil -> "—"
+      %{} = snapshot -> snapshot["title"] || snapshot["alt"] || snapshot["url"] || snapshot["id"]
+      value -> to_string(value)
+    end
   end
 
   # Everything editable here: compiled content types plus admin-defined dynamic
@@ -105,13 +275,23 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   # Filter state lives in the URL (audit U-M3): refresh, back button, and
-  # shared links keep the active status/search. Typing replaces the history
-  # entry so a search doesn't leave one entry per debounced keystroke.
-  def handle_event("filter", %{"status" => status}, socket),
-    do: {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query))}
+  # shared links keep the active status/search/field filter. Typing replaces
+  # the history entry so a search doesn't leave one entry per debounced
+  # keystroke.
+  def handle_event("filter", %{"status" => status}, socket) do
+    {:noreply, push_patch(socket, to: list_path(%{path_params(socket.assigns) | status: status}))}
+  end
 
-  def handle_event("search", %{"q" => q}, socket),
-    do: {:noreply, push_patch(socket, to: list_path(socket.assigns.status, q), replace: true)}
+  def handle_event("search", %{"q" => q}, socket) do
+    {:noreply,
+     push_patch(socket, to: list_path(%{path_params(socket.assigns) | q: q}), replace: true)}
+  end
+
+  # The type-scope + custom-field controls, one form.
+  def handle_event("refine", params, socket) do
+    next = refine_params(path_params(socket.assigns), params)
+    {:noreply, push_patch(socket, to: list_path(next), replace: true)}
+  end
 
   def handle_event("toggle_select", %{"key" => key}, socket) do
     selected = socket.assigns.selected
@@ -192,16 +372,20 @@ defmodule KilnCMSWeb.EditorLive do
     do: {:noreply, transition(socket, params, "unarchive")}
 
   def handle_event("load_more", _params, socket) do
-    case List.last(socket.assigns.items) do
+    items = socket.assigns.items
+
+    case List.last(items) do
       nil ->
         {:noreply, assign(socket, :more?, false)}
 
       {_kind, last} ->
-        {page, more?} = fetch_page(socket, last.updated_at)
+        # Offset paging under a custom sort (see fetch_page), keyset otherwise.
+        cursor = if custom_sort?(socket.assigns), do: length(items), else: last.updated_at
+        {page, more?} = fetch_page(socket, cursor)
 
         {:noreply,
          socket
-         |> assign(:items, socket.assigns.items ++ page)
+         |> assign(:items, items ++ page)
          |> assign(:more?, more?)}
     end
   end
@@ -210,17 +394,104 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_params(params, _uri, socket) do
     status = if params["status"] in @statuses, do: params["status"], else: "all"
 
+    # Everything below the type scope is validated against that type's field
+    # definitions — a stale or hand-edited URL degrades to "no field filter",
+    # never to a query error.
+    scoped_type = find_type(params["type"])
+    defs = custom_defs(scoped_type, socket.assigns.actor)
+
+    filter_def = Enum.find(defs, &(&1.name == params["field"]))
+
+    filter_op =
+      case filter_def do
+        nil -> "eq"
+        definition -> validate_op(params["op"], ops_for(definition.field_type))
+      end
+
+    custom_sort = validate_custom_sort(params["csort"], defs)
+    sort_def = Enum.find(defs, &(&1.name == String.trim_leading(custom_sort, "-")))
+
     {:noreply,
      socket
      |> assign(:status, status)
      |> assign(:query, params["q"] || "")
+     |> assign(:scoped_type, scoped_type)
+     |> assign(:custom_defs, defs)
+     |> assign(:filter_def, filter_def)
+     |> assign(:filter_op, filter_op)
+     |> assign(:filter_value, (filter_def && params["value"]) || "")
+     |> assign(:custom_sort, custom_sort)
+     |> assign(:show_def, filter_def || sort_def)
      |> load_items()}
   end
 
-  defp list_path(status, q) do
+  defp validate_op(op, allowed), do: if(op in allowed, do: op, else: hd(allowed))
+
+  defp validate_custom_sort(nil, _defs), do: ""
+
+  defp validate_custom_sort(csort, defs) do
+    name = String.trim_leading(csort, "-")
+
+    case Enum.find(defs, &(&1.name == name)) do
+      %{} = definition -> if sortable?(definition), do: csort, else: ""
+      nil -> ""
+    end
+  end
+
+  # Fold a "refine" form change into the current URL params. Switching type
+  # resets the field state (definitions differ per type); switching field
+  # resets the operator and value (their meaning is per field type).
+  defp refine_params(current, params) do
+    type = Map.get(params, "type", "")
+    field = Map.get(params, "field", "")
+    csort = Map.get(params, "csort", "")
+
+    cond do
+      type != current.type ->
+        %{current | type: type, field: "", op: "eq", value: "", csort: ""}
+
+      field != current.field ->
+        %{current | field: field, op: "eq", value: "", csort: csort}
+
+      true ->
+        %{
+          current
+          | op: Map.get(params, "op", "eq"),
+            value: Map.get(params, "value", ""),
+            csort: csort
+        }
+    end
+  end
+
+  # The current filter state as URL params (the single source of truth for
+  # every push_patch).
+  defp path_params(assigns) do
+    %{
+      status: assigns.status,
+      q: assigns.query,
+      type: (assigns.scoped_type && to_string(assigns.scoped_type.type)) || "",
+      field: (assigns.filter_def && assigns.filter_def.name) || "",
+      op: assigns.filter_op,
+      value: assigns.filter_value,
+      csort: assigns.custom_sort
+    }
+  end
+
+  defp list_path(p) do
+    # Field/op/value only mean something under a type scope, and op/value only
+    # under a field — drop dependents of an empty parent along with defaults.
+    p =
+      cond do
+        p.type == "" -> %{p | field: "", op: "eq", value: "", csort: ""}
+        p.field == "" -> %{p | op: "eq", value: ""}
+        true -> p
+      end
+
     params =
-      [status: status, q: q]
-      |> Enum.reject(fn {k, v} -> v == "" or (k == :status and v == "all") end)
+      p
+      |> Enum.reject(fn {k, v} ->
+        v in [nil, ""] or (k == :status and v == "all") or (k == :op and p.field == "")
+      end)
       |> Map.new()
 
     ~p"/editor?#{params}"
@@ -339,7 +610,10 @@ defmodule KilnCMSWeb.EditorLive do
 
     assigns =
       assigns
-      |> assign(:filtering?, assigns.status != "all" or assigns.query != "")
+      |> assign(
+        :filtering?,
+        assigns.status != "all" or assigns.query != "" or assigns.scoped_type != nil
+      )
       |> assign(:selected_count, MapSet.size(assigns.selected))
       |> assign(
         :all_selected?,
@@ -431,6 +705,115 @@ defmodule KilnCMSWeb.EditorLive do
               autocomplete="off"
               class="w-full max-w-xs rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
             />
+          </form>
+          <form id="content-refine" phx-change="refine" class="flex flex-wrap items-center gap-2">
+            <label for="content-type-filter" class="sr-only">{gettext("Filter by type")}</label>
+            <select
+              id="content-type-filter"
+              name="type"
+              aria-label={gettext("Filter by type")}
+              class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+            >
+              <option value="" selected={@scoped_type == nil}>{gettext("All types")}</option>
+              <option
+                :for={ct <- @content_types}
+                value={to_string(ct.type)}
+                selected={@scoped_type && @scoped_type.type == ct.type}
+              >
+                {ct.label}
+              </option>
+            </select>
+
+            <%= if @scoped_type && @custom_defs != [] do %>
+              <label for="content-field-filter" class="sr-only">
+                {gettext("Filter by custom field")}
+              </label>
+              <select
+                id="content-field-filter"
+                name="field"
+                aria-label={gettext("Filter by custom field")}
+                class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+              >
+                <option value="" selected={@filter_def == nil}>{gettext("Any field")}</option>
+                <option
+                  :for={d <- @custom_defs}
+                  value={d.name}
+                  selected={@filter_def && @filter_def.name == d.name}
+                >
+                  {d.label}
+                </option>
+              </select>
+
+              <%= if @filter_def do %>
+                <label for="content-op-filter" class="sr-only">{gettext("Filter operator")}</label>
+                <select
+                  id="content-op-filter"
+                  name="op"
+                  aria-label={gettext("Filter operator")}
+                  class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+                >
+                  <option
+                    :for={op <- ops_for(@filter_def.field_type)}
+                    value={op}
+                    selected={op == @filter_op}
+                  >
+                    {op_label(op)}
+                  </option>
+                </select>
+
+                <%= if @filter_op not in ["set", "unset"] do %>
+                  <label for="content-value-filter" class="sr-only">{gettext("Filter value")}</label>
+                  <%= case value_input_kind(@filter_def) do %>
+                    <% :select -> %>
+                      <select
+                        id="content-value-filter"
+                        name="value"
+                        aria-label={gettext("Filter value")}
+                        class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+                      >
+                        <option value="" selected={@filter_value == ""}>{gettext("Choose…")}</option>
+                        <option
+                          :for={opt <- value_options(@filter_def)}
+                          value={opt}
+                          selected={@filter_value == opt}
+                        >
+                          {opt}
+                        </option>
+                      </select>
+                    <% input_type -> %>
+                      <input
+                        id="content-value-filter"
+                        type={input_type}
+                        step={@filter_def.field_type == :float && "any"}
+                        name="value"
+                        value={@filter_value}
+                        aria-label={gettext("Filter value")}
+                        phx-debounce="300"
+                        autocomplete="off"
+                        class="w-40 rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+                      />
+                  <% end %>
+                <% end %>
+              <% end %>
+
+              <label for="content-custom-sort" class="sr-only">{gettext("Sort by")}</label>
+              <select
+                id="content-custom-sort"
+                name="csort"
+                aria-label={gettext("Sort by")}
+                class="rounded border border-base-content/20 bg-transparent px-2 py-1.5 text-sm"
+              >
+                <option value="" selected={@custom_sort == ""}>
+                  {gettext("Sort: last updated")}
+                </option>
+                <%= for d <- @custom_defs, sortable?(d) do %>
+                  <option value={d.name} selected={@custom_sort == d.name}>{d.label} ↑</option>
+                  <option value={"-" <> d.name} selected={@custom_sort == "-" <> d.name}>
+                    {d.label} ↓
+                  </option>
+                <% end %>
+              </select>
+            <% end %>
           </form>
         </div>
 
@@ -538,6 +921,13 @@ defmodule KilnCMSWeb.EditorLive do
               <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
+            <span
+              :if={@show_def}
+              class="rounded bg-base-200 px-2 py-0.5 text-xs text-base-content/70"
+              title={@show_def.label}
+            >
+              {@show_def.label}: {display_custom_value(record, @show_def)}
+            </span>
             <span
               :if={record.scheduled_at && record.state in [:draft, :in_review]}
               class="flex items-center gap-1 text-xs text-base-content/60"
