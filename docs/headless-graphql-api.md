@@ -42,9 +42,9 @@ from its singular type name. For `post`:
 |-------|--------|-----------|---------|
 | `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!` | one published post (or `null`) |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
-| `publishedPosts` | `:published` | `limit`, `offset` | published posts, newest first, **offset-paginated** (`PageOfPost`) *(posts only)* |
-| `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds` | full-text matches, relevance-ranked |
-| `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale` | vector/semantic matches |
+| `publishedPosts` | `:published` | `limit`, `offset`, `customFilter`, `customSort` | published posts, newest first, **offset-paginated** (`PageOfPost`) *(posts only)* |
+| `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
+| `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
 
 Pages expose the same set **minus** `publishedPosts` (the published index is a
@@ -54,6 +54,11 @@ post-only feature): `pageBySlug`, `pageTranslations`, `searchPages`,
 > `*BySlug` queries require both `slug` and `locale` because content is modelled
 > per-locale (unique `[slug, locale]`). Use `postTranslations` to discover which
 > locales exist for a slug.
+
+> `customFilter` (JSON) and `customSort` (String) query **admin-defined custom
+> fields**: `customFilter: {price: {gt: 10}}, customSort: "-price"`. The same
+> operators, typing and validation as the JSON:API params — see
+> [json-api.md](json-api.md) → "Custom fields".
 
 ### Taxonomy — categories & tags
 

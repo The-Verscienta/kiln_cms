@@ -401,6 +401,77 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  describe "custom-field filtering and sorting (custom_filter / custom_sort)" do
+    test "filters and sorts published posts by an admin-defined field" do
+      admin = user(:admin)
+      price = "price#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: price, label: "Price", field_type: :integer},
+        actor: admin
+      )
+
+      cheap = published_post(%{title: "Cheap", custom_fields: %{price => 9}}, admin)
+      mid = published_post(%{title: "Mid", custom_fields: %{price => 10}}, admin)
+      dear = published_post(%{title: "Dear", custom_fields: %{price => 30}}, admin)
+
+      # Numeric, not lexical: a text comparison would also match "9" > "10".
+      assert {200, body} = api_get("/api/json/posts?custom_filter[#{price}][gt]=10")
+      assert ids(body) == [dear.id]
+
+      # Typed sort; the null=false predicate scopes the list to this test's rows.
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?custom_filter[#{price}][null]=false&custom_sort=-#{price}"
+               )
+
+      assert ids(body) == [dear.id, mid.id, cheap.id]
+    end
+
+    test "entries resolve the field's type through filter[type_name]" do
+      admin = user(:admin)
+      rating = "rating#{System.unique_integer([:positive])}"
+
+      recipes =
+        CMS.create_type_definition!(
+          %{name: "jsondyn#{System.unique_integer([:positive])}", label: "Dyn"},
+          actor: admin
+        )
+
+      CMS.create_field_definition!(
+        %{type_definition_id: recipes.id, name: rating, label: "Rating", field_type: :integer},
+        actor: admin
+      )
+
+      entry! = fn fields ->
+        KilnCMS.CMS.ContentTypes.create!(
+          recipes.name,
+          %{title: "E", slug: slug(), custom_fields: fields},
+          actor: admin
+        )
+      end
+
+      _low = entry!.(%{rating => 2})
+      high = entry!.(%{rating => 5})
+
+      # Drafts are visible to the authenticated editor tier.
+      assert {200, body} =
+               api_get(
+                 "/api/json/entries?filter[type_name]=#{recipes.name}&custom_filter[#{rating}][gte]=3",
+                 token: token(admin)
+               )
+
+      assert ids(body) == [high.id]
+    end
+
+    test "an unknown custom field name is a 400" do
+      assert {400, _body} =
+               api_get(
+                 "/api/json/posts?custom_filter[ghost#{System.unique_integer([:positive])}]=x"
+               )
+    end
+  end
+
   # Page equivalent of `published_post/2`.
   defp published_post_page(attrs, admin) do
     attrs
