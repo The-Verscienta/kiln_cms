@@ -5,6 +5,19 @@ defmodule KilnCMS.Firing.FiringTest do
   alias KilnCMS.{CMS, Firing}
   alias KilnCMS.Firing.{Cache, Engine}
 
+  # A content resource declares its canonical type atom via `__kiln_content_type__/0`
+  # (the Content macro). These stubs stand in for real resources so `document_type/1`
+  # can be checked without seeding — the multi-word case is the regression guard.
+  defmodule MultiWordDoc do
+    defstruct [:id]
+    def __kiln_content_type__, do: :tcm_ingredient
+  end
+
+  defmodule SingleWordDoc do
+    defstruct [:id]
+    def __kiln_content_type__, do: :herb
+  end
+
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "fire-#{System.unique_integer([:positive])}@example.com",
@@ -134,6 +147,18 @@ defmodule KilnCMS.Firing.FiringTest do
 
       assert artifacts.web["html"] =~ "<h2>Hi</h2>"
       assert {:ok, []} = Firing.artifacts_for(:page, page.id, authorize?: false)
+    end
+  end
+
+  describe "document_type/1" do
+    test "trusts a multi-word type's declared atom instead of the module name" do
+      # Regression: downcasing the module suffix ("TcmIngredient" -> "tcmingredient")
+      # loses the underscores, so String.to_existing_atom/1 used to raise here.
+      assert Engine.document_type(%MultiWordDoc{}) == :tcm_ingredient
+    end
+
+    test "still resolves a single-word type" do
+      assert Engine.document_type(%SingleWordDoc{}) == :herb
     end
   end
 end

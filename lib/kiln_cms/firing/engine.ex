@@ -79,7 +79,16 @@ defmodule KilnCMS.Firing.Engine do
   @doc "The content type atom for a document struct (`:page` / `:post` / `:entry`)."
   @spec document_type(struct()) :: atom()
   def document_type(%{__struct__: module}) do
-    module |> Module.split() |> List.last() |> String.downcase() |> String.to_existing_atom()
+    # A content resource declares its canonical type atom via the Content macro;
+    # trust it rather than reverse-deriving from the module name. Downcasing the
+    # module's last segment loses the underscores in a multi-word type
+    # (`TcmIngredient` -> "tcmingredient", not `:tcm_ingredient`), so
+    # `String.to_existing_atom/1` would raise for any multi-word content type.
+    if function_exported?(module, :__kiln_content_type__, 0) do
+      module.__kiln_content_type__()
+    else
+      module |> Module.split() |> List.last() |> String.downcase() |> String.to_existing_atom()
+    end
   end
 
   @doc """
