@@ -7,8 +7,11 @@ defmodule KilnCMS.Repo.Migrations.AddScheduledUnpublishIndexes do
   """
   use Ecto.Migration
 
-  # Every content-type table built on KilnCMS.CMS.Content.
-  @content_tables ~w(pages posts entries herbs formulas conditions practitioners clinics modalities)a
+  # The core content-type tables built on KilnCMS.CMS.Content. Downstream
+  # project tables get the matching unpublish index from their own overlay
+  # migration — the core migration must not name them, or a core-only build
+  # fails on a table it never creates.
+  @content_tables ~w(pages posts entries)a
 
   def change do
     for table <- @content_tables do
