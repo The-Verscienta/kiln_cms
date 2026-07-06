@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.EditorLive do
   import Ash.Expr, only: [expr: 1]
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.I18n
 
   @statuses ~w(all draft in_review published archived)
 
@@ -41,6 +42,7 @@ defmodule KilnCMSWeb.EditorLive do
     socket
     |> assign(:items, items)
     |> assign(:more?, more?)
+    |> assign_translated()
   end
 
   # One page of `{kind, record}` tuples merged across every content type,
@@ -202,9 +204,56 @@ defmodule KilnCMSWeb.EditorLive do
         {:noreply,
          socket
          |> assign(:items, socket.assigns.items ++ page)
-         |> assign(:more?, more?)}
+         |> assign(:more?, more?)
+         |> assign_translated()}
     end
   end
+
+  # The "fully translated" bit of each row's status trigram: which visible
+  # {kind, slug} groups have a variant in every configured locale. One
+  # slug-batched query per kind on the visible page; `nil` (single-locale
+  # site) means trivially covered.
+  defp assign_translated(socket) do
+    locales = I18n.locales()
+
+    if length(locales) < 2 do
+      assign(socket, :translated, nil)
+    else
+      actor = socket.assigns.actor
+
+      translated =
+        socket.assigns.items
+        |> Enum.group_by(fn {kind, _r} -> kind end, fn {_kind, r} -> r.slug end)
+        |> Enum.flat_map(fn {kind, slugs} -> covered_slugs(kind, slugs, locales, actor) end)
+        |> MapSet.new()
+
+      assign(socket, :translated, translated)
+    end
+  end
+
+  # The {kind, slug} pairs among `slugs` whose slug group has a variant in
+  # every configured locale.
+  defp covered_slugs(kind, slugs, locales, actor) do
+    kind
+    |> ContentTypes.list!(
+      actor: actor,
+      query: [filter: expr(slug in ^slugs), select: [:slug, :locale]]
+    )
+    |> Enum.group_by(& &1.slug, & &1.locale)
+    |> Enum.filter(fn {_slug, ls} -> Enum.all?(locales, &(&1 in ls)) end)
+    |> Enum.map(fn {slug, _ls} -> {kind, slug} end)
+  end
+
+  defp translated?(nil, _kind, _slug), do: true
+  defp translated?(set, kind, slug), do: MapSet.member?(set, {kind, slug})
+
+  # The trigram's "scheduled" bit: a pending transition the calendar would
+  # show — publish for drafts/in-review, unpublish for published.
+  defp scheduled?(%{state: state} = r) when state in [:draft, :in_review],
+    do: not is_nil(r.scheduled_at)
+
+  defp scheduled?(%{state: :published} = r), do: not is_nil(r.unpublish_at)
+  defp scheduled?(_record), do: false
 
   @impl true
   def handle_params(params, _uri, socket) do
@@ -501,6 +550,12 @@ defmodule KilnCMSWeb.EditorLive do
               phx-value-key={"#{kind}:#{record.id}"}
               aria-label={gettext("Select %{title}", title: record.title)}
               class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
+            />
+            <.content_trigram
+              published={record.state == :published}
+              translated={translated?(@translated, kind, record.slug)}
+              scheduled={scheduled?(record)}
+              class="text-base-content/50"
             />
             <span class="shrink-0 text-xs uppercase text-base-content/70">{kind}</span>
             <div class="min-w-0 flex-1">

@@ -245,6 +245,12 @@ defmodule KilnCMSWeb.Layouts do
     multi_locale? = length(KilnCMS.I18n.locales()) > 1
 
     author = [
+      %{
+        key: :overview,
+        label: gettext("Overview"),
+        path: ~p"/editor/overview",
+        icon: "hero-squares-2x2"
+      },
       %{key: :content, label: gettext("Content"), path: ~p"/editor", icon: "hero-document-text"},
       %{key: :media, label: gettext("Media"), path: ~p"/media", icon: "hero-photo"},
       %{key: :taxonomy, label: gettext("Taxonomy"), path: ~p"/editor/taxonomy", icon: "hero-tag"},

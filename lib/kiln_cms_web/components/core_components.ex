@@ -228,6 +228,86 @@ defmodule KilnCMSWeb.CoreComponents do
   end
 
   @doc """
+  Renders a bagua trigram: three stacked lines, each solid (yang) or broken
+  (yin), given bottom line first. The console uses trigrams two ways — fixed
+  marks on the overview's bagua tiles, and per-item status glyphs derived from
+  workflow bits (see `content_trigram/1`).
+
+  ## Examples
+
+      <.trigram lines={[false, true, true]} label="xun · wind" />
+  """
+  attr :lines, :list, required: true, doc: "three booleans, bottom line first; true = solid"
+  attr :label, :string, required: true, doc: "accessible name, also the hover tooltip"
+  attr :class, :any, default: nil
+
+  def trigram(assigns) do
+    ~H"""
+    <svg
+      viewBox="0 0 20 13"
+      class={["inline-block h-3 w-5 shrink-0", @class]}
+      role="img"
+      aria-label={@label}
+    >
+      <title>{@label}</title>
+      <%= for {solid?, row} <- Enum.with_index(Enum.reverse(@lines)) do %>
+        <rect :if={solid?} x="0" y={row * 5} width="20" height="3" rx="1" fill="currentColor" />
+        <rect :if={!solid?} x="0" y={row * 5} width="8.5" height="3" rx="1" fill="currentColor" />
+        <rect :if={!solid?} x="11.5" y={row * 5} width="8.5" height="3" rx="1" fill="currentColor" />
+      <% end %>
+    </svg>
+    """
+  end
+
+  @doc """
+  The composite content-status trigram: three workflow bits rendered as one of
+  the eight trigrams — published (bottom line), a variant in every configured
+  locale (middle), a pending scheduled transition (top); solid = yes. The
+  `<.state_badge>` next to it spells the workflow state out; this is the
+  at-a-glance composite, named in the tooltip.
+
+  ## Examples
+
+      <.content_trigram published={true} translated={false} scheduled={true} />
+  """
+  attr :published, :boolean, required: true
+  attr :translated, :boolean, required: true
+  attr :scheduled, :boolean, required: true
+  attr :class, :any, default: nil
+
+  def content_trigram(assigns) do
+    lines = [assigns.published, assigns.translated, assigns.scheduled]
+
+    label =
+      Enum.join(
+        [
+          trigram_name(lines),
+          if(assigns.published, do: gettext("published"), else: gettext("not published")),
+          if(assigns.translated, do: gettext("translated"), else: gettext("translation gaps")),
+          if(assigns.scheduled, do: gettext("scheduled"), else: gettext("no schedule"))
+        ],
+        " · "
+      )
+
+    assigns = assign(assigns, lines: lines, label: label)
+
+    ~H"""
+    <.trigram lines={@lines} label={@label} class={@class} />
+    """
+  end
+
+  # The pinyin name and image of the trigram whose lines (bottom first) are
+  # the given booleans — the tooltip vocabulary for `content_trigram/1`.
+  defp trigram_name([true, true, true]), do: "qian · heaven"
+  defp trigram_name([true, true, false]), do: "dui · lake"
+  defp trigram_name([true, false, true]), do: "li · fire"
+  defp trigram_name([true, false, false]), do: "zhen · thunder"
+  defp trigram_name([false, true, true]), do: "xun · wind"
+  defp trigram_name([false, true, false]), do: "kan · water"
+  defp trigram_name([false, false, true]), do: "gen · mountain"
+  defp trigram_name([false, false, false]), do: "kun · earth"
+
+  @doc """
   Renders a centered empty-state: an icon, a message, optional body and action.
 
   ## Examples
