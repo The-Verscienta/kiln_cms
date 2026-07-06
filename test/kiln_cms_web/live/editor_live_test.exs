@@ -1534,4 +1534,38 @@ defmodule KilnCMSWeb.EditorLiveTest do
                ~r/phx-click="remove_block"[^>]*data-confirm|data-confirm[^>]*phx-click="remove_block"/
     end
   end
+
+  describe "status trigram glyphs" do
+    # The list's composite status glyph is a trigram: published (bottom line),
+    # a variant in every configured locale (middle), a pending scheduled
+    # transition (top). The trigram's name is in the accessible label.
+    test "a bare draft renders as kun (all yin)", %{conn: conn} do
+      draft_page(%{title: "Bare draft"})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ "kun · earth · not published · translation gaps · no schedule"
+    end
+
+    test "published, fully translated and scheduled renders as qian (all yang)", %{conn: conn} do
+      slug = "qi-#{System.unique_integer([:positive])}"
+      horizon = DateTime.add(DateTime.utc_now(), 3, :day)
+
+      for locale <- ["en", "fr", "es"] do
+        draft_page(%{slug: slug, locale: locale, state: :published, unpublish_at: horizon})
+      end
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ "qian · heaven · published · translated · scheduled"
+    end
+
+    test "published but untranslated and unscheduled renders as zhen", %{conn: conn} do
+      draft_page(%{title: "Solo published", state: :published})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ "zhen · thunder · published · translation gaps · no schedule"
+    end
+  end
 end

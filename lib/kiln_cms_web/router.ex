@@ -180,6 +180,7 @@ defmodule KilnCMSWeb.Router do
       ] do
       live "/media", MediaLive, :index
       live "/editor", EditorLive, :index
+      live "/editor/overview", OverviewLive, :index
       live "/editor/calendar", CalendarLive, :index
       live "/editor/translations", TranslationsLive, :index
       live "/editor/search", SearchPaletteLive, :index

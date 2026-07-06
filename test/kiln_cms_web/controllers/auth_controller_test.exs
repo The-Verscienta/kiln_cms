@@ -82,12 +82,13 @@ defmodule KilnCMSWeb.AuthControllerTest do
     end
   end
 
-  # #157: editors/admins land in the editor after sign-in; viewers land on home.
+  # #157: editors/admins land on the console overview after sign-in; viewers
+  # land on home.
   describe "success/4 redirect" do
-    test "an editor is redirected to /editor" do
+    test "an editor is redirected to the console overview" do
       user = signed_in_user(:editor)
       conn = AuthController.success(flash_conn(), :sign_in, user, user.__metadata__.token)
-      assert redirected_to(conn) == "/editor"
+      assert redirected_to(conn) == "/editor/overview"
     end
 
     test "a viewer is redirected to /" do
