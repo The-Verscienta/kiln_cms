@@ -63,17 +63,6 @@ defmodule Kiln.PluginsTest do
     assert is_pid(pid) and Process.alive?(pid)
   end
 
-  describe "the Verscienta retrofit (the plan's 'first plugin/consumer')" do
-    test "Verscienta is an installed plugin declaring its catalog domain" do
-      assert Verscienta.Plugin in Kiln.Plugins.all()
-      assert Verscienta.Plugin.name() == "verscienta"
-      assert Verscienta.Plugin.domains() == [Verscienta.Catalog]
-      # Its domains are registered where the doctor demands (test config).
-      assert Verscienta.Catalog in Application.get_env(:kiln_cms, :ash_domains)
-      assert Verscienta.Catalog in Application.get_env(:kiln_cms, :content_domains)
-    end
-  end
-
   describe "mix kiln.gen.plugin sources" do
     test "the generated plugin module compiles against the contract" do
       camel = "GenPluginT#{System.unique_integer([:positive])}"

@@ -149,5 +149,7 @@ webhooks, delivery, search and workers follow automatically.
 
 `mix kiln.plugins.doctor` (also part of precommit) verifies an install:
 domains registered, no block/field-type/queue collisions, well-formed paths.
-`Verscienta.Plugin` (projects/verscienta) is the reference — the project the
-plan always called "the first plugin/consumer".
+`Verscienta.Plugin` is the reference — the project the plan always called
+"the first plugin/consumer". It lives downstream in the verscienta-base
+repo and is overlaid onto `projects/` at image-build time (see
+projects/README.md for the overlay pattern).

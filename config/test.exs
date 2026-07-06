@@ -1,28 +1,6 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
-# Register the Verscienta project's catalog domain for the test suite only.
-# `config/config.exs` deliberately keeps `Verscienta.Catalog` out of
-# `ash_domains`/`content_domains` everywhere else, so a clean core build/boot
-# never references a project-specific module (see the comment there). But
-# `Verscienta.Catalog` IS compiled here (`projects/` is in `elixirc_paths` for
-# every env — see mix.exs), and `test/verscienta/importer_test.exs` exercises
-# its import pipeline (Catalog.Herb/Formula) directly, so the test suite needs
-# it registered to pass. This override is test-only: prod stays exactly as
-# decided (dormant), so there's no boot-crash risk from this change.
-config :kiln_cms,
-  ash_domains: [
-    KilnCMS.Accounts,
-    KilnCMS.CMS,
-    KilnCMS.Analytics,
-    KilnCMS.Firing,
-    KilnCMS.History,
-    KilnCMS.SearchIndex,
-    KilnCMS.Mail,
-    Verscienta.Catalog
-  ],
-  content_domains: [KilnCMS.CMS, Verscienta.Catalog]
-
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.
 config :kiln_cms, KilnCMS.Mail.DnsCheck,
@@ -43,11 +21,6 @@ config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webho
 
 # Webhook URL validation: skip DNS resolution for Req.Test stub hosts.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: false, resolve_dns: false
-
-# Route the Verscienta Directus migration client through a Req.Test stub so its
-# pagination/auth is exercised offline.
-config :kiln_cms, Verscienta.Source.Directus,
-  req_options: [plug: {Req.Test, Verscienta.Source.Directus}]
 
 # S3 storage adapter: dummy credentials + route ExAws HTTP through a Req.Test
 # stub, so the adapter is exercised end-to-end (signing included) with no live S3.
@@ -129,7 +102,7 @@ config :kiln_cms, KilnCMS.Collab.Crdt, persist?: false, materialize?: false
 
 # The test-suite plugin (D18): exercises every plugin seam — block union
 # membership, admin nav/route, supervision child, Oban queue merge.
-config :kiln_cms, :plugins, [KilnCMS.FixturePlugin, Verscienta.Plugin]
+config :kiln_cms, :plugins, [KilnCMS.FixturePlugin]
 
 # A fixed CORS allowlist so the CORS tests can assert both the allowed and
 # denied paths deterministically (prod default is `[]` / same-origin only).
