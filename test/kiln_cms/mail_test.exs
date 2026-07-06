@@ -37,6 +37,16 @@ defmodule KilnCMS.MailTest do
          {:retries_exceeded, {:temporary_failure, ~c"mx.example.com", "451 4.7.1 greylisted"}}}
   end
 
+  # Relay/MX unreachable: gen_smtp reports DNS/TCP trouble as `:network_failure`
+  # wrapping a posix atom — a *connection-class* transient (vs the 4xx above).
+  defmodule ConnectionFailureAdapter do
+    use Swoosh.Adapter
+
+    def deliver(_email, _config),
+      do:
+        {:error, {:retries_exceeded, {:network_failure, ~c"mx.example.com", {:error, :nxdomain}}}}
+  end
+
   # `apply/3` hides the call from the compile-time type checker, which would
   # otherwise flag these calls for always hitting a raise — that being the
   # point of the invalid-input test.
@@ -184,6 +194,15 @@ defmodule KilnCMS.MailTest do
     end
 
     @tag :capture_log
+    test "a connection-class failure (relay unreachable) still raises so Oban retries" do
+      # Alerting is asserted in KilnCMS.Mail.RelayAlertTest; here we only pin
+      # that classification doesn't change the retry contract.
+      assert_raise Mail.TransientDeliveryError, ~r/transient delivery failure/, fn ->
+        Mail.deliver_for_worker(email(), adapter: ConnectionFailureAdapter)
+      end
+    end
+
+    @tag :capture_log
     test "a permanent failure suppresses the recipient so future sends skip it" do
       refute Mail.suppressed?("one@example.com")
 
@@ -270,6 +289,14 @@ defmodule KilnCMS.MailTest do
   test "backoff follows the greylist-aware schedule and plateaus" do
     schedule = Enum.map(1..8, &DeliveryWorker.backoff(%Oban.Job{attempt: &1}))
     assert schedule == [60, 300, 900, 3600, 7200, 14_400, 28_800, 28_800]
+  end
+
+  test "both mail workers cap each attempt at attempt_timeout/0" do
+    assert Mail.attempt_timeout() == :timer.seconds(60)
+    assert DeliveryWorker.timeout(%Oban.Job{}) == Mail.attempt_timeout()
+
+    assert KilnCMS.Notifications.WorkflowMailWorker.timeout(%Oban.Job{}) ==
+             Mail.attempt_timeout()
   end
 
   defp admin_user, do: user(:admin)

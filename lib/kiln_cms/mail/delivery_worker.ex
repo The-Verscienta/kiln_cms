@@ -20,4 +20,9 @@ defmodule KilnCMS.Mail.DeliveryWorker do
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}), do: Mail.backoff_seconds(attempt)
+
+  # Cap each attempt so a tarpitting relay can't hold a :mail slot for gen_smtp's
+  # hardcoded 20-min read timeout (see `Mail.attempt_timeout/0`).
+  @impl Oban.Worker
+  def timeout(_job), do: Mail.attempt_timeout()
 end

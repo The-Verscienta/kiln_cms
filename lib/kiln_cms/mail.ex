@@ -29,6 +29,7 @@ defmodule KilnCMS.Mail do
   require Logger
 
   alias KilnCMS.Mail.DeliveryWorker
+  alias KilnCMS.Mail.RelayAlert
   alias KilnCMS.Mailer
 
   resources do
@@ -191,33 +192,47 @@ defmodule KilnCMS.Mail do
         safe_reason = redact_reason(reason)
 
         if permanent_failure?(reason) do
-          # Log so a systematic 5xx (e.g. a rotated relay password) is visible
-          # in server logs and Sentry, not just as `cancelled` rows in
-          # `oban_jobs` — a cancel is otherwise silent (no job exception, and
-          # Sentry's Oban integration ignores `{:cancel, _}`).
-          Logger.warning(
-            "Mail permanently rejected for #{Enum.join(recipient_domains(email), ", ")}, " <>
-              "cancelling: #{safe_reason}"
-          )
-
-          :telemetry.execute(
-            [:kiln_cms, :mail, :bounced],
-            %{count: 1},
-            # Recipient domains only, and the reason is scrubbed of any address:
-            # 5xx reject texts routinely echo the recipient, and this metadata
-            # (and the cancel reason below) may reach Sentry/OTLP exporters.
-            %{recipient_domains: recipient_domains(email), reason: safe_reason}
-          )
-
-          # Remember the dead address so future sends skip it (enqueue!).
-          suppress_recipients(email, safe_reason)
-
-          {:cancel, "permanent delivery failure: #{safe_reason}"}
+          cancel_permanent(email, safe_reason)
         else
-          raise TransientDeliveryError,
-            message: "transient delivery failure: #{safe_reason}"
+          retry_transient(email, reason, safe_reason)
         end
     end
+  end
+
+  # A hard 5xx: log + emit a bounce event + suppress the address, then cancel.
+  defp cancel_permanent(email, safe_reason) do
+    # Log so a systematic 5xx (e.g. a rotated relay password) is visible in
+    # server logs and Sentry, not just as `cancelled` rows in `oban_jobs` — a
+    # cancel is otherwise silent (no job exception, and Sentry's Oban
+    # integration ignores `{:cancel, _}`).
+    Logger.warning(
+      "Mail permanently rejected for #{Enum.join(recipient_domains(email), ", ")}, " <>
+        "cancelling: #{safe_reason}"
+    )
+
+    :telemetry.execute(
+      [:kiln_cms, :mail, :bounced],
+      %{count: 1},
+      # Recipient domains only, and the reason is scrubbed of any address: 5xx
+      # reject texts routinely echo the recipient, and this metadata (and the
+      # cancel reason below) may reach Sentry/OTLP exporters.
+      %{recipient_domains: recipient_domains(email), reason: safe_reason}
+    )
+
+    # Remember the dead address so future sends skip it (enqueue!).
+    suppress_recipients(email, safe_reason)
+
+    {:cancel, "permanent delivery failure: #{safe_reason}"}
+  end
+
+  # A retryable failure: raise so Oban retries. A connection-class failure (DNS,
+  # refused/timed-out TCP, no reachable MX) means the relay/MX itself is down —
+  # not one greylisted recipient — so surface it once, aggregated, rather than
+  # one alert per attempt per recipient. Greylisting (4xx) stays quiet.
+  defp retry_transient(email, reason, safe_reason) do
+    if connection_class?(reason), do: RelayAlert.notify(recipient_domain(email))
+
+    raise TransientDeliveryError, message: "transient delivery failure: #{safe_reason}"
   end
 
   ## Mail settings / DKIM
@@ -332,6 +347,20 @@ defmodule KilnCMS.Mail do
   end
 
   @doc """
+  Per-attempt wall-clock ceiling for mail workers (`Oban.Worker.timeout/1`).
+
+  gen_smtp bounds the TCP *connect* at 5s, but its per-command read timeout is
+  a hardcoded 20 minutes with no config seam — so a relay that accepts the
+  connection and then tarpits (greylist tarpitting, a wedged MX, a firewall
+  dropping mid-stream) would hold a `:mail` queue slot for up to that long. A
+  60s ceiling turns any such hang into a fast failed attempt that retries on
+  `backoff_seconds/1`, so one bad relay can't starve the queue. Generous for a
+  healthy dialog (connect + STARTTLS + DATA complete in well under a second).
+  """
+  @spec attempt_timeout() :: pos_integer()
+  def attempt_timeout, do: :timer.seconds(60)
+
+  @doc """
   Rebuild a `Swoosh.Email` from `serialize/2` output (Oban args, so keys are
   strings and address tuples became two-element lists).
   """
@@ -440,6 +469,10 @@ defmodule KilnCMS.Mail do
     |> Enum.uniq()
   end
 
+  # enqueue!/1 splits one job per recipient, so a delivery targets a single
+  # domain; join defensively in case a caller delivered a multi-recipient email.
+  defp recipient_domain(email), do: email |> recipient_domains() |> Enum.join(", ")
+
   # gen_smtp reports hard rejects as a `:permanent_failure` marker nested at
   # varying depths (`{:no_more_hosts, {:permanent_failure, host, msg}}`,
   # `{:send, {:permanent_failure, ...}}`, ...) depending on where in the
@@ -456,4 +489,28 @@ defmodule KilnCMS.Mail do
     do: Enum.any?(term, &permanent_failure?/1)
 
   defp permanent_failure?(_term), do: false
+
+  # A transient failure is "connection-class" when delivery never reached an
+  # SMTP dialog — DNS resolution, TCP connect, or the connection dropping —
+  # rather than an SMTP-level 4xx (greylisting, which gen_smtp marks
+  # `:temporary_failure`). gen_smtp nests `:network_failure` and the underlying
+  # posix atom at varying depths (`{:retries_exceeded, {:network_failure, host,
+  # {:error, :nxdomain}}}`, `{:network_failure, {:error, :econnrefused}}`, ...),
+  # so walk the term like `permanent_failure?/1`. Keyed on `:network_failure`
+  # (present for every socket/DNS error, absent from a `:temporary_failure`
+  # greylist) plus the posix atoms as defence in depth.
+  @connection_class_markers ~w(
+    network_failure
+    nxdomain econnrefused econnreset ehostunreach enetunreach etimedout ehostdown
+  )a
+
+  defp connection_class?(marker) when is_atom(marker), do: marker in @connection_class_markers
+
+  defp connection_class?(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.any?(&connection_class?/1)
+
+  defp connection_class?(term) when is_list(term),
+    do: Enum.any?(term, &connection_class?/1)
+
+  defp connection_class?(_term), do: false
 end

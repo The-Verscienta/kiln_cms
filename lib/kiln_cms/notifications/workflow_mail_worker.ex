@@ -30,6 +30,10 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}), do: Mail.backoff_seconds(attempt)
 
+  # Same per-attempt ceiling as DeliveryWorker (see `Mail.attempt_timeout/0`).
+  @impl Oban.Worker
+  def timeout(_job), do: Mail.attempt_timeout()
+
   defp build_email(%{"event" => "submitted_for_review"} = args) do
     %{"to" => to, "title" => title, "kind" => kind, "id" => id, "actor_name" => who} = args
 
