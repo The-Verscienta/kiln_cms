@@ -1,7 +1,6 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
-
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.
 config :kiln_cms, KilnCMS.Mail.DnsCheck,
