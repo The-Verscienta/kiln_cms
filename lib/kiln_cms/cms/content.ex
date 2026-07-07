@@ -303,7 +303,11 @@ defmodule KilnCMS.CMS.Content do
             ]
 
             routes do
-              base unquote("/#{type}s")
+              # `:plural` is documented as "the delivery URL segment" — honor it
+              # here too instead of the naive `"#{type}s"`, which misroutes
+              # irregular nouns (`:modality` → `/modalitys`). Identical for every
+              # regular type (page → /pages, post → /posts).
+              base unquote("/#{plural}")
 
               # Collection + single-record reads for headless consumers. Filtering
               # (`filter[...]`), sorting (`sort=`) and pagination (`page[...]`) are
