@@ -33,7 +33,16 @@ defmodule KilnCMS.CMS.ContentLink do
   use Ash.Resource,
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshJsonApi.Resource]
+
+  # No routes of its own — link edges travel as compound-document `included`
+  # members when a content record is fetched with `?include=content_links` /
+  # `incoming_links`. The declaration exists so those members carry a proper
+  # JSON:API `type` (instead of the spec-violating `"type": null`).
+  json_api do
+    type "content_link"
+  end
 
   postgres do
     table "content_links"

@@ -214,6 +214,16 @@ defmodule KilnCMS.CMS.Content do
           json_api do
             type "entry"
 
+            # Same compound-document surface as the compiled tier.
+            includes [
+              :tags,
+              :category,
+              :featured_image,
+              :content_links,
+              :incoming_links,
+              unquote(related_name)
+            ]
+
             routes do
               base "/entries"
 
@@ -276,6 +286,21 @@ defmodule KilnCMS.CMS.Content do
 
           json_api do
             type unquote(Atom.to_string(type))
+
+            # Compound documents: the relationships a consumer may `include=`
+            # (AshJsonApi rejects anything not declared here). Content links
+            # come in both directions so headless consumers can join relation
+            # edges (and their kind/position/metadata) without extra routes.
+            # `author` stays excluded: User is deliberately not a JSON:API
+            # resource (PII redaction, #183).
+            includes [
+              :tags,
+              :category,
+              :featured_image,
+              :content_links,
+              :incoming_links,
+              unquote(related_name)
+            ]
 
             routes do
               base unquote("/#{type}s")

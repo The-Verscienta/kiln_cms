@@ -201,6 +201,14 @@ and `tag_ids[]`.
 ## Sparse fieldsets & includes
 
 Standard JSON:API `fields[<type>]` and `include` params work too, e.g.
-`?include=category&fields[post]=title,slug`. The embedded block tree is **not**
+`?include=category&fields[post]=title,slug`. The includable relationships on
+every content type are `tags`, `category`, `featured_image`,
+`content_links`, `incoming_links` and `related_<type>s`; anything else —
+notably `author`, which stays excluded for PII redaction (#183) — is a 400.
+
+Link edges arrive as `content_link` compound members carrying their payload
+(`kind`, `position`, `label`, `metadata`, `source_id`, `target_id`), so a
+consumer can join outgoing/incoming relations (and e.g. per-link dosage
+metadata) without extra requests. The embedded block tree is **not**
 exposed over JSON:API — rendered content is served as fired artifacts at
 `GET /api/content/:type/:slug`.
