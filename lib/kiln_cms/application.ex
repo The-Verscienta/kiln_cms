@@ -26,6 +26,9 @@ defmodule KilnCMS.Application do
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
       # ETS table without bound (one row per `bucket:IP` otherwise lives forever).
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
+      # Cooldown bucket for the aggregated "relay unreachable" mail alert — one
+      # fixed key, so the table stays tiny; a periodic clean keeps it honest.
+      {KilnCMS.Mail.RelayAlert, clean_period: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
       # Bounded LRW firing-artifact cache (see `KilnCMS.Firing.Cache.child_spec/1`).

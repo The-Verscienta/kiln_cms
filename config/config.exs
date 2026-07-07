@@ -292,6 +292,11 @@ config :phoenix, :json_library, Jason
 config :sentry,
   enable_source_code_context: true,
   root_source_code_paths: [File.cwd!()],
+  # Drop expected retry noise: transient mail-delivery failures are raised so
+  # Oban retries (greylisting, a blip), and reporting each attempt of each
+  # recipient buries real issues. The systemic relay-outage case is surfaced
+  # once, aggregated, by KilnCMS.Mail.RelayAlert. See KilnCMS.SentryFilter.
+  before_send: {KilnCMS.SentryFilter, :before_send},
   integrations: [oban: [capture_errors: true]]
 
 # OpenTelemetry. Spans are dropped (`traces_exporter: :none`) and the
