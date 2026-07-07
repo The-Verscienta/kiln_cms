@@ -190,6 +190,51 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  describe "compound documents (include=)" do
+    test "declared relationships come back as included resources with linkage" do
+      admin = user(:admin)
+      cat = category(admin)
+      tag = CMS.create_tag!(%{name: "Inc", slug: slug()}, actor: admin)
+      other = published_post(%{title: "Linked-to"}, admin)
+
+      post =
+        published_post(
+          %{title: "Compound", category_id: cat.id, tag_ids: [tag.id]},
+          admin
+        )
+
+      CMS.create_content_link!(
+        %{source_id: post.id, target_id: other.id, kind: :see_also, metadata: %{"note" => "x"}},
+        actor: admin
+      )
+
+      assert {200, body} =
+               api_get("/api/json/posts/#{post.id}?include=tags,category,content_links")
+
+      # Linkage data appears on the requested relationships…
+      rels = body["data"]["relationships"]
+      assert [%{"type" => "tag", "id" => _}] = rels["tags"]["data"]
+      assert %{"type" => "category"} = rels["category"]["data"]
+      assert [%{"type" => "content_link"}] = rels["content_links"]["data"]
+
+      # …and the compound members arrive typed, links with their payload.
+      included = Enum.group_by(body["included"], & &1["type"])
+      assert [%{"attributes" => %{"name" => "Inc"}}] = included["tag"]
+      assert [%{"attributes" => link}] = included["content_link"]
+      assert link["kind"] == "see_also"
+      assert link["metadata"] == %{"note" => "x"}
+      assert link["target_id"] == other.id
+    end
+
+    test "an undeclared include is still rejected" do
+      admin = user(:admin)
+      post = published_post(%{title: "P"}, admin)
+
+      assert {400, %{"errors" => [%{"code" => "invalid_includes"}]}} =
+               api_get("/api/json/posts/#{post.id}?include=versions")
+    end
+  end
+
   # Regression for #183: the JSON:API must not expose author PII. User is not a
   # JSON:API resource (the Accounts domain has no AshJsonApi router), so the
   # author relationship is not includable and the post payload carries only the
