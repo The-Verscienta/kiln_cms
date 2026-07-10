@@ -59,6 +59,75 @@ Then visit:
 - GraphQL playground: <http://localhost:4000/gql/playground>
 - JSON:API Swagger UI: <http://localhost:4000/api/json/swaggerui>
 
+## Creating an admin user
+
+The `role` attribute (`:admin`/`:editor`/`:viewer`) can **not** be set through
+self-registration — `register_with_password` always lands on `:viewer` so signup
+can never escalate privileges. Admins are seeded directly or promoted by an
+existing admin.
+
+**Development.** The seed script ([`priv/repo/seeds.exs`](priv/repo/seeds.exs))
+creates a pre-confirmed admin and editor. It runs automatically as part of
+`mix setup`, or on its own:
+
+```bash
+mix run priv/repo/seeds.exs
+```
+
+Default dev credentials are `admin@kiln.test` / `kilnadmin123`. Override them
+(this is how you bootstrap a real admin) with env vars — the script is
+idempotent, so it's safe to re-run:
+
+```bash
+ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a-strong-password' \
+  mix run priv/repo/seeds.exs
+```
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ADMIN_EMAIL` | `admin@kiln.test` | Email for the seeded admin account. |
+| `ADMIN_PASSWORD` | `kilnadmin123` | Password for the seeded admin account. |
+| `EDITOR_EMAIL` | `editor@kiln.test` | Email for the seeded editor account. |
+| `EDITOR_PASSWORD` | `kilneditor123` | Password for the seeded editor account. |
+
+**Production — bootstrap the first admin.** A production OTP release has no
+`iex`/`mix` — drive it through the generated `bin/kiln_cms` scripts (in Docker
+they live at `/app/bin/kiln_cms`). With no existing admin to authorize the
+promotion, run the admin-only `:manage_access` action with `authorize?: false`.
+
+Attach an IEx shell to the **running** node (`remote` connects to the live,
+fully-started app — repo included):
+
+```bash
+/app/bin/kiln_cms remote
+```
+
+```elixir
+alias KilnCMS.Accounts
+
+user = Accounts.get_user_by_email!("you@example.com", authorize?: false)
+Accounts.manage_user_access!(user, %{role: :admin}, authorize?: false)
+```
+
+Or run it one-shot without an interactive shell via `rpc` (executes on the live
+node, prints the result, exits):
+
+```bash
+/app/bin/kiln_cms rpc 'KilnCMS.Accounts.manage_user_access!(KilnCMS.Accounts.get_user_by_email!("you@example.com", authorize?: false), %{role: :admin}, authorize?: false)'
+```
+
+> Use **straight** ASCII quotes (`"you@example.com"`) — smart/curly quotes
+> (`“ ”`) are a syntax error in Elixir.
+
+Both `remote` and `rpc` need a running node — they connect to the live release.
+On Docker, `docker exec -it <container> /app/bin/kiln_cms remote`; on Fly.io,
+`fly ssh console` then the same command. (`bin/kiln_cms eval` boots a separate,
+non-serving instance and does **not** auto-start the repo, so prefer `remote`/`rpc`
+for this.)
+
+Once one admin exists, promote further users through the editor UI / API as that
+admin actor — no `authorize?: false` needed.
+
 ## Delivery
 
 KilnCMS serves its **public website itself**, with Phoenix LiveView and

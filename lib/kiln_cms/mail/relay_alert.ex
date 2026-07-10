@@ -43,9 +43,12 @@ defmodule KilnCMS.Mail.RelayAlert do
 
   @doc false
   # Test seam: clear the cooldown so a deterministic alert can be asserted.
+  # Drops the bucket row outright rather than zeroing it via Hammer's `set/3`,
+  # whose `count` is spec'd `pos_integer()` — passing 0 is a type violation.
+  # Hammer names the ETS table after the module, and @bucket is its only key.
   @spec reset() :: :ok
   def reset do
-    _ = set(@bucket, @cooldown, 0)
+    :ets.delete_all_objects(__MODULE__)
     :ok
   end
 
