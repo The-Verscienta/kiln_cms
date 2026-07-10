@@ -90,6 +90,21 @@ editorially. Note a non-public or unknown field in `sort` fails the request
 with `invalid_sort` (it is not silently ignored), so a naive client renders an
 empty page — check the error body.
 
+### Sorting search results
+
+`/…/search` orders by **relevance** by default (title hits above body hits,
+newest breaking ties). An explicit `sort=` **overrides** it — your keys rank
+first and relevance degrades to the tiebreaker:
+
+```
+GET /api/json/posts/search?query=tea             # best match first
+GET /api/json/posts/search?query=tea&sort=title  # A → Z, relevance breaks ties
+```
+
+`/…/semantic-search` behaves the same way with cosine distance as the default
+order (overriding it usually defeats the point — but it is not an error).
+`custom_sort` is not accepted on the search routes.
+
 ## Custom fields (`custom_filter` / `custom_sort`)
 
 Admin-defined custom fields (see
@@ -141,7 +156,9 @@ on its type; if declarations diverge, the API asks you to scope rather than
 guessing a cast.
 
 **Search facets** — `/…/search` and `/…/semantic-search` accept
-`custom_filter` too (not `custom_sort` — relevance/distance owns the order).
+`custom_filter` too (not `custom_sort`; relevance/distance is the default
+order, and only an explicit `sort=` overrides it — see "Sorting search
+results" above).
 
 > **Performance.** These predicates run on unindexed JSONB extractions. They're
 > built for the long tail of editor-owned fields; a field you filter or sort by
