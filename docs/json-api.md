@@ -32,12 +32,18 @@ Authorization: Bearer <token>
 
 | Resource  | Collection                  | Single record               | Extra reads |
 |-----------|-----------------------------|-----------------------------|-------------|
-| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/autocomplete` |
-| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/autocomplete`, `/posts/published` |
+| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete` |
+| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search` |
 
 `GET /api/json/posts/published` returns published posts only, ordered newest
 first — the headless blog feed.
+
+Every content-type search read also has a **published-only twin** at
+`…/search/published`, `…/semantic-search/published` and
+`…/autocomplete/published` — same query surface, with `state == :published`
+filtered server-side. Delivery sites calling with a bearer key should use
+these; see "Search & autocomplete" below.
 
 ## Filtering
 
@@ -221,6 +227,29 @@ GET /api/json/media-items/search?query=logo
 
 `search` also accepts the optional facets `category_id`, `author_id`, `state`
 and `tag_ids[]`.
+
+### Published-only search (`…/published`)
+
+The base search routes go through the read policy: anonymous callers match
+published content only, but a **bearer-keyed** caller matches whatever its
+minting account can see — with an editor/admin key that includes drafts, and
+the optional `state` facet is merely a request the caller must remember to
+make. Each search read therefore has a published-only twin whose
+`state == :published` filter is applied **server-side** (#297):
+
+```
+GET /api/json/posts/search/published?query=elixir&locale=en
+GET /api/json/posts/semantic-search/published?query=elixir
+GET /api/json/posts/autocomplete/published?prefix=eli
+```
+
+They take the same params minus `state` (the twins have no such argument — the
+filter cannot be widened) and keep the same relevance/distance ordering and
+pagination.
+Delivery sites should use these — the search counterpart of reading
+`/…/published` instead of the plain index. See
+[headless-consumer-guide.md](headless-consumer-guide.md) → "Delivery sites: an
+API key widens what you see".
 
 ## Sparse fieldsets & includes
 

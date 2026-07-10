@@ -59,6 +59,22 @@ defmodule KilnCMS.CMS.Content do
     if query.limit || query.page, do: query, else: Ash.Query.limit(query, default)
   end
 
+  @doc false
+  # Shared by the `:search_semantic` / `:search_semantic_published` prepares:
+  # embed the query and order by cosine distance (nearest first). Returns
+  # nothing when semantic search is disabled or the query can't be embedded.
+  def semantic_sort(query) do
+    with true <- KilnCMS.Search.semantic?(),
+         {:ok, vector} <- KilnCMS.Search.embed_query(Ash.Query.get_argument(query, :query)) do
+      query
+      |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+      |> cap_unbounded()
+    else
+      # Disabled, or the query couldn't be embedded — no semantic results.
+      _ -> Ash.Query.limit(query, 0)
+    end
+  end
+
   defmacro __using__(opts) do
     type = Keyword.fetch!(opts, :type)
     plural = Keyword.get(opts, :plural, "#{type}s")
@@ -208,6 +224,14 @@ defmodule KilnCMS.CMS.Content do
               list :search_entries, :search, paginate_with: nil
               list :semantic_search_entries, :search_semantic, paginate_with: nil
               list :autocomplete_entries, :autocomplete
+
+              # Published-only delivery twins (#297) — state pinned server-side.
+              list :search_published_entries, :search_published, paginate_with: nil
+
+              list :semantic_search_published_entries, :search_semantic_published,
+                paginate_with: nil
+
+              list :autocomplete_published_entries, :autocomplete_published
             end
           end
 
@@ -233,6 +257,12 @@ defmodule KilnCMS.CMS.Content do
               index :search, route: "/search"
               index :search_semantic, route: "/semantic-search"
               index :autocomplete, route: "/autocomplete"
+              # Published-only delivery twins (#297) — same query surface
+              # minus `state`, filtered server-side, so a keyed service
+              # caller can't be widened to drafts.
+              index :search_published, route: "/search/published"
+              index :search_semantic_published, route: "/semantic-search/published"
+              index :autocomplete_published, route: "/autocomplete/published"
               get :read
             end
           end
@@ -281,6 +311,14 @@ defmodule KilnCMS.CMS.Content do
               list unquote(:"search_#{type}s"), :search, paginate_with: nil
               list unquote(:"semantic_search_#{type}s"), :search_semantic, paginate_with: nil
               list unquote(:"autocomplete_#{type}s"), :autocomplete
+
+              # Published-only delivery twins (#297) — state pinned server-side.
+              list unquote(:"search_published_#{type}s"), :search_published, paginate_with: nil
+
+              list unquote(:"semantic_search_published_#{type}s"), :search_semantic_published,
+                paginate_with: nil
+
+              list unquote(:"autocomplete_published_#{type}s"), :autocomplete_published
             end
           end
 
@@ -320,6 +358,12 @@ defmodule KilnCMS.CMS.Content do
               # unavailable (KilnCMS.Search.semantic? false).
               index :search_semantic, route: "/semantic-search"
               index :autocomplete, route: "/autocomplete"
+              # Published-only delivery twins (#297) — same query surface
+              # minus `state`, filtered server-side, so a keyed service
+              # caller can't be widened to drafts.
+              index :search_published, route: "/search/published"
+              index :search_semantic_published, route: "/semantic-search/published"
+              index :autocomplete_published, route: "/autocomplete/published"
               unquote(published_route)
               # `/:id` last so it can't shadow the static sub-paths above.
               get :read
@@ -388,6 +432,208 @@ defmodule KilnCMS.CMS.Content do
                    )
           end
         end
+      end
+
+    # Headless search reads, generated in pairs (#297): keyword search,
+    # semantic search, and autocomplete each ship a `*_published` delivery
+    # twin whose `state == :published` filter is pinned **server-side** — the
+    # search counterpart of the plain index vs `:published`. The read policy
+    # alone doesn't protect delivery consumers here: a bearer API key
+    # authorizes as the account that minted it, so with an editor/admin key
+    # the base actions silently match drafts. The twins cannot be widened by
+    # any credential, and they drop the `state` facet argument (dead weight
+    # against the pinned filter). Both flavors come from one template so
+    # their query surfaces can't drift.
+    join_and = fn clauses ->
+      Enum.reduce(clauses, fn clause, acc -> quote(do: unquote(acc) and unquote(clause)) end)
+    end
+
+    pinned_state = quote(do: ^ref(:state) == :published)
+
+    # The optional facets shared by keyword + semantic search — category,
+    # author, tags (content carrying any of them), custom fields, and (base
+    # flavor only) workflow state. `custom_filter` is a facet, not a sort:
+    # relevance/distance is the order unless the caller passes an explicit
+    # `sort` (see the prepare in each action).
+    facet_args = fn published? ->
+      [
+        quote(do: argument(:category_id, :uuid)),
+        quote(do: argument(:author_id, :uuid)),
+        if(published?, do: nil, else: quote(do: argument(:state, :atom))),
+        quote(do: argument(:tag_ids, {:array, :uuid})),
+        quote(do: argument(:custom_filter, :map)),
+        quote(do: prepare(KilnCMS.CMS.Preparations.CustomFieldQuery))
+      ]
+      |> Enum.reject(&is_nil/1)
+    end
+
+    facet_clauses = fn published? ->
+      [
+        quote(do: is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)),
+        quote(do: is_nil(^arg(:author_id)) or ^ref(:author_id) == ^arg(:author_id)),
+        if(published?,
+          do: nil,
+          else: quote(do: is_nil(^arg(:state)) or ^ref(:state) == ^arg(:state))
+        ),
+        quote(do: is_nil(^arg(:tag_ids)) or exists(tags, ^ref(:id) in ^arg(:tag_ids)))
+      ]
+      |> Enum.reject(&is_nil/1)
+    end
+
+    # Exposed on the public API (JSON:API index routes, GraphQL lists) —
+    # without a bound, a broad query returns every matching row. For semantic
+    # search the bound isn't just response size: an `ORDER BY embedding <=>
+    # $1` without a LIMIT can't use the HNSW index — Postgres computes the
+    # distance for every embedded row.
+    search_pagination =
+      quote do
+        pagination offset?: true,
+                   keyset?: true,
+                   countable: true,
+                   required?: false,
+                   max_page_size: 100,
+                   default_limit: 25
+      end
+
+    # Locale-aware full-text search over the trigger-maintained, weighted
+    # `search_vector`. Scopes results to one `locale` (default: the configured
+    # default) and stems with that locale's text-search config
+    # (`kiln_regconfig/1`), so French content is matched with French rules,
+    # etc. The prepare resolves the locale (setting it back so the filter sees
+    # it too), then orders by relevance (ts_rank over the weighted vector —
+    # title hits outrank body hits), newest to break ties. `Ash.Query.sort/2`
+    # APPENDS: these keys rank after whatever the caller already sorted on, so
+    # an explicit JSON:API/GraphQL `sort` overrides relevance and relevance
+    # degrades to the tiebreaker. That contract is pinned by test ("explicit
+    # sort= overrides relevance", JsonApiTest) — don't switch to
+    # prepend/unsort without meaning to.
+    search_read = fn name, published? ->
+      filter_ast =
+        join_and.(
+          List.wrap(if(published?, do: pinned_state)) ++
+            [
+              quote(do: ^ref(:locale) == ^arg(:locale)),
+              quote do
+                fragment(
+                  "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
+                  ^arg(:locale),
+                  ^arg(:query)
+                )
+              end
+            ] ++ facet_clauses.(published?)
+        )
+
+      quote do
+        read unquote(name) do
+          argument :query, :string, allow_nil?: false
+          argument :locale, :string
+
+          unquote(search_pagination)
+
+          unquote_splicing(facet_args.(published?))
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+            q = Ash.Query.get_argument(query, :query)
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([
+              {:search_rank, {%{locale: locale, query: q}, :desc}},
+              {:inserted_at, :desc}
+            ])
+            |> KilnCMS.CMS.Content.cap_unbounded()
+          end
+        end
+      end
+    end
+
+    # Semantic search: embed the query and return embedded content ordered by
+    # cosine distance (nearest first), backed by the HNSW index. Returns
+    # nothing when semantic search is disabled or the query can't be embedded.
+    semantic_read = fn name, published? ->
+      filter_ast =
+        join_and.(
+          List.wrap(if(published?, do: pinned_state)) ++
+            [
+              quote(do: not is_nil(^ref(:embedding))),
+              quote(do: ^ref(:locale) == ^arg(:locale))
+            ] ++ facet_clauses.(published?)
+        )
+
+      quote do
+        read unquote(name) do
+          argument :query, :string, allow_nil?: false
+          argument :locale, :string
+
+          unquote(search_pagination)
+
+          unquote_splicing(facet_args.(published?))
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> KilnCMS.CMS.Content.semantic_sort()
+          end
+        end
+      end
+    end
+
+    # Typo-tolerant title autocomplete: same-locale rows whose title matches
+    # the prefix (case-insensitive) or is trigram-similar (handles typos),
+    # ordered by similarity, capped at 10. The base flavor has no state facet
+    # at all — anonymous callers are policy-filtered to published, but a keyed
+    # editor caller gets draft suggestions; the published twin is the only
+    # way to narrow it.
+    autocomplete_read = fn name, published? ->
+      filter_ast =
+        join_and.(
+          List.wrap(if(published?, do: pinned_state)) ++
+            [
+              quote(do: ^ref(:locale) == ^arg(:locale)),
+              quote do
+                fragment("? ILIKE ? || '%'", ^ref(:title), ^arg(:prefix)) or
+                  fragment("? <% ?", ^arg(:prefix), ^ref(:title))
+              end
+            ]
+        )
+
+      quote do
+        read unquote(name) do
+          argument :prefix, :string, allow_nil?: false
+          argument :locale, :string
+
+          filter expr(unquote(filter_ast))
+
+          prepare fn query, _context ->
+            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
+            prefix = Ash.Query.get_argument(query, :prefix)
+
+            query
+            |> Ash.Query.set_argument(:locale, locale)
+            |> Ash.Query.sort([{:title_similarity, {%{prefix: prefix}, :desc}}])
+            |> Ash.Query.limit(10)
+          end
+        end
+      end
+    end
+
+    search_actions =
+      quote do
+        (unquote_splicing([
+           search_read.(:search, false),
+           search_read.(:search_published, true),
+           semantic_read.(:search_semantic, false),
+           semantic_read.(:search_semantic_published, true),
+           autocomplete_read.(:autocomplete, false),
+           autocomplete_read.(:autocomplete_published, true)
+         ]))
       end
 
     # The generic entry tier belongs to its admin-defined type; slugs, public
@@ -760,156 +1006,15 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
 
-        # Full-text search over the denormalized `search_text`. Goes through the
-        # read policy, so anonymous callers only match published content.
-        # Locale-aware full-text search over the trigger-maintained, weighted
-        # `search_vector`. Scopes results to one `locale` (default: the
-        # configured default) and stems with that locale's text-search config
-        # (`kiln_regconfig/1`), so French content is matched with French rules,
-        # etc. Goes through the read policy — anonymous callers match published
-        # content only.
-        read :search do
-          argument :query, :string, allow_nil?: false
-          argument :locale, :string
-
-          # Exposed on the public API (JSON:API `index :search`, GraphQL list)
-          # — without a bound, a broad query returns every matching row.
-          pagination offset?: true,
-                     keyset?: true,
-                     countable: true,
-                     required?: false,
-                     max_page_size: 100,
-                     default_limit: 25
-
-          # Optional facets — each is skipped when nil, so callers filter by any
-          # combination of category, tags (content carrying any of them), author,
-          # and workflow state.
-          argument :category_id, :uuid
-          argument :author_id, :uuid
-          argument :state, :atom
-          argument :tag_ids, {:array, :uuid}
-
-          # Custom-field facet (no `custom_sort` — relevance is the order
-          # unless the caller passes an explicit `sort`, see below).
-          argument :custom_filter, :map
-          prepare KilnCMS.CMS.Preparations.CustomFieldQuery
-
-          filter expr(
-                   ^ref(:locale) == ^arg(:locale) and
-                     fragment(
-                       "search_vector @@ plainto_tsquery(kiln_regconfig(?), ?)",
-                       ^arg(:locale),
-                       ^arg(:query)
-                     ) and
-                     (is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)) and
-                     (is_nil(^arg(:author_id)) or ^ref(:author_id) == ^arg(:author_id)) and
-                     (is_nil(^arg(:state)) or ^ref(:state) == ^arg(:state)) and
-                     (is_nil(^arg(:tag_ids)) or exists(tags, ^ref(:id) in ^arg(:tag_ids)))
-                 )
-
-          # Resolve the locale (defaulting to the configured default) and set it
-          # back so the filter sees it too, then order by relevance (ts_rank over
-          # the weighted vector — title hits outrank body hits), newest to break
-          # ties. `Ash.Query.sort/2` APPENDS: these keys rank after whatever the
-          # caller already sorted on, so an explicit JSON:API/GraphQL `sort`
-          # overrides relevance and relevance degrades to the tiebreaker. That
-          # contract is pinned by test ("explicit sort= overrides relevance",
-          # JsonApiTest) — don't switch to prepend/unsort without meaning to.
-          prepare fn query, _context ->
-            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
-            q = Ash.Query.get_argument(query, :query)
-
-            query
-            |> Ash.Query.set_argument(:locale, locale)
-            |> Ash.Query.sort([
-              {:search_rank, {%{locale: locale, query: q}, :desc}},
-              {:inserted_at, :desc}
-            ])
-            |> KilnCMS.CMS.Content.cap_unbounded()
-          end
-        end
-
-        # Semantic search: embed the query and return embedded content ordered by
-        # cosine distance (nearest first), backed by the HNSW index. Goes through
-        # the read policy, so anonymous callers only match published content.
-        # Returns nothing when semantic search is disabled or the query can't be
-        # embedded.
-        read :search_semantic do
-          argument :query, :string, allow_nil?: false
-          argument :locale, :string
-
-          # A bound isn't just response size here: an `ORDER BY embedding <=>
-          # $1` without a LIMIT can't use the HNSW index — Postgres computes
-          # the distance for every embedded row.
-          pagination offset?: true,
-                     keyset?: true,
-                     countable: true,
-                     required?: false,
-                     max_page_size: 100,
-                     default_limit: 25
-
-          # The same optional facets as `:search`, so `hybrid/3` can apply one
-          # filter set to both legs.
-          argument :category_id, :uuid
-          argument :author_id, :uuid
-          argument :state, :atom
-          argument :tag_ids, {:array, :uuid}
-
-          # Custom-field facet (no `custom_sort` — distance is the order
-          # unless the caller passes an explicit `sort`; the prepare below
-          # appends its key exactly like `:search`'s does).
-          argument :custom_filter, :map
-          prepare KilnCMS.CMS.Preparations.CustomFieldQuery
-
-          # Candidates: same-locale rows that have an embedding.
-          filter expr(
-                   not is_nil(^ref(:embedding)) and ^ref(:locale) == ^arg(:locale) and
-                     (is_nil(^arg(:category_id)) or ^ref(:category_id) == ^arg(:category_id)) and
-                     (is_nil(^arg(:author_id)) or ^ref(:author_id) == ^arg(:author_id)) and
-                     (is_nil(^arg(:state)) or ^ref(:state) == ^arg(:state)) and
-                     (is_nil(^arg(:tag_ids)) or exists(tags, ^ref(:id) in ^arg(:tag_ids)))
-                 )
-
-          prepare fn query, _context ->
-            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
-            query = Ash.Query.set_argument(query, :locale, locale)
-
-            with true <- KilnCMS.Search.semantic?(),
-                 {:ok, vector} <-
-                   KilnCMS.Search.embed_query(Ash.Query.get_argument(query, :query)) do
-              query
-              |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
-              |> KilnCMS.CMS.Content.cap_unbounded()
-            else
-              # Disabled, or the query couldn't be embedded — no semantic results.
-              _ -> Ash.Query.limit(query, 0)
-            end
-          end
-        end
-
-        # Typo-tolerant title autocomplete: same-locale rows whose title matches
-        # the prefix (case-insensitive) or is trigram-similar (handles typos),
-        # ordered by similarity, capped at 10. Goes through the read policy.
-        read :autocomplete do
-          argument :prefix, :string, allow_nil?: false
-          argument :locale, :string
-
-          filter expr(
-                   ^ref(:locale) == ^arg(:locale) and
-                     (fragment("? ILIKE ? || '%'", ^ref(:title), ^arg(:prefix)) or
-                        fragment("? <% ?", ^arg(:prefix), ^ref(:title)))
-                 )
-
-          prepare fn query, _context ->
-            locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
-            prefix = Ash.Query.get_argument(query, :prefix)
-
-            query
-            |> Ash.Query.set_argument(:locale, locale)
-            |> Ash.Query.sort([{:title_similarity, {%{prefix: prefix}, :desc}}])
-            |> Ash.Query.limit(10)
-          end
-        end
+        # Keyword search, semantic search, and autocomplete — each paired with
+        # its `*_published` delivery twin (state pinned server-side, #297).
+        # Generated from one template above (`search_read`/`semantic_read`/
+        # `autocomplete_read`), where the behavior is documented. All go
+        # through the read policy, so anonymous callers only ever match
+        # published content — the twins exist for *keyed* delivery callers,
+        # whose editor/admin identity would otherwise widen the base actions
+        # to drafts.
+        unquote(search_actions)
 
         update :submit_for_review do
           require_atomic? false

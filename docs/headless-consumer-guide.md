@@ -14,7 +14,7 @@ and knowing what you'll get back. See also [api.md](api.md) (JSON:API + auth),
 | To **preview a specific draft** by share link | `GET /preview/:token` | The draft's raw, editable block tree (curated public fields), behind a signed 1-hour token |
 | **Filterable lists / metadata** (slug, title, SEO, dates, relationships), incl. drafts with a bearer token | JSON:API: `GET /api/json/...` | Resource attributes + relationship linkage. **No block body** (`blocks` is `public? false`) |
 | **Taxonomy** (categories, tags) | JSON:API `/api/json/categories`,`/tags` **or** GraphQL `categories`,`tags` | Name, slug, description |
-| **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too unless you pass `state=published` (see "Drafts") |
+| **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too. Delivery sites: use the `…/published` twins (`searchPublished*` etc.), which pin `state == :published` server-side (see "Drafts") |
 | A **typed query** over published content by slug/locale | GraphQL `/gql` (`postBySlug`, `pageBySlug`, …) | Selected fields; no block body, author is the opaque `authorId` only |
 
 ## Admin-defined (dynamic) content types
@@ -27,8 +27,8 @@ scoped by the type's name:
 | Surface | How |
 |---------|-----|
 | Artifact | `GET /api/content/<type name>/<slug>` — identical to compiled types; the `json` surface's `type` field is the dynamic type's name |
-| JSON:API | `GET /api/json/entries?filter[type_name]=<name>` (+ `/entries/search`, `/semantic-search`, `/autocomplete` with `?query=…`) |
-| GraphQL | `entryBySlug(slug, locale, typeDefinitionId)`, `searchEntries(query, filter: {typeName: {eq: "<name>"}})`, `entryTranslations`, `semanticSearchEntries`, `autocompleteEntries` |
+| JSON:API | `GET /api/json/entries?filter[type_name]=<name>` (+ `/entries/search`, `/semantic-search`, `/autocomplete` with `?query=…`, each with a published-only `…/published` twin) |
+| GraphQL | `entryBySlug(slug, locale, typeDefinitionId)`, `searchEntries(query, filter: {typeName: {eq: "<name>"}})`, `entryTranslations`, `semanticSearchEntries`, `autocompleteEntries` (+ `searchPublishedEntries` / `semanticSearchPublishedEntries` / `autocompletePublishedEntries`) |
 | Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` — exactly like compiled types |
 
 Admin-defined **custom fields** are delivered in each entry's `custom_fields`
@@ -85,11 +85,13 @@ Two independent defenses; use both:
 * **Read the published-only surfaces anyway.** For lists/detail, use
   `GET /api/json/<plural>/published` (the `:published` action filters
   `state == :published` server-side; see [json-api.md](json-api.md) → route
-  table) rather than the plain index. For search there is currently **no
-  `/published` variant** of `/search` / `/semantic-search` / `/autocomplete`;
-  pass the action's `state` argument (`?query=…&state=published`) on every
-  call. A server-side published-only search route is tracked in
-  [#297](https://github.com/The-Verscienta/kiln_cms/issues/297).
+  table) rather than the plain index. Search has the same twins (#297):
+  `/search/published`, `/semantic-search/published` and
+  `/autocomplete/published` (GraphQL: `searchPublished*`,
+  `semanticSearchPublished*`, `autocompletePublished*`) pin
+  `state == :published` server-side — same query surface, minus the `state`
+  facet, so the filter cannot be widened by any credential. Prefer these over
+  remembering to pass `state=published` on every call to the base routes.
 
 Treat "which states can this credential see" as part of the credential's blast
 radius: a leaked editor-keyed delivery config exposes drafts, not just

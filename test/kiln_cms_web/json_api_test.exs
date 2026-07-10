@@ -398,6 +398,99 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # #297: the published-only search twins. The base search routes go through
+  # the read policy, so a bearer-keyed editor/admin caller silently matches
+  # drafts; the `…/published` routes pin `state == :published` server-side and
+  # cannot be widened by any credential.
+  describe "published-only search twins" do
+    test "editor bearer: /search includes drafts, /search/published never does" do
+      admin = user(:admin)
+      editor = user(:editor)
+      term = "pubsearch#{System.unique_integer([:positive])}"
+
+      live = published_post(%{title: "#{term} live"}, admin)
+      draft = make_post(%{title: "#{term} draft"}, admin)
+
+      tok = token(editor)
+
+      # The base route widens to drafts for a keyed editor — the trap.
+      assert {200, base} = api_get("/api/json/posts/search?query=#{term}&locale=en", token: tok)
+      assert Enum.sort(ids(base)) == Enum.sort([live.id, draft.id])
+
+      # The published twin filters server-side, same credential.
+      assert {200, published} =
+               api_get("/api/json/posts/search/published?query=#{term}&locale=en", token: tok)
+
+      assert ids(published) == [live.id]
+    end
+
+    test "anonymous callers get published matches from the twin too" do
+      admin = user(:admin)
+      term = "pubanon#{System.unique_integer([:positive])}"
+      live = published_post(%{title: "#{term} live"}, admin)
+      _draft = make_post(%{title: "#{term} draft"}, admin)
+
+      assert {200, body} = api_get("/api/json/posts/search/published?query=#{term}&locale=en")
+      assert ids(body) == [live.id]
+    end
+
+    test "editor bearer: autocomplete/published hides draft titles" do
+      admin = user(:admin)
+      editor = user(:editor)
+      term = "Puback#{System.unique_integer([:positive])}"
+
+      live = published_post(%{title: "#{term} live"}, admin)
+      draft = make_post(%{title: "#{term} draft"}, admin)
+
+      tok = token(editor)
+
+      # Base route suggests the draft to a keyed editor…
+      assert {200, base} =
+               api_get("/api/json/posts/autocomplete?prefix=#{term}&locale=en", token: tok)
+
+      assert Enum.sort(ids(base)) == Enum.sort([live.id, draft.id])
+
+      # …the published twin does not.
+      assert {200, published} =
+               api_get("/api/json/posts/autocomplete/published?prefix=#{term}&locale=en",
+                 token: tok
+               )
+
+      assert ids(published) == [live.id]
+    end
+
+    test "the semantic twin responds (empty when embeddings unavailable) and requires query" do
+      admin = user(:admin)
+      _post = published_post(%{title: "Semantic published"}, admin)
+
+      assert {200, %{"data" => data}} =
+               api_get("/api/json/posts/semantic-search/published?query=anything&locale=en")
+
+      assert is_list(data)
+
+      assert {400, %{"errors" => [%{"code" => "required"} | _]}} =
+               api_get("/api/json/posts/semantic-search/published")
+    end
+
+    test "the twins expose no state argument to widen" do
+      admin = user(:admin)
+      editor = user(:editor)
+      term = "pubwiden#{System.unique_integer([:positive])}"
+
+      _live = published_post(%{title: "#{term} live"}, admin)
+      draft = make_post(%{title: "#{term} draft"}, admin)
+
+      # Even explicitly asking the twin for drafts returns published only.
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts/search/published?query=#{term}&locale=en&state=draft",
+                 token: token(editor)
+               )
+
+      refute draft.id in ids(body)
+    end
+  end
+
   describe "single record" do
     test "fetches a published post by id" do
       admin = user(:admin)
