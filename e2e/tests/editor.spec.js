@@ -1,27 +1,14 @@
 // @ts-check
-const { test, expect } = require("@playwright/test");
+// `test` here carries the LiveView navigation guard (see fixtures.js): every
+// page.goto/reload waits for the LiveView socket to connect, so a phx-click or
+// phx-submit issued right after a page load can't be swallowed.
+const { test, expect } = require("./fixtures");
 
 // Demo admin seeded by priv/repo/seeds.exs (mix e2e.setup).
 const ADMIN = { email: "admin@kiln.test", password: "kilnadmin123" };
 
-// Wait until the LiveView socket has actually connected before driving any
-// phx-click / phx-submit control on a freshly loaded page.
-//
-// Once app.js loads, LiveView binds the page's forms/buttons and *suppresses*
-// their native fallback (e.g. the sign-in form's plain POST). If a click lands
-// in the window after JS has bound but before the channel has joined, the event
-// is swallowed and never reaches the server — the page just sits there. Locally
-// the socket connects in milliseconds so this is invisible, but on a cold CI
-// runner the join lags the first interaction and the click is lost, which
-// surfaced as sign-in hanging on /sign-in (and "new draft" hanging on /editor).
-// Gating on `isConnected()` makes the connected path deterministic.
-async function waitForLiveConnected(page) {
-  await page.waitForFunction(() => window.liveSocket && window.liveSocket.isConnected());
-}
-
 async function signInAsAdmin(page) {
   await page.goto("/sign-in");
-  await waitForLiveConnected(page);
   await page.fill('input[name="user[email]"]', ADMIN.email);
   await page.fill('input[name="user[password]"]', ADMIN.password);
   await page.getByRole("button", { name: /sign in/i }).click();
@@ -34,7 +21,6 @@ async function signInAsAdmin(page) {
 // `new` handler creates an "Untitled …" draft and navigates into the editor).
 async function newDraftPage(page) {
   await page.goto("/editor");
-  await waitForLiveConnected(page);
   await page.click('button[phx-click="new"][phx-value-kind="page"]');
   await page.waitForURL(/\/editor\/(content\/page|pages)\//);
   await expect(page.locator('form[id$="-editor"]')).toBeVisible();
