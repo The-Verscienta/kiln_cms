@@ -147,6 +147,34 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert {200, desc} = api_get("/api/json/posts?filter[category_id]=#{cat.id}&sort=-title")
       assert ids(desc) == [z.id, m.id, a.id]
     end
+
+    # Regression: timestamps() defaulted to public?: false (the Ash 3 default —
+    # create_timestamp overrides writable?/default/type, not public?), so
+    # sort=-inserted_at was rejected as invalid_sort and the timestamps never
+    # serialized. Found downstream sorting a delivery site by recency
+    # (The-Verscienta/verscienta-base#96).
+    test "sorts by inserted_at and serializes both timestamps" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      oldest = published_post(%{title: "First", category_id: cat.id}, admin)
+      middle = published_post(%{title: "Second", category_id: cat.id}, admin)
+      newest = published_post(%{title: "Third", category_id: cat.id}, admin)
+
+      assert {200, desc} =
+               api_get("/api/json/posts?filter[category_id]=#{cat.id}&sort=-inserted_at")
+
+      assert ids(desc) == [newest.id, middle.id, oldest.id]
+
+      assert {200, asc} =
+               api_get("/api/json/posts?filter[category_id]=#{cat.id}&sort=inserted_at")
+
+      assert ids(asc) == [oldest.id, middle.id, newest.id]
+
+      [first | _] = desc["data"]
+      assert {:ok, _, _} = DateTime.from_iso8601(first["attributes"]["inserted_at"])
+      assert {:ok, _, _} = DateTime.from_iso8601(first["attributes"]["updated_at"])
+    end
   end
 
   describe "pagination" do
