@@ -135,6 +135,36 @@ if config_env() == :prod do
     |> String.replace_leading("http://", "")
     |> String.trim_trailing("/")
 
+  # CHECK_ORIGINS: comma-separated allowlist of extra origins permitted to
+  # open LiveView/channel sockets, for when the app is reachable on more than
+  # one hostname (e.g. mid domain migration). Entries may be full origins
+  # ("https://cms.example.com"), scheme-less ("//cms.example.com" — any
+  # scheme/port), or bare hosts (normalized to "//host"). The PHX_HOST origin
+  # is always kept, so this can only widen the allowlist. Unset ⇒ Phoenix's
+  # default: sockets are only accepted from the PHX_HOST origin.
+  check_origin =
+    case "CHECK_ORIGINS" |> System.get_env("") |> String.split(",", trim: true) do
+      [] ->
+        true
+
+      origins ->
+        extra =
+          origins
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(fn origin ->
+            origin = String.trim_trailing(origin, "/")
+
+            if String.starts_with?(origin, ["https://", "http://", "//"]) do
+              origin
+            else
+              "//" <> origin
+            end
+          end)
+
+        ["https://" <> host | extra]
+    end
+
   config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   # Trusted reverse-proxy CIDRs. When set (comma-separated, e.g.
@@ -147,6 +177,7 @@ if config_env() == :prod do
 
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
+    check_origin: check_origin,
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
