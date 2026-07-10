@@ -61,13 +61,21 @@ defmodule KilnCMSWeb.BlockComponents do
     """
   end
 
-  # The live public form for a form block (see `KilnCMS.CMS.Form`): one input
-  # per admin-defined field, a visually-hidden honeypot, POSTing to
-  # /forms/<slug> (no CSRF — the endpoint is anonymous and honeypot +
-  # rate-limited, and fired artifacts couldn't carry a token anyway).
-  attr :form, :map, required: true
+  @doc """
+  The live public form for a form block (see `KilnCMS.CMS.Form`): one input
+  per admin-defined field, a visually-hidden honeypot, POSTing to
+  `/forms/<slug>` (no CSRF — the endpoint is anonymous and honeypot +
+  rate-limited, and fired artifacts couldn't carry a token anyway).
 
-  defp public_form(assigns) do
+  Set `embed` when rendering inside the iframe page (`/forms/:slug/embed`): it
+  adds a hidden marker so the submit response knows to serve the framing-friendly
+  CSP, otherwise the thank-you page would be blocked by `frame-ancestors 'self'`.
+  Also shared with `KilnCMSWeb.FormHTML`, so new field types work in both places.
+  """
+  attr :form, :map, required: true
+  attr :embed, :boolean, default: false
+
+  def public_form(assigns) do
     ~H"""
     <form
       method="post"
@@ -75,6 +83,9 @@ defmodule KilnCMSWeb.BlockComponents do
       class="kiln-form space-y-4 rounded-lg border border-base-300 p-4"
     >
       <p :if={@form.description} class="text-sm text-base-content/70">{@form.description}</p>
+
+      <%!-- Underscore-prefixed so it can't collide with an admin-defined field name. --%>
+      <input :if={@embed} type="hidden" name="_kiln_embed" value="1" />
 
       <%!-- Honeypot: hidden from humans, irresistible to bots. --%>
       <div style="position:absolute;left:-9999px" aria-hidden="true">

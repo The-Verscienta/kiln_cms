@@ -70,6 +70,16 @@ if cors_origins = System.get_env("CORS_ORIGINS") do
   config :kiln_cms, :cors_origins, KilnCMSWeb.CORS.parse_env(cors_origins)
 end
 
+# ## Embeddable forms — which parents may iframe `/forms/:slug/embed`
+#
+# Defaults to `*` (any site), which is safe: the embed page is an anonymous
+# public form and a cross-site iframe never receives the SameSite=Lax session
+# cookie. Set EMBED_ORIGINS to an allowlist to lock it down, or to a blank value
+# for same-origin only. See KilnCMSWeb.Embed.
+if embed_origins = System.get_env("EMBED_ORIGINS") do
+  config :kiln_cms, :embed_origins, KilnCMSWeb.Embed.parse_env(embed_origins)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

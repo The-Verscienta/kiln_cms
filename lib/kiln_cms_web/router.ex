@@ -143,9 +143,20 @@ defmodule KilnCMSWeb.Router do
   pipeline :public_form do
     plug :accepts, ["html", "json"]
     # The thank-you page is static server HTML (no scripts) — the strict
-    # browser CSP applies as-is, no per-request nonce needed.
+    # browser CSP applies as-is, no per-request nonce needed. (An *embedded*
+    # submission swaps in the embed CSP; see FormController.submit/2.)
     plug :put_secure_browser_headers, @browser_csp_headers
     plug KilnCMSWeb.Plugs.RateLimit, :form
+  end
+
+  # The iframe page for an embeddable form. A page load, not a submission, so it
+  # gets the generous `:delivery` ceiling rather than the tight `:form` bucket.
+  # The controller replaces the CSP with `KilnCMSWeb.Embed.content_security_policy/0`,
+  # whose `frame-ancestors` permits third-party parents.
+  pipeline :form_embed do
+    plug :accepts, ["html"]
+    plug :put_secure_browser_headers, @browser_csp_headers
+    plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
   # Per-IP ceiling for unauthenticated infra/SEO endpoints (`/up` runs a DB
@@ -283,6 +294,14 @@ defmodule KilnCMSWeb.Router do
     # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
     # expressible as one Ash action, so it gets a thin controller (roadmap #4).
     get "/search", SearchApiController, :index
+  end
+
+  # Embeddable form: the iframe document a third-party site frames via
+  # `/embed.js`. Its own pipeline so it can serve a framing-friendly CSP.
+  scope "/", KilnCMSWeb do
+    pipe_through :form_embed
+
+    get "/forms/:slug/embed", FormController, :embed
   end
 
   # Public form submissions (on-site form-encoded + headless JSON).

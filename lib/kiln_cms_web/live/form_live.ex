@@ -118,6 +118,18 @@ defmodule KilnCMSWeb.FormLive do
     {:noreply, assign_selected(socket, socket.assigns.selected.form.id)}
   end
 
+  # --- embed ---------------------------------------------------------------------
+
+  def handle_event("copied", _params, socket),
+    do: {:noreply, put_flash(socket, :info, gettext("Embed code copied to clipboard."))}
+
+  # The one-line snippet an embedder pastes on their site. `/embed.js` injects an
+  # auto-resizing iframe pointing at `/forms/<slug>/embed`. Absolute URL, since
+  # it runs on someone else's domain.
+  defp embed_snippet(slug) do
+    ~s(<script src="#{KilnCMSWeb.Endpoint.url()}/embed.js" data-kiln-form="#{slug}"></script>)
+  end
+
   # --- data --------------------------------------------------------------------
 
   defp load_forms(socket) do
@@ -258,6 +270,42 @@ defmodule KilnCMSWeb.FormLive do
             >
               <.icon name="hero-x-mark" class="size-5" />
             </button>
+          </div>
+
+          <%!-- Embed code: paste on any site to render this form in an iframe. --%>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">{gettext("Embed on another site")}</label>
+
+            <p :if={!@selected.form.active} class="text-xs text-warning">
+              {gettext(
+                "This form is inactive — the embed shows “Form not found” until you activate it."
+              )}
+            </p>
+
+            <div class="flex items-center gap-2">
+              <input
+                type="text"
+                value={embed_snippet(@selected.form.slug)}
+                readonly
+                aria-label={gettext("Embed code")}
+                class="field-input min-w-0 flex-1 font-mono text-xs"
+              />
+              <button
+                type="button"
+                id="copy-embed-code"
+                phx-hook="Clipboard"
+                data-clipboard-text={embed_snippet(@selected.form.slug)}
+                class="btn btn-sm btn-default shrink-0"
+              >
+                {gettext("Copy")}
+              </button>
+            </div>
+
+            <p class="text-xs text-base-content/60">
+              {gettext(
+                "The iframe sizes itself to the form. Restrict which sites may embed it with the EMBED_ORIGINS environment variable."
+              )}
+            </p>
           </div>
 
           <form phx-submit="save_form" class="grid gap-3 sm:grid-cols-2">

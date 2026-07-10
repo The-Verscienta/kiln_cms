@@ -18,8 +18,10 @@ defmodule KilnCMSWeb do
   """
 
   # robots.txt is served dynamically by SitemapController (so it can reference
-  # the environment's sitemap URL).
-  def static_paths, do: ~w(assets fonts images favicon.ico)
+  # the environment's sitemap URL). `embed.js` (host-page snippet) and
+  # `embed-frame.js` (iframe height reporter) are hand-written and live at
+  # `priv/static/`, outside the gitignored `assets/` build output.
+  def static_paths, do: ~w(assets fonts images favicon.ico embed.js embed-frame.js)
 
   def router do
     quote do
