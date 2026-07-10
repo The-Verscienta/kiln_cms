@@ -42,7 +42,7 @@ from its singular type name. For `post`:
 |-------|--------|-----------|---------|
 | `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!` | one published post (or `null`) |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
-| `publishedPosts` | `:published` | `limit`, `offset`, `customFilter`, `customSort` | published posts, newest first, **offset-paginated** (`PageOfPost`) *(posts only)* |
+| `publishedPosts` | `:published` | `limit`, `offset`, `customFilter`, `customSort` | published posts, newest first, **offset-paginated** (`PageOfPost`) |
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
 | `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
@@ -50,9 +50,11 @@ from its singular type name. For `post`:
 | `semanticSearchPublishedPosts` | `:search_semantic_published` | as `semanticSearchPosts`, minus `state` | published-only semantic matches |
 | `autocompletePublishedPosts` | `:autocomplete_published` | `prefix: String!`, `locale` | published-only title suggestions |
 
-Pages expose the same set **minus** `publishedPosts` (the published index is a
-post-only feature): `pageBySlug`, `pageTranslations`, `searchPages`,
-`semanticSearchPages`, `autocompletePages` (and their `*Published*` twins).
+Pages expose the same set: `pageBySlug`, `pageTranslations`, `publishedPages`,
+`searchPages`, `semanticSearchPages`, `autocompletePages` (and their
+`*Published*` twins). The published index is universal since #300 — every
+content type (and `publishedEntries` on the dynamic tier) has it, so delivery
+consumers never need the plain, credential-widened list.
 
 > The base search queries go through the read policy: anonymous callers match
 > published content only, but an **authenticated editor/admin actor (including

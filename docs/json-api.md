@@ -32,12 +32,14 @@ Authorization: Bearer <token>
 
 | Resource  | Collection                  | Single record               | Extra reads |
 |-----------|-----------------------------|-----------------------------|-------------|
-| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete` |
+| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
 | Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search` |
 
-`GET /api/json/posts/published` returns published posts only, ordered newest
-first — the headless blog feed.
+`GET /api/json/<plural>/published` returns published records only, ordered
+newest first (`-published_at`) — the delivery feed. It exists on **every**
+content type (incl. `/entries/published` for dynamic types); on posts it doubles
+as the headless blog feed.
 
 Every content-type search read also has a **published-only twin** at
 `…/search/published`, `…/semantic-search/published` and
