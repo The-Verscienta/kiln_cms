@@ -41,6 +41,10 @@ if Code.ensure_loaded?(Igniter) do
     ```bash
     mix ash.codegen add_<plural> && mix ash.migrate
     ```
+
+    …then add a `search_vector` migration for the new table (the printed notice
+    includes a copy-paste template) — `KilnCMS.Migrations.add_search_vector/1`
+    explains why codegen can't do this one.
     """
     @shortdoc "Generate a KilnCMS content type"
     use Igniter.Mix.Task
@@ -74,7 +78,7 @@ if Code.ensure_loaded?(Igniter) do
       |> add_interfaces(version, [
         {:"list_#{type}_versions", "define :list_#{type}_versions, action: :read"}
       ])
-      |> Igniter.add_notice(notice(module, plural))
+      |> Igniter.add_notice(notice(module, type, plural))
       |> maybe_add_promotion_notice(opts)
     end
 
@@ -230,13 +234,31 @@ if Code.ensure_loaded?(Igniter) do
       module |> Module.split() |> List.last() |> Macro.underscore() |> String.to_atom()
     end
 
-    defp notice(module, plural) do
+    defp notice(module, type, plural) do
+      # The macro's table default, NOT the route/interface plural — a
+      # `--plural` override changes routes, not the table.
+      table = "#{type}s"
+
       """
       Added content type #{inspect(module)} and its CMS.* code interfaces.
 
       Next:
         1. Generate and apply the migration:
              mix ash.codegen add_#{plural} && mix ash.migrate
+        2. Wire up full-text search — the `/#{plural}/search` route 500s without
+           it. `search_vector` is trigger-maintained in the database, not an Ash
+           attribute, so ash.codegen can't create it (and this generator can't
+           either: the migration must sort AFTER step 1's). Add one that calls
+           the helper:
+
+             defmodule KilnCMS.Repo.Migrations.Add#{Macro.camelize(table)}SearchVector do
+               use Ecto.Migration
+
+               import KilnCMS.Migrations
+
+               def up, do: add_search_vector("#{table}")
+               def down, do: drop_search_vector("#{table}")
+             end
 
       Then it just works, no further wiring:
         * Editable in the admin (auto-discovered — appears as "New #{plural}").
