@@ -27,6 +27,9 @@ defmodule KilnCMS.CMS do
       define :search_pages, action: :search, args: [:query]
       define :semantic_search_pages, action: :search_semantic, args: [:query]
       define :autocomplete_pages, action: :autocomplete, args: [:prefix]
+      define :search_published_pages, action: :search_published, args: [:query]
+      define :semantic_search_published_pages, action: :search_semantic_published, args: [:query]
+      define :autocomplete_published_pages, action: :autocomplete_published, args: [:prefix]
       define :create_page, action: :create
       define :update_page, action: :update
       define :submit_page_for_review, action: :submit_for_review
@@ -56,6 +59,9 @@ defmodule KilnCMS.CMS do
       define :search_posts, action: :search, args: [:query]
       define :semantic_search_posts, action: :search_semantic, args: [:query]
       define :autocomplete_posts, action: :autocomplete, args: [:prefix]
+      define :search_published_posts, action: :search_published, args: [:query]
+      define :semantic_search_published_posts, action: :search_semantic_published, args: [:query]
+      define :autocomplete_published_posts, action: :autocomplete_published, args: [:prefix]
       define :create_post, action: :create
       define :update_post, action: :update
       define :submit_post_for_review, action: :submit_for_review
@@ -95,6 +101,13 @@ defmodule KilnCMS.CMS do
       define :search_entries, action: :search, args: [:query]
       define :semantic_search_entries, action: :search_semantic, args: [:query]
       define :autocomplete_entries, action: :autocomplete, args: [:prefix]
+      define :search_published_entries, action: :search_published, args: [:query]
+
+      define :semantic_search_published_entries,
+        action: :search_semantic_published,
+        args: [:query]
+
+      define :autocomplete_published_entries, action: :autocomplete_published, args: [:prefix]
       define :create_entry, action: :create
       define :update_entry, action: :update
       define :submit_entry_for_review, action: :submit_for_review

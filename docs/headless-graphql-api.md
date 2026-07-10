@@ -46,10 +46,21 @@ from its singular type name. For `post`:
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
 | `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
+| `searchPublishedPosts` | `:search_published` | as `searchPosts`, minus `state` | published-only full-text matches — `state == :published` pinned server-side (#297) |
+| `semanticSearchPublishedPosts` | `:search_semantic_published` | as `semanticSearchPosts`, minus `state` | published-only semantic matches |
+| `autocompletePublishedPosts` | `:autocomplete_published` | `prefix: String!`, `locale` | published-only title suggestions |
 
 Pages expose the same set **minus** `publishedPosts` (the published index is a
 post-only feature): `pageBySlug`, `pageTranslations`, `searchPages`,
-`semanticSearchPages`, `autocompletePages`.
+`semanticSearchPages`, `autocompletePages` (and their `*Published*` twins).
+
+> The base search queries go through the read policy: anonymous callers match
+> published content only, but an **authenticated editor/admin actor (including
+> a bearer API key minted on such an account) matches drafts too**. Delivery
+> consumers should use the `*Published*` twins, whose state filter cannot be
+> widened by any credential — see
+> [headless-consumer-guide.md](headless-consumer-guide.md) → "Delivery sites:
+> an API key widens what you see".
 
 > `*BySlug` queries require both `slug` and `locale` because content is modelled
 > per-locale (unique `[slug, locale]`). Use `postTranslations` to discover which
