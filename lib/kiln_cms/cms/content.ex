@@ -782,7 +782,8 @@ defmodule KilnCMS.CMS.Content do
           argument :state, :atom
           argument :tag_ids, {:array, :uuid}
 
-          # Custom-field facet (no `custom_sort` — relevance owns the order).
+          # Custom-field facet (no `custom_sort` — relevance is the order
+          # unless the caller passes an explicit `sort`, see below).
           argument :custom_filter, :map
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
@@ -802,7 +803,11 @@ defmodule KilnCMS.CMS.Content do
           # Resolve the locale (defaulting to the configured default) and set it
           # back so the filter sees it too, then order by relevance (ts_rank over
           # the weighted vector — title hits outrank body hits), newest to break
-          # ties.
+          # ties. `Ash.Query.sort/2` APPENDS: these keys rank after whatever the
+          # caller already sorted on, so an explicit JSON:API/GraphQL `sort`
+          # overrides relevance and relevance degrades to the tiebreaker. That
+          # contract is pinned by test ("explicit sort= overrides relevance",
+          # JsonApiTest) — don't switch to prepend/unsort without meaning to.
           prepare fn query, _context ->
             locale = Ash.Query.get_argument(query, :locale) || KilnCMS.I18n.default_locale()
             q = Ash.Query.get_argument(query, :query)
@@ -843,7 +848,9 @@ defmodule KilnCMS.CMS.Content do
           argument :state, :atom
           argument :tag_ids, {:array, :uuid}
 
-          # Custom-field facet (no `custom_sort` — distance owns the order).
+          # Custom-field facet (no `custom_sort` — distance is the order
+          # unless the caller passes an explicit `sort`; the prepare below
+          # appends its key exactly like `:search`'s does).
           argument :custom_filter, :map
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 

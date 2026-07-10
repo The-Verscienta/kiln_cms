@@ -344,6 +344,30 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert {400, %{"errors" => [%{"code" => "required"} | _]}} =
                api_get("/api/json/posts/search")
     end
+
+    # Pins the sort contract on /search (#301): relevance is only the DEFAULT
+    # order. The :search prepare appends its {search_rank, inserted_at} sort
+    # with Ash.Query.sort/2, so a caller's explicit sort= keys stay primary
+    # and relevance degrades to the tiebreaker. Neither a test nor a doc said
+    # so before — consumers (The-Verscienta/verscienta-base#94) re-sorted
+    # whole result sets in memory rather than rely on unpinned behavior.
+    test "explicit sort= overrides relevance; relevance remains the default order" do
+      admin = user(:admin)
+      term = "sortsearch#{System.unique_integer([:positive])}"
+
+      # The term appears once in each title → equal ts_rank, so the default
+      # order falls to the prepare's own tiebreaker: newest first.
+      older = published_post(%{title: "Apple #{term}"}, admin)
+      newer = published_post(%{title: "Zebra #{term}"}, admin)
+
+      assert {200, default} = api_get("/api/json/posts/search?query=#{term}&locale=en")
+      assert ids(default) == [newer.id, older.id]
+
+      assert {200, sorted} =
+               api_get("/api/json/posts/search?query=#{term}&locale=en&sort=title")
+
+      assert ids(sorted) == [older.id, newer.id]
+    end
   end
 
   describe "single record" do
