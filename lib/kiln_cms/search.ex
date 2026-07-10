@@ -176,6 +176,14 @@ defmodule KilnCMS.Search do
     end
   end
 
+  # Every content resource cross-content search sweeps: the compiled types
+  # from the registry (core and project domains alike — never a hardcoded
+  # module list) plus Entry, the shared tier backing dynamic types, which
+  # deliberately isn't in `ContentTypes.all/0`.
+  defp content_search_resources do
+    Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.resource) ++ [KilnCMS.CMS.Entry]
+  end
+
   # Rerank fused results by a stronger (query, doc) relevance model, falling back
   # to the fused order if the reranker errors.
   defp rerank(query, records) do
@@ -212,21 +220,25 @@ defmodule KilnCMS.Search do
 
   Content sections are locale-scoped (via `:locale`, default configured);
   media and taxonomy are keyword/trigram-only and locale-agnostic (no
-  embeddings). `entries` spans every admin-defined dynamic type (D17), each
-  record carrying the `type_name` calc for labeling/linking. Read options
-  (`:actor`, `:authorize?`) pass through; `:limit` caps each section (default
-  10). Pass `highlight: true` to load the `highlight` snippet calc on the
-  content sections (rendered escape-safely via
+  embeddings). **One section per compiled content type**, keyed by the type's
+  plural (`:pages`, `:posts`, …) — discovered from `ContentTypes.all/0`, so a
+  type a plugin/project registers on `:content_domains` joins global search
+  with no core edit (its table must carry the shared `search_vector`
+  column + trigger, or its keyword leg raises — see #295). `entries` spans
+  every admin-defined dynamic type
+  (D17), each record carrying the `type_name` calc for labeling/linking. Read
+  options (`:actor`, `:authorize?`) pass through; `:limit` caps each section
+  (default 10). Pass `highlight: true` to load the `highlight` snippet calc on
+  the content sections (rendered escape-safely via
   `KilnCMS.Search.Highlight.to_safe_html/1`). `:filters` (see `hybrid/3`)
   narrows the content sections — media and taxonomy don't carry facets.
   """
   @spec global(String.t(), keyword()) :: %{
-          pages: [struct()],
-          posts: [struct()],
-          entries: [struct()],
-          media: [struct()],
-          categories: [struct()],
-          tags: [struct()]
+          required(:entries) => [struct()],
+          required(:media) => [struct()],
+          required(:categories) => [struct()],
+          required(:tags) => [struct()],
+          optional(atom()) => [struct()]
         }
   def global(query, opts \\ []) when is_binary(query) do
     read_opts = Keyword.take(opts, [:actor, :authorize?])
@@ -247,9 +259,18 @@ defmodule KilnCMS.Search do
           filters: Keyword.get(opts, :filters, %{})
         ]
 
-    %{
-      pages: hybrid(KilnCMS.CMS.Page, query, [load: content_load] ++ hybrid_opts),
-      posts: hybrid(KilnCMS.CMS.Post, query, [load: content_load] ++ hybrid_opts),
+    # Section key per compiled type. Plurals are compile-time macro options
+    # (a small bounded set), so minting atoms from them is safe. A plural
+    # colliding with a reserved section below would be overwritten by the
+    # merge — same family of collisions `ContentTypes.path_segment/2` guards
+    # public URLs against.
+    compiled =
+      Map.new(KilnCMS.CMS.ContentTypes.all(), fn ct ->
+        {String.to_atom(ct.plural),
+         hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts)}
+      end)
+
+    Map.merge(compiled, %{
       # One section across every dynamic type. `type_name` (an expression
       # calc, so it doesn't run TypeDefinition's editor-only read policy for
       # anonymous callers) labels each hit with its dynamic type.
@@ -264,7 +285,7 @@ defmodule KilnCMS.Search do
       # tags so editors and headless frontends can jump to filtered listings.
       categories: section(KilnCMS.CMS.Category, :search, %{query: query}, read_opts, limit, []),
       tags: section(KilnCMS.CMS.Tag, :search, %{query: query}, read_opts, limit, [])
-    }
+    })
   end
 
   @doc """
@@ -286,7 +307,7 @@ defmodule KilnCMS.Search do
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
 
     matches =
-      [KilnCMS.CMS.Page, KilnCMS.CMS.Post, KilnCMS.CMS.Entry]
+      content_search_resources()
       |> Enum.flat_map(fn resource ->
         resource
         |> Ash.Query.new()
@@ -349,7 +370,7 @@ defmodule KilnCMS.Search do
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     down = String.downcase(query)
 
-    [KilnCMS.CMS.Page, KilnCMS.CMS.Post, KilnCMS.CMS.Entry]
+    content_search_resources()
     |> Enum.flat_map(fn resource ->
       resource
       |> Ash.Query.for_read(:autocomplete, %{prefix: query, locale: locale})
