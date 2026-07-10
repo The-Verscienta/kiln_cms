@@ -71,6 +71,10 @@ curl -s -X POST http://localhost:4000/api/auth/sign_in \
 }
 ```
 
+> The account must already exist with an `:editor` or `:admin` role — signup
+> always creates a `:viewer`. See [**Creating an admin user**](../README.md#creating-an-admin-user)
+> in the README for seeding the first admin and promoting other users.
+
 Then send the token on JSON:API / GraphQL requests:
 
 ```bash
