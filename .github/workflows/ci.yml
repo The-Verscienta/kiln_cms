@@ -111,6 +111,45 @@ jobs:
       - name: Dialyzer
         run: mix dialyzer
 
+  client:
+    name: Elixir client (kiln_client)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: clients/elixir/kiln_client
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Cache deps and _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            clients/elixir/kiln_client/deps
+            clients/elixir/kiln_client/_build
+          key: ${{ runner.os }}-client-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('clients/elixir/kiln_client/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-client-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests
+        run: mix test
+
   e2e:
     name: Browser E2E (Playwright)
     runs-on: ubuntu-latest

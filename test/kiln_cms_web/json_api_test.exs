@@ -491,6 +491,36 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # #300: the /published feed is universal — every content type (not just
+  # posts) carries the server-side published-only index the official Elixir
+  # client reads by default.
+  describe "universal published feed" do
+    test "pages have /published and a keyed editor cannot see drafts through it" do
+      admin = user(:admin)
+      editor = user(:editor)
+      live_slug = slug()
+      draft_slug = slug()
+
+      live =
+        CMS.create_page!(%{title: "Live page", slug: live_slug}, actor: admin)
+        |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+
+      _draft = CMS.create_page!(%{title: "Draft page", slug: draft_slug}, actor: admin)
+
+      tok = token(editor)
+
+      assert {200, live_body} =
+               api_get("/api/json/pages/published?filter[slug]=#{live_slug}", token: tok)
+
+      assert ids(live_body) == [live.id]
+
+      assert {200, draft_body} =
+               api_get("/api/json/pages/published?filter[slug]=#{draft_slug}", token: tok)
+
+      assert ids(draft_body) == []
+    end
+  end
+
   describe "single record" do
     test "fetches a published post by id" do
       admin = user(:admin)

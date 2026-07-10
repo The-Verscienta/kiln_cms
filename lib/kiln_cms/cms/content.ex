@@ -81,8 +81,13 @@ defmodule KilnCMS.CMS.Content do
     table = Keyword.get(opts, :table, "#{type}s")
     domain = Keyword.get(opts, :domain, KilnCMS.CMS)
     excerpt? = Keyword.get(opts, :excerpt?, false)
-    published? = Keyword.get(opts, :published?, false)
     dynamic? = Keyword.get(opts, :dynamic?, false)
+
+    # `published?:` is accepted for backward compatibility but ignored: the
+    # `/published` feed (read + route + GraphQL query) is universal since the
+    # official client (#300) — every delivery consumer needs a server-side
+    # published-only index, not just the blog (#297).
+    _ = Keyword.get(opts, :published?, false)
 
     # Derive the per-type names from `type` by the project's naming convention.
     resource = __CALLER__.module
@@ -136,55 +141,49 @@ defmodule KilnCMS.CMS.Content do
       end
 
     published_read =
-      if published? do
-        quote do
-          # Public delivery: published content, newest first.
-          read :published do
-            filter expr(^ref(:state) == :published)
+      quote do
+        # Public delivery: published content, newest first. Universal (#300):
+        # every type — not just the blog — needs a server-side published-only
+        # index a keyed delivery caller can't widen to drafts (#297).
+        read :published do
+          filter expr(^ref(:state) == :published)
 
-            # Filter/sort by admin-defined custom fields (typed JSONB access —
-            # see the preparation). Declared before the default-sort build so a
-            # `custom_sort` outranks `published_at` but not an explicit `sort`.
-            argument :custom_filter, :map
-            argument :custom_sort, :string
-            prepare KilnCMS.CMS.Preparations.CustomFieldQuery
+          # Filter/sort by admin-defined custom fields (typed JSONB access —
+          # see the preparation). Declared before the default-sort build so a
+          # `custom_sort` outranks `published_at` but not an explicit `sort`.
+          argument :custom_filter, :map
+          argument :custom_sort, :string
+          prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
-            prepare build(sort: [published_at: :desc])
+          prepare build(sort: [published_at: :desc])
 
-            # Paginated for headless feed consumers (offset + keyset). `required?:
-            # false` keeps `CMS.list_published_*` returning a plain list, but
-            # `max_page_size` caps any explicit `page:` request — the public blog
-            # index (see `ContentController.blog_index/2`) pages through it rather
-            # than loading every row into memory.
-            pagination offset?: true,
-                       keyset?: true,
-                       countable: true,
-                       required?: false,
-                       max_page_size: 100,
-                       default_limit: 25
-          end
+          # Paginated for headless feed consumers (offset + keyset). `required?:
+          # false` keeps `CMS.list_published_*` returning a plain list, but
+          # `max_page_size` caps any explicit `page:` request — the public blog
+          # index (see `ContentController.blog_index/2`) pages through it rather
+          # than loading every row into memory.
+          pagination offset?: true,
+                     keyset?: true,
+                     countable: true,
+                     required?: false,
+                     max_page_size: 100,
+                     default_limit: 25
         end
       end
 
-    # The matching GraphQL query for the `:published` read (post index), only
-    # present when the type opts into `published?`. Offset-paginated for parity
-    # with the JSON:API `/published` feed (#195) — the `:published` action caps
-    # results at `max_page_size` (100, default 25) so the delivery surface can't
-    # be asked to load every published row at once.
+    # The matching GraphQL query for the `:published` read. Offset-paginated
+    # for parity with the JSON:API `/published` feed (#195) — the `:published`
+    # action caps results at `max_page_size` (100, default 25) so the delivery
+    # surface can't be asked to load every published row at once.
     published_query =
-      if published? do
-        quote do
-          list unquote(:"published_#{type}s"), :published, paginate_with: :offset
-        end
+      quote do
+        list unquote(:"published_#{type}s"), :published, paginate_with: :offset
       end
 
-    # JSON:API route for the published feed — only added for types that declare
-    # the `:published` read (e.g. Post), so the macro stays type-agnostic.
+    # JSON:API route for the published feed.
     published_route =
-      if published? do
-        quote do
-          index :published, route: "/published"
-        end
+      quote do
+        index :published, route: "/published"
       end
 
     # The headless surface. Compiled types each get their own typed schema;
@@ -219,6 +218,11 @@ defmodule KilnCMS.CMS.Content do
               end
 
               list :entry_translations, :published_translations
+
+              # The published index (newest first), across all dynamic types —
+              # scope by the `type_name` filter like the plain list.
+              list :published_entries, :published, paginate_with: :offset
+
               # `paginate_with: nil` keeps these plain lists (the pre-pagination
               # schema shape); the actions' prepare caps unpaginated reads.
               list :search_entries, :search, paginate_with: nil
@@ -263,6 +267,7 @@ defmodule KilnCMS.CMS.Content do
               index :search_published, route: "/search/published"
               index :search_semantic_published, route: "/semantic-search/published"
               index :autocomplete_published, route: "/autocomplete/published"
+              unquote(published_route)
               get :read
             end
           end
@@ -301,7 +306,7 @@ defmodule KilnCMS.CMS.Content do
 
               list unquote(:"#{type}_translations"), :published_translations
 
-              # The published index (newest first) — posts only.
+              # The published index (newest first).
               unquote(published_query)
 
               # Headless search surface. Keyword + semantic search and typo-tolerant
