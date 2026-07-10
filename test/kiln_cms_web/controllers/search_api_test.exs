@@ -97,6 +97,36 @@ defmodule KilnCMSWeb.SearchApiTest do
     assert body["suggestion"] == nil
   end
 
+  # #296: the sections are DERIVED from the content-type registry, not a
+  # hardcoded module list — a type a plugin/project registers on
+  # `:content_domains` gets a section (and counts toward the analytics/
+  # did-you-mean total) with no controller or Search edit. Seeding goes
+  # through the registry dispatch too, so this exercises whatever set of
+  # types the running config declares — in the core repo: page and post.
+  test "every compiled content type in the registry gets a result section", %{conn: conn} do
+    actor = admin()
+    word = token()
+
+    seeded =
+      for ct <- ContentTypes.all() do
+        record =
+          ContentTypes.create!(ct.type, %{title: "#{ct.label} #{word}", slug: slug()},
+            actor: actor
+          )
+
+        {:ok, record} = ContentTypes.transition(ct.type, "publish", record, actor: actor)
+        {ct, record}
+      end
+
+    body = conn |> get("/api/search?q=#{word}") |> json_response(200)
+
+    for {ct, record} <- seeded do
+      assert [hit] = body["results"][ct.plural]
+      assert hit["id"] == record.id
+      assert hit["type"] == to_string(ct.type)
+    end
+  end
+
   test "taxonomy matches ride their own sections with name and slug", %{conn: conn} do
     actor = admin()
     word = token()

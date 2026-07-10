@@ -11,6 +11,13 @@ phasing is at the end.
 > (dynamic entries included), and is exposed headlessly at `GET /api/search`
 > (sectioned hits + public paths + safe highlights + "did you mean").
 >
+> **Project types (2026-07-10, #296):** `Search.global/2`, `facets/2` and
+> `suggest/2` derive their content sweep from the `ContentTypes` registry
+> rather than a hardcoded Page/Post/Entry list — a content type a
+> plugin/project registers on `:content_domains` joins global search, the
+> `/api/search` sections, facet counts and "did you mean" automatically
+> (its table must carry the shared `search_vector` column + trigger, #295).
+>
 > **Tail closed (same day):** the fuzzy trigram leg now joins the fusion at
 > reduced weight when the keyword leg comes up short (#6 — typos return
 > results, with "did you mean" naming the correction on sparse result sets);
