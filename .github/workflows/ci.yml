@@ -87,6 +87,15 @@ jobs:
         # `mix ash.codegen`). Compares against the committed snapshots — no DB.
         run: mix ash.codegen --check
 
+      - name: Check the core ships no downstream project schema
+        # Fails if a migrated table or a resource snapshot has no backing Ash
+        # resource in a registered domain — i.e. a downstream project's schema
+        # leaked into the reusable core. This is what would have caught #288's
+        # leftover herbs/formulas tables and the #290 index migrations, both of
+        # which the rest of the suite happily passed. Needs the DB, so it leans
+        # on the migrations the `test` alias applies.
+        run: mix test test/kiln/core_agnostic_test.exs
+
       - name: Check formatting
         run: mix format --check-formatted
 
