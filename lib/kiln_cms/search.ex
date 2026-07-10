@@ -259,15 +259,13 @@ defmodule KilnCMS.Search do
           filters: Keyword.get(opts, :filters, %{})
         ]
 
-    # Section key per compiled type. Plurals are compile-time macro options
-    # (a small bounded set), so minting atoms from them is safe. A plural
-    # colliding with a reserved section below would be overwritten by the
-    # merge — same family of collisions `ContentTypes.path_segment/2` guards
-    # public URLs against.
+    # Section key per compiled type — `ct.section` is the plural atom minted
+    # at compile time by the `Content` macro. A plural colliding with a
+    # reserved section below would be overwritten by the merge — same family
+    # of collisions `ContentTypes.path_segment/2` guards public URLs against.
     compiled =
       Map.new(KilnCMS.CMS.ContentTypes.all(), fn ct ->
-        {String.to_atom(ct.plural),
-         hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts)}
+        {ct.section, hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts)}
       end)
 
     Map.merge(compiled, %{

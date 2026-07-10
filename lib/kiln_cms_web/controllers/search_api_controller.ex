@@ -62,8 +62,8 @@ defmodule KilnCMSWeb.SearchApiController do
     # `:content_domains` appears here with no controller edit.
     compiled =
       Map.new(ContentTypes.all(), fn ct ->
-        key = String.to_atom(ct.plural)
-        {key, Enum.map(Map.get(sections, key, []), &item(&1, to_string(ct.type), ct, locale))}
+        {ct.section,
+         Enum.map(Map.get(sections, ct.section, []), &item(&1, to_string(ct.type), ct, locale))}
       end)
 
     results =
@@ -151,7 +151,7 @@ defmodule KilnCMSWeb.SearchApiController do
 
   defp empty_sections do
     ContentTypes.all()
-    |> Map.new(&{String.to_atom(&1.plural), []})
+    |> Map.new(&{&1.section, []})
     |> Map.merge(%{entries: [], categories: [], tags: []})
   end
 
