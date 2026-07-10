@@ -146,6 +146,12 @@ but **not every query returns drafts**. Pick the right surface:
 > draft slug always resolves to `null`. To fetch a known draft slug, use the
 > JSON:API filter (`filter[slug]=<slug>&filter[state]=draft`) or a preview token.
 
+The table above cuts both ways: a **delivery site** that attaches an
+editor-minted key gets drafts on plain index and search reads it never asked
+for. Mint delivery keys on a `:viewer` account and prefer the `/published`
+surfaces — see [headless-consumer-guide.md](headless-consumer-guide.md) →
+"Drafts".
+
 ## Core content endpoints
 
 Full filtering / sorting / pagination reference: **[json-api.md](json-api.md)**.
