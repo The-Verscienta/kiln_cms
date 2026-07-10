@@ -145,7 +145,14 @@ routes** (role-gated, mounted in the admin live session), **supervision
 children**, and **Oban queues** (merged at boot). Content types need no
 callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
 and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
-webhooks, delivery, search and workers follow automatically.
+webhooks, delivery and workers follow automatically.
+
+**Full-text search needs one migration per type.** The `:search` action
+filters on a trigger-maintained `search_vector` column that is not an Ash
+attribute, so `mix ash.codegen` never creates it — and until it exists the
+type's `/search` route raises `undefined_column`. After the migration that
+creates the table, add one calling `KilnCMS.Migrations.add_search_vector/1`
+(see its moduledoc for the template; `mix kiln.gen.content` prints it too).
 
 `mix kiln.plugins.doctor` (also part of precommit) verifies an install:
 domains registered, no block/field-type/queue collisions, well-formed paths.

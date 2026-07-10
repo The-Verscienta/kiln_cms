@@ -7,8 +7,10 @@ defmodule KilnCMSWeb.SearchApiController do
 
   Anonymous requests see published content only (the read policies); a bearer
   token widens visibility like every other headless surface. Sections mirror
-  `global/2` (`pages`/`posts`/`entries`/`categories`/`tags` — media is an
-  authoring concern, not a content-search result). Content hits carry their
+  `global/2` — one per compiled content type, keyed by its plural
+  (`pages`/`posts`/… for the core, plus any project-registered types), and
+  `entries`/`categories`/`tags` (media is an authoring concern, not a
+  content-search result). Content hits carry their
   public `path` and an escape-safe `highlight` snippet (only `<mark>`
   survives); taxonomy hits carry `name`/`slug` (KilnCMS has no public
   taxonomy browse pages — headless frontends build their own listing URLs). A
@@ -55,19 +57,27 @@ defmodule KilnCMSWeb.SearchApiController do
     sections =
       Search.global(query, read_opts ++ [highlight: true, filters: filters(params)])
 
-    results = %{
-      pages: Enum.map(sections.pages, &item(&1, "page", ContentTypes.get(:page), locale)),
-      posts: Enum.map(sections.posts, &item(&1, "post", ContentTypes.get(:post), locale)),
-      entries: Enum.flat_map(sections.entries, &entry_item(&1, locale)),
-      categories: Enum.map(sections.categories, &taxonomy_item(&1, "category")),
-      tags: Enum.map(sections.tags, &taxonomy_item(&1, "tag"))
-    }
+    # One result section per compiled content type, straight from the same
+    # registry `Search.global/2` swept — a project type registered on
+    # `:content_domains` appears here with no controller edit.
+    compiled =
+      Map.new(ContentTypes.all(), fn ct ->
+        {ct.section,
+         Enum.map(Map.get(sections, ct.section, []), &item(&1, to_string(ct.type), ct, locale))}
+      end)
+
+    results =
+      Map.merge(compiled, %{
+        entries: Enum.flat_map(sections.entries, &entry_item(&1, locale)),
+        categories: Enum.map(sections.categories, &taxonomy_item(&1, "category")),
+        tags: Enum.map(sections.tags, &taxonomy_item(&1, "tag"))
+      })
 
     # Content hits only — a taxonomy name match isn't a found document, so it
     # neither counts for analytics nor suppresses the "did you mean".
     total =
       results
-      |> Map.take([:pages, :posts, :entries])
+      |> Map.drop([:categories, :tags])
       |> Map.values()
       |> Enum.map(&length/1)
       |> Enum.sum()
@@ -139,7 +149,11 @@ defmodule KilnCMSWeb.SearchApiController do
     end
   end
 
-  defp empty_sections, do: %{pages: [], posts: [], entries: [], categories: [], tags: []}
+  defp empty_sections do
+    ContentTypes.all()
+    |> Map.new(&{&1.section, []})
+    |> Map.merge(%{entries: [], categories: [], tags: []})
+  end
 
   defp validated_locale(locale) do
     if locale in I18n.locales(), do: locale, else: I18n.default_locale()

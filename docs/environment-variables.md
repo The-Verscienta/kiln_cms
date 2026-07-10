@@ -10,7 +10,8 @@ compilation and before the system starts.
 > a `mix release` / `MIX_ENV=prod` build). In dev and test, sensible defaults from
 > `config/dev.exs` and `config/test.exs` are used instead, so you do not need to
 > set these locally. The exceptions — read in *every* environment — are
-> `PHX_SERVER`, `PORT`, `SENTRY_DSN`, and the `OTEL_*` group.
+> `PHX_SERVER`, `PORT`, `CORS_ORIGINS`, `EMBED_ORIGINS`, `SENTRY_DSN`, and the
+> `OTEL_*` group.
 
 ## Required (production)
 
@@ -20,23 +21,26 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 | Variable | Purpose | Where it's read |
 |----------|---------|-----------------|
 | `PHX_SERVER` | Set to any truthy value to actually start the web server in a release. Without it the release boots but does not serve HTTP. The generated `bin/server` script sets this for you. | [`config/runtime.exs:19`](../config/runtime.exs#L19) |
-| `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime.exs:64`](../config/runtime.exs#L64) |
-| `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime.exs:109`](../config/runtime.exs#L109) |
-| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime.exs:140`](../config/runtime.exs#L140) |
-| `PHX_HOST` | Public hostname used to generate URLs (defaults to `example.com`, so effectively required for correct links/emails). | [`config/runtime.exs:115`](../config/runtime.exs#L115) |
+| `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime.exs:75`](../config/runtime.exs#L75) |
+| `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime.exs:120`](../config/runtime.exs#L120) |
+| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime.exs:192`](../config/runtime.exs#L192) |
+| `PHX_HOST` | Public hostname used to generate URLs and validate socket origins (defaults to `example.com`, so effectively required — wrong values break links, emails, **and LiveView socket connections**). Bare hostname; any `https://` prefix or trailing `/` is stripped. | [`config/runtime.exs:133`](../config/runtime.exs#L133) |
 
 ## Optional — server & networking
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `PORT` | `4000` | HTTP listen port the Bandit server binds to. | [`config/runtime.exs:24`](../config/runtime.exs#L24) |
-| `POOL_SIZE` | `10` | Ecto database connection pool size. See the pool-sizing formula in [`docs/performance.md`](performance.md). | [`config/runtime.exs:96`](../config/runtime.exs#L96) |
-| `ECTO_IPV6` | unset | Set to `true`/`1` to connect to Postgres over IPv6. | [`config/runtime.exs:70`](../config/runtime.exs#L70) |
-| `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset when internet-facing directly. | [`config/runtime.exs:123`](../config/runtime.exs#L123) |
-| `DNS_CLUSTER_QUERY` | unset | DNS query for libcluster-style node discovery. | [`config/runtime.exs:117`](../config/runtime.exs#L117) |
+| `CHECK_ORIGINS` | unset | Comma-separated **extra** origins allowed to open LiveView/channel sockets, for when the app is served from more than one hostname (e.g. mid domain migration). Entries may be full origins (`https://cms.example.com`), scheme-less (`//cms.example.com` — any scheme/port), or bare hosts (normalized to `//host`). The `PHX_HOST` origin is always allowed. Unset ⇒ only `PHX_HOST` may connect. | [`config/runtime.exs:145`](../config/runtime.exs#L145) |
+| `CORS_ORIGINS` | unset | Comma-separated allowlist (or `*`) of origins allowed cross-origin **HTTP** reads of the headless API (`/api/*`, `/gql`). Read in every environment; without it prod stays same-origin-only. Does not affect sockets — that's `CHECK_ORIGINS`. See [`KilnCMSWeb.CORS`](../lib/kiln_cms_web/cors.ex). | [`config/runtime.exs:69`](../config/runtime.exs#L69) |
+| `EMBED_ORIGINS` | `*` (any site) | Comma-separated allowlist of sites permitted to **iframe** an embeddable form (`/forms/:slug/embed`) — sets that page's CSP `frame-ancestors`. A blank value means same-origin only (embedding off). Safe to leave open: the embed page is an anonymous public form and a cross-site iframe never receives the `SameSite=Lax` session cookie. See [`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex). | [`config/runtime.exs:79`](../config/runtime.exs#L79) |
+| `POOL_SIZE` | `10` | Ecto database connection pool size. See the pool-sizing formula in [`docs/performance.md`](performance.md). | [`config/runtime.exs:107`](../config/runtime.exs#L107) |
+| `ECTO_IPV6` | unset | Set to `true`/`1` to connect to Postgres over IPv6. | [`config/runtime.exs:81`](../config/runtime.exs#L81) |
+| `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset when internet-facing directly. | [`config/runtime.exs:176`](../config/runtime.exs#L176) |
+| `DNS_CLUSTER_QUERY` | unset | DNS query for libcluster-style node discovery. | [`config/runtime.exs:168`](../config/runtime.exs#L168) |
 
 > **Note on ports.** The public URL is hardcoded to port `443`/`https`
-> ([`config/runtime.exs:128`](../config/runtime.exs#L128)); the app itself listens
+> ([`config/runtime.exs:179`](../config/runtime.exs#L179)); the app itself listens
 > on `PORT`. The expected topology is a TLS-terminating reverse proxy on 443
 > forwarding to the app on `PORT`.
 
@@ -44,8 +48,8 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `DATABASE_SSL` | `true` | Encrypt the Postgres connection. Set to `false` only for providers that cannot offer TLS. | [`config/runtime.exs:78`](../config/runtime.exs#L78) |
-| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`); otherwise the connection is still encrypted but uses `verify_none`. | [`config/runtime.exs:81`](../config/runtime.exs#L81) |
+| `DATABASE_SSL` | `true` | Encrypt the Postgres connection. Set to `false` only for providers that cannot offer TLS. | [`config/runtime.exs:89`](../config/runtime.exs#L89) |
+| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`); otherwise the connection is still encrypted but uses `verify_none`. | [`config/runtime.exs:92`](../config/runtime.exs#L92) |
 
 ## Optional — object storage (S3-compatible)
 
@@ -56,15 +60,15 @@ required (the latter two raise via `System.fetch_env!`). See
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:148`](../config/runtime.exs#L148) |
-| `S3_PUBLIC_BASE_URL` | — | Public base URL for stored objects. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:155`](../config/runtime.exs#L155) |
-| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:170`](../config/runtime.exs#L170) |
-| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:171`](../config/runtime.exs#L171) |
-| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:173`](../config/runtime.exs#L173) |
-| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:162`](../config/runtime.exs#L162) |
-| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:177`](../config/runtime.exs#L177) |
-| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:179`](../config/runtime.exs#L179) |
-| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:181`](../config/runtime.exs#L181) |
+| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:200`](../config/runtime.exs#L200) |
+| `S3_PUBLIC_BASE_URL` | — | Public base URL for stored objects. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:207`](../config/runtime.exs#L207) |
+| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:222`](../config/runtime.exs#L222) |
+| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:223`](../config/runtime.exs#L223) |
+| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:225`](../config/runtime.exs#L225) |
+| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:214`](../config/runtime.exs#L214) |
+| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:229`](../config/runtime.exs#L229) |
+| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:231`](../config/runtime.exs#L231) |
+| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:233`](../config/runtime.exs#L233) |
 
 ## Optional — outbound email
 
@@ -79,15 +83,15 @@ outbound port 25.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:260`](../config/runtime.exs#L260) |
-| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:298`](../config/runtime.exs#L298) |
-| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:299`](../config/runtime.exs#L299) |
-| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:265`](../config/runtime.exs#L265) |
-| `SMTP_PORT` | `587` | Relay port. | [`config/runtime.exs:271`](../config/runtime.exs#L271) |
-| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). | [`config/runtime.exs:272`](../config/runtime.exs#L272) |
-| `SMTP_PASSWORD` | unset | Relay password. | [`config/runtime.exs:273`](../config/runtime.exs#L273) |
-| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to `false` only for a local dev/test relay. | [`config/runtime.exs:274`](../config/runtime.exs#L274) |
-| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:289`](../config/runtime.exs#L289) |
+| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:307`](../config/runtime.exs#L307) |
+| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:359`](../config/runtime.exs#L359) |
+| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:360`](../config/runtime.exs#L360) |
+| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:315`](../config/runtime.exs#L315) |
+| `SMTP_PORT` | `587` | Relay port. | [`config/runtime.exs:321`](../config/runtime.exs#L321) |
+| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). | [`config/runtime.exs:322`](../config/runtime.exs#L322) |
+| `SMTP_PASSWORD` | unset | Relay password. | [`config/runtime.exs:323`](../config/runtime.exs#L323) |
+| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to `false` only for a local dev/test relay. | [`config/runtime.exs:324`](../config/runtime.exs#L324) |
+| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:336`](../config/runtime.exs#L336) |
 
 ## Optional — search (Meilisearch)
 
@@ -97,9 +101,9 @@ after enabling. See [`docs/meilisearch.md`](meilisearch.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:190`](../config/runtime.exs#L190) |
-| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:194`](../config/runtime.exs#L194), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
-| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:195`](../config/runtime.exs#L195) |
+| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:242`](../config/runtime.exs#L242) |
+| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:246`](../config/runtime.exs#L246), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
+| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:247`](../config/runtime.exs#L247) |
 
 ## Optional — error tracking (Sentry)
 

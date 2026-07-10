@@ -435,6 +435,13 @@ defmodule KilnCMS.CMS.Content do
           # The plural used for code-interface names, the delivery URL segment,
           # and discovery.
           def __kiln_content_plural__, do: unquote(plural)
+
+          # The plural as an atom, for keying per-type sections (e.g. global
+          # search results). `String.to_atom` is safe here: it runs inside the
+          # `unquote` at macro expansion, on a compile-time macro option (D4 —
+          # no user input), never per-request.
+          # sobelow_skip ["DOS.StringToAtom"]
+          def __kiln_content_section__, do: unquote(String.to_atom(plural))
         end
       end
 
@@ -1180,7 +1187,12 @@ defmodule KilnCMS.CMS.Content do
         # action's `optimistic_lock`). Internal.
         attribute :lock_version, :integer, allow_nil?: false, default: 1, public?: false
 
-        timestamps()
+        # Public so headless consumers can serialize and sort on them (Ash 3
+        # defaults attributes to public?: false, and AshJsonApi rejects a
+        # non-public sort field as invalid_sort — sort=-inserted_at simply
+        # errored before this). Still non-writable; `published_at` remains the
+        # editorial recency field for published feeds.
+        timestamps(public?: true)
       end
 
       relationships do

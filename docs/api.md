@@ -31,6 +31,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](../examples/README.md) |
 | **Locales**            | `GET /api/locales`                | Discover configured content locales + the default.    | [§ Locale discovery](#locale-discovery) |
+| **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
 | **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [§ Webhooks](#webhooks) |
 | **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
@@ -70,6 +71,10 @@ curl -s -X POST http://localhost:4000/api/auth/sign_in \
   "user": { "id": "…", "email": "editor@example.com", "role": "editor" }
 }
 ```
+
+> The account must already exist with an `:editor` or `:admin` role — signup
+> always creates a `:viewer`. See [**Creating an admin user**](../README.md#creating-an-admin-user)
+> in the README for seeding the first admin and promoting other users.
 
 Then send the token on JSON:API / GraphQL requests:
 
@@ -145,6 +150,12 @@ but **not every query returns drafts**. Pick the right surface:
 > the action — independent of the actor. A bearer token makes no difference; a
 > draft slug always resolves to `null`. To fetch a known draft slug, use the
 > JSON:API filter (`filter[slug]=<slug>&filter[state]=draft`) or a preview token.
+
+The table above cuts both ways: a **delivery site** that attaches an
+editor-minted key gets drafts on plain index and search reads it never asked
+for. Mint delivery keys on a `:viewer` account and prefer the `/published`
+surfaces — see [headless-consumer-guide.md](headless-consumer-guide.md) →
+"Drafts".
 
 ## Core content endpoints
 
@@ -242,6 +253,43 @@ Allowed origins come from the `CORS_ORIGINS` env var, resolved at runtime:
 Preflight `OPTIONS` requests are answered ahead of routing and are **not**
 counted against the caller's rate-limit budget. Browser/HTML routes are
 unaffected — CORS applies to the API paths only.
+
+## Embeddable forms
+
+Any active form can be embedded on a third-party site with a one-line snippet
+(copy it from the form's panel in `/editor/forms`):
+
+```html
+<script src="https://cms.example.com/embed.js" data-kiln-form="contact"></script>
+```
+
+`/embed.js` injects an iframe pointing at **`GET /forms/:slug/embed`** — a
+standalone document rendering the same form markup as an on-site form block —
+and keeps its height in sync with the content, so there's no inner scrollbar.
+Optional attributes: `data-kiln-origin` (CMS base URL, defaults to the script's
+own origin), `data-kiln-title`, `data-kiln-height` (initial px).
+
+Submissions post to the normal `POST /forms/:slug` endpoint and render the
+form's success message inside the iframe. No CORS is involved: the iframe is
+served *from* the CMS origin, so its form post is same-origin.
+
+**Who may embed** is controlled by the `EMBED_ORIGINS` env var, which sets the
+embed page's CSP `frame-ancestors`:
+
+| `EMBED_ORIGINS`                        | Effect                                             |
+|----------------------------------------|----------------------------------------------------|
+| *(unset — the default)*                | `*` — any site may embed the form.                 |
+| `https://a.example,https://b.example`  | Only these parents may frame it.                   |
+| *(blank)*                              | `'self'` — same-origin only; embedding is off.     |
+
+Defaulting to `*` is safe here: the embed page is an anonymous public form and a
+cross-site iframe never receives the `SameSite=Lax` session cookie, so there are
+no ambient credentials to clickjack. Submissions remain bounded by the honeypot
+and the tight `form` rate bucket. Lock it down with `EMBED_ORIGINS` if you'd
+rather forms only render on sites you control.
+
+Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
+rather than a blank iframe.
 
 ## Rate limits
 

@@ -70,6 +70,16 @@ if cors_origins = System.get_env("CORS_ORIGINS") do
   config :kiln_cms, :cors_origins, KilnCMSWeb.CORS.parse_env(cors_origins)
 end
 
+# ## Embeddable forms — which parents may iframe `/forms/:slug/embed`
+#
+# Defaults to `*` (any site), which is safe: the embed page is an anonymous
+# public form and a cross-site iframe never receives the SameSite=Lax session
+# cookie. Set EMBED_ORIGINS to an allowlist to lock it down, or to a blank value
+# for same-origin only. See KilnCMSWeb.Embed.
+if embed_origins = System.get_env("EMBED_ORIGINS") do
+  config :kiln_cms, :embed_origins, KilnCMSWeb.Embed.parse_env(embed_origins)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -135,6 +145,36 @@ if config_env() == :prod do
     |> String.replace_leading("http://", "")
     |> String.trim_trailing("/")
 
+  # CHECK_ORIGINS: comma-separated allowlist of extra origins permitted to
+  # open LiveView/channel sockets, for when the app is reachable on more than
+  # one hostname (e.g. mid domain migration). Entries may be full origins
+  # ("https://cms.example.com"), scheme-less ("//cms.example.com" — any
+  # scheme/port), or bare hosts (normalized to "//host"). The PHX_HOST origin
+  # is always kept, so this can only widen the allowlist. Unset ⇒ Phoenix's
+  # default: sockets are only accepted from the PHX_HOST origin.
+  check_origin =
+    case "CHECK_ORIGINS" |> System.get_env("") |> String.split(",", trim: true) do
+      [] ->
+        true
+
+      origins ->
+        extra =
+          origins
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(fn origin ->
+            origin = String.trim_trailing(origin, "/")
+
+            if String.starts_with?(origin, ["https://", "http://", "//"]) do
+              origin
+            else
+              "//" <> origin
+            end
+          end)
+
+        ["https://" <> host | extra]
+    end
+
   config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   # Trusted reverse-proxy CIDRs. When set (comma-separated, e.g.
@@ -147,6 +187,7 @@ if config_env() == :prod do
 
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
+    check_origin: check_origin,
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.

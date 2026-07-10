@@ -65,6 +65,10 @@ RUN ERL_FLAGS="+S 2:2" mix deps.compile
 
 COPY priv priv
 COPY lib lib
+# `projects/` is a compiled source path (see mix.exs elixirc_paths) — project
+# subprojects layered on the core. Without this COPY the release builds green
+# and boots, then 500s on the first request that touches a project domain.
+COPY projects projects
 COPY assets assets
 
 # Install JS dependencies (TipTap, etc.) before bundling.
@@ -86,6 +90,23 @@ COPY rel rel
 RUN mix sentry.package_source_code
 
 RUN mix release
+
+# Assert the API routers actually ship. `mix release` embeds only modules
+# recorded in the compile manifest; a beam present on disk without a manifest
+# entry is pruned as an orphan, and the embedded-mode release then boots fine
+# until the first /api/json or /gql request raises UndefinedFunctionError.
+# Build-time probes can't catch this (they run with lazy code loading), so
+# check what actually ships: the assembled release's .app :modules list.
+RUN elixir -e ' \
+  app = \
+    Path.wildcard("_build/prod/rel/kiln_cms/lib/kiln_cms-*/ebin/kiln_cms.app") \
+    |> List.first() || raise("release .app not found"); \
+  {:ok, [{:application, :kiln_cms, props}]} = :file.consult(String.to_charlist(app)); \
+  mods = Keyword.get(props, :modules, []); \
+  for m <- [KilnCMSWeb.AshJsonApiRouter, KilnCMSWeb.GraphqlSchema], m not in mods do \
+    raise("#{inspect(m)} missing from release .app :modules — the release would 500 on its API surface") \
+  end; \
+  IO.puts("release wiring verified: API routers present in .app :modules")'
 
 # ---- Runtime stage ----
 FROM ${RUNNER_IMAGE}

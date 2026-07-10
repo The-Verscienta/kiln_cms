@@ -83,6 +83,13 @@ Any sortable public field may be used. The collection routes have no implicit
 ordering unless you pass `sort` (except `/posts/published`, which defaults to
 `-published_at`).
 
+Two recency fields, two meanings: `inserted_at`/`updated_at` are the record's
+row timestamps (public read-only), while `published_at` is set by the publish
+transition — for published feeds, `-published_at` is what "newest" means
+editorially. Note a non-public or unknown field in `sort` fails the request
+with `invalid_sort` (it is not silently ignored), so a naive client renders an
+empty page — check the error body.
+
 ### Sorting search results
 
 `/…/search` orders by **relevance** by default (title hits above body hits,

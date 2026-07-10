@@ -14,7 +14,7 @@ and knowing what you'll get back. See also [api.md](api.md) (JSON:API + auth),
 | To **preview a specific draft** by share link | `GET /preview/:token` | The draft's raw, editable block tree (curated public fields), behind a signed 1-hour token |
 | **Filterable lists / metadata** (slug, title, SEO, dates, relationships), incl. drafts with a bearer token | JSON:API: `GET /api/json/...` | Resource attributes + relationship linkage. **No block body** (`blocks` is `public? false`) |
 | **Taxonomy** (categories, tags) | JSON:API `/api/json/categories`,`/tags` **or** GraphQL `categories`,`tags` | Name, slug, description |
-| **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching published records (metadata; no block body) |
+| **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too unless you pass `state=published` (see "Drafts") |
 | A **typed query** over published content by slug/locale | GraphQL `/gql` (`postBySlug`, `pageBySlug`, …) | Selected fields; no block body, author is the opaque `authorId` only |
 
 ## Admin-defined (dynamic) content types
@@ -68,3 +68,29 @@ PII".
 hard-filters `state == :published`). To read a known draft, use a bearer token
 with JSON:API `filter[state]=draft` or a `/preview/:token` link. See
 [api.md](api.md) → "Reading drafts".
+
+### Delivery sites: an API key widens what you see
+
+The read policy authorizes **any editor/admin identity for every workflow
+state** — and that includes a service API key attached as a bearer token. A
+public frontend that sets its key "for rate limits" or "as a service identity"
+is *not* an anonymous caller: its plain-index reads (`GET /api/json/<plural>`)
+and **all search routes** silently include drafts.
+
+Two independent defenses; use both:
+
+* **Mint delivery keys on a `:viewer` account** (see [api.md](api.md) → "API
+  keys"). A viewer identity only ever matches published content, so the key
+  *cannot* widen visibility no matter which route it hits.
+* **Read the published-only surfaces anyway.** For lists/detail, use
+  `GET /api/json/<plural>/published` (the `:published` action filters
+  `state == :published` server-side; see [json-api.md](json-api.md) → route
+  table) rather than the plain index. For search there is currently **no
+  `/published` variant** of `/search` / `/semantic-search` / `/autocomplete`;
+  pass the action's `state` argument (`?query=…&state=published`) on every
+  call. A server-side published-only search route is tracked in
+  [#297](https://github.com/The-Verscienta/kiln_cms/issues/297).
+
+Treat "which states can this credential see" as part of the credential's blast
+radius: a leaked editor-keyed delivery config exposes drafts, not just
+rate-limit headroom.
