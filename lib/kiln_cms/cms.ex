@@ -24,6 +24,7 @@ defmodule KilnCMS.CMS do
       define :get_page, action: :read, get_by: [:id]
       define :get_published_page_by_slug, action: :public_by_slug, args: [:slug, :locale]
       define :list_page_translations, action: :published_translations, args: [:slug]
+      define :list_published_pages, action: :published
       define :search_pages, action: :search, args: [:query]
       define :semantic_search_pages, action: :search_semantic, args: [:query]
       define :autocomplete_pages, action: :autocomplete, args: [:prefix]
@@ -97,6 +98,8 @@ defmodule KilnCMS.CMS do
       define :list_entry_translations,
         action: :published_translations,
         args: [:slug, :type_definition_id]
+
+      define :list_published_entries, action: :published
 
       define :search_entries, action: :search, args: [:query]
       define :semantic_search_entries, action: :search_semantic, args: [:query]

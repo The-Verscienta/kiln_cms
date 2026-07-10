@@ -86,6 +86,20 @@ defmodule KilnCMSWeb.DynamicHeadlessTest do
 
       assert Enum.map(data, & &1["id"]) == [published.id]
     end
+
+    # #300: the entries tier has the universal /published feed too.
+    test "the /published feed lists published entries only" do
+      actor = admin()
+      definition = define_type!(actor)
+
+      published = publish!(definition, entry!(definition, %{title: "Fed"}, actor), actor)
+      _draft = entry!(definition, %{title: "Fed draft"}, actor)
+
+      {200, %{"data" => data}} =
+        api_get("/api/json/entries/published?filter[type_name]=#{definition.name}")
+
+      assert Enum.map(data, & &1["id"]) == [published.id]
+    end
   end
 
   describe "GraphQL entry queries" do
