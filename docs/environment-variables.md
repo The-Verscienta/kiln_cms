@@ -10,7 +10,8 @@ compilation and before the system starts.
 > a `mix release` / `MIX_ENV=prod` build). In dev and test, sensible defaults from
 > `config/dev.exs` and `config/test.exs` are used instead, so you do not need to
 > set these locally. The exceptions — read in *every* environment — are
-> `PHX_SERVER`, `PORT`, `CORS_ORIGINS`, `SENTRY_DSN`, and the `OTEL_*` group.
+> `PHX_SERVER`, `PORT`, `CORS_ORIGINS`, `EMBED_ORIGINS`, `SENTRY_DSN`, and the
+> `OTEL_*` group.
 
 ## Required (production)
 
@@ -32,6 +33,7 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 | `PORT` | `4000` | HTTP listen port the Bandit server binds to. | [`config/runtime.exs:24`](../config/runtime.exs#L24) |
 | `CHECK_ORIGINS` | unset | Comma-separated **extra** origins allowed to open LiveView/channel sockets, for when the app is served from more than one hostname (e.g. mid domain migration). Entries may be full origins (`https://cms.example.com`), scheme-less (`//cms.example.com` — any scheme/port), or bare hosts (normalized to `//host`). The `PHX_HOST` origin is always allowed. Unset ⇒ only `PHX_HOST` may connect. | [`config/runtime.exs:145`](../config/runtime.exs#L145) |
 | `CORS_ORIGINS` | unset | Comma-separated allowlist (or `*`) of origins allowed cross-origin **HTTP** reads of the headless API (`/api/*`, `/gql`). Read in every environment; without it prod stays same-origin-only. Does not affect sockets — that's `CHECK_ORIGINS`. See [`KilnCMSWeb.CORS`](../lib/kiln_cms_web/cors.ex). | [`config/runtime.exs:69`](../config/runtime.exs#L69) |
+| `EMBED_ORIGINS` | `*` (any site) | Comma-separated allowlist of sites permitted to **iframe** an embeddable form (`/forms/:slug/embed`) — sets that page's CSP `frame-ancestors`. A blank value means same-origin only (embedding off). Safe to leave open: the embed page is an anonymous public form and a cross-site iframe never receives the `SameSite=Lax` session cookie. See [`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex). | [`config/runtime.exs:79`](../config/runtime.exs#L79) |
 | `POOL_SIZE` | `10` | Ecto database connection pool size. See the pool-sizing formula in [`docs/performance.md`](performance.md). | [`config/runtime.exs:107`](../config/runtime.exs#L107) |
 | `ECTO_IPV6` | unset | Set to `true`/`1` to connect to Postgres over IPv6. | [`config/runtime.exs:81`](../config/runtime.exs#L81) |
 | `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset when internet-facing directly. | [`config/runtime.exs:176`](../config/runtime.exs#L176) |

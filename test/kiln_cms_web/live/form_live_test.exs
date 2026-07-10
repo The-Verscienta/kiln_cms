@@ -94,4 +94,22 @@ defmodule KilnCMSWeb.FormLiveTest do
 
     assert CMS.recent_form_submissions!(created.id, authorize?: false) == []
   end
+
+  test "the selected form shows a copyable embed snippet", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    form =
+      CMS.create_form!(%{name: "Contact", slug: "embed-snippet"}, actor: admin)
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/forms")
+    html = lv |> element("button[phx-click=select_form]") |> render_click()
+
+    assert html =~ "Embed on another site"
+    assert html =~ "/embed.js"
+    # The snippet sits in a readonly input's value, so its quotes are escaped.
+    assert html =~ "data-kiln-form=&quot;#{form.slug}&quot;"
+
+    # Clicking Copy (via the Clipboard hook) flashes a confirmation.
+    assert lv |> render_hook("copied", %{}) =~ "Embed code copied to clipboard."
+  end
 end
