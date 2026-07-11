@@ -86,13 +86,16 @@ defmodule KilnCMSWeb.SearchApiTest do
   test "a blank query returns the empty shape", %{conn: conn} do
     body = conn |> get("/api/search?q=") |> json_response(200)
 
-    assert body["results"] == %{
-             "pages" => [],
-             "posts" => [],
-             "entries" => [],
-             "categories" => [],
-             "tags" => []
-           }
+    # One empty section per *registered* content type, not a hardcoded core
+    # list: since #311 the controller sweeps the ContentTypes registry, so a
+    # downstream tree running this suite with a project domain registered
+    # (e.g. an overlay CI) gets that project's sections here too.
+    expected =
+      KilnCMS.CMS.ContentTypes.all()
+      |> Map.new(fn ct -> {to_string(ct.section), []} end)
+      |> Map.merge(%{"entries" => [], "categories" => [], "tags" => []})
+
+    assert body["results"] == expected
 
     assert body["suggestion"] == nil
   end
