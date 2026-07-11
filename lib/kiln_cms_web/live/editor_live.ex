@@ -472,7 +472,7 @@ defmodule KilnCMSWeb.EditorLive do
               do: gettext("%{count} selected", count: @selected_count),
               else: gettext("None selected")}
           </span>
-          <div class="ml-auto flex gap-2">
+          <div class="ml-auto flex flex-wrap justify-end gap-2">
             <button
               :for={{verb, label} <- bulk_actions(@actor)}
               type="button"
@@ -505,7 +505,7 @@ defmodule KilnCMSWeb.EditorLive do
           ]}
         >
           <span>{bulk_confirm_prompt(@confirming_bulk, @selected_count)}</span>
-          <div class="ml-auto flex gap-2">
+          <div class="ml-auto flex flex-wrap justify-end gap-2">
             <button
               type="button"
               phx-click="confirm_bulk"
