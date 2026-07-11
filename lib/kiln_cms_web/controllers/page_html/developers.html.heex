@@ -1,0 +1,129 @@
+<Layouts.app
+  flash={@flash}
+  current_scope={@current_scope}
+  current_user={@current_user}
+  container_class="mx-auto max-w-4xl"
+>
+  <section class="relative overflow-hidden rounded-3xl border border-base-content/10 bg-base-200/40 px-6 py-12 sm:px-10">
+    <div
+      class="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-orange-500/20 blur-3xl"
+      aria-hidden="true"
+    />
+
+    <div class="relative max-w-3xl">
+      <p class="text-sm font-medium uppercase tracking-[0.2em] text-base-content/70">
+        {gettext("Headless delivery")}
+      </p>
+      <h1 class="mt-4 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+        {gettext("Developer APIs")}
+      </h1>
+      <p class="mt-4 max-w-2xl text-base leading-7 text-base-content/70">
+        {gettext(
+          "This site publishes its content over two headless API surfaces — GraphQL and JSON:API — plus a rendered-artifact endpoint for full page bodies. Anonymous requests read published content; a bearer token unlocks drafts."
+        )}
+      </p>
+    </div>
+  </section>
+
+  <section id="json-api" class="mt-8 scroll-mt-20 rounded-2xl border border-base-content/10 p-6">
+    <h2 class="text-lg font-semibold">JSON:API</h2>
+    <p class="mt-2 text-sm leading-6 text-base-content/70">
+      {gettext(
+        "Filterable lists, metadata, relationships, and search over every content type, following the JSON:API specification. Block bodies are not included on this surface — fetch rendered bodies from the artifact endpoint below."
+      )}
+    </p>
+    <pre class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"><code>curl -s "https://&lt;this-site&gt;/api/json/posts?sort=-published_at&amp;page[limit]=5"</code></pre>
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      <a
+        href="/api/json/swaggerui"
+        class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
+      >
+        {gettext("Open Swagger UI")}
+      </a>
+      <a
+        href="/api/json/open_api"
+        class="rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200"
+      >
+        {gettext("OpenAPI spec (JSON)")}
+      </a>
+      <a
+        href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/json-api.md"
+        class="rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200"
+      >
+        {gettext("Filtering reference")}
+      </a>
+    </div>
+  </section>
+
+  <section id="graphql" class="mt-6 scroll-mt-20 rounded-2xl border border-base-content/10 p-6">
+    <h2 class="text-lg font-semibold">GraphQL</h2>
+    <p class="mt-2 text-sm leading-6 text-base-content/70">
+      {gettext(
+        "Typed queries over published content — by-slug lookups, taxonomy, and keyword/semantic search. POST queries to the endpoint below (GET with a ?query= parameter also works). The interactive GraphiQL playground is available in development environments only."
+      )}
+    </p>
+    <pre
+      phx-no-curly-interpolation
+      class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"
+    ><code>curl -s -X POST "https://&lt;this-site&gt;/gql" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ health }"}'</code></pre>
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      <a
+        href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/headless-graphql-api.md"
+        class="rounded-lg border border-base-content/20 px-4 py-2 text-sm font-semibold transition hover:bg-base-200"
+      >
+        {gettext("GraphQL API reference")}
+      </a>
+    </div>
+  </section>
+
+  <section id="auth" class="mt-6 scroll-mt-20 rounded-2xl border border-base-content/10 p-6">
+    <h2 class="text-lg font-semibold">{gettext("Authentication")}</h2>
+    <p class="mt-2 text-sm leading-6 text-base-content/70">
+      {gettext(
+        "Both surfaces work anonymously and return published content only. To read drafts, exchange editor credentials for a JWT and send it as a bearer token — admin-issued API keys go in the same header."
+      )}
+    </p>
+    <pre
+      phx-no-curly-interpolation
+      class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"
+    ><code>curl -s -X POST "https://&lt;this-site&gt;/api/auth/sign_in" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "…"}'
+
+curl -s "https://&lt;this-site&gt;/api/json/posts" -H "Authorization: Bearer &lt;token&gt;"</code></pre>
+    <p class="mt-4 rounded-lg border border-base-content/15 bg-base-200/60 px-4 py-3 text-sm text-base-content/70">
+      {gettext(
+        "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
+      )}
+    </p>
+  </section>
+
+  <section class="mt-6 rounded-2xl border border-base-content/10 p-6">
+    <h2 class="text-lg font-semibold">{gettext("More surfaces")}</h2>
+    <ul class="mt-3 space-y-2 text-sm leading-6 text-base-content/70">
+      <li>
+        <code class="rounded bg-base-200/60 px-1.5 py-0.5 text-xs">GET /api/content/:type/:slug</code>
+        — {gettext("the rendered artifact: full block body, pre-compiled and CDN-cacheable.")}
+      </li>
+      <li>
+        <code class="rounded bg-base-200/60 px-1.5 py-0.5 text-xs">GET /api/search?query=…</code>
+        — {gettext("hybrid keyword + semantic search across all content types.")}
+      </li>
+      <li>
+        <code class="rounded bg-base-200/60 px-1.5 py-0.5 text-xs">GET /api/locales</code>
+        — {gettext("locale discovery for building language switchers.")}
+      </li>
+    </ul>
+    <p class="mt-4 text-sm leading-6 text-base-content/70">
+      {gettext("Not sure which surface to use? Start with the consumer guide:")}
+      <a
+        href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/headless-consumer-guide.md"
+        class="font-medium text-primary hover:underline"
+      >
+        {gettext("Headless consumer guide")}
+      </a>
+    </p>
+  </section>
+</Layouts.app>

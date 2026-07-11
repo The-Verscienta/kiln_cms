@@ -162,8 +162,12 @@ defmodule KilnCMSWeb.Layouts do
         </nav>
         <div class="border-t border-base-content/10 p-2">
           <div class="flex gap-1 px-1 pb-2 text-xs text-base-content/50">
-            <a href="/gql" class="side-link !py-1 !text-xs">{gettext("GraphQL")}</a>
-            <a href="/api/json" class="side-link !py-1 !text-xs">{gettext("JSON:API")}</a>
+            <a href="/developers#graphql" class="side-link !py-1 !text-xs">
+              {gettext("GraphQL")}
+            </a>
+            <a href="/developers#json-api" class="side-link !py-1 !text-xs">
+              {gettext("JSON:API")}
+            </a>
           </div>
           <div
             :if={@current_user}
@@ -511,8 +515,8 @@ defmodule KilnCMSWeb.Layouts do
       )
 
     ~H"""
-    <a href="/gql" class={@item}>{gettext("GraphQL")}</a>
-    <a href="/api/json" class={@item}>{gettext("JSON:API")}</a>
+    <a href="/developers#graphql" class={@item}>{gettext("GraphQL")}</a>
+    <a href="/developers#json-api" class={@item}>{gettext("JSON:API")}</a>
     <a
       :if={@current_user && @current_user.role in [:editor, :admin]}
       href={~p"/editor"}

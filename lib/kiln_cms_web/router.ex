@@ -237,15 +237,29 @@ defmodule KilnCMSWeb.Router do
 
   # Headless GraphQL — always available; the interactive playground is dev-only
   # (see the `dev_routes` block below).
+  #
+  # Cap query cost/depth so a deeply nested or wide query can't force an
+  # unbounded resolve (DoS). Tune `max_complexity` up as list queries are added.
+  # One definition shared by the forward below and `PageController.gql_get/2`
+  # (which re-dispatches GET-based queries to Absinthe).
+  @graphql_opts [
+    schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
+    analyze_complexity: true,
+    max_complexity: 200
+  ]
+
+  @doc "Absinthe.Plug options for the `/gql` endpoint (see the forward below)."
+  def graphql_opts, do: @graphql_opts
+
   scope "/gql" do
     pipe_through [:graphql]
 
-    # Cap query cost/depth so a deeply nested or wide query can't force an
-    # unbounded resolve (DoS). Tune `max_complexity` up as list queries are added.
-    forward "/", Absinthe.Plug,
-      schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-      analyze_complexity: true,
-      max_complexity: 200
+    # A browser landing on the bare endpoint gets the developer docs instead of
+    # a 400; GET-based GraphQL queries (`?query=…`) still execute (#319). Exact
+    # match only — `/gql/<anything>` still falls through to the forward.
+    get "/", KilnCMSWeb.PageController, :gql_get
+
+    forward "/", Absinthe.Plug, @graphql_opts
   end
 
   # Interactive API docs — Swagger UI over the published OpenAPI spec. Always
@@ -334,6 +348,9 @@ defmodule KilnCMSWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    # Served summary of the headless API surfaces — the header/footer
+    # "GraphQL" / "JSON:API" links land here instead of on raw endpoints (#319).
+    get "/developers", PageController, :developers
     # UI locale switcher — persists the chosen locale in the session.
     get "/locale/:locale", LocaleController, :update
   end

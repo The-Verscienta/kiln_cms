@@ -36,6 +36,28 @@ defmodule KilnCMSWeb.PageControllerTest do
     assert html_response(conn, 200) =~ "KilnCMS"
   end
 
+  # #319: the header/footer API links land on a served docs page, not on the
+  # raw endpoints (which 404/400 in a browser).
+  test "GET /developers serves the API docs page", %{conn: conn} do
+    html = conn |> get(~p"/developers") |> html_response(200)
+
+    assert html =~ "Developer APIs"
+    # Onward links to the browsable explorer + spec and the auth endpoint.
+    assert html =~ "/api/json/swaggerui"
+    assert html =~ "/api/json/open_api"
+    assert html =~ "/api/auth/sign_in"
+    assert html =~ "GraphQL"
+  end
+
+  test "home and nav point API links at the docs page, not raw endpoints", %{conn: conn} do
+    html = conn |> get(~p"/") |> html_response(200)
+
+    assert html =~ ~s(href="/developers#graphql")
+    assert html =~ ~s(href="/developers#json-api")
+    refute html =~ ~s(href="/gql")
+    refute html =~ ~s(href="/api/json")
+  end
+
   # #142: viewer-role accounts (the self-registration default) get onboarding
   # copy explaining that editor access requires an admin upgrade.
   test "a viewer sees onboarding about needing an editor upgrade", %{conn: conn} do
