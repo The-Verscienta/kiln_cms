@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branches filter: stacked PRs (base = another feature branch) must get
+  # the same compile/lint/test coverage as PRs into main. A base-branch filter
+  # here meant stacked PRs ran zero CI (bit PR #316).
   pull_request:
-    branches: [main]
 
 # Cancel superseded runs on the same ref.
 concurrency:
