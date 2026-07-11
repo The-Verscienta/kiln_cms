@@ -144,4 +144,35 @@ test.describe("editor journey", () => {
     // The reorder event re-renders the form-backed preview in the new order.
     await expect(previewHeadings).toHaveText(["Second", "First"]);
   });
+
+  test("accordions keep their toggle state while typing", async ({ page }) => {
+    await newDraftPage(page);
+
+    // The user's <details> open/closed state is client-side only; without the
+    // LiveSocket onBeforeElUpdated guard in app.js, the per-keystroke validate
+    // patch resets every accordion to its server-rendered default (SEO closed,
+    // Organization open) — the bug where typing collapsed the section.
+    const seo = page.locator("details").filter({ hasText: "SEO & scheduling" });
+    const org = page.locator("details").filter({ hasText: "Organization & relationships" });
+    await expect(seo).toHaveJSProperty("open", false);
+    await expect(org).toHaveJSProperty("open", true);
+
+    await seo.locator("summary").click();
+    const seoTitle = page.locator('input[name$="[seo_title]"]');
+    await seoTitle.click();
+    await seoTitle.pressSequentially("E2E SEO title", { delay: 30 });
+    // Let the 300ms validate debounce fire and the patch come back.
+    await page.waitForTimeout(700);
+    await expect(seo).toHaveJSProperty("open", true);
+    await expect(seoTitle).toHaveValue("E2E SEO title");
+
+    // Mirror direction: a section the server renders open stays closed once
+    // the user closes it.
+    await org.locator("summary").click();
+    await expect(org).toHaveJSProperty("open", false);
+    await seoTitle.pressSequentially(" more", { delay: 30 });
+    await page.waitForTimeout(700);
+    await expect(org).toHaveJSProperty("open", false);
+    await expect(seo).toHaveJSProperty("open", true);
+  });
 });

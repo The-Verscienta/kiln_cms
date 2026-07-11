@@ -331,7 +331,40 @@ const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
   hooks: {...colocatedHooks, ...Hooks},
+  dom: {
+    // <details> open/closed is client-side state the server template doesn't
+    // track, so a patch (e.g. the editor's per-keystroke validate) would reset
+    // every accordion to its rendered default. Keep the user's toggle unless
+    // the *server-rendered* value itself changed — that still lets the server
+    // force a section open (e.g. "Custom fields" when it gains errors).
+    // `data-server-open` (last seen server value) is seeded by the document
+    // "toggle" listener below and kept current here.
+    onBeforeElUpdated(from, to) {
+      if (from.tagName === "DETAILS") {
+        const serverOpen = to.hasAttribute("open")
+        const prevServerOpen = from.dataset.serverOpen
+        if (prevServerOpen !== undefined && (prevServerOpen === "true") === serverOpen) {
+          to.toggleAttribute("open", from.open)
+        }
+        to.dataset.serverOpen = String(serverOpen)
+      }
+    },
+  },
 })
+
+// First-toggle seed for the <details> preservation above: before any patch has
+// stamped data-server-open, a user toggle means the pre-toggle state was the
+// server-rendered one. "toggle" doesn't bubble, so listen in capture phase.
+document.addEventListener(
+  "toggle",
+  e => {
+    const el = e.target
+    if (el.tagName === "DETAILS" && el.dataset.serverOpen === undefined) {
+      el.dataset.serverOpen = String(!el.open)
+    }
+  },
+  true
+)
 
 // ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
 // there). Skipped while typing in an input so it doesn't hijack the field.
