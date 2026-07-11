@@ -186,7 +186,7 @@ defmodule KilnCMSWeb.Layouts do
       </aside>
 
       <div class="flex min-h-screen flex-col">
-        <header class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-base-content/10 bg-base-100/90 px-4 backdrop-blur sm:px-6">
+        <header class="sticky top-0 z-20 flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-content/10 bg-base-100/90 px-4 py-2 backdrop-blur sm:px-6">
           <label
             for="kiln-nav-toggle"
             class="-ml-1 cursor-pointer rounded-md p-2 text-base-content/70 hover:bg-base-200 lg:hidden"
@@ -200,7 +200,7 @@ defmodule KilnCMSWeb.Layouts do
           <div :if={@page_title} class="truncate text-sm font-semibold tracking-tight">
             {@page_title}
           </div>
-          <div class="ml-auto flex items-center gap-2">
+          <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
             <.link
               navigate={~p"/editor/search"}
               class="hidden items-center gap-2 rounded-md border border-base-content/15 px-2.5 py-1.5 text-sm text-base-content/60 hover:bg-base-200 sm:flex"
