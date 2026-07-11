@@ -182,7 +182,8 @@ defmodule KilnCMS.Webhooks.SafeUrl do
   # would otherwise tie up the DeliveryWorker (Oban) for seconds per attempt.
   defp resolve_addresses(host) do
     charlist = String.to_charlist(host)
-    task = Task.async(fn -> :inet.gethostbyname(charlist) end)
+    resolver = resolver()
+    task = Task.async(fn -> resolver.(charlist) end)
 
     case Task.yield(task, dns_timeout_ms()) || Task.shutdown(task, :brutal_kill) do
       {:ok, {:ok, {:hostent, _name, _aliases, _addrtype, _length, addresses}}} ->
@@ -272,6 +273,12 @@ defmodule KilnCMS.Webhooks.SafeUrl do
   # Max time to wait for hostname resolution before failing validation (#223).
   defp dns_timeout_ms do
     config() |> Keyword.get(:dns_timeout_ms, 3_000)
+  end
+
+  # The DNS lookup itself, `:inet.gethostbyname/1`-shaped. Configurable so
+  # tests can stub resolution instead of depending on live DNS.
+  defp resolver do
+    config() |> Keyword.get(:resolver, &:inet.gethostbyname/1)
   end
 
   defp config, do: Application.get_env(:kiln_cms, __MODULE__, [])
