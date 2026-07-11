@@ -51,8 +51,15 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 (`create_entry` needs a `type_definition_id` — discover them with
 `read_type_definitions`), plus `create_tag` and `create_category`.
 
-The tool set lives in the `tools` block on `KilnCMS.CMS` and the `/mcp` forward
-in `KilnCMSWeb.Router` — add a tool in both places.
+The tool set lives in the `tools` block on `KilnCMS.CMS` and the
+`config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile
+time by the `/mcp` forward in `KilnCMSWeb.Router`) — add a tool in both places.
+
+A downstream project can expose MCP tools for its own content types without
+touching the core: add a `tools` block (via the `AshAi` extension) to your
+content domain, then override `:mcp_tools` in your project config. As with
+`ash_domains`, the override replaces the list — restate the core tools and
+append your own.
 
 ## Connecting a client
 
