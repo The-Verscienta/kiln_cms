@@ -1,11 +1,15 @@
 defmodule KilnCMSWeb.ApiKeyLive do
   @moduledoc """
   API keys (`/editor/api-keys`) — mint and revoke keys for headless / third-party
-  **read** access to the delivery API. Admin-only, mirroring the `ApiKey` policy.
+  access to the delivery API and the `/mcp` authoring endpoint. Admin-only,
+  mirroring the `ApiKey` policy.
 
-  A key authenticates as its owning user, inheriting that user's read scope; keys
-  can never mutate content. The plaintext key is shown **once**, right after
-  minting — it's only stored hashed, so it can't be retrieved again.
+  A key authenticates as its owning user, inheriting that user's read scope. Its
+  `access` scope bounds what it may do with that identity: `:read` keys (the
+  default) can never mutate content; `:read_write` keys may author content
+  within the owner's role (built for LLM/automation clients on `/mcp`). The
+  plaintext key is shown **once**, right after minting — it's only stored
+  hashed, so it can't be retrieved again.
   """
   use KilnCMSWeb, :live_view
 
@@ -38,11 +42,18 @@ defmodule KilnCMSWeb.ApiKeyLive do
   end
 
   @impl true
-  def handle_event("mint", %{"user_id" => user_id, "name" => name, "days" => days}, socket) do
+  def handle_event(
+        "mint",
+        %{"user_id" => user_id, "name" => name, "days" => days} = params,
+        socket
+      ) do
     actor = socket.assigns.actor
     expires_at = DateTime.add(DateTime.utc_now(), duration_days(days), :day)
+    access = access_scope(params["access"])
 
-    case Accounts.mint_api_key(user_id, String.trim(name), expires_at, actor: actor) do
+    case Accounts.mint_api_key(user_id, String.trim(name), expires_at, %{access: access},
+           actor: actor
+         ) do
       {:ok, key} ->
         {:noreply,
          socket
@@ -91,6 +102,10 @@ defmodule KilnCMSWeb.ApiKeyLive do
     end
   end
 
+  # Anything but an explicit opt-in falls back to read-only.
+  defp access_scope("read_write"), do: :read_write
+  defp access_scope(_), do: :read
+
   defp status(%{revoked_at: at}) when not is_nil(at), do: {:revoked, gettext("Revoked")}
   defp status(%{valid: true}), do: {:active, gettext("Active")}
   defp status(_), do: {:expired, gettext("Expired")}
@@ -107,7 +122,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
           <h1 class="mt-1 text-2xl font-semibold">{gettext("API keys")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext(
-              "Grant headless / third-party read access to the delivery API. A key acts as its owning user and can never modify content. For public-only access, mint a key on a viewer account."
+              "Grant headless / third-party access to the delivery API and the MCP authoring endpoint. A key acts as its owning user; read-only keys can never modify content, while read + write keys can author content within the owner's role. For public-only access, mint a read-only key on a viewer account; for an LLM author, mint a read + write key on an editor account."
             )}
           </p>
         </div>
@@ -170,6 +185,16 @@ defmodule KilnCMSWeb.ApiKeyLive do
                 <option :for={{label, days} <- @durations} value={days}>{label}</option>
               </select>
             </label>
+            <label class="text-sm">
+              <span class="mb-1 block font-medium">{gettext("Access")}</span>
+              <select
+                name="access"
+                class="w-full rounded border border-base-content/30 px-2 py-1.5 text-sm"
+              >
+                <option value="read">{gettext("Read-only (delivery)")}</option>
+                <option value="read_write">{gettext("Read + write (MCP authoring)")}</option>
+              </select>
+            </label>
             <div class="flex items-end">
               <.button type="submit" variant="primary">{gettext("Create key")}</.button>
             </div>
@@ -189,6 +214,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
                 <tr class="border-b border-base-content/15 text-xs uppercase tracking-wide text-base-content/60">
                   <th class="py-2 pr-3">{gettext("Name")}</th>
                   <th class="py-2 pr-3">{gettext("User")}</th>
+                  <th class="py-2 pr-3">{gettext("Access")}</th>
                   <th class="py-2 pr-3">{gettext("Status")}</th>
                   <th class="py-2 pr-3">{gettext("Expires")}</th>
                   <th class="py-2"></th>
@@ -198,6 +224,17 @@ defmodule KilnCMSWeb.ApiKeyLive do
                 <tr :for={key <- @keys} id={"api-key-#{key.id}"}>
                   <td class="py-2 pr-3 font-medium">{key.name}</td>
                   <td class="py-2 pr-3 text-base-content/70">{key.user && key.user.email}</td>
+                  <td class="py-2 pr-3">
+                    <span class={[
+                      "rounded px-1.5 py-0.5 text-xs font-medium",
+                      key.access == :read_write && "bg-warning/15 text-warning",
+                      key.access == :read && "bg-base-200 text-base-content/60"
+                    ]}>
+                      {if key.access == :read_write,
+                        do: gettext("Read + write"),
+                        else: gettext("Read-only")}
+                    </span>
+                  </td>
                   <td class="py-2 pr-3">
                     <% {kind, label} = status(key) %>
                     <span class={[

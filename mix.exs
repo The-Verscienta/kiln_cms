@@ -69,6 +69,8 @@ defmodule KilnCMS.MixProject do
       {:ash_paper_trail, "~> 0.6"},
       {:ash_graphql, "~> 1.0"},
       {:ash_json_api, "~> 1.0"},
+      # MCP server for LLM authoring (write-scoped API keys) — see docs/mcp.md.
+      {:ash_ai, "~> 0.7"},
       {:ash_admin, "~> 1.0"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:igniter, "~> 0.5", only: [:dev, :test]},

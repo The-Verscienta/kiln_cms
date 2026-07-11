@@ -1157,11 +1157,22 @@ defmodule KilnCMS.CMS.Content do
           authorize_if always()
         end
 
-        # API keys grant **read-only** access (headless/third-party delivery).
-        # Even a key minted on an editor/admin account can never mutate content —
-        # this runs before the admin bypass below so it isn't short-circuited.
-        # Defense-in-depth: the headless HTTP surface exposes only reads anyway.
-        policy action_type([:create, :update, :destroy]) do
+        # API keys default to **read-only** access (headless/third-party
+        # delivery): a `:read` key can never mutate content, even one minted on
+        # an editor/admin account. A `:read_write` key (LLM/automation authoring
+        # via `/mcp` — docs/mcp.md) falls through to the owning user's role
+        # policies below instead. Both run before the admin bypass so they
+        # aren't short-circuited. Defense-in-depth: the JSON:API/GraphQL
+        # delivery surface exposes only reads regardless (D7).
+        policy action_type([:create, :update]) do
+          forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
+          authorize_if always()
+        end
+
+        # No key may destroy content, whatever its scope — an automation
+        # credential has no business hard-deleting (archive/unpublish are
+        # update actions, gated by the write scope above).
+        policy action_type(:destroy) do
           forbid_if AshAuthentication.Checks.UsingApiKey
           authorize_if always()
         end

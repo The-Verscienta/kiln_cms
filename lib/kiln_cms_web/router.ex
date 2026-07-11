@@ -96,6 +96,20 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :auth
   end
 
+  # MCP (Model Context Protocol) — LLM authoring clients (docs/mcp.md).
+  # API-key-only, `required?: true`: unlike `:api` there is no anonymous or JWT
+  # access here, a missing/invalid `Bearer kiln_…` key is a 401. What a key may
+  # do is enforced by the resource policies (its `access` scope + the owning
+  # user's role), not by the transport.
+  pipeline :mcp do
+    plug :accepts, ["json"]
+    plug KilnCMSWeb.Plugs.RateLimit, :api
+
+    plug AshAuthentication.Strategy.ApiKey.Plug,
+      resource: KilnCMS.Accounts.User,
+      required?: true
+  end
+
   # Swagger UI explorer — serves the published OpenAPI spec interactively in all
   # environments (issue #37). Relaxed, swagger-specific CSP (`@swagger_csp`) plus
   # a per-request nonce for swagger-ui's inline boot script.
@@ -274,6 +288,38 @@ defmodule KilnCMSWeb.Router do
     pipe_through :api_auth
 
     post "/sign_in", ApiAuthController, :sign_in
+  end
+
+  # MCP server for LLM authoring clients (docs/mcp.md). Tool names must match
+  # the `tools` block on `KilnCMS.CMS`. Authoring tools need a `:read_write`
+  # key on an editor account; publishing/deleting are deliberately not exposed
+  # (drafts go through the human review workflow).
+  scope "/mcp" do
+    pipe_through :mcp
+
+    forward "/", AshAi.Mcp.Router,
+      tools: [
+        :read_pages,
+        :read_posts,
+        :read_entries,
+        :read_type_definitions,
+        :read_field_definitions,
+        :read_tags,
+        :read_categories,
+        :create_page,
+        :update_page,
+        :submit_page_for_review,
+        :create_post,
+        :update_post,
+        :submit_post_for_review,
+        :create_entry,
+        :update_entry,
+        :submit_entry_for_review,
+        :create_tag,
+        :create_category
+      ],
+      protocol_version_statement: "2024-11-05",
+      otp_app: :kiln_cms
   end
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves

@@ -55,6 +55,14 @@ defmodule KilnCMS.CMS.ContentLink do
   end
 
   policies do
+    # Join rows are part of editing: a write-scoped API key may link/unlink
+    # (via `manage_relationship` on content updates), a read-scoped key may
+    # not. Before the admin bypass so a key on an admin account can't skip it.
+    policy action_type([:create, :update, :destroy]) do
+      forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
+      authorize_if always()
+    end
+
     bypass actor_attribute_equals(:role, :admin) do
       authorize_if always()
     end
