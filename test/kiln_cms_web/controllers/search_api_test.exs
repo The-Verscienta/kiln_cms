@@ -86,14 +86,14 @@ defmodule KilnCMSWeb.SearchApiTest do
   test "a blank query returns the empty shape", %{conn: conn} do
     body = conn |> get("/api/search?q=") |> json_response(200)
 
-    assert body["results"] == %{
-             "pages" => [],
-             "posts" => [],
-             "entries" => [],
-             "categories" => [],
-             "tags" => []
-           }
+    # The sections are derived from the content-type registry (#296), so a
+    # downstream project overlay adds buckets beyond the core set — assert the
+    # core buckets exist and *every* bucket is empty, not exact equality.
+    for bucket <- ~w(pages posts entries categories tags) do
+      assert Map.has_key?(body["results"], bucket)
+    end
 
+    assert Enum.all?(body["results"], fn {_bucket, results} -> results == [] end)
     assert body["suggestion"] == nil
   end
 
