@@ -78,8 +78,15 @@ defmodule KilnCMS.Webhooks.SafeUrlTest do
     end
 
     test "rejects hostnames that resolve to private addresses" do
-      with_config([require_https: false, resolve_dns: true], fn ->
-        assert {:error, message} = SafeUrl.validate("http://127.0.0.1.nip.io/hook")
+      # Stubbed resolver: live DNS (e.g. nip.io) is flaky on CI runners, and a
+      # timed-out lookup would pass the old assertion without exercising the
+      # private-address rejection at all.
+      resolver = fn _host ->
+        {:ok, {:hostent, ~c"internal.example.com", [], :inet, 4, [{10, 0, 0, 5}]}}
+      end
+
+      with_config([require_https: false, resolve_dns: true, resolver: resolver], fn ->
+        assert {:error, message} = SafeUrl.validate("http://internal.example.com/hook")
         assert message =~ "private" or message =~ "loopback" or message =~ "resolved"
       end)
     end
