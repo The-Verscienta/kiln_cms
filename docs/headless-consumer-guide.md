@@ -6,6 +6,10 @@ and knowing what you'll get back. See also [api.md](api.md) (JSON:API + auth),
 [headless-graphql-api.md](headless-graphql-api.md) (GraphQL), and
 [json-api.md](json-api.md) (filtering reference).
 
+Every Kiln site also serves a human-readable summary of these surfaces at
+**`/developers`** (linked from the site header) — endpoints, auth in brief, and
+the Swagger UI / OpenAPI spec links (#319).
+
 **Building in Elixir?** Use the official client,
 [`kiln_client`](../clients/elixir/kiln_client/README.md) — it wraps the
 JSON:API reads, search, and artifact surfaces with the safe defaults below

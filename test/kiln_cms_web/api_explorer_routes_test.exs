@@ -63,6 +63,21 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
     assert get_in(spec, ["paths", "/preview/{token}", "get", "operationId"]) == "getPreview"
   end
 
+  # #319: a browser GET on the bare endpoint gets the developer docs instead of
+  # Absinthe's 400 "unable to provide document".
+  test "GET /gql without a query redirects to the developer docs" do
+    conn = get(build_conn(), "/gql")
+
+    assert redirected_to(conn) == "/developers#graphql"
+  end
+
+  # Absinthe supports GET-based queries; the docs redirect must not break them.
+  test "GET /gql with a ?query= still executes GraphQL" do
+    conn = get(build_conn(), "/gql", %{"query" => "{ health }"})
+
+    assert %{"data" => %{"health" => "ok"}} = json_response(conn, 200)
+  end
+
   test "headless GraphQL endpoint remains available" do
     conn =
       build_conn()
