@@ -304,34 +304,21 @@ defmodule KilnCMSWeb.Router do
     post "/sign_in", ApiAuthController, :sign_in
   end
 
-  # MCP server for LLM authoring clients (docs/mcp.md). Tool names must match
-  # the `tools` block on `KilnCMS.CMS`. Authoring tools need a `:read_write`
-  # key on an editor account; publishing/deleting are deliberately not exposed
-  # (drafts go through the human review workflow).
+  # MCP server for LLM authoring clients (docs/mcp.md). The tool list comes
+  # from `config :kiln_cms, :mcp_tools` (compile-time, like `:content_domains`
+  # in the GraphQL schema/JSON:API router) so a downstream project can expose
+  # tools for its own content domain without editing the core router. Names
+  # must match a `tools` block on a configured Ash domain — the core set lives
+  # on `KilnCMS.CMS`. Authoring tools need a `:read_write` key on an editor
+  # account; publishing/deleting are deliberately not exposed (drafts go
+  # through the human review workflow).
+  @mcp_tools Application.compile_env!(:kiln_cms, :mcp_tools)
+
   scope "/mcp" do
     pipe_through :mcp
 
     forward "/", AshAi.Mcp.Router,
-      tools: [
-        :read_pages,
-        :read_posts,
-        :read_entries,
-        :read_type_definitions,
-        :read_field_definitions,
-        :read_tags,
-        :read_categories,
-        :create_page,
-        :update_page,
-        :submit_page_for_review,
-        :create_post,
-        :update_post,
-        :submit_post_for_review,
-        :create_entry,
-        :update_entry,
-        :submit_entry_for_review,
-        :create_tag,
-        :create_category
-      ],
+      tools: @mcp_tools,
       protocol_version_statement: "2024-11-05",
       otp_app: :kiln_cms
   end

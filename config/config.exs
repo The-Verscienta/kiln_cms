@@ -57,6 +57,33 @@ config :kiln_cms,
   # domain in its own config (same reason as ash_domains above — keep it out of
   # the core default so a clean build/boot doesn't reference a missing module).
   content_domains: [KilnCMS.CMS],
+  # Tools served by the `/mcp` endpoint (docs/mcp.md). Read at compile time by
+  # `KilnCMSWeb.Router`; every name must match a `tools` block on a configured
+  # Ash domain (the core set lives on `KilnCMS.CMS`). Like `ash_domains`, a
+  # downstream project's config REPLACES this list — restate the core tools and
+  # append your own (defined in a `tools` block on your content domain).
+  # Publishing/destroying tools are deliberately absent: an LLM authors drafts
+  # and submits them for review; a human approves.
+  mcp_tools: [
+    :read_pages,
+    :read_posts,
+    :read_entries,
+    :read_type_definitions,
+    :read_field_definitions,
+    :read_tags,
+    :read_categories,
+    :create_page,
+    :update_page,
+    :submit_page_for_review,
+    :create_post,
+    :update_post,
+    :submit_post_for_review,
+    :create_entry,
+    :update_entry,
+    :submit_entry_for_review,
+    :create_tag,
+    :create_category
+  ],
   # Default "from" address for transactional email (auth confirmation/reset).
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
