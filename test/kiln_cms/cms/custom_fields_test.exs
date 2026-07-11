@@ -179,4 +179,97 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
       assert page.custom_fields == %{"region" => "unknown"}
     end
   end
+
+  describe "custom_fields partial updates merge over the stored map" do
+    setup do
+      admin = admin()
+      define!(%{name: "genus", label: "Genus", field_type: :string}, admin)
+      define!(%{name: "species", label: "Species", field_type: :string}, admin)
+      define!(%{name: "notes", label: "Notes", field_type: :text}, admin)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Plant",
+            slug: slug(),
+            custom_fields: %{"genus" => "Panax", "species" => "ginseng", "notes" => "keep me"}
+          },
+          actor: admin
+        )
+
+      %{admin: admin, page: page}
+    end
+
+    test "a field omitted from the payload keeps its stored value", %{admin: admin, page: page} do
+      updated =
+        CMS.update_page!(page, %{custom_fields: %{"species" => "quinquefolius"}}, actor: admin)
+
+      # The one supplied field changes; the two omitted fields are untouched —
+      # not wiped by the full-map rewrite.
+      assert updated.custom_fields == %{
+               "genus" => "Panax",
+               "species" => "quinquefolius",
+               "notes" => "keep me"
+             }
+    end
+
+    test "a field supplied blank is cleared, siblings preserved", %{admin: admin, page: page} do
+      updated = CMS.update_page!(page, %{custom_fields: %{"notes" => ""}}, actor: admin)
+
+      refute Map.has_key?(updated.custom_fields, "notes")
+      assert updated.custom_fields == %{"genus" => "Panax", "species" => "ginseng"}
+    end
+
+    test "an empty custom_fields payload changes nothing", %{admin: admin, page: page} do
+      updated = CMS.update_page!(page, %{custom_fields: %{}}, actor: admin)
+
+      assert updated.custom_fields == page.custom_fields
+    end
+
+    test "a required field omitted from a partial update keeps its stored value", %{admin: admin} do
+      define!(%{name: "req", label: "Req", field_type: :string, required: true}, admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "R", slug: slug(), custom_fields: %{"req" => "present", "genus" => "A"}},
+          actor: admin
+        )
+
+      # Not resending `req` doesn't trip the required validation — the stored
+      # value stands.
+      updated = CMS.update_page!(page, %{custom_fields: %{"genus" => "B"}}, actor: admin)
+
+      assert updated.custom_fields["req"] == "present"
+      assert updated.custom_fields["genus"] == "B"
+    end
+
+    test "unknown keys in a partial update are still dropped", %{admin: admin, page: page} do
+      updated =
+        CMS.update_page!(page, %{custom_fields: %{"genus" => "New", "stray" => "x"}},
+          actor: admin
+        )
+
+      refute Map.has_key?(updated.custom_fields, "stray")
+      assert updated.custom_fields["genus"] == "New"
+      assert updated.custom_fields["notes"] == "keep me"
+    end
+
+    # The form editor renders an input for *every* definition and submits the
+    # complete map (blank for empties), so a full-map update that empties a field
+    # must still clear it — merge semantics must not resurrect emptied fields.
+    test "a full-map update (editor shape) still clears an emptied field", %{
+      admin: admin,
+      page: page
+    } do
+      updated =
+        CMS.update_page!(
+          page,
+          %{custom_fields: %{"genus" => "Panax", "species" => "ginseng", "notes" => ""}},
+          actor: admin
+        )
+
+      refute Map.has_key?(updated.custom_fields, "notes")
+      assert updated.custom_fields == %{"genus" => "Panax", "species" => "ginseng"}
+    end
+  end
 end

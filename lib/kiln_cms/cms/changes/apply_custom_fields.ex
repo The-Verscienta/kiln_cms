@@ -11,6 +11,23 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   round-trips cleanly. Types beyond the built-ins dispatch to their registered
   `Kiln.FieldType`'s `cast/2` (see `KilnCMS.CMS.FieldTypes`). Definitions are
   read with `authorize?: false` (registry metadata, not user data).
+
+  ## Partial updates merge; the payload is not the whole record
+
+  On **update**, the supplied map is merged over the record's existing
+  `custom_fields` with three-way, per-key semantics:
+
+    * a key **present with a value** is coerced and written;
+    * a key **present but blank** is cleared (or reset to its default);
+    * a key **absent** from the payload keeps its stored value untouched.
+
+  So an API/MCP client can `PATCH` a single field without resending the rest —
+  omitting a field no longer silently wipes it. On **create** there is nothing
+  to merge over, so absent fields fall to their defaults as before.
+
+  The form editor is unaffected: it renders an input for every definition and
+  submits the complete map (blank for empties), so every key is "present" and
+  clearing a field by emptying it still works exactly as before.
   """
   use Ash.Resource.Change
 
@@ -31,7 +48,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     supplied = stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
 
-    {cleaned, errors} = Enum.reduce(defs, {%{}, []}, &accumulate(&1, supplied, &2))
+    # The base to merge the payload over. On create there is no record yet, so
+    # absent fields fall to their defaults (empty base). On update we carry the
+    # stored values forward, so a field the caller didn't mention is preserved
+    # rather than dropped by the full-map rewrite below.
+    existing =
+      case changeset.action_type do
+        :create -> %{}
+        _ -> stringify_keys(changeset.data.custom_fields || %{})
+      end
+
+    {cleaned, errors} = Enum.reduce(defs, {%{}, []}, &accumulate(&1, supplied, existing, &2))
 
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
@@ -53,18 +80,35 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.
-  defp accumulate(def, supplied, {cleaned, errors}) do
-    case resolve(def, supplied) do
-      :skip -> {cleaned, errors}
-      {:ok, value} -> {Map.put(cleaned, def.name, value), errors}
-      {:error, message} -> {cleaned, [error(def, message) | errors]}
+  # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
+  # they omitted keeps its `existing` stored value (the merge); a field with
+  # neither falls to its default (fresh field / create).
+  defp accumulate(def, supplied, existing, {cleaned, errors}) do
+    cond do
+      Map.has_key?(supplied, def.name) ->
+        fold(resolve(def, Map.get(supplied, def.name)), def, cleaned, errors)
+
+      Map.has_key?(existing, def.name) ->
+        # Untouched by this write: keep the stored (already-coerced) value as-is.
+        # No re-coercion, so a stale reference/media snapshot isn't re-resolved
+        # and a since-changed definition can't reject a value the caller never
+        # sent.
+        {Map.put(cleaned, def.name, Map.get(existing, def.name)), errors}
+
+      true ->
+        fold(resolve(def, nil), def, cleaned, errors)
     end
   end
 
-  # The coerced value for a definition: the supplied value (or its default),
+  defp fold(:skip, _def, cleaned, errors), do: {cleaned, errors}
+  defp fold({:ok, value}, def, cleaned, errors), do: {Map.put(cleaned, def.name, value), errors}
+
+  defp fold({:error, message}, def, cleaned, errors),
+    do: {cleaned, [error(def, message) | errors]}
+
+  # The coerced value for a definition from a supplied `raw` (or its default):
   # `:skip` when blank-and-optional, or an error when blank-and-required.
-  defp resolve(def, supplied) do
-    raw = Map.get(supplied, def.name)
+  defp resolve(def, raw) do
     raw = if blank?(raw), do: def.default, else: raw
 
     cond do
