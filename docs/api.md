@@ -105,12 +105,12 @@ strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 token = user.__metadata__.token
 ```
 
-### API keys (third-party read access)
+### API keys (third-party access)
 
-For unattended integrators (a build pipeline, another app), issue a long-lived
-**API key** instead of sharing user credentials. An admin mints keys at
-**`/editor/api-keys`**; the plaintext is shown **once** at creation (only a hash
-is stored) and looks like `kiln_<base62>_<crc>`.
+For unattended integrators (a build pipeline, another app, an LLM client),
+issue a long-lived **API key** instead of sharing user credentials. An admin
+mints keys at **`/editor/api-keys`**; the plaintext is shown **once** at
+creation (only a hash is stored) and looks like `kiln_<base62>_<crc>`.
 
 Send it on the same `Authorization: Bearer` header — the `kiln_` prefix tells it
 apart from a JWT:
@@ -124,13 +124,18 @@ curl -s 'http://localhost:4000/api/json/posts' \
 - A key **authenticates as its owning user**, inheriting that user's read scope
   (role + audiences). For public-content-only access, mint the key on a `:viewer`
   account.
-- Keys are **read-only**: the headless surface exposes only reads, and any
-  mutation attempted with a key is forbidden at the policy layer regardless of
-  the owner's role.
+- Keys carry an **`access` scope**, chosen at mint and immutable after:
+  - **Read-only** (the default): the JSON:API/GraphQL surface exposes only
+    reads, and any mutation attempted with a read key is forbidden at the
+    policy layer regardless of the owner's role.
+  - **Read + write**: may additionally author content over the **MCP endpoint**
+    (`/mcp`) as its owning user, within that user's role — create/update
+    drafts, submit for review. Publishing and hard deletes are never exposed to
+    keys. See [mcp.md](mcp.md).
 - Keys always **expire** and can be **revoked** immediately from the admin UI; an
   expired/revoked key returns **401**.
-- Works on both JSON:API (`/api/json`) and GraphQL (`/gql`, incl. the
-  subscription WebSocket via the `token` connection param).
+- Works on JSON:API (`/api/json`), GraphQL (`/gql`, incl. the subscription
+  WebSocket via the `token` connection param), and MCP (`/mcp`).
 
 ### Reading drafts
 

@@ -194,6 +194,19 @@ defmodule KilnCMS.CMS.MediaItem do
   end
 
   policies do
+    # Read-scoped API keys can never write media, and no key may delete it —
+    # before the admin bypass so a key on an admin account can't skip it
+    # (mirrors the content policy; see Checks.ApiKeyWithoutWriteAccess).
+    policy action_type([:create, :update]) do
+      forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
+      authorize_if always()
+    end
+
+    policy action_type(:destroy) do
+      forbid_if AshAuthentication.Checks.UsingApiKey
+      authorize_if always()
+    end
+
     # Admins may do anything.
     bypass actor_attribute_equals(:role, :admin) do
       authorize_if always()

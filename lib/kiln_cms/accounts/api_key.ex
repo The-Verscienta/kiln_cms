@@ -1,14 +1,24 @@
 defmodule KilnCMS.Accounts.ApiKey do
   @moduledoc """
   A hashed, revocable API key bound to a `User`, for third-party / headless
-  **read** access to the delivery API.
+  access to the delivery API and the MCP authoring endpoint.
 
   A key authenticates as its owning user, so it inherits that user's read scope
-  (role + audiences). The headless HTTP surface exposes only reads (JSON:API and
-  GraphQL are read-only — decision D7), and the content policy additionally
-  forbids any mutation performed with an API key, so a leaked key can never write
-  regardless of the owner's role. For a pure public-content integrator, mint a
-  key on a dedicated `:viewer` account.
+  (role + audiences). What it may *do* with that identity is bounded by its
+  `access` scope:
+
+    * `:read` (the default) — delivery reads only. The headless JSON:API and
+      GraphQL surfaces expose only reads anyway (decision D7), and the content
+      policy additionally forbids any mutation performed with a read-scoped
+      key, so a leaked key can never write regardless of the owner's role.
+    * `:read_write` — may also author content (create/update, including
+      workflow transitions) as its owning user, within that user's role. Built
+      for LLM / automation clients on the `/mcp` endpoint (see `docs/mcp.md`).
+      Hard deletes stay forbidden for every key, whatever its scope.
+
+  For a pure public-content integrator, mint a `:read` key on a dedicated
+  `:viewer` account. For an LLM author, mint a `:read_write` key on an
+  `:editor` account — its drafts still go through admin review to publish.
 
   Only the SHA-256 hash of the key is stored; the plaintext is returned **once**
   at creation, in `key.__metadata__.plaintext_api_key`. Keys look like
@@ -44,7 +54,7 @@ defmodule KilnCMS.Accounts.ApiKey do
     create :create do
       primary? true
       description "Mint an API key. The plaintext is returned once in metadata."
-      accept [:user_id, :name, :expires_at]
+      accept [:user_id, :name, :expires_at, :access]
 
       change {AshAuthentication.Strategy.ApiKey.GenerateApiKey,
               prefix: @prefix, hash: :api_key_hash}
@@ -81,6 +91,18 @@ defmodule KilnCMS.Accounts.ApiKey do
     attribute :api_key_hash, :binary do
       allow_nil? false
       sensitive? true
+    end
+
+    # What the key may do as its owning user. `:read` keys are delivery-only;
+    # `:read_write` keys may also author content (the content policy reads this
+    # off `actor.__metadata__.api_key` — see Checks.ApiKeyWithoutWriteAccess).
+    # Set at mint and immutable after (no update action accepts it): upgrading
+    # a credential's power in place is a footgun, so mint a new key instead.
+    attribute :access, :atom do
+      allow_nil? false
+      public? true
+      default :read
+      constraints one_of: [:read, :read_write]
     end
 
     # Keys are always expiring — no immortal credentials.

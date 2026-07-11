@@ -7,10 +7,92 @@ defmodule KilnCMS.CMS do
   resource (see decision D3 in the project plan), not as a separate table.
   """
   use Ash.Domain,
-    extensions: [AshJsonApi.Domain, AshGraphql.Domain, AshAdmin.Domain]
+    extensions: [AshJsonApi.Domain, AshGraphql.Domain, AshAdmin.Domain, AshAi]
 
   admin do
     show? true
+  end
+
+  # LLM-facing tools, served over the `/mcp` endpoint (see docs/mcp.md and
+  # `KilnCMSWeb.Router`). Every call runs as the API-key's owning user through
+  # the same policies as any other caller: reads are role/state/audience-scoped,
+  # writes additionally require a `:read_write` key (content policy) and the
+  # owner's role. Publishing and hard deletes are deliberately NOT exposed —
+  # an LLM authors drafts and submits them for review; a human approves.
+  tools do
+    # Discovery / reads.
+    tool :read_pages, KilnCMS.CMS.Page, :read do
+      description "List/filter pages (drafts included when the key's user is an editor)."
+    end
+
+    tool :read_posts, KilnCMS.CMS.Post, :read do
+      description "List/filter blog posts (drafts included when the key's user is an editor)."
+    end
+
+    tool :read_entries, KilnCMS.CMS.Entry, :read do
+      description "List/filter dynamic-type entries; scope by type_definition_id (see read_type_definitions)."
+    end
+
+    tool :read_type_definitions, KilnCMS.CMS.TypeDefinition, :read do
+      description "List the admin-defined dynamic content types (name, id) entries belong to."
+    end
+
+    tool :read_field_definitions, KilnCMS.CMS.FieldDefinition, :read do
+      description "List the custom-field schema for a content type (drives the custom_fields map)."
+    end
+
+    tool :read_tags, KilnCMS.CMS.Tag, :read do
+      description "List/filter tags (attach via tag_ids on content writes)."
+    end
+
+    tool :read_categories, KilnCMS.CMS.Category, :read do
+      description "List/filter categories (attach via category_id on content writes)."
+    end
+
+    # Authoring — requires a read-write API key on an editor (or admin) account.
+    tool :create_page, KilnCMS.CMS.Page, :create do
+      description "Create a page as a draft."
+    end
+
+    tool :update_page, KilnCMS.CMS.Page, :update do
+      description "Update a page's content/metadata (state unchanged)."
+    end
+
+    tool :submit_page_for_review, KilnCMS.CMS.Page, :submit_for_review do
+      description "Move a draft page to in_review so an admin can publish it."
+    end
+
+    tool :create_post, KilnCMS.CMS.Post, :create do
+      description "Create a blog post as a draft."
+    end
+
+    tool :update_post, KilnCMS.CMS.Post, :update do
+      description "Update a blog post's content/metadata (state unchanged)."
+    end
+
+    tool :submit_post_for_review, KilnCMS.CMS.Post, :submit_for_review do
+      description "Move a draft post to in_review so an admin can publish it."
+    end
+
+    tool :create_entry, KilnCMS.CMS.Entry, :create do
+      description "Create a dynamic-type entry as a draft (requires type_definition_id)."
+    end
+
+    tool :update_entry, KilnCMS.CMS.Entry, :update do
+      description "Update a dynamic-type entry's content/metadata (state unchanged)."
+    end
+
+    tool :submit_entry_for_review, KilnCMS.CMS.Entry, :submit_for_review do
+      description "Move a draft entry to in_review so an admin can publish it."
+    end
+
+    tool :create_tag, KilnCMS.CMS.Tag, :create do
+      description "Create a tag (check read_tags first to avoid duplicates)."
+    end
+
+    tool :create_category, KilnCMS.CMS.Category, :create do
+      description "Create a category (check read_categories first to avoid duplicates)."
+    end
   end
 
   # Domain code interfaces are the contract for calling into these resources —

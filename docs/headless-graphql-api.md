@@ -30,6 +30,10 @@ There are no GraphQL mutations beyond the empty custom-mutation block.
 This keeps the public schema small, safe-by-default, and shaped around what a
 frontend actually needs: fetch published content, list it, search it.
 
+The one headless surface that *can* author is the MCP endpoint (`/mcp`), built
+for LLM clients and gated separately by write-scoped API keys — see
+[mcp.md](mcp.md). GraphQL and JSON:API stay read-only regardless.
+
 ## Queries
 
 ### Content — pages & posts
