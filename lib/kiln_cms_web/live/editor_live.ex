@@ -18,6 +18,10 @@ defmodule KilnCMSWeb.EditorLive do
   # the merged newest @page_size, so any item is reachable via Load more.
   @page_size 50
 
+  # Past this many content types, the top bar's per-type "New …" buttons
+  # collapse into a single dropdown so the header stays one row.
+  @max_inline_new_buttons 3
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -25,6 +29,7 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:page_title, gettext("Content"))
      |> assign(:content_types, editable_types())
+     |> assign(:max_inline_new_buttons, @max_inline_new_buttons)
      |> assign(:statuses, @statuses)
      |> assign(:selected, MapSet.new())
      |> assign(:confirming_bulk, nil)}
@@ -403,8 +408,12 @@ defmodule KilnCMSWeb.EditorLive do
       active={:content}
     >
       <:actions>
+        <%!-- A handful of types reads best as direct buttons; past that the row
+              (even wrapping) crowds out the top bar, so collapse into one menu.
+              CSS-only <details>, same pattern as the mobile nav disclosure. --%>
         <.button
           :for={ct <- @content_types}
+          :if={length(@content_types) <= @max_inline_new_buttons}
           type="button"
           phx-click="new"
           phx-value-kind={ct.type}
@@ -414,6 +423,28 @@ defmodule KilnCMSWeb.EditorLive do
           <.icon name="hero-plus" class="size-4" />
           {gettext("New %{type}", type: String.downcase(ct.label))}
         </.button>
+        <details
+          :if={length(@content_types) > @max_inline_new_buttons}
+          id="content-new-menu"
+          class="relative"
+        >
+          <summary class="btn btn-primary btn-sm cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+            <.icon name="hero-plus" class="size-4" />
+            {gettext("New")}
+            <.icon name="hero-chevron-down" class="size-3.5" />
+          </summary>
+          <div class="absolute right-0 z-30 mt-2 flex max-h-96 w-56 flex-col gap-0.5 overflow-y-auto rounded-lg border border-base-content/10 bg-base-100 p-1.5 shadow-lg">
+            <button
+              :for={ct <- @content_types}
+              type="button"
+              phx-click="new"
+              phx-value-kind={ct.type}
+              class="rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-base-200"
+            >
+              {gettext("New %{type}", type: String.downcase(ct.label))}
+            </button>
+          </div>
+        </details>
       </:actions>
 
       <div class="space-y-5">

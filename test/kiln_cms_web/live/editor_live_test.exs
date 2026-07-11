@@ -1325,6 +1325,29 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "New post"
     end
 
+    test "many content types collapse the New buttons into one dropdown", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      for label <- ~w(Recipe Review) do
+        CMS.create_type_definition!(
+          %{name: "#{String.downcase(label)}#{System.unique_integer([:positive])}", label: label},
+          actor: admin
+        )
+      end
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor")
+
+      # page + post + 2 dynamic types crosses the inline threshold: one summary
+      # trigger, with the per-type buttons inside the menu still wired to "new".
+      assert html =~ "content-new-menu"
+      assert html =~ "New recipe"
+
+      {:error, {:live_redirect, %{to: to}}} =
+        lv |> element(~s(#content-new-menu button[phx-value-kind="page"])) |> render_click()
+
+      assert to =~ "/editor/content/page/"
+    end
+
     test "edits a page via the generic /editor/content/:type/:id route", %{conn: conn} do
       page = draft_page(%{title: "Generic old"})
 
