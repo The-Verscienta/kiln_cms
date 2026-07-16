@@ -29,22 +29,29 @@
    theme is chosen before first paint by the inline script in root.html.heex,
    which resolves "system" to a concrete light/dark `data-theme`, so no
    `prefers-color-scheme` fallback is needed here. Retune the brand by editing
-   `--color-primary` (and friends) — every utility follows automatically. */
-@theme {
-  /* Warm "kiln" palette — fired-clay brand on warm bisque surfaces. */
-  --color-base-100: oklch(98.2% 0.004 75);
-  --color-base-200: oklch(95% 0.008 73);
-  --color-base-300: oklch(90% 0.013 72);
-  --color-base-content: oklch(27% 0.012 60);
+   `--color-primary` (and friends) — every utility follows automatically.
 
-  --color-primary: oklch(55% 0.135 42);
-  --color-primary-content: oklch(98% 0.012 60);
-  --color-secondary: oklch(52% 0.018 65);
-  --color-secondary-content: oklch(98% 0.004 75);
-  --color-accent: oklch(72% 0.115 64);
-  --color-accent-content: oklch(27% 0.012 60);
-  --color-neutral: oklch(34% 0.01 65);
-  --color-neutral-content: oklch(98% 0.004 75);
+   This is the "ember" design language (see design/design-system.md): the
+   #FF6200 ember brand on neutral-gray surfaces. Note: pure #FF6200 only reaches
+   ~3:1 against white, so `--color-primary-content` is a near-black ink (≈5.6:1
+   on the fill) to keep primary buttons/badges at WCAG AA. */
+@theme {
+  /* Neutral-gray surfaces (#FFFFFF / #F8F9FA / #E9ECEF) + #212529 text. */
+  --color-base-100: oklch(100% 0 0);
+  --color-base-200: oklch(98.5% 0.0015 255);
+  --color-base-300: oklch(92.9% 0.004 255);
+  --color-base-content: oklch(26.9% 0.008 255);
+
+  /* Ember brand — oklch(69% 0.21 44) resolves to exactly #FF6200.
+     Dark ink on the fill (≈6.3:1) keeps primary buttons/badges at WCAG AA. */
+  --color-primary: oklch(69% 0.21 44);
+  --color-primary-content: oklch(21% 0.012 255);
+  --color-secondary: oklch(45% 0.012 255);
+  --color-secondary-content: oklch(99% 0 0);
+  --color-accent: oklch(80% 0.13 60);
+  --color-accent-content: oklch(26% 0.02 60);
+  --color-neutral: oklch(30% 0.008 255);
+  --color-neutral-content: oklch(98.5% 0 0);
 
   --color-info: oklch(55% 0.1 248);
   --color-info-content: oklch(98% 0.01 250);
@@ -55,10 +62,10 @@
   --color-error: oklch(54% 0.16 28);
   --color-error-content: oklch(98% 0.015 20);
 
-  /* Corner radius scale — slightly softer than stock for a refined feel. */
-  --radius-sm: 0.3rem;
-  --radius-md: 0.45rem;
-  --radius-lg: 0.7rem;
+  /* Corner radius scale — anchored at md = 8px (0.5rem) per the spec. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
   --radius-xl: 1rem;
 
   /* UI font stack (system — no web-font dependency / CSP changes). */
@@ -66,24 +73,24 @@
     Helvetica, Arial, sans-serif;
 }
 
-/* Dark theme: a deeper, Elixir-leaning surface set with a violet brand. */
+/* Dark theme: neutral charcoal surfaces with a brighter ember brand. */
 @layer base {
   [data-theme="dark"] {
-    /* Warm charcoal surfaces; base-200/300 lift for visible raised
-       surfaces + borders. Brighter clay so the brand reads on dark. */
-    --color-base-100: oklch(25% 0.012 60);
-    --color-base-200: oklch(29% 0.012 60);
-    --color-base-300: oklch(34% 0.012 62);
-    --color-base-content: oklch(95% 0.012 70);
+    /* Neutral charcoal surfaces; base-200/300 lift for visible raised
+       surfaces + borders. Brighter ember so the brand reads on dark. */
+    --color-base-100: oklch(21% 0.006 255);
+    --color-base-200: oklch(25% 0.006 255);
+    --color-base-300: oklch(30% 0.007 255);
+    --color-base-content: oklch(95% 0.003 255);
 
-    --color-primary: oklch(66% 0.13 45);
-    --color-primary-content: oklch(20% 0.03 45);
-    --color-secondary: oklch(72% 0.02 70);
-    --color-secondary-content: oklch(22% 0.01 60);
-    --color-accent: oklch(76% 0.12 65);
+    --color-primary: oklch(76% 0.175 44);
+    --color-primary-content: oklch(20% 0.02 44);
+    --color-secondary: oklch(72% 0.015 255);
+    --color-secondary-content: oklch(22% 0.006 255);
+    --color-accent: oklch(80% 0.13 62);
     --color-accent-content: oklch(22% 0.02 60);
-    --color-neutral: oklch(75% 0.01 70);
-    --color-neutral-content: oklch(22% 0.01 60);
+    --color-neutral: oklch(75% 0.008 255);
+    --color-neutral-content: oklch(22% 0.006 255);
 
     --color-info: oklch(70% 0.1 248);
     --color-info-content: oklch(20% 0.03 250);
@@ -117,7 +124,7 @@
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: "cv11", "ss01";
     text-rendering: optimizeLegibility;
-    line-height: 1.55;
+    line-height: 1.6;
   }
 
   /* Tighter, more confident headings. */
@@ -262,6 +269,10 @@
   }
   .side-link[aria-current] {
     background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+    /* Pure ember only hits ~3:1 on light surfaces; darken for AA as text. */
+    color: color-mix(in oklch, var(--color-primary) 68%, black);
+  }
+  [data-theme="dark"] .side-link[aria-current] {
     color: var(--color-primary);
   }
   .side-section {
@@ -445,9 +456,13 @@
   margin-top: 0.25rem;
 }
 .kiln-block a {
-  color: var(--color-primary);
+  /* Darken pure ember for AA as body-text link color on light surfaces. */
+  color: color-mix(in oklch, var(--color-primary) 68%, black);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+[data-theme="dark"] .kiln-block a {
+  color: var(--color-primary);
 }
 .kiln-block a:hover {
   text-decoration: none;

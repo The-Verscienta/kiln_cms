@@ -48,9 +48,14 @@ thing, and with **no CSS-framework dependency**.
 | Radius | `--radius-sm | md | lg | xl` |
 | Type | `--font-sans` (system stack), tightened heading tracking |
 
-Brand palette is a warm "fired-clay on bisque" in light, deeper charcoal +
-brighter clay in dark. Retune by editing the `@theme` / `[data-theme="dark"]`
-blocks — do **not** introduce new raw colors in components.
+Brand palette is the **ember** language (see [`design/design-system.md`](../design/design-system.md)):
+the `#FF6200` ember brand on neutral-gray surfaces in light, and a brighter ember
+on neutral charcoal in dark. Note ember only reaches ~3:1 against white, so
+`--color-primary-content` is a near-black ink — primary buttons/badges carry dark
+text on the ember fill (≈6.3:1, WCAG AA), and ember-as-text usages (active nav
+link, in-content links) are darkened for AA on light surfaces. Retune by editing
+the `@theme` / `[data-theme="dark"]` blocks — do **not** introduce new raw colors
+in components.
 
 ## Component kit (`@layer components` in `app.css`)
 
