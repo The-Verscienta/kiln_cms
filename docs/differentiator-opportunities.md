@@ -137,6 +137,47 @@ the decoupling problem largely disappears:
 Hard parts (feasible, not free): inline rich text (TipTap in-page), structural
 add/reorder/delete, non-content chrome boundaries, concurrency (CRDT helps).
 
+## 11. Tamper-evident audit log + editorial consent linking — [#356](https://github.com/The-Verscienta/kiln_cms/issues/356) `P1`
+
+Extends the governance story (#340 signing, #352 dashboard) with two parts:
+
+- [ ] **Tamper-evident audit** — hash-chain/Merkle the AshPaperTrail entries and
+      sign *every version* (not just published artifacts), giving an append-only,
+      verifiable log. Today's paper-trail rows are mutable.
+- [ ] **Editorial/authorization consent linking** — a Consent resource tied to
+      content (reviewer sign-off, source/patient release, licensing); surfaced in
+      the dashboard, optionally gating publish. Scope is *cleared-to-publish*
+      consent, NOT GDPR data-subject consent.
+
+**Caution:** link to consent *references/metadata*, never store the sensitive
+consent documents themselves (PHI-adjacent exposure).
+
+**The asymmetry:** no mainstream CMS ties every item to a verifiable
+authorization record with a tamper-evident trail. Pairs with #2, #4, #8.
+
+## 12. Built-in GEO (Generative Engine Optimization) tooling — [#357](https://github.com/The-Verscienta/kiln_cms/issues/357) `P1`
+
+Structure content so LLMs / answer engines cite it accurately.
+
+- [ ] `:llm` fired artifact surface (clean, chunked, extractable markdown)
+- [ ] `llms.txt` generation from the firing engine
+- [ ] Expanded schema.org/JSON-LD (`Article`, `FAQPage`, `HowTo`, `MedicalWebPage`, `ClaimReview`)
+- [ ] Citation/source metadata on claims (ties into #4 provenance)
+
+**Honest caveat:** GEO is unsettled — this maximizes *citability* (structure,
+schema, clean surfaces, provenance); it does not guarantee an LLM cites you.
+
+**The asymmetry:** Kiln already fires a `:json_ld` surface and has a multi-surface
+firing engine + embeddings, so an `:llm` surface + llms.txt + schema expansion
+are cheap here and hard for live-render CMSs.
+
+---
+
+> **Not filed — already shipped:** hybrid semantic + keyword search (RRF fusion +
+> reranking), block-level embeddings, and faceted search already exist at
+> `/api/search`. Only remaining refinements: enabling semantic in prod (EXLA/
+> build-host constraint) and the multilingual model swap.
+
 ---
 
 **Sequencing take:** #3 and #6 are the cheapest (mostly expose what exists).
