@@ -96,10 +96,10 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :root_class, "mb-6 flex w-full justify-center"
     set :href_class, nil
     set :href_url, "/"
-    set :image_class, "h-10 w-auto"
-    set :dark_image_class, "h-10 w-auto"
-    set :image_url, "/images/logo.svg"
-    set :dark_image_url, "/images/logo.svg"
+    set :image_class, "h-10 w-auto dark:hidden"
+    set :dark_image_class, "hidden h-10 w-auto dark:block"
+    set :image_url, "/images/logo-mark.png"
+    set :dark_image_url, "/images/logo-mark.png"
     set :text_class, "ml-3 text-lg font-semibold tracking-tight text-base-content"
     set :text, "KilnCMS"
   end

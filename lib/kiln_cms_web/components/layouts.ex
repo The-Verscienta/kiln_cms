@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.Layouts do
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
-          <img src={~p"/images/logo.svg"} width="32" alt="" />
+          <img src={~p"/images/logo-mark.png"} class="h-8 w-auto" alt="" />
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-2 sm:gap-3">
@@ -154,7 +154,7 @@ defmodule KilnCMSWeb.Layouts do
         "lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:bg-base-200/40 lg:shadow-none"
       ]}>
         <div class="flex h-14 items-center gap-2.5 border-b border-base-content/10 px-4">
-          <img src={~p"/images/logo.svg"} width="26" alt="" />
+          <img src={~p"/images/logo-mark.png"} class="h-7 w-auto" alt="" />
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </div>
         <nav class="flex-1 overflow-y-auto px-2 py-2" aria-label={gettext("Primary")}>
@@ -372,7 +372,7 @@ defmodule KilnCMSWeb.Layouts do
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-3xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
-          <img src={~p"/images/logo.svg"} width="28" alt="" />
+          <img src={~p"/images/logo-mark.png"} class="h-7 w-auto" alt="" />
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
