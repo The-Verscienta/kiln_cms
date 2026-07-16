@@ -103,6 +103,33 @@ less a competitor than a **blueprint for a capability Kiln can uniquely unlock**
 - **Adobe AEM / Sitecore / Optimizely** — the enterprise DXP ceiling
   (personalization, experimentation, DAM) — where the market's high end sits.
 
+## The core differentiator: the typed, declarative firing model
+
+Lead with this — it is the umbrella that makes every other differentiator cheap.
+
+Kiln has **one declarative content definition** (the `use KilnCMS.CMS.Content`
+macro over the Ash/Spark DSL) from which it derives, automatically:
+
+- the database schema and typed content model,
+- the editor UI,
+- renderers for every surface (web HTML, email, JSON-LD, JSON, GraphQL),
+- search projections (full-text + embeddings), and
+- **pre-computed immutable "fired" artifacts per surface**, with a reference
+  graph that re-fires dependents precisely when referenced content changes.
+
+Most CMSs are either fully dynamic (render live from a mutable store on every
+request) or require manual wiring of each output surface. Kiln's model gives
+leverage *and* correctness: structured data "just works," reads hit immutable
+artifacts (fast + resilient), and content evolves safely.
+
+**Why it matters competitively:** nearly every differentiator below falls out of
+this one model — signed provenance (#340) and tamper-evident history (#356)
+because artifacts are immutable; point-in-time delivery (#338) because history +
+artifacts are addressable; DB-outage resilience (#341) because delivery reads
+artifacts not the live tree; multi-surface GEO output (#357) because firing is
+already multi-surface. Competitors would have to re-architect delivery to match
+any one of these; Kiln gets them as extensions of its core.
+
 ## Structural advantages (why the differentiators are cheap for Kiln)
 
 These are not features to build — they are inherent properties of the stack, and
