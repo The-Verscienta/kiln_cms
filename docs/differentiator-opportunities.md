@@ -77,6 +77,36 @@ production. Answers Directus Flows without embedding a new JS automation runtime
 near-trivial. Even Sanity charges enterprise money for real-time collaboration
 features.
 
+## 8. Compliance & governance dashboard — [#352](https://github.com/The-Verscienta/kiln_cms/issues/352) `P1`
+
+- [ ] Editorial audit trail view (who created/edited/approved, when)
+- [ ] Side-by-side version diffs per content item
+- [ ] Provenance reports (ties into #4 / #340) and point-in-time export (ties into #2 / #338)
+- [ ] Exportable trails (CSV/PDF/JSON) for review/regulatory scrutiny
+
+**The asymmetry:** AshPaperTrail history, the `history/` audit trail, and
+self-service export already exist — this *packages* them into one governance
+surface. Consolidates #2 + #4 + the existing audit trail.
+
+**Framing note:** NOT "HIPAA" — HIPAA governs *protected health information*
+(patient data), not *content about* GLP-1/TCM. The real value is editorial /
+medical-claim governance (traceable authorship, sourcing, approval), which maps
+to FTC health-claim scrutiny and medical-review workflows.
+
+## 9. First-class static / edge export of fired artifacts — [#353](https://github.com/The-Verscienta/kiln_cms/issues/353) `P2`
+
+- [ ] Export immutable `:web`/`:json`/`:json_ld` artifacts to a static host / CDN
+- [ ] Support air-gapped / edge-cached deploys from the artifact store
+- [ ] Live CMS stays authoritative; static export is an *output surface*, not a fork
+
+**The asymmetry:** The firing engine already produces immutable pre-rendered
+artifacts with precise dependency-graph invalidation — that *is* static
+generation. Exporting to the edge is the only missing part. Overlaps with #5.
+
+**Not Beacon:** AGENTS.md declines Beacon, and LiveView already server-renders
+(SEO handled). This captures only the genuinely-missing kernel of the "hybrid
+rendering" idea: static/edge export.
+
 ---
 
 **Sequencing take:** #3 and #6 are the cheapest (mostly expose what exists).
