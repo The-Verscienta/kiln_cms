@@ -103,6 +103,25 @@ less a competitor than a **blueprint for a capability Kiln can uniquely unlock**
 - **Adobe AEM / Sitecore / Optimizely** — the enterprise DXP ceiling
   (personalization, experimentation, DAM) — where the market's high end sits.
 
+## Structural advantages (why the differentiators are cheap for Kiln)
+
+These are not features to build — they are inherent properties of the stack, and
+they are *the reason* the differentiators in
+[differentiator-opportunities.md](differentiator-opportunities.md) are near-free
+for Kiln but expensive for others.
+
+- **Compile-time safety + declarative power via Ash** — content types, policies,
+  and APIs are declared and checked at compile time, vs. the more dynamic,
+  runtime schemas common elsewhere. Fewer whole classes of runtime error.
+- **Minimal external dependencies / true low-ops self-hosting** — Postgres-centric
+  by design; cache, search, and object storage are optional add-ons, not
+  required infra. One database to run, not a fleet.
+- **Hybrid delivery in one app** — serves a traditional site (LiveView) *and*
+  headless APIs from the same deployment; no separate frontend to build/deploy.
+- **BEAM concurrency + fault tolerance** — native real-time (PubSub, presence,
+  subscriptions) with no external broker, and supervision that isolates failures
+  — the foundation under the reliability and collaboration differentiators.
+
 ## Positioning summary
 
 Kiln is an **opinionated, security-first, self-hosted platform** for teams that
