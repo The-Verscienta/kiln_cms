@@ -107,6 +107,36 @@ generation. Exporting to the edge is the only missing part. Overlaps with #5.
 (SEO handled). This captures only the genuinely-missing kernel of the "hybrid
 rendering" idea: static/edge export.
 
+## 10. Front-end (in-context) editing on Kiln's own site — [#354](https://github.com/The-Verscienta/kiln_cms/issues/354) `P1`
+
+Front-end editing is perpetually promised and rarely good because headless CMSs
+are *decoupled from the front end* — they must inject an overlay into an app
+they don't render and reverse-engineer which DOM element maps to which field
+(Sanity stega, Storyblok bridge, Tina component wrapping — all require the front
+end to cooperate).
+
+**The asymmetry:** Kiln renders its own front end (LiveView serves the site), so
+the decoupling problem largely disappears:
+- LiveView holds a stateful socket — `phx-*` hooks send edits straight back →
+  Ash write-through → re-render. No iframe bridge, no preview protocol.
+- Kiln rendered the block, so it *knows* which field produced each region;
+  blocks carry stable IDs. Element→field mapping is free.
+- Write-through, policies, and paper-trail versioning are already native.
+
+**Boundary:** editing targets the authenticated live-draft / preview surface
+(`mode: :preview`); public delivery stays on immutable fired artifacts.
+
+**The split (was the single "visual editing" gap #335):**
+- **#354** — in-context editing on Kiln's own LiveView site (this — uniquely
+  feasible, high value).
+- **#355** — visual-editing bridge/SDK for *external* headless front ends
+  (blocked on #330 write APIs; Kiln can enable but not own it — inherent to
+  headless).
+- **#335** — drag-and-drop page building (layout composition).
+
+Hard parts (feasible, not free): inline rich text (TipTap in-page), structural
+add/reorder/delete, non-content chrome boundaries, concurrency (CRDT helps).
+
 ---
 
 **Sequencing take:** #3 and #6 are the cheapest (mostly expose what exists).
