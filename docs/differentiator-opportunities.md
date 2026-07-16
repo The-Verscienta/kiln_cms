@@ -1,0 +1,85 @@
+# Differentiator Opportunities
+
+Capabilities Kiln is uniquely positioned to ship — each is *near-free because a
+component already exists*, and *hard for competitors because of their stack*.
+That asymmetry is the point: these are not generic feature requests, they are
+moves only Kiln can make cheaply.
+
+Companion docs: [cms-comparison.md](cms-comparison.md),
+[competitive-gaps-todo.md](competitive-gaps-todo.md).
+
+Priority reflects value × cheapness-to-build. P1 = strongest / cheapest wins.
+
+---
+
+## 1. Publishing + newsletters + memberships (the "Ghost play") — [#337](https://github.com/The-Verscienta/kiln_cms/issues/337) `P1`
+
+- [ ] Subscriber segments (reuse the `audiences` read-axis)
+- [ ] "Send this post as a newsletter to segment X" via the built-in MTA
+- [ ] Optional paid-membership gating on content
+
+**The asymmetry:** Kiln already ships a **DKIM-signing, direct-to-MX MTA** — no
+other headless CMS has native outbound email. Content → audience → inbox in one
+system. This is the single most differentiated product move available.
+
+## 2. Point-in-time / "time-travel" content API — [#338](https://github.com/The-Verscienta/kiln_cms/issues/338) `P1`
+
+- [ ] Expose "content/site as it was on date/version X" over the read API
+- [ ] Leverage AshPaperTrail history + immutable fired artifacts
+
+**The asymmetry:** Full version history *and* immutable artifacts + a dependency
+graph already exist. For regulated/health content (Verscienta), "what did our
+guidance say on this date, provably" is a compliance superpower. Competitors
+render live from a mutable DB and can't do this without heavy custom work.
+
+## 3. RAG "ask your content" endpoint + AI content intelligence — [#339](https://github.com/The-Verscienta/kiln_cms/issues/339) `P1`
+
+- [ ] `/api/ask` — RAG over *published* content, policy-scoped (never leaks drafts)
+- [ ] Auto "related content", near-duplicate detection, AI auto-tagging
+- [ ] Content-gap analysis ("users search for X; you have nothing about it")
+
+**The asymmetry:** Block-level embeddings (pgvector + Bumblebee) and ash_ai are
+already in-house. Exposing them is almost free. Most CMSs bolt this on via
+Algolia/OpenAI.
+
+## 4. Cryptographically signed / provenance-verified content — [#340](https://github.com/The-Verscienta/kiln_cms/issues/340) `P2`
+
+- [ ] Sign published artifacts (C2PA-style) using existing signing infra
+- [ ] Consumer-verifiable "came from us, unaltered, at version N"
+
+**The asymmetry:** Artifact immutability *and* a DKIM signing key already exist.
+In the AI-slop era and for medical/regulated content, verifiable provenance is
+genuinely novel — no CMS ships it natively.
+
+## 5. "Stays up when the database doesn't" delivery — [#341](https://github.com/The-Verscienta/kiln_cms/issues/341) `P2`
+
+- [ ] Serve valid cached artifacts through a Postgres outage
+- [ ] Make it an explicit, tested reliability guarantee
+
+**The asymmetry:** Delivery already reads *immutable cached artifacts*, not the
+live tree, and BEAM supervision isolates failures. A reliability story Node/PHP
+CMSs structurally cannot match.
+
+## 6. Oban-backed editorial automation (a Directus Flows answer) — [#342](https://github.com/The-Verscienta/kiln_cms/issues/342) `P2`
+
+- [ ] No-code "when X happens, do Y" builder
+- [ ] e.g. on `in_review` → notify Slack; on `published` → fire newsletter + re-index
+
+**The asymmetry:** Oban + state machine + webhooks + PubSub + MTA already run in
+production. Answers Directus Flows without embedding a new JS automation runtime.
+
+## 7. Multiplayer live preview with presence — [#343](https://github.com/The-Verscienta/kiln_cms/issues/343) `P2`
+
+- [ ] Shared live-preview sessions (editor + stakeholder, same preview)
+- [ ] Cursors / presence via Phoenix.Presence
+
+**The asymmetry:** CRDT collab exists; Phoenix.Presence makes shared preview
+near-trivial. Even Sanity charges enterprise money for real-time collaboration
+features.
+
+---
+
+**Sequencing take:** #3 and #6 are the cheapest (mostly expose what exists).
+#1 and #2 are the biggest strategic differentiators (especially for
+health/regulated content). #4 and #5 are the best "put it on the box"
+trust/reliability stories.
