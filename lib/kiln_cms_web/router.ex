@@ -377,7 +377,10 @@ defmodule KilnCMSWeb.Router do
     pipe_through :public_form
 
     get "/confirm/:token", NewsletterController, :confirm
-    get "/unsubscribe/:token", NewsletterController, :unsubscribe
+    # GET renders a confirmation page (no state change); POST performs the
+    # unsubscribe (the RFC 8058 one-click lands here). Separate actions per verb,
+    # so a GET can never mutate.
+    get "/unsubscribe/:token", NewsletterController, :unsubscribe_form
     post "/unsubscribe/:token", NewsletterController, :unsubscribe
   end
 

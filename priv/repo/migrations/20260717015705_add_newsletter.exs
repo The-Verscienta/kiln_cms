@@ -46,7 +46,8 @@ defmodule KilnCMS.Repo.Migrations.AddNewsletter do
             type: :uuid,
             prefix: "public",
             on_delete: :delete_all
-          ), null: false
+          ),
+          null: false
 
       add :subscriber_id, :uuid, null: false
     end

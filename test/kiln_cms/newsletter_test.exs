@@ -58,8 +58,10 @@ defmodule KilnCMS.NewsletterTest do
       end
     end)
     |> Enum.take_while(&(&1 != nil))
-    |> Enum.filter(&Map.has_key?(&1.headers, "List-Unsubscribe"))
-    |> Enum.filter(&String.contains?(&1.subject, subject_match))
+    |> Enum.filter(
+      &(Map.has_key?(&1.headers, "List-Unsubscribe") and
+          String.contains?(&1.subject, subject_match))
+    )
   end
 
   defp recipients(emails), do: emails |> Enum.flat_map(& &1.to) |> Enum.map(fn {_n, a} -> a end)
