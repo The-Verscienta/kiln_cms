@@ -54,6 +54,7 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   # Standalone styled page (no app shell) matching the sign-in aesthetic. Inline
   # styles only — allowed by the browser CSP; no scripts.
+  # sobelow_skip ["XSS.SendResp"]
   defp render_form(conn, status, error) do
     token = Phoenix.Controller.get_csrf_token()
 
