@@ -16,6 +16,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
     Ash.Changeset.after_action(changeset, fn _changeset, record ->
       KilnCMS.Cache.bust_type_registry()
       KilnCMS.Cache.bust_sitemap()
+      KilnCMS.Cache.bust_llms()
       {:ok, record}
     end)
   end

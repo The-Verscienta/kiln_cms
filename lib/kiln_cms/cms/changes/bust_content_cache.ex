@@ -38,8 +38,9 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
     |> Enum.each(&Cache.bust(type, &1))
 
     # A publish/unpublish changes the set of public URLs, so the cached sitemap
-    # (keyed separately from per-record entries) must be dropped too.
+    # and llms.txt (keyed separately from per-record entries) must be dropped too.
     Cache.bust_sitemap()
+    Cache.bust_llms()
   end
 
   # The cache key's type segment. Compiled types use their type atom; entries
