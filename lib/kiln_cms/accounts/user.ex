@@ -151,7 +151,7 @@ defmodule KilnCMS.Accounts.User do
     # access is granted — self-registration always lands on `:viewer` with no
     # audiences. See KilnCMS.CMS.Audiences and the content read policy.
     update :manage_access do
-      accept [:role, :audiences]
+      accept [:role, :audiences, :editable_types]
     end
 
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
@@ -469,6 +469,18 @@ defmodule KilnCMS.Accounts.User do
     # struct regardless of API visibility.
     attribute :audiences, {:array, :atom} do
       constraints items: [one_of: KilnCMS.CMS.Audiences.all()]
+      default []
+      allow_nil? false
+      public? false
+    end
+
+    # Granular authoring scope (#332): the content types this editor may
+    # create/update. Empty (the default) means no restriction — author any type,
+    # so existing editors are unchanged; a non-empty list scopes the editor to
+    # those types (e.g. `["post"]`). Admins ignore it (they bypass the content
+    # authoring policies). Access-control config, so `public? false` like
+    # `audiences`; set by an admin via `:manage_access`.
+    attribute :editable_types, {:array, :string} do
       default []
       allow_nil? false
       public? false
