@@ -307,6 +307,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-bolt"
           },
           %{key: :mail, label: gettext("Mail"), path: ~p"/editor/mail", icon: "hero-envelope"},
+          %{
+            key: :newsletter,
+            label: gettext("Newsletter"),
+            path: ~p"/editor/newsletter",
+            icon: "hero-megaphone"
+          },
           %{key: :trash, label: gettext("Trash"), path: ~p"/editor/trash", icon: "hero-trash"},
           %{
             key: :settings,
