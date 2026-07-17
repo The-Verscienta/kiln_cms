@@ -145,6 +145,20 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
+  @doc "Cache key for the generated `llms.txt` (shared with the llms controller)."
+  def llms_key, do: "llms:txt"
+
+  @doc """
+  Drop the cached `llms.txt` so a publish/unpublish is reflected on the next
+  request rather than waiting out its TTL. Like the sitemap, this aggregate key
+  isn't touched by per-record `bust/2`, so publish hooks call it explicitly.
+  """
+  @spec bust_llms() :: :ok
+  def bust_llms do
+    if enabled?(), do: Cachex.del(@cache, llms_key())
+    :ok
+  end
+
   @doc """
   Drop all cached published content. The blunt fallback for writes whose blast
   radius isn't a single `{type, slug}` (e.g. a media-item edit that may be
