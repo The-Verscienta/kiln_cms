@@ -28,14 +28,23 @@ defmodule KilnCMS.Accounts do
 
     resource KilnCMS.Accounts.User do
       define :list_users, action: :read
+      define :get_user, action: :read, get_by: [:id]
       define :get_user_by_email, action: :get_by_email, args: [:email]
       define :update_notification_prefs, action: :update_notification_prefs
+      # Two-factor (TOTP) self-service (issue #331) — pass `actor: user` (self).
+      define :setup_totp, action: :setup_totp
+      define :confirm_totp, action: :confirm_totp
+      define :disable_totp, action: :disable_totp
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
       # GDPR Art. 17 erasure (#212) — admin-only; pass `actor: admin`.
       define :anonymize_user, action: :anonymize
     end
   end
+
+  @doc "Whether the user has completed two-factor (TOTP) enrolment (issue #331)."
+  @spec totp_enabled?(KilnCMS.Accounts.User.t()) :: boolean()
+  def totp_enabled?(%KilnCMS.Accounts.User{totp_confirmed_at: at}), do: not is_nil(at)
 
   @doc """
   A JSON-serializable snapshot of a user's own data for an access/portability

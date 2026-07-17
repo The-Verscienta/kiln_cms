@@ -7,6 +7,9 @@ defmodule KilnCMSWeb.SettingsLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Totp
+
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_user
@@ -16,7 +19,67 @@ defmodule KilnCMSWeb.SettingsLive do
      |> assign(:page_title, gettext("Settings"))
      |> assign(:form, prefs_form(user))
      |> assign(:profile_form, profile_form(user))
-     |> assign(:password_form, password_form(user))}
+     |> assign(:password_form, password_form(user))
+     |> assign(:totp_enabled?, Accounts.totp_enabled?(user))
+     # Transient enrolment state (secret + provisioning URI) while confirming.
+     |> assign(:enrolling, nil)}
+  end
+
+  # --- two-factor authentication (#331) --------------------------------------
+
+  @impl true
+  def handle_event("start_totp", _params, socket) do
+    user = socket.assigns.current_user
+
+    case Accounts.setup_totp(user, %{}, actor: user) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:current_user, user)
+         |> assign(:enrolling, %{
+           secret: Totp.base32_encode(user.totp_secret),
+           uri: Totp.otpauth_uri(user.totp_secret, to_string(user.email))
+         })}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't start two-factor setup."))}
+    end
+  end
+
+  def handle_event("cancel_totp", _params, socket),
+    do: {:noreply, assign(socket, :enrolling, nil)}
+
+  def handle_event("confirm_totp", %{"code" => code}, socket) do
+    user = socket.assigns.current_user
+
+    case Accounts.confirm_totp(user, %{code: code}, actor: user) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:current_user, user)
+         |> assign(:totp_enabled?, true)
+         |> assign(:enrolling, nil)
+         |> put_flash(:info, gettext("Two-factor authentication is now on."))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — try again."))}
+    end
+  end
+
+  def handle_event("disable_totp", %{"code" => code}, socket) do
+    user = socket.assigns.current_user
+
+    case Accounts.disable_totp(user, %{code: code}, actor: user) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:current_user, user)
+         |> assign(:totp_enabled?, false)
+         |> put_flash(:info, gettext("Two-factor authentication is now off."))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — 2FA is still on."))}
+    end
   end
 
   @impl true
@@ -178,6 +241,69 @@ defmodule KilnCMSWeb.SettingsLive do
             />
             <.button type="submit" variant="primary">{gettext("Change password")}</.button>
           </.form>
+        </section>
+
+        <section class="card card-pad max-w-xl">
+          <h2 class="mb-1 text-lg font-medium">{gettext("Two-factor authentication")}</h2>
+          <p class="mb-4 text-sm text-base-content/60">
+            {gettext(
+              "Require a time-based code from an authenticator app (Google Authenticator, 1Password, …) as a second factor when you sign in."
+            )}
+          </p>
+
+          <div :if={@totp_enabled?} class="space-y-3">
+            <p class="flex items-center gap-1.5 text-sm font-medium text-success">
+              <.icon name="hero-shield-check" class="size-4" />
+              {gettext("Two-factor authentication is on.")}
+            </p>
+            <form phx-submit="disable_totp" class="flex items-end gap-2">
+              <.input
+                name="code"
+                value=""
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                label={gettext("Enter a current code to turn it off")}
+              />
+              <.button type="submit" variant="danger">{gettext("Disable")}</.button>
+            </form>
+          </div>
+
+          <div :if={!@totp_enabled? && @enrolling} class="space-y-3">
+            <p class="text-sm text-base-content/70">
+              {gettext(
+                "Add this key to your authenticator app, then enter the 6-digit code to confirm."
+              )}
+            </p>
+            <p class="text-sm">
+              {gettext("Setup key")}:
+              <code class="rounded bg-base-200 px-1.5 py-0.5 font-mono text-sm break-all">{@enrolling.secret}</code>
+            </p>
+            <details class="text-xs text-base-content/60">
+              <summary class="cursor-pointer">{gettext("Provisioning URI")}</summary>
+              <code class="break-all">{@enrolling.uri}</code>
+            </details>
+            <form phx-submit="confirm_totp" class="flex items-end gap-2">
+              <.input
+                name="code"
+                value=""
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                label={gettext("6-digit code")}
+              />
+              <.button type="submit" variant="primary">{gettext("Confirm")}</.button>
+              <button type="button" phx-click="cancel_totp" class="btn btn-default">
+                {gettext("Cancel")}
+              </button>
+            </form>
+          </div>
+
+          <div :if={!@totp_enabled? && !@enrolling}>
+            <.button phx-click="start_totp" variant="primary">
+              {gettext("Enable two-factor authentication")}
+            </.button>
+          </div>
         </section>
 
         <section class="card card-pad max-w-xl">

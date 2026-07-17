@@ -373,7 +373,10 @@ defmodule KilnCMSWeb.Router do
     pipe_through :public_form
 
     get "/confirm/:token", NewsletterController, :confirm
-    get "/unsubscribe/:token", NewsletterController, :unsubscribe
+    # GET renders a confirmation page (no state change); POST performs the
+    # unsubscribe (the RFC 8058 one-click lands here). Separate actions per verb,
+    # so a GET can never mutate.
+    get "/unsubscribe/:token", NewsletterController, :unsubscribe_form
     post "/unsubscribe/:token", NewsletterController, :unsubscribe
   end
 
@@ -408,6 +411,11 @@ defmodule KilnCMSWeb.Router do
 
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     sign_out_route AuthController
+
+    # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
+    # account (#331). Gated by the signed :pending_2fa session token, not a login.
+    get "/sign-in/verify", TwoFactorController, :new
+    post "/sign-in/verify", TwoFactorController, :create
 
     # Show the registration link/route only when open self-registration is
     # enabled (the default). Set `config :kiln_cms, :registration_enabled, false`
