@@ -342,6 +342,10 @@ defmodule KilnCMSWeb.Router do
     # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
     # expressible as one Ash action, so it gets a thin controller (roadmap #4).
     get "/search", SearchApiController, :index
+
+    # RAG "ask your content" (#339): retrieval over published content + cited
+    # sources, with an optional (config-gated) generated answer.
+    get "/ask", AskController, :ask
   end
 
   # Embeddable form: the iframe document a third-party site frames via
