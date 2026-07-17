@@ -1201,8 +1201,11 @@ defmodule KilnCMS.CMS.Content do
 
         # Authoring and workflow transitions are reserved for editors (and admins
         # via the bypass above). Every state-machine action is an update action.
+        # Granular RBAC (#332): an editor may author only the content types in
+        # their `editable_types` scope — empty means all (the default), so
+        # unrestricted editors are unchanged.
         policy action_type([:create, :update]) do
-          authorize_if actor_attribute_equals(:role, :editor)
+          authorize_if KilnCMS.CMS.Checks.EditableContentType
         end
 
         # Publishing is an admin approval step — editors submit for review instead.
