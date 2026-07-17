@@ -24,7 +24,19 @@ config :kiln_cms, Oban,
   # their one-minute cadence. Total worker concurrency here is ~34 — size
   # POOL_SIZE accordingly in production (see config/runtime.exs and
   # docs/performance.md).
-  queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, default: 10],
+  # Newsletter fan-out/delivery gets its own :newsletter queue so a large blast
+  # can't starve transactional :mail (total worker concurrency is now ~37 — size
+  # POOL_SIZE accordingly).
+  queues: [
+    firing: 5,
+    search: 5,
+    mail: 3,
+    newsletter: 3,
+    media: 3,
+    webhooks: 3,
+    scheduling: 5,
+    default: 10
+  ],
   repo: KilnCMS.Repo,
   plugins: [
     {Oban.Plugins.Cron, []},
@@ -45,7 +57,8 @@ config :kiln_cms,
     KilnCMS.Firing,
     KilnCMS.History,
     KilnCMS.SearchIndex,
-    KilnCMS.Mail
+    KilnCMS.Mail,
+    KilnCMS.Newsletter
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the

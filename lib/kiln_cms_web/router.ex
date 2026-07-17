@@ -234,6 +234,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
       live "/editor/mail", MailSettingsLive, :index
+      live "/editor/newsletter", NewsletterLive, :index
       live "/editor/forms", FormLive, :index
       live "/editor/api-keys", ApiKeyLive, :index
 
@@ -363,6 +364,17 @@ defmodule KilnCMSWeb.Router do
     pipe_through :preview
 
     get "/:token", PreviewController, :show
+  end
+
+  # Public newsletter confirm/unsubscribe — authorized by an opaque per-subscriber
+  # token, not a session. Uses the CSRF-free :public_form pipeline so the RFC 8058
+  # one-click `List-Unsubscribe-Post` POST works from mail clients.
+  scope "/newsletter", KilnCMSWeb do
+    pipe_through :public_form
+
+    get "/confirm/:token", NewsletterController, :confirm
+    get "/unsubscribe/:token", NewsletterController, :unsubscribe
+    post "/unsubscribe/:token", NewsletterController, :unsubscribe
   end
 
   # Public SEO files + health probe. Rate-limited (`:probe`) so an unauthenticated
