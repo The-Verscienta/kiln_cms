@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.ArtifactController do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Engine
+  alias KilnCMS.Firing.PointInTime
 
   @surfaces %{"json" => :json, "json_ld" => :json_ld, "web" => :web}
   # How long clients should wait before retrying a still-compiling artifact.
@@ -27,6 +28,8 @@ defmodule KilnCMSWeb.ArtifactController do
   # evicts the firing cache), so they're cacheable; the ETag lets a CDN/static
   # build revalidate cheaply after the window (#188).
   @max_age_seconds 300
+
+  def show(conn, %{"as_of" => _} = params), do: show_point_in_time(conn, params)
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
@@ -40,6 +43,62 @@ defmodule KilnCMSWeb.ArtifactController do
       :backfilling -> backfilling(conn)
       _ -> error(conn, :not_found, "not_found", "Content not found.")
     end
+  end
+
+  # Point-in-time delivery (#338): `?as_of=<ISO8601 date or datetime>` serves the
+  # artifact for this content *as it was published on that date*, reconstructed
+  # from PaperTrail history and re-fired in memory (KilnCMS.Firing.PointInTime).
+  # The content must still be resolvable now (lookup is by the current record's
+  # id); see the module for scope.
+  defp show_point_in_time(conn, %{"type" => type, "slug" => slug} = params) do
+    locale = params["locale"] || KilnCMS.I18n.default_locale()
+
+    with {:ok, as_of} <- parse_as_of(params["as_of"]),
+         ct when not is_nil(ct) <- ContentTypes.get(type),
+         surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
+         record when not is_nil(record) <- published(ct.type, slug, locale),
+         {:ok, body, published_at} <- PointInTime.read(ct.resource, record.id, surface, as_of) do
+      serve_point_in_time(conn, as_of, published_at, body)
+    else
+      :error ->
+        error(
+          conn,
+          :bad_request,
+          "invalid_as_of",
+          "`as_of` must be an ISO 8601 date or datetime."
+        )
+
+      {:error, :not_published} ->
+        error(conn, :not_found, "not_published", "No published version as of that date.")
+
+      _ ->
+        error(conn, :not_found, "not_found", "Content not found.")
+    end
+  end
+
+  # Accept a full ISO 8601 datetime, or a bare date (treated as the end of that
+  # day, UTC — "as of that day" captures the last publish during it).
+  defp parse_as_of(raw) do
+    case DateTime.from_iso8601(raw) do
+      {:ok, datetime, _offset} ->
+        {:ok, datetime}
+
+      _ ->
+        case Date.from_iso8601(raw) do
+          {:ok, date} -> {:ok, DateTime.new!(date, ~T[23:59:59.999999], "Etc/UTC")}
+          _ -> :error
+        end
+    end
+  end
+
+  # Historical snapshots are immutable for a given (content, as_of), so they're
+  # cacheable; the headers name the requested moment and the effective publish.
+  defp serve_point_in_time(conn, as_of, published_at, body) do
+    conn
+    |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
+    |> put_resp_header("x-kiln-as-of", DateTime.to_iso8601(as_of))
+    |> put_resp_header("x-kiln-published-at", DateTime.to_iso8601(published_at))
+    |> json(body)
   end
 
   # Standard error envelope shared with the other headless surfaces (#190):
