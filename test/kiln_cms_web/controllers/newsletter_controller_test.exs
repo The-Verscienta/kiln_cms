@@ -22,19 +22,21 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
     assert reload(sub).status == :confirmed
   end
 
-  test "GET unsubscribe with a valid token unsubscribes", %{conn: conn} do
+  test "GET unsubscribe renders a confirmation page WITHOUT unsubscribing", %{conn: conn} do
     sub = subscriber()
 
     conn = get(conn, ~p"/newsletter/unsubscribe/#{sub.unsubscribe_token}")
-    assert html_response(conn, 200) =~ "unsubscribed"
-    assert reload(sub).status == :unsubscribed
+    # A one-button POST form — a GET (e.g. a link prefetcher) must not mutate.
+    assert html_response(conn, 200) =~ "unsubscribe"
+    assert html_response(conn, 200) =~ "<form method=\"post\""
+    assert reload(sub).status == :pending
   end
 
   test "POST unsubscribe (one-click) unsubscribes", %{conn: conn} do
     sub = subscriber()
 
     conn = post(conn, ~p"/newsletter/unsubscribe/#{sub.unsubscribe_token}")
-    assert html_response(conn, 200)
+    assert html_response(conn, 200) =~ "unsubscribed"
     assert reload(sub).status == :unsubscribed
   end
 
