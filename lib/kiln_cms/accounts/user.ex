@@ -328,6 +328,45 @@ defmodule KilnCMS.Accounts.User do
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
     end
+
+    # --- Two-factor authentication (TOTP) self-service (issue #331) ---
+
+    # Begin enrolment: mint a fresh secret (unconfirmed). The caller (the user
+    # themselves) reads back `totp_secret` to show the authenticator QR/URI.
+    update :setup_totp do
+      description "Start 2FA enrolment by generating a new TOTP secret."
+      accept []
+      require_atomic? false
+      change set_attribute(:totp_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
+      change set_attribute(:totp_confirmed_at, nil)
+    end
+
+    # Finish enrolment by proving a code from the new secret; only then is 2FA
+    # actually enforced at sign-in.
+    update :confirm_totp do
+      description "Confirm 2FA enrolment with a code from the authenticator app."
+      accept []
+      require_atomic? false
+
+      argument :code, :string, allow_nil?: false, sensitive?: true
+
+      validate KilnCMS.Accounts.Validations.ValidTotpCode
+      change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
+    end
+
+    # Turn 2FA off — requires a current code, so a walk-up attacker on an open
+    # session still can't remove the second factor.
+    update :disable_totp do
+      description "Disable 2FA (requires a current code)."
+      accept []
+      require_atomic? false
+
+      argument :code, :string, allow_nil?: false, sensitive?: true
+
+      validate KilnCMS.Accounts.Validations.ValidTotpCode
+      change set_attribute(:totp_secret, nil)
+      change set_attribute(:totp_confirmed_at, nil)
+    end
   end
 
   policies do
@@ -356,6 +395,12 @@ defmodule KilnCMS.Accounts.User do
     end
 
     policy action(:update_notification_prefs) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
+    # 2FA is strictly self-service: a user manages the second factor on their own
+    # account only (the admin bypass above still lets an operator intervene).
+    policy action([:setup_totp, :confirm_totp, :disable_totp]) do
       authorize_if expr(id == ^actor(:id))
     end
 
@@ -452,6 +497,20 @@ defmodule KilnCMS.Accounts.User do
       default true
       allow_nil? false
       public? true
+    end
+
+    # Two-factor (TOTP) secret and enrolment timestamp (issue #331). The raw
+    # secret is stored as bytea; `sensitive?` keeps it out of inspect/logs and
+    # `public? false` keeps both off every API surface — they're read only
+    # internally (by the sign-in gate and the owner's enrolment UI). 2FA is
+    # "enabled" iff `totp_confirmed_at` is set.
+    attribute :totp_secret, :binary do
+      sensitive? true
+      public? false
+    end
+
+    attribute :totp_confirmed_at, :utc_datetime_usec do
+      public? false
     end
   end
 

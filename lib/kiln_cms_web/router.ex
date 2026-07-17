@@ -409,6 +409,11 @@ defmodule KilnCMSWeb.Router do
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     sign_out_route AuthController
 
+    # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
+    # account (#331). Gated by the signed :pending_2fa session token, not a login.
+    get "/sign-in/verify", TwoFactorController, :new
+    post "/sign-in/verify", TwoFactorController, :create
+
     # Show the registration link/route only when open self-registration is
     # enabled (the default). Set `config :kiln_cms, :registration_enabled, false`
     # for invite-only mode — the registration *action* is also gated, so this
