@@ -45,7 +45,7 @@ defmodule KilnCMSWeb.InContextEditLive do
                         )
 
   @impl true
-  def mount(%{"type" => type, "slug" => slug}, _session, socket) do
+  def mount(%{"type" => type, "slug" => slug} = params, _session, socket) do
     actor = socket.assigns.current_user
 
     case ContentTypes.get(type) do
@@ -63,6 +63,9 @@ defmodule KilnCMSWeb.InContextEditLive do
              |> assign(:kind, ct.type)
              |> assign(:ct, ct)
              |> assign(:actor, actor)
+             # Deep-link target from the visual-editing bridge (#355):
+             # `?focus=<block_id>` scrolls to and focuses that block on load.
+             |> assign(:focus_block_id, params["focus"])
              |> assign(:autosave_timer, nil)
              |> assign(:save_state, :saved)
              |> assign(:conflict, false)
@@ -372,7 +375,12 @@ defmodule KilnCMSWeb.InContextEditLive do
         conflict={@conflict}
       />
 
-      <article class="prose max-w-none">
+      <article
+        id="in-context-article"
+        phx-hook="FocusBlock"
+        data-kiln-focus={@focus_block_id}
+        class="prose max-w-none"
+      >
         <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
 
         <p :if={@blocks == []} class="mt-6 text-base-content/70">

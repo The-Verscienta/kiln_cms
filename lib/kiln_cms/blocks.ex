@@ -65,9 +65,29 @@ defmodule KilnCMS.Blocks do
   @spec fetch(atom()) :: {:ok, module()} | :error
   def fetch(type) when is_atom(type), do: Map.fetch(registry(), type)
 
-  @doc "Serialize a block struct to a surface (dispatches to the block module)."
+  @doc """
+  Serialize a block struct to a surface (dispatches to the block module).
+
+  For the `:json` delivery surface the block's stable `id` is injected as `_id`
+  on the rendered map (blocks are Sanity-style `_type`-tagged maps that otherwise
+  drop identity). This is the addressing anchor the visual-editing bridge (#355)
+  maps a rendered value back to — the same id the in-context editor exposes as
+  `data-kiln-block-id`. It recurses for free: container blocks (e.g. `columns`)
+  render their children through this same function. Non-map renders (`nil`) and
+  the `:web`/`:json_ld` surfaces are untouched.
+  """
   @spec render(struct(), Kiln.Block.Renderer.surface()) :: iodata() | map() | nil
+  def render(%module{} = block, :json) do
+    case module.render(block, :json) do
+      %{} = map -> maybe_put_id(map, Map.get(block, :id))
+      other -> other
+    end
+  end
+
   def render(%module{} = block, surface), do: module.render(block, surface)
+
+  defp maybe_put_id(map, nil), do: map
+  defp maybe_put_id(map, id), do: Map.put(map, "_id", id)
 
   @doc "Plain-text projection of a block struct (dispatches to the block module)."
   @spec search_text(struct()) :: String.t()

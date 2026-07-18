@@ -17,9 +17,12 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
 
   # Built once at compile time; the `{mod, fun, args}` origin is still evaluated
   # per request, so runtime `CORS_ORIGINS` changes are honoured.
+  # `PATCH`/`DELETE` are needed for the write API (#330) so an external front end
+  # (e.g. the visual-editing bridge, #355) can round-trip edits cross-origin —
+  # a `PATCH /api/json/<type>/:id` preflight must be answered. Reads stay GET.
   @corsica Corsica.init(
              origins: {KilnCMSWeb.CORS, :allowed_origin?, []},
-             allow_methods: ["GET", "POST", "OPTIONS"],
+             allow_methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
              allow_headers: ["authorization", "content-type", "x-api-key"],
              max_age: 600
            )

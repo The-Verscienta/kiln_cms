@@ -129,9 +129,12 @@ the decoupling problem largely disappears:
 **The split (was the single "visual editing" gap #335):**
 - **#354** — in-context editing on Kiln's own LiveView site (this — uniquely
   feasible, high value).
-- **#355** — visual-editing bridge/SDK for *external* headless front ends
-  (blocked on #330 write APIs; Kiln can enable but not own it — inherent to
-  headless).
+- **#355** — visual-editing bridge/SDK for *external* headless front ends.
+  **Shipped** (once #330 landed): stega field-mapping + `_id` addressing in the
+  annotated preview, an embeddable `bridge.js` overlay (click-to-edit →
+  deep-link to the Kiln editor), and a live-preview push socket. Kiln *enables*
+  it; the external front end still opts in (embed the SDK) — inherent to
+  headless. See [visual-editing-bridge.md](visual-editing-bridge.md).
 - **#335** — drag-and-drop page building (layout composition).
 
 Hard parts (feasible, not free): inline rich text (TipTap in-page), structural

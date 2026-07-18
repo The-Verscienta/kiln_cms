@@ -7,7 +7,14 @@
   verbose: false,
   # Honour inline `# sobelow_skip [...]` annotations for reviewed findings.
   skip: true,
-  ignore: [],
+  # Config.CSWH (Cross-Site WebSocket Hijacking) is ignored deliberately: the
+  # only socket with a non-default `check_origin` is `/ws/bridge` (#355), which
+  # is cross-origin *by design* for external front ends. It carries **no ambient
+  # credentials** (auth is an explicit `api_key` query param, never a cookie), so
+  # the CSWH threat model — a malicious site riding the victim's cookies — does
+  # not apply; origin is still allowlisted via `KilnCMSWeb.CORS.check_socket_origin?/1`.
+  # A Config-level check can't be suppressed with an inline `# sobelow_skip`.
+  ignore: ["Config.CSWH"],
   # Non-production config holding throwaway local secrets — same rationale as
   # Sobelow's built-in skipping of config/dev.exs and config/test.exs. The E2E
   # env only ever runs the browser suite against a local database.
