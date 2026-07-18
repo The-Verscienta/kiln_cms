@@ -14,6 +14,18 @@ defmodule KilnCMS.Firing.PublishedArtifact do
   postgres do
     table "published_artifacts"
     repo KilnCMS.Repo
+
+    # Point-lookup index for the delivery hot path. The `:doc_surface` identity is
+    # now the `org_id`-LEADING `(org_id, document_type, document_id, surface)`
+    # composite, which Postgres can't seek for the tenant-less `get_surface` /
+    # `for_document` delivery reads (PR1 sets no tenant under `global?: true`).
+    # `all_tenants?: true` keeps this `org_id`-free so those lookups seek again;
+    # redundant with the composite once the delivery path threads the tenant.
+    custom_indexes do
+      index [:document_type, :document_id, :surface],
+        name: "published_artifacts_doc_surface_lookup_index",
+        all_tenants?: true
+    end
   end
 
   actions do

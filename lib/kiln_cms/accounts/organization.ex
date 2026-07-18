@@ -49,7 +49,13 @@ defmodule KilnCMS.Accounts.Organization do
   end
 
   actions do
-    defaults [:read, :destroy]
+    # No `:destroy` — organizations are deliberately NOT deletable in this PR.
+    # Content org_id FKs are RESTRICT, but the paper-trail `*_versions` tables
+    # carry `org_id` as an FK-less audit column (versions outlive their source by
+    # design), so deleting an org whose content was purged would strand version
+    # rows pointing at a nonexistent org. Org teardown (which must also reconcile
+    # those audit rows) is a later feature; until then an org is permanent.
+    defaults [:read]
     default_accept [:name, :slug, :custom_domain, :status]
 
     create :create do
@@ -97,7 +103,7 @@ defmodule KilnCMS.Accounts.Organization do
     # deny here). Scoped to write actions ONLY — a bare `policy always()` would
     # also match `:read` and, since Ash AND-combines every applicable policy,
     # would nullify the member-read grant above (a hard forbid, not a filter).
-    policy action_type([:create, :update, :destroy]) do
+    policy action_type([:create, :update]) do
       forbid_if always()
     end
   end

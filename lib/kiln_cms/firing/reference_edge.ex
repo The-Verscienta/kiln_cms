@@ -13,6 +13,17 @@ defmodule KilnCMS.Firing.ReferenceEdge do
   postgres do
     table "reference_edges"
     repo KilnCMS.Repo
+
+    # Point-lookup index for the re-fire wave's `from_source` read. The `:edge`
+    # identity is now the `org_id`-LEADING composite, which can't be seeked by
+    # `(from_type, from_id)` for the tenant-less rebuild (PR1 sets no tenant under
+    # `global?: true`). `all_tenants?: true` keeps this `org_id`-free; redundant
+    # with the composite once the wave threads the tenant.
+    custom_indexes do
+      index [:from_type, :from_id],
+        name: "reference_edges_from_source_lookup_index",
+        all_tenants?: true
+    end
   end
 
   actions do

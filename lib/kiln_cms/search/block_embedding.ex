@@ -29,6 +29,14 @@ defmodule KilnCMS.Search.BlockEmbedding do
         name: "block_embeddings_hnsw_index",
         using: "hnsw",
         all_tenants?: true
+
+      # Point-lookup index for the `for_document` read (block re-index / delete).
+      # The `:doc_block` identity is now the `org_id`-LEADING composite, which
+      # can't be seeked by `(document_type, document_id)` tenant-less (PR1 sets no
+      # tenant under `global?: true`). `all_tenants?: true` keeps this `org_id`-free.
+      index [:document_type, :document_id],
+        name: "block_embeddings_doc_lookup_index",
+        all_tenants?: true
     end
   end
 

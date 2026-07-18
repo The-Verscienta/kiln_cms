@@ -930,6 +930,17 @@ defmodule KilnCMS.CMS.Content do
             name: unquote("#{table}_title_trgm_index"),
             using: "gin",
             all_tenants?: true
+
+          # Point-lookup index for the delivery hot path (`public_by_slug`).
+          # `:unique_slug` is now the `org_id`-LEADING `(org_id, slug, locale)`
+          # composite, which Postgres can't seek for a tenant-less delivery read
+          # (PR1 reads set no tenant under `global?: true`). `all_tenants?: true`
+          # keeps this one `org_id`-free so `(slug, locale)` lookups seek again;
+          # once the delivery path threads the tenant (a later PR) it becomes
+          # redundant with the composite and can be dropped.
+          index [:slug, :locale],
+            name: unquote("#{table}_slug_locale_lookup_index"),
+            all_tenants?: true
         end
       end
 
