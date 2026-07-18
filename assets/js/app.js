@@ -399,6 +399,48 @@ const Hooks = {
       this.sorter && this.sorter.destroy()
     },
   },
+
+  // Nested drag-and-drop for a `columns` block's children (#335): one Sortable
+  // per column list, all sharing a group so a child can be dragged within a
+  // column or across into a sibling column of the same block. On any drop it
+  // reports the full new structure — the ordered child ids of every column — so
+  // the server rebuilds the tree authoritatively (LiveView then reconciles the
+  // DOM back to the server-rendered order, keying on each child's stable id).
+  NestedBlockSortable: {
+    mounted() {
+      this.init()
+    },
+    updated() {
+      // Re-init so a newly added/removed column list gets (or drops) its sorter.
+      this.destroySorters()
+      this.init()
+    },
+    destroyed() {
+      this.destroySorters()
+    },
+    init() {
+      const blockId = this.el.dataset.blockId
+      const group = `nested-cols-${blockId}`
+      this.sorters = Array.from(this.el.querySelectorAll("[data-col-list]")).map(list =>
+        Sortable.create(list, {
+          group,
+          animation: 150,
+          handle: "[data-child-handle]",
+          ghostClass: "opacity-40",
+          onEnd: () => {
+            const cols = Array.from(this.el.querySelectorAll("[data-col-list]")).map(col =>
+              Array.from(col.querySelectorAll("[data-child-id]")).map(c => c.dataset.childId),
+            )
+            this.pushEvent("col_reorder", {id: blockId, cols})
+          },
+        }),
+      )
+    },
+    destroySorters() {
+      ;(this.sorters || []).forEach(s => s.destroy())
+      this.sorters = []
+    },
+  },
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

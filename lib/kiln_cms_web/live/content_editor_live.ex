@@ -26,7 +26,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Preferred display order for the block palette; any block type registered
   # beyond these is appended automatically (the palette is registry-driven, so
   # adding a `Kiln.Block` module needs no editor change).
-  @type_order ~w(rich_text heading quote image embed divider custom)
+  @type_order ~w(rich_text heading quote image embed divider columns custom)
+
+  # Child block types offerable inside a `columns` container (#335). A curated
+  # subset with simple field editors — nested blocks get functional inputs, not
+  # the top-level TipTap/media-picker treatment. Columns-in-columns is supported
+  # by the model/renderer but intentionally not offered here (one nesting level
+  # keeps the nested editor legible).
+  @nested_child_types ~w(heading rich_text quote image embed divider)
+
+  # Bounds on the columns editor, so the nested UI (and any hostile client event)
+  # can't create a pathological tree. The storage cast has its own depth guard.
+  @max_columns 4
+  @max_children_per_column 20
 
   # Bound the media picker window loaded on mount (newest first) so a large
   # library can't grow each open editor's heap without limit.
@@ -71,6 +83,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:has_excerpt, ContentTypes.get!(kind).excerpt?)
          |> assign(:actor, actor)
          |> assign(:block_types, block_types())
+         |> assign(:nested_child_types, @nested_child_types)
          |> assign(:editors, Presence.editors(kind, id))
          |> assign(:preview_open?, Presence.previews_open?(kind, id))
          |> assign(:cursors, %{})
@@ -182,9 +195,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:record, record)
     |> assign(:page_title, record.title)
     |> assign(:form, build_form(record, socket.assigns.actor))
+    |> seed_block_children(record)
     |> refresh_preview()
     |> load_versions()
     |> load_translations()
+  end
+
+  # Seed the socket-managed children of every stored `columns` block, keyed by the
+  # block's stable id (#335). Children live in socket state (not bound form
+  # inputs) because a `{:array, :map}` field isn't an AshPhoenix sub-form; they're
+  # injected back into the form params on every validate/save so the form — and
+  # thus the preview and the eventual write — stays in sync. See `inject_children/2`.
+  defp seed_block_children(socket, record) do
+    children =
+      record.blocks
+      |> KilnCMS.CMS.TypedBlocks.to_typed()
+      |> Enum.filter(&match?(%KilnCMS.Blocks.Columns{}, &1))
+      |> Map.new(fn %KilnCMS.Blocks.Columns{} = c -> {c.id, normalize_columns(c.columns)} end)
+
+    assign(socket, :block_children, children)
   end
 
   # Per-locale coverage for the Translations panel (only rendered when the
@@ -374,6 +403,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @impl true
   def handle_event("validate", %{"form" => params}, socket) do
+    # The columns children live in socket state (they aren't bound form inputs);
+    # re-inject them so a keystroke's partial params can't wipe the nested tree.
+    params = inject_children(params, socket.assigns.block_children)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
@@ -461,6 +493,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, mark_dirty(socket)}
   end
 
+  # A columns block carries a socket-managed child tree, so it's inserted with a
+  # stable id (seeded into `block_children`) and a default two-column layout.
+  def handle_event("add_block", %{"type" => "columns"}, socket) do
+    id = Ash.UUID.generate()
+    cols = [%{"blocks" => []}, %{"blocks" => []}]
+
+    form =
+      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+        params: %{"_union_type" => "columns", "id" => id, "columns" => cols}
+      )
+
+    {:noreply,
+     socket
+     |> assign(:form, form)
+     |> assign(:block_children, Map.put(socket.assigns.block_children, id, cols))
+     |> refresh_preview()
+     |> mark_dirty()}
+  end
+
   def handle_event("add_block", %{"type" => type}, socket) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
@@ -510,8 +561,78 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # ── columns container editing (#335) ────────────────────────────────────────
+  # These mutate the socket-managed child tree of a `columns` block, then re-sync
+  # it into the form (so the live preview + save reflect it). Blocks and columns
+  # are addressed by their stable ids; nothing here relies on positional indices
+  # surviving a concurrent reorder.
+
+  def handle_event("col_add_child", %{"id" => id, "col" => col, "type" => type}, socket)
+      when type in @nested_child_types do
+    bc =
+      update_column(socket.assigns.block_children, id, to_int(col), fn blocks ->
+        if length(blocks) >= @max_children_per_column,
+          do: blocks,
+          else: blocks ++ [new_child(type)]
+      end)
+
+    {:noreply, apply_children(socket, bc)}
+  end
+
+  def handle_event("col_remove_child", %{"id" => id, "child" => child_id}, socket) do
+    bc =
+      update_columns(socket.assigns.block_children, id, fn blocks ->
+        Enum.reject(blocks, &(&1["id"] == child_id))
+      end)
+
+    {:noreply, apply_children(socket, bc)}
+  end
+
+  def handle_event(
+        "col_update_child",
+        %{"id" => id, "child" => child_id, "field" => field} = p,
+        socket
+      ) do
+    value = Map.get(p, "value", "")
+
+    bc =
+      update_columns(socket.assigns.block_children, id, fn blocks ->
+        Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
+      end)
+
+    {:noreply, apply_children(socket, bc)}
+  end
+
+  # Nested SortableJS drop: `cols` is the new child-id order of every column of
+  # this block. Rebuild each column from the flat id→child map so a child can
+  # move within or across the block's columns without losing its edits.
+  def handle_event("col_reorder", %{"id" => id, "cols" => cols}, socket) when is_list(cols) do
+    bc = Map.update(socket.assigns.block_children, id, [], &rebuild_columns(&1, cols))
+    {:noreply, apply_children(socket, bc)}
+  end
+
+  def handle_event("col_add_column", %{"id" => id}, socket) do
+    bc =
+      Map.update(socket.assigns.block_children, id, [%{"blocks" => []}], fn cols ->
+        if length(cols) >= @max_columns, do: cols, else: cols ++ [%{"blocks" => []}]
+      end)
+
+    {:noreply, apply_children(socket, bc)}
+  end
+
+  def handle_event("col_remove_column", %{"id" => id, "col" => col}, socket) do
+    bc =
+      Map.update(socket.assigns.block_children, id, [], fn cols ->
+        # Keep at least one column so the block stays a valid container.
+        if length(cols) <= 1, do: cols, else: List.delete_at(cols, to_int(col))
+      end)
+
+    {:noreply, apply_children(socket, bc)}
+  end
+
   def handle_event("save", %{"form" => params}, socket) do
     socket = cancel_autosave_timer(socket)
+    params = inject_children(params, socket.assigns.block_children)
 
     result =
       EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
@@ -851,6 +972,156 @@ defmodule KilnCMSWeb.ContentEditorLive do
         List.update_at(blocks, String.to_integer(index), &Map.merge(&1 || %{}, fields))
     end)
   end
+
+  # ── columns children: socket state ⇄ form params ────────────────────────────
+
+  # Re-sync the socket-managed children into the form (keeping the preview + a
+  # future save current), then refresh the preview and mark the doc dirty. The
+  # form's own params carry every other field, so injecting the children over
+  # them is a lossless round-trip.
+  defp apply_children(socket, block_children) do
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> inject_children(block_children)
+
+    socket
+    |> assign(:block_children, block_children)
+    |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    |> broadcast_preview_and_refresh()
+    |> mark_dirty()
+  end
+
+  defp broadcast_preview_and_refresh(socket) do
+    socket = refresh_preview(socket)
+    broadcast_preview(socket)
+    socket
+  end
+
+  # Set the `columns` param of every `columns` block to its socket-managed
+  # children, matched by the block's stable id. Tolerates params where `blocks`
+  # is the usual indexed map or a list.
+  defp inject_children(params, block_children) when map_size(block_children) == 0, do: params
+
+  defp inject_children(params, block_children) do
+    Map.update(params, "blocks", params["blocks"], fn
+      blocks when is_map(blocks) ->
+        Map.new(blocks, fn {k, v} -> {k, inject_block(v, block_children)} end)
+
+      blocks when is_list(blocks) ->
+        Enum.map(blocks, &inject_block(&1, block_children))
+
+      other ->
+        other
+    end)
+  end
+
+  defp inject_block(%{} = block, block_children) do
+    case block["id"] && Map.get(block_children, block["id"]) do
+      nil -> block
+      cols -> Map.put(block, "columns", cols)
+    end
+  end
+
+  defp inject_block(other, _block_children), do: other
+
+  # Apply `fun` to the child-block list of one column (by index) of a block.
+  defp update_column(block_children, block_id, col_index, fun) do
+    Map.update(block_children, block_id, [], fn cols ->
+      List.update_at(cols, col_index, &update_col_blocks(&1, fun))
+    end)
+  end
+
+  # Apply `fun` to every column's child-block list of a block.
+  defp update_columns(block_children, block_id, fun) do
+    Map.update(block_children, block_id, [], fn cols ->
+      Enum.map(cols, &update_col_blocks(&1, fun))
+    end)
+  end
+
+  defp update_col_blocks(col, fun) do
+    Map.update(col || %{"blocks" => []}, "blocks", [], fn blocks -> fun.(List.wrap(blocks)) end)
+  end
+
+  # Rebuild every column of a block from a per-column list of child ids (a nested
+  # drag result), preserving each child's current attrs by id.
+  defp rebuild_columns(current, cols) do
+    by_id = current |> Enum.flat_map(& &1["blocks"]) |> Map.new(&{&1["id"], &1})
+    Enum.map(cols, fn ids -> %{"blocks" => pick_children(by_id, ids)} end)
+  end
+
+  defp pick_children(by_id, ids),
+    do: ids |> List.wrap() |> Enum.map(&by_id[&1]) |> Enum.reject(&is_nil/1)
+
+  # Set `field` on the child whose id matches; leave every other child untouched.
+  defp maybe_put_field(%{"id" => id} = child, id, field, value),
+    do: put_child_field(child, field, value)
+
+  defp maybe_put_field(child, _id, _field, _value), do: child
+
+  # Normalize a stored/def columns value to the editor shape: a non-empty list of
+  # `%{"blocks" => [child maps]}`, every child carrying a stable id (backfilled if
+  # a legacy child lacks one, so the nested Sortable can address it).
+  defp normalize_columns(cols) do
+    case List.wrap(cols) do
+      [] ->
+        [%{"blocks" => []}, %{"blocks" => []}]
+
+      list ->
+        Enum.map(list, fn col ->
+          blocks =
+            col
+            |> child_blocks_of()
+            |> Enum.map(&ensure_child_id/1)
+
+          %{"blocks" => blocks}
+        end)
+    end
+  end
+
+  defp child_blocks_of(col) when is_map(col),
+    do: (Map.get(col, "blocks") || Map.get(col, :blocks) || []) |> List.wrap()
+
+  defp child_blocks_of(_), do: []
+
+  defp ensure_child_id(child) do
+    child = stringify_child(child)
+    Map.put_new_lazy(child, "id", &Ash.UUID.generate/0)
+  end
+
+  defp stringify_child(%{} = child), do: Map.new(child, fn {k, v} -> {to_string(k), v} end)
+  defp stringify_child(_), do: %{}
+
+  # A fresh child block map (string keys) with its type-appropriate defaults.
+  defp new_child(type) do
+    base = %{"_type" => type, "id" => Ash.UUID.generate()}
+
+    case type do
+      "heading" -> Map.merge(base, %{"text" => "", "level" => 2})
+      "rich_text" -> Map.merge(base, %{"legacy_html" => "", "body" => []})
+      "quote" -> Map.merge(base, %{"text" => "", "citation" => ""})
+      "image" -> Map.merge(base, %{"url" => "", "alt" => ""})
+      "embed" -> Map.merge(base, %{"url" => ""})
+      _ -> base
+    end
+  end
+
+  # Coerce an editable child field, keeping `level` an integer (headings clamp on
+  # render, so an out-of-range value is harmless, but a non-integer would fail the
+  # embedded cast).
+  defp put_child_field(child, "level", value), do: Map.put(child, "level", to_int(value))
+  defp put_child_field(child, field, value), do: Map.put(child, field, value)
+
+  defp to_int(value) when is_integer(value), do: value
+
+  defp to_int(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, _} -> int
+      :error -> 0
+    end
+  end
+
+  defp to_int(_), do: 0
 
   # The media id currently on an image block sub-form, if any.
   defp media_id_of(bf), do: bf[:media_id].value
@@ -1423,7 +1694,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> preview_block_maps()
     |> KilnCMS.CMS.TypedBlocks.to_typed()
     |> KilnCMS.CMS.TypedBlocks.to_legacy()
-    |> Enum.map(&%{type: to_string(&1.type), content: &1.content})
+    |> KilnCMSWeb.BlockComponents.thin_blocks()
   end
 
   # Inline preview rendered through the **same typed serializers that firing
@@ -1495,6 +1766,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("image"), do: "hero-photo"
   defp block_icon("embed"), do: "hero-code-bracket"
   defp block_icon("divider"), do: "hero-minus"
+  defp block_icon("columns"), do: "hero-view-columns"
   defp block_icon("portable_text"), do: "hero-bars-3"
   defp block_icon("custom"), do: "hero-puzzle-piece"
   defp block_icon(_), do: "hero-squares-2x2"
@@ -1506,6 +1778,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("image"), do: gettext("Picture with alt text and caption")
   defp block_description("embed"), do: gettext("Embedded HTML or external content")
   defp block_description("divider"), do: gettext("Visual separator between sections")
+  defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
   defp block_description("portable_text"), do: gettext("Portable Text rich content")
   defp block_description("custom"), do: gettext("Custom block payload")
   defp block_description(_), do: gettext("Insert a block")
@@ -1585,6 +1858,194 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </div>
     """
   end
+
+  # ── columns (nested-layout) editor (#335) ───────────────────────────────────
+
+  # The socket-managed children of the columns block behind sub-form `bf`, keyed
+  # by the block's stable id. Falls back to the default two empty columns for a
+  # block whose id isn't seeded yet (a just-inserted one before its first sync).
+  defp col_state(block_children, bf) do
+    Map.get(block_children, col_block_id(bf)) || [%{"blocks" => []}, %{"blocks" => []}]
+  end
+
+  defp col_block_id(bf), do: bf[:id].value || AshPhoenix.Form.value(bf, :id)
+
+  # Layout <select> options: "Equal" plus each width-ratio preset (labelled "1 : 2").
+  defp layout_options do
+    presets =
+      KilnCMS.Blocks.Columns.presets()
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.map(&{String.replace(&1, "-", " : "), &1})
+
+    [{gettext("Equal width"), ""} | presets]
+  end
+
+  # The full nested editor for one columns block: a layout picker, then a
+  # drag-reorderable list per column (nested SortableJS via the `NestedBlockSortable`
+  # hook — children move within and across this block's columns), each with an
+  # "add block" palette. Children are edited by socket-side events, not bound form
+  # inputs; the hidden id input lets the server match this block on save/validate.
+  attr :bf, :any, required: true
+  attr :columns, :list, required: true
+  attr :child_types, :list, required: true
+
+  defp columns_editor(assigns) do
+    assigns = assign(assigns, :block_id, col_block_id(assigns.bf))
+
+    ~H"""
+    <div class="space-y-3">
+      <%!-- Carries the block id into save/validate params so its socket-managed
+            children can be matched and re-injected (see inject_children/2). --%>
+      <input type="hidden" name={@bf[:id].name} value={@block_id} />
+
+      <div class="flex flex-wrap items-end gap-3">
+        <.input
+          field={@bf[:layout]}
+          type="select"
+          label={gettext("Layout")}
+          options={layout_options()}
+        />
+        <button
+          type="button"
+          phx-click="col_add_column"
+          phx-value-id={@block_id}
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-plus" class="mr-1 size-4" />{gettext("Add column")}
+        </button>
+      </div>
+
+      <div
+        id={"cols-#{@block_id}"}
+        phx-hook="NestedBlockSortable"
+        data-block-id={@block_id}
+        class="grid gap-3"
+        style={"grid-template-columns:repeat(#{max(length(@columns), 1)}, minmax(0, 1fr))"}
+      >
+        <div
+          :for={{col, ci} <- Enum.with_index(@columns)}
+          class="rounded border border-dashed border-base-content/25 p-2"
+        >
+          <div class="mb-2 flex items-center justify-between">
+            <span class="text-xs font-medium text-base-content/60">
+              {gettext("Column %{n}", n: ci + 1)}
+            </span>
+            <button
+              :if={length(@columns) > 1}
+              type="button"
+              phx-click="col_remove_column"
+              phx-value-id={@block_id}
+              phx-value-col={ci}
+              data-confirm={gettext("Remove this column and its blocks?")}
+              aria-label={gettext("Remove column")}
+              class="text-base-content/50 hover:text-error"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+
+          <div data-col-list data-col-index={ci} class="min-h-8 space-y-2">
+            <div
+              :for={child <- col["blocks"] || []}
+              id={"child-#{child["id"]}"}
+              data-child-id={child["id"]}
+              class="rounded border border-base-content/15 bg-base-100 p-2"
+            >
+              <div class="mb-1 flex items-center justify-between gap-2">
+                <span
+                  data-child-handle
+                  class="flex cursor-grab items-center gap-1 text-xs text-base-content/60"
+                >
+                  <.icon name="hero-bars-3" class="size-4" />
+                  {dsl_label(child["_type"])}
+                </span>
+                <button
+                  type="button"
+                  phx-click="col_remove_child"
+                  phx-value-id={@block_id}
+                  phx-value-child={child["id"]}
+                  aria-label={gettext("Remove block")}
+                  class="text-base-content/50 hover:text-error"
+                >
+                  <.icon name="hero-trash" class="size-4" />
+                </button>
+              </div>
+              <.nested_child_fields block_id={@block_id} child={child} />
+            </div>
+          </div>
+
+          <div class="mt-2 flex flex-wrap gap-1">
+            <button
+              :for={type <- @child_types}
+              type="button"
+              phx-click="col_add_child"
+              phx-value-id={@block_id}
+              phx-value-col={ci}
+              phx-value-type={type}
+              class="rounded bg-base-200 px-2 py-1 text-xs hover:bg-base-300"
+            >
+              + {dsl_label(type)}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Simple per-type field editors for a nested child block. Inputs are nameless
+  # (they never enter the form's params) and commit to socket state via
+  # `col_update_child` on blur/change — see the columns handlers.
+  attr :block_id, :any, required: true
+  attr :child, :map, required: true
+
+  defp nested_child_fields(%{child: %{"_type" => "divider"}} = assigns) do
+    ~H"""
+    <hr class="border-base-300" />
+    """
+  end
+
+  defp nested_child_fields(assigns) do
+    ~H"""
+    <div class="space-y-1">
+      <input
+        :for={{field, ph} <- nested_fields_for(@child["_type"])}
+        type="text"
+        value={@child[field] || ""}
+        placeholder={ph}
+        phx-blur="col_update_child"
+        phx-value-id={@block_id}
+        phx-value-child={@child["id"]}
+        phx-value-field={field}
+        class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+      />
+      <select
+        :if={@child["_type"] == "heading"}
+        phx-change="col_update_child"
+        phx-value-id={@block_id}
+        phx-value-child={@child["id"]}
+        phx-value-field="level"
+        class="rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+      >
+        <option :for={n <- 1..6} value={n} selected={to_int(@child["level"]) == n}>H{n}</option>
+      </select>
+    </div>
+    """
+  end
+
+  # {field, placeholder} pairs for a nested child type's text inputs.
+  defp nested_fields_for("heading"), do: [{"text", gettext("Heading text")}]
+  defp nested_fields_for("rich_text"), do: [{"legacy_html", gettext("HTML / text")}]
+
+  defp nested_fields_for("quote"),
+    do: [{"text", gettext("Quote")}, {"citation", gettext("Citation")}]
+
+  defp nested_fields_for("image"),
+    do: [{"url", gettext("Image URL")}, {"alt", gettext("Alt text")}]
+
+  defp nested_fields_for("embed"), do: [{"url", gettext("Embed URL")}]
+  defp nested_fields_for(_), do: []
 
   @impl true
   def render(assigns) do
@@ -1882,7 +2343,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <.input field={bf[:alt]} label={gettext("Alt text")} />
                       <.input field={bf[:caption]} label={gettext("Caption")} />
                     </div>
-                    <div :if={block_type_string(bf) not in ["rich_text", "image"]}>
+                    <.columns_editor
+                      :if={block_type_string(bf) == "columns"}
+                      bf={bf}
+                      columns={col_state(@block_children, bf)}
+                      child_types={@nested_child_types}
+                    />
+                    <div :if={block_type_string(bf) not in ["rich_text", "image", "columns"]}>
                       <.dsl_block_fields
                         bf={bf}
                         role={@actor.role}

@@ -16,8 +16,13 @@ defmodule KilnCMS.CMS.TypedBlocks do
   accessors tolerate both.
   """
 
-  alias KilnCMS.Blocks.{Custom, Divider, Embed, Form, Heading, Image, Quote, RichText}
+  alias KilnCMS.Blocks.{Columns, Custom, Divider, Embed, Form, Heading, Image, Quote, RichText}
   alias KilnCMS.HTMLSanitizer
+
+  # Guards recursion for the nested `columns` block: hostile API input can't force
+  # unbounded nesting on cast (columns nested past this depth are dropped). The
+  # editor caps nesting well below this, so real content is never affected.
+  @max_nesting 5
 
   # Every block module in the storage union — core + plugin (D18), from the
   # same compile-time source as `BlockUnion` itself.
@@ -127,7 +132,49 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp sanitize_attrs(%{"_type" => "embed"} = m),
     do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_embed_url(&1) || ""))
 
+  # A `columns` container: sanitize each child block through the same typed-input
+  # pipeline a top-level block uses, so nested rich_text/image/embed are cleaned.
+  defp sanitize_attrs(%{"_type" => "columns"} = m), do: sanitize_columns_block(m, 1)
+
   defp sanitize_attrs(m), do: m
+
+  defp sanitize_columns_block(m, depth) do
+    Map.update(m, "columns", [], fn cols ->
+      cols
+      |> List.wrap()
+      |> Enum.map(fn
+        %{} = col -> Map.update(col, "blocks", [], &sanitize_children(&1, depth))
+        _ -> %{"blocks" => []}
+      end)
+    end)
+  end
+
+  defp sanitize_children(blocks, depth) do
+    blocks
+    |> List.wrap()
+    |> Enum.flat_map(fn child ->
+      case typed_attrs(child) do
+        {nil, _attrs} ->
+          []
+
+        # A nested columns child recurses with the depth guard (bypassing the
+        # sanitize_attrs columns clause, which would reset depth to 1).
+        {"columns", _attrs} when depth >= @max_nesting ->
+          []
+
+        {"columns", attrs} ->
+          [
+            attrs
+            |> Map.put("_type", "columns")
+            |> sanitize_columns_block(depth + 1)
+            |> drop_nils()
+          ]
+
+        {name, attrs} ->
+          [attrs |> Map.put("_type", name) |> sanitize_attrs() |> drop_nils()]
+      end
+    end)
+  end
 
   # Build a typed struct from a typed map (string or atom keys), upcasting first.
   defp struct_from_typed_map(map) do
@@ -265,6 +312,17 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   defp one_to_legacy(%Form{} = b),
     do: %{type: :form, content: b.form_slug, data: %{"form_slug" => b.form_slug}, id: b.id}
+
+  # The container's layout + child tree ride in `data` (`content`/`children` stay
+  # empty). Delivery reads `data["columns"]` to render the nested tree — see
+  # `KilnCMSWeb.BlockComponents`.
+  defp one_to_legacy(%Columns{} = b),
+    do: %{
+      type: :columns,
+      content: nil,
+      data: %{"layout" => b.layout, "gap" => b.gap, "columns" => b.columns || []},
+      id: b.id
+    }
 
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}

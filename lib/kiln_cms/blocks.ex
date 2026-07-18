@@ -20,6 +20,7 @@ defmodule KilnCMS.Blocks do
     embed: KilnCMS.Blocks.Embed,
     divider: KilnCMS.Blocks.Divider,
     form: KilnCMS.Blocks.Form,
+    columns: KilnCMS.Blocks.Columns,
     custom: KilnCMS.Blocks.Custom
   ]
 

@@ -123,6 +123,55 @@ defmodule KilnCMSWeb.ContentControllerTest do
       refute html =~ "/uploads/f-card"
     end
 
+    test "columns blocks render a grid with nested, media-enriched children (#335)", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "c.jpg",
+          url: "/uploads/c-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          alt: "Nested image",
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/c-thumb",
+              "width" => 400,
+              "height" => 267
+            }
+          }
+        })
+
+      page =
+        page(%{
+          title: "Cols Page",
+          blocks: [
+            %{
+              "_type" => "columns",
+              "layout" => "1-1",
+              "columns" => [
+                %{"blocks" => [%{"_type" => "heading", "text" => "Col heading"}]},
+                %{
+                  "blocks" => [
+                    %{"_type" => "image", "media_id" => media.id, "url" => "/uploads/c-orig"}
+                  ]
+                }
+              ]
+            }
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      # The grid container, the nested heading, and the nested image with the
+      # library srcset (enrichment recursed into the column's child).
+      assert html =~ "kiln-columns"
+      assert html =~ "grid-template-columns:1fr 1fr"
+      assert html =~ "Col heading"
+      assert html =~ "/uploads/c-thumb 400w"
+      assert html =~ ~s(alt="Nested image")
+    end
+
     test "form blocks render the live public form on-site", %{conn: conn} do
       actor =
         Ash.Seed.seed!(KilnCMS.Accounts.User, %{

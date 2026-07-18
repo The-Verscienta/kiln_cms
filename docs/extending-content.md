@@ -160,3 +160,50 @@ domains registered, no block/field-type/queue collisions, well-formed paths.
 "the first plugin/consumer". It lives downstream in the verscienta-base
 repo and is overlaid onto `projects/` at image-build time (see
 projects/README.md for the overlay pattern).
+
+## 6. Nested layout: columns (#335)
+
+Every core block is a **leaf** except one. [`KilnCMS.Blocks.Columns`](../lib/kiln_cms/blocks/columns.ex)
+is a **container**: it holds child blocks, turning the otherwise-flat block list
+into a shallow tree — the first-party answer to visual page building's one
+genuine gap (drag-reorder and the block palette were already shipped).
+
+**Stored shape** (jsonb, string keys):
+
+```elixir
+%{
+  "_type"  => "columns",
+  "layout" => "1-1",            # width-ratio preset: 1-1 | 1-2 | 2-1 | 1-1-1 | 1-2-1 | 1-1-1-1
+  "gap"    => "md",             # none | sm | md | lg (optional)
+  "columns" => [
+    %{"blocks" => [<child block map>, ...]},   # each child is a normal typed block map
+    %{"blocks" => [<child block map>, ...]}
+  ]
+}
+```
+
+Children are stored as **raw block maps**, not as a first-class `Ash.Type.Union`
+member — a block whose field is the union that lists it would be a compile-time
+cycle. They're typed lazily at render time (via `KilnCMS.CMS.TypedBlocks`), so:
+
+- **Rendering, search text, JSON/JSON-LD, and reference extraction** all recurse
+  through the *same* typed serializers a top-level block uses. A nested
+  `image`/`rich_text`/`form` behaves exactly as it would at the top level
+  (media enrichment, sanitization, schema.org nodes, ref edges — all recurse).
+- **Backward compatibility is trivial**: a document with no `columns` block never
+  gains a nesting level, so the upcaster leaves flat documents byte-for-byte
+  untouched. (The legacy `columns` *discriminator* on the old flat
+  `KilnCMS.CMS.Block` still maps to `Custom` — only the new typed `_type:
+  "columns"` is a real container.)
+- **Nesting composes** (a column may itself hold a `columns` block); a depth
+  guard on cast bounds hostile input, and the admin editor caps nesting well
+  below it.
+
+**Editing.** The admin block editor renders a nested per-column drag-and-drop
+area (the `NestedBlockSortable` JS hook — children move within *and across* a
+block's columns) with a per-column "add block" palette and a layout picker. The
+children live in LiveView socket state (a `{:array, :map}` field isn't an
+AshPhoenix sub-form) and are re-injected into the form params on every
+validate/save, so the live preview and the write stay in sync. The in-context
+on-page editor renders columns with their nested children in place (read-only
+there — structural nested edits belong to the full editor).

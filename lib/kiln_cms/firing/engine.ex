@@ -161,9 +161,21 @@ defmodule KilnCMS.Firing.Engine do
     }
 
     # Structured data falls out of the typed blocks (decision D9): each block that
-    # has a schema.org representation contributes a node to the document @graph.
-    block_nodes = typed |> Enum.map(&Blocks.render(&1, :json_ld)) |> Enum.reject(&is_nil/1)
+    # has a schema.org representation contributes a node to the document @graph. A
+    # block may yield nil (no node), one node, or — for a container block like
+    # `columns` — a list of its children's nodes, so flatten before assembling.
+    block_nodes = typed |> Enum.flat_map(&json_ld_nodes/1)
 
     %{"@context" => "https://schema.org", "@graph" => [article | block_nodes]}
+  end
+
+  # Normalize a block's `:json_ld` render (nil | node map | list of nodes) to a
+  # flat list of nodes for the @graph.
+  defp json_ld_nodes(block) do
+    case Blocks.render(block, :json_ld) do
+      nil -> []
+      nodes when is_list(nodes) -> Enum.reject(nodes, &is_nil/1)
+      node -> [node]
+    end
   end
 end

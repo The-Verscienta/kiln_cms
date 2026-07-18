@@ -15,8 +15,12 @@ defmodule Kiln.Block.Renderer do
   @typedoc "A v1 firing surface (decision A2)."
   @type surface :: :web | :json | :json_ld
 
-  @doc "Serialize a block to a surface. Web → iodata; json/json_ld → map (or nil)."
-  @callback render(block :: struct(), surface()) :: iodata() | map() | nil
+  @doc """
+  Serialize a block to a surface. Web → iodata; json → map (or nil); json_ld → a
+  schema.org node map, `nil`, or a list of nodes (a container block flattens its
+  children's nodes — the firing engine flat-maps the results into the @graph).
+  """
+  @callback render(block :: struct(), surface()) :: iodata() | map() | [map()] | nil
 
   @doc "Plain text projection used for search/embeddings (decision D16)."
   @callback search_text(block :: struct()) :: String.t()
