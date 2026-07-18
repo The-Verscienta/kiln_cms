@@ -31,6 +31,33 @@ const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
 const Hooks = {
   FocusTrap,
+  // Multiplayer preview cursors (#343): report this viewer's pointer position
+  // as fractions (0..1) of the preview surface, throttled, so co-viewers can
+  // render it at the right spot regardless of their window size. The server
+  // broadcasts it to the other viewers (never echoes it back to us).
+  PreviewCursors: {
+    mounted() {
+      this.last = 0
+      this.onMove = e => {
+        const now = Date.now()
+        if (now - this.last < 50) return // ~20 msgs/sec ceiling
+        this.last = now
+        const rect = this.el.getBoundingClientRect()
+        if (rect.width === 0 || rect.height === 0) return
+        this.pushEvent("cursor", {
+          x: (e.clientX - rect.left) / rect.width,
+          y: (e.clientY - rect.top) / rect.height,
+        })
+      }
+      this.onLeave = () => this.pushEvent("cursor_leave", {})
+      this.el.addEventListener("mousemove", this.onMove)
+      this.el.addEventListener("mouseleave", this.onLeave)
+    },
+    destroyed() {
+      this.el.removeEventListener("mousemove", this.onMove)
+      this.el.removeEventListener("mouseleave", this.onLeave)
+    },
+  },
   // Warn before discarding unsaved editor changes. The server keeps
   // `data-dirty` on the form in sync with its save state; this hook guards
   // full page unloads (tab close, hard reload, plain links) via `beforeunload`
