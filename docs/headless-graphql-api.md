@@ -1,9 +1,17 @@
 # Headless GraphQL API
 
-KilnCMS exposes a **curated, read-only GraphQL delivery API** (AshGraphql) for
-headless frontends. This document is the contract for what the public surface
-intentionally exposes — and, just as deliberately (decision **D7**), what it
-does not.
+KilnCMS exposes a **curated GraphQL API** (AshGraphql) for headless frontends: a
+world-readable **delivery** surface plus an authenticated **write** surface
+(create / update / workflow / soft-delete). This document is the contract for
+what the surface exposes and how writes are authorized.
+
+> **D7 was reversed (#330).** The delivery API was originally read-only *by
+> design* (decision **D7**); mutations were added deliberately so external apps
+> can write back into the CMS (parity with Strapi/Directus/Payload). Reads are
+> unchanged and stay anonymous-friendly; **writes require an API key** and go
+> through the exact same resource policies as `/mcp` — see
+> [Mutations](#mutations-writing) below. A read-only key or an anonymous caller
+> can *see* the mutations in the schema but cannot execute them.
 
 ## Endpoints
 
@@ -19,20 +27,17 @@ make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
 taxonomy; there is nothing to leak.
 
-## Design: a read-only delivery surface (D7)
+## Design: delivery reads, authenticated writes
 
-The GraphQL surface is a **delivery** API, not an authoring API. Authoring,
-workflow transitions (create / update / publish / unpublish / archive / restore /
-delete) and webhook administration run through the admin LiveView editor and the
-bearer-authenticated JSON:API — they are **not** surfaced over GraphQL at all.
-There are no GraphQL mutations beyond the empty custom-mutation block.
+The **reads** are a delivery surface: anonymous-friendly, shaped around what a
+frontend needs (fetch published content, list it, search it), and safe by
+default because every read runs through the resource read policies (published
+content is world-readable; everything else is editor-only).
 
-This keeps the public schema small, safe-by-default, and shaped around what a
-frontend actually needs: fetch published content, list it, search it.
-
-The one headless surface that *can* author is the MCP endpoint (`/mcp`), built
-for LLM clients and gated separately by write-scoped API keys — see
-[mcp.md](mcp.md). GraphQL and JSON:API stay read-only regardless.
+The **writes** (#330) are the same authoring/workflow actions the admin editor
+and `/mcp` use, exposed as mutations and gated by the **identical resource
+policies** — the schema is wider, but authorization is unchanged. See
+[Mutations](#mutations-writing).
 
 ## Queries
 
@@ -127,9 +132,86 @@ Under load, notification fan-out batches through an out-of-band worker
 (`AshGraphql.Subscription.Batcher`), so publishing never blocks on slow
 subscribers.
 
+## Mutations (writing)
+
+> **Reverses D7 (#330).** Writes require an API key; a read-only key or an
+> anonymous caller is rejected by the resource policies, not by the mutation
+> being absent. Mint keys at `/editor/api-keys` (admin-only); a key acts as its
+> owning user, bounded by its `access` scope. This is the same auth model as
+> [`/mcp`](mcp.md) — the `:read_write` scope is no longer MCP-only.
+
+Every content type gets the same set of mutations, derived from its singular
+type name. For `post` (Pages, and any `mix kiln.gen.content` type, are
+identical; the dynamic tier shares one generic `*_entry` set):
+
+| Mutation | Action | Who | Effect |
+|----------|--------|-----|--------|
+| `createPost(input:)` | `:create` | `:read_write` key, editor+ | Creates a **draft**, attributed to the key's owner |
+| `updatePost(id:, input:)` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if the record is already published |
+| `submitPostForReview(id:)` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
+| `publishPost(id:)` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
+| `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
+| `deletePost(id:)` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
+
+Authorization mirrors `/mcp` exactly: a **read-only key** can run none of these;
+a **`:read_write` key on a `:viewer`** account can run none (the role has no
+authoring rights); a **`:read_write` key on an `:editor`** account can
+create/update/submit; **publish, unpublish and delete require an `:admin`**
+account. The hard delete (`:purge`) is **never** exposed as a mutation and is
+API-key-banned regardless of scope.
+
+### Writing body content — the `blockTree` argument
+
+The typed `blocks` union is not on the GraphQL surface (it can't render cleanly
+as a union of embedded resources, and delivery reads the *fired artifacts*, not
+the raw tree). To write body content, `createPost` / `updatePost` accept a
+public **`blockTree`** input: an array of block maps (the same shape the editor
+and MCP submit), cast into the union — which **sanitizes** rich-text HTML and
+media URLs. Omit it on an update to leave the body untouched; send `[]` to clear
+it.
+
+```graphql
+mutation ($input: CreatePostInput!) {
+  createPost(input: $input) {
+    result { id slug state }
+    errors { message }
+  }
+}
+```
+
+```json
+{
+  "input": {
+    "title": "Written over GraphQL",
+    "slug": "hello-api",
+    "blockTree": [{ "type": "rich_text", "content": "<p>Body</p>", "order": 1 }]
+  }
+}
+```
+
+Send the API key as a bearer header (same as a read token):
+
+```bash
+curl -s http://localhost:4000/gql \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{"query":"mutation($id:ID!){ publishPost(id:$id){ result{ id state } errors{ message } } }","variables":{"id":"<uuid>"}}'
+```
+
+### Re-fire semantics
+
+Firing (the immutable per-surface artifact regeneration) is bound to the
+`:publish` action, so `publishPost` re-fires automatically. Editing
+already-published content with `updatePost` **also** re-fires (the `:update`
+action carries a `published`-guarded re-fire, #330) — so a write-through to live
+content never leaves a stale artifact. Draft edits do not fire.
+
 ## Deliberately *not* exposed
 
-- **Mutations.** No create/update/publish/delete. Authoring is admin-only.
+- **Hard delete.** `deletePost` is a reversible soft-delete; the permanent
+  `:purge` is never a mutation and no API key may run it.
+- **Taxonomy writes.** Categories and tags stay read-only over GraphQL —
+  authored through the admin editor (or `/mcp`'s `create_tag`/`create_category`).
 - **The media library as a list.** `MediaItem` has a GraphQL *type* (so it
   resolves as the nested `featuredImage` on content) but **no top-level query** —
   there is no public "list all media" endpoint.

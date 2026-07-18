@@ -10,18 +10,30 @@ commitment — some gaps are deliberate design choices (see notes).
 
 ---
 
-## 1. Write-capable headless APIs — [#330](https://github.com/The-Verscienta/kiln_cms/issues/330) `P0`
+## 1. Write-capable headless APIs — [#330](https://github.com/The-Verscienta/kiln_cms/issues/330) `P0` ✅ SHIPPED
 
-- [ ] Expose content **create/update/delete** over REST (JSON:API) and/or GraphQL.
-- [ ] Design an auth/authorization story for programmatic writes (extend the
-      `:read_write` API-key scope beyond MCP).
-- [ ] Decide interaction with the firing engine — writes must trigger re-fire.
+- [x] Expose content **create/update/delete** over REST (JSON:API) **and** GraphQL.
+      Create/update/submit-for-review/publish/unpublish + reversible soft-delete
+      on every content type and the dynamic entry tier. Body content writes via a
+      public `block_tree`/`blockTree` argument (the `blocks` union stays off the
+      auto surface); hard `:purge` is never exposed.
+- [x] Auth story for programmatic writes: the **`:read_write` API-key scope is no
+      longer MCP-only** — the JSON:API and GraphQL pipelines already accept
+      `kiln_…` keys, and the *same* resource policies gate every surface (read
+      key / anonymous forbidden; editor authors; admin publishes). No new auth
+      code — writes reuse the MCP model exactly.
+- [x] Firing interaction: re-fire is **action-scoped**, so any write path that
+      calls `:publish` re-fires automatically. The `:update` action gained a
+      `published`-guarded re-fire so an in-place edit of live content never
+      leaves a stale artifact.
 
-**Why:** Strapi, Directus, and Payload all offer full write APIs. This is the
+**Why:** Strapi, Directus, and Payload all offer full write APIs. This was the
 single biggest blocker for "app writes back into the CMS" use cases.
-**Note:** Currently read-only *by design* (decision D7). This item is a
-deliberate reversal to evaluate, not just an oversight — writes flow through
-the LiveView admin or the MCP endpoint today.
+**Decision:** Read-only-by-design (**D7**) was **deliberately reversed** here
+(signed off before implementation). Reads are unchanged; writes are
+API-key-gated. This unblocks the visual-editing bridge/SDK
+([#355](https://github.com/The-Verscienta/kiln_cms/issues/355)), which was
+hard-blocked on this write surface.
 
 ## 2. Runtime / marketplace extensibility — [#333](https://github.com/The-Verscienta/kiln_cms/issues/333) `P2`
 

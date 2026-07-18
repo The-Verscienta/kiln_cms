@@ -125,13 +125,17 @@ curl -s 'http://localhost:4000/api/json/posts' \
   (role + audiences). For public-content-only access, mint the key on a `:viewer`
   account.
 - Keys carry an **`access` scope**, chosen at mint and immutable after:
-  - **Read-only** (the default): the JSON:API/GraphQL surface exposes only
-    reads, and any mutation attempted with a read key is forbidden at the
-    policy layer regardless of the owner's role.
-  - **Read + write**: may additionally author content over the **MCP endpoint**
-    (`/mcp`) as its owning user, within that user's role — create/update
-    drafts, submit for review. Publishing and hard deletes are never exposed to
-    keys. See [mcp.md](mcp.md).
+  - **Read-only** (the default): any write attempted with a read key is
+    forbidden at the policy layer regardless of the owner's role.
+  - **Read + write**: may additionally author content over **all three
+    key-authenticated surfaces** — JSON:API (`POST`/`PATCH`/`DELETE`), GraphQL
+    (mutations), and MCP (`/mcp`) — as its owning user, within that user's role.
+    An **editor** creates/updates/submits drafts; **publish, unpublish and
+    (soft-)delete require an admin**; the hard delete (`:purge`) is never exposed
+    to any key. `/mcp` additionally exposes no publish/delete tools at all (LLM
+    authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
+    [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and
+    [mcp.md](mcp.md).
 - Keys always **expire** and can be **revoked** immediately from the admin UI; an
   expired/revoked key returns **401**.
 - Works on JSON:API (`/api/json`), GraphQL (`/gql`, incl. the subscription

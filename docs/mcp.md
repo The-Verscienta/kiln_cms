@@ -7,9 +7,15 @@ hand-rolled HTTP. It is powered by [`ash_ai`](https://hexdocs.pm/ash_ai): each
 tool is an Ash action on the `KilnCMS.CMS` domain, executed as the caller
 through the exact same policies as every other surface.
 
-This is deliberately distinct from the delivery APIs: JSON:API and GraphQL
-remain **read-only** (decision D7). `/mcp` is the only key-authenticated
-surface that can write, and only for keys minted with write access.
+`/mcp` was historically the *only* key-authenticated surface that could write.
+As of #330 the JSON:API and GraphQL surfaces are **also write-capable** (the
+deliberate reversal of decision D7), using the **same** `:read_write` API-key
+scope and resource policies described here — see
+[json-api.md](json-api.md) → "Writing" and
+[headless-graphql-api.md](headless-graphql-api.md) → "Mutations". `/mcp` remains
+the LLM-tailored surface (typed tools, tool-list scoping) and, unlike those two,
+exposes **no** publish/unpublish/delete tools at all — LLM authoring stays
+draft-only by design.
 
 ## Authentication: write-scoped API keys
 
