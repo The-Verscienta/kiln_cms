@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.ArtifactController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
 
@@ -34,13 +35,17 @@ defmodule KilnCMSWeb.ArtifactController do
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
 
+    # Resolution and body reads go through KilnCMS.Firing.Delivery, which is
+    # cache-first and DB-error-tolerant: a warm request touches no database at
+    # all, so delivery keeps answering through a Postgres outage (#341).
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
-         record when not is_nil(record) <- published(ct.type, slug, locale),
+         {:ok, record} <- Delivery.published(ct.type, slug, locale),
          {:ok, body} <- artifact(record, surface) do
       serve(conn, record, params["surface"] || "json", body)
     else
       :backfilling -> backfilling(conn)
+      :unavailable -> unavailable(conn)
       _ -> error(conn, :not_found, "not_found", "Content not found.")
     end
   end
@@ -154,11 +159,14 @@ defmodule KilnCMSWeb.ArtifactController do
   defp artifact(record, surface) do
     type = Engine.document_type(record)
 
-    case Engine.read(type, record.id, surface) do
+    case Delivery.read_artifact(type, record.id, surface) do
       {:ok, body} ->
         {:ok, body}
 
-      :error ->
+      :unavailable ->
+        :unavailable
+
+      :miss ->
         enqueue_backfill(type, record.id)
         :backfilling
     end
@@ -174,5 +182,18 @@ defmodule KilnCMSWeb.ArtifactController do
     conn
     |> put_resp_header("retry-after", Integer.to_string(@retry_after_seconds))
     |> error(:service_unavailable, "artifact_compiling", "Artifact is compiling; retry shortly.")
+  end
+
+  # The database is down and this content isn't warm in cache (#341). Warm
+  # content is served above without ever reaching here. Signal a retryable 503 —
+  # no Oban enqueue (that would need the DB too).
+  defp unavailable(conn) do
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(@retry_after_seconds))
+    |> error(
+      :service_unavailable,
+      "temporarily_unavailable",
+      "Content is temporarily unavailable; retry shortly."
+    )
   end
 end
