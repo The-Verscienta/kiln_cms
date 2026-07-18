@@ -23,7 +23,12 @@ defmodule KilnCMS.Search.BlockEmbedding do
 
     custom_indexes do
       # HNSW (cosine) index for approximate nearest-neighbour over block vectors.
-      index ["embedding vector_cosine_ops"], name: "block_embeddings_hnsw_index", using: "hnsw"
+      # `all_tenants?: true` keeps `org_id` out of the index (epic #336) — HNSW
+      # can't be multicolumn; the tenant filter rides the query's `WHERE org_id`.
+      index ["embedding vector_cosine_ops"],
+        name: "block_embeddings_hnsw_index",
+        using: "hnsw",
+        all_tenants?: true
     end
   end
 
@@ -84,8 +89,28 @@ defmodule KilnCMS.Search.BlockEmbedding do
     end
   end
 
+  # Multi-tenancy (epic #336): block embeddings are partitioned by org so
+  # per-block retrieval stays per-site — one shared HNSW index, filtered by
+  # `org_id` (the whole reason `:attribute` was chosen over schema-per-tenant).
+  # `global?: true` keeps the tenant optional for the current tenant-less
+  # indexer; the `:doc_block` unique index gains `org_id` automatically.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # Owning organization (epic #336). Set from tenant/default; never accepted
+    # from input (absent from the `:upsert` accept list).
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :document_type, :atom,
       allow_nil?: false,
@@ -104,6 +129,16 @@ defmodule KilnCMS.Search.BlockEmbedding do
     attribute :ancestor_context, :string, public?: true
     attribute :embedding, KilnCMS.Search.Vector, public?: true
     attribute :embedded_at, :utc_datetime_usec, public?: true
+  end
+
+  relationships do
+    # FK to the owning org (epic #336); the tenant axis is the `org_id` attribute.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   calculations do

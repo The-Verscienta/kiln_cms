@@ -65,8 +65,28 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     end
   end
 
+  # Multi-tenancy (epic #336): artifacts are partitioned by the owning org so the
+  # delivery hot path (and cache eviction) stays per-site. `global?: true` keeps
+  # the tenant optional for the current tenant-less firing engine; the org_id is
+  # stamped from the tenant on write, or the default org otherwise. The `:edge`/
+  # `:doc_surface` unique indexes gain `org_id` automatically (attribute strategy).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # Owning organization (epic #336). Set from tenant/default; never accepted
+    # from input (absent from the `:upsert` accept list).
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # `:entry` is the generic tier for admin-defined dynamic types (D17): one
     # storage key for all of them, the dynamic name lives on the entry row.
@@ -88,6 +108,16 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     attribute :body, :map, allow_nil?: false, default: %{}, public?: true
     attribute :source_version_id, :uuid, public?: true
     attribute :fired_at, :utc_datetime_usec, allow_nil?: false, public?: true
+  end
+
+  relationships do
+    # FK to the owning org (epic #336); the tenant axis is the `org_id` attribute.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   identities do
