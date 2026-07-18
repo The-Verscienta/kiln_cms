@@ -1,0 +1,78 @@
+defmodule Mix.Tasks.Kiln.Export.Static do
+  @shortdoc "Export fired artifacts to a static directory tree for CDN/edge deploys"
+  @moduledoc """
+  First-class static / edge export (#353). Copies every published document's
+  immutable fired `:web`/`:json`/`:json_ld` artifacts to a static directory tree
+  you can `rsync` to a CDN, bake into an edge cache, or ship to an air-gapped
+  host. Reuses the firing engine — no re-render — so the export is a faithful
+  snapshot of what the live headless API serves.
+
+      mix kiln.export.static <out_dir> [--surface web,json,json_ld] [--base-url URL]
+
+  Examples:
+
+      mix kiln.export.static ./_static
+      mix kiln.export.static /var/www/edge --surface web
+      mix kiln.export.static ./_static --base-url https://cdn.example.com
+
+  Existing files are overwritten; content deleted since a prior export is not
+  pruned (diff the written `index.json` to reconcile). See docs/static-export.md.
+  """
+  use Mix.Task
+
+  alias KilnCMS.Firing.StaticExport
+
+  @requirements ["app.start"]
+
+  @switches [surface: :string, base_url: :string]
+
+  @impl Mix.Task
+  def run(args) do
+    {opts, positional, _} = OptionParser.parse(args, strict: @switches)
+
+    case positional do
+      [out_dir | _] ->
+        export_opts =
+          []
+          |> put_surfaces(opts[:surface])
+          |> put_base_url(opts[:base_url])
+
+        {:ok, result} = StaticExport.export(out_dir, export_opts)
+
+        Mix.shell().info(
+          "Exported #{result.count} document(s) " <>
+            "(#{Enum.map_join(result.surfaces, "/", &to_string/1)}) to #{result.out_dir}" <>
+            skipped_note(result.skipped)
+        )
+
+      [] ->
+        Mix.raise("Usage: mix kiln.export.static <out_dir> [--surface web,json,json_ld]")
+    end
+  end
+
+  defp put_surfaces(opts, nil), do: opts
+
+  defp put_surfaces(opts, csv) do
+    surfaces =
+      csv
+      |> String.split(",", trim: true)
+      |> Enum.map(&parse_surface/1)
+
+    Keyword.put(opts, :surfaces, surfaces)
+  end
+
+  defp parse_surface(name) do
+    case name do
+      "web" -> :web
+      "json" -> :json
+      "json_ld" -> :json_ld
+      other -> Mix.raise("Unknown surface #{inspect(other)} (expected web|json|json_ld)")
+    end
+  end
+
+  defp put_base_url(opts, nil), do: opts
+  defp put_base_url(opts, url), do: Keyword.put(opts, :base_url, url)
+
+  defp skipped_note(0), do: "."
+  defp skipped_note(n), do: "; skipped #{n} not-yet-fired document(s)."
+end

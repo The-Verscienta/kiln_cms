@@ -147,6 +147,17 @@ config :kiln_cms, KilnCMS.Search.Meilisearch,
 # Register pgvector's Postgrex extension so `vector` columns encode/decode.
 config :kiln_cms, KilnCMS.Repo, types: KilnCMS.PostgrexTypes
 
+# First-class static / edge export of fired artifacts (#353). The firing engine
+# already produces immutable per-surface artifacts; this exports them to a
+# static directory tree for CDN/air-gapped deploys (`mix kiln.export.static`, or
+# the enqueuable KilnCMS.Firing.StaticExportWorker for admin/cron triggers).
+# `output_dir` is the worker's destination — nil means the worker is a no-op, so
+# it's safe to schedule before an operator picks a destination. See
+# docs/static-export.md.
+config :kiln_cms, KilnCMS.Firing.StaticExport,
+  output_dir: nil,
+  surfaces: [:web, :json, :json_ld]
+
 # Nx's backend is set per-env: EXLA.Backend in dev/test (where the :exla dep is
 # available — see config/dev.exs + test.exs), Nx.BinaryBackend (Nx's default)
 # elsewhere. EXLA is excluded from the prod build because its from-source XLA NIF
