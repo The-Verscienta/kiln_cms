@@ -344,6 +344,11 @@ defmodule KilnCMSWeb.Router do
 
     get "/content/:type/:slug", ArtifactController, :show
 
+    # Visual-editing bridge (#355): the live working copy, stega-annotated so an
+    # external front end's overlay maps a rendered value back to its Kiln field.
+    # Draft-visible only to an editor/admin API key; `no-store`, per-actor.
+    get "/visual-editing/:type/:slug", VisualEditingController, :show
+
     # Locale discovery — lets a headless consumer build a locale switcher /
     # hreflang set without hard-coding the site's configured languages.
     get "/locales", LocalesController, :index

@@ -416,6 +416,24 @@
   border-top: 1px solid var(--color-base-300);
 }
 
+/* Deep-link focus pulse (#355): when the visual-editing bridge opens the
+   in-context editor at `?focus=<block_id>`, the FocusBlock hook briefly adds
+   this class to the target block wrapper so the editor visibly lands on it. */
+@keyframes kiln-focus-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--color-primary, oklch(0.6 0.2 250));
+    background-color: color-mix(in oklch, var(--color-primary, oklch(0.6 0.2 250)) 12%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+    background-color: transparent;
+  }
+}
+.kiln-focus-pulse {
+  animation: kiln-focus-pulse 1.6s ease-out;
+  border-radius: 0.375rem;
+}
+
 /* Public rich-text typography (#147). The delivered article wrapper uses
    `prose max-w-none`, but the Tailwind Typography plugin isn't installed, so the
    sanitized `<p>/<h*>/<ul>/<blockquote>/<a>/<code>` inside each rich-text

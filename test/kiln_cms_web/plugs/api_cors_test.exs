@@ -29,6 +29,28 @@ defmodule KilnCMSWeb.Plugs.ApiCORSTest do
 
       assert get_resp_header(conn, "access-control-allow-origin") == []
     end
+
+    test "a cross-origin write (PATCH) preflight is allowed (#330/#355)", %{conn: conn} do
+      # The visual-editing bridge round-trips edits with `PATCH /api/json/...`;
+      # the preflight must advertise PATCH in allow-methods or the browser blocks
+      # the write.
+      conn =
+        conn
+        |> put_req_header("origin", @allowed)
+        |> put_req_header("access-control-request-method", "PATCH")
+        |> options(~p"/api/json/posts/00000000-0000-0000-0000-000000000000")
+
+      assert get_resp_header(conn, "access-control-allow-origin") == [@allowed]
+      assert conn.status in 200..204
+
+      allow_methods =
+        conn
+        |> get_resp_header("access-control-allow-methods")
+        |> Enum.join(",")
+
+      assert allow_methods =~ "PATCH"
+      assert allow_methods =~ "DELETE"
+    end
   end
 
   describe "actual cross-origin request" do

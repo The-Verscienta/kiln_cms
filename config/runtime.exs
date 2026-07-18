@@ -80,6 +80,17 @@ if embed_origins = System.get_env("EMBED_ORIGINS") do
   config :kiln_cms, :embed_origins, KilnCMSWeb.Embed.parse_env(embed_origins)
 end
 
+# ## Visual-editing bridge (#355) — the annotated preview read + `/bridge.js`
+#
+# Enabled by default. Set VISUAL_EDITING_ENABLED=false to switch the whole
+# surface off (the annotated `/api/visual-editing/...` route 404s). Which origins
+# may fetch it cross-origin and round-trip writes is governed by CORS_ORIGINS
+# (the annotated read and the write API both live under `/api`); draft visibility
+# is governed by the caller's API key. See KilnCMS.VisualEditing.
+if visual_editing = System.get_env("VISUAL_EDITING_ENABLED") do
+  config :kiln_cms, :visual_editing_enabled, visual_editing not in ~w(false 0 no off)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
