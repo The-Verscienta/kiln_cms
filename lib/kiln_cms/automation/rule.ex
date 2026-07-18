@@ -1,0 +1,114 @@
+defmodule KilnCMS.Automation.Rule do
+  @moduledoc """
+  A no-code editorial automation rule — Kiln's answer to Directus Flows (#342).
+
+  "**When** X happens **to** this content type, **do** Y." A rule pairs a
+  lifecycle trigger (`published` / `unpublished` / `updated`) — optionally scoped
+  to one content type — with a single reaction (`send_email`, `broadcast`,
+  `invalidate_cache`, `reindex`). Rules are admin-managed data; the executor
+  (`KilnCMS.Automation`) evaluates them off-request on Oban when the matching
+  editorial event fires. No embedded scripting runtime — pure Elixir over the
+  primitives Kiln already runs (Oban + state machine + PubSub + MTA).
+  """
+  use Ash.Resource,
+    domain: KilnCMS.Automation,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshAdmin.Resource]
+
+  # Lifecycle events an editorial rule can trigger on — the same verbs the
+  # webhook system emits (`KilnCMS.CMS.WebhookEndpoint.verbs/0`), which is where
+  # automation is evaluated from.
+  @triggers [:published, :unpublished, :updated]
+
+  # Reactions. HTTP/Slack notifications are the (signed, SSRF-safe) webhook
+  # feature's job; automation adds the reactions webhooks can't do.
+  @action_kinds [:send_email, :broadcast, :invalidate_cache, :reindex]
+
+  @doc "Lifecycle events a rule can trigger on."
+  def triggers, do: @triggers
+
+  @doc "Reaction kinds a rule can perform."
+  def action_kinds, do: @action_kinds
+
+  admin do
+    resource_group :system
+    table_columns [:name, :trigger_event, :content_type, :action, :enabled]
+  end
+
+  postgres do
+    table "automation_rules"
+    repo KilnCMS.Repo
+  end
+
+  actions do
+    defaults [:read, :destroy]
+
+    default_accept [
+      :name,
+      :description,
+      :trigger_event,
+      :content_type,
+      :action,
+      :config,
+      :enabled
+    ]
+
+    create :create, primary?: true
+
+    update :update do
+      primary? true
+      require_atomic? false
+    end
+
+    # The executor's lookup: enabled rules for a lifecycle event, matching either
+    # a specific content type or any (`content_type` is nil).
+    read :matching do
+      argument :trigger_event, :atom, allow_nil?: false
+      argument :content_type, :string, allow_nil?: false
+
+      filter expr(
+               enabled == true and trigger_event == ^arg(:trigger_event) and
+                 (is_nil(content_type) or content_type == ^arg(:content_type))
+             )
+    end
+  end
+
+  policies do
+    # Editor-workflow configuration is admin-only; the executor reads with
+    # `authorize?: false` (system job).
+    policy always() do
+      authorize_if actor_attribute_equals(:role, :admin)
+    end
+  end
+
+  attributes do
+    uuid_primary_key :id
+
+    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :description, :string, public?: true
+
+    attribute :trigger_event, :atom do
+      allow_nil? false
+      constraints one_of: @triggers
+      public? true
+    end
+
+    # nil = any content type; otherwise the public type name ("post", "page", a
+    # dynamic type's name).
+    attribute :content_type, :string, public?: true
+
+    attribute :action, :atom do
+      allow_nil? false
+      constraints one_of: @action_kinds
+      public? true
+    end
+
+    # Action parameters (e.g. `%{"to" => …, "subject" => …}` for send_email).
+    attribute :config, :map, allow_nil?: false, default: %{}, public?: true
+
+    attribute :enabled, :boolean, allow_nil?: false, default: true, public?: true
+
+    timestamps()
+  end
+end
