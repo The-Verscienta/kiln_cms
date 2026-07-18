@@ -16,8 +16,11 @@ defmodule KilnCMS.Search.BlockIndexer do
   @spec reindex(struct()) :: {:ok, non_neg_integer()}
   def reindex(document) do
     type = Engine.document_type(document)
+    # Block embeddings are tenant-scoped (epic #336); the tenant rides on the
+    # document's own `org_id`.
+    org_id = document.org_id
     context = document_context(document)
-    hashes = existing_hashes(type, document.id)
+    hashes = existing_hashes(org_id, type, document.id)
 
     embedded =
       document
@@ -25,14 +28,14 @@ defmodule KilnCMS.Search.BlockIndexer do
       |> TypedBlocks.to_typed()
       |> Enum.with_index()
       |> Enum.map(fn {block, index} ->
-        index_block(type, document.id, block, index, context, hashes)
+        index_block(org_id, type, document.id, block, index, context, hashes)
       end)
       |> Enum.count(&(&1 == :embedded))
 
     {:ok, embedded}
   end
 
-  defp index_block(type, document_id, %module{} = block, index, context, hashes) do
+  defp index_block(org_id, type, document_id, %module{} = block, index, context, hashes) do
     text = Blocks.search_text(block)
 
     if text == "" do
@@ -44,12 +47,12 @@ defmodule KilnCMS.Search.BlockIndexer do
       if hashes[block_key] == hash do
         :unchanged
       else
-        embed_and_store(type, document_id, block_key, module, hash, context, text)
+        embed_and_store(org_id, type, document_id, block_key, module, hash, context, text)
       end
     end
   end
 
-  defp embed_and_store(type, document_id, block_key, module, hash, context, text) do
+  defp embed_and_store(org_id, type, document_id, block_key, module, hash, context, text) do
     case Search.embed("#{context}\n\n#{text}") do
       {:ok, vector} ->
         SearchIndex.upsert_block_embedding(
@@ -63,7 +66,8 @@ defmodule KilnCMS.Search.BlockIndexer do
             embedding: vector,
             embedded_at: DateTime.utc_now()
           },
-          authorize?: false
+          authorize?: false,
+          tenant: org_id
         )
 
         :embedded
@@ -75,10 +79,11 @@ defmodule KilnCMS.Search.BlockIndexer do
 
   # One batched read of the document's stored hashes (embedding vectors stay in
   # the DB) instead of a lookup query per block.
-  defp existing_hashes(type, document_id) do
+  defp existing_hashes(org_id, type, document_id) do
     type
     |> SearchIndex.block_embeddings_for!(document_id,
       authorize?: false,
+      tenant: org_id,
       query: [select: [:block_key, :content_hash]]
     )
     |> Map.new(&{&1.block_key, &1.content_hash})

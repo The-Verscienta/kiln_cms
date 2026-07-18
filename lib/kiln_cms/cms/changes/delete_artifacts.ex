@@ -13,12 +13,17 @@ defmodule KilnCMS.CMS.Changes.DeleteArtifacts do
       with {:ok, record} <- result do
         try do
           type = KilnCMS.Firing.Engine.document_type(record)
-          KilnCMS.Firing.Engine.purge(type, record.id)
+          KilnCMS.Firing.Engine.purge(record.org_id, type, record.id)
 
           # Drop it from the optional Meilisearch index (Phase 6). No-op when the
           # backend is disabled.
           if KilnCMS.Search.Meilisearch.enabled?() do
-            %{"op" => "delete", "type" => to_string(type), "id" => record.id}
+            %{
+              "org_id" => record.org_id,
+              "op" => "delete",
+              "type" => to_string(type),
+              "id" => record.id
+            }
             |> KilnCMS.Search.MeilisearchWorker.new()
             |> Oban.insert()
           end

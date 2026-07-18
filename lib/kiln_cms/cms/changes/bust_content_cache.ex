@@ -30,17 +30,20 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
   # rename (and collapses to one key when unchanged).
   defp bust(changeset, record) do
     type = cache_type(changeset.resource, record)
+    # The record's own tenant (epic #336) — cache keys are per-org, so a bust
+    # only drops this site's entries.
+    org_id = record.org_id
 
     [changeset.data, record]
     |> Enum.map(&Map.get(&1, :slug))
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
-    |> Enum.each(&Cache.bust(type, &1))
+    |> Enum.each(&Cache.bust(org_id, type, &1))
 
     # A publish/unpublish changes the set of public URLs, so the cached sitemap
     # and llms.txt (keyed separately from per-record entries) must be dropped too.
-    Cache.bust_sitemap()
-    Cache.bust_llms()
+    Cache.bust_sitemap(org_id)
+    Cache.bust_llms(org_id)
   end
 
   # The cache key's type segment. Compiled types use their type atom; entries

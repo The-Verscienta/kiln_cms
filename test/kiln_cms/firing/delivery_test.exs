@@ -92,33 +92,38 @@ defmodule KilnCMS.Firing.DeliveryTest do
 
   describe "warm reads are database-free (survive an outage)" do
     test "a cached record resolves with no DB access" do
+      org = KilnCMS.Accounts.default_org_id()
       {slug, _id} = fired_page()
       # Warm the resolution cache from a process that has the DB.
-      assert {:ok, _record} = Delivery.published(:page, slug, "en")
+      assert {:ok, _record} = Delivery.published(org, :page, slug, "en")
 
       # Now the DB is "down" (bare process): the warm slug still resolves.
-      assert %{slug: ^slug} = without_db(fn -> unwrap(Delivery.published(:page, slug, "en")) end)
+      assert %{slug: ^slug} =
+               without_db(fn -> unwrap(Delivery.published(org, :page, slug, "en")) end)
     end
 
     test "a cached artifact body reads with no DB access" do
+      org = KilnCMS.Accounts.default_org_id()
       {slug, id} = fired_page()
       # Firing warmed the body cache; make one resolution to be safe.
-      assert {:ok, _} = Delivery.published(:page, slug, "en")
+      assert {:ok, _} = Delivery.published(org, :page, slug, "en")
 
       assert %{"type" => "page"} =
-               without_db(fn -> unwrap(Delivery.read_artifact(:page, id, :json)) end)
+               without_db(fn -> unwrap(Delivery.read_artifact(org, :page, id, :json)) end)
     end
   end
 
   describe "cold reads during an outage degrade gracefully" do
     test "an uncached slug returns :unavailable instead of crashing" do
+      org = KilnCMS.Accounts.default_org_id()
       missing = "del-cold-#{System.unique_integer([:positive])}"
-      assert :unavailable = without_db(fn -> Delivery.published(:page, missing, "en") end)
+      assert :unavailable = without_db(fn -> Delivery.published(org, :page, missing, "en") end)
     end
 
     test "an uncached artifact returns :unavailable instead of crashing" do
+      org = KilnCMS.Accounts.default_org_id()
       id = Ash.UUID.generate()
-      assert :unavailable = without_db(fn -> Delivery.read_artifact(:page, id, :json) end)
+      assert :unavailable = without_db(fn -> Delivery.read_artifact(org, :page, id, :json) end)
     end
   end
 

@@ -7,7 +7,9 @@ defmodule KilnCMS.Firing.Cache do
   **off by default** to honor the project's minimal-ops goal (D2). When a tier-2
   adapter is configured it would back-fill tier 1 on miss; none ships today.
 
-  Keyed by `{document_type, document_id, surface}`.
+  Keyed by `{org_id, document_type, document_id, surface}` — the tenant (epic
+  #336) is part of the key so eviction and any tier-2 (Redis) sharing stay
+  correct per site even though `document_id` (a UUID) is globally unique.
   """
   import Cachex.Spec, only: [hook: 1]
 
@@ -37,29 +39,30 @@ defmodule KilnCMS.Firing.Cache do
     )
   end
 
-  @spec get(atom(), Ash.UUID.t(), atom()) :: {:ok, map()} | :miss
-  def get(document_type, document_id, surface) do
-    case Cachex.get(@cache, key(document_type, document_id, surface)) do
+  @spec get(Ash.UUID.t(), atom(), Ash.UUID.t(), atom()) :: {:ok, map()} | :miss
+  def get(org_id, document_type, document_id, surface) do
+    case Cachex.get(@cache, key(org_id, document_type, document_id, surface)) do
       {:ok, nil} -> :miss
       {:ok, body} -> {:ok, body}
       _ -> :miss
     end
   end
 
-  @spec put(atom(), Ash.UUID.t(), atom(), map()) :: :ok
-  def put(document_type, document_id, surface, body) do
+  @spec put(Ash.UUID.t(), atom(), Ash.UUID.t(), atom(), map()) :: :ok
+  def put(org_id, document_type, document_id, surface, body) do
     # Cachex honors `:expire`, not `:ttl` — the latter is silently ignored, so
     # entries would otherwise never expire (see KilnCMS.Cache).
-    Cachex.put(@cache, key(document_type, document_id, surface), body, expire: @ttl)
+    Cachex.put(@cache, key(org_id, document_type, document_id, surface), body, expire: @ttl)
     :ok
   end
 
   @doc "Evict every surface for a document (on unpublish or re-fire)."
-  @spec evict(atom(), Ash.UUID.t()) :: :ok
-  def evict(document_type, document_id) do
-    Enum.each(@surfaces, &Cachex.del(@cache, key(document_type, document_id, &1)))
+  @spec evict(Ash.UUID.t(), atom(), Ash.UUID.t()) :: :ok
+  def evict(org_id, document_type, document_id) do
+    Enum.each(@surfaces, &Cachex.del(@cache, key(org_id, document_type, document_id, &1)))
     :ok
   end
 
-  defp key(document_type, document_id, surface), do: {document_type, document_id, surface}
+  defp key(org_id, document_type, document_id, surface),
+    do: {org_id, document_type, document_id, surface}
 end

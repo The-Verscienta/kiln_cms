@@ -29,17 +29,20 @@ defmodule KilnCMS.Firing.PointInTime do
   `as_of`, plus the effective publish time. `{:error, :not_published}` when
   nothing was published by then.
   """
-  @spec read(module(), Ash.UUID.t(), atom(), DateTime.t()) ::
+  @spec read(Ash.UUID.t(), module(), Ash.UUID.t(), atom(), DateTime.t()) ::
           {:ok, map(), DateTime.t()} | {:error, :not_published}
-  def read(resource, id, surface, %DateTime{} = as_of) do
+  def read(org_id, resource, id, surface, %DateTime{} = as_of) do
     version_module = Module.concat(resource, Version)
 
-    case last_publish(version_module, id, as_of) do
+    # Version rows inherit the source's tenant (epic #336), so the history reads
+    # are scoped to this org; the rebuilt document is re-stamped with `org_id` so
+    # the in-memory re-fire stays in the right tenant.
+    case last_publish(version_module, id, as_of, org_id) do
       {:ok, published_at} ->
         {:ok, artifacts} =
           version_module
-          |> replay(id, published_at)
-          |> build_document(resource, id)
+          |> replay(id, published_at, org_id)
+          |> build_document(resource, id, org_id)
           |> Engine.fire(mode: :preview)
 
         {:ok, Map.fetch!(artifacts, surface), published_at}
@@ -50,7 +53,7 @@ defmodule KilnCMS.Firing.PointInTime do
   end
 
   # The most recent publish at or before `as_of` — its timestamp bounds the replay.
-  defp last_publish(version_module, id, as_of) do
+  defp last_publish(version_module, id, as_of, org_id) do
     version_module
     |> Ash.Query.filter(
       version_source_id == ^id and version_inserted_at <= ^as_of and
@@ -58,7 +61,7 @@ defmodule KilnCMS.Firing.PointInTime do
     )
     |> Ash.Query.sort(version_inserted_at: :desc)
     |> Ash.Query.limit(1)
-    |> Ash.read(authorize?: false)
+    |> Ash.read(authorize?: false, tenant: org_id)
     |> case do
       {:ok, [version]} -> {:ok, version.version_inserted_at}
       _ -> :error
@@ -67,11 +70,11 @@ defmodule KilnCMS.Firing.PointInTime do
 
   # Reconstruct the full attribute state at `up_to` by merging every version's
   # `changes` in chronological order (`:changes_only` tracking).
-  defp replay(version_module, id, up_to) do
+  defp replay(version_module, id, up_to, org_id) do
     version_module
     |> Ash.Query.filter(version_source_id == ^id and version_inserted_at <= ^up_to)
     |> Ash.Query.sort(version_inserted_at: :asc)
-    |> Ash.read!(authorize?: false)
+    |> Ash.read!(authorize?: false, tenant: org_id)
     |> Enum.reduce(%{}, fn version, acc -> Map.merge(acc, version.changes) end)
   end
 
@@ -80,7 +83,7 @@ defmodule KilnCMS.Firing.PointInTime do
   # tolerates the stored map shape), `.title`/`.slug`, and derives the type from
   # the struct module. Restricted to real attributes so a stray change key can't
   # blow up on `String.to_existing_atom`.
-  defp build_document(state, resource, id) do
+  defp build_document(state, resource, id, org_id) do
     names = resource |> Ash.Resource.Info.attributes() |> MapSet.new(&to_string(&1.name))
 
     attrs =
@@ -88,6 +91,8 @@ defmodule KilnCMS.Firing.PointInTime do
         {String.to_existing_atom(key), value}
       end
 
-    struct(resource, Map.put(attrs, :id, id))
+    # `org_id` is a version column (attributes_as_attributes), not in the freeform
+    # `changes` map, so stamp it explicitly for the in-memory re-fire.
+    struct(resource, attrs |> Map.put(:id, id) |> Map.put(:org_id, org_id))
   end
 end

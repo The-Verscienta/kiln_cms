@@ -8,7 +8,8 @@ defmodule KilnCMS.Firing.Engine do
   broadcasts `{:fired, type, id}`. `mode: :preview` compiles to memory only (no DB,
   no cache) for live editor previews.
 
-  `read/3` is the delivery path: cache → artifact table, **never** the live tree.
+  `read/4` is the delivery path: cache → artifact table, **never** the live tree.
+  Every read/write is scoped to the document's `org_id` tenant (epic #336).
   """
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.TypedBlocks
@@ -24,17 +25,21 @@ defmodule KilnCMS.Firing.Engine do
   def fire(document, opts \\ []) do
     mode = Keyword.get(opts, :mode, :persist)
     type = document_type(document)
+    # The tenant rides on the document itself (epic #336): every content struct
+    # carries `org_id`, so firing is scoped to the document's own org with no
+    # extra plumbing at the call sites.
+    org_id = document.org_id
     start = System.monotonic_time()
 
     typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
     artifacts = Map.new(@surfaces, fn surface -> {surface, compose(document, typed, surface)} end)
 
     if mode == :persist do
-      persist(document, type, artifacts)
+      persist(document, type, org_id, artifacts)
       # Keep the dependency graph current (decision D13). Invalidation of
       # referrers is enqueued by the caller (publish hook / re-fire worker), not
       # here, to keep fire/2 free of recursion.
-      KilnCMS.Firing.References.rebuild(type, document.id, typed)
+      KilnCMS.Firing.References.rebuild(org_id, type, document.id, typed)
     end
 
     # Firing-duration telemetry (#206): wall-clock of the per-surface render
@@ -49,16 +54,16 @@ defmodule KilnCMS.Firing.Engine do
   end
 
   @doc "Read a fired artifact body for a surface: cache, then the artifact table."
-  @spec read(atom(), Ash.UUID.t(), atom()) :: {:ok, map()} | :error
-  def read(type, id, surface) do
-    case Cache.get(type, id, surface) do
+  @spec read(Ash.UUID.t(), atom(), Ash.UUID.t(), atom()) :: {:ok, map()} | :error
+  def read(org_id, type, id, surface) do
+    case Cache.get(org_id, type, id, surface) do
       {:ok, body} ->
         {:ok, body}
 
       :miss ->
-        case Firing.get_artifact(type, id, surface, authorize?: false) do
+        case Firing.get_artifact(type, id, surface, authorize?: false, tenant: org_id) do
           {:ok, %{body: body}} ->
-            Cache.put(type, id, surface, body)
+            Cache.put(org_id, type, id, surface, body)
             {:ok, body}
 
           _ ->
@@ -68,11 +73,11 @@ defmodule KilnCMS.Firing.Engine do
   end
 
   @doc "Delete every fired artifact for a document and evict the cache (unpublish)."
-  @spec purge(atom(), Ash.UUID.t()) :: :ok
-  def purge(type, id) do
-    {:ok, artifacts} = Firing.artifacts_for(type, id, authorize?: false)
-    Enum.each(artifacts, &Ash.destroy!(&1, authorize?: false))
-    Cache.evict(type, id)
+  @spec purge(Ash.UUID.t(), atom(), Ash.UUID.t()) :: :ok
+  def purge(org_id, type, id) do
+    {:ok, artifacts} = Firing.artifacts_for(type, id, authorize?: false, tenant: org_id)
+    Enum.each(artifacts, &Ash.destroy!(&1, authorize?: false, tenant: org_id))
+    Cache.evict(org_id, type, id)
     :ok
   end
 
@@ -107,7 +112,7 @@ defmodule KilnCMS.Firing.Engine do
 
   def public_type(document), do: to_string(document_type(document))
 
-  defp persist(document, type, artifacts) do
+  defp persist(document, type, org_id, artifacts) do
     fired_at = DateTime.utc_now()
 
     Enum.each(@surfaces, fn surface ->
@@ -122,10 +127,13 @@ defmodule KilnCMS.Firing.Engine do
             source_version_id: Map.get(document, :published_version_id),
             fired_at: fired_at
           },
-          authorize?: false
+          # `org_id` is set from the tenant (writable? false), so pass it as the
+          # tenant rather than in the attrs map.
+          authorize?: false,
+          tenant: org_id
         )
 
-      Cache.put(type, document.id, surface, artifacts[surface])
+      Cache.put(org_id, type, document.id, surface, artifacts[surface])
     end)
 
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, "firing", {:fired, type, document.id})

@@ -66,7 +66,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       kind ->
         actor = socket.assigns.current_user
-        record = fetch!(kind, id, actor)
+        record = fetch!(kind, id, actor, socket.assigns.current_org)
         field_definitions = field_definitions(kind, actor)
 
         if connected?(socket) do
@@ -252,9 +252,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp build_form(record, actor) do
     # Blocks are authored as native `Ash.Type.Union` member sub-forms (Kiln v2):
     # each block sub-form is a typed block resource (Heading/Image/…), so fields
-    # bind straight to the typed attributes.
+    # bind straight to the typed attributes. The update is scoped to the record's
+    # own org (epic #336) so a save stays in the site it was loaded from.
     record
-    |> AshPhoenix.Form.for_update(:update, actor: actor, forms: [auto?: true])
+    |> AshPhoenix.Form.for_update(:update,
+      actor: actor,
+      tenant: record.org_id,
+      forms: [auto?: true]
+    )
     |> to_form()
   end
 
@@ -266,9 +271,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # --- generic dispatch to the per-kind code interfaces (via the registry) ---
 
-  defp fetch!(kind, id, actor) do
+  defp fetch!(kind, id, actor, org) do
+    # Scope the load to the current site's org (epic #336) so an editor on one
+    # site's subdomain can only open that site's content.
     ContentTypes.get_record!(kind, id,
       actor: actor,
+      tenant: org,
       load: [:category, :featured_image, :tags, related_name(kind)]
     )
   end
@@ -396,10 +404,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp list_versions(kind, opts), do: ContentTypes.list_versions!(kind, opts)
 
   defp restore_version(kind, record, vid, actor),
-    do: ContentTypes.restore_version(kind, record, vid, actor: actor)
+    do: ContentTypes.restore_version(kind, record, vid, actor: actor, tenant: record.org_id)
 
   defp do_workflow(kind, verb, record, actor),
-    do: ContentTypes.transition(kind, verb, record, actor: actor)
+    do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: record.org_id)
 
   @impl true
   def handle_event("validate", %{"form" => params}, socket) do
@@ -643,7 +651,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:ok, record} ->
         # Re-fetch so the relationship pickers reflect the saved links (the
         # submit result doesn't carry loaded relationships).
-        reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
+        reloaded =
+          fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
 
         {:noreply,
          socket
@@ -666,7 +675,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Discard local changes and reload the latest saved version, clearing the
   # conflict. (The simplest safe resolution — a merge UI is future work.)
   def handle_event("reload_conflict", _params, socket) do
-    record = fetch!(socket.assigns.kind, socket.assigns.record.id, socket.assigns.actor)
+    record =
+      fetch!(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
 
     {:noreply,
      socket
@@ -687,7 +702,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
     translation =
-      KilnCMS.CMS.Translations.create_translation!(kind, record, locale, actor: actor)
+      KilnCMS.CMS.Translations.create_translation!(kind, record, locale,
+        actor: actor,
+        tenant: record.org_id
+      )
 
     {:noreply,
      socket
@@ -833,6 +851,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     autosave_form =
       AshPhoenix.Form.for_update(socket.assigns.record, :autosave,
         actor: socket.assigns.actor,
+        tenant: socket.assigns.record.org_id,
         forms: [auto?: true]
       )
 
@@ -845,7 +864,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     case result do
       {:ok, record} ->
-        reloaded = fetch!(socket.assigns.kind, record.id, socket.assigns.actor)
+        reloaded =
+          fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
+
         socket |> assign_record(reloaded) |> assign(:save_state, :saved)
 
       {:error, form} ->

@@ -49,11 +49,11 @@ defmodule KilnCMS.Firing.Delivery do
   Returns `{:ok, record}` (DB-free on a cache hit), `:not_found`, or
   `:unavailable` when the database is down and the record isn't cached.
   """
-  @spec published(atom() | String.t(), String.t(), String.t()) ::
+  @spec published(Ash.UUID.t(), atom() | String.t(), String.t(), String.t()) ::
           {:ok, struct()} | :not_found | :unavailable
-  def published(type, slug, locale) do
-    KilnCMS.Cache.fetch_published(to_string(type), slug, locale, fn ->
-      ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false)
+  def published(org_id, type, slug, locale) do
+    KilnCMS.Cache.fetch_published(org_id, to_string(type), slug, locale, fn ->
+      ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false, tenant: org_id)
     end)
     |> case do
       nil -> :not_found
@@ -89,25 +89,26 @@ defmodule KilnCMS.Firing.Delivery do
   hasn't been fired yet, or `:unavailable` when the database is down and the
   body isn't cached.
   """
-  @spec read_artifact(atom(), Ash.UUID.t(), atom()) :: {:ok, map()} | :miss | :unavailable
-  def read_artifact(type, id, surface) do
-    # Cache-first, like `Engine.read/3` — but read the artifact table ourselves
-    # rather than delegating, because `Engine.read/3` collapses a DB error into
+  @spec read_artifact(Ash.UUID.t(), atom(), Ash.UUID.t(), atom()) ::
+          {:ok, map()} | :miss | :unavailable
+  def read_artifact(org_id, type, id, surface) do
+    # Cache-first, like `Engine.read/4` — but read the artifact table ourselves
+    # rather than delegating, because `Engine.read/4` collapses a DB error into
     # the same `:error` it returns for a not-yet-fired artifact. We must tell
     # "not fired" (→ backfill) apart from "database down" (→ serve what's cached,
     # else degrade).
-    case Cache.get(type, id, surface) do
+    case Cache.get(org_id, type, id, surface) do
       {:ok, body} -> {:ok, body}
-      :miss -> fetch_artifact(type, id, surface)
+      :miss -> fetch_artifact(org_id, type, id, surface)
     end
   rescue
     e -> if db_unavailable?(e), do: :unavailable, else: reraise(e, __STACKTRACE__)
   end
 
-  defp fetch_artifact(type, id, surface) do
-    case Firing.get_artifact(type, id, surface, authorize?: false) do
+  defp fetch_artifact(org_id, type, id, surface) do
+    case Firing.get_artifact(type, id, surface, authorize?: false, tenant: org_id) do
       {:ok, %{body: body}} ->
-        Cache.put(type, id, surface, body)
+        Cache.put(org_id, type, id, surface, body)
         {:ok, body}
 
       {:error, error} ->

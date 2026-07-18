@@ -62,16 +62,18 @@ defmodule KilnCMS.Firing.FiringTest do
     end
 
     test "the web artifact is pre-rendered HTML from the typed serializers" do
+      org = KilnCMS.Accounts.default_org_id()
       page = published_page(admin())
-      {:ok, %{"html" => html}} = Engine.read(:page, page.id, :web)
+      {:ok, %{"html" => html}} = Engine.read(org, :page, page.id, :web)
 
       assert html =~ "<h1>Welcome</h1>"
       assert html =~ "<p>Body</p>"
     end
 
     test "the json artifact carries structured intent" do
+      org = KilnCMS.Accounts.default_org_id()
       page = published_page(admin())
-      {:ok, json} = Engine.read(:page, page.id, :json)
+      {:ok, json} = Engine.read(org, :page, page.id, :json)
 
       assert json["type"] == "page"
       assert json["title"] == "Fired"
@@ -80,6 +82,7 @@ defmodule KilnCMS.Firing.FiringTest do
 
     test "the json_ld artifact is a schema.org graph derived from the blocks (Phase J)" do
       actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
 
       page =
         CMS.create_page!(
@@ -96,7 +99,7 @@ defmodule KilnCMS.Firing.FiringTest do
 
       page = CMS.publish_page!(page, actor: actor)
       KilnCMS.DataCase.drain_oban()
-      {:ok, ld} = Engine.read(:page, page.id, :json_ld)
+      {:ok, ld} = Engine.read(org, :page, page.id, :json_ld)
 
       assert ld["@context"] == "https://schema.org"
       types = Enum.map(ld["@graph"], & &1["@type"])
@@ -108,12 +111,13 @@ defmodule KilnCMS.Firing.FiringTest do
   describe "reads never touch the live tree" do
     test "editing the live document after publish does not change the fired artifact" do
       actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
       page = published_page(actor)
 
       # Mutate the live draft AFTER publishing; do not re-publish.
       CMS.update_page!(page, %{title: "Changed Live"}, actor: actor)
 
-      {:ok, json} = Engine.read(:page, page.id, :json)
+      {:ok, json} = Engine.read(org, :page, page.id, :json)
       # Still the fired snapshot, not the live edit.
       assert json["title"] == "Fired"
     end
@@ -122,14 +126,15 @@ defmodule KilnCMS.Firing.FiringTest do
   describe "unpublish" do
     test "removes artifacts and evicts the cache" do
       actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
       page = published_page(actor)
-      assert {:ok, _} = Engine.read(:page, page.id, :web)
+      assert {:ok, _} = Engine.read(org, :page, page.id, :web)
 
       CMS.unpublish_page!(page, actor: actor)
 
       assert {:ok, []} = Firing.artifacts_for(:page, page.id, authorize?: false)
-      assert :miss = Cache.get(:page, page.id, :web)
-      assert :error = Engine.read(:page, page.id, :web)
+      assert :miss = Cache.get(org, :page, page.id, :web)
+      assert :error = Engine.read(org, :page, page.id, :web)
     end
   end
 

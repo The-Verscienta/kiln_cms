@@ -94,6 +94,11 @@ defmodule KilnCMSWeb.Endpoint do
   # Strip a `/<locale>/…` prefix and set the locale before routing.
   plug KilnCMSWeb.Plugs.SetLocale
 
+  # Resolve the request's organization from its host and set it as the Ash tenant
+  # (epic #336), so every pipeline — delivery controllers, GraphQL, JSON:API — is
+  # scoped to the right site. Bare-host/localhost requests resolve to the default org.
+  plug KilnCMSWeb.Plugs.SetTenant
+
   # Attach request context (method, path, scrubbed headers/params) to any Sentry
   # event raised while handling this request. No-op without a configured DSN.
   # Sensitive params/headers are scrubbed by Sentry's defaults. On Bandit this is

@@ -50,16 +50,16 @@ defmodule KilnCMS.Cache do
   A `nil` (not found) is never cached, so newly published content appears
   immediately. Falls back to `fun` if the cache is disabled or the backend errors.
   """
-  @spec fetch_published(String.t(), String.t(), String.t(), (-> any())) :: any()
-  def fetch_published(type, slug, locale, fun) when is_function(fun, 0) do
-    if enabled?(), do: fetch_published_cached(type, slug, locale, fun), else: fun.()
+  @spec fetch_published(Ash.UUID.t(), String.t(), String.t(), String.t(), (-> any())) :: any()
+  def fetch_published(org_id, type, slug, locale, fun) when is_function(fun, 0) do
+    if enabled?(), do: fetch_published_cached(org_id, type, slug, locale, fun), else: fun.()
   end
 
   # `Cachex.fetch` deduplicates concurrent fallback executions per key
   # (Courier), so a burst of requests for a hot page right after an
   # invalidation computes the value once instead of stampeding the DB.
-  defp fetch_published_cached(type, slug, locale, fun) do
-    case Cachex.fetch(@cache, key(type, slug, locale), fn _key -> commit(fun.(), @ttl) end) do
+  defp fetch_published_cached(org_id, type, slug, locale, fun) do
+    case Cachex.fetch(@cache, key(org_id, type, slug, locale), fn _key -> commit(fun.(), @ttl) end) do
       {:ok, value} -> emit(:hit, value)
       {:commit, value} -> emit(:miss, value)
       {:ignore, value} -> emit(:miss, value)
@@ -105,11 +105,11 @@ defmodule KilnCMS.Cache do
   fallback under the *requested* locale's key (same slug), so a single slug can
   live under several locale keys.
   """
-  @spec bust(String.t(), String.t()) :: :ok
-  def bust(type, slug) when is_binary(type) and is_binary(slug) do
+  @spec bust(Ash.UUID.t(), String.t(), String.t()) :: :ok
+  def bust(org_id, type, slug) when is_binary(type) and is_binary(slug) do
     if enabled?() do
       Enum.each(KilnCMS.I18n.locales(), fn locale ->
-        Cachex.del(@cache, key(type, slug, locale))
+        Cachex.del(@cache, key(org_id, type, slug, locale))
       end)
     end
 
@@ -131,31 +131,35 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
-  @doc "Cache key for the generated sitemap XML (shared with the sitemap controller)."
-  def sitemap_key, do: "sitemap:xml"
+  @doc """
+  Cache key for a site's generated sitemap XML (shared with the sitemap
+  controller). Per-org (epic #336): each organization serves its own sitemap of
+  its own published URLs.
+  """
+  def sitemap_key(org_id), do: "sitemap:#{org_id}:xml"
 
   @doc """
-  Drop the cached sitemap XML so a new publish/unpublish is reflected on the next
-  request rather than waiting out the sitemap's TTL. Per-record `bust/2` doesn't
-  touch this key, so publish hooks call it explicitly.
+  Drop a site's cached sitemap XML so a new publish/unpublish is reflected on the
+  next request rather than waiting out the sitemap's TTL. Per-record `bust/3`
+  doesn't touch this key, so publish hooks call it explicitly.
   """
-  @spec bust_sitemap() :: :ok
-  def bust_sitemap do
-    if enabled?(), do: Cachex.del(@cache, sitemap_key())
+  @spec bust_sitemap(Ash.UUID.t()) :: :ok
+  def bust_sitemap(org_id) do
+    if enabled?(), do: Cachex.del(@cache, sitemap_key(org_id))
     :ok
   end
 
-  @doc "Cache key for the generated `llms.txt` (shared with the llms controller)."
-  def llms_key, do: "llms:txt"
+  @doc "Cache key for a site's generated `llms.txt` (shared with the llms controller)."
+  def llms_key(org_id), do: "llms:#{org_id}:txt"
 
   @doc """
-  Drop the cached `llms.txt` so a publish/unpublish is reflected on the next
+  Drop a site's cached `llms.txt` so a publish/unpublish is reflected on the next
   request rather than waiting out its TTL. Like the sitemap, this aggregate key
-  isn't touched by per-record `bust/2`, so publish hooks call it explicitly.
+  isn't touched by per-record `bust/3`, so publish hooks call it explicitly.
   """
-  @spec bust_llms() :: :ok
-  def bust_llms do
-    if enabled?(), do: Cachex.del(@cache, llms_key())
+  @spec bust_llms(Ash.UUID.t()) :: :ok
+  def bust_llms(org_id) do
+    if enabled?(), do: Cachex.del(@cache, llms_key(org_id))
     :ok
   end
 
@@ -177,7 +181,7 @@ defmodule KilnCMS.Cache do
   defp commit(nil, _ttl), do: {:ignore, nil}
   defp commit(value, ttl), do: {:commit, value, expire: ttl}
 
-  defp key(type, slug, locale), do: "published:#{type}:#{locale}:#{slug}"
+  defp key(org_id, type, slug, locale), do: "published:#{org_id}:#{type}:#{locale}:#{slug}"
 
   defp enabled? do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:enabled, true)

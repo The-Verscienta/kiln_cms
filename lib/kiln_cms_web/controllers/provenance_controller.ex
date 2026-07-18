@@ -74,10 +74,11 @@ defmodule KilnCMSWeb.ProvenanceController do
     if Provenance.enabled?() do
       locale = params["locale"] || KilnCMS.I18n.default_locale()
       surface = Map.get(@surfaces, params["surface"] || "json")
+      org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
       with false <- is_nil(surface),
            ct when not is_nil(ct) <- ContentTypes.get(type),
-           {:ok, record} <- Delivery.published(ct.type, slug, locale),
+           {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale),
            {:ok, artifact} <- artifact_row(record, surface) do
         fun.(record, artifact)
       else
@@ -93,7 +94,8 @@ defmodule KilnCMSWeb.ProvenanceController do
   defp artifact_row(record, surface) do
     type = Engine.document_type(record)
 
-    case Firing.get_artifact(type, record.id, surface, authorize?: false) do
+    # `record.org_id` is the request tenant (resolved through Delivery.published/4).
+    case Firing.get_artifact(type, record.id, surface, authorize?: false, tenant: record.org_id) do
       {:ok, %_{} = artifact} -> {:ok, artifact}
       _ -> :error
     end

@@ -107,7 +107,7 @@ defmodule KilnCMSWeb.EditorLive do
       slug: "untitled-#{System.unique_integer([:positive])}"
     }
 
-    record = create!(kind, attrs, socket.assigns.actor)
+    record = create!(kind, attrs, socket.assigns.actor, socket.assigns.current_org)
     {:noreply, push_navigate(socket, to: edit_path(kind, record.id))}
   end
 
@@ -290,7 +290,10 @@ defmodule KilnCMSWeb.EditorLive do
     end
   end
 
-  defp create!(kind, attrs, actor), do: ContentTypes.create!(kind, attrs, actor: actor)
+  # `tenant:` stamps the new record with the current site's org (epic #336);
+  # `org_id` is writable? false, so the tenant is the only way to set it.
+  defp create!(kind, attrs, actor, org),
+    do: ContentTypes.create!(kind, attrs, actor: actor, tenant: org)
 
   defp get!(kind, id, actor), do: ContentTypes.get_record!(kind, id, actor: actor)
 

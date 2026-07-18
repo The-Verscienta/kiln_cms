@@ -10,7 +10,9 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
     max_attempts: 3,
     unique: [
       period: 60,
-      keys: [:type, :id],
+      # `:org_id` in the dedup key so the same doc in two orgs re-indexes
+      # separately (epic #336).
+      keys: [:org_id, :type, :id],
       states: [:scheduled, :available, :executing, :retryable, :suspended]
     ]
 
@@ -18,17 +20,17 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
   alias KilnCMS.Search.BlockIndexer
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"type" => type, "id" => id}}) do
+  def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type, "id" => id}}) do
     if Search.semantic?() do
-      type |> load(id) |> reindex()
+      org_id |> load(type, id) |> reindex()
     else
       :ok
     end
   end
 
-  defp load("page", id), do: CMS.get_page(id, authorize?: false)
-  defp load("post", id), do: CMS.get_post(id, authorize?: false)
-  defp load(_type, _id), do: :error
+  defp load(org_id, "page", id), do: CMS.get_page(id, authorize?: false, tenant: org_id)
+  defp load(org_id, "post", id), do: CMS.get_post(id, authorize?: false, tenant: org_id)
+  defp load(_org_id, _type, _id), do: :error
 
   defp reindex({:ok, document}) do
     {:ok, _count} = BlockIndexer.reindex(document)

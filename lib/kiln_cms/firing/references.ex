@@ -47,11 +47,14 @@ defmodule KilnCMS.Firing.References do
   end
 
   @doc "Replace a document's outgoing edges to match its current block tree."
-  @spec rebuild(atom(), term(), [struct()]) :: :ok
-  def rebuild(from_type, from_id, typed_blocks) do
+  @spec rebuild(Ash.UUID.t(), atom(), term(), [struct()]) :: :ok
+  def rebuild(org_id, from_type, from_id, typed_blocks) do
+    # Tenant-scoped (epic #336): destroy/create only touch this org's edges, so a
+    # rebuild can never delete or upsert across a tenant boundary. `org_id` is set
+    # from the tenant (writable? false), so it's not in the built attrs maps.
     Firing.ReferenceEdge
     |> Ash.Query.filter(from_type == ^from_type and from_id == ^from_id)
-    |> Ash.bulk_destroy!(:destroy, %{}, authorize?: false)
+    |> Ash.bulk_destroy!(:destroy, %{}, authorize?: false, tenant: org_id)
 
     typed_blocks
     |> extract()
@@ -60,6 +63,7 @@ defmodule KilnCMS.Firing.References do
     end)
     |> Ash.bulk_create!(Firing.ReferenceEdge, :upsert,
       authorize?: false,
+      tenant: org_id,
       return_errors?: true,
       stop_on_error?: true,
       # The :edge identity spans every attribute, so a conflicting row is
@@ -75,16 +79,19 @@ defmodule KilnCMS.Firing.References do
   any node already in `visited` (cycle-safe). The originating doc's key should be
   in `visited` so it is not re-fired by its own wave.
   """
-  @spec invalidate(atom(), term(), [String.t()]) :: :ok
-  def invalidate(to_type, to_id, visited) do
-    {:ok, edges} = Firing.edges_to(to_type, to_id, authorize?: false)
+  @spec invalidate(Ash.UUID.t(), atom(), term(), [String.t()]) :: :ok
+  def invalidate(org_id, to_type, to_id, visited) do
+    # Tenant-scoped `edges_to` (epic #336): a wave only ever sees same-org
+    # referrers, so a re-fire can never cross a tenant boundary. `org_id` is
+    # carried in the job args so the worker restores it as its tenant.
+    {:ok, edges} = Firing.edges_to(to_type, to_id, authorize?: false, tenant: org_id)
 
     edges
     |> Enum.map(&{&1.from_type, &1.from_id})
     |> Enum.uniq()
     |> Enum.reject(fn {ft, fid} -> key(ft, fid) in visited end)
     |> Enum.each(fn {ft, fid} ->
-      %{"type" => to_string(ft), "id" => fid, "visited" => visited}
+      %{"org_id" => org_id, "type" => to_string(ft), "id" => fid, "visited" => visited}
       |> RefireWorker.new()
       |> Oban.insert()
     end)
@@ -102,11 +109,17 @@ defmodule KilnCMS.Firing.References do
   def type_atom(type) when is_binary(type), do: Map.get(@types, type)
 
   @doc "Load a document by type+id only if it is currently published."
-  @spec load_published(atom(), term()) :: {:ok, struct()} | :error
-  def load_published(:page, id), do: published(CMS.get_page(id, authorize?: false))
-  def load_published(:post, id), do: published(CMS.get_post(id, authorize?: false))
-  def load_published(:entry, id), do: published(CMS.get_entry(id, authorize?: false))
-  def load_published(_type, _id), do: :error
+  @spec load_published(Ash.UUID.t(), atom(), term()) :: {:ok, struct()} | :error
+  def load_published(org_id, :page, id),
+    do: published(CMS.get_page(id, authorize?: false, tenant: org_id))
+
+  def load_published(org_id, :post, id),
+    do: published(CMS.get_post(id, authorize?: false, tenant: org_id))
+
+  def load_published(org_id, :entry, id),
+    do: published(CMS.get_entry(id, authorize?: false, tenant: org_id))
+
+  def load_published(_org_id, _type, _id), do: :error
 
   defp published({:ok, %{state: :published} = doc}), do: {:ok, doc}
   defp published(_), do: :error

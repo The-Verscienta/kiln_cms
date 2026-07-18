@@ -108,15 +108,18 @@ defmodule KilnCMS.Newsletter do
   @doc false
   @spec artifact_html(struct() | NewsletterSend.t()) :: {:ok, String.t()} | {:error, :not_fired}
   def artifact_html(%NewsletterSend{content_type: type, content_id: id}) do
-    read_web_artifact(String.to_existing_atom(type), id)
+    # NewsletterSend isn't org-scoped yet (newsletter is scoped in a later PR),
+    # so resolve the artifact under the default org (epic #336). Correct while the
+    # single-org rollout guard is in force; revisit when NewsletterSend gains org_id.
+    read_web_artifact(KilnCMS.Accounts.default_org_id(), String.to_existing_atom(type), id)
   end
 
   def artifact_html(document) do
-    read_web_artifact(Firing.Engine.document_type(document), document.id)
+    read_web_artifact(document.org_id, Firing.Engine.document_type(document), document.id)
   end
 
-  defp read_web_artifact(type, id) do
-    case Firing.Engine.read(type, id, :web) do
+  defp read_web_artifact(org_id, type, id) do
+    case Firing.Engine.read(org_id, type, id, :web) do
       {:ok, %{"html" => html}} -> {:ok, html}
       _ -> {:error, :not_fired}
     end

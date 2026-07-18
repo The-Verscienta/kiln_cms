@@ -152,28 +152,28 @@ if config_env() == :prod do
   # scheme/port), or bare hosts (normalized to "//host"). The PHX_HOST origin
   # is always kept, so this can only widen the allowlist. Unset ⇒ Phoenix's
   # default: sockets are only accepted from the PHX_HOST origin.
-  check_origin =
-    case "CHECK_ORIGINS" |> System.get_env("") |> String.split(",", trim: true) do
-      [] ->
-        true
+  extra_origins =
+    "CHECK_ORIGINS"
+    |> System.get_env("")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn origin ->
+      origin = String.trim_trailing(origin, "/")
 
-      origins ->
-        extra =
-          origins
-          |> Enum.map(&String.trim/1)
-          |> Enum.reject(&(&1 == ""))
-          |> Enum.map(fn origin ->
-            origin = String.trim_trailing(origin, "/")
+      if String.starts_with?(origin, ["https://", "http://", "//"]) do
+        origin
+      else
+        "//" <> origin
+      end
+    end)
 
-            if String.starts_with?(origin, ["https://", "http://", "//"]) do
-              origin
-            else
-              "//" <> origin
-            end
-          end)
-
-        ["https://" <> host | extra]
-    end
+  # Accept sockets from the canonical host AND any of its subdomains — multi-tenant
+  # sites are served at `<org>.<host>` (epic #336), so a per-org LiveView/channel
+  # would otherwise fail the Origin check. `//*.host` matches any scheme/port. The
+  # explicit list (not `true`) is required for the wildcard; `CHECK_ORIGINS` still
+  # widens it (e.g. a custom domain mid-migration).
+  check_origin = ["https://" <> host, "//*." <> host | extra_origins]
 
   config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
@@ -184,6 +184,12 @@ if config_env() == :prod do
   config :kiln_cms,
          :trusted_proxies,
          "TRUSTED_PROXIES" |> System.get_env("") |> String.split(",", trim: true)
+
+  # The base host multi-tenant subdomains are carved from (epic #336): a request
+  # to `<org>.<TENANT_BASE_HOST>` resolves to that org. Defaults to PHX_HOST — set
+  # it explicitly only if tenant subdomains live under a different apex than the
+  # canonical URL host.
+  config :kiln_cms, :tenant_base_host, System.get_env("TENANT_BASE_HOST") || host
 
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

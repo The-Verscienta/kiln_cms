@@ -21,8 +21,8 @@ defmodule KilnCMS.CMS.Changes.EnqueueEmbedding do
     end
   end
 
-  defp enqueue(_changeset, %resource{id: id} = record) do
-    %{"resource" => to_string(resource), "id" => id}
+  defp enqueue(_changeset, %resource{id: id, org_id: org_id} = record) do
+    %{"org_id" => org_id, "resource" => to_string(resource), "id" => id}
     |> EmbeddingWorker.new()
     |> Oban.insert!()
 

@@ -34,13 +34,17 @@ defmodule KilnCMSWeb.ArtifactController do
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
+    # The request's tenant, resolved from the host by KilnCMSWeb.Plugs.SetTenant
+    # (epic #336). Delivery is scoped to this org so one site's slug never serves
+    # another's content.
+    org_id = current_org_id(conn)
 
     # Resolution and body reads go through KilnCMS.Firing.Delivery, which is
     # cache-first and DB-error-tolerant: a warm request touches no database at
     # all, so delivery keeps answering through a Postgres outage (#341).
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
-         {:ok, record} <- Delivery.published(ct.type, slug, locale),
+         {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale),
          {:ok, body} <- artifact(record, surface) do
       serve(conn, record, params["surface"] || "json", body)
     else
@@ -57,12 +61,14 @@ defmodule KilnCMSWeb.ArtifactController do
   # id); see the module for scope.
   defp show_point_in_time(conn, %{"type" => type, "slug" => slug} = params) do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
+    org_id = current_org_id(conn)
 
     with {:ok, as_of} <- parse_as_of(params["as_of"]),
          ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
-         record when not is_nil(record) <- published(ct.type, slug, locale),
-         {:ok, body, published_at} <- PointInTime.read(ct.resource, record.id, surface, as_of) do
+         record when not is_nil(record) <- published(org_id, ct.type, slug, locale),
+         {:ok, body, published_at} <-
+           PointInTime.read(org_id, ct.resource, record.id, surface, as_of) do
       serve_point_in_time(conn, as_of, published_at, body)
     else
       :error ->
@@ -157,11 +163,13 @@ defmodule KilnCMSWeb.ArtifactController do
     Calendar.strftime(dt, "%a, %d %b %Y %H:%M:%S GMT")
   end
 
-  defp published(type, slug, locale) do
-    ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false)
+  defp published(org_id, type, slug, locale) do
+    ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false, tenant: org_id)
   rescue
     _ -> nil
   end
+
+  defp current_org_id(conn), do: KilnCMSWeb.Tenant.current_org_id(conn)
 
   # Serve the fired artifact. On a miss, enqueue a background firing job (deduped
   # by FireWorker's uniqueness) and signal `:backfilling` rather than compiling
@@ -172,7 +180,10 @@ defmodule KilnCMSWeb.ArtifactController do
   defp artifact(record, surface) do
     type = Engine.document_type(record)
 
-    case Delivery.read_artifact(type, record.id, surface) do
+    # `record.org_id` == the request tenant (the record was resolved through the
+    # tenant-scoped `Delivery.published/4`), so the artifact read + backfill stay
+    # in the same org.
+    case Delivery.read_artifact(record.org_id, type, record.id, surface) do
       {:ok, body} ->
         {:ok, body}
 
@@ -180,13 +191,13 @@ defmodule KilnCMSWeb.ArtifactController do
         :unavailable
 
       :miss ->
-        enqueue_backfill(type, record.id)
+        enqueue_backfill(record.org_id, type, record.id)
         :backfilling
     end
   end
 
-  defp enqueue_backfill(type, id) do
-    %{"type" => to_string(type), "id" => id}
+  defp enqueue_backfill(org_id, type, id) do
+    %{"org_id" => org_id, "type" => to_string(type), "id" => id}
     |> KilnCMS.Firing.FireWorker.new()
     |> Oban.insert()
   end

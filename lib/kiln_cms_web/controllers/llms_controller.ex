@@ -21,7 +21,11 @@ defmodule KilnCMSWeb.LlmsController do
   @cache_ttl :timer.minutes(5)
 
   def index(conn, _params) do
-    body = Cache.fetch(Cache.llms_key(), @cache_ttl, fn -> build_body(build_groups()) end)
+    # Per-org `llms.txt` (epic #336): each site indexes only its own content.
+    org_id = KilnCMSWeb.Tenant.current_org_id(conn)
+
+    body =
+      Cache.fetch(Cache.llms_key(org_id), @cache_ttl, fn -> build_body(build_groups(org_id)) end)
 
     conn
     |> put_resp_content_type("text/markdown")
@@ -31,7 +35,7 @@ defmodule KilnCMSWeb.LlmsController do
   # No actor + `authorize?: true` ⇒ the read policy returns published records
   # only. Dynamic types (D17) are included — same read policy. Non-default
   # locales are dropped so the index stays single-language and link-clean.
-  defp build_groups do
+  defp build_groups(org_id) do
     default_locale = KilnCMS.I18n.default_locale()
 
     {groups, _count} =
@@ -46,6 +50,7 @@ defmodule KilnCMSWeb.LlmsController do
             ct
             |> ContentTypes.list!(
               authorize?: true,
+              tenant: org_id,
               query: [select: [:title, :slug, :locale, :seo_description], limit: remaining]
             )
             |> Enum.filter(&(&1.locale == default_locale))

@@ -24,7 +24,11 @@ defmodule KilnCMSWeb.SitemapController do
   @cache_ttl :timer.minutes(5)
 
   def index(conn, _params) do
-    xml = Cache.fetch(Cache.sitemap_key(), @cache_ttl, fn -> sitemap_xml(build_urls()) end)
+    # Per-org sitemap (epic #336): each site lists only its own published URLs.
+    org_id = KilnCMSWeb.Tenant.current_org_id(conn)
+
+    xml =
+      Cache.fetch(Cache.sitemap_key(org_id), @cache_ttl, fn -> sitemap_xml(build_urls(org_id)) end)
 
     conn
     |> put_resp_content_type("application/xml")
@@ -35,7 +39,7 @@ defmodule KilnCMSWeb.SitemapController do
   # only, which is exactly what belongs in a public sitemap. Each type's read is
   # capped, and accumulation stops once the overall ceiling is reached.
   # Dynamic types (D17) are included — their entries carry the same read policy.
-  defp build_urls do
+  defp build_urls(org_id) do
     Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(), [], fn ct, acc ->
       remaining = @max_urls - length(acc)
 
@@ -48,6 +52,7 @@ defmodule KilnCMSWeb.SitemapController do
           ct
           |> ContentTypes.list!(
             authorize?: true,
+            tenant: org_id,
             # Only the three fields the XML uses — at the 50k ceiling, full
             # rows (blocks + embeddings) would be a large memory spike per
             # rebuild.
