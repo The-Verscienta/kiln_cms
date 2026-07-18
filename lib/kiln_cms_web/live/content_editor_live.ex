@@ -1689,6 +1689,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
+            <%!-- In-context (front-end) editing on Kiln's own rendered page (#354). --%>
+            <.link
+              navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
+              class="btn btn-sm btn-default"
+            >
+              <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
+            </.link>
             <.autosave_status
               :if={@record.state == :draft or @save_state != :saved}
               state={@save_state}

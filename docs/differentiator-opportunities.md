@@ -137,6 +137,17 @@ the decoupling problem largely disappears:
 Hard parts (feasible, not free): inline rich text (TipTap in-page), structural
 add/reorder/delete, non-content chrome boundaries, concurrency (CRDT helps).
 
+**Phase 1 (shipped):** an authenticated editor "edit mode" on the rendered page
+at `/editor/site/:type/:slug` (`KilnCMSWeb.InContextEditLive`). It re-renders the
+record from the live draft (never the fired artifacts), annotates each block with
+its stable id, and makes heading / quote / rich-text regions `contenteditable`
+(rich text via TipTap with a floating toolbar). Blocks can also be reordered in
+place — drag-and-drop (SortableJS) or keyboard up/down, screen-reader announced.
+Edits push back over the socket and write through the same Ash `:update` /
+`:autosave` actions the block editor uses, so policies (#332) and paper-trail
+versioning are native. Reachable via "Edit on page" from the structured editor.
+Structural add/delete of blocks stays in the block editor / page-building (#335).
+
 ## 11. Tamper-evident audit log + editorial consent linking — [#356](https://github.com/The-Verscienta/kiln_cms/issues/356) `P1`
 
 Extends the governance story (#340 signing, #352 dashboard) with two parts:

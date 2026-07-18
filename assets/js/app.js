@@ -168,6 +168,54 @@ const Hooks = {
       this.collab && this.collab.release()
     },
   },
+  // In-context editing (#354): a plain-text `contenteditable` region (heading /
+  // quote block on the rendered page). Debounced input and blur push the region's
+  // text back to the LiveView, which writes it through the block's Ash update.
+  // The element is `phx-update="ignore"`, so the browser owns it while editing.
+  InlineText: {
+    mounted() {
+      this.onInput = () => {
+        clearTimeout(this._t)
+        this._t = setTimeout(() => this.push(), 600)
+      }
+      this.onBlur = () => {
+        clearTimeout(this._t)
+        this.push()
+      }
+      this.el.addEventListener("input", this.onInput)
+      this.el.addEventListener("blur", this.onBlur)
+    },
+    destroyed() {
+      clearTimeout(this._t)
+      this.el.removeEventListener("input", this.onInput)
+      this.el.removeEventListener("blur", this.onBlur)
+    },
+    push() {
+      this.pushEvent("update_block", {
+        id: this.el.dataset.kilnBlockId,
+        // innerText collapses the contenteditable's markup to the plain string
+        // these blocks store.
+        value: this.el.innerText.trim(),
+      })
+    },
+  },
+  // In-context editing (#354): a rich-text region on the rendered page. Loads the
+  // shared TipTap implementation on demand (kept out of the public bundle) and
+  // mounts it into this region with a floating formatting toolbar; edits push the
+  // sanitized-on-write HTML back to the LiveView.
+  InlineRichText: {
+    mounted() {
+      import("./rich_text").then(({mountInline}) => {
+        if (!this._destroyed) mountInline(this)
+      })
+    },
+    destroyed() {
+      this._destroyed = true
+      this.slash && this.slash.destroy()
+      this.toolbar && this.toolbar.remove()
+      this.editor && this.editor.destroy()
+    },
+  },
   // Notion-style slash-command block inserter (#29). The server renders the
   // trigger button + a menu of real `add_block` buttons (one per registered
   // block type); this hook layers on open/close, type-to-filter, and full
