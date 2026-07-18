@@ -52,7 +52,14 @@ defmodule KilnCMS.Accounts.Organization do
     defaults [:read, :destroy]
     default_accept [:name, :slug, :custom_domain, :status]
 
-    create :create, primary?: true
+    create :create do
+      primary? true
+      # Enforce the staged-rollout invariant: no second org until the delivery
+      # path threads a tenant (epic #336). The seeded default org is created by
+      # the backfill migration, which bypasses this action.
+      validate KilnCMS.Accounts.Validations.MultitenancyEnabled
+    end
+
     update :update, primary?: true
 
     # Tenant resolution: fetch an org by its subdomain slug (used by the routing
@@ -86,8 +93,11 @@ defmodule KilnCMS.Accounts.Organization do
       authorize_if expr(exists(memberships, user_id == ^actor(:id)))
     end
 
-    # Everything else is admin-only (covered by the bypass; explicit deny here).
-    policy always() do
+    # Provisioning/managing tenants is admin-only (covered by the bypass; explicit
+    # deny here). Scoped to write actions ONLY — a bare `policy always()` would
+    # also match `:read` and, since Ash AND-combines every applicable policy,
+    # would nullify the member-read grant above (a hard forbid, not a filter).
+    policy action_type([:create, :update, :destroy]) do
       forbid_if always()
     end
   end

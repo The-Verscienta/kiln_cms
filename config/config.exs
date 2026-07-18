@@ -177,6 +177,14 @@ config :kiln_cms, :graphql_introspection, true
 # which hides the registration route and rejects the registration action.
 config :kiln_cms, :registration_enabled, true
 
+# Multi-tenancy (epic #336). `false` (default) keeps the install single-tenant:
+# the `org_id` axis exists in non-strict `global?: true` mode and every row lives
+# in the seeded default org, but creating a *second* organization is refused —
+# because delivery reads don't yet thread a tenant, a second org would be spanned
+# by every tenant-less read (a cross-site leak). The routing/tenant-resolution PR
+# flips this on once delivery is tenant-aware.
+config :kiln_cms, :multitenancy_enabled, false
+
 # Content locales. Content is modelled per-locale (unique [slug, locale]); the
 # delivery layer serves the requested locale with a fallback to the default.
 # Non-default locales are served under a `/<locale>/…` URL prefix.

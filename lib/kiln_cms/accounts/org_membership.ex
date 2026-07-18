@@ -31,6 +31,14 @@ defmodule KilnCMS.Accounts.OrgMembership do
       reference :organization, on_delete: :delete
       reference :user, on_delete: :delete
     end
+
+    # The unique identity is `(user_id, organization_id)` (user_id-leading), which
+    # can't serve `organization_id`-only lookups — the `:for_org` read and the
+    # org-delete cascade both probe by `organization_id` alone. Postgres doesn't
+    # auto-index FK columns, so add one to avoid a sequential scan.
+    custom_indexes do
+      index [:organization_id]
+    end
   end
 
   actions do
@@ -61,8 +69,11 @@ defmodule KilnCMS.Accounts.OrgMembership do
       authorize_if expr(user_id == ^actor(:id))
     end
 
-    # Creating/changing/removing memberships is admin-only.
-    policy always() do
+    # Creating/changing/removing memberships is admin-only. Scoped to write
+    # actions ONLY — a bare `policy always()` would also match `:read` and, since
+    # Ash AND-combines every applicable policy, would nullify the self-read grant
+    # above (a hard forbid, not a filter).
+    policy action_type([:create, :update, :destroy]) do
       forbid_if always()
     end
   end
