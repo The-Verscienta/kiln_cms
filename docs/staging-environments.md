@@ -202,6 +202,8 @@ the gaps the *data* carries — the *config* is already inert:
 
 ## Cross-references
 
+- [`deploy-staging.md`](deploy-staging.md) — the deploy + operator checklist for this
+  feature (prerequisites, guards, teardown, rollback).
 - [`data-flows.md`](data-flows.md) — the authoritative map of what personal data Kiln
   holds and the `:anonymize` erasure action the scrub reuses.
 - [`deploy-p2.md`](deploy-p2.md) — the production Coolify redeploy posture this recipe
