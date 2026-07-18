@@ -1035,6 +1035,9 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # Compliance gate (#356): block publish when a required editorial consent
+          # is missing (config-gated, no-op by default — see the validation).
+          validate KilnCMS.CMS.Validations.RequiredConsent
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -1046,6 +1049,9 @@ defmodule KilnCMS.CMS.Content do
         update :publish_scheduled do
           # Run by the AshOban scheduler once `scheduled_at` has passed.
           require_atomic? false
+          # Same compliance gate as `:publish` (#356) — a scheduled publish must
+          # also satisfy any required consent.
+          validate KilnCMS.CMS.Validations.RequiredConsent
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)

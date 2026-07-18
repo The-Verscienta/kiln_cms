@@ -243,6 +243,15 @@ defmodule KilnCMS.CMS do
       define :record_webhook_delivery_attempt, action: :record_attempt
     end
 
+    # Editorial/authorization consent linked to content (#356).
+    resource KilnCMS.CMS.Consent do
+      define :record_consent, action: :record
+      define :list_consents, action: :read
+      define :list_consents_for, action: :for_content, args: [:content_type, :content_id]
+      define :get_consent, action: :read, get_by: [:id]
+      define :destroy_consent, action: :destroy
+    end
+
     # Admin-defined public forms (contact/signup/…) + their submissions.
     resource KilnCMS.CMS.Form do
       define :list_forms, action: :read
