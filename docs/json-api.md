@@ -1,10 +1,12 @@
 # Headless JSON:API
 
-KilnCMS exposes a [JSON:API](https://jsonapi.org/)-compliant read surface for
+KilnCMS exposes a [JSON:API](https://jsonapi.org/)-compliant surface for
 headless consumers at **`/api/json`** (powered by
-[AshJsonApi](https://hexdocs.pm/ash_json_api)). This document covers the
-filtering, sorting and pagination query params for the public content types —
-**Page**, **Post** and **MediaItem** — tuned in Phase 5 (issue #33).
+[AshJsonApi](https://hexdocs.pm/ash_json_api)). Reads are anonymous-friendly;
+**writes** (create / update / workflow / soft-delete) require an API key —
+see [Writing](#writing-330). This document covers the read query params
+(filtering, sorting, pagination) for the public content types — **Page**,
+**Post** and **MediaItem** (tuned in Phase 5, issue #33) — and the write routes.
 
 > The machine-readable OpenAPI spec (`/api/json/open_api`) and its interactive
 > Swagger UI (`/api/json/swaggerui`) are published in **all environments** (dev
@@ -265,5 +267,95 @@ Link edges arrive as `content_link` compound members carrying their payload
 (`kind`, `position`, `label`, `metadata`, `source_id`, `target_id`), so a
 consumer can join outgoing/incoming relations (and e.g. per-link dosage
 metadata) without extra requests. The embedded block tree is **not**
-exposed over JSON:API — rendered content is served as fired artifacts at
-`GET /api/content/:type/:slug`.
+exposed over JSON:API for *reads* — rendered content is served as fired
+artifacts at `GET /api/content/:type/:slug`. For *writes*, send the body via the
+`block_tree` attribute (see [Writing](#writing-330)).
+
+## Writing (#330)
+
+> **Reverses D7.** The JSON:API was originally read-only *by design*; write
+> routes were added so external apps can write back into the CMS. **Writes
+> require an API key** (`Authorization: Bearer kiln_…`) or an editor/admin JWT —
+> a read-only key and anonymous callers are rejected by the resource policies.
+> This is the same auth model as [`/mcp`](mcp.md): a key acts as its owning
+> user, bounded by its `access` scope. Mint keys at `/editor/api-keys`.
+
+Use the JSON:API media type on both `Accept` and `Content-Type`:
+`application/vnd.api+json`.
+
+| Route | Action | Who | Effect |
+|-------|--------|-----|--------|
+| `POST /api/json/posts` | `:create` | `:read_write` key, editor+ | Creates a **draft**, attributed to the key's owner |
+| `PATCH /api/json/posts/:id` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if already published |
+| `PATCH /api/json/posts/:id/submit-for-review` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
+| `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
+| `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
+| `DELETE /api/json/posts/:id` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
+
+Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
+`create` needs a `type_definition_id` — discover types via `/mcp`'s
+`read_type_definitions`).
+
+**Authorization** mirrors `/mcp`: a **read-only key** can run none of these; a
+**`:read_write` key on a `:viewer`** account can run none; a **`:read_write` key
+on an `:editor`** can create/update/submit; **publish, unpublish and delete
+require an `:admin`** account. Hard delete (`:purge`) is **never** routed and is
+API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
+
+### Creating and editing
+
+```bash
+# Create a draft post
+curl -s http://localhost:4000/api/json/posts \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{
+    "data": {
+      "type": "post",
+      "attributes": {
+        "title": "Written over the API",
+        "slug": "hello-api",
+        "block_tree": [{ "type": "rich_text", "content": "<p>Body</p>", "order": 1 }]
+      }
+    }
+  }'
+```
+
+`tag_ids` / `category_id` / `featured_image_id` and the SEO / `audience` /
+`custom_fields` / scheduling attributes are all writable. Relationship arrays
+(`tag_ids`, `related_post_ids`) are passed as attributes.
+
+### Writing body content — the `block_tree` attribute
+
+The typed `blocks` union isn't exposed on the auto API (it isn't `public?`), so
+body content is written through a public **`block_tree`** attribute: an array of
+block maps (the same shape the editor and MCP submit), cast into the union —
+which **sanitizes** rich-text HTML and media URLs. On an update, **omit**
+`block_tree` to leave the body untouched (a metadata-only `PATCH` never wipes
+it); send `[]` to clear it.
+
+### Re-fire semantics
+
+Firing (immutable per-surface artifact regeneration) is bound to `:publish`, so
+the publish route re-fires automatically. Editing already-published content with
+`PATCH /:id` **also** re-fires (a `published`-guarded re-fire on `:update`,
+#330), so a write-through to live content never leaves a stale artifact. Draft
+edits do not fire.
+
+### Workflow routes take an empty resource object
+
+The workflow `PATCH` routes (`/publish`, `/unpublish`, `/submit-for-review`)
+carry no attributes — send the JSON:API resource identifier only:
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/posts/<uuid>/publish \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_ADMIN_API_KEY" \
+  -d '{ "data": { "type": "post", "id": "<uuid>", "attributes": {} } }'
+```
+
+The full request/response schemas (including the write routes) are in the
+published OpenAPI spec at `/api/json/open_api` and the Swagger UI at
+`/api/json/swaggerui`.

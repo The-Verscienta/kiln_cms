@@ -175,7 +175,7 @@ defmodule KilnCMS.Accounts.ApiKeyTest do
                )
     end
 
-    test "no key may hard-delete content, even a write key on an admin account" do
+    test "no key may HARD-delete (:purge) content, even a write key on an admin account" do
       admin = user(:admin)
 
       page =
@@ -186,10 +186,27 @@ defmodule KilnCMS.Accounts.ApiKeyTest do
 
       actor = key_actor(admin, mint(admin, admin, access: :read_write))
 
-      assert {:error, %Ash.Error.Forbidden{}} = KilnCMS.CMS.destroy_page(page, actor: actor)
+      # Hard delete stays banned for every key regardless of scope/role (#330).
+      assert {:error, %Ash.Error.Forbidden{}} = KilnCMS.CMS.purge_page(page, actor: actor)
 
-      # The same admin, keyless, may (soft-)delete.
-      assert :ok = KilnCMS.CMS.destroy_page(page, actor: admin)
+      # The same admin, keyless, may hard-delete.
+      assert :ok = KilnCMS.CMS.purge_page(page, actor: admin)
+    end
+
+    test "a write key soft-deletes as its owner's role — admin yes, but a read key never" do
+      admin = user(:admin)
+      slug = fn -> "sd-#{System.unique_integer([:positive])}" end
+
+      p1 = KilnCMS.CMS.create_page!(%{title: "SD", slug: slug.()}, actor: admin)
+      p2 = KilnCMS.CMS.create_page!(%{title: "SD", slug: slug.()}, actor: admin)
+
+      # A read-only key can never soft-delete (fails the write-scope gate).
+      read_actor = key_actor(admin, mint(admin, admin))
+      assert {:error, %Ash.Error.Forbidden{}} = KilnCMS.CMS.destroy_page(p1, actor: read_actor)
+
+      # A :read_write key acts as its owner — an admin's key may soft-delete (#330).
+      write_actor = key_actor(admin, mint(admin, admin, access: :read_write))
+      assert :ok = KilnCMS.CMS.destroy_page(p2, actor: write_actor)
     end
   end
 end

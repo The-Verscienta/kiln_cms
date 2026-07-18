@@ -237,6 +237,18 @@ defmodule KilnCMS.CMS.Content do
 
               list :autocomplete_published_entries, :autocomplete_published
             end
+
+            # Write surface (#330) — one generic set over the shared entry tier.
+            # `create_entry` needs a `type_definition_id`. Same policy stack as
+            # the compiled types; `hide_inputs: [:blocks]` as above.
+            mutations do
+              create :create_entry, :create, hide_inputs: [:blocks]
+              update :update_entry, :update, hide_inputs: [:blocks]
+              update :submit_entry_for_review, :submit_for_review, hide_inputs: [:blocks]
+              update :publish_entry, :publish, hide_inputs: [:blocks]
+              update :unpublish_entry, :unpublish, hide_inputs: [:blocks]
+              destroy :delete_entry, :destroy, hide_inputs: [:blocks]
+            end
           end
 
           json_api do
@@ -269,6 +281,17 @@ defmodule KilnCMS.CMS.Content do
               index :autocomplete_published, route: "/autocomplete/published"
               unquote(published_route)
               get :read
+
+              # Write surface (#330) — the shared entry tier, same policy stack
+              # as the compiled types. `create` requires `type_definition_id`
+              # (discover types via `/api/json/type-definitions` or MCP's
+              # `read_type_definitions`). See docs/json-api.md → "Writing".
+              post :create
+              patch :update
+              patch :submit_for_review, route: "/:id/submit-for-review"
+              patch :publish, route: "/:id/publish"
+              patch :unpublish, route: "/:id/unpublish"
+              delete :destroy
             end
           end
         end
@@ -325,6 +348,26 @@ defmodule KilnCMS.CMS.Content do
 
               list unquote(:"autocomplete_published_#{type}s"), :autocomplete_published
             end
+
+            # Write surface (#330 — reverses D7). GraphQL mutations mirror the
+            # JSON:API write routes and share the identical policy stack: a
+            # read-only API key is forbidden every write; a `:read_write` key
+            # acts as its owning user (create/update/submit as editor, publish as
+            # admin). `hide_inputs: [:blocks]` keeps the non-public `blocks` union
+            # out of every mutation input (AshGraphql can't build an input type
+            # for it); body content goes through the public `block_tree` argument.
+            mutations do
+              create unquote(:"create_#{type}"), :create, hide_inputs: [:blocks]
+              update unquote(:"update_#{type}"), :update, hide_inputs: [:blocks]
+
+              update unquote(:"submit_#{type}_for_review"), :submit_for_review,
+                hide_inputs: [:blocks]
+
+              update unquote(:"publish_#{type}"), :publish, hide_inputs: [:blocks]
+              update unquote(:"unpublish_#{type}"), :unpublish, hide_inputs: [:blocks]
+              # Reversible soft-delete; hard `:purge` is never exposed.
+              destroy unquote(:"delete_#{type}"), :destroy, hide_inputs: [:blocks]
+            end
           end
 
           json_api do
@@ -372,6 +415,22 @@ defmodule KilnCMS.CMS.Content do
               unquote(published_route)
               # `/:id` last so it can't shadow the static sub-paths above.
               get :read
+
+              # Write surface (#330 — reverses D7 for authenticated writers).
+              # Same policy stack as `/mcp`: a read-only API key is forbidden
+              # every write by the resource policies; a `:read_write` key acts as
+              # its owning user (create/update/submit as an editor; publish as an
+              # admin). Anonymous/JWT writers are governed by role alone. Body
+              # content is written via the public `block_tree` argument (the raw
+              # `blocks` union isn't exposed). See docs/json-api.md → "Writing".
+              post :create
+              patch :update
+              patch :submit_for_review, route: "/:id/submit-for-review"
+              patch :publish, route: "/:id/publish"
+              patch :unpublish, route: "/:id/unpublish"
+              # DELETE is a reversible soft-delete (AshArchival); hard `:purge`
+              # is deliberately never routed and is API-key-banned.
+              delete :destroy
             end
           end
         end
@@ -932,10 +991,14 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # Soft-delete (AshArchival). Non-atomic so the cache-busting after_action
-        # change can run.
+        # change can run. `DeleteArtifacts` purges any fired artifacts so a
+        # soft-deleted (archived) record can't keep being served from the
+        # artifact cache/table — matters now that soft-delete is reachable over
+        # the headless write API (#330), not just admin-only from LiveView.
         destroy :destroy do
           primary? true
           require_atomic? false
+          change KilnCMS.CMS.Changes.DeleteArtifacts
         end
 
         create :create do
@@ -951,6 +1014,11 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          # Headless block-body writes (#330): the `blocks` union isn't public on
+          # the auto API, so accept the body as a public array of block maps and
+          # cast it into the union (sanitized on cast). Omitted = empty body.
+          argument :block_tree, {:array, :map}
+          change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
@@ -974,6 +1042,10 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
+          # Headless block-body writes (#330) — see `:create`. Omitted argument
+          # leaves the existing body untouched (a metadata-only PATCH is safe).
+          argument :block_tree, {:array, :map}
+          change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
@@ -981,6 +1053,12 @@ defmodule KilnCMS.CMS.Content do
           # Edits to already-published content fire a `<type>.updated` webhook;
           # `only_when: :published` keeps draft edits and autosaves silent.
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+
+          # Re-fire when editing already-live content (#330). Firing is otherwise
+          # bound to `:publish`; an in-place edit of a published record (headless
+          # write-through, in-context editing) would leave the fired artifact
+          # stale. `only_when: :published` keeps draft edits/autosaves silent.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
@@ -1175,11 +1253,21 @@ defmodule KilnCMS.CMS.Content do
           authorize_if always()
         end
 
-        # No key may destroy content, whatever its scope — an automation
-        # credential has no business hard-deleting (archive/unpublish are
-        # update actions, gated by the write scope above).
-        policy action_type(:destroy) do
+        # Hard delete (`:purge`) is never available to any API key, whatever its
+        # scope or the owning user's role — an automation credential has no
+        # business permanently destroying content (the write API doesn't route
+        # it either). Reversible removals (soft-delete/unpublish/archive) remain.
+        policy action(:purge) do
           forbid_if AshAuthentication.Checks.UsingApiKey
+          authorize_if always()
+        end
+
+        # Soft-delete (`:destroy`, AshArchival — reversible via restore) follows
+        # the write scope like create/update (#330): a read-only key can never
+        # delete; a `:read_write` key falls through to the owning user's role
+        # (admin-only, per the destroy policy below), same model as `/mcp`.
+        policy action(:destroy) do
+          forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
           authorize_if always()
         end
 

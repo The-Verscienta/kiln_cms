@@ -1,10 +1,12 @@
 defmodule KilnCMSWeb.DeliveryGraphqlTest do
   @moduledoc """
-  Issue #34 — the curated, read-only public GraphQL delivery surface (D7).
+  Issue #34 — the curated public GraphQL delivery surface.
 
   Anonymous queries go through the read policies, so only published content (and
-  world-readable taxonomy) is ever returned, and no authoring/workflow mutations
-  are exposed at all.
+  world-readable taxonomy) is ever returned. Since #330 the surface also carries
+  authoring/workflow mutations (the reversal of D7); this suite asserts the read
+  contract and that the mutations are *present* — their authorization is covered
+  end-to-end by `KilnCMSWeb.WriteApiTest`.
   """
   use KilnCMS.DataCase, async: true
 
@@ -204,31 +206,50 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
     end
   end
 
-  describe "deliberate non-exposure (D7)" do
-    test "no authoring/workflow mutations are exposed" do
-      mutation_fields =
+  describe "write surface (#330 — reverses D7)" do
+    setup do
+      names =
         @schema
         |> Absinthe.Schema.lookup_type("RootMutationType")
         |> case do
           nil -> %{}
           type -> type.fields
         end
+        |> Map.keys()
 
-      names = Map.keys(mutation_fields)
+      %{names: names}
+    end
 
-      # The public surface is read-only — none of the content write actions leak.
-      for forbidden <- [
+    test "content write/workflow mutations ARE now exposed (auth is policy-gated)", %{
+      names: names
+    } do
+      # #330 reverses read-only-by-design: content types carry create/update/
+      # workflow/soft-delete mutations. Access is enforced by the resource
+      # policies (read-only key / anonymous can't write) — see WriteApiTest —
+      # not by the mutations' absence from the schema.
+      for expected <- [
             :create_page,
             :update_page,
+            :submit_page_for_review,
             :publish_page,
-            :destroy_page,
+            :unpublish_page,
+            :delete_page,
             :create_post,
             :publish_post,
-            :create_category,
-            :create_tag
+            :create_entry
           ] do
+        assert expected in names,
+               "expected #{expected} mutation on the write surface (#330)"
+      end
+    end
+
+    test "hard delete and taxonomy writes stay unexposed", %{names: names} do
+      # Reversible soft-delete (`delete_*`) is exposed; the hard `:purge` is
+      # never routed. Taxonomy (category/tag) remains read-only — no write
+      # mutations were added there.
+      for forbidden <- [:purge_page, :destroy_page, :create_category, :create_tag] do
         refute forbidden in names,
-               "expected no #{forbidden} mutation on the public GraphQL surface"
+               "expected no #{forbidden} mutation on the GraphQL surface"
       end
     end
 
