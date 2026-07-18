@@ -194,3 +194,12 @@ not impose one because it is jurisdiction- and policy-dependent.
 - [ ] Documented your content-version (PaperTrail) audit-retention period.
 - [ ] Know the two subject-rights paths: self-export (`/editor/settings`) and
       admin erasure (`anonymize_user`).
+
+## Staging / preview environments
+
+Non-production copies of the database are a privacy concern too: a naive `pg_dump`
+of production carries every editor's email, live API keys, webhook signing secrets,
+and the DKIM private key into a less-locked-down box. KilnCMS ships a **scrub** that
+reuses the `:anonymize` erasure action above (plus the same retention purges) to make
+a clone PII-free and secret-free by default. See
+[`staging-environments.md`](staging-environments.md).

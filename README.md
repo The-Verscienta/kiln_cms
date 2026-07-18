@@ -169,6 +169,15 @@ in the runtime image for image processing. Target: Coolify (RackNerd VPS) or Fly
 Performance SLOs, Oban queue/`POOL_SIZE` tuning, and load-test recipes are in
 [`docs/performance.md`](docs/performance.md).
 
+### Staging / preview environments
+
+Stand up a throwaway copy of production content to rehearse an upgrade or review a
+change, then throw it away. `./scripts/staging.sh up` clones the production database,
+migrates it, and **scrubs it of personal data and outbound secrets** (reusing the
+GDPR-erasure `:anonymize` action) so the copy is safe to run somewhere less
+locked-down. See [`docs/staging-environments.md`](docs/staging-environments.md) for
+the one-command flow, the Docker/Coolify recipe, and the safety guards.
+
 ### Production hardening checklist
 
 - **`dev_routes` must stay off.** It is only set in `config/dev.exs`; `config/prod.exs`
