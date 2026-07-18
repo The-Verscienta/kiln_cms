@@ -11,9 +11,10 @@ defmodule KilnCMSWeb.InContextEditLive do
   the same Ash `:update`/`:autosave` actions the structured editor uses — so
   policies (#332) and PaperTrail versioning are native, with no separate write path.
 
-  Phase 1 scope is inline text editing of existing blocks. Structural add / reorder
-  / delete of blocks belongs to the block editor and page-building (#335) and is
-  intentionally out of scope here — the "Open full editor" link covers it.
+  Scope is inline text editing of existing blocks plus drag-and-drop (and
+  keyboard) reordering. Structural add / delete of blocks belongs to the block
+  editor and page-building (#335) and stays out of scope — the "Open full editor"
+  link covers it.
 
   Editor/admin only (mounted in the `:editor_routes` live session). The per-type
   authoring scope is enforced by the resource policies at save time, exactly as in
@@ -65,6 +66,7 @@ defmodule KilnCMSWeb.InContextEditLive do
              |> assign(:autosave_timer, nil)
              |> assign(:save_state, :saved)
              |> assign(:conflict, false)
+             |> assign(:moved_announcement, nil)
              # Bumped on server-driven form replacement (save/restore/reload) so the
              # `phx-update="ignore"` editable regions remount and reload from the
              # fresh content rather than keeping the stale DOM they own.
@@ -151,6 +153,35 @@ defmodule KilnCMSWeb.InContextEditLive do
 
       :error ->
         {:noreply, socket}
+    end
+  end
+
+  # Drag-and-drop reorder (the `Sortable` hook pushes the new order of block ids).
+  # Reordering is a structural edit, but a single-block move is cheap and stays on
+  # the inline surface; add/remove of blocks remains in the full editor (#335).
+  def handle_event("reorder", %{"order" => order}, socket) do
+    case reordered(socket, order) do
+      {:ok, socket} -> {:noreply, mark_dirty(socket)}
+      :noop -> {:noreply, socket}
+    end
+  end
+
+  # Keyboard-accessible reorder (the up/down buttons), so reordering isn't
+  # drag-only (mirrors the block editor's #171 controls). Announces the move.
+  def handle_event("move_block", %{"id" => id, "dir" => dir}, socket) do
+    ids = Enum.map(socket.assigns.blocks, &to_string(&1.id))
+
+    with {order, pos} <- neighbor_swap(ids, id, dir),
+         {:ok, socket} <- reordered(socket, order) do
+      {:noreply,
+       socket
+       |> mark_dirty()
+       |> assign(
+         :moved_announcement,
+         gettext("Moved block to position %{pos} of %{count}", pos: pos + 1, count: length(ids))
+       )}
+    else
+      _ -> {:noreply, socket}
     end
   end
 
@@ -275,6 +306,42 @@ defmodule KilnCMSWeb.InContextEditLive do
     end
   end
 
+  # The id order that swaps block `id` with its neighbour in `dir` (`"up"`/down),
+  # plus the target position, or nil if there's no neighbour that way.
+  defp neighbor_swap(ids, id, dir) do
+    i = Enum.find_index(ids, &(&1 == id))
+    j = if dir == "up", do: i && i - 1, else: i && i + 1
+
+    if (i && j && j >= 0) and j < length(ids) do
+      {ids |> List.replace_at(i, Enum.at(ids, j)) |> List.replace_at(j, id), j}
+    end
+  end
+
+  # Reorder the working set (both the save inputs and the render descriptors) to
+  # match `order`, a list of block-id strings. Returns `:noop` — never a partial
+  # order — unless `order` is exactly a permutation of the current block ids, so a
+  # stray/missing id (e.g. a not-yet-backfilled null-id block whose sort key is "")
+  # can never silently drop a block on the next save.
+  defp reordered(socket, order) do
+    inputs_by_id = Map.new(socket.assigns.block_inputs, &{to_string(&1["id"]), &1})
+    blocks_by_id = Map.new(socket.assigns.blocks, &{to_string(&1.id), &1})
+    current = MapSet.new(Map.keys(blocks_by_id))
+
+    if length(order) == map_size(blocks_by_id) and MapSet.equal?(MapSet.new(order), current) do
+      inputs = Enum.map(order, &Map.fetch!(inputs_by_id, &1))
+
+      blocks =
+        order
+        |> Enum.map(&Map.fetch!(blocks_by_id, &1))
+        |> Enum.with_index()
+        |> Enum.map(fn {block, index} -> %{block | index: index} end)
+
+      {:ok, socket |> assign(:block_inputs, inputs) |> assign(:blocks, blocks)}
+    else
+      :noop
+    end
+  end
+
   # True when a failed update was rejected by the optimistic lock (the row moved
   # underneath us) rather than by ordinary validation.
   defp stale_conflict?(error), do: stale_error?(error)
@@ -316,8 +383,51 @@ defmodule KilnCMSWeb.InContextEditLive do
           {gettext("to add blocks.")}
         </p>
 
-        <div class="mt-6 space-y-4">
-          <.block :for={block <- @blocks} block={block} region_version={@region_version} />
+        <%!-- Announces keyboard reorder moves to screen readers (mirrors #171). --%>
+        <p class="sr-only" role="status" aria-live="polite">{@moved_announcement}</p>
+
+        <div id="in-context-blocks" phx-hook="Sortable" class="mt-6 space-y-4">
+          <div
+            :for={block <- @blocks}
+            id={"block-wrap-#{block.id}"}
+            data-sort-id={block.id}
+            class="group relative"
+          >
+            <div class="absolute -left-9 top-0 hidden items-center gap-0.5 pr-1 group-hover:flex group-focus-within:flex">
+              <span
+                data-drag-handle
+                aria-label={gettext("Drag to reorder")}
+                class="cursor-grab text-base-content/40 hover:text-base-content/70"
+              >
+                <.icon name="hero-bars-3" class="size-5" />
+              </span>
+              <div class="flex flex-col">
+                <button
+                  type="button"
+                  phx-click="move_block"
+                  phx-value-id={block.id}
+                  phx-value-dir="up"
+                  disabled={block.index == 0}
+                  aria-label={gettext("Move block up")}
+                  class="text-base-content/40 hover:text-base-content/70 disabled:opacity-30"
+                >
+                  <.icon name="hero-chevron-up" class="size-4" />
+                </button>
+                <button
+                  type="button"
+                  phx-click="move_block"
+                  phx-value-id={block.id}
+                  phx-value-dir="down"
+                  disabled={block.index == length(@blocks) - 1}
+                  aria-label={gettext("Move block down")}
+                  class="text-base-content/40 hover:text-base-content/70 disabled:opacity-30"
+                >
+                  <.icon name="hero-chevron-down" class="size-4" />
+                </button>
+              </div>
+            </div>
+            <.block block={block} region_version={@region_version} />
+          </div>
         </div>
       </article>
     </Layouts.public>

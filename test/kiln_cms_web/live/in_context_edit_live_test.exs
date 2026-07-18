@@ -89,6 +89,11 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
     |> Map.get(field)
   end
 
+  # The stored block ids in order.
+  defp block_order(page_id) do
+    CMS.get_page!(page_id, authorize?: false).blocks |> Enum.map(& &1.value.id)
+  end
+
   describe "mount and render" do
     test "renders each block with stable ids and inline-editable regions", %{conn: conn} do
       editor = authed_user(:editor)
@@ -195,6 +200,70 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
 
       assert html =~ "Saved."
       assert block_value(page.id, ids.quote, :text) == "Saved quote"
+    end
+  end
+
+  describe "reordering" do
+    test "the surface renders a sortable list with drag handles", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      assert html =~ ~s(id="in-context-blocks")
+      assert html =~ ~s(phx-hook="Sortable")
+      assert html =~ ~s(data-sort-id="#{ids.heading}")
+      assert html =~ "data-drag-handle"
+    end
+
+    test "a drag reorder autosaves the new block order", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      # Sortable pushes the new order of block ids after a drop.
+      new_order = [ids.quote, ids.heading, ids.image, ids.rich]
+      render_hook(lv, "reorder", %{"order" => Enum.map(new_order, &to_string/1)})
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert block_order(page.id) == new_order
+    end
+
+    test "keyboard move down swaps a block with its neighbour", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      html = render_hook(lv, "move_block", %{"id" => ids.heading, "dir" => "down"})
+      # The move is announced to screen readers.
+      assert html =~ "Moved block to position 2 of 4"
+
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert block_order(page.id) == [ids.rich, ids.heading, ids.quote, ids.image]
+    end
+
+    test "an order that isn't a permutation of the blocks is refused (no data loss)",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      original = block_order(page.id)
+
+      # A short/garbled order (e.g. a null-id block's "" sort key) must not drop
+      # blocks — it's ignored, leaving the order and every block intact.
+      render_hook(lv, "reorder", %{"order" => [to_string(ids.heading), ""]})
+      refute render(lv) =~ "Saving…"
+
+      send(lv.pid, :autosave)
+      render(lv)
+      assert block_order(page.id) == original
     end
   end
 
