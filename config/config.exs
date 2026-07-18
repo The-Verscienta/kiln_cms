@@ -289,6 +289,28 @@ config :phoenix_live_view,
 # at the `config/runtime.exs`.
 config :kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Local
 
+# Cryptographically signed / provenance-verified content (#340). When enabled,
+# each fired :web/:json/:json_ld artifact gets a C2PA-*style* detached manifest:
+# a signed SHA-256 hash bound to a claim (signer identity, AI-generation
+# disclosure, origin, version, timestamp), verifiable via /api/provenance/*.
+# **Off by default** — no manifest is produced and the verify endpoints 404, so
+# the lean install pays nothing. See docs/provenance.md.
+#
+# `signing_key` reuses KilnCMS.Keys (the DKIM signing infra): `:dkim` shares the
+# mail signing key, or point at a dedicated content-signing key with
+# `{:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}` / `{:file, %{"path" => …}}`
+# (PKCS#1 RSA PEM, like DKIM). Configure the key source in runtime.exs for prod.
+config :kiln_cms, KilnCMS.Provenance,
+  enabled: false,
+  # Human-readable signer identity; defaults to :site_name when unset.
+  signer: nil,
+  # Origin URL recorded in the claim; defaults to :public_base_url when unset.
+  origin: nil,
+  # Default AI disclosure when a document doesn't set custom_fields["ai_disclosure"]:
+  # :human | :ai_assisted | :ai_generated.
+  ai_disclosure: :human,
+  signing_key: {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",

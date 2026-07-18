@@ -357,6 +357,14 @@ defmodule KilnCMSWeb.Router do
     # RAG "ask your content" (#339): retrieval over published content + cited
     # sources, with an optional (config-gated) generated answer.
     get "/ask", AskController, :ask
+
+    # Signed / provenance-verified content (#340). C2PA-*style* detached
+    # manifests over fired artifacts; all 404 unless provenance is enabled.
+    # `public-key` is registered before the `:type/:slug` pattern (different
+    # arity — no shadowing, but kept first for clarity).
+    get "/provenance/public-key", ProvenanceController, :public_key
+    get "/provenance/:type/:slug", ProvenanceController, :manifest
+    get "/provenance/:type/:slug/verify", ProvenanceController, :verify
   end
 
   # Embeddable form: the iframe document a third-party site frames via

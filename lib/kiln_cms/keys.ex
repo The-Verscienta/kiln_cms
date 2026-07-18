@@ -36,12 +36,28 @@ defmodule KilnCMS.Keys do
   `:dkim` — the DKIM signing key; provider choice and config live on the
   `KilnCMS.Mail.Settings` singleton. `{:error, :not_configured}` when the
   settings row doesn't exist yet.
+
+  `:provenance` — the content-signing key for C2PA-*style* signed artifacts
+  (#340). Its source is config, not the DB singleton: `config :kiln_cms,
+  KilnCMS.Provenance, signing_key: {:env, %{"var" => …}} | {:file, %{"path" =>
+  …}} | :dkim`. `:dkim` reuses the mail signing key (the same "this org's RSA
+  key" the issue points at); the tuple forms resolve through the env/file
+  providers, letting an operator point at a dedicated content-signing key.
   """
-  @spec fetch(:dkim) :: {:ok, binary()} | {:error, term()}
+  @spec fetch(:dkim | :provenance) :: {:ok, binary()} | {:error, term()}
   def fetch(:dkim) do
     case KilnCMS.Mail.get_settings() do
       nil -> {:error, :not_configured}
       settings -> fetch_for(settings)
+    end
+  end
+
+  def fetch(:provenance) do
+    case Application.get_env(:kiln_cms, KilnCMS.Provenance, [])[:signing_key] do
+      :dkim -> fetch(:dkim)
+      {provider, config} when provider in @provider_names -> provider!(provider).fetch(config)
+      nil -> {:error, :not_configured}
+      other -> {:error, {:invalid_key_source, other}}
     end
   end
 
@@ -110,6 +126,30 @@ defmodule KilnCMS.Keys do
 
       {:ok, Base.encode64(der)}
     end
+  end
+
+  @doc """
+  Decode an RSA private key PEM to the `:public_key` record used by
+  `:public_key.sign/3` (shared by the provenance signer, #340). Same PKCS#1
+  requirement as DKIM — PKCS#8 is rejected with `:pkcs8_unsupported`.
+  """
+  @spec rsa_private_key(binary()) :: {:ok, tuple()} | {:error, term()}
+  def rsa_private_key(pem) when is_binary(pem), do: decode_rsa_private_key(pem)
+
+  @doc """
+  Derive the `:RSAPublicKey` record (`{:RSAPublicKey, modulus, exponent}`) from
+  an RSA private key record — the public half used to verify signatures.
+  """
+  @spec rsa_public_key(tuple()) :: tuple()
+  def rsa_public_key(private_key) do
+    {:RSAPublicKey, elem(private_key, 2), elem(private_key, 3)}
+  end
+
+  @doc "Encode an RSA private key's public half as a SubjectPublicKeyInfo PEM."
+  @spec rsa_public_key_pem(tuple()) :: binary()
+  def rsa_public_key_pem(private_key) do
+    entry = :public_key.pem_entry_encode(:SubjectPublicKeyInfo, rsa_public_key(private_key))
+    :public_key.pem_encode([entry])
   end
 
   @doc """
