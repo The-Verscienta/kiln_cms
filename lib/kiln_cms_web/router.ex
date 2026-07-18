@@ -234,6 +234,8 @@ defmodule KilnCMSWeb.Router do
       ] do
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index
+      # Editorial automation (#342) — no-code "when X happens, do Y" rules.
+      live "/editor/automation", AutomationLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
       live "/editor/mail", MailSettingsLive, :index

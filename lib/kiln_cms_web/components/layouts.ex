@@ -306,6 +306,12 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/webhooks",
             icon: "hero-bolt"
           },
+          %{
+            key: :automation,
+            label: gettext("Automation"),
+            path: ~p"/editor/automation",
+            icon: "hero-cpu-chip"
+          },
           %{key: :mail, label: gettext("Mail"), path: ~p"/editor/mail", icon: "hero-envelope"},
           %{
             key: :newsletter,

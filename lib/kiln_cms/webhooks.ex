@@ -53,6 +53,13 @@ defmodule KilnCMS.Webhooks do
       query: Ash.Query.filter(CMS.WebhookEndpoint, active == true and ^event in events)
     )
     |> Enum.each(&enqueue(&1.id, event, payload))
+
+    # Editorial automation (#342) reacts to the same editorial events — this is
+    # the single funnel every `<type>.published`/`.unpublished`/`.updated` flows
+    # through. Never raises (a rule problem must not break the publish).
+    KilnCMS.Automation.handle_event(event, payload)
+
+    :ok
   end
 
   @doc """
