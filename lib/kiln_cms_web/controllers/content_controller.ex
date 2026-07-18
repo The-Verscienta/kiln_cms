@@ -376,16 +376,47 @@ defmodule KilnCMSWeb.ContentController do
   defp blocks(record) do
     # Blocks are stored as the typed union (Kiln v2); convert back to legacy block
     # structs so the existing media-enriching renderer (`BlockComponents`) is
-    # unchanged. Public delivery still goes through the same shapes as before.
-    raw =
-      record.blocks
-      |> KilnCMS.CMS.TypedBlocks.to_typed()
-      |> KilnCMS.CMS.TypedBlocks.to_legacy()
-      |> Enum.map(&struct(KilnCMS.CMS.Block, &1))
+    # unchanged. A `columns` block (#335) nests child blocks, so the tree is built
+    # recursively and flattened once for the media/form preloads — a nested image
+    # or form is loaded in the same batched query as a top-level one.
+    tree = block_tree(record.blocks)
+    flat = flatten_block_tree(tree)
 
-    media = load_block_media(raw)
-    forms = load_block_forms(raw)
-    Enum.map(raw, &enrich_block(&1, media, forms))
+    media = load_block_media(flat)
+    forms = load_block_forms(flat)
+    Enum.map(tree, &enrich_block(&1, media, forms))
+  end
+
+  # Typed union → legacy `KilnCMS.CMS.Block` structs, recursing into `columns`
+  # children so each nested block is itself a legacy struct the renderer handles.
+  defp block_tree(blocks) do
+    blocks
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+    |> Enum.map(&struct(KilnCMS.CMS.Block, &1))
+    |> Enum.map(&nest_columns/1)
+  end
+
+  defp nest_columns(%KilnCMS.CMS.Block{type: :columns, data: data} = block) do
+    cols =
+      for col <- data["columns"] || [] do
+        %{"blocks" => col |> Map.get("blocks", []) |> block_tree()}
+      end
+
+    %{block | data: Map.put(data, "columns", cols)}
+  end
+
+  defp nest_columns(block), do: block
+
+  # Depth-first block list, so the media/form preloads see nested blocks too.
+  defp flatten_block_tree(blocks) do
+    Enum.flat_map(blocks, fn
+      %KilnCMS.CMS.Block{type: :columns, data: %{"columns" => cols}} = block ->
+        [block | Enum.flat_map(cols, &flatten_block_tree(&1["blocks"] || []))]
+
+      block ->
+        [block]
+    end)
   end
 
   # Batch-load the active forms referenced by form blocks (fields included),
@@ -427,6 +458,9 @@ defmodule KilnCMSWeb.ContentController do
     base = %{type: to_string(block.type), content: block.content}
 
     cond do
+      block.type == :columns ->
+        enrich_columns(base, block, media, forms)
+
       block.type == :image && match?(%{}, media[block.data["media_id"]]) ->
         item = media[block.data["media_id"]]
 
@@ -445,6 +479,22 @@ defmodule KilnCMSWeb.ContentController do
       true ->
         base
     end
+  end
+
+  # Recursively enrich a columns block's nested children (each column's blocks go
+  # through the same `enrich_block/3` a top-level block does), and attach the grid
+  # style so `BlockComponents` lays the container out identically to firing.
+  defp enrich_columns(base, block, media, forms) do
+    cols =
+      for col <- block.data["columns"] || [] do
+        %{blocks: Enum.map(col["blocks"] || [], &enrich_block(&1, media, forms))}
+      end
+
+    Map.merge(base, %{
+      columns: cols,
+      style:
+        KilnCMS.Blocks.Columns.grid_style(block.data["layout"], block.data["gap"], length(cols))
+    })
   end
 
   # `object-position` from the media item's focal point, so any theme (or the

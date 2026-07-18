@@ -75,11 +75,11 @@ defmodule KilnCMSWeb.PreviewLive do
 
   defp content_blocks(record) do
     # Blocks are the typed union (Kiln v2); convert to the thin {type, content}
-    # maps the shared BlockComponents preview renderer expects.
+    # maps the shared BlockComponents preview renderer expects (columns recurse).
     record.blocks
     |> KilnCMS.CMS.TypedBlocks.to_typed()
     |> KilnCMS.CMS.TypedBlocks.to_legacy()
-    |> Enum.map(&%{type: to_string(&1.type), content: &1.content})
+    |> BlockComponents.thin_blocks()
   end
 
   @impl true

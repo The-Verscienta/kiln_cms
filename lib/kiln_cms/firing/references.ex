@@ -13,7 +13,7 @@ defmodule KilnCMS.Firing.References do
   content bridged to `Custom`, in `data["ref"]` / `data["refs"]`
   (`%{"type" => "page"|"post", "id" => uuid}`).
   """
-  alias KilnCMS.Blocks.Custom
+  alias KilnCMS.Blocks.{Columns, Custom}
   alias KilnCMS.CMS
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing
@@ -110,6 +110,11 @@ defmodule KilnCMS.Firing.References do
 
   defp published({:ok, %{state: :published} = doc}), do: {:ok, doc}
   defp published(_), do: :error
+
+  # A `columns` container has no refs of its own, but its nested children may —
+  # recurse so a reference inside a column is tracked like a top-level one.
+  defp block_refs(%Columns{} = block),
+    do: block |> Columns.child_blocks_flat() |> Enum.flat_map(&block_refs/1)
 
   defp block_refs(%mod{} = block), do: dsl_refs(mod, block) ++ custom_refs(block)
 

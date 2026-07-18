@@ -117,6 +117,36 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       refute html =~ ~s(data-kiln-block-id="#{ids.image}")
     end
 
+    test "a columns block renders its nested children in place (#335)", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Columns page",
+            slug: slug(),
+            blocks: [
+              %{
+                "_type" => "columns",
+                "layout" => "1-1",
+                "columns" => [
+                  %{"blocks" => [%{"_type" => "heading", "text" => "Nested left"}]},
+                  %{"blocks" => [%{"_type" => "quote", "text" => "Nested right"}]}
+                ]
+              }
+            ]
+          },
+          actor: editor
+        )
+
+      {:ok, _lv, html} =
+        conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      assert html =~ "kiln-columns"
+      assert html =~ "Nested left"
+      assert html =~ "Nested right"
+    end
+
     test "unknown slug and unknown type redirect back to the editor", %{conn: conn} do
       editor = authed_user(:editor)
 

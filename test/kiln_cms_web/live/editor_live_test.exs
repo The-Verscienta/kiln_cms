@@ -1591,4 +1591,127 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "zhen · thunder · published · translation gaps · no schedule"
     end
   end
+
+  # Nested-layout container editing (#335): add a columns block, nest child blocks
+  # inside its columns, and persist the tree through save.
+  describe "columns (nested-layout) block editor" do
+    defp add_columns_block(lv) do
+      lv
+      |> element("button[data-inserter-item][phx-value-type='columns']")
+      |> render_click()
+    end
+
+    # The stable id of the (single) columns block currently in the editor DOM.
+    defp columns_block_id(lv) do
+      [_, id] = Regex.run(~r/data-block-id="([^"]+)"/, render(lv))
+      id
+    end
+
+    test "columns is offered in the block inserter", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert has_element?(lv, "button[data-inserter-item][phx-value-type='columns']")
+    end
+
+    test "adding a columns block renders a two-column nested editor", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+
+      id = columns_block_id(lv)
+      # Two columns, each with an "add block" palette entry per child type.
+      assert has_element?(
+               lv,
+               "button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']"
+             )
+
+      assert has_element?(
+               lv,
+               "button[phx-click='col_add_child'][phx-value-col='1'][phx-value-type='heading']"
+             )
+
+      assert has_element?(lv, "button[phx-click='col_add_column'][phx-value-id='#{id}']")
+    end
+
+    test "an empty columns block persists on save", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :columns
+      assert length(block.data["columns"]) == 2
+    end
+
+    test "a nested child block persists with its edited text", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      # Add a heading child to the first column.
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      # The child now has a stable id; edit its text through the socket-side event.
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      render_hook(lv, "col_update_child", %{
+        "id" => id,
+        "child" => child_id,
+        "field" => "text",
+        "value" => "Nested heading"
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :columns
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["_type"] == "heading"
+      assert child["text"] == "Nested heading"
+    end
+
+    test "the nested block renders in the live preview", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      html =
+        render_hook(lv, "col_update_child", %{
+          "id" => id,
+          "child" => child_id,
+          "field" => "text",
+          "value" => "PreviewNested"
+        })
+
+      # The inline preview renders through the typed serializers (columns → grid).
+      assert html =~ "PreviewNested"
+      assert html =~ "kiln-columns"
+    end
+  end
 end

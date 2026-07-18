@@ -584,6 +584,16 @@ defmodule KilnCMSWeb.InContextEditLive do
   # A minimal legacy-shaped map for the public renderer. Media enrichment
   # (srcset/focal) is a delivery concern; the edit surface renders the plain
   # source, which is enough to keep the page's shape recognizable.
+  #
+  # A `columns` container (#335) is rendered through the shared thin-map builder
+  # so its nested children show in place (read-only here — structural nested
+  # edits live in the full editor, like the other non-text blocks on this surface).
+  defp read_only_block(%KilnCMS.Blocks.Columns{} = struct) do
+    [legacy] = TypedBlocks.to_legacy([struct])
+    [thin] = BlockComponents.thin_blocks([legacy])
+    thin
+  end
+
   defp read_only_block(struct) do
     [legacy] = TypedBlocks.to_legacy([struct])
     base = %{type: to_string(legacy.type), content: legacy.content}

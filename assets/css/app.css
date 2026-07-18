@@ -495,6 +495,22 @@
   margin: 1.5rem 0;
 }
 
+/* Nested-layout columns (#335). The container carries an inline `display:grid`
+   with its `grid-template-columns` (so the fired headless `:web` artifact is
+   self-contained), but multi-column grids are cramped on phones — stack them
+   below the `sm` breakpoint. The inline grid still wins at wider widths. */
+.kiln-columns {
+  margin-top: 1rem;
+}
+@media (max-width: 640px) {
+  .kiln-columns {
+    grid-template-columns: 1fr !important;
+  }
+}
+.kiln-column > * + * {
+  margin-top: 1rem;
+}
+
 /* Floating slash-command menu ("/" inside a rich-text block). Rendered into
    document.body and positioned at the caret, so it lives outside .ProseMirror. */
 .rt-slash-menu {

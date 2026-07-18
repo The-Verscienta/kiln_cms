@@ -66,8 +66,14 @@ is about *authoring* permissions.
 
 ## 6. Visual editing experience — [#335](https://github.com/The-Verscienta/kiln_cms/issues/335) `P2`
 
-- [ ] Evaluate a visual/drag-drop layout canvas (page builder) on top of the
-      TipTap block editor.
+- [x] Drag-and-drop block reorder + block palette — already shipped across the
+      admin block editor (#29/#171) and the in-context on-page editor (#367).
+- [x] **Nested layout composition** — the one genuine gap. A first-party
+      `columns` container block ([`KilnCMS.Blocks.Columns`](../lib/kiln_cms/blocks/columns.ex))
+      nests child blocks (flat list → shallow tree) with per-column drag-and-drop
+      in the admin editor. See [nested layout columns](extending-content.md#6-nested-layout-columns-335).
+- [ ] Palette **drag-to-place** (drag a block *type* onto a position) — a small
+      UX add on top; deferred.
 - [ ] Improve live preview to match Craft's / Payload's polish.
 
 **Why:** Marketing/editorial teams often want visual layout and high-fidelity

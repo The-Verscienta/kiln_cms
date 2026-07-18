@@ -39,6 +39,16 @@ defmodule KilnCMSWeb.BlockComponents do
             loading="lazy"
             class="max-w-full rounded"
           />
+        <% @type == "columns" -> %>
+          <%!-- Nested-layout container (#335): a CSS grid whose cells each hold a
+                recursively-rendered child block list. `style` is built from
+                allowlisted layout/gap presets (KilnCMS.Blocks.Columns), so it's
+                safe as an attribute value. --%>
+          <div class="kiln-columns" style={@block[:style]}>
+            <div :for={col <- @block[:columns] || []} class="kiln-column space-y-2">
+              <.render_block :for={child <- col.blocks} block={child} />
+            </div>
+          </div>
         <% @type == "divider" -> %>
           <hr class="border-base-300" />
         <% @type == "form" -> %>
@@ -149,4 +159,36 @@ defmodule KilnCMSWeb.BlockComponents do
   defp form_input_type(:integer), do: "number"
   defp form_input_type(:date), do: "date"
   defp form_input_type(_), do: "text"
+
+  @doc """
+  Thin `%{type, content}` preview maps from legacy block maps (the shape the
+  decoupled preview windows push over PubSub). A `columns` block recurses,
+  carrying its child tree + grid `style` so the pop-out preview lays nested
+  blocks out too — without the media/form enrichment the live delivery path adds.
+  Shared by `PreviewLive` and the editor's decoupled preview so both agree.
+  """
+  @spec thin_blocks([map()]) :: [map()]
+  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &thin_block/1)
+
+  defp thin_block(%{type: :columns, data: data}) do
+    cols =
+      for col <- data["columns"] || [] do
+        children =
+          col
+          |> Map.get("blocks", [])
+          |> KilnCMS.CMS.TypedBlocks.to_typed()
+          |> KilnCMS.CMS.TypedBlocks.to_legacy()
+
+        %{blocks: thin_blocks(children)}
+      end
+
+    %{
+      type: "columns",
+      content: nil,
+      columns: cols,
+      style: KilnCMS.Blocks.Columns.grid_style(data["layout"], data["gap"], length(cols))
+    }
+  end
+
+  defp thin_block(block), do: %{type: to_string(block.type), content: block.content}
 end

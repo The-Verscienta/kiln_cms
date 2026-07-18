@@ -63,6 +63,7 @@ defmodule KilnCMS.Blocks.Upcaster do
     "rich_text" => :rich_text,
     "quote" => :quote,
     "embed" => :embed,
+    "columns" => :columns,
     "custom" => :custom
   }
   defp safe_atom(type) when is_atom(type), do: type
