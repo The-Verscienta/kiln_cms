@@ -34,8 +34,12 @@ defmodule KilnCMSWeb.Endpoint do
 
   # Visual-editing bridge live-preview push (#355). A raw transport socket (plain
   # JSON frames) so the dependency-free `bridge.js` consumes it without a Phoenix
-  # JS client. Cross-origin by design — gated by the shared CORS_ORIGINS allowlist
-  # (never the endpoint host) plus per-connection API-key authorization.
+  # JS client. Deliberately cross-origin (an external front end), so origin is
+  # gated by the shared `KilnCMSWeb.CORS.check_socket_origin?/1` allowlist rather
+  # than the endpoint host, and every connection additionally authorizes the API
+  # key against the document's read policy. It carries no ambient credentials
+  # (auth is the explicit `api_key` param, never a cookie), so Sobelow's CSWH
+  # finding here is a false positive — ignored with rationale in `.sobelow-conf`.
   socket "/ws/bridge", KilnCMSWeb.BridgeSocket,
     websocket: [check_origin: {KilnCMSWeb.CORS, :check_socket_origin?, []}],
     longpoll: false
