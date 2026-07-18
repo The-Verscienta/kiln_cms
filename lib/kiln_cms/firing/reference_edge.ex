@@ -13,6 +13,17 @@ defmodule KilnCMS.Firing.ReferenceEdge do
   postgres do
     table "reference_edges"
     repo KilnCMS.Repo
+
+    # Point-lookup index for the re-fire wave's `from_source` read. The `:edge`
+    # identity is now the `org_id`-LEADING composite, which can't be seeked by
+    # `(from_type, from_id)` for the tenant-less rebuild (PR1 sets no tenant under
+    # `global?: true`). `all_tenants?: true` keeps this `org_id`-free; redundant
+    # with the composite once the wave threads the tenant.
+    custom_indexes do
+      index [:from_type, :from_id],
+        name: "reference_edges_from_source_lookup_index",
+        all_tenants?: true
+    end
   end
 
   actions do
@@ -47,8 +58,27 @@ defmodule KilnCMS.Firing.ReferenceEdge do
     end
   end
 
+  # Multi-tenancy (epic #336): edges are partitioned by org so the re-fire wave
+  # can never cross a tenant boundary. `global?: true` keeps the tenant optional
+  # for the current tenant-less rebuild; org_id comes from tenant/default. The
+  # `:edge` unique index gains `org_id` automatically (attribute strategy).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # Owning organization (epic #336). Set from tenant/default; never accepted
+    # from input (absent from the `:upsert` accept list).
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :from_type, :atom,
       allow_nil?: false,
@@ -65,6 +95,16 @@ defmodule KilnCMS.Firing.ReferenceEdge do
       public?: true
 
     attribute :to_id, :uuid, allow_nil?: false, public?: true
+  end
+
+  relationships do
+    # FK to the owning org (epic #336); the tenant axis is the `org_id` attribute.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   identities do

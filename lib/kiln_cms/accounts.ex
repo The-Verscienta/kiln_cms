@@ -12,6 +12,25 @@ defmodule KilnCMS.Accounts do
   resources do
     resource KilnCMS.Accounts.Token
 
+    # The tenant registry (epic #336) + the user↔org membership join. The org is
+    # not itself multitenant — it *is* the tenant list every scoped resource is
+    # partitioned by.
+    resource KilnCMS.Accounts.Organization do
+      define :list_organizations, action: :read
+      define :get_organization, action: :read, get_by: [:id]
+      define :get_organization_by_slug, action: :by_slug, args: [:slug]
+      define :get_organization_by_domain, action: :by_custom_domain, args: [:custom_domain]
+      define :create_organization, action: :create
+    end
+
+    resource KilnCMS.Accounts.OrgMembership do
+      define :list_org_memberships, action: :read
+      define :list_memberships_for_user, action: :for_user, args: [:user_id]
+      define :list_memberships_for_org, action: :for_org, args: [:organization_id]
+      define :create_org_membership, action: :create
+      define :remove_org_membership, action: :destroy
+    end
+
     # API keys for third-party / headless access (admin-managed). Pass
     # `actor: admin` — the resource policies restrict management to admins.
     # `access` defaults to :read; pass it in the params map for an authoring
@@ -41,6 +60,17 @@ defmodule KilnCMS.Accounts do
       define :anonymize_user, action: :anonymize
     end
   end
+
+  @doc """
+  The id of the default organization (epic #336).
+
+  The fixed sentinel every existing/tenant-less row belongs to: seeded by the
+  backfill migration and stamped as the `org_id` default whenever a scoped
+  resource is created without a tenant (non-strict `global?: true` rollout). A
+  compile-time constant — no per-write database lookup.
+  """
+  @spec default_org_id() :: Ash.UUID.t()
+  def default_org_id, do: KilnCMS.Accounts.Organization.default_id()
 
   @doc "Whether the user has completed two-factor (TOTP) enrolment (issue #331)."
   @spec totp_enabled?(KilnCMS.Accounts.User.t()) :: boolean()

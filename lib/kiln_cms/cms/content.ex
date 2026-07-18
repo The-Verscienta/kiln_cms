@@ -768,6 +768,22 @@ defmodule KilnCMS.CMS.Content do
 
       unquote(api_blocks)
 
+      # Multi-tenancy (epic #336): every content row is partitioned by its
+      # owning organization via an `org_id` column (Ash `:attribute` strategy —
+      # chosen over schema-per-tenant so the single pgvector HNSW / trigram
+      # indexes and the one Meilisearch index aren't multiplied per site).
+      # `global?: true` keeps a tenant OPTIONAL for now: existing tenant-less
+      # code paths (editor, seeds, anonymous headless delivery) keep working and
+      # land in the default org (see the `org_id` attribute default). The
+      # delivery reads run `authorize?: false`, so once a second org exists the
+      # tenant MUST be threaded onto every such read (a later stacked PR) — until
+      # then the single default org makes tenant-less reads safe.
+      multitenancy do
+        strategy :attribute
+        attribute :org_id
+        global? true
+      end
+
       # Content-focused AshAdmin overrides (issue #25). AshAdmin is the dev/CRUD
       # inspector, not the editor — these just make it pleasant: group the content
       # types together, show editorial columns at a glance instead of every raw
@@ -828,6 +844,13 @@ defmodule KilnCMS.CMS.Content do
       paper_trail do
         change_tracking_mode(:changes_only)
         store_action_name?(true)
+        # The generated `*.Version` resource inherits this resource's `:attribute`
+        # multitenancy (epic #336), so its table needs the tenant column as a real
+        # attribute rather than buried in the freeform `changes` map — otherwise
+        # version creation (in the same transaction as the source write) has no
+        # `org_id` to satisfy the inherited multitenancy. The version inherits
+        # `global?: true` too, so tenant-less writes still work.
+        attributes_as_attributes([:org_id])
         ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at, :lock_version])
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
@@ -948,16 +971,35 @@ defmodule KilnCMS.CMS.Content do
           # HNSW index for approximate nearest-neighbour search over embeddings,
           # using cosine distance (`<=>`). The `embedding vector_cosine_ops`
           # column string carries the opclass through to the generated DDL.
+          # `all_tenants?: true` keeps `org_id` OUT of the index (epic #336):
+          # pgvector HNSW indexes cannot be multicolumn, so the tenant filter
+          # rides the query's `WHERE org_id = ?` instead (a post-filter over the
+          # shared ANN graph — the reason `:attribute` beats schema-per-tenant).
           index ["embedding vector_cosine_ops"],
             name: unquote("#{table}_embedding_hnsw_index"),
-            using: "hnsw"
+            using: "hnsw",
+            all_tenants?: true
 
           # Trigram GIN index on title for typo-tolerant autocomplete (the `%`
           # similarity operator + `similarity(...)`). `gin_trgm_ops` opclass is
-          # carried through via the column string.
+          # carried through via the column string. `all_tenants?: true` keeps it
+          # single-column too (a multicolumn GIN over a plain uuid column would
+          # need `btree_gin`); the tenant filter rides the query.
           index ["title gin_trgm_ops"],
             name: unquote("#{table}_title_trgm_index"),
-            using: "gin"
+            using: "gin",
+            all_tenants?: true
+
+          # Point-lookup index for the delivery hot path (`public_by_slug`).
+          # `:unique_slug` is now the `org_id`-LEADING `(org_id, slug, locale)`
+          # composite, which Postgres can't seek for a tenant-less delivery read
+          # (PR1 reads set no tenant under `global?: true`). `all_tenants?: true`
+          # keeps this one `org_id`-free so `(slug, locale)` lookups seek again;
+          # once the delivery path threads the tenant (a later PR) it becomes
+          # redundant with the composite and can be dropped.
+          index [:slug, :locale],
+            name: unquote("#{table}_slug_locale_lookup_index"),
+            all_tenants?: true
         end
       end
 
@@ -1326,6 +1368,19 @@ defmodule KilnCMS.CMS.Content do
       attributes do
         uuid_primary_key :id
 
+        # The owning organization (epic #336 — Ash `:attribute` multitenancy).
+        # Set automatically: Ash force-changes it from the tenant on a
+        # tenant-scoped create, and this `default` stamps the default org on a
+        # tenant-less create (`global?: true`), so existing single-tenant writes
+        # keep working. Never accepted from API input (`writable?: false` and
+        # absent from `default_accept`) — it's the sole cross-site boundary.
+        attribute :org_id, :uuid do
+          allow_nil? false
+          default &KilnCMS.Accounts.default_org_id/0
+          writable? false
+          public? false
+        end
+
         attribute :title, :string, allow_nil?: false, public?: true
         attribute :slug, :string, allow_nil?: false, public?: true
 
@@ -1415,6 +1470,17 @@ defmodule KilnCMS.CMS.Content do
 
       relationships do
         unquote(type_definition_rel)
+
+        # The owning organization (epic #336). The FK backs referential integrity
+        # and AshAdmin display; the tenant axis itself is the `org_id` attribute
+        # above (set from tenant/default), so this is not writable and not in
+        # `default_accept`.
+        belongs_to :organization, KilnCMS.Accounts.Organization do
+          source_attribute :org_id
+          define_attribute? false
+          attribute_writable? false
+          public? false
+        end
 
         # The user who authored this record. Nullable so existing/system content
         # without an actor is valid. Exposed via the public APIs, but only the

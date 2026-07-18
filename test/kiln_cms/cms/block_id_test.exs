@@ -73,13 +73,16 @@ defmodule KilnCMS.CMS.BlockIdTest do
     Repo.query!(
       """
       INSERT INTO pages (id, title, slug, state, blocks, locale, audience,
-                         custom_fields, lock_version, inserted_at, updated_at)
-      VALUES ($1, 'Legacy', $2, 'draft', $3, 'en', 'public', '{}', 1, now(), now())
+                         custom_fields, lock_version, org_id, inserted_at, updated_at)
+      VALUES ($1, 'Legacy', $2, 'draft', $3, 'en', 'public', '{}', 1, $4, now(), now())
       """,
       [
         Ecto.UUID.dump!(page_id),
         slug(),
-        [%{"type" => "heading", "content" => "Old", "data" => %{"level" => 2}, "order" => 0}]
+        [%{"type" => "heading", "content" => "Old", "data" => %{"level" => 2}, "order" => 0}],
+        # Legacy rows were backfilled to the default org (epic #336); org_id is
+        # now NOT NULL and has no DB-level default, so a raw insert must set it.
+        Ecto.UUID.dump!(KilnCMS.Accounts.default_org_id())
       ]
     )
 

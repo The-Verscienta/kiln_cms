@@ -540,6 +540,13 @@ defmodule KilnCMS.Accounts.User do
     has_many :valid_api_keys, KilnCMS.Accounts.ApiKey do
       filter expr(is_nil(revoked_at) and expires_at > now())
     end
+
+    # Org memberships (epic #336): which organizations this (global) user belongs
+    # to, and their per-org role. The authoring policies still read `role` off the
+    # user for now; a later PR moves the effective-role source onto the membership.
+    has_many :org_memberships, KilnCMS.Accounts.OrgMembership do
+      destination_attribute :user_id
+    end
   end
 
   aggregates do
