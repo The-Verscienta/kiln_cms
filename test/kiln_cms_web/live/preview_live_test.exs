@@ -111,6 +111,22 @@ defmodule KilnCMSWeb.PreviewLiveTest do
     refute render(alice) =~ "remote-cursor"
   end
 
+  test "an edge cursor coordinate (JSON integer 0/1) does not crash the render" do
+    page = a_page()
+    path = ~p"/editor/preview/page/#{page.id}"
+
+    {:ok, alice, _} = live(conn_for("Alice"), path)
+    {:ok, bob, _} = live(conn_for("Bob"), path)
+
+    # A cursor exactly at the left/top edge arrives as the integer 0 (JS 0/500);
+    # float_to_binary/2 raises on an integer, so this must be handled.
+    render_hook(alice, "cursor", %{"x" => 0, "y" => 1})
+
+    html = render(bob)
+    assert html =~ "remote-cursor"
+    assert html =~ "left:0.0%;top:100.0%"
+  end
+
   test "leaving drops a viewer (and their cursor) for everyone else" do
     page = a_page()
     path = ~p"/editor/preview/page/#{page.id}"

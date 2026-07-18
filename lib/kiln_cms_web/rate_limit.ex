@@ -32,7 +32,14 @@ defmodule KilnCMSWeb.RateLimit do
   env raises the buckets the broad controller suites hammer (`:api` etc.) so a
   fast full-suite run doesn't saturate one per-IP window and 429 unrelated tests.
   """
-  def limits, do: Map.merge(@default_limits, configured_limits())
+  def limits do
+    case configured_limits() do
+      # No override (production default): return the constant, no per-request
+      # merge/allocation on this hot-path plug.
+      empty when map_size(empty) == 0 -> @default_limits
+      overrides -> Map.merge(@default_limits, overrides)
+    end
+  end
 
   defp configured_limits do
     Application.get_env(:kiln_cms, __MODULE__, []) |> Keyword.get(:limits, %{})

@@ -62,11 +62,9 @@ defmodule Mix.Tasks.Kiln.Export.Static do
   end
 
   defp parse_surface(name) do
-    case name do
-      "web" -> :web
-      "json" -> :json
-      "json_ld" -> :json_ld
-      other -> Mix.raise("Unknown surface #{inspect(other)} (expected web|json|json_ld)")
+    case StaticExport.parse_surface(name) do
+      {:ok, surface} -> surface
+      :error -> Mix.raise("Unknown surface #{inspect(name)} (expected web|json|json_ld)")
     end
   end
 

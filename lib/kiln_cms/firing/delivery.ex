@@ -22,20 +22,26 @@ defmodule KilnCMS.Firing.Delivery do
   request-per-query CMS structurally can't match (the BEAM keeps the cache and
   the web layer up independently of the DB connection).
   """
+  require Logger
+
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Cache
 
   # Exceptions that mean "the query didn't reach a healthy database": a real
-  # production outage (`DBConnection.ConnectionError`), a downed/absent pool
+  # production outage (`DBConnection.ConnectionError`) or a downed/absent pool
   # (`DBConnection.OwnershipError`, also what the test sandbox raises for an
-  # unallowed process), or a Postgrex-level failure.
-  @db_error_modules [DBConnection.ConnectionError, DBConnection.OwnershipError, Postgrex.Error]
+  # unallowed process). Deliberately NOT `Postgrex.Error` — that is raised for
+  # ordinary SQL failures (bad type, undefined column) which are real defects to
+  # surface, not transient outages.
+  @db_error_modules [DBConnection.ConnectionError, DBConnection.OwnershipError]
 
   # Ash re-wraps a DB failure in `Ash.Error.Unknown` and stringifies the
   # underlying exception (e.g. "** (DBConnection.ConnectionError) …"), so the
-  # struct type is lost by the time it reaches us — match the message signature.
-  @db_error_signatures ["DBConnection.", "OwnershipError", "ConnectionError", "Postgrex.Error"]
+  # struct type is lost by the time it reaches us — match the *full* connection
+  # error names (not a bare "ConnectionError", which could appear in an
+  # unrelated error message).
+  @db_error_signatures ["DBConnection.ConnectionError", "DBConnection.OwnershipError"]
 
   @doc """
   Resolve the published record for `{type, slug, locale}`, cache-first.
@@ -54,10 +60,26 @@ defmodule KilnCMS.Firing.Delivery do
       record -> {:ok, record}
     end
   rescue
-    # A missing slug raises `Ash.Error.Invalid` (NotFound) rather than returning
-    # nil, so a non-DB error means "not found" (this mirrors the delivery
-    # controller's prior rescue-to-404). Only a database outage is `:unavailable`.
-    e -> if db_unavailable?(e), do: :unavailable, else: :not_found
+    e ->
+      cond do
+        # A DB outage → serve degraded (503) rather than a misleading 404.
+        db_unavailable?(e) ->
+          :unavailable
+
+        # A missing slug raises `Ash.Error.Invalid` (NotFound) rather than
+        # returning nil — the expected not-found path (→ 404), no log noise.
+        match?(%Ash.Error.Invalid{}, e) ->
+          :not_found
+
+        # Anything else is an unexpected defect in resolution: still answer 404
+        # (behavior-preserving) but log it so it isn't silently swallowed.
+        true ->
+          Logger.warning(
+            "Delivery.published unexpected error for #{type}/#{slug}: #{Exception.message(e)}"
+          )
+
+          :not_found
+      end
   end
 
   @doc """

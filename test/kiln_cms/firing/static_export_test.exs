@@ -130,6 +130,39 @@ defmodule KilnCMS.Firing.StaticExportTest do
     assert result.skipped >= 1
   end
 
+  test "skips a document whose locale would escape the output directory (no traversal)" do
+    actor = admin()
+    slug = "exp-trav-#{System.unique_integer([:positive])}"
+    marker = "kiln-evil-#{System.unique_integer([:positive])}"
+    evil_dir = Path.join(System.tmp_dir!(), marker)
+    on_exit(fn -> File.rm_rf!(evil_dir) end)
+
+    # locale is an unconstrained attribute; a crafted one must not redirect writes.
+    # Enough `../` to climb to the filesystem root from any out_dir, then into /tmp.
+    out = tmp_dir()
+    evil_locale = String.duplicate("../", 20) <> "tmp/#{marker}"
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Evil",
+          slug: slug,
+          locale: evil_locale,
+          blocks: [%{type: :heading, content: "x", data: %{"level" => 1}, order: 0}]
+        },
+        actor: actor
+      )
+
+    CMS.publish_page!(page, actor: actor)
+    drain_oban()
+
+    {:ok, result} = StaticExport.export(out)
+
+    # The entry was skipped and nothing was written to the traversal target.
+    refute Enum.any?(result.entries, &(&1["slug"] == slug))
+    refute File.exists?(evil_dir)
+  end
+
   describe "StaticExportWorker" do
     test "no-ops when no output directory is configured" do
       assert :ok = StaticExportWorker.perform(%Oban.Job{args: %{}})
@@ -141,6 +174,21 @@ defmodule KilnCMS.Firing.StaticExportTest do
 
       assert :ok = StaticExportWorker.perform(%Oban.Job{args: %{"out_dir" => out}})
       assert File.exists?(Path.join([out, "content", "page", "en", slug, "json.json"]))
+    end
+
+    test "ignores an unknown surface string instead of crashing" do
+      slug = fired_page()
+      out = tmp_dir()
+
+      # A typo'd surface in the job args must not raise a FunctionClauseError.
+      assert :ok =
+               StaticExportWorker.perform(%Oban.Job{
+                 args: %{"out_dir" => out, "surfaces" => ["json", "bogus"]}
+               })
+
+      base = Path.join([out, "content", "page", "en", slug])
+      assert File.exists?(Path.join(base, "json.json"))
+      refute File.exists?(Path.join(base, "web.html"))
     end
   end
 end

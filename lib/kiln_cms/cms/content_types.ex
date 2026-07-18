@@ -151,6 +151,26 @@ defmodule KilnCMS.CMS.ContentTypes do
   def public_prefix(%{path_segment: nil}), do: ""
   def public_prefix(%{path_segment: segment}), do: "/" <> segment
 
+  @doc """
+  The **storage tier** atom for a content type (D17): dynamic types store under
+  the generic `:entry` tier, compiled types under their own atom. Accepts a
+  registry descriptor, a type atom, or a public type-name string; returns `nil`
+  for an unknown name. The single source of truth for firing/export/reindex
+  callers that need the storage key from a public type.
+  """
+  @spec storage_type(t() | atom() | String.t()) :: atom() | nil
+  def storage_type(%{source: :dynamic}), do: :entry
+  def storage_type(%{type: type}), do: type
+  def storage_type(type) when is_atom(type), do: type
+
+  def storage_type(type) when is_binary(type) do
+    case get(type) do
+      %{source: :dynamic} -> :entry
+      %{type: atom} -> atom
+      _ -> nil
+    end
+  end
+
   @doc ~S"""
   Find a content type by its public URL segment, e.g. "blog" or "products" —
   compiled first, then dynamic (`TypeDefinition.path_segment`).
