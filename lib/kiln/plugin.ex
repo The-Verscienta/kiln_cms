@@ -31,6 +31,17 @@ defmodule Kiln.Plugin do
   Content types, admin CRUD, webhook events, delivery routes and Oban
   workers need no plugin callbacks at all — they flow from the registered
   domains through the existing registries.
+
+  ## Catalog metadata
+
+  A plugin may also carry cheap, declarative **catalog metadata** —
+  `version/0`, `summary/0`, `homepage/0` — surfaced by
+  `Kiln.Plugins.manifests/0` and `mix kiln.plugins.list` (see
+  `docs/plugin-extensibility.md`). All three are optional and default to
+  `nil`: they are the "registry" for the vetted-plugin marketplace, not
+  behavior. Screenshots and long-form docs live in the plugin's own hex
+  package / README — `homepage/0` is the pointer to them, so the running node
+  carries a URL, not a media library.
   """
 
   @type nav_item :: %{label: String.t(), path: String.t(), role: :editor | :admin}
@@ -38,6 +49,15 @@ defmodule Kiln.Plugin do
 
   @doc "Machine name (used in diagnostics). Defaults to the module's last segment."
   @callback name() :: String.t()
+
+  @doc "Version string for the catalog/`mix kiln.plugins.list`. Defaults to `nil`."
+  @callback version() :: String.t() | nil
+
+  @doc "One-line catalog description. Defaults to `nil`."
+  @callback summary() :: String.t() | nil
+
+  @doc "Hexdocs/repo URL — where screenshots and docs live. Defaults to `nil`."
+  @callback homepage() :: String.t() | nil
 
   @callback domains() :: [module()]
   @callback blocks() :: [module()]
@@ -62,6 +82,15 @@ defmodule Kiln.Plugin do
       end
 
       @impl Kiln.Plugin
+      def version, do: nil
+
+      @impl Kiln.Plugin
+      def summary, do: nil
+
+      @impl Kiln.Plugin
+      def homepage, do: nil
+
+      @impl Kiln.Plugin
       def domains, do: []
 
       @impl Kiln.Plugin
@@ -83,6 +112,9 @@ defmodule Kiln.Plugin do
       def oban_queues, do: []
 
       defoverridable name: 0,
+                     version: 0,
+                     summary: 0,
+                     homepage: 0,
                      domains: 0,
                      blocks: 0,
                      field_types: 0,

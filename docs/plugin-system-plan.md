@@ -119,7 +119,15 @@ the block union and the router need the list during compilation.
   editor + fields-admin rendering, doctor contract/collision checks, and
   `mix kiln.gen.plugin --field <name>`.
 - **Marketplace/discovery** — the plan marks it "future"; installers +
-  hexdocs are the v1 distribution story.
+  hexdocs are the v1 distribution story. Scoped in
+  `docs/plugin-extensibility.md` (decision #333): **no runtime hot-loading of
+  arbitrary code** (the BEAM has no in-process sandbox); the marketplace is
+  vetted, compile-time, git/hex-distributed plugins carrying cheap catalog
+  metadata (`version`/`summary`/`homepage` on the contract,
+  `Kiln.Plugins.manifests/0`, `mix kiln.plugins.list`), plus the already-safe
+  data-driven runtime config (D17 dynamic types, `Kiln.FieldType`, #342 rules).
+  A true third-party runtime-code sandbox (WASM / out-of-process) is a future
+  dedicated effort.
 - **Public plugin routes** — content types already get public delivery;
   arbitrary public routes invite router-conflict complexity for no proven
   need.
