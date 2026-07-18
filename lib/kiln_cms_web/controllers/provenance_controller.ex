@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.ProvenanceController do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing
+  alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Provenance
 
@@ -76,7 +77,7 @@ defmodule KilnCMSWeb.ProvenanceController do
 
       with false <- is_nil(surface),
            ct when not is_nil(ct) <- ContentTypes.get(type),
-           record when not is_nil(record) <- published(ct.type, slug, locale),
+           {:ok, record} <- Delivery.published(ct.type, slug, locale),
            {:ok, artifact} <- artifact_row(record, surface) do
         fun.(record, artifact)
       else
@@ -87,6 +88,8 @@ defmodule KilnCMSWeb.ProvenanceController do
     end
   end
 
+  # The manifest needs the artifact *row* (`fired_at`/`source_version_id`), not
+  # just the body Delivery.read_artifact returns, so read the row here.
   defp artifact_row(record, surface) do
     type = Engine.document_type(record)
 
@@ -94,12 +97,6 @@ defmodule KilnCMSWeb.ProvenanceController do
       {:ok, %_{} = artifact} -> {:ok, artifact}
       _ -> :error
     end
-  end
-
-  defp published(type, slug, locale) do
-    ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false)
-  rescue
-    _ -> nil
   end
 
   defp disabled(conn),

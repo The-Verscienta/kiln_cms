@@ -40,8 +40,10 @@ defmodule KilnCMS.Automation.RuleWorker do
       new()
       |> from(Application.fetch_env!(:kiln_cms, :email_from))
       |> to(to)
-      |> subject(render(config["subject"] || "Kiln automation: {{title}}", event, payload))
-      |> html_body(render(config["body"] || default_body(), event, payload))
+      # Subject is a header: render it as plain text with CR/LF stripped so a
+      # content title can't inject extra headers. Body is HTML: escape markup.
+      |> subject(render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text))
+      |> html_body(render(config["body"] || default_body(), event, payload, :html))
       |> KilnCMS.Mail.deliver_for_worker()
     else
       Logger.warning("Automation send_email rule missing a `to` address; skipping.")
@@ -50,7 +52,9 @@ defmodule KilnCMS.Automation.RuleWorker do
   end
 
   defp run(%{action: :broadcast, config: config}, event, payload) do
-    topic = config["topic"] || "automation"
+    # Namespace the admin-supplied topic so a rule can't broadcast onto an
+    # internal topic (e.g. "content_preview:…") and crash unrelated subscribers.
+    topic = "automation:" <> (config["topic"] || "automation")
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:automation_event, event, payload})
   end
 
@@ -67,7 +71,7 @@ defmodule KilnCMS.Automation.RuleWorker do
   defp run(%{action: :reindex}, event, payload) do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
-         storage when not is_nil(storage) <- storage_type(type) do
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type) do
       %{"type" => to_string(storage), "id" => id}
       |> KilnCMS.Firing.FireWorker.new()
       |> Oban.insert()
@@ -81,23 +85,14 @@ defmodule KilnCMS.Automation.RuleWorker do
   # The public content type from a `<type>.<verb>` event name.
   defp event_type(event), do: event |> String.split(".", parts: 2) |> List.first()
 
-  # The storage tier for a public type: dynamic types live under the generic
-  # `:entry` tier (D17), compiled types under their own atom.
-  defp storage_type(type) do
-    case ContentTypes.get(type) do
-      %{source: :dynamic} -> :entry
-      %{type: atom} -> atom
-      _ -> nil
-    end
-  end
-
   defp default_body do
     "<p>The content <strong>{{title}}</strong> ({{type}}) emitted <em>{{event}}</em>.</p>"
   end
 
-  # Minimal, safe templating: substitute a fixed set of payload fields, each
-  # HTML-escaped (author-supplied title/slug must not inject markup into email).
-  defp render(template, event, payload) do
+  # Minimal, safe templating: substitute a fixed set of payload fields. `:html`
+  # escapes markup (email body); `:text` strips CR/LF so a value can't inject a
+  # header when the result is used as a Subject.
+  defp render(template, event, payload, mode) do
     vars = %{
       "title" => payload["title"],
       "slug" => payload["slug"],
@@ -108,13 +103,17 @@ defmodule KilnCMS.Automation.RuleWorker do
 
     Regex.replace(~r/\{\{(\w+)\}\}/, template, fn whole, key ->
       case Map.fetch(vars, key) do
-        {:ok, value} when not is_nil(value) -> escape(value)
+        {:ok, value} when not is_nil(value) -> escape(value, mode)
         _ -> whole
       end
     end)
   end
 
-  defp escape(value) do
+  defp escape(value, :html) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+  end
+
+  defp escape(value, :text) do
+    value |> to_string() |> String.replace(~r/[\r\n]+/, " ")
   end
 end

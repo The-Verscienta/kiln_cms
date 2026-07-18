@@ -65,12 +65,22 @@ defmodule KilnCMS.Firing.DeliveryTest do
   end
 
   describe "db_unavailable?/1" do
-    test "classifies connection/ownership/postgrex errors as unavailable" do
+    test "classifies connection/ownership errors (raw and Ash-wrapped) as unavailable" do
       assert Delivery.db_unavailable?(%DBConnection.ConnectionError{})
       assert Delivery.db_unavailable?(%DBConnection.OwnershipError{})
-      assert Delivery.db_unavailable?(%Postgrex.Error{})
-      # Ash wraps DB failures in an errors list — recurse into it.
+      # Ash wraps DB failures in an errors list and stringifies the exception.
       assert Delivery.db_unavailable?(%{errors: [%DBConnection.ConnectionError{}]})
+      assert Delivery.db_unavailable?(%{error: "** (DBConnection.ConnectionError) …"})
+    end
+
+    test "does not treat a plain Postgrex.Error (a real SQL bug) as an outage" do
+      # A constraint violation / bad type is a defect to surface, not a transient
+      # outage — so it must NOT be classified as :unavailable.
+      refute Delivery.db_unavailable?(%Postgrex.Error{})
+
+      refute Delivery.db_unavailable?(%{
+               error: "** (Postgrex.Error) ERROR 42703 undefined_column"
+             })
     end
 
     test "does not swallow ordinary bugs" do

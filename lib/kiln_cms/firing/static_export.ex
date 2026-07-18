@@ -34,9 +34,28 @@ defmodule KilnCMS.Firing.StaticExport do
 
   @surfaces [:web, :json, :json_ld]
   @surface_files %{web: "web.html", json: "json.json", json_ld: "json_ld.json"}
-  # Slugs are validated on write, but guard the path we build from them anyway —
-  # an export must never escape the output directory.
-  @safe_slug ~r/\A[A-Za-z0-9._-]+\z/
+  @surface_names %{"web" => :web, "json" => :json, "json_ld" => :json_ld}
+
+  @doc "The exportable surfaces."
+  @spec surfaces() :: [atom()]
+  def surfaces, do: @surfaces
+
+  @doc """
+  Parse a surface name to its atom: `{:ok, surface}` or `:error` for an unknown
+  one. The single validation point shared by the mix task and the worker (which
+  receive surface names as strings). Accepts an already-valid atom too.
+  """
+  @spec parse_surface(String.t() | atom()) :: {:ok, atom()} | :error
+  def parse_surface(name) when is_binary(name), do: Map.fetch(@surface_names, name)
+  def parse_surface(name) when name in @surfaces, do: {:ok, name}
+  def parse_surface(_), do: :error
+  # Every path segment (type, locale, slug) is validated before it's joined into
+  # the output path — an export must never escape the output directory. `locale`
+  # in particular is an unconstrained content attribute, so a document with a
+  # crafted locale (e.g. "../../etc") must not be able to redirect a write.
+  # The pattern excludes `/` and `\`; the explicit `.`/`..` reject closes the
+  # traversal segments the pattern would otherwise allow.
+  @safe_segment ~r/\A[A-Za-z0-9._-]+\z/
 
   @type result :: %{
           out_dir: String.t(),
@@ -108,9 +127,12 @@ defmodule KilnCMS.Firing.StaticExport do
   end
 
   defp export_document(out_dir, ct, record, surfaces) do
-    with true <- Regex.match?(@safe_slug, record.slug),
+    public_type = to_string(ct.type)
+
+    with true <- safe_segment?(public_type),
+         true <- safe_segment?(record.locale),
+         true <- safe_segment?(record.slug),
          bodies when bodies != [] <- read_surfaces(ct, record, surfaces) do
-      public_type = to_string(ct.type)
       rel_dir = Path.join(["content", public_type, record.locale, record.slug])
       dir = Path.join(out_dir, rel_dir)
       mkdir_p!(dir)
@@ -132,10 +154,17 @@ defmodule KilnCMS.Firing.StaticExport do
     end
   end
 
+  # A path segment is safe to join into the output tree only if it matches the
+  # allow-list AND is not a traversal segment (`.`/`..`, which the pattern allows).
+  defp safe_segment?(seg) when is_binary(seg),
+    do: seg not in [".", ".."] and Regex.match?(@safe_segment, seg)
+
+  defp safe_segment?(_), do: false
+
   # Read each requested surface's fired body without re-rendering. Dynamic types
   # store under the generic `:entry` tier (D17); compiled types under their atom.
   defp read_surfaces(ct, record, surfaces) do
-    storage_type = if ct.source == :dynamic, do: :entry, else: ct.type
+    storage_type = ContentTypes.storage_type(ct)
 
     Enum.flat_map(surfaces, fn surface ->
       case Engine.read(storage_type, record.id, surface) do

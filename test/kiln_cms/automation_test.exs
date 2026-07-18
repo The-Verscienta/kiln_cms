@@ -6,6 +6,7 @@ defmodule KilnCMS.AutomationTest do
   import Swoosh.TestAssertions
 
   alias KilnCMS.Automation
+  alias KilnCMS.Automation.DispatchWorker
   alias KilnCMS.Automation.Rule
   alias KilnCMS.Automation.RuleWorker
   alias KilnCMS.CMS
@@ -24,19 +25,32 @@ defmodule KilnCMS.AutomationTest do
     Map.merge(%{"id" => Ash.UUID.generate(), "title" => "Hello", "slug" => "hello"}, overrides)
   end
 
-  describe "handle_event/2 rule matching" do
+  describe "handle_event/2 (on the publish path)" do
+    test "enqueues a DispatchWorker for a supported event (no DB read on the publish path)" do
+      Automation.handle_event("post.published", payload())
+      assert_enqueued(worker: DispatchWorker, args: %{"event" => "post.published"})
+    end
+
+    test "ignores unsupported events without enqueuing or raising" do
+      assert :ok = Automation.handle_event("form.submitted", payload())
+      assert :ok = Automation.handle_event("garbage", payload())
+      refute_enqueued(worker: DispatchWorker)
+    end
+  end
+
+  describe "dispatch/2 rule matching" do
     test "enqueues a worker for a matching enabled rule" do
       r = rule(%{trigger_event: :published, action: :broadcast})
-      Automation.handle_event("post.published", payload())
+      Automation.dispatch("post.published", payload())
       assert_enqueued(worker: RuleWorker, args: %{"rule_id" => r.id, "event" => "post.published"})
     end
 
     test "respects the content_type filter" do
       scoped = rule(%{trigger_event: :published, action: :broadcast, content_type: "post"})
-      Automation.handle_event("page.published", payload())
+      Automation.dispatch("page.published", payload())
       refute_enqueued(worker: RuleWorker, args: %{"rule_id" => scoped.id})
 
-      Automation.handle_event("post.published", payload())
+      Automation.dispatch("post.published", payload())
       assert_enqueued(worker: RuleWorker, args: %{"rule_id" => scoped.id})
     end
 
@@ -44,15 +58,15 @@ defmodule KilnCMS.AutomationTest do
       off = rule(%{trigger_event: :published, action: :broadcast, enabled: false})
       other = rule(%{trigger_event: :unpublished, action: :broadcast})
 
-      Automation.handle_event("post.published", payload())
+      Automation.dispatch("post.published", payload())
       refute_enqueued(worker: RuleWorker, args: %{"rule_id" => off.id})
       refute_enqueued(worker: RuleWorker, args: %{"rule_id" => other.id})
     end
 
     test "ignores unsupported events without raising" do
       _r = rule(%{trigger_event: :published, action: :broadcast})
-      assert :ok = Automation.handle_event("form.submitted", payload())
-      assert :ok = Automation.handle_event("garbage", payload())
+      assert :ok = Automation.dispatch("form.submitted", payload())
+      assert :ok = Automation.dispatch("garbage", payload())
     end
   end
 
@@ -63,10 +77,12 @@ defmodule KilnCMS.AutomationTest do
       })
     end
 
-    test "broadcast publishes an automation event on the configured topic" do
-      topic = "automation-test-#{System.unique_integer([:positive])}"
-      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
-      r = rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => topic}})
+    test "broadcast publishes an automation event on the (namespaced) configured topic" do
+      name = "test-#{System.unique_integer([:positive])}"
+      # The worker namespaces the admin-supplied topic so it can't collide with
+      # internal topics.
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, "automation:#{name}")
+      r = rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => name}})
 
       run(r, "post.published", payload())
       assert_receive {:automation_event, "post.published", %{"slug" => "hello"}}
@@ -85,6 +101,23 @@ defmodule KilnCMS.AutomationTest do
       assert_email_sent(fn email ->
         assert email.subject == "Live: Big News (post)"
         assert {_, "team@example.com"} = hd(email.to)
+      end)
+    end
+
+    test "send_email strips CR/LF from a templated title so the subject can't inject headers" do
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :send_email,
+          config: %{"to" => "team@example.com", "subject" => "New: {{title}}"}
+        })
+
+      run(r, "post.published", payload(%{"title" => "Hi\r\nBcc: evil@example.com"}))
+
+      assert_email_sent(fn email ->
+        refute email.subject =~ "\n"
+        refute email.subject =~ "\r"
+        assert email.subject == "New: Hi Bcc: evil@example.com"
       end)
     end
 
@@ -109,9 +142,9 @@ defmodule KilnCMS.AutomationTest do
 
   describe "end-to-end from a publish" do
     test "publishing a page fires its matching rule" do
-      topic = "automation-e2e-#{System.unique_integer([:positive])}"
-      Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
-      rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => topic}})
+      name = "e2e-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, "automation:#{name}")
+      rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => name}})
 
       actor =
         Ash.Seed.seed!(KilnCMS.Accounts.User, %{

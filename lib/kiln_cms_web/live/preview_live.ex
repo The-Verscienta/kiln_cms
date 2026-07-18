@@ -112,6 +112,9 @@ defmodule KilnCMSWeb.PreviewLive do
     {:noreply, assign(socket, :cursors, Map.delete(socket.assigns.cursors, key))}
   end
 
+  # Ignore any unexpected message rather than crashing the preview process.
+  def handle_info(_message, socket), do: {:noreply, socket}
+
   @impl true
   # Our cursor moved (from the JS hook): broadcast it to the other viewers.
   # Coordinates are fractions (0..1) of the preview area, so they map across
@@ -159,7 +162,9 @@ defmodule KilnCMSWeb.PreviewLive do
   defp clamp(value) when is_number(value), do: value |> max(0.0) |> min(1.0)
   defp clamp(_), do: 0.0
 
-  defp pct(fraction), do: :erlang.float_to_binary(fraction * 100, decimals: 1) <> "%"
+  # `* 100.0` (not `* 100`) forces a float: an edge coordinate arrives as the
+  # JSON integer 0 or 1, and `float_to_binary/2` raises on an integer.
+  defp pct(fraction), do: :erlang.float_to_binary(fraction * 100.0, decimals: 1) <> "%"
 
   @impl true
   def render(assigns) do

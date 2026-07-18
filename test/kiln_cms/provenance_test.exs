@@ -85,6 +85,14 @@ defmodule KilnCMS.ProvenanceTest do
     test "sorts nested object keys" do
       assert Canonical.encode(%{"z" => 1, "a" => 2}) == ~s({"a":2,"z":1})
     end
+
+    test "encodes floats (a body with a decimal must not crash)" do
+      # An artifact body can contain a decimal (a numeric custom field, a rating,
+      # a JSON-LD coordinate); encoding/digesting it must not raise.
+      body = %{"rating" => 4.5, "nested" => %{"price" => 9.99}}
+      assert Canonical.encode(body) == ~s({"nested":{"price":9.99},"rating":4.5})
+      assert is_binary(Canonical.digest(body))
+    end
   end
 
   describe "manifest_for/2" do

@@ -56,11 +56,18 @@ defmodule KilnCMS.Firing.StaticExportWorker do
   defp surfaces_opt(nil), do: []
 
   defp surfaces_opt(surfaces) when is_list(surfaces) do
-    [surfaces: Enum.map(surfaces, &to_atom_surface/1)]
+    # Parse via the shared validator, silently dropping any unknown surface
+    # string rather than crashing the job on a typo.
+    parsed =
+      surfaces
+      |> Enum.map(&StaticExport.parse_surface/1)
+      |> Enum.flat_map(fn
+        {:ok, surface} -> [surface]
+        :error -> []
+      end)
+
+    [surfaces: parsed]
   end
 
-  defp to_atom_surface(s) when is_atom(s), do: s
-  defp to_atom_surface("web"), do: :web
-  defp to_atom_surface("json"), do: :json
-  defp to_atom_surface("json_ld"), do: :json_ld
+  defp surfaces_opt(_), do: []
 end
