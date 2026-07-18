@@ -41,4 +41,51 @@ defmodule Kiln.Plugins do
       Keyword.merge(acc, plugin.oban_queues())
     end)
   end
+
+  @typedoc """
+  The plain-data catalog view of one installed plugin — its declared metadata
+  plus its contribution surface. Rendered by `mix kiln.plugins.list` and the
+  natural shape for a marketplace UI (see `docs/plugin-extensibility.md`).
+  """
+  @type manifest :: %{
+          module: module(),
+          name: String.t(),
+          version: String.t() | nil,
+          summary: String.t() | nil,
+          homepage: String.t() | nil,
+          domains: [module()],
+          blocks: [module()],
+          field_types: [module()],
+          nav_items: non_neg_integer(),
+          admin_routes: non_neg_integer(),
+          oban_queues: keyword(pos_integer()),
+          children: non_neg_integer()
+        }
+
+  @doc """
+  The catalog/registry view: one `t:manifest/0` per installed plugin, in
+  registration order. Metadata (`version`/`summary`/`homepage`) is whatever the
+  plugin declares (`nil` if it declares nothing); contributions are read from
+  the same callbacks the seams use.
+  """
+  @spec manifests() :: [manifest()]
+  def manifests, do: Enum.map(all(), &manifest/1)
+
+  @spec manifest(module()) :: manifest()
+  defp manifest(plugin) do
+    %{
+      module: plugin,
+      name: plugin.name(),
+      version: plugin.version(),
+      summary: plugin.summary(),
+      homepage: plugin.homepage(),
+      domains: plugin.domains(),
+      blocks: plugin.blocks(),
+      field_types: plugin.field_types(),
+      nav_items: length(plugin.nav_items()),
+      admin_routes: length(plugin.admin_routes()),
+      oban_queues: plugin.oban_queues(),
+      children: length(plugin.children())
+    }
+  end
 end

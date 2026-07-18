@@ -97,6 +97,15 @@ defmodule KilnCMS.FixturePlugin do
   use Kiln.Plugin
 
   @impl true
+  def version, do: "1.2.3"
+
+  @impl true
+  def summary, do: "Test fixture exercising every plugin seam."
+
+  @impl true
+  def homepage, do: "https://example.com/fixture-plugin"
+
+  @impl true
   def blocks, do: [KilnCMS.FixturePlugin.CalloutBlock]
 
   @impl true

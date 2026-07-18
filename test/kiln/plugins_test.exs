@@ -29,6 +29,45 @@ defmodule Kiln.PluginsTest do
              Kiln.Plugins.nav_items()
   end
 
+  test "manifests/0 exposes the catalog metadata + contribution surface" do
+    manifest = Enum.find(Kiln.Plugins.manifests(), &(&1.module == FixturePlugin))
+
+    assert manifest.name == "fixture_plugin"
+    assert manifest.version == "1.2.3"
+    assert manifest.summary == "Test fixture exercising every plugin seam."
+    assert manifest.homepage == "https://example.com/fixture-plugin"
+    assert manifest.blocks == [FixturePlugin.CalloutBlock]
+    assert manifest.field_types == [FixturePlugin.FieldTypes.Rating]
+    assert manifest.nav_items == 1
+    assert manifest.admin_routes == 1
+    assert manifest.oban_queues == [fixture: 1]
+    assert manifest.children == 1
+  end
+
+  test "a metadata-free plugin reports nil metadata (use defaults)" do
+    defmodule BarelyAPlugin do
+      use Kiln.Plugin
+    end
+
+    assert BarelyAPlugin.version() == nil
+    assert BarelyAPlugin.summary() == nil
+    assert BarelyAPlugin.homepage() == nil
+  end
+
+  describe "mix kiln.plugins.list" do
+    import ExUnit.CaptureIO
+
+    test "renders installed plugins with metadata and contributions" do
+      output = capture_io(fn -> assert Mix.Tasks.Kiln.Plugins.List.run([]) == :ok end)
+
+      assert output =~ "fixture_plugin v1.2.3"
+      assert output =~ "Test fixture exercising every plugin seam."
+      assert output =~ "https://example.com/fixture-plugin"
+      # Contribution summary is pluralized and omits zero-count kinds.
+      assert output =~ "1 block, 1 field type, 1 nav item, 1 admin route"
+    end
+  end
+
   test "a plugin block is a first-class member of the block system" do
     # Storage union + runtime registry, from the same compile-time source.
     assert Keyword.has_key?(Blocks.union_types(), :callout)
