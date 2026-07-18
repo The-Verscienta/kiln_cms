@@ -235,6 +235,10 @@ defmodule KilnCMSWeb.Router do
       live "/editor/types", TypeDefinitionLive, :index
       live "/editor/mail", MailSettingsLive, :index
       live "/editor/newsletter", NewsletterLive, :index
+      # Compliance & governance dashboard (#352) — audit trail, consent, and
+      # point-in-time history per content item.
+      live "/editor/governance", GovernanceLive, :index
+      live "/editor/governance/:type/:id", GovernanceLive, :show
       live "/editor/forms", FormLive, :index
       live "/editor/api-keys", ApiKeyLive, :index
 
@@ -248,6 +252,10 @@ defmodule KilnCMSWeb.Router do
     # the signed-in user loaded in `:browser`; the controller scopes the payload
     # to `current_user`.
     get "/editor/account/export.json", AccountController, :export
+
+    # Governance trail export (#352) — file download, admin-gated in the
+    # controller against the `:browser`-loaded user.
+    get "/editor/governance/:type/:id/export.json", GovernanceController, :export
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only
