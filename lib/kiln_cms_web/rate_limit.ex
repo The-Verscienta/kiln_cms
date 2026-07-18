@@ -4,7 +4,7 @@ defmodule KilnCMSWeb.RateLimit do
   """
   use Hammer, backend: :ets
 
-  @limits %{
+  @default_limits %{
     gql: {60, :timer.minutes(1)},
     api: {120, :timer.minutes(1)},
     auth: {20, :timer.minutes(1)},
@@ -25,12 +25,22 @@ defmodule KilnCMSWeb.RateLimit do
     probe: {600, :timer.minutes(1)}
   }
 
-  @doc false
-  def limits, do: @limits
+  @doc """
+  Effective per-bucket limits: the defaults, with any per-bucket overrides from
+  `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{bucket => {limit, scale}}`
+  merged over them. Production leaves this unset (the defaults apply); the test
+  env raises the buckets the broad controller suites hammer (`:api` etc.) so a
+  fast full-suite run doesn't saturate one per-IP window and 429 unrelated tests.
+  """
+  def limits, do: Map.merge(@default_limits, configured_limits())
+
+  defp configured_limits do
+    Application.get_env(:kiln_cms, __MODULE__, []) |> Keyword.get(:limits, %{})
+  end
 
   @doc "Returns `:allow` or `{:deny, retry_after_ms}` for the given bucket key."
   def check(bucket, remote_ip) when is_atom(bucket) and is_binary(remote_ip) do
-    {limit, scale} = Map.fetch!(@limits, bucket)
+    {limit, scale} = Map.fetch!(limits(), bucket)
     key = "#{bucket}:#{remote_ip}"
 
     case hit(key, scale, limit) do

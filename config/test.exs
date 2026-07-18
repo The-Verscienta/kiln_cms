@@ -48,6 +48,21 @@ config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 # call the record functions synchronously instead.
 config :kiln_cms, :analytics_enabled, false
 
+# Raise the rate-limit buckets the broad controller suites hammer, per IP. All
+# test requests come from 127.0.0.1, so a fast full-suite run can pack more than
+# the production `:api` limit (120/min) of `/api/*` calls into one window and
+# 429 unrelated tests (flaky on fast machines, and it started failing CI as the
+# `/api` test volume grew). Only the buckets no test asserts on are raised — the
+# `:auth`/`:preview`/`:form`/`:docs` limits `KilnCMSWeb.Plugs.RateLimitTest`
+# exercises are left at their real values. Production is unaffected (unset).
+config :kiln_cms, KilnCMSWeb.RateLimit,
+  limits: %{
+    api: {1_000_000, :timer.minutes(1)},
+    delivery: {1_000_000, :timer.minutes(1)},
+    gql: {1_000_000, :timer.minutes(1)},
+    probe: {1_000_000, :timer.minutes(1)}
+  }
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
