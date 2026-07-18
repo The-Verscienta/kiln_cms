@@ -2,7 +2,9 @@
 
 Deploy checklist for the 2026-07 P2 feature set: signed provenance (#340),
 static/edge export (#353), DB-outage-resilient delivery (#341), editorial
-automation (#342), and multiplayer live preview (#343).
+automation (#342), and multiplayer live preview (#343). Plus the
+runtime/marketplace extensibility scoping (#333) — a **no-op deploy**, see the
+table row and §6.
 
 Production is a **manual Coolify _Redeploy_** on the VPS. A Redeploy rebuilds the
 image (running `mix assets.deploy` at build time) and runs pending migrations at
@@ -18,6 +20,7 @@ container start (`bin/migrate` → `KilnCMS.Release.migrate`, per the container
 | #341 DB-outage delivery | none | none | none | none |
 | #342 automation | **1 migration** (`automation_rules`) | none | none (rules are UI-created) | none (`:default`) |
 | #343 multiplayer preview | none | **JS hook** (`PreviewCursors`) | none | none |
+| #333 extensibility scoping | none | none | none | none |
 
 Key points:
 
@@ -109,9 +112,36 @@ config :kiln_cms, KilnCMS.Firing.StaticExport, output_dir: "/data/edge"
       and unused elsewhere, so it can stay; nothing else changed schema. There is
       no data migration to reverse.
 
+## 6. #333 extensibility scoping — nothing to deploy
+
+#333 (PR #380) is **docs + a decision + an inert lightweight registry** — it
+changes no runtime behavior on a stock install:
+
+- **No migration, no assets, no env/config, no new Oban queue.** It ships on the
+  same plain Redeploy as everything above with zero extra steps.
+- **The decision it records:** Kiln does **not** hot-load arbitrary plugin code
+  at runtime (the BEAM has no in-process sandbox). Nothing to configure — this
+  ratifies the existing compile-time plugin model (D18/D4). See
+  `docs/plugin-extensibility.md`.
+- **The registry additions are inert by default:** the new optional
+  `version/0`/`summary/0`/`homepage/0` plugin metadata and
+  `Kiln.Plugins.manifests/0` only surface data for plugins that are *already
+  installed* (i.e. compiled into the image and listed in
+  `config :kiln_cms, :plugins`). Production ships with that list empty, so there
+  is no new surface to verify.
+- **New ops tool (optional, discovery only):** `mix kiln.plugins.list` prints
+  installed plugins with their catalog metadata and contribution surface. Mix
+  tasks aren't packaged in a release, so this is a **build/dev-shell** aid, never
+  run in production or automatically. From a release, the equivalent is
+  `bin/kiln_cms eval 'Kiln.Plugins.manifests()'`.
+
+There is no post-deploy check specific to #333 — a successful boot is the whole
+story. Rollback is likewise a no-op (docs + code, no schema).
+
 ---
 
 **Bottom line:** a plain Redeploy of `main` ships #341, #343, and #342 (incl. the
 automation table and the preview cursor hook) with no manual steps beyond
-verifying boot. #340 and #353 do nothing until you opt in via §4. No POOL_SIZE
-change, no new required secrets.
+verifying boot. #340 and #353 do nothing until you opt in via §4. #333 is docs +
+an inert registry — nothing to deploy or verify (§6). No POOL_SIZE change, no new
+required secrets.
