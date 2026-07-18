@@ -176,7 +176,8 @@ change, then throw it away. `./scripts/staging.sh up` clones the production data
 migrates it, and **scrubs it of personal data and outbound secrets** (reusing the
 GDPR-erasure `:anonymize` action) so the copy is safe to run somewhere less
 locked-down. See [`docs/staging-environments.md`](docs/staging-environments.md) for
-the one-command flow, the Docker/Coolify recipe, and the safety guards.
+the one-command flow, the Docker/Coolify recipe, and the safety guards, and
+[`docs/deploy-staging.md`](docs/deploy-staging.md) for the deploy/operator checklist.
 
 ### Production hardening checklist
 
