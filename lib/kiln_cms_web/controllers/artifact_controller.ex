@@ -121,11 +121,24 @@ defmodule KilnCMSWeb.ArtifactController do
       |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
       |> put_resp_header("etag", etag)
       |> put_resp_header("last-modified", http_date(record.updated_at))
+      |> maybe_provenance_header(record, surface)
 
     if etag in get_req_header(conn, "if-none-match") do
       send_resp(conn, :not_modified, "")
     else
       json(conn, body)
+    end
+  end
+
+  # Advertise the signed provenance manifest for this artifact (#340) when
+  # provenance is enabled, so consumers can discover the verification surface
+  # from the delivery response. A no-op (cheap config read) when disabled.
+  defp maybe_provenance_header(conn, record, surface) do
+    if KilnCMS.Provenance.enabled?() do
+      url = "/api/provenance/#{Engine.public_type(record)}/#{record.slug}?surface=#{surface}"
+      put_resp_header(conn, "x-kiln-provenance", url)
+    else
+      conn
     end
   end
 
