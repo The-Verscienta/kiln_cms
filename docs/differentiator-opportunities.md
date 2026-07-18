@@ -132,9 +132,11 @@ the decoupling problem largely disappears:
 - **#355** — visual-editing bridge/SDK for *external* headless front ends.
   **Shipped** (once #330 landed): stega field-mapping + `_id` addressing in the
   annotated preview, an embeddable `bridge.js` overlay (click-to-edit →
-  deep-link to the Kiln editor), and a live-preview push socket. Kiln *enables*
-  it; the external front end still opts in (embed the SDK) — inherent to
-  headless. See [visual-editing-bridge.md](visual-editing-bridge.md).
+  deep-link to the Kiln editor), a live-preview push socket, and a **Presentation
+  console** (`/editor/presentation/:type/:slug`) that iframes the external front
+  end for side-by-side inline editing. Kiln *enables* it; the external front end
+  still opts in (embed the SDK) — inherent to headless. See
+  [visual-editing-bridge.md](visual-editing-bridge.md).
 - **#335** — drag-and-drop page building (layout composition).
 
 Hard parts (feasible, not free): inline rich text (TipTap in-page), structural
