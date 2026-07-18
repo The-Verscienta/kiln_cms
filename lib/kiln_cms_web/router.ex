@@ -219,6 +219,9 @@ defmodule KilnCMSWeb.Router do
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post
       live "/editor/preview/:kind/:id", PreviewLive, :show
+      # In-context (front-end) editing on Kiln's own site (#354): renders the
+      # page from the live draft with inline-editable text regions.
+      live "/editor/site/:type/:slug", InContextEditLive, :edit
     end
 
     # Admin-only authoring UIs. Guarded at the router (live_session) level, not

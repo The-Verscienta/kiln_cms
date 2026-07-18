@@ -289,6 +289,108 @@ async function mountCollab(hook, {token, topic, fragment}) {
   if (seed) hook.editor.commands.setContent(seed, true)
 }
 
+// In-context editing (#354): mount TipTap directly into a rendered-page region.
+// Unlike the block editor's mount (a dedicated widget with a static toolbar and a
+// hidden form input), here the region *is* the page content, so the toolbar
+// floats above the block on focus and edits push straight to the LiveView via
+// `update_block` rather than mirroring into a form input. The pushed HTML is
+// re-sanitized on write by the `BlockUnion` cast, so no client-side allowlist is
+// needed. State lands on the hook so its destroyed() can tear everything down.
+export function mountInline(hook) {
+  const seed = hook.el.dataset.content || ""
+  // TipTap appends its own contenteditable; clear the no-JS seed HTML first so it
+  // isn't left duplicated alongside the editor.
+  hook.el.replaceChildren()
+
+  const editor = new Editor({
+    element: hook.el,
+    extensions: [StarterKit],
+    content: seed,
+    editorProps: {
+      attributes: {
+        "aria-label": hook.el.dataset.editorLabel || "Rich text editor",
+        "aria-multiline": "true",
+        role: "textbox",
+      },
+    },
+    onUpdate: ({editor}) => {
+      hook.slash.update()
+      syncInlineToolbar(hook)
+      clearTimeout(hook._debounce)
+      hook._debounce = setTimeout(() => pushInline(hook), 600)
+    },
+    onSelectionUpdate: () => {
+      hook.slash.update()
+      syncInlineToolbar(hook)
+    },
+    onFocus: () => showInlineToolbar(hook),
+    onBlur: () => {
+      // Delay so a mousedown on a toolbar button (which momentarily blurs the
+      // editor) doesn't hide the toolbar before the command runs.
+      clearTimeout(hook._blurTimer)
+      hook._blurTimer = setTimeout(() => hideInlineToolbar(hook), 200)
+      clearTimeout(hook._debounce)
+      pushInline(hook)
+    },
+  })
+
+  hook.editor = editor
+  hook.slash = new SlashMenu(editor)
+  buildInlineToolbar(hook)
+}
+
+function pushInline(hook) {
+  hook.pushEvent("update_block", {
+    id: hook.el.dataset.kilnBlockId,
+    value: hook.editor.getHTML(),
+  })
+}
+
+// A toolbar floating above the focused region, rendered into document.body (so
+// it escapes the region's overflow) and repositioned each time it's shown.
+function buildInlineToolbar(hook) {
+  const bar = document.createElement("div")
+  bar.className = "rt-inline-toolbar"
+  bar.setAttribute("role", "toolbar")
+  bar.setAttribute("aria-label", "Text formatting")
+  bar.hidden = true
+  // Keep the editor's selection: pressing a button must not blur the editor.
+  bar.addEventListener("mousedown", e => e.preventDefault())
+
+  hook.toolbarButtons = TOOLBAR.map(item => {
+    const b = toolbarButton(hook.editor, item)
+    bar.appendChild(b)
+    return {item, b}
+  })
+
+  document.body.appendChild(bar)
+  hook.toolbar = bar
+}
+
+function showInlineToolbar(hook) {
+  clearTimeout(hook._blurTimer)
+  if (!hook.toolbar) return
+  hook.toolbar.hidden = false
+  const rect = hook.el.getBoundingClientRect()
+  hook.toolbar.style.top = `${window.scrollY + rect.top - hook.toolbar.offsetHeight - 6}px`
+  hook.toolbar.style.left = `${window.scrollX + rect.left}px`
+  syncInlineToolbar(hook)
+}
+
+function hideInlineToolbar(hook) {
+  if (hook.toolbar) hook.toolbar.hidden = true
+}
+
+function syncInlineToolbar(hook) {
+  if (!hook.toolbarButtons) return
+  hook.toolbarButtons.forEach(({item, b}) => {
+    if (!item.active) return
+    const on = item.active(hook.editor)
+    b.classList.toggle("bg-base-300", on)
+    b.setAttribute("aria-pressed", on ? "true" : "false")
+  })
+}
+
 // `content` seeds the editor; omit it under collaboration, where the CRDT
 // owns the document (TipTap ignores the option there anyway — see mountCollab).
 function buildEditor(hook, extensions, content = null) {
