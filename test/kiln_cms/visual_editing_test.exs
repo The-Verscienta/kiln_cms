@@ -128,5 +128,48 @@ defmodule KilnCMS.VisualEditingTest do
       json = %{"title" => "no id here", "blocks" => []}
       assert VisualEditing.annotate(json) == json
     end
+
+    test "stega-encodes each span of a rich-text Portable Text body" do
+      json = %{
+        "type" => "post",
+        "id" => "doc-3",
+        "slug" => "rt",
+        "title" => "T",
+        "blocks" => [
+          %{
+            "_type" => "rich_text",
+            "_id" => "r1",
+            "body" => [
+              %{
+                "_type" => "block",
+                "_key" => "b0",
+                "children" => [
+                  %{"_type" => "span", "text" => "Hello ", "marks" => []},
+                  %{"_type" => "span", "text" => "world", "marks" => ["strong"]}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+
+      out = VisualEditing.annotate(json)
+      [%{"body" => [%{"children" => [s1, s2]}]}] = out["blocks"]
+
+      # Every span carries the rich-text block address; a click anywhere resolves
+      # to block "r1".
+      assert Stega.decode(s1["text"]) ==
+               %{
+                 "type" => "post",
+                 "id" => "doc-3",
+                 "slug" => "rt",
+                 "field" => "body",
+                 "block" => "r1"
+               }
+
+      assert Stega.clean(s1["text"]) == "Hello "
+      assert Stega.decode(s2["text"])["block"] == "r1"
+      assert Stega.clean(s2["text"]) == "world"
+    end
   end
 end
