@@ -23,9 +23,12 @@ defmodule KilnCMS.Firing.PointInTime do
   alias KilnCMS.Firing.Engine
 
   @publish_actions [:publish, :publish_scheduled]
-  # Archive is a state transition OUT of :published too — an archived
-  # document must stop appearing in the historical index from that moment.
-  @unpublish_actions [:unpublish, :unpublish_scheduled, :archive]
+  # Archive and soft-delete (:destroy, AshArchival) leave the published state
+  # too — a removed document must stop appearing in the historical index from
+  # that moment. (Hard purges are filtered at entry time: their version rows
+  # survive, but re-exposing deliberately erased content would be a privacy
+  # regression.)
+  @unpublish_actions [:unpublish, :unpublish_scheduled, :archive, :destroy]
 
   @doc """
   The **collection view as of a date** (#338 phase 2): every document of
@@ -89,23 +92,58 @@ defmodule KilnCMS.Firing.PointInTime do
   defp org_uuid(nil), do: nil
   defp org_uuid(org_id), do: Ecto.UUID.dump!(org_id)
 
-  # Replay up to the effective publish for the index fields. `nil` when the
-  # replayed state carries no slug (malformed history) — dropped by the caller.
-  defp entry(version_module, _resource, id, published_at, org_id) do
-    state = replay(version_module, id, published_at, org_id)
-
-    case state do
-      %{"slug" => slug} when is_binary(slug) ->
-        %{
-          id: id,
-          slug: slug,
-          title: state["title"],
-          published_at: published_at
-        }
-
-      _ ->
-        nil
+  # Index fields as of the effective publish — one slim query folding only the
+  # versions that touched title/slug (never the full block-tree payloads).
+  # `nil` when no slug is reconstructible (history predating version tracking)
+  # or when the document row is GONE (hard purge — deliberately erased content
+  # must not be re-exposed by the historical index).
+  defp entry(version_module, resource, id, published_at, org_id) do
+    with true <- still_exists?(resource, id, org_id),
+         %{"slug" => slug} = state when is_binary(slug) <-
+           title_slug_at(version_module, id, published_at) do
+      %{id: id, slug: slug, title: state["title"], published_at: published_at}
+    else
+      _ -> nil
     end
+  end
+
+  # The row still exists in ANY workflow state (archived/trashed rows do; hard
+  # purges don't). Raw existence probe — reads across archival state.
+  defp still_exists?(resource, id, org_id) do
+    table = AshPostgres.DataLayer.Info.table(resource)
+
+    %{rows: [[exists]]} =
+      KilnCMS.Repo.query!(
+        "SELECT EXISTS(SELECT 1 FROM #{table} WHERE id = $1 AND ($2::uuid IS NULL OR org_id = $2))",
+        [Ecto.UUID.dump!(id), org_uuid(org_id)]
+      )
+
+    exists
+  end
+
+  # Fold title/slug through history WITHOUT loading block trees: only versions
+  # whose changes touched either key, last value wins.
+  defp title_slug_at(version_module, id, up_to) do
+    table = AshPostgres.DataLayer.Info.table(version_module)
+
+    %{rows: rows} =
+      KilnCMS.Repo.query!(
+        """
+        SELECT changes->>'title', changes->>'slug'
+        FROM #{table}
+        WHERE version_source_id = $1
+          AND version_inserted_at <= $2
+          AND changes ?| array['title', 'slug']
+        ORDER BY version_inserted_at ASC, id ASC
+        """,
+        [Ecto.UUID.dump!(id), DateTime.to_naive(up_to)]
+      )
+
+    Enum.reduce(rows, %{}, fn [title, slug], acc ->
+      acc
+      |> then(&if(title, do: Map.put(&1, "title", title), else: &1))
+      |> then(&if(slug, do: Map.put(&1, "slug", slug), else: &1))
+    end)
   end
 
   @doc """

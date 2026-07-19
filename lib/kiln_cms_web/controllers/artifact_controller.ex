@@ -71,7 +71,7 @@ defmodule KilnCMSWeb.ArtifactController do
     # version history lives on the shared entry tier — the documented
     # "dynamic entries are a later phase" boundary, enforced instead of 500ing.
     with {:ok, as_of} <- parse_as_of(raw),
-         ct when not is_nil(ct) <- ContentTypes.get(type),
+         ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          resource when not is_nil(resource) <- ct.resource do
       limit = index_limit(params)
 
@@ -88,7 +88,11 @@ defmodule KilnCMSWeb.ArtifactController do
             slug: entry.slug,
             title: entry.title,
             published_at: entry.published_at,
-            href: "/api/content/#{type}/#{entry.slug}?as_of=#{DateTime.to_iso8601(as_of)}"
+            # The per-document snapshot endpoint resolves by CURRENT slug and
+            # published state — a since-unpublished or since-renamed document
+            # has no working snapshot URL (id-addressable history is the
+            # documented later phase), so emit an honest null over a dead link.
+            href: snapshot_href(org_id, ct.type, type, entry.slug, as_of)
           }
         end)
 
@@ -117,6 +121,18 @@ defmodule KilnCMSWeb.ArtifactController do
       "missing_as_of",
       "This collection view is historical: pass `as_of` (the live collection is served by the JSON:API/GraphQL surfaces)."
     )
+  end
+
+  defp snapshot_href(org_id, storage_type, public_type, slug, as_of) do
+    locale = KilnCMS.I18n.default_locale()
+
+    case Delivery.published(org_id, storage_type, slug, locale) do
+      {:ok, _record} ->
+        "/api/content/#{public_type}/#{slug}?as_of=#{DateTime.to_iso8601(as_of)}"
+
+      _ ->
+        nil
+    end
   end
 
   # Bounded page size for the historical index.

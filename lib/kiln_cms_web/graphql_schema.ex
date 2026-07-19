@@ -42,7 +42,7 @@ defmodule KilnCMSWeb.GraphqlSchema do
       resolve fn %{type: type, as_of: as_of} = args, resolution ->
         # Compiled types only — a dynamic (D17) descriptor has resource: nil
         # (the documented later-phase boundary), so error cleanly, never crash.
-        case KilnCMS.CMS.ContentTypes.get(type) do
+        case KilnCMS.CMS.ContentTypes.get(type, graphql_org_id(resolution)) do
           %{resource: resource} when not is_nil(resource) ->
             {:ok,
              KilnCMS.Firing.PointInTime.index(
