@@ -17,7 +17,7 @@ defmodule KilnCMS.Firing.Engine do
   alias KilnCMS.Firing.Cache
 
   # `:llm` (#357) is the Markdown surface answer engines extract from.
-  @surfaces [:web, :json, :json_ld, :llm]
+  @surfaces KilnCMS.Firing.Surfaces.all()
   # Bumped when a surface's serialized shape changes (decision A2).
   @format_version 1
 

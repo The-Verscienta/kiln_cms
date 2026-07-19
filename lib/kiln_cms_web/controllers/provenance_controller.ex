@@ -23,7 +23,7 @@ defmodule KilnCMSWeb.ProvenanceController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Provenance
 
-  @surfaces %{"json" => :json, "json_ld" => :json_ld, "web" => :web}
+  @surfaces KilnCMS.Firing.Surfaces.name_map()
   @max_age_seconds 300
 
   def public_key(conn, _params) do

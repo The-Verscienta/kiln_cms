@@ -32,9 +32,9 @@ defmodule KilnCMS.Firing.StaticExport do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Engine
 
-  @surfaces [:web, :json, :json_ld, :llm]
+  @surfaces KilnCMS.Firing.Surfaces.all()
   @surface_files %{web: "web.html", json: "json.json", json_ld: "json_ld.json", llm: "llm.md"}
-  @surface_names %{"web" => :web, "json" => :json, "json_ld" => :json_ld, "llm" => :llm}
+  @surface_names KilnCMS.Firing.Surfaces.name_map()
 
   @doc "The exportable surfaces."
   @spec surfaces() :: [atom()]
@@ -187,7 +187,6 @@ defmodule KilnCMS.Firing.StaticExport do
   defp write_surface(path, :web, %{"html" => html}), do: write!(path, html)
   defp write_surface(path, :web, body), do: write!(path, Map.get(body, "html", ""))
   # The :llm surface is raw Markdown (#357), exported as such.
-  defp write_surface(path, :llm, %{"markdown" => markdown}), do: write!(path, markdown)
   defp write_surface(path, :llm, body), do: write!(path, Map.get(body, "markdown", ""))
   defp write_surface(path, _surface, body), do: write_json(path, body)
 

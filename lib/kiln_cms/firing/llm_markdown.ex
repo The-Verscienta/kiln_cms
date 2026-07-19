@@ -36,21 +36,7 @@ defmodule KilnCMS.Firing.LlmMarkdown do
     Enum.join(title ++ excerpt ++ blocks, "\n\n") <> "\n"
   end
 
-  # Per-block Markdown. The head matches a plain var, never `%__MODULE__{}` —
-  # block structs are built late by Ash (clean-compile gotcha).
-  defp block_markdown(block) do
-    module = block.__struct__
-
-    cond do
-      function_exported?(module, :to_markdown, 1) ->
-        module.to_markdown(block)
-
-      module == KilnCMS.Blocks.Heading ->
-        level = if block.level in 1..6, do: block.level, else: 2
-        String.duplicate("#", level) <> " " <> Blocks.search_text(block)
-
-      true ->
-        Blocks.search_text(block)
-    end
-  end
+  # Per-block Markdown — the shared dispatcher owns the seam: block modules
+  # export `to_markdown/1` (Heading, Columns) or fall back to search_text.
+  defp block_markdown(block), do: Blocks.to_markdown(block)
 end

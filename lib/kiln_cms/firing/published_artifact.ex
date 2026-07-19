@@ -112,7 +112,7 @@ defmodule KilnCMS.Firing.PublishedArtifact do
 
     attribute :surface, :atom do
       allow_nil? false
-      constraints one_of: [:web, :json, :json_ld, :llm]
+      constraints one_of: KilnCMS.Firing.Surfaces.all()
       public? true
     end
 
