@@ -25,7 +25,13 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
 
     Ash.Changeset.after_action(changeset, fn _changeset, record ->
       if dispatch?(only_when, record) do
-        Webhooks.dispatch("#{event_prefix(record)}.#{event}", ContentSerializer.to_map(record))
+        # Scope the fan-out to the publishing record's own site (epic #336) so a
+        # publish only reaches its org's subscribed endpoints.
+        Webhooks.dispatch(
+          "#{event_prefix(record)}.#{event}",
+          ContentSerializer.to_map(record),
+          record.org_id
+        )
       end
 
       {:ok, record}

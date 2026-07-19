@@ -12,8 +12,10 @@ defmodule KilnCMS.Forms.NotificationWorker do
   alias KilnCMS.{CMS, Mail}
 
   @impl Oban.Worker
-  def perform(%Oban.Job{id: id, args: %{"form_id" => form_id, "data" => data}}) do
-    case CMS.get_form(form_id, authorize?: false) do
+  def perform(%Oban.Job{id: id, args: %{"form_id" => form_id, "data" => data} = args}) do
+    # `org_id` scopes the form re-fetch to its site (epic #336); pre-#336 jobs
+    # carry none — a nil tenant reads globally, finding the row by its unique id.
+    case CMS.get_form(form_id, authorize?: false, tenant: args["org_id"]) do
       {:ok, %{notify_email: to} = form} when is_binary(to) and to != "" ->
         new()
         |> from(Application.fetch_env!(:kiln_cms, :email_from))

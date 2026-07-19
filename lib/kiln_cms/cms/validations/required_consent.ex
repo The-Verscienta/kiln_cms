@@ -41,11 +41,13 @@ defmodule KilnCMS.CMS.Validations.RequiredConsent do
   end
 
   # Consent kinds already recorded for this document. Read as the system — the
-  # gate must see every consent regardless of the publishing actor.
+  # gate must see every consent regardless of the publishing actor — and scoped
+  # to the document's own site (epic #336) so a consent on another org's content
+  # can never satisfy this org's gate.
   defp present_kinds(document) do
     type = to_string(KilnCMS.Firing.Engine.document_type(document))
 
-    KilnCMS.CMS.list_consents_for!(type, document.id, authorize?: false)
+    KilnCMS.CMS.list_consents_for!(type, document.id, authorize?: false, tenant: document.org_id)
     |> Enum.map(& &1.kind)
     |> Enum.uniq()
   end

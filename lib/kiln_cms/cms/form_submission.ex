@@ -52,8 +52,27 @@ defmodule KilnCMS.CMS.FormSubmission do
     end
   end
 
+  # Multi-tenancy (epic #336): a submission belongs to the same site as its form.
+  # `global?: true` keeps the tenant optional; the delivery-path create
+  # (`KilnCMS.Forms.record`, `authorize?: false`) MUST carry the form's tenant so
+  # the submission lands in the right site (see `KilnCMS.Forms`).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant (the form's org) on
+    # the delivery-path create, else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # Coerced field values, keyed by FormField name.
     attribute :data, :map, allow_nil?: false, default: %{}, public?: true
@@ -65,6 +84,14 @@ defmodule KilnCMS.CMS.FormSubmission do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     belongs_to :form, KilnCMS.CMS.Form do
       allow_nil? false
       public? true

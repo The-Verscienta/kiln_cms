@@ -71,7 +71,13 @@ defmodule KilnCMS.Governance do
         },
         timeline: timeline,
         publishes: for(e <- timeline, e.publish?, do: e.at),
-        consents: KilnCMS.CMS.list_consents_for!(to_string(ct.type), id, authorize?: false)
+        # Scoped to the record's own site (epic #336) so the trail only shows
+        # consents from the same org as the content.
+        consents:
+          KilnCMS.CMS.list_consents_for!(to_string(ct.type), id,
+            authorize?: false,
+            tenant: record.org_id
+          )
       }
     else
       _ -> nil

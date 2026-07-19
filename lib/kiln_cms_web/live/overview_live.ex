@@ -51,10 +51,13 @@ defmodule KilnCMSWeb.OverviewLive do
 
   defp load_metrics(socket) do
     actor = socket.assigns.actor
+    # Every count/aggregate scopes to the current site (epic #336); Ash ignores
+    # the tenant on the still-global resources (API keys, analytics).
+    org = socket.assigns.current_org
     admin? = actor.role == :admin
     now = DateTime.utc_now()
 
-    rows = content_rows(actor)
+    rows = content_rows(actor, org)
     by_state = Enum.frequencies_by(rows, fn {_kind, r} -> r.state end)
 
     socket
@@ -63,23 +66,23 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:stale, stale_count(rows, now))
     |> assign(:upcoming, upcoming_count(rows, now))
     |> assign(:coverage, coverage(rows))
-    |> assign(:media_count, count(MediaItem, actor))
-    |> assign(:views, total_views(actor))
-    |> assign(:taxonomy_terms, count(Category, actor) + count(Tag, actor))
+    |> assign(:media_count, count(MediaItem, actor, org))
+    |> assign(:views, total_views(actor, org))
+    |> assign(:taxonomy_terms, count(Category, actor, org) + count(Tag, actor, org))
     |> assign(:types_count, length(ContentTypes.all()) + length(ContentTypes.dynamic_all()))
     |> assign(:plugins_count, length(Kiln.Plugins.all()))
-    |> assign(:fields_count, if(admin?, do: count(FieldDefinition, actor)))
-    |> assign(:webhooks, if(admin?, do: webhook_health(actor)))
-    |> assign(:forms, if(admin?, do: form_activity(actor)))
-    |> assign(:keys_count, if(admin?, do: count(ApiKey, actor)))
+    |> assign(:fields_count, if(admin?, do: count(FieldDefinition, actor, org)))
+    |> assign(:webhooks, if(admin?, do: webhook_health(actor, org)))
+    |> assign(:forms, if(admin?, do: form_activity(actor, org)))
+    |> assign(:keys_count, if(admin?, do: count(ApiKey, actor, org)))
   end
 
   # One narrow-select fetch per content type; every content-shaped metric
   # (state counts, schedule window, staleness, translation coverage) is then
   # computed in memory from the same rows.
-  defp content_rows(actor) do
+  defp content_rows(actor, org) do
     for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(),
-        row <- ContentTypes.list!(ct, actor: actor, query: [select: @row_fields]) do
+        row <- ContentTypes.list!(ct, actor: actor, tenant: org, query: [select: @row_fields]) do
       {ct.type, row}
     end
   end
@@ -121,13 +124,13 @@ defmodule KilnCMSWeb.OverviewLive do
     end
   end
 
-  defp webhook_health(actor) do
-    endpoints = CMS.list_webhook_endpoints!(actor: actor)
+  defp webhook_health(actor, org) do
+    endpoints = CMS.list_webhook_endpoints!(actor: actor, tenant: org)
 
     failed_24h =
       WebhookDelivery
       |> Ash.Query.filter(status == :failed and inserted_at >= ago(1, :day))
-      |> count(actor)
+      |> count(actor, org)
 
     %{
       active: Enum.count(endpoints, & &1.active),
@@ -136,26 +139,27 @@ defmodule KilnCMSWeb.OverviewLive do
     }
   end
 
-  defp form_activity(actor) do
+  defp form_activity(actor, org) do
     recent =
       FormSubmission
       |> Ash.Query.filter(inserted_at >= ago(^@window_days, :day))
-      |> count(actor)
+      |> count(actor, org)
 
-    %{forms: count(Form, actor), recent: recent}
+    %{forms: count(Form, actor, org), recent: recent}
   end
 
-  defp count(query, actor) do
-    case Ash.count(query, actor: actor) do
+  defp count(query, actor, org) do
+    case Ash.count(query, actor: actor, tenant: org) do
       {:ok, n} -> n
       _ -> 0
     end
   end
 
   # SUM over zero rows yields nil (see AnalyticsLive.total_views/1 for why
-  # this is a pattern match rather than `|| 0`).
-  defp total_views(actor) do
-    case Ash.sum(KilnCMS.Analytics.ContentView, :views, actor: actor) do
+  # this is a pattern match rather than `|| 0`). `tenant` is a no-op until
+  # Analytics.ContentView is org-scoped (PR 4d); harmless under the guard.
+  defp total_views(actor, org) do
+    case Ash.sum(KilnCMS.Analytics.ContentView, :views, actor: actor, tenant: org) do
       {:ok, total} when is_integer(total) -> total
       _ -> 0
     end

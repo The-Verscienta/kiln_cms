@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.FormController do
 
   alias KilnCMS.Forms
   alias KilnCMSWeb.Embed
+  alias KilnCMSWeb.Tenant
 
   # The embed page is public and changes only when an admin edits the form, so a
   # short shared-cache window is safe; a deactivated form disappears within it.
@@ -36,7 +37,7 @@ defmodule KilnCMSWeb.FormController do
   def embed(conn, %{"slug" => slug}) do
     conn = put_embed_csp(conn)
 
-    case Forms.get_active(slug) do
+    case Forms.get_active(slug, Tenant.current_org_id(conn)) do
       nil ->
         conn |> put_status(404) |> html(page(gettext_msg("Form not found."), nil, embed: true))
 
@@ -59,7 +60,7 @@ defmodule KilnCMSWeb.FormController do
   defp embedded?(params), do: params["_kiln_embed"] == "1"
 
   def schema(conn, %{"slug" => slug}) do
-    case Forms.get_active(slug) do
+    case Forms.get_active(slug, Tenant.current_org_id(conn)) do
       nil ->
         error(conn, 404, "not_found", "Form not found.")
 
@@ -99,7 +100,7 @@ defmodule KilnCMSWeb.FormController do
     # would just reload the empty form — omit it there.
     back_href = if embedded?, do: nil, else: back(conn)
 
-    case run(slug, params) do
+    case run(conn, slug, params) do
       :not_found ->
         conn
         |> put_status(404)
@@ -124,7 +125,7 @@ defmodule KilnCMSWeb.FormController do
 
   # Headless (JSON) submission.
   def submit_json(conn, %{"slug" => slug} = params) do
-    case run(slug, params) do
+    case run(conn, slug, params) do
       :not_found ->
         error(conn, 404, "not_found", "Form not found.")
 
@@ -136,8 +137,8 @@ defmodule KilnCMSWeb.FormController do
     end
   end
 
-  defp run(slug, params) do
-    case Forms.get_active(slug) do
+  defp run(conn, slug, params) do
+    case Forms.get_active(slug, Tenant.current_org_id(conn)) do
       nil ->
         :not_found
 

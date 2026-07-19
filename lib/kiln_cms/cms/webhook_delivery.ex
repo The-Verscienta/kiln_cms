@@ -43,6 +43,11 @@ defmodule KilnCMS.CMS.WebhookDelivery do
   end
 
   oban do
+    # The nightly prune scheduler scans globally (`global? true`), while the
+    # prune worker runs under each row's own `org_id` tenant (epic #336) — one
+    # site's retention sweep never touches another's ledger.
+    use_tenant_from_record? true
+
     triggers do
       # Nightly ledger prune — delivery history is operational data, not an
       # archive.
@@ -92,8 +97,26 @@ defmodule KilnCMS.CMS.WebhookDelivery do
     end
   end
 
+  # Multi-tenancy (epic #336): a delivery belongs to the same site as its
+  # endpoint. `global?: true` keeps the tenant optional; the pipeline create
+  # (`KilnCMS.Webhooks.enqueue`, `authorize?: false`) carries the endpoint's org.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant (the endpoint's
+    # org) on the pipeline create, else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # The event name as sent (`page.published`, `ping`, …).
     attribute :event, :string, allow_nil?: false, public?: true
@@ -125,6 +148,14 @@ defmodule KilnCMS.CMS.WebhookDelivery do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     belongs_to :endpoint, KilnCMS.CMS.WebhookEndpoint do
       allow_nil? false
       public? true

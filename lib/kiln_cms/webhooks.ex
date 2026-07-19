@@ -43,16 +43,19 @@ defmodule KilnCMS.Webhooks do
     do: Keyword.get(Application.get_env(:kiln_cms, __MODULE__, []), :auto_disable_after, 10)
 
   @doc """
-  Record + enqueue a delivery for every active endpoint subscribed to `event`.
-  Runs as a system job (`authorize?: false`).
+  Record + enqueue a delivery for every active endpoint of `org` subscribed to
+  `event`. Runs as a system job (`authorize?: false`); the endpoint scan is
+  tenant-scoped (epic #336) so a publish only fans out to its own site's
+  endpoints. `org` defaults to the sole org (the single-org rollout bridge).
   """
-  @spec dispatch(String.t(), map()) :: :ok
-  def dispatch(event, payload) do
+  @spec dispatch(String.t(), map(), Ash.ToTenant.t() | nil) :: :ok
+  def dispatch(event, payload, org \\ KilnCMS.Accounts.default_org_id()) do
     CMS.list_webhook_endpoints!(
       authorize?: false,
+      tenant: org,
       query: Ash.Query.filter(CMS.WebhookEndpoint, active == true and ^event in events)
     )
-    |> Enum.each(&enqueue(&1.id, event, payload))
+    |> Enum.each(&enqueue(&1.id, event, payload, org))
 
     # Editorial automation (#342) reacts to the same editorial events — this is
     # the single funnel every `<type>.published`/`.unpublished`/`.updated` flows
@@ -67,7 +70,8 @@ defmodule KilnCMS.Webhooks do
   event, and payload — history stays immutable. Admin-triggered.
   """
   @spec redeliver(struct()) :: struct()
-  def redeliver(delivery), do: enqueue(delivery.endpoint_id, delivery.event, delivery.payload)
+  def redeliver(delivery),
+    do: enqueue(delivery.endpoint_id, delivery.event, delivery.payload, delivery.org_id)
 
   @doc """
   Send a test `"ping"` event to one endpoint (delivers even when inactive, so
@@ -75,21 +79,29 @@ defmodule KilnCMS.Webhooks do
   """
   @spec ping(struct()) :: struct()
   def ping(endpoint) do
-    enqueue(endpoint.id, "ping", %{
-      message: "KilnCMS webhook test",
-      endpoint_url: endpoint.url,
-      sent_at: DateTime.to_iso8601(DateTime.utc_now())
-    })
+    enqueue(
+      endpoint.id,
+      "ping",
+      %{
+        message: "KilnCMS webhook test",
+        endpoint_url: endpoint.url,
+        sent_at: DateTime.to_iso8601(DateTime.utc_now())
+      },
+      endpoint.org_id
+    )
   end
 
-  defp enqueue(endpoint_id, event, payload) do
+  defp enqueue(endpoint_id, event, payload, org) do
+    # The delivery lands in the endpoint's site, and its org rides into the job
+    # args so the worker settles it under the same tenant (epic #336).
     delivery =
       CMS.create_webhook_delivery!(
         %{endpoint_id: endpoint_id, event: event, payload: payload},
-        authorize?: false
+        authorize?: false,
+        tenant: org
       )
 
-    %{delivery_id: delivery.id}
+    %{delivery_id: delivery.id, org_id: delivery.org_id}
     |> DeliveryWorker.new()
     |> Oban.insert!()
 

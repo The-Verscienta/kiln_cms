@@ -98,8 +98,27 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     end
   end
 
+  # Multi-tenancy (epic #336): an endpoint belongs to one site, so a publish only
+  # dispatches to its own org's endpoints. `global?: true` keeps the tenant
+  # optional; the dispatch scan (`KilnCMS.Webhooks.dispatch`, `authorize?: false`)
+  # is scoped to the publishing record's org.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on a scoped create,
+    # else the default org; never accepted from input (absent from `default_accept`).
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :url, :string, allow_nil?: false, public?: true
 
@@ -124,6 +143,16 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     attribute :auto_disabled_at, :utc_datetime_usec, public?: true
 
     timestamps()
+  end
+
+  relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   @doc false

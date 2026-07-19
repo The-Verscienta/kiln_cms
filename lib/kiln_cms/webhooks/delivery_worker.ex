@@ -15,8 +15,13 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   alias KilnCMS.Webhooks.SafeUrl
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"delivery_id" => id}} = job) do
-    case CMS.get_webhook_delivery(id, authorize?: false, load: [:endpoint]) do
+  def perform(%Oban.Job{args: %{"delivery_id" => id} = args} = job) do
+    # `org_id` scopes the ledger read/settlement to the delivery's site (epic
+    # #336). Pre-#336 jobs carry none — a nil tenant reads globally, which under
+    # `global?: true` still finds the row by its unique id.
+    tenant = args["org_id"]
+
+    case CMS.get_webhook_delivery(id, authorize?: false, tenant: tenant, load: [:endpoint]) do
       {:ok, delivery} -> attempt(delivery, job)
       # Ledger row pruned/deleted from under the job — nothing to deliver.
       _ -> :ok
@@ -63,6 +68,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   # on the endpoint's health counters (success resets, exhaustion bumps and
   # may auto-disable).
   defp settle(delivery, job, {:ok, status}, _final?) do
+    # The fetched delivery/endpoint carry their org; settle under it (epic #336).
     CMS.record_webhook_delivery_attempt!(
       delivery,
       %{
@@ -72,11 +78,15 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         last_error: nil,
         delivered_at: DateTime.utc_now()
       },
-      authorize?: false
+      authorize?: false,
+      tenant: delivery.org_id
     )
 
     if delivery.endpoint do
-      CMS.record_webhook_success!(delivery.endpoint, %{}, authorize?: false)
+      CMS.record_webhook_success!(delivery.endpoint, %{},
+        authorize?: false,
+        tenant: delivery.org_id
+      )
     end
   end
 
@@ -89,14 +99,18 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         last_status: parse_status(reason),
         last_error: reason
       },
-      authorize?: false
+      authorize?: false,
+      tenant: delivery.org_id
     )
 
     # Bump health only for a live endpoint that truly exhausted its retries —
     # a failed ping against an already-disabled endpoint proves nothing new.
     if final? and is_struct(delivery.endpoint, KilnCMS.CMS.WebhookEndpoint) and
          delivery.endpoint.active do
-      CMS.record_webhook_failure!(delivery.endpoint, %{}, authorize?: false)
+      CMS.record_webhook_failure!(delivery.endpoint, %{},
+        authorize?: false,
+        tenant: delivery.org_id
+      )
     end
   end
 
