@@ -11,23 +11,21 @@ defmodule KilnCMSWeb.GovernanceController do
   alias KilnCMS.Governance
 
   def export(conn, %{"type" => type, "id" => id}) do
-    case conn.assigns[:current_user] do
-      %{role: :admin} ->
-        case Governance.trail(type, id, KilnCMSWeb.Tenant.current_org_id(conn)) do
-          nil ->
-            conn |> put_status(:not_found) |> json(%{error: "not_found"})
+    if KilnCMSWeb.LiveUserAuth.effective_tier(conn) == :admin do
+      case Governance.trail(type, id, KilnCMSWeb.Tenant.current_org_id(conn)) do
+        nil ->
+          conn |> put_status(:not_found) |> json(%{error: "not_found"})
 
-          trail ->
-            conn
-            |> put_resp_header(
-              "content-disposition",
-              ~s(attachment; filename="governance-#{type}-#{id}.json")
-            )
-            |> json(payload(trail))
-        end
-
-      _ ->
-        conn |> put_status(:forbidden) |> json(%{error: "admin_required"})
+        trail ->
+          conn
+          |> put_resp_header(
+            "content-disposition",
+            ~s(attachment; filename="governance-#{type}-#{id}.json")
+          )
+          |> json(payload(trail))
+      end
+    else
+      conn |> put_status(:forbidden) |> json(%{error: "admin_required"})
     end
   end
 

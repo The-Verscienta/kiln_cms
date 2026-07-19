@@ -93,7 +93,7 @@ defmodule KilnCMS.CMS.WebhookDelivery do
 
     # Delivery history is admin-only; the pipeline writes with authorize?: false.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

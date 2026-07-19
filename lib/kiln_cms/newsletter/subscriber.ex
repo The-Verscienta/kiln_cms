@@ -93,7 +93,7 @@ defmodule KilnCMS.Newsletter.Subscriber do
     # Admin-only management. Public subscribe/confirm/unsubscribe and the send
     # pipeline run as the system (`authorize?: false`) behind token checks.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

@@ -90,7 +90,7 @@ defmodule KilnCMS.Mail.Settings do
     # Mail settings are admin-only. The delivery pipeline reads them with
     # `authorize?: false` as a system job (KilnCMS.Mail.dkim_config/0).
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

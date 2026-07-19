@@ -36,13 +36,13 @@ defmodule KilnCMS.Analytics.ContentView do
   end
 
   policies do
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
     # Reading analytics is editor/admin only.
     policy action_type(:read) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     # Views are recorded only by the system (the delivery controller, via

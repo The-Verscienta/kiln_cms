@@ -27,6 +27,7 @@ defmodule KilnCMSWeb.EditorLive do
     {:ok,
      socket
      |> assign(:actor, socket.assigns.current_user)
+     |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
      |> assign(:page_title, gettext("Content"))
      |> assign(:content_types, editable_types())
      |> assign(:max_inline_new_buttons, @max_inline_new_buttons)
@@ -322,7 +323,7 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp edit_path(type, id), do: ~p"/editor/content/#{type}/#{id}"
 
-  defp bulk_actions(%{role: :admin}) do
+  defp bulk_actions(:admin) do
     [
       {"publish", gettext("Publish")},
       {"unpublish", gettext("Unpublish")},
@@ -331,7 +332,7 @@ defmodule KilnCMSWeb.EditorLive do
     ]
   end
 
-  defp bulk_actions(_actor) do
+  defp bulk_actions(_tier) do
     [
       {"unpublish", gettext("Unpublish")},
       {"archive", gettext("Archive")},
@@ -517,7 +518,7 @@ defmodule KilnCMSWeb.EditorLive do
           </span>
           <div class="ml-auto flex flex-wrap justify-end gap-2">
             <button
-              :for={{verb, label} <- bulk_actions(@actor)}
+              :for={{verb, label} <- bulk_actions(@tier)}
               type="button"
               phx-click="bulk"
               phx-value-action={verb}
@@ -527,7 +528,7 @@ defmodule KilnCMSWeb.EditorLive do
               {label}
             </button>
             <button
-              :if={@actor.role == :admin}
+              :if={@tier == :admin}
               type="button"
               phx-click="bulk"
               phx-value-action="delete"
@@ -634,7 +635,7 @@ defmodule KilnCMSWeb.EditorLive do
             </span>
             <div class="flex w-full items-center justify-end gap-2 sm:w-auto">
               <button
-                :if={record.state == :draft and @actor.role == :editor}
+                :if={record.state == :draft and @tier == :editor}
                 type="button"
                 phx-click="submit"
                 phx-value-kind={kind}
@@ -644,7 +645,7 @@ defmodule KilnCMSWeb.EditorLive do
                 {gettext("Submit")}
               </button>
               <button
-                :if={record.state in [:draft, :in_review] and @actor.role == :admin}
+                :if={record.state in [:draft, :in_review] and @tier == :admin}
                 type="button"
                 phx-click="publish"
                 phx-value-kind={kind}
@@ -654,7 +655,7 @@ defmodule KilnCMSWeb.EditorLive do
                 {if record.state == :in_review, do: gettext("Approve"), else: gettext("Publish")}
               </button>
               <button
-                :if={record.state == :in_review and @actor.role == :admin}
+                :if={record.state == :in_review and @tier == :admin}
                 type="button"
                 phx-click="return"
                 phx-value-kind={kind}

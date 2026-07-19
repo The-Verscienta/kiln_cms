@@ -83,6 +83,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:kind, kind)
          |> assign(:has_excerpt, ContentTypes.get!(kind, org_id(org)).excerpt?)
          |> assign(:actor, actor)
+         |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
          |> assign(:block_types, block_types())
          |> assign(:nested_child_types, @nested_child_types)
          |> assign(:editors, Presence.editors(kind, id))
@@ -2198,7 +2199,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               :if={@record.state == :draft or @save_state != :saved}
               state={@save_state}
             />
-            <.workflow_buttons state={@record.state} actor={@actor} />
+            <.workflow_buttons state={@record.state} tier={@tier} />
             <.button
               type="submit"
               variant="primary"
@@ -2389,7 +2390,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     <div :if={block_type_string(bf) not in ["rich_text", "image", "columns"]}>
                       <.dsl_block_fields
                         bf={bf}
-                        role={@actor.role}
+                        role={@tier}
                         locked_fields={@locked_fields}
                         cursors={@cursors}
                       />
@@ -2789,12 +2790,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   attr :state, :atom, required: true
-  attr :actor, :map, required: true
+  attr :tier, :atom, required: true
 
   defp workflow_buttons(assigns) do
     ~H"""
     <button
-      :if={@state == :draft and @actor.role == :editor}
+      :if={@state == :draft and @tier == :editor}
       type="button"
       phx-click="workflow"
       phx-value-action="submit"
@@ -2804,7 +2805,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {gettext("Submit for review")}
     </button>
     <button
-      :if={@state in [:draft, :in_review] and @actor.role == :admin}
+      :if={@state in [:draft, :in_review] and @tier == :admin}
       type="button"
       phx-click="workflow"
       phx-value-action="publish"
@@ -2814,7 +2815,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {if @state == :in_review, do: gettext("Approve & publish"), else: gettext("Publish")}
     </button>
     <button
-      :if={@state == :in_review and @actor.role == :admin}
+      :if={@state == :in_review and @tier == :admin}
       type="button"
       phx-click="workflow"
       phx-value-action="return"
@@ -2824,7 +2825,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {gettext("Request changes")}
     </button>
     <span
-      :if={@state == :in_review and @actor.role == :editor}
+      :if={@state == :in_review and @tier == :editor}
       class="text-xs text-base-content/70"
     >
       {gettext("Awaiting admin approval")}

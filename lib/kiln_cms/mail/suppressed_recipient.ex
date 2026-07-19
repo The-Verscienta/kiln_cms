@@ -41,7 +41,7 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
     # Admin-only management. The delivery pipeline writes and reads suppressions
     # as the system (`authorize?: false`) — like the webhook delivery worker.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 
