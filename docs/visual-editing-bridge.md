@@ -178,14 +178,26 @@ editing) → **Save** writes through Ash (`:update`, policies + PaperTrail nativ
 → the console broadcasts on the preview topic, so `bridge.js` (over `/ws/bridge`)
 re-fetches and the frame updates. No deep-link tab needed.
 
-The inline fields are heading / quote / rich-text (same as #354); other fields
-offer an "Open the full editor" link.
+The console edits the inline block fields (heading / quote / rich-text, same as
+#354) **and** the document **title** (click the rendered title). Rich-text is
+fully clickable — every word carries its block's address (see below). Other
+fields (SEO, custom fields) offer an "Open the full editor" link.
+
+## What's covered
+
+- **Rich-text is stega-encoded per span**, so a click anywhere in a rich-text
+  region resolves to its block. (The edit round-trip still opens the whole
+  rich-text block — Portable Text spans have no stable key.)
+- **Live push works for every content type**, compiled (page/post) and the
+  dynamic entry tier alike — the bridge socket subscribes to the same
+  `content_preview:<type>:<id>` topic the editor broadcasts on, keyed by the
+  public type name.
+- **Console scalar editing** covers `title` today.
 
 ## Limitations & follow-ons
 
-- **Console inline fields** cover heading/quote/rich-text today; document scalars
-  (title/SEO) and other block types route to the full editor.
-- **Rich-text bodies** are addressed at the block level (`_id` + `data-kiln-*`),
-  not per-span; Portable Text arrays aren't stega-encoded.
-- **Live push** covers compiled types (page/post); the dynamic entry tier is a
-  follow-on (its editor broadcasts on a different topic kind).
+- **Console scalar editing** is `title` only; `excerpt` works when the front end
+  annotates it, and SEO/custom fields route to the full editor (they aren't
+  rendered as clickable body text).
+- **Rich-text editing granularity** is block-level, not per-span (spans lack
+  stable keys); the whole block opens in the editor.
