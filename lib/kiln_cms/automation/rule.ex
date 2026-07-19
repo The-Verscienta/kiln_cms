@@ -26,7 +26,18 @@ defmodule KilnCMS.Automation.Rule do
   # feature's job; automation adds the reactions webhooks can't do.
   # `:newsletter` (#376) fans a published document out to subscribers via the
   # existing newsletter machinery — "on publish → send the newsletter".
-  @action_kinds [:send_email, :broadcast, :invalidate_cache, :reindex, :newsletter]
+  # `:flag_duplicates` / `:suggest_tags` (#377) are the embedding-driven
+  # editorial-intelligence reactions — e.g. "on in_review → email the editors
+  # any near-duplicates" as a lightweight review gate.
+  @action_kinds [
+    :send_email,
+    :broadcast,
+    :invalidate_cache,
+    :reindex,
+    :newsletter,
+    :flag_duplicates,
+    :suggest_tags
+  ]
 
   @doc "Lifecycle events a rule can trigger on."
   def triggers, do: @triggers
