@@ -170,6 +170,13 @@ defmodule KilnCMSWeb.NewsletterLive do
   defp send_error(:not_fired),
     do: gettext("That post hasn't been fired yet — republish it and retry.")
 
+  defp send_error(:already_sent),
+    do: gettext("A campaign for this publish revision was already sent.")
+
+  # Ledger/validation failures (e.g. a bad segment) surface as Ash errors —
+  # show a generic failure rather than crashing the LiveView.
+  defp send_error(_other), do: gettext("The campaign couldn't be recorded — check the details.")
+
   # --- data ------------------------------------------------------------------
 
   defp load_segments(socket) do

@@ -1152,12 +1152,14 @@ defmodule KilnCMS.CMS.Content do
         update :submit_for_review do
           require_atomic? false
           change transition_state(:in_review)
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "in_review"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :submitted_for_review}
         end
 
         update :return_to_draft do
           require_atomic? false
           change transition_state(:draft)
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "returned_to_draft"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :returned_to_draft}
         end
 

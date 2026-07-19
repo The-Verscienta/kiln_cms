@@ -82,11 +82,20 @@ Unsubscribe tokens are **stored and non-expiring**, so links in old newsletters
 keep working. Unsubscribe is treated as *consent* and is deliberately separate
 from the mail pipeline's bounce-*suppression* list (a deliverability signal).
 
+## Auto-send on publish (shipped via automation, #376)
+
+Auto-send is an **automation rule**, not a hard-wired publish change: create a
+rule "on `<type>.published` → `newsletter`" at `/editor/automation`
+(`config`: `segment_id` optional — omit for all confirmed subscribers;
+`subject` defaults to the title). The rule flows through the same funnel as
+webhooks, reuses `send_as_newsletter/2` (so unpublished/gated/unfired content
+is still refused, and the send briefly retries until the `:web` artifact is
+fired), and is deduped per **{rule, content, publish revision}** on the
+campaign ledger — re-fired events and re-delivered jobs can never double-send;
+a genuinely new publish sends again.
+
 ## Phase 2 hook points
 
-- **Auto-send on publish** — attach a `change {…, event: :published}` alongside
-  the existing `NotifyWorkflowEmail` / `NotifyWebhooks` changes in the `:publish`
-  action (`lib/kiln_cms/cms/content.ex`), guarded by an opt-in per-post flag.
 - **Paid membership gating** — `Subscriber` reserves an `audience` seam; gated
   audiences can map to paid tiers, with content access rules layered on the
   existing audience read-axis.
