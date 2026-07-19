@@ -11,6 +11,7 @@ defmodule KilnCMS.SearchIndex do
     resource KilnCMS.Search.BlockEmbedding do
       define :upsert_block_embedding, action: :upsert
       define :block_embeddings_for, action: :for_document, args: [:document_type, :document_id]
+      define :nearest_block_embeddings, action: :nearest_to_vector
 
       define :get_block_embedding,
         action: :read,

@@ -349,6 +349,10 @@ defmodule KilnCMSWeb.Router do
 
     get "/content/:type/:slug", ArtifactController, :show
 
+    # Embedding-driven related content (#339 phase 2): published documents
+    # semantically closest to this one.
+    get "/content/:type/:slug/related", RelatedController, :show
+
     # Visual-editing bridge (#355): the live working copy, stega-annotated so an
     # external front end's overlay maps a rendered value back to its Kiln field.
     # Draft-visible only to an editor/admin API key; `no-store`, per-actor.

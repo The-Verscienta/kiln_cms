@@ -57,8 +57,31 @@ infrastructure — a strong fit for regulated/health content. The *choice* of
 model (and its hosting) is an operator decision, so the core ships the retrieval
 pipeline + the seam, not a bundled model.
 
-## Phase 2
+## Content intelligence (#339 phase 2, shipped)
 
-- A reference **no-egress generator** wired to a local model.
-- The same retrieved-context plumbing powers the rest of #339: **related
-  content**, near-duplicate detection, auto-tagging, and content-gap analysis.
+`KilnCMS.Search.Related`, built purely on the existing block embeddings
+(D16) — no new model, no egress; every function degrades to empty results
+when semantic search is off:
+
+- **Related content** — `related_documents/2`, and public delivery at
+  `GET /api/content/:type/:slug/related` (published-only on both ends,
+  org-scoped, cacheable): nearest foreign block embeddings to the document's
+  centroid, aggregated per document by minimum cosine distance.
+- **Near-duplicates** — `near_duplicates/2`: documents within a cosine
+  distance threshold (default 0.1), any workflow state — catches a draft
+  duplicating live content.
+- **Tag suggestions** — `suggest_tags/2`: existing tags ranked by similarity
+  to the document's centroid, minus the ones already applied.
+- **Content gaps** — `content_gaps/2`: recorded zero-result search queries
+  (the search-analytics log), most-searched first — what readers looked for
+  and didn't get.
+
+The vector primitive behind them is `BlockEmbedding`'s `:nearest_to_vector`
+read (nearest neighbours of an already-computed vector, self-excluded).
+
+## Later
+
+- A reference **no-egress generator** wired to a local model (the
+  `KilnCMS.Ask.Generator` seam stands).
+- Editor-UI surfacing of near-duplicates and tag suggestions (the domain
+  functions are the seam; #377's agentic tasks are the natural consumer).
