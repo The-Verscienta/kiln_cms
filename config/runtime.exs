@@ -230,6 +230,20 @@ if config_env() == :prod do
       System.get_env("TOKEN_SIGNING_SECRET") ||
         raise("Missing environment variable `TOKEN_SIGNING_SECRET`!")
 
+  # OIDC SSO settings (#331) — only read when the strategy was compiled in
+  # (`config :kiln_cms, :sso_oidc, enabled: true`). OIDC_ISSUER is the
+  # provider's base URL (discovery at /.well-known/openid-configuration);
+  # OIDC_REDIRECT_URI is this site's callback base, e.g.
+  # "https://cms.example.com/auth".
+  if Application.get_env(:kiln_cms, :sso_oidc, [])[:enabled] do
+    config :kiln_cms, :sso_oidc,
+      enabled: true,
+      client_id: System.get_env("OIDC_CLIENT_ID"),
+      client_secret: System.get_env("OIDC_CLIENT_SECRET"),
+      base_url: System.get_env("OIDC_ISSUER"),
+      redirect_uri: System.get_env("OIDC_REDIRECT_URI")
+  end
+
   # ## Object storage (S3-compatible)
   #
   # Opt into the S3 adapter by setting S3_BUCKET. Works with AWS S3, Cloudflare

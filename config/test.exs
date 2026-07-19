@@ -122,3 +122,13 @@ config :kiln_cms, :plugins, [KilnCMS.FixturePlugin]
 # A fixed CORS allowlist so the CORS tests can assert both the allowed and
 # denied paths deterministically (prod default is `[]` / same-origin only).
 config :kiln_cms, :cors_origins, ["https://frontend.test"]
+
+# OIDC SSO (#331): enabled in test with placeholder settings so the strategy,
+# its routes, and the register action compile and are testable. No live IdP is
+# contacted — tests drive the register action directly.
+config :kiln_cms, :sso_oidc,
+  enabled: true,
+  client_id: "kiln-test-client",
+  client_secret: "kiln-test-secret",
+  base_url: "https://idp.example.test",
+  redirect_uri: "http://localhost:4002/auth"

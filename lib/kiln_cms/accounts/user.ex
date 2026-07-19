@@ -23,7 +23,15 @@ defmodule KilnCMS.Accounts.User do
         confirm_on_update? false
         require_interaction? true
         confirmed_at_field :confirmed_at
-        auto_confirm_actions [:sign_in_with_magic_link, :reset_password_with_token]
+        # :register_with_sso — the OIDC provider has already verified the email
+        # (the register change rejects unverified claims), so no second
+        # confirmation loop.
+        auto_confirm_actions [
+          :sign_in_with_magic_link,
+          :reset_password_with_token,
+          :register_with_sso
+        ]
+
         sender KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail
       end
     end
@@ -70,6 +78,30 @@ defmodule KilnCMS.Accounts.User do
       api_key :api_key do
         api_key_relationship :valid_api_keys
         api_key_hash_attribute :api_key_hash
+      end
+
+      # Enterprise SSO via any OpenID Connect provider (#331). Compile-gated
+      # like invite-only mode: off by default so the lean install shows no SSO
+      # button and exposes no OAuth routes; flip `config :kiln_cms, :sso_oidc,
+      # enabled: true` (+ the OIDC_* env in runtime.exs) and recompile to
+      # enable. Settings resolve at request time via SsoSecrets, so
+      # credentials stay out of the build. See docs/sso.md.
+      if Application.compile_env(:kiln_cms, [:sso_oidc, :enabled], false) do
+        oidc :sso do
+          client_id KilnCMS.Accounts.SsoSecrets
+          client_secret KilnCMS.Accounts.SsoSecrets
+          base_url KilnCMS.Accounts.SsoSecrets
+          redirect_uri KilnCMS.Accounts.SsoSecrets
+          # Stable linking by the provider's iss/sub — after the first
+          # (verified-email) link, sign-in matches the stored identity, not
+          # the email claim.
+          identity_resource KilnCMS.Accounts.UserIdentity
+          # First-time linking to an existing local account goes by the
+          # provider's `email_verified` claim. Only point Kiln at an IdP that
+          # reliably asserts email ownership (docs/sso.md); an unverified
+          # match is rejected outright (`on_untrusted_email_match` default).
+          trust_email_verified? true
+        end
       end
     end
   end
@@ -237,6 +269,28 @@ defmodule KilnCMS.Accounts.User do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
       end
+    end
+
+    # OIDC SSO sign-in/registration (#331): upsert by verified email. An
+    # existing account (matched on :unique_email) signs in AS-IS — role,
+    # audiences, and display name untouched (upsert_fields is just [:email]);
+    # a new account lands as :viewer like password self-registration. The
+    # change enforces verified-email-only and invite-only mode.
+    create :register_with_sso do
+      description "Register or sign in a user from an OIDC identity."
+
+      argument :user_info, :map, allow_nil?: false
+      argument :oauth_tokens, :map, allow_nil?: false, sensitive?: true
+
+      upsert? true
+      upsert_identity :unique_email
+      upsert_fields [:email]
+
+      change KilnCMS.Accounts.Changes.RegisterWithSso
+      # Persist the provider's iss/sub link (UserIdentity) and mint the session
+      # token — both required by the OAuth2/OIDC strategy machinery.
+      change AshAuthentication.Strategy.OAuth2.IdentityChange
+      change AshAuthentication.GenerateTokenChange
     end
 
     create :register_with_password do
