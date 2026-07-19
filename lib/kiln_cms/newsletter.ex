@@ -74,22 +74,27 @@ defmodule KilnCMS.Newsletter do
   """
   @spec send_as_newsletter(struct(), keyword()) :: {:ok, struct()} | {:error, atom()}
   def send_as_newsletter(document, opts \\ []) do
-    with :ok <- ensure_sendable(document),
-         {:ok, _html} <- artifact_html(document) do
-      {:ok, send} =
-        create_send(
-          %{
-            content_type: to_string(Firing.Engine.document_type(document)),
-            content_id: document.id,
-            subject: opts[:subject] || document.title,
-            segment_id: opts[:segment_id],
-            sent_by_id: opts[:actor] && opts[:actor].id
-          },
-          authorize?: false,
-          # The campaign lands in the document's site (epic #336).
-          tenant: document.org_id
-        )
+    automation = opts[:automation]
 
+    with :ok <- ensure_sendable(document),
+         {:ok, _html} <- artifact_html(document),
+         {:ok, send} <-
+           create_send(
+             %{
+               content_type: to_string(Firing.Engine.document_type(document)),
+               content_id: document.id,
+               subject: opts[:subject] || document.title,
+               segment_id: opts[:segment_id],
+               sent_by_id: opts[:actor] && opts[:actor].id,
+               # Automation provenance + dedupe key (#376) — nil for manual sends.
+               automation_rule_id: automation && automation.rule_id,
+               content_published_at: automation && automation.published_at
+             },
+             authorize?: false,
+             # The campaign lands in the document's site (epic #336).
+             tenant: document.org_id
+           )
+           |> dedupe_conflict() do
       # `org_id` rides into the worker args so the fan-out runs under the send's
       # tenant.
       %{"newsletter_send_id" => send.id, "org_id" => send.org_id}
@@ -99,6 +104,23 @@ defmodule KilnCMS.Newsletter do
       {:ok, send}
     end
   end
+
+  # An automation-driven campaign for the same {rule, content, publish revision}
+  # already exists (the `:automation_dedupe` identity) — a re-fired event or
+  # re-delivered job, not a new publish. Surfaced as `:already_sent` so callers
+  # treat it as a clean no-op instead of a failure.
+  defp dedupe_conflict({:error, error}) do
+    if match?(%{errors: _}, error) and
+         Enum.any?(List.wrap(Map.get(error, :errors)), fn e ->
+           is_exception(e) and Exception.message(e) =~ "has already been taken"
+         end) do
+      {:error, :already_sent}
+    else
+      {:error, error}
+    end
+  end
+
+  defp dedupe_conflict(other), do: other
 
   # A document is safe to newsletter only when it is published *and*
   # world-readable. Gated/embargoed content is refused so restricted content

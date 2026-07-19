@@ -14,6 +14,9 @@ defmodule KilnCMS.Automation.RuleWorker do
     * `:invalidate_cache` — bust the record's content cache (+ sitemap/llms).
     * `:reindex` — re-fire the record (refreshes artifacts + search indexes) via
       `KilnCMS.Firing.FireWorker`.
+    * `:newsletter` — send the published document to subscribers via
+      `KilnCMS.Newsletter` (#376; `config` `"segment_id"`/`"subject"`, both
+      optional). Deduped per {rule, content, publish revision}.
   """
   use Oban.Worker, queue: :default, max_attempts: 5
 
@@ -71,6 +74,44 @@ defmodule KilnCMS.Automation.RuleWorker do
     KilnCMS.Cache.bust_sitemap(org_id)
     KilnCMS.Cache.bust_llms(org_id)
     :ok
+  end
+
+  # "On publish → send the newsletter" (#376 / #337 phase 2). Loads the live
+  # record (the payload is a serialized snapshot) and hands it to the existing
+  # newsletter machinery, which refuses unpublished/gated/unfired content. The
+  # `automation` key makes {rule, content, publish revision} unique on the send
+  # ledger, so a re-fired event or re-delivered job can't double-send; a
+  # genuinely new publish (fresh `published_at`) sends again.
+  defp run(%{action: :newsletter, config: config, org_id: org_id, id: rule_id}, event, payload) do
+    with type when is_binary(type) <- event_type(event),
+         id when is_binary(id) <- payload["id"],
+         {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id) do
+      case KilnCMS.Newsletter.send_as_newsletter(record,
+             segment_id: config["segment_id"],
+             subject: config["subject"],
+             automation: %{rule_id: rule_id, published_at: record.published_at}
+           ) do
+        {:ok, _send} ->
+          :ok
+
+        {:error, :already_sent} ->
+          :ok
+
+        {:error, :not_fired} ->
+          # Publish fires artifacts on a sibling Oban job — briefly retry until
+          # the :web artifact this campaign renders from exists.
+          {:snooze, 30}
+
+        {:error, reason} when reason in [:not_published, :gated] ->
+          Logger.info("Automation newsletter rule skipped #{event}: #{inspect(reason)}")
+          :ok
+
+        {:error, other} ->
+          {:error, other}
+      end
+    else
+      _ -> :ok
+    end
   end
 
   defp run(%{action: :reindex, org_id: org_id}, event, payload) do
