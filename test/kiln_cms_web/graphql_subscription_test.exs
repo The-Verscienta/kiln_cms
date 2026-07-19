@@ -22,6 +22,11 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
 
   @endpoint KilnCMSWeb.Endpoint
   @password "password123456"
+  # Post-guard-lift, subscriptions are tenant-scoped (#336): a subscriber resolves
+  # its org from the connecting host (the default org for a host-less test socket),
+  # so the content whose changes it should receive must be written under that same
+  # org — exactly as an editor's tenant-threaded writes do in production.
+  @org KilnCMS.Accounts.default_org_id()
 
   defp admin do
     Ash.Seed.seed!(User, %{
@@ -70,12 +75,12 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
     actor = admin()
 
     # Draft create + edit: invisible to an anonymous subscriber.
-    page = CMS.create_page!(%{title: "Quiet draft", slug: slug()}, actor: actor)
-    page = CMS.update_page!(page, %{title: "Still quiet"}, actor: actor)
+    page = CMS.create_page!(%{title: "Quiet draft", slug: slug()}, actor: actor, tenant: @org)
+    page = CMS.update_page!(page, %{title: "Still quiet"}, actor: actor, tenant: @org)
     refute_push("subscription:data", _any, 100)
 
     # Publishing makes it visible — the update lands as `updated`.
-    page = CMS.publish_page!(page, %{}, actor: actor)
+    page = CMS.publish_page!(page, %{}, actor: actor, tenant: @org)
 
     assert_push("subscription:data", %{result: result, subscriptionId: ^subscription_id})
 
@@ -88,7 +93,7 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
     drain_pushes()
 
     # Published edits keep flowing.
-    CMS.update_page!(page, %{title: "Live v2"}, actor: actor)
+    CMS.update_page!(page, %{title: "Live v2"}, actor: actor, tenant: @org)
 
     assert_push("subscription:data", %{result: %{data: %{"pageChanged" => changed}}})
     assert %{"updated" => %{"title" => "Live v2"}} = changed
@@ -106,7 +111,7 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
     actor = admin()
     {_socket, subscription_id} = subscribe!(@page_changed, %{"token" => bearer_token(actor)})
 
-    page = CMS.create_page!(%{title: "Editor draft", slug: slug()}, actor: actor)
+    page = CMS.create_page!(%{title: "Editor draft", slug: slug()}, actor: actor, tenant: @org)
 
     assert_push("subscription:data", %{result: result, subscriptionId: ^subscription_id})
     assert %{data: %{"pageChanged" => %{"created" => %{"id" => id}}}} = result
@@ -119,7 +124,8 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
     definition =
       CMS.create_type_definition!(
         %{name: "sub#{System.unique_integer([:positive])}", label: "Sub"},
-        actor: actor
+        actor: actor,
+        tenant: @org
       )
 
     # Create before subscribing, so the only push is the publish transition.
@@ -127,7 +133,8 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
       KilnCMS.CMS.ContentTypes.create!(
         definition.name,
         %{title: "Dyn live", slug: slug()},
-        actor: actor
+        actor: actor,
+        tenant: @org
       )
 
     {_socket, _subscription_id} =
@@ -143,7 +150,10 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
       )
 
     {:ok, entry} =
-      KilnCMS.CMS.ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+      KilnCMS.CMS.ContentTypes.transition(definition.name, "publish", entry,
+        actor: actor,
+        tenant: @org
+      )
 
     assert_push("subscription:data", %{result: %{data: %{"entryChanged" => changed}}})
     assert %{"updated" => %{"id" => id}} = changed

@@ -37,8 +37,11 @@ defmodule KilnCMSWeb.TranslationsLive do
         socket
       ) do
     actor = socket.assigns.current_user
-    source = ContentTypes.get_record!(kind, id, actor: actor)
-    translation = Translations.create_translation!(kind, source, locale, actor: actor)
+    org = socket.assigns.current_org
+    source = ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
+
+    translation =
+      Translations.create_translation!(kind, source, locale, actor: actor, tenant: org)
 
     {:noreply,
      socket
@@ -53,14 +56,17 @@ defmodule KilnCMSWeb.TranslationsLive do
 
   defp load_rows(socket) do
     actor = socket.assigns.current_user
+    org = socket.assigns.current_org
     default = I18n.default_locale()
 
+    # Scope the translation dashboard to the editor's current site (epic #336).
     rows =
-      (ContentTypes.all() ++ ContentTypes.dynamic_all())
+      (ContentTypes.all() ++ ContentTypes.dynamic_all(org.id))
       |> Enum.flat_map(fn ct ->
         ct
         |> ContentTypes.list!(
           actor: actor,
+          tenant: org,
           query: [
             select: [:id, :title, :slug, :state, :locale, :updated_at],
             sort: [updated_at: :desc],

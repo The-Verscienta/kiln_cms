@@ -129,10 +129,13 @@ defmodule KilnCMSWeb.ContentController do
   def search(conn, params) do
     locale = locale(conn)
     query = params["q"] |> to_string() |> String.trim()
+    # Scope search to the request's org (#336); content sections are per-site.
+    org_id = current_org_id(conn)
 
     # Optional category facet (`?category=<slug>`): filters both hybrid legs.
-    # An unknown slug matches nothing rather than silently unfiltering.
-    category = category_filter(params["category"])
+    # An unknown slug matches nothing rather than silently unfiltering. Resolved
+    # within the request org so a foreign site's category can't be referenced.
+    category = category_filter(params["category"], org_id)
 
     filters =
       case category do
@@ -140,9 +143,6 @@ defmodule KilnCMSWeb.ContentController do
         :unknown -> %{category_id: Ecto.UUID.generate()}
         nil -> %{}
       end
-
-    # Scope search to the request's org (#336); content sections are per-site.
-    org_id = current_org_id(conn)
 
     results =
       if query == "" do
@@ -195,14 +195,14 @@ defmodule KilnCMSWeb.ContentController do
 
   # Resolve a `?category=` slug world-readably: nil when absent, the category
   # when known, `:unknown` otherwise.
-  defp category_filter(slug) when is_binary(slug) and slug != "" do
-    case KilnCMS.CMS.get_category_by_slug(slug, authorize?: true) do
+  defp category_filter(slug, org_id) when is_binary(slug) and slug != "" do
+    case KilnCMS.CMS.get_category_by_slug(slug, authorize?: true, tenant: org_id) do
       {:ok, category} -> category
       _not_found -> :unknown
     end
   end
 
-  defp category_filter(_absent), do: nil
+  defp category_filter(_absent, _org_id), do: nil
 
   # Dynamic-entry hits as plain view maps: resolve each result's type through
   # the registry for its URL segment and label, dropping hits whose type no
@@ -284,7 +284,7 @@ defmodule KilnCMSWeb.ContentController do
         %{
           record: record,
           blocks: blocks(record, org_id),
-          translations: translations(ct, record.slug)
+          translations: translations(ct, record.slug, org_id)
         }
     end
   end
@@ -343,10 +343,11 @@ defmodule KilnCMSWeb.ContentController do
     |> render(template, record: record, blocks: blocks)
   end
 
-  # Published locale variants of `slug`. Best-effort: a content type without a
-  # translations interface simply yields none.
-  defp translations(ct, slug) do
-    ContentTypes.list_translations(ct.type, slug, authorize?: false)
+  # Published locale variants of `slug`, scoped to the request's site (#336) so
+  # hreflang/locale links never point at another org's content. Best-effort: a
+  # content type without a translations interface simply yields none.
+  defp translations(ct, slug, org_id) do
+    ContentTypes.list_translations(ct.type, slug, authorize?: false, tenant: org_id)
   rescue
     _ -> []
   end

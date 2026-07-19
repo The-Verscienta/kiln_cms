@@ -161,26 +161,27 @@ defmodule KilnCMS.MultitenancyTest do
     end
   end
 
-  describe "the multi-tenancy rollout guard" do
-    test "creating a second org via the action is refused while multi-tenancy is off" do
-      # Default config: multitenancy_enabled is false. The seeded default org
-      # exists (via migration), so this is the "second org" the guard blocks.
+  describe "the multi-tenancy guard (now a kill switch, enabled by default)" do
+    test "creating an org via the action succeeds by default (guard lifted)" do
+      # `multitenancy_enabled` defaults to true post-guard-lift — a second org
+      # (beyond the seeded default) can now be provisioned.
+      assert {:ok, _} =
+               Accounts.create_organization(%{name: "Yes", slug: uslug("allowed")},
+                 authorize?: false
+               )
+    end
+
+    test "flipping the kill switch off hard-refuses a new org" do
+      prev = Application.get_env(:kiln_cms, :multitenancy_enabled, true)
+      Application.put_env(:kiln_cms, :multitenancy_enabled, false)
+      on_exit(fn -> Application.put_env(:kiln_cms, :multitenancy_enabled, prev) end)
+
       assert {:error, error} =
                Accounts.create_organization(%{name: "Nope", slug: uslug("blocked")},
                  authorize?: false
                )
 
       assert Exception.message(error) =~ "multi-tenancy is not enabled"
-    end
-
-    test "creating an org succeeds once multi-tenancy is enabled" do
-      Application.put_env(:kiln_cms, :multitenancy_enabled, true)
-      on_exit(fn -> Application.put_env(:kiln_cms, :multitenancy_enabled, false) end)
-
-      assert {:ok, _} =
-               Accounts.create_organization(%{name: "Yes", slug: uslug("allowed")},
-                 authorize?: false
-               )
     end
   end
 
