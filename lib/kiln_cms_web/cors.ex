@@ -32,6 +32,30 @@ defmodule KilnCMSWeb.CORS do
     end
   end
 
+  @doc """
+  Whether a WebSocket `Origin` (as a `%URI{}`) is permitted — the socket-transport
+  analogue of `allowed_origin?/2`, wired as Phoenix `check_origin: {mod, fun, []}`
+  for the visual-editing bridge socket (#355). Reuses the same `:cors_origins`
+  allowlist as the HTTP API, so one config governs both cross-origin reads and
+  the live-preview push.
+  """
+  @spec check_socket_origin?(URI.t()) :: boolean()
+  def check_socket_origin?(%URI{} = uri) do
+    case configured_origins() do
+      :all -> true
+      origins when is_list(origins) -> origin_string(uri) in origins
+      _ -> false
+    end
+  end
+
+  defp origin_string(%URI{scheme: scheme, host: host, port: port}) do
+    if port in [nil, 80, 443] do
+      "#{scheme}://#{host}"
+    else
+      "#{scheme}://#{host}:#{port}"
+    end
+  end
+
   defp configured_origins, do: Application.get_env(:kiln_cms, :cors_origins, [])
 
   @doc """

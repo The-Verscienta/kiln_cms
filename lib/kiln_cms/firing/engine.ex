@@ -148,6 +148,11 @@ defmodule KilnCMS.Firing.Engine do
 
   defp compose(document, typed, :json) do
     %{
+      # `id` + `type` address the document for the visual-editing bridge (#355):
+      # `(type, id, <field>)` locates a document scalar (title/slug), while each
+      # block map carries its own `_id` for `(block_id, <field>)`. Additive and
+      # non-sensitive (an opaque uuid) — safe on the public artifact.
+      "id" => Map.get(document, :id),
       "type" => public_type(document),
       "title" => Map.get(document, :title),
       "slug" => Map.get(document, :slug),

@@ -32,6 +32,18 @@ defmodule KilnCMSWeb.Endpoint do
   # unless :collab_prototype is enabled — see KilnCMSWeb.CollabChannel).
   socket "/ws/collab", KilnCMSWeb.CollabSocket, websocket: true, longpoll: false
 
+  # Visual-editing bridge live-preview push (#355). A raw transport socket (plain
+  # JSON frames) so the dependency-free `bridge.js` consumes it without a Phoenix
+  # JS client. Deliberately cross-origin (an external front end), so origin is
+  # gated by the shared `KilnCMSWeb.CORS.check_socket_origin?/1` allowlist rather
+  # than the endpoint host, and every connection additionally authorizes the API
+  # key against the document's read policy. It carries no ambient credentials
+  # (auth is the explicit `api_key` param, never a cookie), so Sobelow's CSWH
+  # finding here is a false positive — ignored with rationale in `.sobelow-conf`.
+  socket "/ws/bridge", KilnCMSWeb.BridgeSocket,
+    websocket: [check_origin: {KilnCMSWeb.CORS, :check_socket_origin?, []}],
+    longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

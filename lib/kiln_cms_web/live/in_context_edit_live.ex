@@ -26,15 +26,9 @@ defmodule KilnCMSWeb.InContextEditLive do
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.EditorTelemetry
-
-  # Block types that support inline editing, mapped to the single form field the
-  # editable region writes. `:html` fields carry sanitized rich-text HTML (the
-  # `BlockUnion` cast re-sanitizes on write); `:text` fields are plain strings.
-  @inline_fields %{
-    "heading" => {"text", :text},
-    "quote" => {"text", :text},
-    "rich_text" => {"legacy_html", :html}
-  }
+  # Shared inline-editing engine (block working set + Ash write path), also used
+  # by the Presentation console (#355).
+  alias KilnCMSWeb.InlineEditing
 
   # Idle delay before a draft edit autosaves. Runtime-configurable so callers can
   # tune it; tests drive the autosave deterministically instead of waiting.
@@ -45,7 +39,7 @@ defmodule KilnCMSWeb.InContextEditLive do
                         )
 
   @impl true
-  def mount(%{"type" => type, "slug" => slug}, _session, socket) do
+  def mount(%{"type" => type, "slug" => slug} = params, _session, socket) do
     actor = socket.assigns.current_user
 
     case ContentTypes.get(type) do
@@ -63,6 +57,9 @@ defmodule KilnCMSWeb.InContextEditLive do
              |> assign(:kind, ct.type)
              |> assign(:ct, ct)
              |> assign(:actor, actor)
+             # Deep-link target from the visual-editing bridge (#355):
+             # `?focus=<block_id>` scrolls to and focuses that block on load.
+             |> assign(:focus_block_id, params["focus"])
              |> assign(:autosave_timer, nil)
              |> assign(:save_state, :saved)
              |> assign(:conflict, false)
@@ -112,36 +109,9 @@ defmodule KilnCMSWeb.InContextEditLive do
     # block — the edited one changed, the rest byte-for-byte — with identity
     # intact. Kept alongside the display descriptors so one edit can't drop a
     # sibling block the way a partial form-params merge would.
-    |> assign(:block_inputs, Enum.map(typed, &TypedBlocks.input_map/1))
-    |> assign(:blocks, editable_blocks(typed))
+    |> assign(:block_inputs, InlineEditing.block_inputs(typed))
+    |> assign(:blocks, InlineEditing.editable_blocks(typed))
   end
-
-  # The record's typed blocks as flat render descriptors, keeping each block's
-  # absolute position (`index`) in the `blocks` array. `field`/`mode` are set for
-  # the inline editable types and nil for read-only ones (image/divider/embed/…).
-  defp editable_blocks(typed) do
-    typed
-    |> Enum.with_index()
-    |> Enum.map(fn {block, index} ->
-      type = to_string(block._type)
-      {field, mode} = Map.get(@inline_fields, type, {nil, nil})
-
-      %{
-        id: block.id,
-        index: index,
-        type: type,
-        field: field,
-        mode: mode,
-        value: inline_value(block, field),
-        struct: block
-      }
-    end)
-  end
-
-  # The current text/HTML for an inline field; empty string when unset so the
-  # contenteditable region mounts with a stable (non-nil) value.
-  defp inline_value(_block, nil), do: nil
-  defp inline_value(block, field), do: Map.get(block, String.to_existing_atom(field)) || ""
 
   # ── events ────────────────────────────────────────────────────────────────
 
@@ -152,7 +122,7 @@ defmodule KilnCMSWeb.InContextEditLive do
   def handle_event("update_block", %{"id" => id, "value" => value}, socket) do
     case block_target(socket, id) do
       {index, field} ->
-        inputs = List.update_at(socket.assigns.block_inputs, index, &Map.put(&1, field, value))
+        inputs = InlineEditing.put_block_field(socket.assigns.block_inputs, index, field, value)
         {:noreply, socket |> assign(:block_inputs, inputs) |> mark_dirty()}
 
       :error ->
@@ -254,12 +224,12 @@ defmodule KilnCMSWeb.InContextEditLive do
 
     result =
       EditorTelemetry.span(event, %{kind: socket.assigns.kind}, fn ->
-        socket.assigns.record
-        |> Ash.Changeset.for_update(action, %{blocks: socket.assigns.block_inputs},
-          actor: socket.assigns.actor,
-          tenant: socket.assigns.record.org_id
+        InlineEditing.write(
+          socket.assigns.record,
+          action,
+          socket.assigns.block_inputs,
+          socket.assigns.actor
         )
-        |> Ash.update()
       end)
 
     case result do
@@ -270,10 +240,11 @@ defmodule KilnCMSWeb.InContextEditLive do
          |> reset_regions()
          |> assign(:save_state, :saved)}
 
-      {:error, error} ->
-        if stale_conflict?(error),
-          do: {:conflict, flag_conflict(socket)},
-          else: {:error, assign(socket, :save_state, :error)}
+      :conflict ->
+        {:conflict, flag_conflict(socket)}
+
+      {:error, _error} ->
+        {:error, assign(socket, :save_state, :error)}
     end
   end
 
@@ -351,17 +322,6 @@ defmodule KilnCMSWeb.InContextEditLive do
     end
   end
 
-  # True when a failed update was rejected by the optimistic lock (the row moved
-  # underneath us) rather than by ordinary validation.
-  defp stale_conflict?(error), do: stale_error?(error)
-
-  defp stale_error?(%Ash.Error.Changes.StaleRecord{}), do: true
-
-  defp stale_error?(%{errors: errors}) when is_list(errors),
-    do: Enum.any?(errors, &stale_error?/1)
-
-  defp stale_error?(_other), do: false
-
   defp redirect_to_editor(socket, message) do
     socket |> put_flash(:error, message) |> push_navigate(to: ~p"/editor")
   end
@@ -381,7 +341,12 @@ defmodule KilnCMSWeb.InContextEditLive do
         conflict={@conflict}
       />
 
-      <article class="prose max-w-none">
+      <article
+        id="in-context-article"
+        phx-hook="FocusBlock"
+        data-kiln-focus={@focus_block_id}
+        class="prose max-w-none"
+      >
         <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
 
         <p :if={@blocks == []} class="mt-6 text-base-content/70">
@@ -524,7 +489,7 @@ defmodule KilnCMSWeb.InContextEditLive do
     ~H"""
     <div class="kiln-block">
       <h2
-        id={region_id(@block, @region_version)}
+        id={InlineEditing.region_id(@block, @region_version)}
         phx-hook="InlineText"
         phx-update="ignore"
         contenteditable="true"
@@ -541,7 +506,7 @@ defmodule KilnCMSWeb.InContextEditLive do
     ~H"""
     <div class="kiln-block">
       <blockquote
-        id={region_id(@block, @region_version)}
+        id={InlineEditing.region_id(@block, @region_version)}
         phx-hook="InlineText"
         phx-update="ignore"
         contenteditable="true"
@@ -564,7 +529,7 @@ defmodule KilnCMSWeb.InContextEditLive do
     ~H"""
     <div class="kiln-block">
       <div
-        id={region_id(@block, @region_version)}
+        id={InlineEditing.region_id(@block, @region_version)}
         phx-hook="InlineRichText"
         phx-update="ignore"
         data-kiln-block-id={@block.id}
@@ -615,7 +580,6 @@ defmodule KilnCMSWeb.InContextEditLive do
 
   # Stable-id region element id, keyed by `region_version` so a save/restore
   # remounts the region and reloads its content.
-  defp region_id(block, version), do: "region-#{block.id}-v#{version}"
 
   defp published_path(ct, record) do
     prefix = if record.locale == KilnCMS.I18n.default_locale(), do: "", else: "/#{record.locale}"

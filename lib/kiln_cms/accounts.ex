@@ -113,4 +113,26 @@ defmodule KilnCMS.Accounts do
       }
     }
   end
+
+  @doc """
+  Resolve a plaintext `kiln_…` API key to its owning user (the Ash actor), or
+  `:error`. Verifies the key exactly like the HTTP `ApiKeyAuth` plug — through
+  the `:sign_in_with_api_key` strategy action — so the returned actor carries the
+  `using_api_key?` metadata the content policies key off. Used off the request
+  cycle by the visual-editing bridge socket (#355).
+  """
+  @spec actor_from_api_key(String.t()) :: {:ok, KilnCMS.Accounts.User.t()} | :error
+  def actor_from_api_key(key) when is_binary(key) do
+    KilnCMS.Accounts.User
+    |> Ash.Query.for_read(:sign_in_with_api_key, %{api_key: key})
+    |> Ash.read_one(authorize?: false)
+    |> case do
+      {:ok, %KilnCMS.Accounts.User{} = user} -> {:ok, user}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  def actor_from_api_key(_), do: :error
 end

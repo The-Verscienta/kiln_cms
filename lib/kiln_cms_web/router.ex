@@ -223,6 +223,9 @@ defmodule KilnCMSWeb.Router do
       # In-context (front-end) editing on Kiln's own site (#354): renders the
       # page from the live draft with inline-editable text regions.
       live "/editor/site/:type/:slug", InContextEditLive, :edit
+      # Presentation console (#355): iframe an EXTERNAL front end for side-by-side
+      # editing, driven by bridge.js postMessage. Needs PRESENTATION_PREVIEW_URL.
+      live "/editor/presentation/:type/:slug", PresentationLive, :show
     end
 
     # Admin-only authoring UIs. Guarded at the router (live_session) level, not
@@ -345,6 +348,11 @@ defmodule KilnCMSWeb.Router do
     pipe_through :api
 
     get "/content/:type/:slug", ArtifactController, :show
+
+    # Visual-editing bridge (#355): the live working copy, stega-annotated so an
+    # external front end's overlay maps a rendered value back to its Kiln field.
+    # Draft-visible only to an editor/admin API key; `no-store`, per-actor.
+    get "/visual-editing/:type/:slug", VisualEditingController, :show
 
     # Locale discovery — lets a headless consumer build a locale switcher /
     # hreflang set without hard-coding the site's configured languages.
