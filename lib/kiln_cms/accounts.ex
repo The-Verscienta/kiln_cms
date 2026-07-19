@@ -109,6 +109,18 @@ defmodule KilnCMS.Accounts do
   def default_org_id, do: KilnCMS.Accounts.Organization.default_id()
 
   @doc """
+  Every organization id (#419 strict-tenancy prep) — the tenant list for
+  cross-org iteration: AshOban scheduler scans (`KilnCMS.Accounts.ListOrgIds`)
+  and deliberate all-orgs sweeps (GDPR actor erasure). System-level read.
+  """
+  @spec list_org_ids() :: [Ash.UUID.t()]
+  def list_org_ids do
+    KilnCMS.Accounts.Organization
+    |> Ash.read!(authorize?: false)
+    |> Enum.map(& &1.id)
+  end
+
+  @doc """
   The default organization struct (epic #336). Loaded by id; used as the tenant
   fallback when a request's host doesn't resolve to a specific org. Returns `nil`
   only if the seed row is missing (it's created by the backfill migration).

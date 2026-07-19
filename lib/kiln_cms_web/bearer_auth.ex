@@ -39,13 +39,10 @@ defmodule KilnCMSWeb.BearerAuth do
   def user_from_token(_), do: :error
 
   @doc "Absinthe context map matching `AshGraphql.Plug`."
-  # NOTE (epic #336): `tenant: nil` — the GraphQL WebSocket transport
-  # (`/ws/gql`, KilnCMSWeb.GraphqlSocket) bypasses the endpoint plug pipeline, so
-  # KilnCMSWeb.Plugs.SetTenant never runs for it and socket queries/subscriptions
-  # are unscoped (allow-global under `global?: true`). The HTTP `/gql` path IS
-  # scoped (AshGraphql.Plug reads the plug tenant). Resolving the tenant from the
-  # socket `connect_info` host is a follow-up before real multi-org is enabled;
-  # safe under the single-org rollout guard until then.
+  # `tenant: nil` here is a PLACEHOLDER, never served as-is: both socket
+  # callers (KilnCMSWeb.GraphqlSocket and the bridge socket) overwrite it with
+  # the org resolved from the connecting host (`connect_info`), mirroring the
+  # SetTenant plug on the HTTP path (epic #336; wired in the guard-lift).
   def graphql_context(nil), do: %{actor: nil, tenant: nil, context: %{}}
 
   def graphql_context(user), do: %{actor: user, tenant: nil, context: %{}}

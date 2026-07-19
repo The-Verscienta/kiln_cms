@@ -17,9 +17,10 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"delivery_id" => id} = args} = job) do
     # `org_id` scopes the ledger read/settlement to the delivery's site (epic
-    # #336). Pre-#336 jobs carry none — a nil tenant reads globally, which under
-    # `global?: true` still finds the row by its unique id.
-    tenant = args["org_id"]
+    # #336). Strict-tenancy prep (#419): a legacy job with no org resolves the
+    # default org explicitly (matching the firing workers) instead of a
+    # nil-tenant global read.
+    tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
 
     case CMS.get_webhook_delivery(id, authorize?: false, tenant: tenant, load: [:endpoint]) do
       {:ok, delivery} -> attempt(delivery, job)
@@ -29,9 +30,13 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   end
 
   # Legacy args shape: jobs enqueued before the ledger existed may still sit
-  # in the queue across a deploy. Deliver without recording.
+  # in the queue across a deploy. Deliver without recording; pre-ledger jobs
+  # predate multi-tenancy, so the endpoint lives in the default org (#419).
   def perform(%Oban.Job{args: %{"endpoint_id" => id, "event" => event, "payload" => payload}}) do
-    case CMS.get_webhook_endpoint(id, authorize?: false) do
+    case CMS.get_webhook_endpoint(id,
+           authorize?: false,
+           tenant: KilnCMS.Accounts.default_org_id()
+         ) do
       {:ok, %{active: true} = endpoint} ->
         case deliver(endpoint, event, payload) do
           {:ok, _status} -> :ok

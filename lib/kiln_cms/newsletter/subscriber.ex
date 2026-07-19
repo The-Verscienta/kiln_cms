@@ -76,6 +76,12 @@ defmodule KilnCMS.Newsletter.Subscriber do
 
     # Public token lookups (confirm/unsubscribe links). Non-identity fields, so
     # they're explicit filtered reads rather than `get_by`.
+    #
+    # DELIBERATE GLOBAL READS (#419): the org is unknown until the row is
+    # found — the token itself is the secret, and the caller re-scopes the
+    # follow-up write with the found row's `org_id`. These two actions are the
+    # documented exception the strict `global?: false` flip (#419 PR 3) must
+    # preserve (per-action bypass or an equivalent contained lookup).
     read :by_confirm_token do
       get? true
       argument :token, :string, allow_nil?: false
