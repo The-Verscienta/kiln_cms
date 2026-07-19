@@ -42,7 +42,14 @@ defmodule KilnCMS.Accounts.OrgMembership do
   end
 
   actions do
-    defaults [:read, :create, :update, :destroy]
+    defaults [:read, :create, :destroy]
+
+    # Explicit (not a default) so the grant-shape validation — which inspects
+    # the whole map and has no atomic expression — can run.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
 
     default_accept [
       :organization_id,
@@ -50,7 +57,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
       :role,
       :audiences,
       :editable_types,
-      :readable_types
+      :readable_types,
+      :field_grants
     ]
 
     read :for_user do
@@ -86,6 +94,12 @@ defmodule KilnCMS.Accounts.OrgMembership do
     end
   end
 
+  validations do
+    # A malformed grant map must fail on the admin's write, not crash the
+    # editor's next save (see the validation module).
+    validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
+  end
+
   attributes do
     uuid_primary_key :id
 
@@ -118,6 +132,15 @@ defmodule KilnCMS.Accounts.OrgMembership do
     # the user column for this org (see KilnCMS.Accounts.Scoping).
     attribute :readable_types, {:array, :string} do
       default []
+      allow_nil? false
+      public? false
+    end
+
+    # The per-org per-field write grants (mirrors `User.field_grants`, #332
+    # slice 3). Empty means no restriction; a non-empty map wins wholesale
+    # over the user column for this org (see KilnCMS.Accounts.Scoping).
+    attribute :field_grants, :map do
+      default %{}
       allow_nil? false
       public? false
     end

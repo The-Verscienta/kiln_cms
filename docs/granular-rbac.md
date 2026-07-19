@@ -78,9 +78,43 @@ authoring), but an *empty* (unrestricted) editable scope does not widen reads
 — it would dissolve every read restriction. When scoping `readable_types`,
 scope `editable_types` alongside it.
 
+## Phase 2, slice 3 (shipped) — per-field write grants
+
+`field_grants` (user + membership, same membership-wins resolution) maps a
+content-type name to the attribute names an editor may **change** on existing
+documents of that type — `%{"post" => ["title", "blocks"]}`. No entry for a
+type means no per-field restriction. Enforced by one generic change,
+`KilnCMS.CMS.Changes.EnforceFieldGrants`, on every update action in the
+Content macro (not Ash `field_policies`, which gate reads — write-gating
+inspects the changeset).
+
+Deliberate semantics:
+
+- Only **user-supplied, actually-changing** input violates — the editor form
+  posts every field on save, and resubmitting unchanged values must pass.
+- Workflow transitions (`submit_for_review`, …) carry no content attributes
+  and pass untouched: a grant scopes *what* may be edited, not *which verbs*
+  run (verbs have their own policies).
+- The headless `block_tree` argument writes the `blocks` attribute, so it
+  requires the `"blocks"` grant. The block tree is **one attribute** —
+  sub-block grants are out of scope (`Kiln.Block.Policy`'s schema-declared
+  `editable_by` covers block-field granularity in the editor).
+- Relationship arguments (tags, related links) are curation, not attributes —
+  ungoverned by grants.
+- Creates are ungoverned: authoring a *new* document is gated by
+  `editable_types`; grants refine stewardship of existing content.
+- `custom_fields` is granted as a whole attribute; per-custom-field keys
+  (`custom_fields.<name>`) are a possible later refinement.
+- **Version restores require full field access**: `restore_version` rewrites
+  the whole document from a snapshot (via force-changes the param inspection
+  can't see), so any editor under a field grant for the type is refused the
+  verb outright.
+- Grant maps resolve **per type key** across the levels (membership → role →
+  user): an override for one type never discards another level's restriction
+  on a different type.
+
 ## Later phases
 
-- **Per-field write grants** (slice 3) and **custom roles + `/editor/team`
-  UI** (slice 4) — see the design note on
+- **Custom roles + `/editor/team` UI** (slice 4) — see the design note on
   [#332](https://github.com/The-Verscienta/kiln_cms/issues/332).
 - **Per-dynamic-type** scoping (today all dynamic types share the `entry` key).

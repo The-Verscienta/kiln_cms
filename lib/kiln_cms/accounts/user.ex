@@ -183,7 +183,10 @@ defmodule KilnCMS.Accounts.User do
     # access is granted — self-registration always lands on `:viewer` with no
     # audiences. See KilnCMS.CMS.Audiences and the content read policy.
     update :manage_access do
-      accept [:role, :audiences, :editable_types, :readable_types]
+      accept [:role, :audiences, :editable_types, :readable_types, :field_grants]
+      # The shape validation inspects the whole map — no atomic expression.
+      require_atomic? false
+      validate KilnCMS.Accounts.Validations.FieldGrantsShape
     end
 
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
@@ -587,6 +590,18 @@ defmodule KilnCMS.Accounts.User do
     # per-org override lives on `OrgMembership` (see KilnCMS.Accounts.Scoping).
     attribute :readable_types, {:array, :string} do
       default []
+      allow_nil? false
+      public? false
+    end
+
+    # Per-field write grants (#332 slice 3): content-type name → the attribute
+    # names the editor may change on existing documents of that type
+    # (`%{"post" => ["title", "blocks"]}`). No entry for a type = no per-field
+    # restriction (the default). Enforced by
+    # KilnCMS.CMS.Changes.EnforceFieldGrants; per-org override on
+    # `OrgMembership` (see KilnCMS.Accounts.Scoping.field_grant/3).
+    attribute :field_grants, :map do
+      default %{}
       allow_nil? false
       public? false
     end

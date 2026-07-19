@@ -151,6 +151,44 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
+  @doc """
+  The actor's effective per-field write grant for `type_name` (slice 3).
+
+  `field_grants` is a map of content-type name → list of attribute names the
+  editor may change (`%{"post" => ["title", "blocks"]}`). Resolution is
+  **per type key** across the levels (membership, then the user column) — an
+  override for one type at a more specific level never discards a broader
+  level's restriction on a *different* type. Returns `nil` when no level
+  grants an entry for `type_name` (no per-field restriction), the list of
+  permitted attribute names otherwise, and `[]` (nothing changeable) for a
+  foreign-org actor. Non-list grant values are ignored defensively — the
+  write-time shape validation is the real guard.
+  """
+  @spec field_grant(map(), Ash.Changeset.t() | nil, String.t() | nil) :: [String.t()] | nil
+  def field_grant(_actor, _subject, nil), do: nil
+
+  def field_grant(actor, subject, type_name) do
+    case affiliation(actor, org_id(subject)) do
+      {:member, membership} ->
+        grant_key(membership, type_name) || grant_key(actor, type_name)
+
+      :unaffiliated ->
+        grant_key(actor, type_name)
+
+      :foreign_org ->
+        []
+    end
+  end
+
+  defp grant_key(source, type_name) do
+    with grants when is_map(grants) <- Map.get(source, :field_grants),
+         fields when is_list(fields) <- Map.get(grants, type_name) do
+      fields
+    else
+      _ -> nil
+    end
+  end
+
   # The org the authorization runs under. Queries/changesets carry the resolved
   # tenant in `to_tenant` (an id via `Ash.ToTenant`, defensively also matched
   # as a struct) or `tenant`; a tenant-less subject falls back to the default
