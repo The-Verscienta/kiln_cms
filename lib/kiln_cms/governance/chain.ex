@@ -187,15 +187,23 @@ defmodule KilnCMS.Governance.Chain do
     match?({:ok, key_id} when key_id == anchor.key_id, Signer.key_id())
   end
 
-  @doc "The latest anchor for a document, or nil."
+  @doc """
+  The latest anchor for a document, or nil. Honors the kill switch (and so
+  keeps the whole read path quiet — no `history_anchors` query — when the
+  feature is off or its migration hasn't run yet).
+  """
   def latest_anchor(type, source_id, org_id) do
-    # Newest first with an id tiebreak (same-microsecond anchors), one row only.
-    CMS.list_history_anchors_for!(type, source_id,
-      authorize?: false,
-      tenant: org_id,
-      query: [sort: [inserted_at: :desc, id: :desc], limit: 1]
-    )
-    |> List.first()
+    if enabled?() do
+      # Newest first with an id tiebreak (same-microsecond anchors), one row only.
+      CMS.list_history_anchors_for!(type, source_id,
+        authorize?: false,
+        tenant: org_id,
+        query: [sort: [inserted_at: :desc, id: :desc], limit: 1]
+      )
+      |> List.first()
+    else
+      nil
+    end
   end
 
   # ── internals ─────────────────────────────────────────────────────────────
