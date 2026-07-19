@@ -1714,4 +1714,144 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "kiln-columns"
     end
   end
+
+  # GEO blocks (#357): faq/how_to item rows are bound inputs normalized from
+  # indexed maps; claim edits ride the generic DSL field editor.
+  describe "GEO block editing" do
+    test "faq, how_to and claim are offered in the block inserter", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      for type <- ~w(faq how_to claim) do
+        assert has_element?(lv, "button[data-inserter-item][phx-value-type='#{type}']")
+      end
+    end
+
+    test "faq rows add, edit and persist through save", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button[data-inserter-item][phx-value-type='faq']") |> render_click()
+
+      # Add one Q&A row, then type into its bound inputs.
+      lv
+      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> render_click()
+
+      lv
+      |> form("#page-editor")
+      |> render_change(%{
+        "form" => %{
+          "blocks" => %{
+            "0" => %{
+              "title" => "FAQ",
+              "items" => %{"0" => %{"question" => "What?", "answer" => "This."}}
+            }
+          }
+        }
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :faq
+      assert block.content == "FAQ"
+      assert block.data["items"] == [%{"question" => "What?", "answer" => "This."}]
+    end
+
+    test "removing the last faq row clears the stored list", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button[data-inserter-item][phx-value-type='faq']") |> render_click()
+
+      lv
+      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> render_click()
+
+      lv
+      |> element("button[phx-click='geo_item_remove'][phx-value-index='0'][phx-value-item='0']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :faq
+      assert block.data["items"] == []
+    end
+
+    test "a claim block persists its citation fields via the DSL editor", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button[data-inserter-item][phx-value-type='claim']") |> render_click()
+
+      lv
+      |> form("#page-editor")
+      |> render_change(%{
+        "form" => %{
+          "blocks" => %{
+            "0" => %{
+              "text" => "Water is wet.",
+              "source_title" => "Src",
+              "source_url" => "https://s.example",
+              "rating" => ""
+            }
+          }
+        }
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :claim
+      assert block.content == "Water is wet."
+      assert block.data["source_title"] == "Src"
+      assert block.data["source_url"] == "https://s.example"
+    end
+
+    test "how_to steps persist and render in the preview", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button[data-inserter-item][phx-value-type='how_to']") |> render_click()
+
+      lv
+      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> render_click()
+
+      html =
+        lv
+        |> form("#page-editor")
+        |> render_change(%{
+          "form" => %{
+            "blocks" => %{
+              "0" => %{
+                "name" => "Brew tea",
+                "steps" => %{"0" => %{"name" => "Boil", "text" => "Boil water."}}
+              }
+            }
+          }
+        })
+
+      assert html =~ "kiln-howto"
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :how_to
+      assert block.content == "Brew tea"
+      assert block.data["steps"] == [%{"name" => "Boil", "text" => "Boil water."}]
+    end
+  end
 end

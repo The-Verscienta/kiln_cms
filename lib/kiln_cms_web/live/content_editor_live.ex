@@ -26,7 +26,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Preferred display order for the block palette; any block type registered
   # beyond these is appended automatically (the palette is registry-driven, so
   # adding a `Kiln.Block` module needs no editor change).
-  @type_order ~w(rich_text heading quote image embed divider columns custom)
+  @type_order ~w(rich_text heading quote image embed divider columns faq how_to claim custom)
 
   # Child block types offerable inside a `columns` container (#335). A curated
   # subset with simple field editors — nested blocks get functional inputs, not
@@ -424,7 +424,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("validate", %{"form" => params}, socket) do
     # The columns children live in socket state (they aren't bound form inputs);
     # re-inject them so a keystroke's partial params can't wipe the nested tree.
-    params = inject_children(params, socket.assigns.block_children)
+    # GEO item rows (faq/how_to, #357) ARE bound inputs, but arrive as indexed
+    # maps — normalize them to the lists their {:array, :map} fields cast.
+    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
@@ -544,6 +546,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
 
+  # ── GEO item rows (faq items / how_to steps, #357) ──────────────────────────
+  # Rows are bound form inputs; add/remove mutate the form params directly (the
+  # same targeted-update pattern as `pick_image` at an index), so there's no
+  # parallel socket state to keep in sync.
+
+  def handle_event("geo_item_add", %{"index" => index, "field" => field}, socket)
+      when field in ["items", "steps"] do
+    update_geo_items(socket, index, field, &(&1 ++ [%{}]))
+  end
+
+  def handle_event(
+        "geo_item_remove",
+        %{"index" => index, "field" => field, "item" => item},
+        socket
+      )
+      when field in ["items", "steps"] do
+    update_geo_items(socket, index, field, &List.delete_at(&1, to_int(item)))
+  end
+
   def handle_event("remove_block", %{"path" => path}, socket) do
     {:noreply,
      socket
@@ -655,7 +676,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("save", %{"form" => params}, socket) do
     socket = cancel_autosave_timer(socket)
-    params = inject_children(params, socket.assigns.block_children)
+    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
 
     result =
       EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
@@ -1007,6 +1028,68 @@ defmodule KilnCMSWeb.ContentEditorLive do
       blocks when is_list(blocks) ->
         List.update_at(blocks, String.to_integer(index), &Map.merge(&1 || %{}, fields))
     end)
+  end
+
+  # ── GEO item rows: params helpers (#357) ────────────────────────────────────
+
+  # Apply `fun` to the item list of one block (by index) and re-validate.
+  defp update_geo_items(socket, index, field, fun) do
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> normalize_geo_items()
+
+    current = params |> block_param_at(index) |> Map.get(field) |> List.wrap()
+    params = put_block(params, to_string(index), %{field => fun.(current)})
+
+    socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    broadcast_preview(socket)
+    {:noreply, mark_dirty(socket)}
+  end
+
+  defp block_param_at(params, index) do
+    case params["blocks"] do
+      blocks when is_map(blocks) -> Map.get(blocks, to_string(index)) || %{}
+      blocks when is_list(blocks) -> Enum.at(blocks, to_int(index)) || %{}
+      _ -> %{}
+    end
+  end
+
+  # Item rows are bound inputs, so a DOM submit delivers them as indexed maps
+  # (`"items" => %{"0" => %{…}}`) — convert to the ordered lists the blocks'
+  # `{:array, :map}` fields cast. Non-numeric keys (the always-present sentinel
+  # that keeps the param submitted when every row is removed) are dropped.
+  defp normalize_geo_items(params) do
+    # `Map.update/4` would *insert* a nil `blocks` key on block-less params
+    # (title-only edits), which AshPhoenix's nested-form validate chokes on.
+    case params do
+      %{"blocks" => blocks} when is_map(blocks) ->
+        Map.put(params, "blocks", Map.new(blocks, fn {k, b} -> {k, normalize_block_items(b)} end))
+
+      %{"blocks" => blocks} when is_list(blocks) ->
+        Map.put(params, "blocks", Enum.map(blocks, &normalize_block_items/1))
+
+      _ ->
+        params
+    end
+  end
+
+  defp normalize_block_items(%{} = block) do
+    Enum.reduce(["items", "steps"], block, fn key, block ->
+      case block do
+        %{^key => %{} = indexed} -> Map.put(block, key, indexed_items_to_list(indexed))
+        _ -> block
+      end
+    end)
+  end
+
+  defp normalize_block_items(other), do: other
+
+  defp indexed_items_to_list(indexed) do
+    indexed
+    |> Enum.filter(fn {k, v} -> is_map(v) and Regex.match?(~r/\A\d+\z/, k) end)
+    |> Enum.sort_by(fn {k, _v} -> String.to_integer(k) end)
+    |> Enum.map(fn {_k, v} -> v end)
   end
 
   # ── columns children: socket state ⇄ form params ────────────────────────────
@@ -1805,6 +1888,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("divider"), do: "hero-minus"
   defp block_icon("columns"), do: "hero-view-columns"
   defp block_icon("portable_text"), do: "hero-bars-3"
+  defp block_icon("faq"), do: "hero-question-mark-circle"
+  defp block_icon("how_to"), do: "hero-list-bullet"
+  defp block_icon("claim"), do: "hero-check-badge"
   defp block_icon("custom"), do: "hero-puzzle-piece"
   defp block_icon(_), do: "hero-squares-2x2"
 
@@ -1817,6 +1903,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("divider"), do: gettext("Visual separator between sections")
   defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
   defp block_description("portable_text"), do: gettext("Portable Text rich content")
+  defp block_description("faq"), do: gettext("Q&A list, fired as FAQPage structured data")
+
+  defp block_description("how_to"),
+    do: gettext("Step-by-step guide, fired as HowTo structured data")
+
+  defp block_description("claim"), do: gettext("Sourced claim with citation metadata")
   defp block_description("custom"), do: gettext("Custom block payload")
   defp block_description(_), do: gettext("Insert a block")
 
@@ -1895,6 +1987,95 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </div>
     """
   end
+
+  # ── GEO item-list editor (faq items / how_to steps, #357) ───────────────────
+
+  # Repeatable two-field rows bound straight into the union member's
+  # `{:array, :map}` param (`…[items][0][question]`); `normalize_geo_items`
+  # turns the indexed maps back into lists on validate/save. The hidden
+  # sentinel keeps the param present when every row is removed, so deleting
+  # the last row actually clears the stored list.
+  attr :bf, :any, required: true
+
+  defp geo_items_editor(assigns) do
+    {field, key_a, key_b, label_a, label_b, add_label} =
+      case block_type_string(assigns.bf) do
+        "faq" ->
+          {:items, "question", "answer", gettext("Question"), gettext("Answer"),
+           gettext("Add question")}
+
+        "how_to" ->
+          {:steps, "name", "text", gettext("Step label (optional)"), gettext("Instruction"),
+           gettext("Add step")}
+      end
+
+    assigns =
+      assigns
+      |> assign(:field, field)
+      |> assign(:name, assigns.bf[field].name)
+      |> assign(:items, geo_item_maps(assigns.bf[field].value))
+      |> assign(:key_a, key_a)
+      |> assign(:key_b, key_b)
+      |> assign(:label_a, label_a)
+      |> assign(:label_b, label_b)
+      |> assign(:add_label, add_label)
+
+    ~H"""
+    <div class="mt-2 space-y-2">
+      <input type="hidden" name={"#{@name}[_sentinel]"} value="" />
+
+      <div
+        :for={{item, i} <- Enum.with_index(@items)}
+        class="flex items-start gap-2 rounded border border-base-content/10 p-2"
+      >
+        <div class="grow space-y-1">
+          <input
+            type="text"
+            name={"#{@name}[#{i}][#{@key_a}]"}
+            value={item[@key_a]}
+            placeholder={@label_a}
+            aria-label={@label_a}
+            phx-debounce="300"
+            class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+          />
+          <textarea
+            name={"#{@name}[#{i}][#{@key_b}]"}
+            placeholder={@label_b}
+            aria-label={@label_b}
+            rows="2"
+            phx-debounce="300"
+            class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+          >{item[@key_b]}</textarea>
+        </div>
+        <button
+          type="button"
+          phx-click="geo_item_remove"
+          phx-value-index={@bf.index}
+          phx-value-field={@field}
+          phx-value-item={i}
+          aria-label={gettext("Remove row")}
+          class="mt-1 text-base-content/60 hover:text-error"
+        >
+          <.icon name="hero-x-mark" class="size-4" />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        phx-click="geo_item_add"
+        phx-value-index={@bf.index}
+        phx-value-field={@field}
+        class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      >
+        <.icon name="hero-plus" class="mr-1 size-4" />{@add_label}
+      </button>
+    </div>
+    """
+  end
+
+  # The current item rows of an `{:array, :map}` field value, tolerating nil
+  # (fresh block) and non-map junk.
+  defp geo_item_maps(value), do: value |> List.wrap() |> Enum.filter(&is_map/1)
 
   # ── columns (nested-layout) editor (#335) ───────────────────────────────────
 
@@ -2393,6 +2574,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         locked_fields={@locked_fields}
                         cursors={@cursors}
                       />
+                      <.geo_items_editor :if={block_type_string(bf) in ["faq", "how_to"]} bf={bf} />
                     </div>
                   </div>
                 </.inputs_for>

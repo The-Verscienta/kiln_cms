@@ -103,8 +103,114 @@ defmodule KilnCMS.Firing.FiringTest do
 
       assert ld["@context"] == "https://schema.org"
       types = Enum.map(ld["@graph"], & &1["@type"])
-      assert "Article" in types
+      # Pages declare WebPage as their main-node @type (#357, GEO).
+      assert "WebPage" in types
       assert "ImageObject" in types
+
+      # The main node carries the citation-relevant document metadata (#357).
+      main = Enum.find(ld["@graph"], &(&1["@type"] == "WebPage"))
+      assert main["headline"] == "Graphed"
+      assert main["inLanguage"] == "en"
+      assert is_binary(main["datePublished"])
+      # WebPage is not an Article subtype, so the body fires as `text`.
+      assert is_binary(main["text"])
+      refute Map.has_key?(main, "articleBody")
+    end
+
+    test "posts fire a BlogPosting main node with articleBody (#357)" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+
+      post =
+        CMS.create_post!(
+          %{title: "GEO", slug: slug(), blocks: [%{type: :heading, content: "H", order: 0}]},
+          actor: actor
+        )
+
+      post = CMS.publish_post!(post, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+      {:ok, ld} = Engine.read(org, :post, post.id, :json_ld)
+
+      assert [%{"@type" => "BlogPosting"} = main | _] = ld["@graph"]
+      assert is_binary(main["articleBody"])
+    end
+
+    test "a dynamic type's declared schema.org type fires on its entries (#357)" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+
+      definition =
+        CMS.create_type_definition!(
+          %{
+            name: "remedy#{System.unique_integer([:positive])}",
+            label: "Remedy",
+            schema_org_type: "MedicalWebPage"
+          },
+          actor: actor
+        )
+
+      entry =
+        CMS.ContentTypes.create!(definition.name, %{title: "Ginger", slug: slug()}, actor: actor)
+
+      {:ok, entry} = CMS.ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+      {:ok, ld} = Engine.read(org, :entry, entry.id, :json_ld)
+
+      assert [%{"@type" => "MedicalWebPage"} | _] = ld["@graph"]
+    end
+
+    test "faq, how_to and claim blocks expand the fired @graph (#357)" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Answers",
+            slug: slug(),
+            blocks: [
+              %{
+                type: :faq,
+                content: "FAQ",
+                data: %{"items" => [%{"question" => "Q?", "answer" => "A."}]},
+                order: 0
+              },
+              %{
+                type: :how_to,
+                content: "Do it",
+                data: %{"steps" => [%{"name" => "One", "text" => "First."}]},
+                order: 1
+              },
+              %{
+                type: :claim,
+                content: "Water is wet.",
+                data: %{"source_title" => "Src", "source_url" => "https://s.example"},
+                order: 2
+              }
+            ]
+          },
+          actor: actor
+        )
+
+      page = CMS.publish_page!(page, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, ld} = Engine.read(org, :page, page.id, :json_ld)
+      types = Enum.map(ld["@graph"], & &1["@type"])
+      assert "FAQPage" in types
+      assert "HowTo" in types
+      assert "Claim" in types
+
+      # The citation also rides the :llm Markdown surface.
+      {:ok, %{"markdown" => md}} = Engine.read(org, :page, page.id, :llm)
+      assert md =~ "### Q?"
+      assert md =~ "1. **One** — First."
+      assert md =~ "Source: [Src](https://s.example)"
+
+      # …and the fired :web HTML.
+      {:ok, %{"html" => html}} = Engine.read(org, :page, page.id, :web)
+      assert html =~ "kiln-faq"
+      assert html =~ "kiln-claim"
     end
   end
 
