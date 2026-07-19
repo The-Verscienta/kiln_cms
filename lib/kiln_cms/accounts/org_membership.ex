@@ -50,7 +50,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
       :role,
       :audiences,
       :editable_types,
-      :readable_types
+      :readable_types,
+      :field_grants
     ]
 
     read :for_user do
@@ -118,6 +119,15 @@ defmodule KilnCMS.Accounts.OrgMembership do
     # the user column for this org (see KilnCMS.Accounts.Scoping).
     attribute :readable_types, {:array, :string} do
       default []
+      allow_nil? false
+      public? false
+    end
+
+    # The per-org per-field write grants (mirrors `User.field_grants`, #332
+    # slice 3). Empty means no restriction; a non-empty map wins wholesale
+    # over the user column for this org (see KilnCMS.Accounts.Scoping).
+    attribute :field_grants, :map do
+      default %{}
       allow_nil? false
       public? false
     end

@@ -87,6 +87,43 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
+  @doc """
+  The actor's effective per-field write grant for `type_name` (slice 3).
+
+  `field_grants` is a map of content-type name → list of attribute names the
+  editor may change (`%{"post" => ["title", "blocks"]}`). Resolution mirrors
+  the list axes: a **non-empty** membership map wins wholesale for the
+  request's org, else the user column. Returns `nil` when the effective map
+  has no entry for `type_name` — no per-field restriction — or the list of
+  permitted attribute names.
+  """
+  @spec field_grant(map(), Ash.Changeset.t() | nil, String.t() | nil) :: [String.t()] | nil
+  def field_grant(_actor, _subject, nil), do: nil
+
+  def field_grant(actor, subject, type_name) do
+    grants = membership_grants(actor, org_id(subject)) || user_grants(actor)
+    Map.get(grants, type_name)
+  end
+
+  defp membership_grants(%{id: user_id}, org_id) when is_binary(user_id) and is_binary(org_id) do
+    case Accounts.get_org_membership(user_id, org_id,
+           authorize?: false,
+           not_found_error?: false
+         ) do
+      {:ok, %{field_grants: grants}} when is_map(grants) and map_size(grants) > 0 -> grants
+      _ -> nil
+    end
+  end
+
+  defp membership_grants(_actor, _org_id), do: nil
+
+  defp user_grants(actor) do
+    case Map.get(actor, :field_grants) do
+      grants when is_map(grants) -> grants
+      _ -> %{}
+    end
+  end
+
   # The org the authorization runs under. Queries/changesets carry the resolved
   # tenant attribute value in `to_tenant` (set by `Ash.ToTenant` from the org
   # struct or id); a tenant-less subject falls back to the default org — the

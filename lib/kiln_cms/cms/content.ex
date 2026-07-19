@@ -1285,6 +1285,13 @@ defmodule KilnCMS.CMS.Content do
       # writes — see the change module).
       changes do
         change KilnCMS.CMS.Changes.BustContentCache, on: [:create, :update, :destroy]
+
+        # Per-field write scoping for editors (granular RBAC #332, slice 3):
+        # when the editor's effective `field_grants` names this type, changing
+        # an attribute outside the grant rejects the write. One generic change
+        # on every update action — transitions carry no content attributes and
+        # pass untouched; admins are exempt (see the change module).
+        change KilnCMS.CMS.Changes.EnforceFieldGrants, on: [:update]
       end
 
       policies do
