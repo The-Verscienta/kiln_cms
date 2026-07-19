@@ -146,10 +146,29 @@ defmodule KilnCMS.WebhooksTest do
     end
   end
 
+  test "review events are opt-in: the default subscription excludes them (#375)" do
+    stub_capture()
+    admin = admin()
+    # Default subscription (no explicit events list) — publish lifecycle only.
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Quiet Draft", slug: slug()}, actor: admin)
+    CMS.submit_page_for_review!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    # The draft-carrying review event must NOT reach a default subscriber.
+    refute_received {:delivered, _, _, _, _}
+  end
+
   test "review-workflow transitions dispatch in_review / returned_to_draft events (#375)" do
     stub_capture()
     admin = admin()
-    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    # Review events carry draft bodies, so the endpoint opts in explicitly.
+    CMS.create_webhook_endpoint!(
+      %{url: "https://example.test/hook", events: KilnCMS.CMS.WebhookEndpoint.events()},
+      actor: admin
+    )
 
     page = CMS.create_page!(%{title: "Reviewable", slug: slug()}, actor: admin)
 

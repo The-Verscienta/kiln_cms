@@ -15,6 +15,12 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   # `in_review` / `returned_to_draft` are the review-workflow transitions (#375).
   @verbs ~w(published unpublished updated in_review returned_to_draft)
 
+  # Verbs a NEW endpoint subscribes to by default. The review-transition events
+  # carry the full serialized body of a NOT-yet-published document, so they are
+  # explicit opt-in — a receiver set up for publish mirroring must never be
+  # POSTed draft/embargoed content it didn't ask for.
+  @default_verbs ~w(published unpublished updated)
+
   @doc "The lifecycle verbs every content type can emit."
   def verbs, do: @verbs
 
@@ -28,6 +34,18 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   def events do
     types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all()
     content = for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
+    content ++ ["form.submitted"]
+  end
+
+  @doc """
+  The default subscription for a new endpoint: the published-content lifecycle
+  plus form submissions. The review-transition events (`in_review` /
+  `returned_to_draft`, #375) carry unpublished draft bodies and are therefore
+  **opt-in only** — select them explicitly on the endpoint.
+  """
+  def default_events do
+    types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all()
+    content = for ct <- types, verb <- @default_verbs, do: "#{ct.type}.#{verb}"
     content ++ ["form.submitted"]
   end
 
@@ -123,9 +141,10 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     attribute :url, :string, allow_nil?: false, public?: true
 
-    # Subscribed event names; defaults to all known events (see `events/0`).
+    # Subscribed event names; defaults to the published-content lifecycle only
+    # (`default_events/0`) — draft-carrying review events are explicit opt-in.
     attribute :events, {:array, :string} do
-      default &KilnCMS.CMS.WebhookEndpoint.events/0
+      default &KilnCMS.CMS.WebhookEndpoint.default_events/0
       public? true
     end
 
