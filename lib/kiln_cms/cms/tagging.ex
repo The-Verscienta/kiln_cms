@@ -27,6 +27,14 @@ defmodule KilnCMS.CMS.Tagging do
       # no longer join to any content) and can be swept separately if desired.
       reference :tag, on_delete: :delete
     end
+
+    # `:unique_link` is now `(org_id, subject_id, tag_id)`, which can't seek a
+    # tenant-less lookup by `subject_id` — the reverse of every content type's
+    # `tags` many-to-many join. This `all_tenants?: true` companion keeps a plain
+    # `(subject_id)` index so those joins still seek under `global?: true`.
+    custom_indexes do
+      index [:subject_id], name: "taggings_subject_lookup_index", all_tenants?: true
+    end
   end
 
   actions do
@@ -59,14 +67,41 @@ defmodule KilnCMS.CMS.Tagging do
     end
   end
 
+  # Multi-tenancy (epic #336): a tagging belongs to the same site as the tag and
+  # subject it links. `global?: true` keeps a tenant OPTIONAL; the tenant is
+  # propagated from the parent content changeset via `manage_relationship`, so a
+  # `tag_id` in another org simply won't resolve under the tenant (cross-org guard).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on a scoped create
+    # (propagated from the parent content changeset), else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # The tagged record's id (any content type). Polymorphic — no foreign key.
     attribute :subject_id, :uuid, allow_nil?: false, public?: true
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     belongs_to :tag, KilnCMS.CMS.Tag do
       allow_nil? false
       public? true

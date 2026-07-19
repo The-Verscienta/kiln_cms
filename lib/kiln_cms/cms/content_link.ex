@@ -47,6 +47,16 @@ defmodule KilnCMS.CMS.ContentLink do
   postgres do
     table "content_links"
     repo KilnCMS.Repo
+
+    # `:unique_link` is now `(org_id, source_id, target_id, kind)`, which can't
+    # seek a tenant-less lookup by `source_id` (a record's outgoing links) or
+    # `target_id` (its `incoming_links`). These `all_tenants?: true` companions
+    # keep plain single-column indexes so both directions still seek under
+    # `global?: true` (mirrors content.ex).
+    custom_indexes do
+      index [:source_id], name: "content_links_source_lookup_index", all_tenants?: true
+      index [:target_id], name: "content_links_target_lookup_index", all_tenants?: true
+    end
   end
 
   actions do
@@ -78,8 +88,28 @@ defmodule KilnCMS.CMS.ContentLink do
     end
   end
 
+  # Multi-tenancy (epic #336): a link belongs to the same site as the records it
+  # joins. `global?: true` keeps a tenant OPTIONAL; via `manage_relationship` the
+  # tenant is propagated from the parent content changeset (and the direct
+  # `create_content_link` interface carries it explicitly), so a `target_id` in
+  # another org won't resolve under the tenant (cross-org guard).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on a scoped create
+    # (propagated from the parent content changeset), else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # Both ends are polymorphic record ids (any content type) — no foreign keys.
     attribute :source_id, :uuid, allow_nil?: false, public?: true
@@ -99,6 +129,16 @@ defmodule KilnCMS.CMS.ContentLink do
     # (dosage, role, jia-jian notes, …). Lets a data-carrying relation reuse the
     # one `content_links` table instead of needing a bespoke typed join resource.
     attribute :metadata, :map, allow_nil?: false, default: %{}, public?: true
+  end
+
+  relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   identities do

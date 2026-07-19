@@ -24,20 +24,25 @@ defmodule KilnCMS.Media.VariantWorker do
   def topic, do: @topic
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"media_item_id" => id}}) do
-    case CMS.get_media_item(id, authorize?: false) do
-      {:ok, %{storage_key: key} = item} when is_binary(key) -> process(item, key)
+  def perform(%Oban.Job{args: %{"media_item_id" => id} = args}) do
+    # `org_id` scopes the re-fetch/update to the item's site (epic #336). Old jobs
+    # enqueued before #336 carry no `org_id`; a nil tenant reads globally, which
+    # under `global?: true` still finds the row by its (globally-unique) id.
+    tenant = args["org_id"]
+
+    case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+      {:ok, %{storage_key: key} = item} when is_binary(key) -> process(item, key, tenant)
       _ -> :ok
     end
   end
 
-  defp process(item, key) do
+  defp process(item, key, tenant) do
     case Storage.fetch(key) do
       {:ok, binary} ->
         tmp = write_temp(binary, Path.extname(key))
 
         try do
-          generate(item, tmp, Path.extname(key))
+          generate(item, tmp, Path.extname(key), tenant)
         after
           rm(tmp)
         end
@@ -51,7 +56,7 @@ defmodule KilnCMS.Media.VariantWorker do
     end
   end
 
-  defp generate(item, path, ext) do
+  defp generate(item, path, ext, tenant) do
     focal = %{x: item.focal_x || 0.5, y: item.focal_y || 0.5}
 
     case ImageProcessor.process(path, ext, focal) do
@@ -60,7 +65,8 @@ defmodule KilnCMS.Media.VariantWorker do
           CMS.update_media_item(
             item,
             %{width: width, height: height, variants: store_variants(files, ext)},
-            authorize?: false
+            authorize?: false,
+            tenant: tenant
           )
 
       {:error, _} ->

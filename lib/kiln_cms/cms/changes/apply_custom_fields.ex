@@ -46,6 +46,12 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp apply_definitions(changeset) do
     defs = definitions_for(changeset)
 
+    # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
+    # by id under this tenant, so a value pointing at another site's media/content
+    # simply won't resolve (nil under `global?: true` → a validation error rather
+    # than a cross-org leak). Tenant-less writes (default org) resolve as before.
+    tenant = changeset.to_tenant
+
     supplied = stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
 
     # The base to merge the payload over. On create there is no record yet, so
@@ -58,7 +64,8 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         _ -> stringify_keys(changeset.data.custom_fields || %{})
       end
 
-    {cleaned, errors} = Enum.reduce(defs, {%{}, []}, &accumulate(&1, supplied, existing, &2))
+    {cleaned, errors} =
+      Enum.reduce(defs, {%{}, []}, &accumulate(&1, supplied, existing, tenant, &2))
 
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
@@ -83,10 +90,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
   # they omitted keeps its `existing` stored value (the merge); a field with
   # neither falls to its default (fresh field / create).
-  defp accumulate(def, supplied, existing, {cleaned, errors}) do
+  defp accumulate(def, supplied, existing, tenant, {cleaned, errors}) do
     cond do
       Map.has_key?(supplied, def.name) ->
-        fold(resolve(def, Map.get(supplied, def.name)), def, cleaned, errors)
+        fold(resolve(def, Map.get(supplied, def.name), tenant), def, cleaned, errors)
 
       Map.has_key?(existing, def.name) ->
         # Untouched by this write: keep the stored (already-coerced) value as-is.
@@ -96,7 +103,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         {Map.put(cleaned, def.name, Map.get(existing, def.name)), errors}
 
       true ->
-        fold(resolve(def, nil), def, cleaned, errors)
+        fold(resolve(def, nil, tenant), def, cleaned, errors)
     end
   end
 
@@ -108,15 +115,26 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # The coerced value for a definition from a supplied `raw` (or its default):
   # `:skip` when blank-and-optional, or an error when blank-and-required.
-  defp resolve(def, raw) do
+  defp resolve(def, raw, tenant) do
     raw = if blank?(raw), do: def.default, else: raw
 
     cond do
       blank?(raw) and def.required -> {:error, "is required"}
       blank?(raw) -> :skip
-      true -> coerce(raw, def)
+      true -> coerce(raw, def, tenant)
     end
   end
+
+  # Tenant-aware dispatch: only `:media`/`:reference` resolve records (and so need
+  # the writing tenant); every other field type coerces purely from its value, so
+  # it delegates to the type-only `coerce/2` below.
+  defp coerce(value, %{field_type: :media} = def, tenant),
+    do: coerce_media(value, def, tenant)
+
+  defp coerce(value, %{field_type: :reference} = def, tenant),
+    do: coerce_reference(value, def, tenant)
+
+  defp coerce(value, def, _tenant), do: coerce(value, def)
 
   # --- coercion to JSON-native values ----------------------------------------
 
@@ -170,36 +188,6 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
-  # A media field: the editor submits a MediaItem id; the stored value is a
-  # small snapshot (`%{"id", "url", "alt"}`) resolved at write time, so delivery
-  # needs no extra lookup — the same embed-at-write-time stance image blocks
-  # take. Re-saving refreshes the snapshot. Accepts a previously stored map too
-  # (API writers may round-trip the stored shape).
-  defp coerce(value, %{field_type: :media}) do
-    with {:ok, id} <- extract_id(value),
-         {:ok, media} <- KilnCMS.CMS.get_media_item(id, authorize?: false) do
-      {:ok, %{"id" => media.id, "url" => media.url, "alt" => media.alt}}
-    else
-      _ -> {:error, "must be an existing media item"}
-    end
-  end
-
-  # A content reference: resolves the target id against the field's declared
-  # `target_type` (compiled or dynamic) and stores a snapshot
-  # (`%{"id", "type", "slug", "title"}`) — id/type are the stable keys
-  # consumers fetch fresh content with; slug/title are display labels that may
-  # go stale until the next save.
-  defp coerce(value, %{field_type: :reference, target_type: target}) do
-    with {:ok, id} <- extract_id(value),
-         ct when not is_nil(ct) <- KilnCMS.CMS.ContentTypes.get(target),
-         {:ok, record} <- KilnCMS.CMS.ContentTypes.get_record(ct, id, authorize?: false) do
-      {:ok,
-       %{"id" => record.id, "type" => target, "slug" => record.slug, "title" => record.title}}
-    else
-      _ -> {:error, "must be an existing #{target || "content"} record"}
-    end
-  end
-
   # A plugin-contributed field type (`Kiln.FieldType`): the plugin's `cast/2`
   # owns coercion + validation. The contract requires a JSON-native return —
   # anything else is a loud contract violation, not a swallowed write.
@@ -220,6 +208,39 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
             raise "#{inspect(module)}.cast/2 must return {:ok, value} | {:error, message}, " <>
                     "got: #{inspect(other)}"
         end
+    end
+  end
+
+  # A media field: the editor submits a MediaItem id; the stored value is a
+  # small snapshot (`%{"id", "url", "alt"}`) resolved at write time, so delivery
+  # needs no extra lookup — the same embed-at-write-time stance image blocks
+  # take. Re-saving refreshes the snapshot. Accepts a previously stored map too
+  # (API writers may round-trip the stored shape). Scoped to the writing tenant
+  # so a media reference can't point across sites (epic #336).
+  defp coerce_media(value, _def, tenant) do
+    with {:ok, id} <- extract_id(value),
+         {:ok, media} <- KilnCMS.CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+      {:ok, %{"id" => media.id, "url" => media.url, "alt" => media.alt}}
+    else
+      _ -> {:error, "must be an existing media item"}
+    end
+  end
+
+  # A content reference: resolves the target id against the field's declared
+  # `target_type` (compiled or dynamic) and stores a snapshot
+  # (`%{"id", "type", "slug", "title"}`) — id/type are the stable keys
+  # consumers fetch fresh content with; slug/title are display labels that may
+  # go stale until the next save. Scoped to the writing tenant so a reference
+  # can't point across sites (epic #336).
+  defp coerce_reference(value, %{target_type: target}, tenant) do
+    with {:ok, id} <- extract_id(value),
+         ct when not is_nil(ct) <- KilnCMS.CMS.ContentTypes.get(target),
+         {:ok, record} <-
+           KilnCMS.CMS.ContentTypes.get_record(ct, id, authorize?: false, tenant: tenant) do
+      {:ok,
+       %{"id" => record.id, "type" => target, "slug" => record.slug, "title" => record.title}}
+    else
+      _ -> {:error, "must be an existing #{target || "content"} record"}
     end
   end
 
