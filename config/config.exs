@@ -157,7 +157,7 @@ config :kiln_cms, KilnCMS.Repo, types: KilnCMS.PostgrexTypes
 # docs/static-export.md.
 config :kiln_cms, KilnCMS.Firing.StaticExport,
   output_dir: nil,
-  surfaces: [:web, :json, :json_ld]
+  surfaces: [:web, :json, :json_ld, :llm]
 
 # Nx's backend is set per-env: EXLA.Backend in dev/test (where the :exla dep is
 # available — see config/dev.exs + test.exs), Nx.BinaryBackend (Nx's default)

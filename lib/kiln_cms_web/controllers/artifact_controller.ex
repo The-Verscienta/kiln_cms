@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
 
-  @surfaces %{"json" => :json, "json_ld" => :json_ld, "web" => :web}
+  @surfaces KilnCMS.Firing.Surfaces.name_map()
   # How long clients should wait before retrying a still-compiling artifact.
   @retry_after_seconds 2
   # Artifacts are immutable per publish (republish updates `updated_at` and
@@ -69,7 +69,7 @@ defmodule KilnCMSWeb.ArtifactController do
          record when not is_nil(record) <- published(org_id, ct.type, slug, locale),
          {:ok, body, published_at} <-
            PointInTime.read(org_id, ct.resource, record.id, surface, as_of) do
-      serve_point_in_time(conn, as_of, published_at, body)
+      serve_point_in_time(conn, as_of, published_at, params["surface"] || "json", body)
     else
       :error ->
         error(
@@ -104,12 +104,14 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Historical snapshots are immutable for a given (content, as_of), so they're
   # cacheable; the headers name the requested moment and the effective publish.
-  defp serve_point_in_time(conn, as_of, published_at, body) do
+  defp serve_point_in_time(conn, as_of, published_at, surface, body) do
     conn
     |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
     |> put_resp_header("x-kiln-as-of", DateTime.to_iso8601(as_of))
     |> put_resp_header("x-kiln-published-at", DateTime.to_iso8601(published_at))
-    |> json(body)
+    # Same per-surface envelope as live delivery — :llm is raw text/markdown
+    # with or without as_of.
+    |> respond(surface, body)
   end
 
   # Standard error envelope shared with the other headless surfaces (#190):
@@ -137,9 +139,19 @@ defmodule KilnCMSWeb.ArtifactController do
     if etag in get_req_header(conn, "if-none-match") do
       send_resp(conn, :not_modified, "")
     else
-      json(conn, body)
+      respond(conn, surface, body)
     end
   end
+
+  # The :llm surface is raw Markdown (#357) — LLM crawlers fetch it directly,
+  # so no JSON envelope; every other surface keeps the JSON body.
+  defp respond(conn, "llm", %{"markdown" => markdown}) do
+    conn
+    |> put_resp_content_type("text/markdown")
+    |> send_resp(200, markdown)
+  end
+
+  defp respond(conn, _surface, body), do: json(conn, body)
 
   # Advertise the signed provenance manifest for this artifact (#340) when
   # provenance is enabled, so consumers can discover the verification surface

@@ -16,7 +16,8 @@ defmodule KilnCMS.Firing.Engine do
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Cache
 
-  @surfaces [:web, :json, :json_ld]
+  # `:llm` (#357) is the Markdown surface answer engines extract from.
+  @surfaces KilnCMS.Firing.Surfaces.all()
   # Bumped when a surface's serialized shape changes (decision A2).
   @format_version 1
 
@@ -158,6 +159,11 @@ defmodule KilnCMS.Firing.Engine do
       "slug" => Map.get(document, :slug),
       "blocks" => Enum.map(typed, &Blocks.render(&1, :json))
     }
+  end
+
+  # Clean chunked Markdown for LLM/answer-engine extraction (#357, GEO).
+  defp compose(document, typed, :llm) do
+    %{"markdown" => KilnCMS.Firing.LlmMarkdown.compose(document, typed)}
   end
 
   defp compose(document, typed, :json_ld) do

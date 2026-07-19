@@ -126,6 +126,18 @@ defmodule KilnCMS.Blocks.Columns do
     |> Enum.join(" ")
   end
 
+  # The :llm surface (#357): recurse each child through the shared Markdown
+  # dispatcher so a columns layout keeps per-block structure (nested headings
+  # stay `##…`, paragraphs stay separate passages) instead of collapsing into
+  # the one-line search_text projection.
+  def to_markdown(block) do
+    block
+    |> child_blocks_flat()
+    |> Enum.map(&Blocks.to_markdown/1)
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   @doc "Typed child blocks of every column, flattened in document order."
