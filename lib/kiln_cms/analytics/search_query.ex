@@ -41,6 +41,8 @@ defmodule KilnCMS.Analytics.SearchQuery do
         worker_read_action :expired
         queue :default
         scheduler_cron "0 3 * * *"
+        # Strict-tenancy prep (#419): schedulers scan per org, not globally.
+        list_tenants KilnCMS.Accounts.ListOrgIds
         where expr(last_searched_at <= ago(@retention_days, :day))
 
         worker_module_name KilnCMS.Analytics.SearchQuery.AshOban.Worker.PurgeExpired

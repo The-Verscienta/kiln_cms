@@ -55,6 +55,8 @@ defmodule KilnCMS.CMS.WebhookDelivery do
         action :destroy
         queue :default
         scheduler_cron "20 3 * * *"
+        # Strict-tenancy prep (#419): schedulers scan per org, not globally.
+        list_tenants KilnCMS.Accounts.ListOrgIds
 
         where expr(inserted_at <= ago(^@retention_days, :day))
 

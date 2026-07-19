@@ -895,6 +895,8 @@ defmodule KilnCMS.CMS.Content do
             action :publish_scheduled
             queue :scheduling
             scheduler_cron "* * * * *"
+            # Strict-tenancy prep (#419): schedulers scan per org, not globally.
+            list_tenants KilnCMS.Accounts.ListOrgIds
 
             where expr(
                     ^ref(:state) in [:draft, :in_review] and not is_nil(^ref(:scheduled_at)) and
@@ -913,6 +915,8 @@ defmodule KilnCMS.CMS.Content do
             action :unpublish_scheduled
             queue :scheduling
             scheduler_cron "* * * * *"
+            # Strict-tenancy prep (#419): schedulers scan per org, not globally.
+            list_tenants KilnCMS.Accounts.ListOrgIds
 
             where expr(
                     ^ref(:state) == :published and not is_nil(^ref(:unpublish_at)) and
@@ -930,6 +934,8 @@ defmodule KilnCMS.CMS.Content do
             worker_read_action :trashed
             queue :default
             scheduler_cron "0 3 * * *"
+            # Strict-tenancy prep (#419): schedulers scan per org, not globally.
+            list_tenants KilnCMS.Accounts.ListOrgIds
 
             where expr(^ref(:archived_at) <= ago(unquote(@trash_retention_days), :day))
 
@@ -946,6 +952,8 @@ defmodule KilnCMS.CMS.Content do
             action :destroy
             queue :default
             scheduler_cron "45 3 * * *"
+            # Strict-tenancy prep (#419): schedulers scan per org, not globally.
+            list_tenants KilnCMS.Accounts.ListOrgIds
 
             where expr(
                     ^ref(:state) == :draft and

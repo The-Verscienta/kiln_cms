@@ -82,12 +82,16 @@ defmodule KilnCMS.Firing.StaticExport do
     surfaces = opts[:surfaces] || @surfaces
     base_url = opts[:base_url] || Application.get_env(:kiln_cms, :public_base_url)
     generated_at = opts[:generated_at] || DateTime.utc_now()
+    # One export = ONE site (#419): the cross-org single-tree behavior is gone
+    # (two orgs sharing a slug collided). Pass `:org_id` to export another
+    # site; run once per org for a full-fleet export.
+    org_id = opts[:org_id] || KilnCMS.Accounts.default_org_id()
 
     mkdir_p!(out_dir)
 
     {entries, skipped} =
-      (ContentTypes.all() ++ ContentTypes.dynamic_all())
-      |> Enum.flat_map(&published_records/1)
+      (ContentTypes.all() ++ ContentTypes.dynamic_all(org_id))
+      |> Enum.flat_map(&published_records(&1, org_id))
       |> Enum.reduce({[], 0}, fn {ct, record}, {acc, skipped} ->
         case export_document(out_dir, ct, record, surfaces) do
           {:ok, entry} -> {[entry | acc], skipped}
@@ -120,16 +124,14 @@ defmodule KilnCMS.Firing.StaticExport do
   # Published records for a content type, paired with their descriptor. No actor
   # + authorize?: true ⇒ the read policy returns published records only (same as
   # the sitemap). Minimal select — bodies come from the artifact store, not here.
-  defp published_records(ct) do
-    # NOTE (epic #336): this list is NOT tenant-scoped — a static export currently
-    # spans every org's published content into a single output tree, so two orgs
-    # sharing a slug would collide. Safe under the single-org rollout guard; a
-    # per-org export (loop tenants / write to per-org subtrees) is required before
-    # real multi-org. `:org_id` is selected so `read_surfaces/3` still scopes each
-    # artifact read to its record's tenant.
+  defp published_records(ct, org_id) do
+    # Tenant-scoped to the export's site (#419) — the read policy returns
+    # published records only (same as the sitemap). `:org_id` is selected so
+    # `read_surfaces/3` scopes each artifact read to its record's tenant.
     ct
     |> ContentTypes.list!(
       authorize?: true,
+      tenant: org_id,
       query: [select: [:id, :slug, :locale, :updated_at, :org_id]]
     )
     |> Enum.map(&{ct, &1})

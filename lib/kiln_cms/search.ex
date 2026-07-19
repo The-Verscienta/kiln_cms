@@ -415,12 +415,13 @@ defmodule KilnCMS.Search do
     if normalized != "" do
       locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
 
-      # The recorded query lands in the request's site (epic #336); `:tenant`
-      # defaults to nil (the sole org) for any caller that doesn't pass one.
+      # The recorded query lands in the request's site (epic #336). Strict-
+      # tenancy prep (#419): a caller that omits `:tenant` records against the
+      # default org explicitly rather than relying on a nil-tenant global write.
       KilnCMS.Analytics.record_search(
         %{query: normalized, locale: locale, result_count: result_count},
         authorize?: false,
-        tenant: Keyword.get(opts, :tenant)
+        tenant: Keyword.get(opts, :tenant) || KilnCMS.Accounts.default_org_id()
       )
     end
 

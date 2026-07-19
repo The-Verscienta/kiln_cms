@@ -28,13 +28,19 @@ defmodule KilnCMS.History do
   """
   @spec anonymize_actor(Ecto.UUID.t()) :: :ok
   def anonymize_actor(actor_id) when is_binary(actor_id) do
-    DocumentEvent
-    |> Ash.Query.filter(actor_id == ^actor_id)
-    |> Ash.bulk_update!(:anonymize_actor, %{},
-      authorize?: false,
-      return_records?: false,
-      return_errors?: true
-    )
+    # An erased user's events may live in several orgs — iterate them
+    # explicitly (#419 strict-tenancy prep) instead of one tenant-less
+    # global sweep.
+    for org_id <- KilnCMS.Accounts.list_org_ids() do
+      DocumentEvent
+      |> Ash.Query.filter(actor_id == ^actor_id)
+      |> Ash.bulk_update!(:anonymize_actor, %{},
+        authorize?: false,
+        tenant: org_id,
+        return_records?: false,
+        return_errors?: true
+      )
+    end
 
     :ok
   end
