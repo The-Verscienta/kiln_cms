@@ -10,6 +10,12 @@ defmodule KilnCMSWeb.PreviewController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.PreviewToken
 
+  # A browser opening a shared preview link lands on the human multiplayer
+  # view (#379); headless consumers (JSON accept — the default) are unchanged.
+  def show(%{private: %{phoenix_format: "html"}} = conn, %{"token" => token}) do
+    redirect(conn, to: ~p"/preview/#{token}/live")
+  end
+
   def show(conn, %{"token" => token}) do
     with {:ok, %{type: type, id: id}} <- PreviewToken.verify(token),
          {:ok, record} <- fetch(type, id) do
