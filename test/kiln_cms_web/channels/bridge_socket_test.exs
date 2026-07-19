@@ -152,4 +152,42 @@ defmodule KilnCMSWeb.BridgeSocketTest do
                params: %{"type" => "post", "id" => post.id, "api_key" => key(admin)}
              })
   end
+
+  describe "tenant scoping (#336)" do
+    test "connect is scoped to the connecting host's org" do
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Org BS",
+          slug: "bs-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      admin = user(:admin)
+
+      post =
+        KilnCMS.CMS.create_post!(
+          %{title: "Other-site", slug: "bs-t-#{System.unique_integer([:positive])}"},
+          actor: admin,
+          tenant: org
+        )
+
+      k = key(admin)
+
+      # No connect host (or the default host) resolves the default org — the
+      # other org's document is invisible, so the socket is refused.
+      assert :error =
+               BridgeSocket.connect(%{
+                 params: %{"type" => "post", "id" => post.id, "api_key" => k}
+               })
+
+      # The owning org's subdomain host resolves it.
+      uri = URI.parse("wss://#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}/ws/bridge")
+
+      assert {:ok, _state} =
+               BridgeSocket.connect(%{
+                 params: %{"type" => "post", "id" => post.id, "api_key" => k},
+                 connect_info: %{uri: uri}
+               })
+    end
+  end
 end

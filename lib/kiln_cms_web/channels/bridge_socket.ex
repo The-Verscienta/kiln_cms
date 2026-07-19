@@ -34,11 +34,11 @@ defmodule KilnCMSWeb.BridgeSocket do
   def child_spec(_opts), do: :ignore
 
   @impl true
-  def connect(%{params: params}) do
+  def connect(%{params: params} = info) do
     with true <- KilnCMS.VisualEditing.enabled?(),
          {:ok, ct, id} <- fetch_target(params),
          actor <- authenticate(params["api_key"]),
-         :ok <- authorize_read(ct, id, actor) do
+         :ok <- authorize_read(ct, id, actor, resolve_org(info)) do
       {:ok, %{type: to_string(ct.type), id: id}}
     else
       _ -> :error
@@ -97,12 +97,21 @@ defmodule KilnCMSWeb.BridgeSocket do
   defp authenticate(_), do: nil
 
   # The actor must be able to read the document, or we refuse the socket (so a
-  # draft is never streamed to someone who couldn't fetch it over HTTP).
-  defp authorize_read(ct, id, actor) do
-    ContentTypes.get_record!(ct.type, id, actor: actor)
+  # draft is never streamed to someone who couldn't fetch it over HTTP). Scoped
+  # to the connecting host's org (epic #336) so a socket on one site's host
+  # can't watch another site's document.
+  defp authorize_read(ct, id, actor, org) do
+    ContentTypes.get_record!(ct.type, id, actor: actor, tenant: org)
     :ok
   rescue
     _ -> :error
+  end
+
+  # Raw transports bypass the plug pipeline, so resolve the tenant from the
+  # connect URI's host (the same source `SetTenant` uses). A missing host —
+  # `connect_info` absent in tests — resolves to the default org.
+  defp resolve_org(info) do
+    KilnCMSWeb.Tenant.resolve_org(get_in(info, [:connect_info, :uri, Access.key(:host)]))
   end
 
   defp excerpt(value) when is_binary(value), do: value

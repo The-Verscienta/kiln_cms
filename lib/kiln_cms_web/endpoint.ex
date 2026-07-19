@@ -41,7 +41,12 @@ defmodule KilnCMSWeb.Endpoint do
   # (auth is the explicit `api_key` param, never a cookie), so Sobelow's CSWH
   # finding here is a false positive — ignored with rationale in `.sobelow-conf`.
   socket "/ws/bridge", KilnCMSWeb.BridgeSocket,
-    websocket: [check_origin: {KilnCMSWeb.CORS, :check_socket_origin?, []}],
+    websocket: [
+      check_origin: {KilnCMSWeb.CORS, :check_socket_origin?, []},
+      # The request URI carries the host the socket resolves its tenant from
+      # (epic #336) — raw transports bypass the SetTenant plug pipeline.
+      connect_info: [:uri]
+    ],
     longpoll: false
 
   # Serve at "/" the static files from "priv/static" directory.

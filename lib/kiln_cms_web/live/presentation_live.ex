@@ -36,7 +36,8 @@ defmodule KilnCMSWeb.PresentationLive do
     actor = socket.assigns.current_user
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
-         record when not is_nil(record) <- fetch_by_slug(ct.type, slug, actor) do
+         record when not is_nil(record) <-
+           fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org) do
       {:ok,
        socket
        |> assign(:kind, ct.type)
@@ -55,13 +56,19 @@ defmodule KilnCMSWeb.PresentationLive do
     end
   end
 
-  defp fetch_by_slug(kind, slug, actor) do
+  # Scope to the current site's org (epic #336) so the Presentation console on
+  # one site's host only resolves that site's content.
+  defp fetch_by_slug(kind, slug, actor, org) do
     case ContentTypes.list!(kind,
            actor: actor,
+           tenant: org,
            query: [filter: [slug: slug], select: [:id], limit: 1]
          ) do
-      [%{id: id} | _] -> ContentTypes.get_record!(kind, id, actor: actor, load: [:featured_image])
-      _ -> nil
+      [%{id: id} | _] ->
+        ContentTypes.get_record!(kind, id, actor: actor, tenant: org, load: [:featured_image])
+
+      _ ->
+        nil
     end
   rescue
     _ -> nil
