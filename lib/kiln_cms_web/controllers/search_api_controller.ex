@@ -50,6 +50,9 @@ defmodule KilnCMSWeb.SearchApiController do
     read_opts = [
       actor: conn.assigns[:current_user],
       authorize?: true,
+      # Scope search to the request's org (#336); resolved from the host by the
+      # SetTenant plug. Content sections are isolated per site.
+      tenant: KilnCMSWeb.Tenant.current_org_id(conn),
       locale: locale,
       limit: limit
     ]

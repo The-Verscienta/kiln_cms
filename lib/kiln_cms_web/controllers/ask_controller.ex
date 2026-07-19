@@ -22,6 +22,8 @@ defmodule KilnCMSWeb.AskController do
       |> Ask.answer(
         actor: conn.assigns[:current_user],
         authorize?: true,
+        # Scope RAG retrieval to the request's org (#336).
+        tenant: KilnCMSWeb.Tenant.current_org_id(conn),
         locale: params["locale"],
         limit: parse_limit(params["limit"])
       )

@@ -75,6 +75,8 @@ defmodule KilnCMS.Search.MeilisearchTest do
       assert doc.type == "page"
       assert doc.title == "Otters"
       assert doc.slug == page.slug
+      # The tenant facet (#336) — the page's org rides into the index document.
+      assert doc.org_id == page.org_id
       assert is_integer(doc.published_at)
     end
   end
@@ -130,15 +132,29 @@ defmodule KilnCMS.Search.MeilisearchTest do
 
   describe "search/2" do
     test "returns {:error, :disabled} when the backend is off" do
-      assert {:error, :disabled} = Meilisearch.search("anything")
+      assert {:error, :disabled} =
+               Meilisearch.search("anything", org_id: KilnCMS.Accounts.default_org_id())
     end
 
-    test "posts the query and returns hits when enabled" do
+    test "forces the tenant facet and returns hits when enabled" do
       put_meili_env(enabled: true, client: __MODULE__.SearchStub, index: "test_idx")
-      assert {:ok, [%{"title" => "Hit"}]} = Meilisearch.search("hit", type: :page, locale: "en")
+      org_id = "00000000-0000-0000-0000-0000000000aa"
+
+      assert {:ok, [%{"title" => "Hit"}]} =
+               Meilisearch.search("hit", org_id: org_id, type: :page, locale: "en")
+
       assert_received {:search_body, body}
       assert body.q == "hit"
-      assert body.filter == ~s(type = page AND locale = "en")
+      # `org_id` is a mandatory, quoted clause prepended to every query (#336).
+      assert body.filter == ~s(org_id = "#{org_id}" AND type = page AND locale = "en")
+    end
+
+    test "requires an :org_id (tenant) — never spans orgs" do
+      put_meili_env(enabled: true, client: __MODULE__.SearchStub, index: "test_idx")
+
+      assert_raise ArgumentError, ~r/requires :org_id/, fn ->
+        Meilisearch.search("hit", type: :page)
+      end
     end
   end
 

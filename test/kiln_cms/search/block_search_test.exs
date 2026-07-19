@@ -40,8 +40,19 @@ defmodule KilnCMS.Search.BlockSearchTest do
 
   defp slug, do: "bsrch-#{System.unique_integer([:positive])}"
 
+  defp org(name) do
+    Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+      name: name,
+      slug: "#{name}-#{System.unique_integer([:positive])}",
+      status: :active
+    })
+  end
+
   defp page_with_blocks(actor, blocks),
     do: CMS.create_page!(%{title: "Doc", slug: slug(), blocks: blocks}, actor: actor)
+
+  defp page_with_blocks(actor, org, blocks),
+    do: CMS.create_page!(%{title: "Doc", slug: slug(), blocks: blocks}, actor: actor, tenant: org)
 
   describe "BlockIndexer.reindex/1" do
     test "embeds one row per non-empty block, keyed by block, deduped by hash" do
@@ -86,6 +97,26 @@ defmodule KilnCMS.Search.BlockSearchTest do
       headings = BlockSearch.search("Mountains", block_type: :heading)
       assert Enum.all?(headings, &(&1.block_type == :heading))
       assert length(headings) == 1
+    end
+
+    test "is tenant-scoped — a search sees only its own org's blocks (#336)" do
+      actor = admin()
+      a = org("orga")
+      b = org("orgb")
+
+      # The SAME block text indexed under two different orgs.
+      pa = page_with_blocks(actor, a, [%{type: :heading, content: "Shared Term", order: 0}])
+      pb = page_with_blocks(actor, b, [%{type: :heading, content: "Shared Term", order: 0}])
+      {:ok, 1} = BlockIndexer.reindex(pa)
+      {:ok, 1} = BlockIndexer.reindex(pb)
+
+      a_results = BlockSearch.search("Shared Term", org_id: a.id)
+      assert Enum.all?(a_results, &(&1.document_id == pa.id))
+      refute Enum.any?(a_results, &(&1.document_id == pb.id))
+
+      b_results = BlockSearch.search("Shared Term", org_id: b.id)
+      assert Enum.all?(b_results, &(&1.document_id == pb.id))
+      refute Enum.any?(b_results, &(&1.document_id == pa.id))
     end
 
     test "returns nothing when semantic search is disabled" do

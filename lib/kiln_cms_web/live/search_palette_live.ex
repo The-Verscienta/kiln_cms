@@ -32,7 +32,13 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         socket |> assign(:query, "") |> assign(:searched, false) |> assign(:results, empty())
       else
         results =
-          Search.global(query, actor: socket.assigns.current_user, limit: 8, highlight: true)
+          Search.global(query,
+            actor: socket.assigns.current_user,
+            # Scope the palette to the editor's current site (#336).
+            tenant: socket.assigns.current_org,
+            limit: 8,
+            highlight: true
+          )
 
         # Content + media hits; taxonomy name matches don't count as found
         # documents for analytics.
