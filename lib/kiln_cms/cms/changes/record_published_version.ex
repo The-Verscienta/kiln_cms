@@ -26,16 +26,24 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
   defp wire_version(record) do
     version_module = Module.concat(record.__struct__, Version)
 
-    case latest_publish_version(version_module, record.id) do
-      {:ok, %{} = version} ->
-        Ash.update(record, %{published_version_id: version.id},
-          action: :set_published_version_id,
-          authorize?: false
-        )
+    result =
+      case latest_publish_version(version_module, record.id) do
+        {:ok, %{} = version} ->
+          Ash.update(record, %{published_version_id: version.id},
+            action: :set_published_version_id,
+            authorize?: false
+          )
 
-      _ ->
-        {:ok, record}
-    end
+        _ ->
+          {:ok, record}
+      end
+
+    # Tamper-evident history anchor (#356): fold + sign the full version chain
+    # at this publish point. `anchor/2` is config-gated and never raises, so a
+    # chain problem can't break the publish.
+    with {:ok, published} <- result, do: KilnCMS.Governance.Chain.anchor(published)
+
+    result
   end
 
   defp latest_publish_version(version_module, source_id) do

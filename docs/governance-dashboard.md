@@ -32,12 +32,20 @@ behind the admin-gated route. `KilnCMSWeb.GovernanceLive` renders it;
 
 ## Scope & later phases
 
-Phase 1 is a read model over what the cluster already produces. Later phases:
+Phase 1 was a read model over what the cluster already produces. Phase 2
+(shipped with #356's anchors):
 
-- **Full side-by-side version diffs** (today the timeline names the changed
-  fields; not the before/after values).
-- **Signed / tamper-evident** trail once #356's hash-chained versions land — the
-  export would then carry a verifiable signature.
+- **Side-by-side value diffs** — each timeline entry expands to old → new per
+  changed field (strings verbatim, structures inspected + capped).
+- **Tamper-evidence** — the detail header shows the signed-anchor chain
+  verdict (`verified` / `intact-unsigned` / `unanchored` / `TAMPERED`), and the
+  JSON export carries it. Anchors are minted at publish
+  (`KilnCMS.Governance.Chain`); verify fleet-wide with `mix kiln.audit.verify`.
+- **Consent recording UI** — record a consent (kind / grantor / reference /
+  note) directly from the trail page.
+
+Later phases:
+
 - **"Who"** on each version — richer actor attribution on PaperTrail versions
   (the workflow action + time is shown today; the grantor is captured on
   consents).

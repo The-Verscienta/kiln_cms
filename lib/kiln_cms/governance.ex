@@ -71,6 +71,10 @@ defmodule KilnCMS.Governance do
         },
         timeline: timeline,
         publishes: for(e <- timeline, e.publish?, do: e.at),
+        # Tamper-evidence (#356): does the anchored history still reproduce the
+        # signed chain hash minted at the last publish?
+        chain:
+          KilnCMS.Governance.Chain.verify(ct.resource, to_string(ct.type), id, record.org_id),
         # Scoped to the record's own site (epic #336) so the trail only shows
         # consents from the same org as the content.
         consents:
@@ -85,19 +89,33 @@ defmodule KilnCMS.Governance do
   end
 
   # The PaperTrail version timeline, newest first: each version's action, time,
-  # and which fields it changed (`:changes_only` tracking stores the diff).
+  # which fields it changed, and the old → new value pair per field (#352).
+  # `:changes_only` tracking stores each version's NEW values; the "old" side is
+  # the most recent earlier version's value for that field (nil when the field
+  # had never been set/tracked before), accumulated in one ascending pass.
   defp timeline(resource, id) do
-    Module.concat(resource, Version)
-    |> Ash.Query.filter(version_source_id == ^id)
-    |> Ash.Query.sort(version_inserted_at: :desc)
-    |> Ash.read!(authorize?: false)
-    |> Enum.map(fn version ->
-      %{
-        action: version.version_action_name,
-        at: version.version_inserted_at,
-        changed: version.changes |> Map.keys() |> Enum.sort(),
-        publish?: version.version_action_name in @publish_actions
-      }
-    end)
+    {events, _last_known} =
+      Module.concat(resource, Version)
+      |> Ash.Query.filter(version_source_id == ^id)
+      |> Ash.Query.sort(version_inserted_at: :asc)
+      |> Ash.read!(authorize?: false)
+      |> Enum.map_reduce(%{}, fn version, last_known ->
+        changes = version.changes || %{}
+
+        event = %{
+          action: version.version_action_name,
+          at: version.version_inserted_at,
+          changed: changes |> Map.keys() |> Enum.sort(),
+          diffs:
+            changes
+            |> Enum.map(fn {field, new} -> {field, {Map.get(last_known, field), new}} end)
+            |> Enum.sort_by(&elem(&1, 0)),
+          publish?: version.version_action_name in @publish_actions
+        }
+
+        {event, Map.merge(last_known, changes)}
+      end)
+
+    Enum.reverse(events)
   end
 end

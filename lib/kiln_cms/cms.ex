@@ -252,6 +252,13 @@ defmodule KilnCMS.CMS do
       define :destroy_consent, action: :destroy
     end
 
+    # Signed, append-only anchors over a document's version history (#356,
+    # tamper-evident half). Minted on publish; see KilnCMS.Governance.Chain.
+    resource KilnCMS.CMS.HistoryAnchor do
+      define :create_history_anchor, action: :create
+      define :list_history_anchors_for, action: :for_content, args: [:resource_type, :source_id]
+    end
+
     # Admin-defined public forms (contact/signup/…) + their submissions.
     resource KilnCMS.CMS.Form do
       define :list_forms, action: :read

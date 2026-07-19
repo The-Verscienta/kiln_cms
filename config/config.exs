@@ -185,6 +185,13 @@ config :kiln_cms, :registration_enabled, true
 # flips this on once delivery is tenant-aware.
 config :kiln_cms, :multitenancy_enabled, false
 
+# Tamper-evident history anchors (#356): at every publish, the document's full
+# PaperTrail version chain is folded into a canonical hash and recorded
+# (RSA-signed when a provenance signing key is configured — see
+# `config :kiln_cms, KilnCMS.Provenance` below). Cheap (one hash fold + local
+# sign per publish); disable only if the audit surface is unwanted.
+config :kiln_cms, :audit_anchors_enabled, true
+
 # Content locales. Content is modelled per-locale (unique [slug, locale]); the
 # delivery layer serves the requested locale with a fallback to the default.
 # Non-default locales are served under a `/<locale>/…` URL prefix.
