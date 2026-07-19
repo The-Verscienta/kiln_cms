@@ -5,93 +5,158 @@ defmodule KilnCMS.Accounts.Scoping do
 
   A scope axis (`:editable_types` — which types an editor may author;
   `:readable_types` — which types an editor may see beyond published) lives in
-  two places:
+  two places, resolved most-specific-first:
 
-    * on the user's `KilnCMS.Accounts.OrgMembership` for the request's org —
-      the **per-org** value, so one account can be a blog editor on site A and
-      unrestricted on site B; and
-    * on `KilnCMS.Accounts.User` itself — the pre-#336 single-org column, kept
-      as the fallback.
+    1. the user's `KilnCMS.Accounts.OrgMembership` for the request's org —
+       the **per-org** value, so one account can be a blog editor on site A
+       and unrestricted on site B; and
+    2. `KilnCMS.Accounts.User` itself — the pre-#336 single-org column, the
+       fallback.
 
-  Resolution: a **non-empty** membership scope wins; otherwise the user column
-  applies. (An empty list means "unrestricted" on both levels, so an empty
-  membership can't be distinguished from an unconfigured one — narrowing is
-  always possible per-org, widening means clearing the user column. Slice 4's
-  named roles subsume this.) The tenant comes from the query/changeset under
-  authorization; a tenant-less request resolves against the default org — the
-  same org those writes stamp content with.
+  A **non-empty** value wins at each level (empty means "unrestricted", which
+  is indistinguishable from "unconfigured" — narrowing is always possible at a
+  more specific level, widening means clearing the broader level).
+
+  **Affiliation is fail-closed.** A user who holds memberships — the multi-org
+  model — gets NO editorial scope on an org they have no membership for: the
+  org resolves from the client-controlled host, so falling back to the (often
+  empty = unrestricted) user column there would let a scoped editor escape
+  their restriction by switching hosts. A user with no memberships at all
+  (pre-#336 data that missed the backfill) keeps the user-column behavior
+  everywhere. The tenant comes from the query/changeset under authorization;
+  a tenant-less request resolves against the default org — the same org those
+  writes stamp.
 
   Called from the content policy checks (`EditableContentType` /
-  `ReadableContentType`), which is the single choke point every surface
-  (LiveView, JSON:API, GraphQL, MCP) authorizes through. The membership lookup
-  is one indexed `(user_id, organization_id)` get per policy evaluation and
-  short-circuits for non-editor actors, so the anonymous delivery hot path
-  never pays it.
+  `ReadableContentType`), the single choke points every surface (LiveView,
+  JSON:API, GraphQL, MCP) authorizes through. The membership lookup is one
+  indexed `(user_id, organization_id)` get, memoized per process for a few
+  seconds (several checks run per request), and short-circuits for non-editor
+  actors — the anonymous delivery hot path never pays it.
   """
 
   alias KilnCMS.Accounts
 
   @axes [:editable_types, :readable_types]
 
+  # How long a resolved affiliation may be reused within one process. Bounds
+  # both the per-request duplicate lookups (policy checks + changes each
+  # resolve) and staleness in long-lived LiveView processes.
+  @memo_ttl_ms 5_000
+
   @doc """
   Whether `type_name` is inside the actor's effective scope for `axis`.
 
   An empty effective scope means unrestricted (`true` for every type); a
-  non-empty scope admits only the listed type names. A `nil` type name (a
-  resource outside the content macro) only passes an unrestricted scope.
+  non-empty scope admits only the listed type names; a foreign-org actor (no
+  membership for the request's org while holding memberships elsewhere) is
+  denied every type. A `nil` type name (a resource outside the content macro)
+  only passes an unrestricted scope.
   """
   @spec permitted?(map(), Ash.Query.t() | Ash.Changeset.t() | nil, atom(), String.t() | nil) ::
           boolean()
   def permitted?(actor, subject, axis, type_name) when axis in @axes do
-    case effective_types(actor, subject, axis) do
+    case scope(actor, subject, axis) do
+      :denied -> false
       [] -> true
       scope -> type_name in scope
     end
   end
 
   @doc """
-  The actor's effective scope list for `axis` under `subject`'s tenant.
-  `[]` = unrestricted.
+  Whether a **non-empty** effective scope for `axis` names `type_name`.
+
+  Unlike `permitted?/4`, an empty (unrestricted) scope returns `false` — used
+  where only an explicit grant should carry extra meaning (e.g. an explicit
+  `editable_types` entry implies editorial visibility, but "may author
+  everything" must not dissolve a `readable_types` restriction).
   """
-  @spec effective_types(map(), Ash.Query.t() | Ash.Changeset.t() | nil, atom()) :: [String.t()]
-  def effective_types(actor, subject, axis) when axis in @axes do
-    membership_types(actor, org_id(subject), axis) || user_types(actor, axis)
+  @spec explicitly_permits?(
+          map(),
+          Ash.Query.t() | Ash.Changeset.t() | nil,
+          atom(),
+          String.t() | nil
+        ) :: boolean()
+  def explicitly_permits?(actor, subject, axis, type_name) when axis in @axes do
+    case scope(actor, subject, axis) do
+      :denied -> false
+      [] -> false
+      scope -> type_name in scope
+    end
   end
 
-  # The per-org value, when a membership exists and configures this axis.
-  # Returns nil (→ user-column fallback) when there is no membership row or its
-  # scope is empty/unset.
-  defp membership_types(%{id: user_id}, org_id, axis)
-       when is_binary(user_id) and is_binary(org_id) do
+  defp scope(actor, subject, axis) do
+    case affiliation(actor, org_id(subject)) do
+      {:member, membership} ->
+        list_axis(membership, axis) || list_axis(actor, axis) || []
+
+      :unaffiliated ->
+        list_axis(actor, axis) || []
+
+      :foreign_org ->
+        :denied
+    end
+  end
+
+  # A list axis counts as configured only when non-empty.
+  defp list_axis(nil, _axis), do: nil
+
+  defp list_axis(source, axis) do
+    case Map.get(source, axis) do
+      scope when is_list(scope) and scope != [] -> scope
+      _ -> nil
+    end
+  end
+
+  # ── membership affiliation ─────────────────────────────────────────────────
+
+  # The actor's relationship to the org, memoized per process:
+  #   {:member, membership} — a membership row exists for this org;
+  #   :foreign_org          — the user holds memberships, none for this org;
+  #   :unaffiliated         — the user holds no memberships at all (legacy).
+  defp affiliation(%{id: user_id}, org_id) when is_binary(user_id) and is_binary(org_id) do
+    memo({__MODULE__, user_id, org_id}, fn -> resolve_affiliation(user_id, org_id) end)
+  end
+
+  defp affiliation(_actor, _org_id), do: :unaffiliated
+
+  defp resolve_affiliation(user_id, org_id) do
     case Accounts.get_org_membership(user_id, org_id,
            authorize?: false,
            not_found_error?: false
          ) do
-      {:ok, %{} = membership} ->
-        case Map.get(membership, axis) do
-          scope when scope in [nil, []] -> nil
-          scope -> scope
-        end
-
-      _ ->
-        nil
+      {:ok, %{} = membership} -> {:member, membership}
+      _ -> if any_membership?(user_id), do: :foreign_org, else: :unaffiliated
     end
   end
 
-  defp membership_types(_actor, _org_id, _axis), do: nil
+  defp any_membership?(user_id) do
+    case Accounts.list_memberships_for_user(user_id, authorize?: false, query: [limit: 1]) do
+      {:ok, [_ | _]} -> true
+      _ -> false
+    end
+  end
 
-  defp user_types(actor, axis) do
-    case Map.get(actor, axis) do
-      scope when is_list(scope) -> scope
-      _ -> []
+  defp memo(key, fun) do
+    now = System.monotonic_time(:millisecond)
+
+    case Process.get(key) do
+      {value, at} when now - at < @memo_ttl_ms ->
+        value
+
+      _ ->
+        value = fun.()
+        Process.put(key, {value, now})
+        value
     end
   end
 
   # The org the authorization runs under. Queries/changesets carry the resolved
-  # tenant attribute value in `to_tenant` (set by `Ash.ToTenant` from the org
-  # struct or id); a tenant-less subject falls back to the default org — the
-  # org that tenant-less writes stamp content with (`global?: true`).
+  # tenant in `to_tenant` (an id via `Ash.ToTenant`, defensively also matched
+  # as a struct) or `tenant`; a tenant-less subject falls back to the default
+  # org — the org that tenant-less writes stamp content with (`global?: true`).
   defp org_id(%{to_tenant: org_id}) when is_binary(org_id), do: org_id
+  defp org_id(%{to_tenant: %{id: org_id}}) when is_binary(org_id), do: org_id
   defp org_id(%{tenant: %{id: org_id}}) when is_binary(org_id), do: org_id
   defp org_id(%{tenant: org_id}) when is_binary(org_id), do: org_id
   defp org_id(_subject), do: Accounts.default_org_id()
