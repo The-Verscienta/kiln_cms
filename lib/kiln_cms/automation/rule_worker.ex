@@ -82,9 +82,16 @@ defmodule KilnCMS.Automation.RuleWorker do
   # `automation` key makes {rule, content, publish revision} unique on the send
   # ledger, so a re-fired event or re-delivered job can't double-send; a
   # genuinely new publish (fresh `published_at`) sends again.
+  # How long after publish we keep waiting for the fired artifact.
+  @fire_wait_limit_s 30 * 60
+
   defp run(%{action: :newsletter, config: config, org_id: org_id, id: rule_id}, event, payload) do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
+         # The type may have been deleted/archived since the event fired — the
+         # storage lookup is nil-safe where `get_record` would raise (same
+         # guard the :reindex clause uses).
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
          {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id) do
       case KilnCMS.Newsletter.send_as_newsletter(record,
              segment_id: config["segment_id"],
@@ -98,9 +105,20 @@ defmodule KilnCMS.Automation.RuleWorker do
           :ok
 
         {:error, :not_fired} ->
-          # Publish fires artifacts on a sibling Oban job — briefly retry until
-          # the :web artifact this campaign renders from exists.
-          {:snooze, 30}
+          # Publish fires artifacts on a sibling Oban job — retry briefly until
+          # the :web artifact exists. Oban snoozes don't consume attempts, so
+          # bound the loop by the publish's age: if the artifact still isn't
+          # there well after publish, firing is broken and retrying can't help.
+          if recent_publish?(record) do
+            {:snooze, 30}
+          else
+            Logger.warning(
+              "Automation newsletter rule gave up on #{event}: no fired artifact " <>
+                "#{inspect(@fire_wait_limit_s)}s after publish"
+            )
+
+            :ok
+          end
 
         {:error, reason} when reason in [:not_published, :gated] ->
           Logger.info("Automation newsletter rule skipped #{event}: #{inspect(reason)}")
@@ -128,6 +146,11 @@ defmodule KilnCMS.Automation.RuleWorker do
       _ -> :ok
     end
   end
+
+  defp recent_publish?(%{published_at: %DateTime{} = at}),
+    do: DateTime.diff(DateTime.utc_now(), at) < @fire_wait_limit_s
+
+  defp recent_publish?(_record), do: false
 
   # The public content type from a `<type>.<verb>` event name.
   defp event_type(event), do: event |> String.split(".", parts: 2) |> List.first()
