@@ -73,6 +73,19 @@ defmodule KilnCMS.Automation.RuleWorker do
     :ok
   end
 
+  # Embedding-driven editorial intelligence (#377): notify editors of
+  # near-duplicate content — a lightweight review gate ("on in_review → email
+  # any suspiciously similar documents"). Silent when nothing is found.
+  defp run(%{action: :flag_duplicates, config: config, org_id: org_id}, event, payload) do
+    intelligence(event, payload, org_id, config, &duplicate_findings/1)
+  end
+
+  # Tag suggestions for the document under review (#377), from the existing
+  # taxonomy ranked by semantic similarity. Silent when nothing to suggest.
+  defp run(%{action: :suggest_tags, config: config, org_id: org_id}, event, payload) do
+    intelligence(event, payload, org_id, config, &tag_findings/1)
+  end
+
   defp run(%{action: :reindex, org_id: org_id}, event, payload) do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
@@ -90,6 +103,78 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   # The public content type from a `<type>.<verb>` event name.
   defp event_type(event), do: event |> String.split(".", parts: 2) |> List.first()
+
+  # ── editorial intelligence (#377) ─────────────────────────────────────────
+
+  # Load the live document, run the finder, and email the findings (if any).
+  # A transient read failure returns the error so Oban retries; a vanished
+  # type/document or empty findings is a clean no-op.
+  defp intelligence(event, payload, org_id, config, finder) do
+    case load_document(event, payload, org_id) do
+      {:ok, record} -> deliver_findings(finder.(record), config)
+      {:error, error} -> {:error, error}
+      :skip -> :ok
+    end
+  end
+
+  defp load_document(event, payload, org_id) do
+    with type when is_binary(type) <- event_type(event),
+         id when is_binary(id) <- payload["id"],
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id) do
+      ContentTypes.get_record(type, id, authorize?: false, tenant: org_id, load: [:tags])
+    else
+      _ -> :skip
+    end
+  end
+
+  defp deliver_findings(:none, _config), do: :ok
+
+  defp deliver_findings({subject, html_body}, config) do
+    to = config["to"]
+
+    if is_binary(to) and to != "" do
+      new()
+      |> from(Application.fetch_env!(:kiln_cms, :email_from))
+      |> to(to)
+      |> subject(escape(subject, :text))
+      |> html_body(html_body)
+      |> KilnCMS.Mail.deliver_for_worker()
+    else
+      Logger.warning("Automation intelligence rule missing a `to` address; skipping.")
+      :ok
+    end
+  end
+
+  defp duplicate_findings(record) do
+    case KilnCMS.Search.Related.near_duplicates(record) do
+      [] ->
+        :none
+
+      dups ->
+        items =
+          Enum.map_join(dups, "", fn d ->
+            "<li>#{escape(d.title || d.slug, :html)} (#{escape(d.type, :html)}/#{escape(d.slug, :html)})</li>"
+          end)
+
+        {"Review note: possible duplicates of \"#{record.title}\"",
+         "<p>Content similar to <strong>#{escape(record.title, :html)}</strong> already exists:</p>" <>
+           "<ul>#{items}</ul>"}
+    end
+  end
+
+  defp tag_findings(record) do
+    case KilnCMS.Search.Related.suggest_tags(record) do
+      [] ->
+        :none
+
+      suggestions ->
+        items = Enum.map_join(suggestions, "", &"<li>#{escape(&1.tag.name, :html)}</li>")
+
+        {"Tag suggestions for \"#{record.title}\"",
+         "<p>Suggested tags for <strong>#{escape(record.title, :html)}</strong>:</p>" <>
+           "<ul>#{items}</ul>"}
+    end
+  end
 
   defp default_body do
     "<p>The content <strong>{{title}}</strong> ({{type}}) emitted <em>{{event}}</em>.</p>"

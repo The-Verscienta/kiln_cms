@@ -31,6 +31,8 @@ Manage rules at **`/editor/automation`** (admin-only). A rule is:
 | `broadcast` | `Phoenix.PubSub` broadcast `{:automation_event, event, payload}` | `topic` (default `"automation"`) |
 | `invalidate_cache` | Bust the record's content cache (+ sitemap/llms) | — |
 | `reindex` | Re-fire the record (refreshes artifacts + search indexes) | — |
+| `flag_duplicates` | Email near-duplicate findings for the document (#377) | `to` |
+| `suggest_tags` | Email semantic tag suggestions for the document (#377) | `to` |
 
 `send_email` subject/body and templates support `{{title}}`, `{{slug}}`,
 `{{id}}`, `{{type}}`, `{{event}}` (each HTML-escaped).
@@ -76,9 +78,16 @@ Phase-1 slice:
   already keys on the event name).
 - **One reaction per rule.** Multi-step flows (do A then B) are modeled today as
   several rules on the same trigger; a sequenced multi-action rule is a follow-on.
-- **Reaction set** covers email / broadcast / cache / reindex. Newsletter fan-out
-  and the agentic editorial tasks noted on the issue (auto internal-linking,
-  metadata generation, compliance checks) are future actions that slot behind the
-  same `action` enum.
+- **Reaction set** covers email / broadcast / cache / reindex, plus the
+  embedding-driven editorial-intelligence reactions (#377): `flag_duplicates`
+  and `suggest_tags` pair naturally with the `in_review` trigger as lightweight
+  review gates. They are silent when nothing is found, and no-ops when semantic
+  search is disabled. The *model-driven* half of #377 (an LLM acting through
+  the MCP surface — drafting internal links, generating metadata) deliberately
+  lives OUTSIDE the CMS: these reactions and the `KilnCMS.Search.Related`
+  seams are what such an agent consumes.
+- **Event dedupe:** rule jobs are Oban-unique per {rule, event, document}
+  within a minute, so re-fired duplicate events can't double-run side-effectful
+  reactions.
 - **Config** is entered as JSON; per-action structured form fields are a UI
   refinement.

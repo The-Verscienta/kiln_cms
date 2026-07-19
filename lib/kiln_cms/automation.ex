@@ -77,8 +77,28 @@ defmodule KilnCMS.Automation do
   end
 
   defp enqueue(rule, event, payload, org_id) do
-    %{"rule_id" => rule.id, "event" => event, "payload" => payload, "org_id" => org_id}
-    |> KilnCMS.Automation.RuleWorker.new()
+    %{
+      "rule_id" => rule.id,
+      "event" => event,
+      # Top-level copy of the document id — Oban unique keys can only address
+      # top-level args.
+      "document_id" => payload["id"],
+      "payload" => payload,
+      "org_id" => org_id
+    }
+    # Generic event-level dedupe (#377 review follow-up): a re-fired/duplicate
+    # editorial event within the window collapses to one job per {rule, event,
+    # document}, so side-effectful reactions (email!) can't double-run from
+    # duplicate enqueues. (Oban retry-after-partial-success remains inherent to
+    # at-least-once side effects; the newsletter action additionally has its
+    # ledger-level dedupe.)
+    |> KilnCMS.Automation.RuleWorker.new(
+      unique: [
+        period: 60,
+        keys: [:rule_id, :event, :document_id],
+        states: [:available, :scheduled, :executing, :retryable]
+      ]
+    )
     |> Oban.insert()
   end
 
