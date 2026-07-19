@@ -7,17 +7,6 @@ defmodule KilnCMS.Search.RelatedTest do
   alias KilnCMS.Search.BlockIndexer
   alias KilnCMS.Search.Related
 
-  # Deterministic stub: same text → same 384-d vector (so identical block text
-  # means distance 0), no model loaded.
-  defmodule StubEmbedder do
-    @behaviour KilnCMS.Search.Embedder
-    @impl true
-    def embed(text) do
-      seed = :erlang.phash2(text)
-      {:ok, for(i <- 1..384, do: :math.sin(seed * 1.0e-4 + i))}
-    end
-  end
-
   setup do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
@@ -25,7 +14,7 @@ defmodule KilnCMS.Search.RelatedTest do
     Application.put_env(
       :kiln_cms,
       KilnCMS.Search,
-      Keyword.merge(original, semantic: true, embedder: StubEmbedder)
+      Keyword.merge(original, semantic: true, embedder: KilnCMS.StubEmbedder)
     )
 
     :ok
