@@ -15,7 +15,10 @@ defmodule KilnCMS.Automation.DispatchWorker do
   use Oban.Worker, queue: :default, max_attempts: 3
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"event" => event, "payload" => payload}}) do
-    KilnCMS.Automation.dispatch(event, payload)
+  def perform(%Oban.Job{args: %{"event" => event, "payload" => payload} = args}) do
+    # `org_id` scopes the rule match to the event's own site (epic #336); pre-#336
+    # jobs carry none and fall back to the sole org.
+    org_id = Map.get(args, "org_id", KilnCMS.Accounts.default_org_id())
+    KilnCMS.Automation.dispatch(event, payload, org_id)
   end
 end

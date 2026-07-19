@@ -30,6 +30,10 @@ defmodule KilnCMS.Analytics.SearchQuery do
   # retention window. Runs nightly as a trusted system job. Surfaced to editors
   # via the search-palette disclosure (#220).
   oban do
+    # The nightly purge scheduler scans globally (`global? true`), while the
+    # worker destroys under each row's own `org_id` tenant (epic #336).
+    use_tenant_from_record? true
+
     triggers do
       trigger :purge_expired do
         action :purge_expired
@@ -109,8 +113,26 @@ defmodule KilnCMS.Analytics.SearchQuery do
     end
   end
 
+  # Multi-tenancy (epic #336): a recorded query belongs to the site it was
+  # searched on. `global?: true` keeps the tenant optional; the record write
+  # carries the request's org and the upsert identity gains `org_id`.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant (the request's
+    # org) on record, else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :query, :string, allow_nil?: false, public?: true
     attribute :locale, :string, allow_nil?: false, default: "en", public?: true
@@ -119,6 +141,16 @@ defmodule KilnCMS.Analytics.SearchQuery do
     attribute :last_searched_at, :utc_datetime_usec, public?: true
 
     timestamps()
+  end
+
+  relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   identities do

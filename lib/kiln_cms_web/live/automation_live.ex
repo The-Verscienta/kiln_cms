@@ -14,15 +14,16 @@ defmodule KilnCMSWeb.AutomationLive do
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
+    org = socket.assigns.current_org
 
     if actor.role == :admin do
       {:ok,
        socket
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Automation"))
-       |> assign(:type_options, type_options())
+       |> assign(:type_options, type_options(org))
        |> assign(:edit, nil)
-       |> assign(:form, create_form(actor))
+       |> assign(:form, create_form(actor, org))
        |> load_rules()}
     else
       {:ok,
@@ -42,7 +43,7 @@ defmodule KilnCMSWeb.AutomationLive do
       {:ok, _rule} ->
         {:noreply,
          socket
-         |> assign(:form, create_form(socket.assigns.actor))
+         |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
          |> load_rules()
          |> put_flash(:info, gettext("Rule added."))}
 
@@ -58,7 +59,11 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   def handle_event("edit", %{"id" => id}, socket) do
-    {:noreply, assign(socket, :edit, %{id: id, form: edit_form(id, socket.assigns.actor)})}
+    {:noreply,
+     assign(socket, :edit, %{
+       id: id,
+       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+     })}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -91,10 +96,12 @@ defmodule KilnCMSWeb.AutomationLive do
 
   def handle_event("toggle_enabled", %{"id" => id}, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     socket =
-      with {:ok, rule} <- Automation.get_rule(id, actor: actor),
-           {:ok, _} <- Automation.update_rule(rule, %{enabled: !rule.enabled}, actor: actor) do
+      with {:ok, rule} <- Automation.get_rule(id, actor: actor, tenant: org),
+           {:ok, _} <-
+             Automation.update_rule(rule, %{enabled: !rule.enabled}, actor: actor, tenant: org) do
         load_rules(socket)
       else
         _ -> put_flash(socket, :error, gettext("Couldn't update that rule."))
@@ -106,9 +113,11 @@ defmodule KilnCMSWeb.AutomationLive do
   def handle_event("delete", %{"id" => id}, socket) do
     actor = socket.assigns.actor
 
+    org = socket.assigns.current_org
+
     socket =
-      with {:ok, rule} <- Automation.get_rule(id, actor: actor),
-           :ok <- Automation.destroy_rule(rule, actor: actor) do
+      with {:ok, rule} <- Automation.get_rule(id, actor: actor, tenant: org),
+           :ok <- Automation.destroy_rule(rule, actor: actor, tenant: org) do
         socket |> load_rules() |> put_flash(:info, gettext("Rule deleted."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't delete that rule."))
@@ -123,18 +132,29 @@ defmodule KilnCMSWeb.AutomationLive do
     assign(
       socket,
       :rules,
-      Automation.list_rules!(actor: socket.assigns.actor, query: [sort: [inserted_at: :asc]])
+      Automation.list_rules!(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
+        query: [sort: [inserted_at: :asc]]
+      )
     )
   end
 
-  defp create_form(actor),
-    do: Rule |> AshPhoenix.Form.for_create(:create, actor: actor, as: "rule") |> to_form()
+  defp create_form(actor, org),
+    do:
+      Rule
+      |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "rule")
+      |> to_form()
 
-  defp edit_form(id, actor) do
-    Automation.get_rule!(id, actor: actor)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, as: "rule")
+  defp edit_form(id, actor, org) do
+    Automation.get_rule!(id, actor: actor, tenant: org)
+    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "rule")
     |> to_form()
   end
+
+  # The dynamic-type registry (`ContentTypes.*`) keys by a raw org_id.
+  defp org_id(%{id: id}), do: id
+  defp org_id(id) when is_binary(id), do: id
 
   # `config` is entered as JSON in a textarea; decode it to a map before submit
   # (a :map attribute can't take the raw string). Invalid JSON surfaces its own
@@ -163,8 +183,8 @@ defmodule KilnCMSWeb.AutomationLive do
 
   defp decode_config(params), do: {:ok, params}
 
-  defp type_options do
-    types = ContentTypes.all() ++ ContentTypes.dynamic_all()
+  defp type_options(org) do
+    types = ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org))
     [{gettext("Any content type"), ""}] ++ Enum.map(types, &{&1.label, to_string(&1.type)})
   end
 

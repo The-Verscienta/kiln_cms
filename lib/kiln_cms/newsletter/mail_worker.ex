@@ -67,13 +67,14 @@ defmodule KilnCMS.Newsletter.MailWorker do
     end
   end
 
+  # Settle the per-recipient outcome under the campaign's own site (epic #336).
   defp record_outcome(:ok, send) do
-    {:ok, _} = Newsletter.record_sent(send, authorize?: false)
+    {:ok, _} = Newsletter.record_sent(send, authorize?: false, tenant: send.org_id)
     :ok
   end
 
   defp record_outcome({:cancel, reason}, send) do
-    {:ok, _} = Newsletter.record_failed(send, authorize?: false)
+    {:ok, _} = Newsletter.record_failed(send, authorize?: false, tenant: send.org_id)
     {:cancel, reason}
   end
 

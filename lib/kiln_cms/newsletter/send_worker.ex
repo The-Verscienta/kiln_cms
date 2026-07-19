@@ -21,22 +21,29 @@ defmodule KilnCMS.Newsletter.SendWorker do
         {:cancel, "newsletter send #{send_id} not found"}
 
       send ->
-        recipients = Newsletter.confirmed_subscribers!(send.segment_id, authorize?: false)
+        # The whole fan-out runs under the campaign's own site (epic #336): the
+        # recipient set is that org's confirmed subscribers, and each per-recipient
+        # job carries the org so `MailWorker` settles under it.
+        org = send.org_id
+
+        recipients =
+          Newsletter.confirmed_subscribers!(send.segment_id, authorize?: false, tenant: org)
 
         {:ok, send} =
           Newsletter.mark_sending(send, %{total_recipients: length(recipients)},
-            authorize?: false
+            authorize?: false,
+            tenant: org
           )
 
         Enum.each(recipients, fn subscriber ->
-          %{"newsletter_send_id" => send.id, "subscriber_id" => subscriber.id}
+          %{"newsletter_send_id" => send.id, "subscriber_id" => subscriber.id, "org_id" => org}
           |> MailWorker.new()
           |> Oban.insert!()
         end)
 
         # "Sent" here means fully dispatched to the queue; per-recipient outcomes
         # accrue in sent_count/failed_count as the mail jobs run.
-        {:ok, _} = Newsletter.mark_sent(send, authorize?: false)
+        {:ok, _} = Newsletter.mark_sent(send, authorize?: false, tenant: org)
         :ok
     end
   end

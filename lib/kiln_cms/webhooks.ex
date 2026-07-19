@@ -59,8 +59,9 @@ defmodule KilnCMS.Webhooks do
 
     # Editorial automation (#342) reacts to the same editorial events — this is
     # the single funnel every `<type>.published`/`.unpublished`/`.updated` flows
-    # through. Never raises (a rule problem must not break the publish).
-    KilnCMS.Automation.handle_event(event, payload)
+    # through. Scoped to the same org as the webhook fan-out (#336). Never raises
+    # (a rule problem must not break the publish).
+    KilnCMS.Automation.handle_event(event, payload, org)
 
     :ok
   end

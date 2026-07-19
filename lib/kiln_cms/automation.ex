@@ -36,11 +36,15 @@ defmodule KilnCMS.Automation do
   of a `DispatchWorker` for events that are a supported lifecycle trigger. A
   no-op for other events (`ping`, `form.submitted`, …). Never raises.
   """
-  @spec handle_event(String.t(), map()) :: :ok
-  def handle_event(event, payload) when is_binary(event) do
+  @spec handle_event(String.t(), map(), Ash.UUID.t()) :: :ok
+  def handle_event(event, payload, org_id \\ KilnCMS.Accounts.default_org_id())
+
+  def handle_event(event, payload, org_id) when is_binary(event) do
     with [_type, verb] <- String.split(event, ".", parts: 2),
          {:ok, _trigger} <- parse_trigger(verb) do
-      %{"event" => event, "payload" => payload}
+      # `org_id` rides into the dispatch worker so rules only fire for their own
+      # site (epic #336).
+      %{"event" => event, "payload" => payload, "org_id" => org_id}
       |> KilnCMS.Automation.DispatchWorker.new()
       |> Oban.insert()
     end
@@ -52,26 +56,28 @@ defmodule KilnCMS.Automation do
       :ok
   end
 
-  def handle_event(_event, _payload), do: :ok
+  def handle_event(_event, _payload, _org_id), do: :ok
 
   @doc """
-  Match `event` against the enabled rules and enqueue one `RuleWorker` per rule.
-  Runs off the publish transaction (from `DispatchWorker`), so the `rules_for`
-  read can't poison the publish. Returns `:ok`.
+  Match `event` against `org`'s enabled rules and enqueue one `RuleWorker` per
+  rule. Runs off the publish transaction (from `DispatchWorker`), so the
+  `rules_for` read can't poison the publish. Returns `:ok`.
   """
-  @spec dispatch(String.t(), map()) :: :ok
-  def dispatch(event, payload) when is_binary(event) do
+  @spec dispatch(String.t(), map(), Ash.UUID.t()) :: :ok
+  def dispatch(event, payload, org_id \\ KilnCMS.Accounts.default_org_id())
+
+  def dispatch(event, payload, org_id) when is_binary(event) do
     with [type, verb] <- String.split(event, ".", parts: 2),
          {:ok, trigger} <- parse_trigger(verb),
-         {:ok, rules} <- rules_for(trigger, type, authorize?: false) do
-      Enum.each(rules, &enqueue(&1, event, payload))
+         {:ok, rules} <- rules_for(trigger, type, authorize?: false, tenant: org_id) do
+      Enum.each(rules, &enqueue(&1, event, payload, org_id))
     end
 
     :ok
   end
 
-  defp enqueue(rule, event, payload) do
-    %{"rule_id" => rule.id, "event" => event, "payload" => payload}
+  defp enqueue(rule, event, payload, org_id) do
+    %{"rule_id" => rule.id, "event" => event, "payload" => payload, "org_id" => org_id}
     |> KilnCMS.Automation.RuleWorker.new()
     |> Oban.insert()
   end

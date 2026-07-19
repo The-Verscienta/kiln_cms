@@ -415,9 +415,12 @@ defmodule KilnCMS.Search do
     if normalized != "" do
       locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
 
+      # The recorded query lands in the request's site (epic #336); `:tenant`
+      # defaults to nil (the sole org) for any caller that doesn't pass one.
       KilnCMS.Analytics.record_search(
         %{query: normalized, locale: locale, result_count: result_count},
-        authorize?: false
+        authorize?: false,
+        tenant: Keyword.get(opts, :tenant)
       )
     end
 

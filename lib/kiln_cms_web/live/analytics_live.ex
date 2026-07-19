@@ -14,22 +14,24 @@ defmodule KilnCMSWeb.AnalyticsLive do
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
+    # Scope the dashboard to the current site (epic #336).
+    org = socket.assigns.current_org
     # Only the rows the table shows — the total is a DB-side SUM, so mount no
     # longer loads one counter row per ever-viewed content item.
-    rows = Analytics.list_views!(actor: actor, query: [limit: @top_limit])
+    rows = Analytics.list_views!(actor: actor, tenant: org, query: [limit: @top_limit])
 
     {:ok,
      socket
      |> assign(:page_title, gettext("Analytics"))
-     |> assign(:total, total_views(actor))
+     |> assign(:total, total_views(actor, org))
      |> assign(:rows, decorate_all(rows))}
   end
 
   # SUM over zero rows yields nil (despite Ash.sum's number() typing, which is
   # why this is a pattern match rather than `|| 0` — dialyzer rejects the
   # latter as an impossible guard).
-  defp total_views(actor) do
-    case Ash.sum(KilnCMS.Analytics.ContentView, :views, actor: actor) do
+  defp total_views(actor, org) do
+    case Ash.sum(KilnCMS.Analytics.ContentView, :views, actor: actor, tenant: org) do
       {:ok, total} when is_integer(total) -> total
       _ -> 0
     end
