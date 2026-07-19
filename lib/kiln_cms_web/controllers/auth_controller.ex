@@ -85,6 +85,18 @@ defmodule KilnCMSWeb.AuthController do
               "address - confirm it to finish linking this provider to your account."
           )
 
+        # An OAuth redirect flow involves no password — "incorrect password"
+        # would mislead users and mask operator misconfiguration (missing
+        # OIDC_* secrets). Detail goes to the log, not the public flash.
+        {{:sso, _phase}, reason} ->
+          require Logger
+          Logger.warning("SSO sign-in failed: #{inspect(reason)}")
+
+          gettext(
+            "Single sign-on failed — the identity couldn't be verified or linked. " <>
+              "Try again, or contact an administrator."
+          )
+
         _ ->
           gettext("Incorrect email or password")
       end
