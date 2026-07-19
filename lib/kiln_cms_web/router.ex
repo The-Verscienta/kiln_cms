@@ -249,6 +249,8 @@ defmodule KilnCMSWeb.Router do
       ] do
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index
+      # Team + granular-RBAC management (#332 slice 4).
+      live "/editor/team", TeamLive, :index
       # Editorial automation (#342) — no-code "when X happens, do Y" rules.
       live "/editor/automation", AutomationLive, :index
       live "/editor/fields", FieldDefinitionLive, :index

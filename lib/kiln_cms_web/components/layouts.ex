@@ -325,6 +325,12 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/governance",
             icon: "hero-shield-check"
           },
+          %{
+            key: :team,
+            label: gettext("Team"),
+            path: ~p"/editor/team",
+            icon: "hero-user-group"
+          },
           %{key: :trash, label: gettext("Trash"), path: ~p"/editor/trash", icon: "hero-trash"},
           %{
             key: :settings,

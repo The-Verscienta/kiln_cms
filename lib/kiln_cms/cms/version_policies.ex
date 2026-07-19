@@ -24,8 +24,12 @@ defmodule KilnCMS.CMS.VersionPolicies do
           authorize_if always()
         end
 
+        # A version's `changes` carry the full document snapshot, so history
+        # follows the SAME editorial read scope as the document (#332 slice 2):
+        # the check resolves a version twin to its source type. Without this an
+        # out-of-scope draft would leak through its history.
         policy action_type(:read) do
-          authorize_if actor_attribute_equals(:role, :editor)
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
         end
 
         # Version rows are created by AshPaperTrail (authorize?: false); manual

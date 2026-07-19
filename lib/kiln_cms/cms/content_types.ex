@@ -117,6 +117,45 @@ defmodule KilnCMS.CMS.ContentTypes do
   @spec reserved_path_segments() :: [String.t()]
   def reserved_path_segments, do: @reserved_path_segments
 
+  @doc """
+  The public content-type name for a resource module, or `nil` for resources
+  outside the content macro. The single authority the RBAC scope checks
+  compare against (granular RBAC #332) — one place to change when the
+  `__kiln_content_type__` contract evolves.
+
+  AshPaperTrail version twins (`<Source>.Version`) resolve to their **source**
+  resource's type name, so scope checks treat a document's history as the same
+  type as the document (a version's `changes` carry the full draft snapshot).
+  """
+  @spec type_name(module()) :: String.t() | nil
+  def type_name(resource) when is_atom(resource) do
+    cond do
+      not Code.ensure_loaded?(resource) ->
+        nil
+
+      function_exported?(resource, :__kiln_content_type__, 0) ->
+        to_string(resource.__kiln_content_type__())
+
+      source = version_source(resource) ->
+        to_string(source.__kiln_content_type__())
+
+      true ->
+        nil
+    end
+  end
+
+  # `Module.concat(source, Version)` is how AshPaperTrail names the twin.
+  defp version_source(resource) do
+    with parts when length(parts) > 1 <- Module.split(resource),
+         "Version" <- List.last(parts),
+         source = parts |> Enum.drop(-1) |> Module.concat(),
+         true <- function_exported?(source, :__kiln_content_type__, 0) do
+      source
+    else
+      _ -> nil
+    end
+  end
+
   defp describe(resource) do
     type = resource.__kiln_content_type__()
     plural = resource.__kiln_content_plural__()

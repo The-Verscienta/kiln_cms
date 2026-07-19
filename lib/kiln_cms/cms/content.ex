@@ -1285,6 +1285,13 @@ defmodule KilnCMS.CMS.Content do
       # writes — see the change module).
       changes do
         change KilnCMS.CMS.Changes.BustContentCache, on: [:create, :update, :destroy]
+
+        # Per-field write scoping for editors (granular RBAC #332, slice 3):
+        # when the editor's effective `field_grants` names this type, changing
+        # an attribute outside the grant rejects the write. One generic change
+        # on every update action — transitions carry no content attributes and
+        # pass untouched; admins are exempt (see the change module).
+        change KilnCMS.CMS.Changes.EnforceFieldGrants, on: [:update]
       end
 
       policies do
@@ -1339,8 +1346,13 @@ defmodule KilnCMS.CMS.Content do
         # Drafts/in-review/archived remain editors-only. `actor(:audiences)` is
         # nil for anonymous callers, so a gated record simply isn't authorized
         # (the `in` yields no match) rather than erroring.
+        # Granular RBAC read axis (#332): the editors-see-everything grant is
+        # scoped by the editor's effective `readable_types` — empty means all
+        # (the default). A restricted editor reading an out-of-scope type falls
+        # through to the published/audience filters below, i.e. reads it like
+        # any signed-in consumer.
         policy action_type(:read) do
-          authorize_if actor_attribute_equals(:role, :editor)
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) in ^actor(:audiences))
         end

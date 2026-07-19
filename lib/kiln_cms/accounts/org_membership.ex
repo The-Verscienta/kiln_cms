@@ -30,6 +30,9 @@ defmodule KilnCMS.Accounts.OrgMembership do
       # A membership is meaningless without its org/user — clean up on delete.
       reference :organization, on_delete: :delete
       reference :user, on_delete: :delete
+      # Deleting a custom role must not delete memberships — they fall back to
+      # their own / the user's scope axes.
+      reference :custom_role, on_delete: :nilify
     end
 
     # The unique identity is `(user_id, organization_id)` (user_id-leading), which
@@ -42,8 +45,25 @@ defmodule KilnCMS.Accounts.OrgMembership do
   end
 
   actions do
-    defaults [:read, :create, :update, :destroy]
-    default_accept [:organization_id, :user_id, :role, :audiences, :editable_types]
+    defaults [:read, :create, :destroy]
+
+    # Explicit (not a default) so the grant-shape validation — which inspects
+    # the whole map and has no atomic expression — can run.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
+
+    default_accept [
+      :organization_id,
+      :user_id,
+      :role,
+      :audiences,
+      :editable_types,
+      :readable_types,
+      :field_grants,
+      :role_id
+    ]
 
     read :for_user do
       description "The orgs a user belongs to (backs the org switcher)."
@@ -78,6 +98,14 @@ defmodule KilnCMS.Accounts.OrgMembership do
     end
   end
 
+  validations do
+    # A malformed grant map must fail on the admin's write, not crash the
+    # editor's next save (see the validation module).
+    validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
+    # A client-supplied role_id must reference a role of THIS org.
+    validate KilnCMS.Accounts.Validations.RoleBelongsToOrg, on: [:create, :update]
+  end
+
   attributes do
     uuid_primary_key :id
 
@@ -105,6 +133,24 @@ defmodule KilnCMS.Accounts.OrgMembership do
       public? false
     end
 
+    # The per-org editorial read scope (mirrors `User.readable_types`, #332
+    # phase 2). Empty means no restriction. A non-empty value here wins over
+    # the user column for this org (see KilnCMS.Accounts.Scoping).
+    attribute :readable_types, {:array, :string} do
+      default []
+      allow_nil? false
+      public? false
+    end
+
+    # The per-org per-field write grants (mirrors `User.field_grants`, #332
+    # slice 3). Empty means no restriction; a non-empty map wins wholesale
+    # over the user column for this org (see KilnCMS.Accounts.Scoping).
+    attribute :field_grants, :map do
+      default %{}
+      allow_nil? false
+      public? false
+    end
+
     timestamps()
   end
 
@@ -117,6 +163,15 @@ defmodule KilnCMS.Accounts.OrgMembership do
     belongs_to :user, KilnCMS.Accounts.User do
       allow_nil? false
       attribute_writable? true
+    end
+
+    # The optional custom role (#332 slice 4) — a named bundle of the three
+    # grant axes. Named `custom_role` because `:role` is the capability-tier
+    # atom attribute above; nil = no bundle (the built-in behavior).
+    belongs_to :custom_role, KilnCMS.Accounts.Role do
+      source_attribute :role_id
+      attribute_writable? true
+      public? false
     end
   end
 
