@@ -66,6 +66,10 @@ Phase-1 slice:
 - **Multi-variant / multi-locale in one shared view** (from the issue) — the
   preview is per `{kind, id}` today; a shared variant/locale switcher that all
   viewers follow is a natural follow-on.
-- **Presence on the token preview** (`/preview/:token`, the headless draft
-  surface) could reuse the same machinery for external stakeholders without an
-  editor account.
+- **Presence on the token preview** (#379, shipped) — `/preview/:token/live` is
+  the human face of the token link: external stakeholders without an editor
+  account join the **same** presence/cursor session as the editor pop-out (same
+  topics per `{kind, id}`), see live edits, and appear as "Guest N" (renameable;
+  no account data exists to leak). Browsers opening the JSON link are
+  content-negotiated to it; the JSON surface and the tight `:preview` rate
+  limit are unchanged.
