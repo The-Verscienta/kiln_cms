@@ -94,40 +94,12 @@ defmodule KilnCMS.Automation.RuleWorker do
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
          {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id),
          :ok <- default_locale_only(record, event) do
-      case KilnCMS.Newsletter.send_as_newsletter(record,
-             segment_id: config["segment_id"],
-             subject: config["subject"],
-             automation: %{rule_id: rule_id, published_at: record.published_at}
-           ) do
-        {:ok, _send} ->
-          :ok
-
-        {:error, :already_sent} ->
-          :ok
-
-        {:error, :not_fired} ->
-          # Publish fires artifacts on a sibling Oban job — retry briefly until
-          # the :web artifact exists. Oban snoozes don't consume attempts, so
-          # bound the loop by the publish's age: if the artifact still isn't
-          # there well after publish, firing is broken and retrying can't help.
-          if recent_publish?(record) do
-            {:snooze, 30}
-          else
-            Logger.warning(
-              "Automation newsletter rule gave up on #{event}: no fired artifact " <>
-                "#{inspect(@fire_wait_limit_s)}s after publish"
-            )
-
-            :ok
-          end
-
-        {:error, reason} when reason in [:not_published, :gated] ->
-          Logger.info("Automation newsletter rule skipped #{event}: #{inspect(reason)}")
-          :ok
-
-        {:error, other} ->
-          {:error, other}
-      end
+      KilnCMS.Newsletter.send_as_newsletter(record,
+        segment_id: config["segment_id"],
+        subject: config["subject"],
+        automation: %{rule_id: rule_id, published_at: record.published_at}
+      )
+      |> settle_newsletter(record, event)
     else
       # A transient read failure (DB blip) must retry, not silently drop the
       # campaign; the nil/skip guards above fall through to a clean :ok.
@@ -164,6 +136,34 @@ defmodule KilnCMS.Automation.RuleWorker do
       :skipped_locale
     end
   end
+
+  defp settle_newsletter({:ok, _send}, _record, _event), do: :ok
+  defp settle_newsletter({:error, :already_sent}, _record, _event), do: :ok
+
+  # Publish fires artifacts on a sibling Oban job — retry briefly until the
+  # :web artifact exists. Oban snoozes don't consume attempts, so bound the
+  # loop by the publish's age: past the window, firing is broken and retrying
+  # can't help.
+  defp settle_newsletter({:error, :not_fired}, record, event) do
+    if recent_publish?(record) do
+      {:snooze, 30}
+    else
+      Logger.warning(
+        "Automation newsletter rule gave up on #{event}: no fired artifact " <>
+          "#{inspect(@fire_wait_limit_s)}s after publish"
+      )
+
+      :ok
+    end
+  end
+
+  defp settle_newsletter({:error, reason}, _record, event)
+       when reason in [:not_published, :gated] do
+    Logger.info("Automation newsletter rule skipped #{event}: #{inspect(reason)}")
+    :ok
+  end
+
+  defp settle_newsletter({:error, other}, _record, _event), do: {:error, other}
 
   defp recent_publish?(%{published_at: %DateTime{} = at}),
     do: DateTime.diff(DateTime.utc_now(), at) < @fire_wait_limit_s
