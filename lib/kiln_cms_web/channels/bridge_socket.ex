@@ -20,8 +20,9 @@ defmodule KilnCMSWeb.BridgeSocket do
   (`check_origin` in the endpoint); the whole surface is off when
   `VISUAL_EDITING_ENABLED=false`.
 
-  Compiled content types (page/post) are supported; live push for the dynamic
-  entry tier is a follow-on (its editor broadcasts on a different topic kind).
+  Works for every content type — compiled (page/post) and the dynamic entry
+  tier alike — since the topic is keyed by the public type name (`ct.type`), the
+  same value the editor broadcasts with.
   """
   @behaviour Phoenix.Socket.Transport
 

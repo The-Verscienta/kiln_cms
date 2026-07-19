@@ -164,4 +164,46 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert html =~ "inline-editable"
     assert html =~ "Open the full editor"
   end
+
+  test "excerpt is editable on a type that has one (Post)", %{conn: conn} do
+    admin = user(:admin)
+
+    post =
+      CMS.create_post!(
+        %{title: "T", slug: "pl-#{System.unique_integer([:positive])}", excerpt: "Old excerpt"},
+        actor: admin
+      )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/presentation/post/#{post.slug}")
+
+    html =
+      render_hook(lv, "edit_field", %{"type" => "post", "id" => post.id, "field" => "excerpt"})
+
+    assert html =~ ~s(name="value")
+    assert html =~ "Old excerpt"
+
+    render_hook(lv, "update_scalar", %{"field" => "excerpt", "value" => "New excerpt"})
+    render_hook(lv, "save", %{})
+
+    assert CMS.get_post!(post.id, actor: admin).excerpt == "New excerpt"
+  end
+
+  test "excerpt on a type WITHOUT one (Page) offers the full editor, not a broken panel", %{
+    conn: conn
+  } do
+    admin = user(:admin)
+
+    page =
+      CMS.create_page!(%{title: "P", slug: "pl-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/presentation/page/#{page.slug}")
+
+    html =
+      render_hook(lv, "edit_field", %{"type" => "page", "id" => page.id, "field" => "excerpt"})
+
+    assert html =~ "inline-editable"
+    refute html =~ ~s(name="value")
+  end
 end

@@ -26,7 +26,9 @@ defmodule KilnCMSWeb.PresentationLive do
   alias KilnCMSWeb.PreviewLive
 
   # Document scalars the console can edit inline (clicked when they have no block
-  # in the stega payload). `excerpt` is only surfaced when the type has one.
+  # in the stega payload). Whether a given scalar is actually editable for THIS
+  # type is decided by `scalar_supported?/2` — `excerpt` only exists on types
+  # declared with `excerpt?: true` (e.g. Post, not Page).
   @scalar_fields ~w(title excerpt)
 
   @impl true
@@ -93,7 +95,14 @@ defmodule KilnCMSWeb.PresentationLive do
 
   def handle_event("edit_field", %{"field" => field}, socket)
       when field in @scalar_fields do
-    {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
+    if scalar_supported?(socket, field) do
+      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
+    else
+      # e.g. clicking `excerpt` on a type without one — the `:update` action
+      # wouldn't accept it, so offer the full editor instead of a panel that
+      # can't save.
+      {:noreply, assign(socket, :editing, {:unsupported, field})}
+    end
   end
 
   def handle_event("edit_field", payload, socket) do
@@ -183,6 +192,11 @@ defmodule KilnCMSWeb.PresentationLive do
      |> assign(:save_state, :saved)
      |> assign(:editing, nil)}
   end
+
+  # `title` is universal; `excerpt` exists only on types declared `excerpt?: true`.
+  defp scalar_supported?(_socket, "title"), do: true
+  defp scalar_supported?(socket, "excerpt"), do: socket.assigns.ct.excerpt?
+  defp scalar_supported?(_socket, _field), do: false
 
   # The current value of a document scalar — a pending edit if any, else the record.
   defp scalar_value(socket, field) do

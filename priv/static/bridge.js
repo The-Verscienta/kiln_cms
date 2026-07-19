@@ -165,11 +165,8 @@
     if (overlay) overlay.style.display = "none";
   }
 
-  var hovered = null;
-
   function onMove(e) {
     var hit = editableFrom(e.target);
-    hovered = hit;
     if (hit) {
       moveOverlay(hit.el);
       document.body.style.cursor = "pointer";
@@ -197,9 +194,14 @@
       encodeURIComponent(p.slug);
     if (p.block) url += "?focus=" + encodeURIComponent(p.block);
     // In a Kiln Presentation-style parent frame, hand off via postMessage;
-    // otherwise open the editor directly.
+    // otherwise open the editor directly. Target the Kiln host origin (the
+    // console that frames us) so the message can't be read by an arbitrary
+    // framing site; fall back to "*" only if no host is configured.
     if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ source: "kiln-bridge", event: "edit", payload: p, url: url }, "*");
+      window.parent.postMessage(
+        { source: "kiln-bridge", event: "edit", payload: p, url: url },
+        origin(config.host) || "*"
+      );
     } else {
       window.open(url, "kiln-editor");
     }
@@ -298,6 +300,11 @@
   // to refresh after a Kiln-side save: re-fetch via the registered onUpdate
   // callbacks if the front end wired them, else fall back to a full reload.
   window.addEventListener("message", function (e) {
+    // Only trust a refresh from the Kiln console (the host origin that framed
+    // us) — an arbitrary framing site must not be able to force reloads. When a
+    // host is configured we require the origin to match; otherwise reject.
+    var host = origin(config.host);
+    if (!host || e.origin !== host) return;
     var d = e.data;
     if (!d || d.source !== "kiln-console" || d.event !== "refresh") return;
     if (updateCallbacks.length) {
