@@ -41,7 +41,12 @@ defmodule KilnCMSWeb.Endpoint do
   # (auth is the explicit `api_key` param, never a cookie), so Sobelow's CSWH
   # finding here is a false positive — ignored with rationale in `.sobelow-conf`.
   socket "/ws/bridge", KilnCMSWeb.BridgeSocket,
-    websocket: [check_origin: {KilnCMSWeb.CORS, :check_socket_origin?, []}],
+    websocket: [
+      check_origin: {KilnCMSWeb.CORS, :check_socket_origin?, []},
+      # The request URI carries the host the socket resolves its tenant from
+      # (epic #336) — raw transports bypass the SetTenant plug pipeline.
+      connect_info: [:uri]
+    ],
     longpoll: false
 
   # Serve at "/" the static files from "priv/static" directory.
@@ -105,6 +110,11 @@ defmodule KilnCMSWeb.Endpoint do
   plug Plug.Session, @session_options
   # Strip a `/<locale>/…` prefix and set the locale before routing.
   plug KilnCMSWeb.Plugs.SetLocale
+
+  # Resolve the request's organization from its host and set it as the Ash tenant
+  # (epic #336), so every pipeline — delivery controllers, GraphQL, JSON:API — is
+  # scoped to the right site. Bare-host/localhost requests resolve to the default org.
+  plug KilnCMSWeb.Plugs.SetTenant
 
   # Attach request context (method, path, scrubbed headers/params) to any Sentry
   # event raised while handling this request. No-op without a configured DSN.

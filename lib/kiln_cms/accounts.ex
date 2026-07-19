@@ -72,6 +72,19 @@ defmodule KilnCMS.Accounts do
   @spec default_org_id() :: Ash.UUID.t()
   def default_org_id, do: KilnCMS.Accounts.Organization.default_id()
 
+  @doc """
+  The default organization struct (epic #336). Loaded by id; used as the tenant
+  fallback when a request's host doesn't resolve to a specific org. Returns `nil`
+  only if the seed row is missing (it's created by the backfill migration).
+  """
+  @spec default_org() :: KilnCMS.Accounts.Organization.t() | nil
+  def default_org do
+    case get_organization(default_org_id(), authorize?: false) do
+      {:ok, org} -> org
+      _ -> nil
+    end
+  end
+
   @doc "Whether the user has completed two-factor (TOTP) enrolment (issue #331)."
   @spec totp_enabled?(KilnCMS.Accounts.User.t()) :: boolean()
   def totp_enabled?(%KilnCMS.Accounts.User{totp_confirmed_at: at}), do: not is_nil(at)

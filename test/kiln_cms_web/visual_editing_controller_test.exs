@@ -129,4 +129,42 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
 
     assert conn |> get_ve("post", post.slug, bearer: key(admin, :read)) |> json_response(404)
   end
+
+  describe "tenant scoping (#336)" do
+    test "the read is scoped to the request host's org", %{conn: conn} do
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Org VE",
+          slug: "ve-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      admin = user(:admin)
+      the_slug = slug()
+
+      CMS.create_post!(
+        %{
+          title: "Other-site post",
+          slug: the_slug,
+          block_tree: [%{"type" => "heading", "content" => "A heading", "order" => 1}]
+        },
+        actor: admin,
+        tenant: org
+      )
+
+      bearer = key(admin, :read)
+
+      # On the default host the document belongs to another org — invisible,
+      # even to an editor key that could read it on its own site.
+      assert conn |> get_ve("post", the_slug, bearer: bearer) |> json_response(404)
+
+      # On the owning org's subdomain the same request resolves it.
+      org_host_conn = %{build_conn() | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
+
+      assert %{"title" => title} =
+               org_host_conn |> get_ve("post", the_slug, bearer: bearer) |> json_response(200)
+
+      assert Stega.clean(title) == "Other-site post"
+    end
+  end
 end

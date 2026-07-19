@@ -121,8 +121,17 @@ defmodule KilnCMS.Firing.StaticExport do
   # + authorize?: true ⇒ the read policy returns published records only (same as
   # the sitemap). Minimal select — bodies come from the artifact store, not here.
   defp published_records(ct) do
+    # NOTE (epic #336): this list is NOT tenant-scoped — a static export currently
+    # spans every org's published content into a single output tree, so two orgs
+    # sharing a slug would collide. Safe under the single-org rollout guard; a
+    # per-org export (loop tenants / write to per-org subtrees) is required before
+    # real multi-org. `:org_id` is selected so `read_surfaces/3` still scopes each
+    # artifact read to its record's tenant.
     ct
-    |> ContentTypes.list!(authorize?: true, query: [select: [:id, :slug, :locale, :updated_at]])
+    |> ContentTypes.list!(
+      authorize?: true,
+      query: [select: [:id, :slug, :locale, :updated_at, :org_id]]
+    )
     |> Enum.map(&{ct, &1})
   end
 
@@ -167,7 +176,8 @@ defmodule KilnCMS.Firing.StaticExport do
     storage_type = ContentTypes.storage_type(ct)
 
     Enum.flat_map(surfaces, fn surface ->
-      case Engine.read(storage_type, record.id, surface) do
+      # `record.org_id` scopes the artifact read to the record's own tenant (#336).
+      case Engine.read(record.org_id, storage_type, record.id, surface) do
         {:ok, body} -> [{surface, body}]
         :error -> []
       end

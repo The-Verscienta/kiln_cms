@@ -73,7 +73,8 @@ defmodule KilnCMS.Firing.ReferencesTest do
       drain()
 
       # Simulate target changing: invalidate its referrers.
-      References.invalidate(:page, target.id, [References.key(:page, target.id)])
+      org = KilnCMS.Accounts.default_org_id()
+      References.invalidate(org, :page, target.id, [References.key(:page, target.id)])
       assert %{success: 1, failure: 0} = drain()
     end
 
@@ -91,7 +92,8 @@ defmodule KilnCMS.Firing.ReferencesTest do
 
       # Invalidating B enqueues A; A's own propagation hits B but B is in the
       # visited set, so the wave fires exactly one node (A) and stops.
-      References.invalidate(:page, b.id, [References.key(:page, b.id)])
+      org = KilnCMS.Accounts.default_org_id()
+      References.invalidate(org, :page, b.id, [References.key(:page, b.id)])
       assert %{success: 1, failure: 0} = drain()
     end
   end

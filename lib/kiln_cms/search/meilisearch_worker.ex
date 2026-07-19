@@ -15,7 +15,8 @@ defmodule KilnCMS.Search.MeilisearchWorker do
     max_attempts: 3,
     unique: [
       period: 60,
-      keys: [:op, :type, :id],
+      # `:org_id` in the dedup key so per-org index ops don't collapse (epic #336).
+      keys: [:org_id, :op, :type, :id],
       states: [:scheduled, :available, :executing, :retryable, :suspended]
     ]
 
@@ -27,9 +28,11 @@ defmodule KilnCMS.Search.MeilisearchWorker do
     if Meilisearch.enabled?(), do: ok(Meilisearch.delete_document(type, id)), else: :ok
   end
 
-  def perform(%Oban.Job{args: %{"op" => "upsert", "type" => type, "id" => id}}) do
+  def perform(%Oban.Job{
+        args: %{"op" => "upsert", "org_id" => org_id, "type" => type, "id" => id}
+      }) do
     if Meilisearch.enabled?() do
-      case load(type, id) do
+      case load(org_id, type, id) do
         {:ok, record} -> ok(Meilisearch.index_document(record))
         # Gone, archived, or unpublished before we ran — make sure it's not indexed.
         _ -> ok(Meilisearch.delete_document(type, id))
@@ -39,10 +42,21 @@ defmodule KilnCMS.Search.MeilisearchWorker do
     end
   end
 
+  # Back-compat (epic #336): an upsert job enqueued before multi-tenancy has no
+  # `"org_id"` — default it to the sole org and re-dispatch rather than crash
+  # across the deploy boundary. (The `delete` clause above needs no org_id.)
+  def perform(%Oban.Job{args: %{"op" => "upsert", "type" => _, "id" => _} = args} = job) do
+    perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
+  end
+
   # Only published, non-archived documents belong in the index (public view).
-  defp load("page", id), do: published(CMS.get_page(id, authorize?: false))
-  defp load("post", id), do: published(CMS.get_post(id, authorize?: false))
-  defp load(_type, _id), do: :error
+  defp load(org_id, "page", id),
+    do: published(CMS.get_page(id, authorize?: false, tenant: org_id))
+
+  defp load(org_id, "post", id),
+    do: published(CMS.get_post(id, authorize?: false, tenant: org_id))
+
+  defp load(_org_id, _type, _id), do: :error
 
   defp published({:ok, %{state: :published} = record}), do: {:ok, record}
   defp published(_), do: :error

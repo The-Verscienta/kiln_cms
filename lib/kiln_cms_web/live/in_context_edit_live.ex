@@ -47,7 +47,7 @@ defmodule KilnCMSWeb.InContextEditLive do
         {:ok, redirect_to_editor(socket, gettext("Unknown content type."))}
 
       ct ->
-        case fetch_by_slug(ct.type, slug, actor) do
+        case fetch_by_slug(ct.type, slug, actor, socket.assigns.current_org) do
           nil ->
             {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
 
@@ -76,14 +76,18 @@ defmodule KilnCMSWeb.InContextEditLive do
   # The editable record for a public slug. Editors may read any state (see the
   # content read policy), so this returns the live working copy — draft or
   # published — whose `blocks` the page renders and edits write to.
-  defp fetch_by_slug(kind, slug, actor) do
+  defp fetch_by_slug(kind, slug, actor, org) do
+    # Scope to the current site's org (epic #336) so in-context editing on one
+    # site's host only resolves that site's content.
     case ContentTypes.list!(kind,
            actor: actor,
+           tenant: org,
            query: [filter: [slug: slug], select: [:id], limit: 1]
          ) do
       [%{id: id} | _] ->
         ContentTypes.get_record!(kind, id,
           actor: actor,
+          tenant: org,
           load: [:category, :featured_image, :tags]
         )
 
@@ -265,7 +269,11 @@ defmodule KilnCMSWeb.InContextEditLive do
   defp reset_regions(socket), do: update(socket, :region_version, &(&1 + 1))
 
   defp reload(socket, id),
-    do: ContentTypes.get_record!(socket.assigns.kind, id, actor: socket.assigns.actor)
+    do:
+      ContentTypes.get_record!(socket.assigns.kind, id,
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org
+      )
 
   defp draft?(socket), do: socket.assigns.record.state == :draft
 

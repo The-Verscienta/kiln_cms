@@ -90,7 +90,10 @@ defmodule KilnCMSWeb.InlineEditing do
           {:ok, struct()} | :conflict | {:error, term()}
   def write_changes(record, action, changes, actor) when is_map(changes) do
     record
-    |> Ash.Changeset.for_update(action, changes, actor: actor)
+    # Scope the update to the record's own org (epic #336); `org_id` is
+    # writable? false, so the tenant is the only way to keep the write in the
+    # right site. Covers both the in-context editor and the Presentation console.
+    |> Ash.Changeset.for_update(action, changes, actor: actor, tenant: record.org_id)
     |> Ash.update()
     |> case do
       {:ok, updated} -> {:ok, updated}

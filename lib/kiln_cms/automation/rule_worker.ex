@@ -61,10 +61,14 @@ defmodule KilnCMS.Automation.RuleWorker do
   defp run(%{action: :invalidate_cache}, event, payload) do
     type = event_type(event)
     slug = payload["slug"]
+    # Automation rules aren't org-scoped yet (scoped in the "remaining resources"
+    # PR), and org_id isn't in the external event payload, so target the default
+    # org (#336). Correct while the single-org rollout guard holds.
+    org_id = KilnCMS.Accounts.default_org_id()
 
-    if is_binary(type) and is_binary(slug), do: KilnCMS.Cache.bust(type, slug)
-    KilnCMS.Cache.bust_sitemap()
-    KilnCMS.Cache.bust_llms()
+    if is_binary(type) and is_binary(slug), do: KilnCMS.Cache.bust(org_id, type, slug)
+    KilnCMS.Cache.bust_sitemap(org_id)
+    KilnCMS.Cache.bust_llms(org_id)
     :ok
   end
 
@@ -72,7 +76,8 @@ defmodule KilnCMS.Automation.RuleWorker do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
          storage when not is_nil(storage) <- ContentTypes.storage_type(type) do
-      %{"type" => to_string(storage), "id" => id}
+      # See invalidate_cache above re: the default-org fallback (#336).
+      %{"org_id" => KilnCMS.Accounts.default_org_id(), "type" => to_string(storage), "id" => id}
       |> KilnCMS.Firing.FireWorker.new()
       |> Oban.insert()
 

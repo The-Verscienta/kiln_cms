@@ -59,7 +59,7 @@ defmodule KilnCMSWeb.LlmsControllerTest do
 
   test "renders an empty index without error when nothing is published", %{conn: conn} do
     # Bust so a prior test's cached index can't satisfy this request.
-    KilnCMS.Cache.bust_llms()
+    KilnCMS.Cache.bust_llms(KilnCMS.Accounts.default_org_id())
 
     conn = get(conn, ~p"/llms.txt")
     assert response(conn, 200) =~ ~r/^# /

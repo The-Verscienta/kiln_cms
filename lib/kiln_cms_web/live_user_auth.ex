@@ -30,6 +30,21 @@ defmodule KilnCMSWeb.LiveUserAuth do
     {:cont, assign(socket, :locale, locale)}
   end
 
+  # Resolve the request's organization from the socket host and expose it as
+  # `:current_org` (epic #336) — the LiveView analogue of the `SetTenant` plug
+  # (LiveViews mount in their own process, so the plug's assign doesn't carry
+  # over). Editor LiveViews pass it as the `tenant:` on authoring writes, so
+  # authoring on a site's subdomain stamps content with that org.
+  def on_mount(:assign_current_org, _params, _session, socket) do
+    host =
+      case socket.host_uri do
+        %URI{host: h} -> h
+        _ -> nil
+      end
+
+    {:cont, assign(socket, :current_org, KilnCMSWeb.Tenant.resolve_org(host))}
+  end
+
   def on_mount(:live_user_optional, _params, _session, socket) do
     socket =
       if socket.assigns[:current_user] do

@@ -41,7 +41,8 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
   defp enqueue(record) do
     type = KilnCMS.Firing.Engine.document_type(record)
 
-    case %{"type" => to_string(type), "id" => record.id}
+    # Carry the record's tenant (epic #336) so the worker fires into the right org.
+    case %{"org_id" => record.org_id, "type" => to_string(type), "id" => record.id}
          |> KilnCMS.Firing.FireWorker.new()
          |> Oban.insert() do
       {:ok, _job} ->

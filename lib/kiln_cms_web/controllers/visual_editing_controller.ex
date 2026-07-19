@@ -31,7 +31,8 @@ defmodule KilnCMSWeb.VisualEditingController do
 
     with true <- VisualEditing.enabled?(),
          ct when not is_nil(ct) <- ContentTypes.get(type),
-         record when not is_nil(record) <- fetch_by_slug(ct.type, slug, locale, actor),
+         record when not is_nil(record) <-
+           fetch_by_slug(ct.type, slug, locale, actor, KilnCMSWeb.Tenant.current_org_id(conn)),
          {:ok, %{json: json}} <- Engine.fire(record, mode: :preview) do
       conn
       # Per-actor draft content: never cache in a shared cache.
@@ -44,15 +45,17 @@ defmodule KilnCMSWeb.VisualEditingController do
   end
 
   # Load the live working copy by slug+locale, scoped by the actor's read policy
-  # (editors/admins see drafts; anonymous sees published only). Mirrors
-  # `KilnCMSWeb.InContextEditLive.fetch_by_slug/3`, scoped to a locale.
-  defp fetch_by_slug(kind, slug, locale, actor) do
+  # (editors/admins see drafts; anonymous sees published only) and by the request
+  # host's org (epic #336). Mirrors `KilnCMSWeb.InContextEditLive.fetch_by_slug/4`,
+  # scoped to a locale.
+  defp fetch_by_slug(kind, slug, locale, actor, org_id) do
     case ContentTypes.list!(kind,
            actor: actor,
+           tenant: org_id,
            query: [filter: [slug: slug, locale: locale], select: [:id], limit: 1]
          ) do
       [%{id: id} | _] ->
-        ContentTypes.get_record!(kind, id, actor: actor, load: [:featured_image])
+        ContentTypes.get_record!(kind, id, actor: actor, tenant: org_id, load: [:featured_image])
 
       _ ->
         nil

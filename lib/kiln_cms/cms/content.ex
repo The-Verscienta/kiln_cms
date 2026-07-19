@@ -882,6 +882,14 @@ defmodule KilnCMS.CMS.Content do
 
       # Background publishing of scheduled content + nightly purge of old trash.
       oban do
+        # Multi-tenancy (epic #336): the scheduler's `where` scan runs globally
+        # (the resource is `global? true`, so its reads act as allow-global and
+        # see every org's due records), while each worker action re-runs under the
+        # record's own `org_id` tenant — so a scheduled publish/unpublish/purge/
+        # sweep fires each record into the right site. AshOban also auto-partitions
+        # the per-record job unique keys by tenant.
+        use_tenant_from_record? true
+
         triggers do
           trigger :publish_scheduled do
             action :publish_scheduled

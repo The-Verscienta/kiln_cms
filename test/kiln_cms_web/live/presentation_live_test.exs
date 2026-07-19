@@ -206,4 +206,27 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert html =~ "inline-editable"
     refute html =~ ~s(name="value")
   end
+
+  test "a document in another org is not reachable on the default host (#336)", %{conn: conn} do
+    org =
+      Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+        name: "Org PL",
+        slug: "pl-org-#{System.unique_integer([:positive])}",
+        status: :active
+      })
+
+    admin = user(:admin)
+
+    post =
+      CMS.create_post!(
+        %{title: "Other-site post", slug: "pl-t-#{System.unique_integer([:positive])}"},
+        actor: admin,
+        tenant: org
+      )
+
+    conn = log_in(conn, admin)
+
+    assert {:error, {:live_redirect, %{to: "/editor"}}} =
+             live(conn, ~p"/editor/presentation/post/#{post.slug}")
+  end
 end
