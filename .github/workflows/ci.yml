@@ -282,7 +282,12 @@ jobs:
           key: strict-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
 
       - name: Install dependencies
-        run: mix deps.get
+        # local.rebar explicitly: this job has no warm _build cache on first
+        # runs and gproc's rebar3 compile failed without the bootstrap.
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
 
       - name: Check for migration/snapshot drift (strict build)
         # Snapshots are generated from the strict build — the canonical prod

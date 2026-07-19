@@ -243,6 +243,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp load_versions(socket) do
     opts = [
       actor: socket.assigns.actor,
+      # Version twins are tenant-strict (#419) — history reads carry the org.
+      tenant: socket.assigns.current_org,
       query: [
         filter: [version_source_id: socket.assigns.record.id],
         sort: [version_inserted_at: :desc],

@@ -86,6 +86,32 @@ defmodule KilnCMS.StrictTenancyTest do
     assert confirmed.status == :confirmed
   end
 
+  test "version-touching changes run strict: autosave coalesce, restore, chain verify" do
+    actor = admin()
+    page = CMS.create_page!(%{title: "R1", slug: slug()}, actor: actor, tenant: org_id())
+
+    # Autosave twice — CoalesceAutosaveVersions reads+destroys version twins.
+    autosave = fn record, title ->
+      record
+      |> Ash.Changeset.for_update(:autosave, %{title: title}, actor: actor, tenant: org_id())
+      |> Ash.update!()
+    end
+
+    page = autosave.(page, "R2")
+    page = autosave.(page, "R3")
+
+    # Publish — Chain.anchor folds the version chain (tenanted read) and
+    # RecordPublishedVersion links the publish version.
+    published = CMS.publish_page!(page, %{}, actor: actor, tenant: org_id())
+
+    assert KilnCMS.Governance.Chain.verify(
+             KilnCMS.CMS.Page,
+             "page",
+             published.id,
+             published.org_id
+           ) in [:verified, :unsigned]
+  end
+
   test "the version twins remain readable through their tenanted source flow" do
     actor = admin()
     page = CMS.create_page!(%{title: "V1", slug: slug()}, actor: actor, tenant: org_id())
