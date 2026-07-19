@@ -166,7 +166,7 @@ defmodule KilnCMS.Governance.ChainTest do
     page = published_page(actor)
     CMS.update_page!(page, %{title: "Renamed"}, actor: actor)
 
-    trail = KilnCMS.Governance.trail("page", page.id)
+    trail = KilnCMS.Governance.trail("page", page.id, page.org_id)
     assert trail.chain == :verified
 
     rename =

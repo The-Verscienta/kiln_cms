@@ -71,7 +71,7 @@ defmodule KilnCMSWeb.GovernanceLive do
       {:ok, _consent} ->
         {:noreply,
          socket
-         |> assign(:trail, Governance.trail(item.type, item.id))
+         |> assign(:trail, Governance.trail(item.type, item.id, item.org_id))
          |> assign(:consent_form, blank_consent_form())
          |> put_flash(:info, gettext("Consent recorded."))}
 
