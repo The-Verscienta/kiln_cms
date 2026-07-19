@@ -14,7 +14,7 @@ defmodule KilnCMS.Firing.Cache do
   import Cachex.Spec, only: [hook: 1]
 
   @cache :kiln_cms_firing_cache
-  @surfaces [:web, :json, :json_ld]
+  @surfaces [:web, :json, :json_ld, :llm]
   @ttl :timer.minutes(60)
 
   # Hard cap on cached artifacts. Without it, fired bodies (documents × 3

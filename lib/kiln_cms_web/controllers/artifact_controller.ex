@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
 
-  @surfaces %{"json" => :json, "json_ld" => :json_ld, "web" => :web}
+  @surfaces %{"json" => :json, "json_ld" => :json_ld, "web" => :web, "llm" => :llm}
   # How long clients should wait before retrying a still-compiling artifact.
   @retry_after_seconds 2
   # Artifacts are immutable per publish (republish updates `updated_at` and
@@ -137,9 +137,19 @@ defmodule KilnCMSWeb.ArtifactController do
     if etag in get_req_header(conn, "if-none-match") do
       send_resp(conn, :not_modified, "")
     else
-      json(conn, body)
+      respond(conn, surface, body)
     end
   end
+
+  # The :llm surface is raw Markdown (#357) — LLM crawlers fetch it directly,
+  # so no JSON envelope; every other surface keeps the JSON body.
+  defp respond(conn, "llm", %{"markdown" => markdown}) do
+    conn
+    |> put_resp_content_type("text/markdown")
+    |> send_resp(200, markdown)
+  end
+
+  defp respond(conn, _surface, body), do: json(conn, body)
 
   # Advertise the signed provenance manifest for this artifact (#340) when
   # provenance is enabled, so consumers can discover the verification surface
