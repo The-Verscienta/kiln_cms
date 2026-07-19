@@ -48,13 +48,13 @@ defmodule KilnCMS.Governance.Chain do
   only the first `count` (the prefix an earlier anchor covered). Returns
   `%{chain_hash, version_count, last_version_id}`.
   """
-  @spec compute(module(), Ash.UUID.t(), :all | non_neg_integer()) :: %{
+  @spec compute(module(), Ash.UUID.t(), Ash.UUID.t(), :all | non_neg_integer()) :: %{
           chain_hash: String.t(),
           version_count: non_neg_integer(),
           last_version_id: Ash.UUID.t() | nil
         }
-  def compute(resource, source_id, count \\ :all) do
-    resource |> versions(source_id, count) |> fold()
+  def compute(resource, source_id, org_id, count \\ :all) do
+    resource |> versions(source_id, count, org_id) |> fold()
   end
 
   @doc "Fold an already-loaded ascending version list into the chain shape."
@@ -80,7 +80,7 @@ defmodule KilnCMS.Governance.Chain do
   def anchor(record, opts \\ []) do
     if enabled?() do
       type = to_string(KilnCMS.Firing.Engine.document_type(record))
-      computed = compute(record.__struct__, record.id)
+      computed = compute(record.__struct__, record.id, record.org_id)
       {signature, key_id} = sign(anchor_payload(type, record.id, computed))
 
       CMS.create_history_anchor!(
@@ -138,7 +138,12 @@ defmodule KilnCMS.Governance.Chain do
         :unanchored
 
       anchor ->
-        verdict(anchor, compute(resource, source_id, anchor.version_count), type, source_id)
+        verdict(
+          anchor,
+          compute(resource, source_id, org_id, anchor.version_count),
+          type,
+          source_id
+        )
     end
   end
 
@@ -208,7 +213,8 @@ defmodule KilnCMS.Governance.Chain do
 
   # ── internals ─────────────────────────────────────────────────────────────
 
-  defp versions(resource, source_id, count) do
+  # Version twins are tenant-strict (#419) — the chain reads under the org.
+  defp versions(resource, source_id, count, org_id) do
     query =
       Module.concat(resource, Version)
       |> Ash.Query.filter(version_source_id == ^source_id)
@@ -216,7 +222,7 @@ defmodule KilnCMS.Governance.Chain do
 
     query = if count == :all, do: query, else: Ash.Query.limit(query, count)
 
-    Ash.read!(query, authorize?: false)
+    Ash.read!(query, authorize?: false, tenant: org_id)
   end
 
   # A version's canonical item digest: identity, action, and the tracked diff.

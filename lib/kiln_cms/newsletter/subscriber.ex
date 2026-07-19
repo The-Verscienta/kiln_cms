@@ -79,17 +79,19 @@ defmodule KilnCMS.Newsletter.Subscriber do
     #
     # DELIBERATE GLOBAL READS (#419): the org is unknown until the row is
     # found — the token itself is the secret, and the caller re-scopes the
-    # follow-up write with the found row's `org_id`. These two actions are the
-    # documented exception the strict `global?: false` flip (#419 PR 3) must
-    # preserve (per-action bypass or an equivalent contained lookup).
+    # follow-up write with the found row's `org_id`. `multitenancy :bypass` is
+    # the sanctioned per-action exception under the strict `global?: false`
+    # resource default.
     read :by_confirm_token do
       get? true
+      multitenancy :bypass
       argument :token, :string, allow_nil?: false
       filter expr(confirm_token == ^arg(:token))
     end
 
     read :by_unsubscribe_token do
       get? true
+      multitenancy :bypass
       argument :token, :string, allow_nil?: false
       filter expr(unsubscribe_token == ^arg(:token))
     end
@@ -103,15 +105,15 @@ defmodule KilnCMS.Newsletter.Subscriber do
     end
   end
 
-  # Multi-tenancy (epic #336): a subscriber belongs to one site, so the same
-  # email can subscribe to two sites independently. `global?: true` keeps the
-  # tenant optional; the public token lookups (`by_confirm_token`/
-  # `by_unsubscribe_token`) run tenant-less (the token is the secret), and the
-  # subsequent confirm/unsubscribe update uses the found row's own org.
+  # Multi-tenancy (epic #336, strict since #419): a subscriber belongs to one
+  # site, so the same email can subscribe to two sites independently. Every
+  # action requires a tenant except the two token lookups above
+  # (`multitenancy :bypass` — the token is the secret), whose follow-up
+  # updates use the found row's own org.
   multitenancy do
     strategy :attribute
     attribute :org_id
-    global? true
+    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
   end
 
   attributes do

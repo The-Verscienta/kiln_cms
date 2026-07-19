@@ -83,11 +83,10 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
 
-      - name: Check for migration/snapshot drift
-        # Fails if the committed migrations + resource snapshots are out of sync
-        # with the Ash resources (someone edited a resource without running
-        # `mix ash.codegen`). Compares against the committed snapshots — no DB.
-        run: mix ash.codegen --check
+      # NOTE (#419): the migration/snapshot drift check moved to the
+      # strict_tenancy job — snapshots are generated from the STRICT build
+      # (the canonical prod schema: org-composite FKs), which this fail-open
+      # test build would mis-diff.
 
       - name: Check the core ships no downstream project schema
         # Fails if a migrated table or a resource snapshot has no backing Ash
@@ -236,3 +235,69 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+  # Strict-tenancy smoke (#419): compile fail-closed (KILN_STRICT_TEST=1 is a
+  # COMPILE-TIME config in config/test.exs) in its own build dir and run only
+  # the @moduletag :strict_tenancy suite — the main suite exercises the
+  # fail-open build above.
+  strict_tenancy:
+    name: Strict-tenancy smoke
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      KILN_STRICT_TEST: "1"
+      # MIX_BUILD_ROOT (not MIX_BUILD_PATH): rebar deps (gproc) lose their
+      # include paths under a bare BUILD_PATH.
+      MIX_BUILD_ROOT: _build_strict
+      MIX_TEST_PARTITION: strict
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Cache deps and strict build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build_strict
+          # v2: the v1 cache holds a half-compiled gproc from before the
+          # local.rebar bootstrap step existed.
+          key: strict-v2-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install dependencies
+        # local.rebar explicitly: this job has no warm _build cache on first
+        # runs and gproc's rebar3 compile failed without the bootstrap.
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Check for migration/snapshot drift (strict build)
+        # Snapshots are generated from the strict build — the canonical prod
+        # schema (org-composite FKs) — so the drift check lives here (#419).
+        run: mix ash.codegen --check
+
+      - name: Run the strict smoke suite
+        # test_helper includes only :strict_tenancy-tagged tests on this leg.
+        run: mix test

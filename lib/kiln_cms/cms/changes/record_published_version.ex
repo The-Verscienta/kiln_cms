@@ -29,11 +29,12 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
     version_module = Module.concat(record.__struct__, Version)
 
     result =
-      case latest_publish_version(version_module, record.id) do
+      case latest_publish_version(version_module, record.id, record.org_id) do
         {:ok, %{} = version} ->
           Ash.update(record, %{published_version_id: version.id},
             action: :set_published_version_id,
-            authorize?: false
+            authorize?: false,
+            tenant: record.org_id
           )
 
         _ ->
@@ -49,13 +50,13 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
     result
   end
 
-  defp latest_publish_version(version_module, source_id) do
+  defp latest_publish_version(version_module, source_id, org_id) do
     version_module
     |> Ash.Query.filter(
       version_source_id == ^source_id and version_action_name in ^@publish_actions
     )
     |> Ash.Query.sort(version_inserted_at: :desc)
     |> Ash.Query.limit(1)
-    |> Ash.read_one(authorize?: false)
+    |> Ash.read_one(authorize?: false, tenant: org_id)
   end
 end
