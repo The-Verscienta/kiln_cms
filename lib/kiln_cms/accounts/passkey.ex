@@ -55,10 +55,6 @@ defmodule KilnCMS.Accounts.Passkey do
       accept [:sign_count]
       change set_attribute(:last_used_at, &DateTime.utc_now/0)
     end
-
-    update :rename do
-      accept [:name]
-    end
   end
 
   policies do
@@ -71,7 +67,7 @@ defmodule KilnCMS.Accounts.Passkey do
       authorize_if expr(user_id == ^actor(:id))
     end
 
-    policy action([:destroy, :rename]) do
+    policy action(:destroy) do
       authorize_if expr(user_id == ^actor(:id))
     end
 

@@ -31,8 +31,6 @@ defmodule KilnCMS.Accounts.WebAuthn do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Passkey
 
-  require Ash.Query
-
   @doc "Mint a registration challenge (discoverable credential, UV required)."
   @spec registration_challenge() :: Wax.Challenge.t()
   def registration_challenge do
@@ -87,8 +85,7 @@ defmodule KilnCMS.Accounts.WebAuthn do
            verifier().register(attestation, client_data, challenge) do
       credential = auth_data.attested_credential_data
 
-      Ash.create(
-        Passkey,
+      Accounts.register_passkey_credential(
         %{
           user_id: user.id,
           name: presence(payload["name"]) || "Passkey",
@@ -96,7 +93,6 @@ defmodule KilnCMS.Accounts.WebAuthn do
           public_key: :erlang.term_to_binary(credential.credential_public_key),
           sign_count: auth_data.sign_count
         },
-        action: :register,
         authorize?: false
       )
     else
@@ -168,10 +164,10 @@ defmodule KilnCMS.Accounts.WebAuthn do
   defp decode_cose_key(binary), do: Plug.Crypto.non_executable_binary_to_term(binary, [:safe])
 
   defp lookup(credential_id) do
-    Passkey
-    |> Ash.Query.filter(credential_id == ^credential_id)
-    |> Ash.read_one(authorize?: false)
-    |> case do
+    case Accounts.get_passkey_by_credential_id(credential_id,
+           authorize?: false,
+           not_found_error?: false
+         ) do
       {:ok, %Passkey{} = passkey} -> {:ok, passkey}
       _ -> {:error, :unknown_credential}
     end
@@ -188,16 +184,13 @@ defmodule KilnCMS.Accounts.WebAuthn do
   end
 
   defp bump_usage(passkey, sign_count) do
-    Ash.update(passkey, %{sign_count: sign_count}, action: :bump_usage, authorize?: false)
+    Accounts.bump_passkey_usage(passkey, %{sign_count: sign_count}, authorize?: false)
   end
 
   # The dedicated sign-in read mints the session token (metadata) exactly like
   # the built-in strategies — see User.sign_in_with_passkey.
   defp sign_in(user_id) do
-    KilnCMS.Accounts.User
-    |> Ash.Query.for_read(:sign_in_with_passkey, %{user_id: user_id})
-    |> Ash.read_one(authorize?: false)
-    |> case do
+    case Accounts.complete_passkey_sign_in(user_id, authorize?: false, not_found_error?: false) do
       {:ok, %KilnCMS.Accounts.User{} = user} -> {:ok, user}
       _ -> {:error, :account_unavailable}
     end
@@ -209,9 +202,54 @@ defmodule KilnCMS.Accounts.WebAuthn do
     Accounts.list_passkeys!(user.id, actor: user, query: [sort: [inserted_at: :asc]])
   end
 
+  @challenge_cache :kiln_cms_passkey_challenges
+
+  @doc "The dedicated Cachex instance for in-flight challenges (supervised)."
+  @spec challenge_cache() :: atom()
+  def challenge_cache, do: @challenge_cache
+
+  @doc """
+  Park a challenge server-side for its Wax timeout, returning an opaque
+  nonce. `take_challenge/1` consumes it atomically — a challenge is verified
+  at most once even if the request (cookies included) is replayed.
+  """
+  @spec stash_challenge(Wax.Challenge.t()) :: String.t()
+  def stash_challenge(challenge) do
+    nonce = 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+    Cachex.put(@challenge_cache, nonce, challenge, expire: :timer.seconds(challenge.timeout))
+    nonce
+  end
+
+  @doc "Consume a parked challenge (single use). `nil` when absent/expired."
+  @spec take_challenge(term()) :: Wax.Challenge.t() | nil
+  def take_challenge(nonce) when is_binary(nonce) do
+    case Cachex.take(@challenge_cache, nonce) do
+      {:ok, %Wax.Challenge{} = challenge} -> challenge
+      _ -> nil
+    end
+  end
+
+  def take_challenge(_nonce), do: nil
+
   # Relying-party identity from the endpoint's canonical URL — passkeys are
   # scoped to this host (subdomain-site setups authenticate on the main host).
-  defp origin, do: String.trim_trailing(KilnCMSWeb.Endpoint.url(), "/")
+  # The WebAuthn origin is scheme://host[:port] with NO path and no default
+  # port — the browser's clientDataJSON origin is compared by exact string, so
+  # a URL config carrying a path or an explicit :443 would fail every
+  # ceremony.
+  defp origin do
+    uri = URI.parse(KilnCMSWeb.Endpoint.url())
+
+    port =
+      case {uri.scheme, uri.port} do
+        {"https", 443} -> ""
+        {"http", 80} -> ""
+        {_, nil} -> ""
+        {_, port} -> ":#{port}"
+      end
+
+    "#{uri.scheme}://#{uri.host}#{port}"
+  end
 
   defp rp_id, do: URI.parse(KilnCMSWeb.Endpoint.url()).host
 

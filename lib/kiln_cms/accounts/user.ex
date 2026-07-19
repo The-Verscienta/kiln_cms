@@ -517,9 +517,10 @@ defmodule KilnCMS.Accounts.User do
 
     # The passkey sign-in completion mints a session token — system-only
     # (`authorize?: false` from WebAuthn.authenticate/2 after assertion
-    # verification). Hard-forbidden for every authorized caller: combined with
-    # the self-only read policy above this is defense-in-depth against any
-    # actor minting a token for another account.
+    # verification). This filter-forbids ordinary authorized callers; the
+    # admin bypass above would still pass, so the PasskeySessionToken
+    # preparation ALSO refuses any actor-carrying call — no authorized path
+    # (admin included) can mint a token for another account.
     policy action(:sign_in_with_passkey) do
       forbid_if always()
     end

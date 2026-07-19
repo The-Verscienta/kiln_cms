@@ -20,11 +20,16 @@ const b64uToBuf = (s) => {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0)).buffer
 }
 
-const bufToB64u = (buf) =>
-  btoa(String.fromCharCode(...new Uint8Array(buf)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "")
+const bufToB64u = (buf) => {
+  // Chunked: spreading a large buffer into fromCharCode's arguments hits the
+  // JS engine's argument limit (attestation objects can be multi-KB).
+  const bytes = new Uint8Array(buf)
+  let bin = ""
+  for (let i = 0; i < bytes.length; i += 8192) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  }
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
 
 const supported = () =>
   typeof window.PublicKeyCredential !== "undefined" && navigator.credentials
@@ -102,9 +107,11 @@ export const initPasskeySignIn = () => {
   const main = document.querySelector("[data-phx-main]")
   const wrap = document.createElement("div")
   wrap.className = "mx-auto mt-4 max-w-sm pb-8 text-center"
+  // Deliberately NOT worded "Sign in …": the accessible name must not collide
+  // with the password form's submit for /sign in/i selectors (e2e strict mode).
   wrap.innerHTML = `
     <button type="button" class="btn btn-default w-full" data-role="passkey-sign-in">
-      Sign in with a passkey
+      Use a passkey
     </button>
     <p class="mt-2 text-xs opacity-60" data-role="passkey-status"
        data-error-text="Passkey sign-in failed — use another method."></p>

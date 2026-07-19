@@ -36,6 +36,7 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     |> Ash.Changeset.after_action(fn _changeset, user ->
       revoke_tokens(user)
       remove_identities(user)
+      remove_passkeys(user)
       :ok = History.anonymize_actor(user.id)
       {:ok, user}
     end)
@@ -56,6 +57,22 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     require Ash.Query
 
     KilnCMS.Accounts.UserIdentity
+    |> Ash.Query.filter(user_id == ^user.id)
+    |> Ash.bulk_destroy!(:destroy, %{},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    )
+  end
+
+  # Delete the user's WebAuthn credentials (#331 passkeys): a surviving
+  # passkey would let the erased account sign straight back in — the same
+  # class of live credential as the IdP links above.
+  defp remove_passkeys(user) do
+    require Ash.Query
+
+    KilnCMS.Accounts.Passkey
     |> Ash.Query.filter(user_id == ^user.id)
     |> Ash.bulk_destroy!(:destroy, %{},
       authorize?: false,

@@ -36,15 +36,20 @@ steps.
 - **Sign-in** is a two-step JSON ceremony (`POST /auth/passkey/options` →
   `POST /auth/passkey/verify`, `KilnCMSWeb.PasskeyController`) driven by
   progressive-enhancement JS on `/sign-in` (the page itself is rendered by
-  ash_authentication_phoenix, so the affordance is attached outside the
-  LiveView root). Challenges park in the encrypted session, single-use; both
-  endpoints sit behind the same per-IP `:auth` rate limit and CSRF protection
-  as every credential endpoint. On success the account's session token is
-  minted through a dedicated `sign_in_with_passkey` action (system-only;
-  hard-forbidden to authorized callers) and the session is established
-  exactly like the built-in strategies.
+  ash_authentication_phoenix, so the "Use a passkey" affordance is attached
+  outside the LiveView root). Challenges park **server-side** and are
+  consumed atomically — the session carries only an opaque nonce, so a
+  captured request/cookie pair cannot be replayed. Both endpoints sit behind
+  the same per-IP `:auth` rate limit and CSRF protection as every credential
+  endpoint. On success the account's session token is minted through a
+  dedicated `sign_in_with_passkey` action (system-only: policy-forbidden to
+  ordinary callers, and its preparation refuses *any* actor-carrying call —
+  admin bypass included — while a token-minting failure errors the ceremony
+  rather than producing a token-less "success").
 - **Clone detection**: a signature counter that fails to advance (when either
   side is non-zero) rejects the assertion (`:sign_count_regression`).
+- **Erasure**: GDPR anonymization (#212) deletes the account's passkeys — a
+  surviving credential would let the erased account sign straight back in.
 
 ## Scope notes
 

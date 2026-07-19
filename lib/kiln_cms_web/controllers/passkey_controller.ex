@@ -23,26 +23,27 @@ defmodule KilnCMSWeb.PasskeyController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Accounts.WebAuthn
-  alias KilnCMSWeb.SafeRedirect
 
-  @challenge_key :passkey_challenge
+  @challenge_key :passkey_challenge_nonce
 
   def options(conn, _params) do
     challenge = WebAuthn.authentication_challenge()
 
+    # The challenge itself parks SERVER-side (single-use — consumed atomically
+    # by `take_challenge/1`); the session carries only an opaque nonce, so
+    # replaying a captured request/cookie pair cannot re-verify the ceremony.
     conn
-    |> put_session(@challenge_key, challenge)
+    |> put_session(@challenge_key, WebAuthn.stash_challenge(challenge))
     |> json(%{publicKey: WebAuthn.authentication_options(challenge)})
   end
 
   def verify(conn, params) do
-    challenge = get_session(conn, @challenge_key)
+    nonce = get_session(conn, @challenge_key)
     conn = delete_session(conn, @challenge_key)
 
-    with %Wax.Challenge{} <- challenge,
+    with %Wax.Challenge{} = challenge <- WebAuthn.take_challenge(nonce),
          {:ok, user} <- WebAuthn.authenticate(challenge, params) do
-      default = if user.role in [:editor, :admin], do: ~p"/editor/overview", else: ~p"/"
-      return_to = SafeRedirect.local_path(get_session(conn, :return_to), default)
+      return_to = KilnCMSWeb.AuthController.sign_in_destination(conn, user)
 
       conn
       |> delete_session(:return_to)

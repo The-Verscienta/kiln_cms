@@ -31,6 +31,9 @@ defmodule KilnCMS.Application do
       {KilnCMS.Mail.RelayAlert, clean_period: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
+      # Small dedicated store for in-flight WebAuthn challenges (#331) —
+      # TTL-only, isolated from the content cache's busts/eviction pressure.
+      {Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},
       # Bounded LRW firing-artifact cache (see `KilnCMS.Firing.Cache.child_spec/1`).
       KilnCMS.Firing.Cache,
       KilnCMS.Repo,

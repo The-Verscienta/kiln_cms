@@ -20,8 +20,12 @@ defmodule KilnCMS.Accounts do
     resource KilnCMS.Accounts.Passkey do
       define :list_passkeys, action: :for_user, args: [:user_id]
       define :get_passkey, action: :read, get_by: [:id]
-      define :rename_passkey, action: :rename
+      define :get_passkey_by_credential_id, action: :read, get_by: [:credential_id]
       define :remove_passkey, action: :destroy
+      # Ceremony-only writes (KilnCMS.Accounts.WebAuthn, `authorize?: false`
+      # after Wax verification).
+      define :register_passkey_credential, action: :register
+      define :bump_passkey_usage, action: :bump_usage
     end
 
     # The tenant registry (epic #336) + the user↔org membership join. The org is
@@ -68,6 +72,9 @@ defmodule KilnCMS.Accounts do
       define :disable_totp, action: :disable_totp
       define :regenerate_totp_recovery_codes, action: :regenerate_totp_recovery_codes
       define :consume_totp_recovery_code, action: :consume_totp_recovery_code
+      # Passkey sign-in completion (#331) — system-only (`authorize?: false`
+      # from the ceremony after Wax verification; see the action + preparation).
+      define :complete_passkey_sign_in, action: :sign_in_with_passkey, args: [:user_id]
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
       # GDPR Art. 17 erasure (#212) — admin-only; pass `actor: admin`.
