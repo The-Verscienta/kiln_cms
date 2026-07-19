@@ -55,6 +55,15 @@ defmodule KilnCMS.CMS.Category do
   postgres do
     table "categories"
     repo KilnCMS.Repo
+
+    # `:unique_slug` is now the `org_id`-LEADING `(org_id, slug)` composite, which
+    # Postgres can't seek for a tenant-less `by_slug` delivery read (reads set no
+    # tenant under `global?: true`). This `all_tenants?: true` companion keeps a
+    # plain `(slug)` index so those lookups still seek; redundant with the
+    # composite once every taxonomy read threads the tenant (mirrors content.ex).
+    custom_indexes do
+      index [:slug], name: "categories_slug_lookup_index", all_tenants?: true
+    end
   end
 
   actions do
@@ -131,8 +140,28 @@ defmodule KilnCMS.CMS.Category do
     end
   end
 
+  # Multi-tenancy (epic #336): taxonomy is per-site, partitioned by `org_id`
+  # (Ash `:attribute` strategy — same axis as content). `global?: true` keeps a
+  # tenant OPTIONAL: tenant-less reads/writes (editor, seeds, public delivery)
+  # keep working and land in the default org (see the `org_id` default).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set automatically from the tenant on a
+    # scoped create, else defaults to the sole org; never accepted from input
+    # (`writable?: false`, absent from `default_accept`) — the cross-site boundary.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :name, :string, allow_nil?: false, public?: true
     attribute :slug, :string, allow_nil?: false, public?: true
@@ -142,6 +171,14 @@ defmodule KilnCMS.CMS.Category do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     # One-to-many inverse of the `belongs_to :category` on each content type.
     has_many :pages, KilnCMS.CMS.Page do
       public? true

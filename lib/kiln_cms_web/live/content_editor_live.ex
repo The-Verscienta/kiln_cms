@@ -66,7 +66,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       kind ->
         actor = socket.assigns.current_user
-        record = fetch!(kind, id, actor, socket.assigns.current_org)
+        org = socket.assigns.current_org
+        record = fetch!(kind, id, actor, org)
         field_definitions = field_definitions(kind, actor)
 
         if connected?(socket) do
@@ -111,6 +112,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
            # variants/EXIF-bearing rows out of the editor's heap.
            CMS.list_media_items!(
              actor: actor,
+             tenant: org,
              query: [
                select: [:id, :url, :alt, :caption, :filename],
                sort: [inserted_at: :desc],
@@ -118,11 +120,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
              ]
            )
          )
-         |> assign(:categories, CMS.list_categories!(actor: actor))
-         |> assign(:tags, CMS.list_tags!(actor: actor))
+         |> assign(:categories, CMS.list_categories!(actor: actor, tenant: org))
+         |> assign(:tags, CMS.list_tags!(actor: actor, tenant: org))
          |> assign(:audiences, audience_options())
          |> assign(:field_definitions, field_definitions)
-         |> assign(:reference_options, reference_options(field_definitions, actor))
+         |> assign(:reference_options, reference_options(field_definitions, actor, org))
          # CRDT collab prototype: when enabled, rich-text blocks sync live
          # between editors over the collab channel (see KilnCMS.Collab.Crdt).
          |> assign(:collab_token, collab_token(actor))
@@ -355,7 +357,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Pick-lists for `:reference` custom fields: per definition, the target
   # type's records as `{title, id}` options — narrow select and the same window
   # cap as the media picker, so a large library can't blow up the mount.
-  defp reference_options(definitions, actor) do
+  defp reference_options(definitions, actor, org) do
     definitions
     |> Enum.filter(&(&1.field_type == :reference))
     |> Map.new(fn definition ->
@@ -368,6 +370,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             ct
             |> ContentTypes.list!(
               actor: actor,
+              tenant: org,
               query: [select: [:id, :title], sort: [title: :asc], limit: @max_media]
             )
             |> Enum.map(&{&1.title, &1.id})
@@ -456,7 +459,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Live-filter the browser grid as the user types.
   def handle_event("search_media", %{"q" => q}, socket) do
-    results = if q == "", do: nil, else: search_media(q, socket.assigns.actor)
+    results =
+      if q == "",
+        do: nil,
+        else: search_media(q, socket.assigns.actor, socket.assigns.current_org)
+
     {:noreply, socket |> assign(:media_query, q) |> assign(:picker_media, results)}
   end
 
@@ -1461,11 +1468,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # items beyond the mounted picker window, and matches partial input as the
   # user types (the library's `:search` action is whole-word tsquery, less
   # forgiving for a live picker). %, _ and \ in the input match literally.
-  defp search_media(q, actor) do
+  defp search_media(q, actor, org) do
     pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
 
     CMS.list_media_items!(
       actor: actor,
+      tenant: org,
       query: [
         filter:
           expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern)),

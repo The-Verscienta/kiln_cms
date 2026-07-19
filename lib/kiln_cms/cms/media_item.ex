@@ -86,12 +86,16 @@ defmodule KilnCMS.CMS.MediaItem do
 
     # GIN index backing the `:search` action — its expression matches the
     # `to_tsvector(...)` over filename/alt/caption in that action's filter.
+    # `all_tenants?: true` keeps `org_id` OUT of the GIN (a GIN can't lead with a
+    # plain `org_id` column); the tenant filter rides the query's `WHERE org_id`
+    # as a post-filter (mirrors the HNSW/trigram handling in `content.ex`).
     custom_indexes do
       index [
               "to_tsvector('english', coalesce(filename, '') || ' ' || coalesce(alt, '') || ' ' || coalesce(caption, ''))"
             ],
             name: "media_items_search_gin_index",
-            using: "gin"
+            using: "gin",
+            all_tenants?: true
     end
   end
 
@@ -243,8 +247,28 @@ defmodule KilnCMS.CMS.MediaItem do
     change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :update, :destroy]
   end
 
+  # Multi-tenancy (epic #336): media is per-site, partitioned by `org_id` (Ash
+  # `:attribute` strategy — same axis as content). `global?: true` keeps a tenant
+  # OPTIONAL: tenant-less reads/writes (editor, seeds, public delivery) keep
+  # working and land in the default org (see the `org_id` default).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set automatically from the tenant on a
+    # scoped create, else defaults to the sole org; never accepted from input
+    # (`writable?: false`, absent from `default_accept`) — the cross-site boundary.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :filename, :string, allow_nil?: false, public?: true
     attribute :content_type, :string, public?: true
@@ -273,6 +297,14 @@ defmodule KilnCMS.CMS.MediaItem do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     # One-to-many inverse of `belongs_to :featured_image` — the content items
     # using this media item as their lead image.
     has_many :featured_pages, KilnCMS.CMS.Page do

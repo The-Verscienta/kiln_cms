@@ -16,14 +16,15 @@ defmodule KilnCMSWeb.TaxonomyLive do
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
+    org = socket.assigns.current_org
 
     {:ok,
      socket
      |> assign(:actor, actor)
      |> assign(:page_title, gettext("Taxonomy"))
      |> assign(:edit, nil)
-     |> assign(:cat_form, create_form(:category, actor))
-     |> assign(:tag_form, create_form(:tag, actor))
+     |> assign(:cat_form, create_form(:category, actor, org))
+     |> assign(:tag_form, create_form(:tag, actor, org))
      |> load_taxonomy()}
   end
 
@@ -40,7 +41,10 @@ defmodule KilnCMSWeb.TaxonomyLive do
       {:ok, _category} ->
         {:noreply,
          socket
-         |> assign(:cat_form, create_form(:category, socket.assigns.actor))
+         |> assign(
+           :cat_form,
+           create_form(:category, socket.assigns.actor, socket.assigns.current_org)
+         )
          |> load_taxonomy()
          |> put_flash(:info, gettext("Category added."))}
 
@@ -59,7 +63,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
       {:ok, _tag} ->
         {:noreply,
          socket
-         |> assign(:tag_form, create_form(:tag, socket.assigns.actor))
+         |> assign(:tag_form, create_form(:tag, socket.assigns.actor, socket.assigns.current_org))
          |> load_taxonomy()
          |> put_flash(:info, gettext("Tag added."))}
 
@@ -71,7 +75,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
   # --- inline edit -----------------------------------------------------------
 
   def handle_event("edit", %{"type" => type, "id" => id}, socket) do
-    form = edit_form(type, id, socket.assigns.actor)
+    form = edit_form(type, id, socket.assigns.actor, socket.assigns.current_org)
     {:noreply, assign(socket, :edit, %{type: type, id: id, form: form})}
   end
 
@@ -101,7 +105,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
 
   def handle_event("delete", %{"type" => type, "id" => id}, socket) do
     socket =
-      case destroy(type, id, socket.assigns.actor) do
+      case destroy(type, id, socket.assigns.actor, socket.assigns.current_org) do
         :ok ->
           socket |> load_taxonomy() |> put_flash(:info, gettext("Deleted."))
 
@@ -120,45 +124,54 @@ defmodule KilnCMSWeb.TaxonomyLive do
 
   defp load_taxonomy(socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     socket
     |> assign(
       :categories,
-      CMS.list_categories!(actor: actor, load: @loads, query: sort_by_name())
+      CMS.list_categories!(actor: actor, tenant: org, load: @loads, query: sort_by_name())
     )
-    |> assign(:tags, CMS.list_tags!(actor: actor, load: @loads, query: sort_by_name()))
+    |> assign(
+      :tags,
+      CMS.list_tags!(actor: actor, tenant: org, load: @loads, query: sort_by_name())
+    )
   end
 
   defp sort_by_name, do: [sort: [name: :asc]]
 
   # Distinct form names keep input ids unique across the two create forms (and
-  # the inline edit form) on the same page.
-  defp create_form(:category, actor),
-    do: AshPhoenix.Form.for_create(Category, :create, actor: actor, as: "category") |> to_form()
+  # the inline edit form) on the same page. `tenant:` stamps the new row's org so
+  # taxonomy is created into the current site (epic #336).
+  defp create_form(:category, actor, org),
+    do:
+      AshPhoenix.Form.for_create(Category, :create, actor: actor, tenant: org, as: "category")
+      |> to_form()
 
-  defp create_form(:tag, actor),
-    do: AshPhoenix.Form.for_create(Tag, :create, actor: actor, as: "tag") |> to_form()
+  defp create_form(:tag, actor, org),
+    do:
+      AshPhoenix.Form.for_create(Tag, :create, actor: actor, tenant: org, as: "tag")
+      |> to_form()
 
-  defp edit_form("category", id, actor) do
-    CMS.get_category!(id, actor: actor)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, as: "taxonomy")
+  defp edit_form("category", id, actor, org) do
+    CMS.get_category!(id, actor: actor, tenant: org)
+    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "taxonomy")
     |> to_form()
   end
 
-  defp edit_form("tag", id, actor) do
-    CMS.get_tag!(id, actor: actor)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, as: "taxonomy")
+  defp edit_form("tag", id, actor, org) do
+    CMS.get_tag!(id, actor: actor, tenant: org)
+    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "taxonomy")
     |> to_form()
   end
 
-  defp destroy("category", id, actor) do
-    with {:ok, record} <- CMS.get_category(id, actor: actor),
-         do: CMS.destroy_category(record, actor: actor)
+  defp destroy("category", id, actor, org) do
+    with {:ok, record} <- CMS.get_category(id, actor: actor, tenant: org),
+         do: CMS.destroy_category(record, actor: actor, tenant: org)
   end
 
-  defp destroy("tag", id, actor) do
-    with {:ok, record} <- CMS.get_tag(id, actor: actor),
-         do: CMS.destroy_tag(record, actor: actor)
+  defp destroy("tag", id, actor, org) do
+    with {:ok, record} <- CMS.get_tag(id, actor: actor, tenant: org),
+         do: CMS.destroy_tag(record, actor: actor, tenant: org)
   end
 
   # Fill a blank slug from the name so editors only have to type a label. An

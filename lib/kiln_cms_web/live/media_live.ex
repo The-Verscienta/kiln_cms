@@ -94,10 +94,11 @@ defmodule KilnCMSWeb.MediaLive do
 
   def handle_event("save", _params, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     results =
       consume_uploaded_entries(socket, :media, fn %{path: path}, entry ->
-        {:ok, {entry.client_name, store_entry(path, entry, actor)}}
+        {:ok, {entry.client_name, store_entry(path, entry, actor, org)}}
       end)
 
     {ok, failed} = Enum.split_with(results, fn {_name, result} -> result == :ok end)
@@ -115,7 +116,7 @@ defmodule KilnCMSWeb.MediaLive do
     actor = socket.assigns.actor
 
     socket =
-      case CMS.get_media_item(id, actor: actor) do
+      case CMS.get_media_item(id, actor: actor, tenant: socket.assigns.current_org) do
         {:ok, item} -> delete_item(socket, item, actor)
         _ -> put_flash(socket, :error, gettext("That item no longer exists."))
       end
@@ -129,7 +130,10 @@ defmodule KilnCMSWeb.MediaLive do
     actor = socket.assigns.actor
 
     if socket.assigns.is_admin do
-      {:noreply, socket |> assign(:view, :trash) |> assign(:trashed, list_trashed(actor))}
+      {:noreply,
+       socket
+       |> assign(:view, :trash)
+       |> assign(:trashed, list_trashed(actor, socket.assigns.current_org))}
     else
       {:noreply, socket}
     end
@@ -147,7 +151,7 @@ defmodule KilnCMSWeb.MediaLive do
           put_flash(socket, :error, gettext("That item no longer exists."))
 
         item ->
-          case CMS.restore_media_item(item, actor: actor) do
+          case CMS.restore_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
             {:ok, _} ->
               put_flash(socket, :info, gettext("Restored %{name}.", name: item.filename))
 
@@ -156,7 +160,10 @@ defmodule KilnCMSWeb.MediaLive do
           end
       end
 
-    {:noreply, socket |> assign(:trashed, list_trashed(actor)) |> reload_media()}
+    {:noreply,
+     socket
+     |> assign(:trashed, list_trashed(actor, socket.assigns.current_org))
+     |> reload_media()}
   end
 
   def handle_event("purge", %{"id" => id}, socket) do
@@ -168,7 +175,7 @@ defmodule KilnCMSWeb.MediaLive do
         item -> purge_item(socket, item, actor)
       end
 
-    {:noreply, assign(socket, :trashed, list_trashed(actor))}
+    {:noreply, assign(socket, :trashed, list_trashed(actor, socket.assigns.current_org))}
   end
 
   # Selection lives in the URL, so an open drawer survives refresh and can be
@@ -216,7 +223,8 @@ defmodule KilnCMSWeb.MediaLive do
 
     socket =
       case CMS.update_media_item(socket.assigns.selected, %{alt: alt, caption: caption},
-             actor: actor
+             actor: actor,
+             tenant: socket.assigns.current_org
            ) do
         {:ok, item} ->
           socket
@@ -258,7 +266,7 @@ defmodule KilnCMSWeb.MediaLive do
   # sobelow_skip ["Traversal.FileModule"]
   # Returns :ok or {:error, reason} — the reason reaches the failure flash so
   # editors learn WHICH file failed and why, not just a count (audit U-M5).
-  defp store_entry(path, entry, actor) do
+  defp store_entry(path, entry, actor, org) do
     case ImageProcessor.validate_upload(path) do
       {:ok, %{ext: ext, content_type: content_type}} ->
         key = Storage.generate_key_with_ext(ext)
@@ -268,7 +276,7 @@ defmodule KilnCMSWeb.MediaLive do
 
         try do
           case Storage.store(key, source) do
-            {:ok, ^key} -> create_from_upload(key, content_type, entry, actor)
+            {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
             _ -> {:error, :storage_failed}
           end
         after
@@ -289,7 +297,7 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  defp create_from_upload(key, content_type, entry, actor) do
+  defp create_from_upload(key, content_type, entry, actor, org) do
     attrs = %{
       filename: entry.client_name,
       content_type: content_type,
@@ -298,7 +306,7 @@ defmodule KilnCMSWeb.MediaLive do
       url: Storage.url(key)
     }
 
-    case CMS.create_media_item(attrs, actor: actor) do
+    case CMS.create_media_item(attrs, actor: actor, tenant: org) do
       {:ok, item} ->
         enqueue_processing(item)
         :ok
@@ -313,7 +321,9 @@ defmodule KilnCMSWeb.MediaLive do
   # request). The worker re-fetches the original from storage, so there's no
   # node-local temp hand-off.
   defp enqueue_processing(item) do
-    %{media_item_id: item.id}
+    # Carry the item's org so the worker re-fetches/updates under its tenant
+    # (epic #336) — future-proof for the strict `global?: false` flip.
+    %{media_item_id: item.id, org_id: item.org_id}
     |> KilnCMS.Media.VariantWorker.new()
     |> Oban.insert!()
   end
@@ -325,7 +335,7 @@ defmodule KilnCMSWeb.MediaLive do
   # Soft delete: stamp `archived_at` but keep the row and blobs, so content still
   # referencing the item keeps working and an admin can restore it from trash.
   defp delete_item(socket, item, actor) do
-    case CMS.destroy_media_item(item, actor: actor) do
+    case CMS.destroy_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
       :ok -> put_flash(socket, :info, gettext("Moved %{name} to trash.", name: item.filename))
       _ -> put_flash(socket, :error, gettext("You don't have permission to delete media."))
     end
@@ -333,7 +343,7 @@ defmodule KilnCMSWeb.MediaLive do
 
   # Permanent delete: drop the row and reclaim the original + variant blobs.
   defp purge_item(socket, item, actor) do
-    case CMS.purge_media_item(item, actor: actor) do
+    case CMS.purge_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
       :ok ->
         if item.storage_key, do: Storage.delete(item.storage_key)
         delete_variant_blobs(item.variants)
@@ -346,9 +356,10 @@ defmodule KilnCMSWeb.MediaLive do
 
   defp find_trashed(socket, id), do: Enum.find(socket.assigns.trashed, &(&1.id == id))
 
-  defp list_trashed(actor) do
+  defp list_trashed(actor, org) do
     CMS.list_trashed_media_items!(
       actor: actor,
+      tenant: org,
       query: [sort: [updated_at: :desc], limit: @max_trashed]
     )
   end
@@ -376,6 +387,7 @@ defmodule KilnCMSWeb.MediaLive do
     items =
       CMS.list_media_items!(
         actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
         query: media_query(socket.assigns.query, cursor, limit)
       )
 
@@ -410,7 +422,7 @@ defmodule KilnCMSWeb.MediaLive do
   defp assign_selected(socket, nil), do: assign(socket, :selected, nil)
 
   defp assign_selected(socket, id) do
-    case CMS.get_media_item(id, actor: socket.assigns.actor) do
+    case CMS.get_media_item(id, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
       {:ok, item} ->
         assign(socket, :selected, item)
 

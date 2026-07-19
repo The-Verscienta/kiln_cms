@@ -32,7 +32,9 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published(org_id, "page", slug, locale, fn -> payload(fetch, locale, ct) end) do
+    case Cache.fetch_published(org_id, "page", slug, locale, fn ->
+           payload(fetch, locale, ct, org_id)
+         end) do
       nil ->
         not_found(conn)
 
@@ -55,7 +57,9 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published(org_id, "post", slug, locale, fn -> payload(fetch, locale, ct) end) do
+    case Cache.fetch_published(org_id, "post", slug, locale, fn ->
+           payload(fetch, locale, ct, org_id)
+         end) do
       nil ->
         not_found(conn)
 
@@ -81,7 +85,7 @@ defmodule KilnCMSWeb.ContentController do
            ),
          payload when not is_nil(payload) <-
            Cache.fetch_published(org_id, to_string(ct.type), slug, locale, fn ->
-             payload(fetch, locale, ct)
+             payload(fetch, locale, ct, org_id)
            end) do
       track_view(to_string(ct.type), payload.record.id)
       render_content(conn, :show, payload, ct)
@@ -271,13 +275,17 @@ defmodule KilnCMSWeb.ContentController do
   # here at cache-miss time, so a cache *hit* carries resolved media URLs and
   # translations and issues no further DB queries. Returns `nil` (not cached)
   # when nothing is found.
-  defp payload(fetch, locale, ct) do
+  defp payload(fetch, locale, ct, org_id) do
     case localized(fetch, locale) do
       nil ->
         nil
 
       record ->
-        %{record: record, blocks: blocks(record), translations: translations(ct, record.slug)}
+        %{
+          record: record,
+          blocks: blocks(record, org_id),
+          translations: translations(ct, record.slug)
+        }
     end
   end
 
@@ -387,7 +395,7 @@ defmodule KilnCMSWeb.ContentController do
     Phoenix.HTML.raw(~s(<script type="application/ld+json">#{json}</script>))
   end
 
-  defp blocks(record) do
+  defp blocks(record, org_id) do
     # Blocks are stored as the typed union (Kiln v2); convert back to legacy block
     # structs so the existing media-enriching renderer (`BlockComponents`) is
     # unchanged. A `columns` block (#335) nests child blocks, so the tree is built
@@ -396,7 +404,7 @@ defmodule KilnCMSWeb.ContentController do
     tree = block_tree(record.blocks)
     flat = flatten_block_tree(tree)
 
-    media = load_block_media(flat)
+    media = load_block_media(flat, org_id)
     forms = load_block_forms(flat)
     Enum.map(tree, &enrich_block(&1, media, forms))
   end
@@ -449,7 +457,7 @@ defmodule KilnCMSWeb.ContentController do
 
   # Batch-load the media items referenced by image blocks (so we render one
   # query, not one per image).
-  defp load_block_media(blocks) do
+  defp load_block_media(blocks, org_id) do
     ids =
       for b <- blocks,
           to_string(b.type) == "image",
@@ -463,7 +471,13 @@ defmodule KilnCMSWeb.ContentController do
         %{}
 
       ids ->
-        CMS.list_media_items!(authorize?: false, query: [filter: [id: [in: ids]]])
+        # Tenant-scoped so a page can only enrich media from its own site (#336);
+        # `authorize?: false` is the delivery bypass, so the tenant is the guard.
+        CMS.list_media_items!(
+          authorize?: false,
+          tenant: org_id,
+          query: [filter: [id: [in: ids]]]
+        )
         |> Map.new(&{&1.id, &1})
     end
   end
