@@ -38,21 +38,13 @@ defmodule KilnCMS.Automation.RuleWorker do
   end
 
   defp run(%{action: :send_email, config: config}, event, payload) do
-    to = config["to"]
-
-    if is_binary(to) and to != "" do
-      new()
-      |> from(Application.fetch_env!(:kiln_cms, :email_from))
-      |> to(to)
-      # Subject is a header: render it as plain text with CR/LF stripped so a
-      # content title can't inject extra headers. Body is HTML: escape markup.
-      |> subject(render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text))
-      |> html_body(render(config["body"] || default_body(), event, payload, :html))
-      |> KilnCMS.Mail.deliver_for_worker()
-    else
-      Logger.warning("Automation send_email rule missing a `to` address; skipping.")
-      :ok
-    end
+    # Subject is a header: render it as plain text with CR/LF stripped so a
+    # content title can't inject extra headers. Body is HTML: escape markup.
+    send_rule_email(
+      config,
+      render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text),
+      render(config["body"] || default_body(), event, payload, :html)
+    )
   end
 
   defp run(%{action: :broadcast, config: config}, event, payload) do
@@ -129,18 +121,23 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   defp deliver_findings(:none, _config), do: :ok
 
-  defp deliver_findings({subject, html_body}, config) do
+  defp deliver_findings({subject, html_body}, config),
+    do: send_rule_email(config, escape(subject, :text), html_body)
+
+  # One delivery skeleton for every emailing reaction, so header/policy
+  # changes (from-address, missing-`to` handling) can't diverge per action.
+  defp send_rule_email(config, subject_text, html) do
     to = config["to"]
 
     if is_binary(to) and to != "" do
       new()
       |> from(Application.fetch_env!(:kiln_cms, :email_from))
       |> to(to)
-      |> subject(escape(subject, :text))
-      |> html_body(html_body)
+      |> subject(subject_text)
+      |> html_body(html)
       |> KilnCMS.Mail.deliver_for_worker()
     else
-      Logger.warning("Automation intelligence rule missing a `to` address; skipping.")
+      Logger.warning("Automation email rule missing a `to` address; skipping.")
       :ok
     end
   end

@@ -80,8 +80,9 @@ Phase-1 slice:
   several rules on the same trigger; a sequenced multi-action rule is a follow-on.
 - **Reaction set** covers email / broadcast / cache / reindex, plus the
   embedding-driven editorial-intelligence reactions (#377): `flag_duplicates`
-  and `suggest_tags` pair naturally with the `in_review` trigger as lightweight
-  review gates. They are silent when nothing is found, and no-ops when semantic
+  and `suggest_tags` pair naturally with the `in_review` trigger (#375,
+  landing separately — until it merges, `updated`/`published` are the
+  available triggers) as lightweight review gates. They are silent when nothing is found, and no-ops when semantic
   search is disabled. The *model-driven* half of #377 (an LLM acting through
   the MCP surface — drafting internal links, generating metadata) deliberately
   lives OUTSIDE the CMS: these reactions and the `KilnCMS.Search.Related`

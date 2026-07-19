@@ -77,7 +77,7 @@ defmodule KilnCMS.Automation do
   end
 
   defp enqueue(rule, event, payload, org_id) do
-    %{
+    args = %{
       "rule_id" => rule.id,
       "event" => event,
       # Top-level copy of the document id — Oban unique keys can only address
@@ -86,21 +86,32 @@ defmodule KilnCMS.Automation do
       "payload" => payload,
       "org_id" => org_id
     }
-    # Generic event-level dedupe (#377 review follow-up): a re-fired/duplicate
-    # editorial event within the window collapses to one job per {rule, event,
-    # document}, so side-effectful reactions (email!) can't double-run from
-    # duplicate enqueues. (Oban retry-after-partial-success remains inherent to
-    # at-least-once side effects; the newsletter action additionally has its
-    # ledger-level dedupe.)
-    |> KilnCMS.Automation.RuleWorker.new(
+
+    args
+    |> KilnCMS.Automation.RuleWorker.new(unique_opts(payload))
+    |> Oban.insert()
+  end
+
+  # Pending-duplicate dedupe (#377 review follow-up): a re-fired duplicate
+  # editorial event collapses onto the still-QUEUED job for the same {rule,
+  # event, document}. Deliberately narrow — only :available/:scheduled — so a
+  # legitimate follow-up event (second publish/edit of the same document)
+  # arriving while the first job is executing or retrying is NEVER dropped;
+  # and no uniqueness at all without a document id, so id-less events can't
+  # collapse onto each other. (Retry-after-partial-success remains inherent
+  # to at-least-once side effects; the newsletter action has its own
+  # ledger-level dedupe for exactly that.)
+  defp unique_opts(%{"id" => id}) when is_binary(id) do
+    [
       unique: [
         period: 60,
         keys: [:rule_id, :event, :document_id],
-        states: [:available, :scheduled, :executing, :retryable]
+        states: [:available, :scheduled]
       ]
-    )
-    |> Oban.insert()
+    ]
   end
+
+  defp unique_opts(_payload), do: []
 
   # Derived from the canonical Rule.triggers/0 so a new lifecycle trigger only
   # has to be added there (not also here).

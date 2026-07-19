@@ -25,7 +25,8 @@ defmodule KilnCMS.Automation.Rule do
   # feature's job; automation adds the reactions webhooks can't do.
   # `:flag_duplicates` / `:suggest_tags` (#377) are the embedding-driven
   # editorial-intelligence reactions — e.g. "on in_review → email the editors
-  # any near-duplicates" as a lightweight review gate.
+  # any near-duplicates" as a lightweight review gate (the :in_review trigger
+  # itself ships with #375).
   @action_kinds [
     :send_email,
     :broadcast,
