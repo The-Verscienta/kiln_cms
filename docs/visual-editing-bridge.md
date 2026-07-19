@@ -153,6 +153,10 @@ elements, where there's no text to encode), annotate elements yourself from the
 - **Never ship the editor key to the public site.** Load `bridge.js` and the key
   only in the edit-mode build.
 
+> **Deploying this?** See [deploy-write-visual-editing.md](deploy-write-visual-editing.md)
+> — the operator checklist (audit `:read_write` keys; set `CORS_ORIGINS` +
+> `PRESENTATION_PREVIEW_URL`; no migration/POOL_SIZE change).
+
 ## The Presentation console (side-by-side editing)
 
 Beyond the deep-link, Kiln ships a **Presentation console** at
