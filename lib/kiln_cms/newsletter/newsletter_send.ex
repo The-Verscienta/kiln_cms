@@ -36,7 +36,16 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
 
     create :create do
       primary? true
-      accept [:content_type, :content_id, :subject, :segment_id, :sent_by_id]
+
+      accept [
+        :content_type,
+        :content_id,
+        :subject,
+        :segment_id,
+        :sent_by_id,
+        :automation_rule_id,
+        :content_published_at
+      ]
     end
 
     # Fan-out started: record how many recipients resolved.
@@ -124,6 +133,16 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
 
     attribute :sent_at, :utc_datetime_usec, public?: true
 
+    # Automation provenance + double-send guard (#376): when a campaign is
+    # fired by an automation rule, it records the rule and the exact publish
+    # revision (`published_at`) it reacted to. The `:automation_dedupe`
+    # identity then makes {rule, content, publish revision} unique, so a
+    # re-fired event or a re-delivered job can never send the same campaign
+    # twice — while a genuinely new publish (fresh `published_at`) sends
+    # again. Manual sends leave both nil (NULLs never collide).
+    attribute :automation_rule_id, :uuid, public?: true
+    attribute :content_published_at, :utc_datetime_usec, public?: true
+
     timestamps()
   end
 
@@ -139,5 +158,9 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
     belongs_to :segment, KilnCMS.Newsletter.Segment do
       public? true
     end
+  end
+
+  identities do
+    identity :automation_dedupe, [:automation_rule_id, :content_id, :content_published_at]
   end
 end

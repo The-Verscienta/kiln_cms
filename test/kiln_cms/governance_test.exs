@@ -26,7 +26,7 @@ defmodule KilnCMS.GovernanceTest do
       actor: admin
     )
 
-    trail = Governance.trail("post", post.id)
+    trail = Governance.trail("post", post.id, KilnCMS.Accounts.default_org_id())
 
     assert trail.item.title == "Guidance"
     assert trail.item.state == :published
@@ -37,15 +37,19 @@ defmodule KilnCMS.GovernanceTest do
     assert consent.kind == :reviewer_signoff
   end
 
-  test "trail/2 is nil for unknown content" do
-    assert Governance.trail("post", Ecto.UUID.generate()) == nil
-    assert Governance.trail("nope", Ecto.UUID.generate()) == nil
+  test "trail/3 is nil for unknown content" do
+    org = KilnCMS.Accounts.default_org_id()
+    assert Governance.trail("post", Ecto.UUID.generate(), org) == nil
+    assert Governance.trail("nope", Ecto.UUID.generate(), org) == nil
   end
 
   test "content_index lists content" do
     admin = admin()
     CMS.create_post!(%{title: "Indexed", slug: slug()}, actor: admin)
 
-    assert Enum.any?(Governance.content_index(), &(&1.title == "Indexed" and &1.type == "post"))
+    assert Enum.any?(
+             Governance.content_index(KilnCMS.Accounts.default_org_id()),
+             &(&1.title == "Indexed" and &1.type == "post")
+           )
   end
 end

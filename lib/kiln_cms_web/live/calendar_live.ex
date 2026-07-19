@@ -30,7 +30,7 @@ defmodule KilnCMSWeb.CalendarLive do
      socket
      |> assign(:month, month)
      |> assign(:weeks, weeks(month))
-     |> assign(:events, events(socket.assigns.current_user, month))}
+     |> assign(:events, events(socket.assigns.current_user, socket.assigns.current_org, month))}
   end
 
   # --- data -------------------------------------------------------------------
@@ -47,20 +47,22 @@ defmodule KilnCMSWeb.CalendarLive do
 
   # All events in the month, grouped by day: %{~D[...] => [event, ...]}.
   # One record can contribute several events (went live + embargo end).
-  defp events(actor, month) do
+  defp events(actor, org, month) do
     from = DateTime.new!(month, ~T[00:00:00], "Etc/UTC")
     to = DateTime.new!(Date.add(Date.end_of_month(month), 1), ~T[00:00:00], "Etc/UTC")
 
-    (ContentTypes.all() ++ ContentTypes.dynamic_all())
-    |> Enum.flat_map(&month_events(&1, actor, from, to))
+    # Scope the whole calendar to the editor's current site (epic #336).
+    (ContentTypes.all() ++ ContentTypes.dynamic_all(org.id))
+    |> Enum.flat_map(&month_events(&1, actor, org, from, to))
     |> Enum.sort_by(& &1.at, DateTime)
     |> Enum.group_by(&DateTime.to_date(&1.at))
   end
 
-  defp month_events(ct, actor, from, to) do
+  defp month_events(ct, actor, org, from, to) do
     ct
     |> ContentTypes.list!(
       actor: actor,
+      tenant: org,
       query: [
         filter:
           expr(

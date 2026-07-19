@@ -62,12 +62,15 @@ defmodule KilnCMSWeb.TrashLive do
     actor = socket.assigns.actor
     query = page_query(cursor)
 
+    org = socket.assigns.current_org
+
     per_type =
-      Enum.map(editable_types(), fn ct ->
+      Enum.map(editable_types(org.id), fn ct ->
         # Dispatch on the descriptor itself so a type archived between listing
-        # and dispatch can't turn into a registry-lookup miss.
+        # and dispatch can't turn into a registry-lookup miss. Scoped to the
+        # editor's current site (epic #336).
         ct
-        |> ContentTypes.list_trashed!(actor: actor, query: query)
+        |> ContentTypes.list_trashed!(actor: actor, tenant: org, query: query)
         |> Enum.map(&{ct.type, &1})
       end)
 
@@ -86,7 +89,7 @@ defmodule KilnCMSWeb.TrashLive do
       [select: @list_fields, sort: [archived_at: :desc], limit: @page_size]
   end
 
-  defp editable_types, do: ContentTypes.all() ++ ContentTypes.dynamic_all()
+  defp editable_types(org_id), do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id)
 
   @impl true
   def handle_event("restore", %{"kind" => kind, "id" => id}, socket) do
@@ -97,7 +100,7 @@ defmodule KilnCMSWeb.TrashLive do
         {:noreply, socket}
 
       record ->
-        case do_restore(kind, record, actor) do
+        case do_restore(kind, record, actor, socket.assigns.current_org) do
           {:ok, _} ->
             {:noreply, socket |> load_items() |> put_flash(:info, gettext("Restored."))}
 
@@ -117,7 +120,7 @@ defmodule KilnCMSWeb.TrashLive do
         {:noreply, socket}
 
       record ->
-        case do_purge(kind, record, actor) do
+        case do_purge(kind, record, actor, socket.assigns.current_org) do
           :ok ->
             {:noreply,
              socket |> load_items() |> put_flash(:info, gettext("Permanently deleted."))}
@@ -139,12 +142,15 @@ defmodule KilnCMSWeb.TrashLive do
 
   def handle_event("confirm_empty", _params, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     # Everything in the trash, not just the loaded page — walk each type in
     # bounded batches so a huge trash never materializes in memory at once.
+    # Scoped to the editor's current site (epic #336) so emptying one site's
+    # trash never purges another's.
     {ok, skipped} =
-      Enum.reduce(editable_types(), {0, 0}, fn ct, acc ->
-        purge_all(ct, actor, acc, nil)
+      Enum.reduce(editable_types(org.id), {0, 0}, fn ct, acc ->
+        purge_all(ct, actor, org, acc, nil)
       end)
 
     flash =
@@ -175,21 +181,23 @@ defmodule KilnCMSWeb.TrashLive do
     end
   end
 
-  defp do_purge(kind, record, actor), do: ContentTypes.purge(kind, record, actor: actor)
+  defp do_purge(kind, record, actor, org),
+    do: ContentTypes.purge(kind, record, actor: actor, tenant: org)
 
   # Purge one type's trash in @page_size batches, walking oldest-first behind
   # an archived_at cursor so rows whose purge failed are never refetched (and
-  # never loop). Totals are {purged, skipped}.
-  defp purge_all(ct, actor, {ok, skipped}, cursor) do
+  # never loop). Totals are {purged, skipped}. Every read/purge is scoped to
+  # `org` (epic #336).
+  defp purge_all(ct, actor, org, {ok, skipped}, cursor) do
     query =
       if(cursor, do: [{:filter, expr(archived_at > ^cursor)}], else: []) ++
         [select: @list_fields, sort: [archived_at: :asc], limit: @page_size]
 
-    batch = ContentTypes.list_trashed!(ct, actor: actor, query: query)
+    batch = ContentTypes.list_trashed!(ct, actor: actor, tenant: org, query: query)
 
     totals =
       Enum.reduce(batch, {ok, skipped}, fn record, {o, s} ->
-        case ContentTypes.purge(ct, record, actor: actor) do
+        case ContentTypes.purge(ct, record, actor: actor, tenant: org) do
           :ok -> {o + 1, s}
           _ -> {o, s + 1}
         end
@@ -198,7 +206,7 @@ defmodule KilnCMSWeb.TrashLive do
     case batch do
       [] -> totals
       _ when length(batch) < @page_size -> totals
-      _ -> purge_all(ct, actor, totals, List.last(batch).archived_at)
+      _ -> purge_all(ct, actor, org, totals, List.last(batch).archived_at)
     end
   end
 
@@ -208,7 +216,8 @@ defmodule KilnCMSWeb.TrashLive do
     end)
   end
 
-  defp do_restore(kind, record, actor), do: ContentTypes.restore(kind, record, actor: actor)
+  defp do_restore(kind, record, actor, org),
+    do: ContentTypes.restore(kind, record, actor: actor, tenant: org)
 
   @impl true
   def render(assigns) do

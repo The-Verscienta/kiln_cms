@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Kiln.Export.Static do
   host. Reuses the firing engine — no re-render — so the export is a faithful
   snapshot of what the live headless API serves.
 
-      mix kiln.export.static <out_dir> [--surface web,json,json_ld] [--base-url URL]
+      mix kiln.export.static <out_dir> [--surface web,json,json_ld,llm] [--base-url URL]
 
   Examples:
 
@@ -46,7 +46,7 @@ defmodule Mix.Tasks.Kiln.Export.Static do
         )
 
       [] ->
-        Mix.raise("Usage: mix kiln.export.static <out_dir> [--surface web,json,json_ld]")
+        Mix.raise("Usage: mix kiln.export.static <out_dir> [--surface web,json,json_ld,llm]")
     end
   end
 
@@ -63,8 +63,14 @@ defmodule Mix.Tasks.Kiln.Export.Static do
 
   defp parse_surface(name) do
     case StaticExport.parse_surface(name) do
-      {:ok, surface} -> surface
-      :error -> Mix.raise("Unknown surface #{inspect(name)} (expected web|json|json_ld)")
+      {:ok, surface} ->
+        surface
+
+      :error ->
+        Mix.raise(
+          "Unknown surface #{inspect(name)} " <>
+            "(expected #{Enum.join(KilnCMS.Firing.Surfaces.all(), "|")})"
+        )
     end
   end
 

@@ -58,7 +58,10 @@ defmodule KilnCMSWeb.SearchApiController do
     ]
 
     sections =
-      Search.global(query, read_opts ++ [highlight: true, filters: filters(params)])
+      Search.global(
+        query,
+        read_opts ++ [highlight: true, filters: filters(params, read_opts[:tenant])]
+      )
 
     # One result section per compiled content type, straight from the same
     # registry `Search.global/2` swept — a project type registered on
@@ -107,10 +110,10 @@ defmodule KilnCMSWeb.SearchApiController do
   # Facet filter params → `Search` filters. Only the category facet is
   # accepted from the public query string (by slug, resolved world-readably);
   # unknown slugs match nothing rather than silently dropping the filter.
-  defp filters(params) do
+  defp filters(params, org_id) do
     case params["category"] do
       slug when is_binary(slug) and slug != "" ->
-        case KilnCMS.CMS.get_category_by_slug(slug, authorize?: true) do
+        case KilnCMS.CMS.get_category_by_slug(slug, authorize?: true, tenant: org_id) do
           {:ok, category} -> %{category_id: category.id}
           _not_found -> %{category_id: Ecto.UUID.generate()}
         end

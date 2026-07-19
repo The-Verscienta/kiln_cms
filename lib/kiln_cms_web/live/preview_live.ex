@@ -29,14 +29,17 @@ defmodule KilnCMSWeb.PreviewLive do
   def mount(%{"kind" => kind, "id" => id}, _session, socket) do
     if ContentTypes.type?(kind) do
       user = socket.assigns.current_user
-      record = ContentTypes.get_record!(kind, id, actor: user)
+      # Scope the record read to the editor's current site (epic #336) so a
+      # preview can only open that site's content.
+      org = socket.assigns.current_org
+      record = ContentTypes.get_record!(kind, id, actor: user, tenant: org)
 
       socket =
         socket
         |> assign(:kind, kind)
         |> assign(:record_id, id)
         |> assign(:page_title, gettext("Preview: %{title}", title: record.title))
-        |> assign(:excerpt?, ContentTypes.get!(kind).excerpt?)
+        |> assign(:excerpt?, ContentTypes.get!(kind, org.id).excerpt?)
         |> assign(:title, record.title)
         |> assign(:excerpt, Map.get(record, :excerpt))
         |> assign(:blocks, content_blocks(record))

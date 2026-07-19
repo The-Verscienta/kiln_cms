@@ -14,6 +14,9 @@ defmodule KilnCMS.Automation.RuleWorker do
     * `:invalidate_cache` — bust the record's content cache (+ sitemap/llms).
     * `:reindex` — re-fire the record (refreshes artifacts + search indexes) via
       `KilnCMS.Firing.FireWorker`.
+    * `:newsletter` — send the published document to subscribers via
+      `KilnCMS.Newsletter` (#376; `config` `"segment_id"`/`"subject"`, both
+      optional). Deduped per {rule, content, publish revision}.
   """
   use Oban.Worker, queue: :default, max_attempts: 5
 
@@ -38,21 +41,13 @@ defmodule KilnCMS.Automation.RuleWorker do
   end
 
   defp run(%{action: :send_email, config: config}, event, payload) do
-    to = config["to"]
-
-    if is_binary(to) and to != "" do
-      new()
-      |> from(Application.fetch_env!(:kiln_cms, :email_from))
-      |> to(to)
-      # Subject is a header: render it as plain text with CR/LF stripped so a
-      # content title can't inject extra headers. Body is HTML: escape markup.
-      |> subject(render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text))
-      |> html_body(render(config["body"] || default_body(), event, payload, :html))
-      |> KilnCMS.Mail.deliver_for_worker()
-    else
-      Logger.warning("Automation send_email rule missing a `to` address; skipping.")
-      :ok
-    end
+    # Subject is a header: render it as plain text with CR/LF stripped so a
+    # content title can't inject extra headers. Body is HTML: escape markup.
+    send_rule_email(
+      config,
+      render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text),
+      render(config["body"] || default_body(), event, payload, :html)
+    )
   end
 
   defp run(%{action: :broadcast, config: config}, event, payload) do
@@ -73,6 +68,52 @@ defmodule KilnCMS.Automation.RuleWorker do
     :ok
   end
 
+  # "On publish → send the newsletter" (#376 / #337 phase 2). Loads the live
+  # record (the payload is a serialized snapshot) and hands it to the existing
+  # newsletter machinery, which refuses unpublished/gated/unfired content. The
+  # `automation` key makes {rule, content, publish revision} unique on the send
+  # ledger, so a re-fired event or re-delivered job can't double-send; a
+  # genuinely new publish (fresh `published_at`) sends again.
+  # How long after publish we keep waiting for the fired artifact.
+  @fire_wait_limit_s 30 * 60
+
+  defp run(%{action: :newsletter, config: config, org_id: org_id, id: rule_id}, event, payload) do
+    with type when is_binary(type) <- event_type(event),
+         id when is_binary(id) <- payload["id"],
+         # The type may have been deleted/archived since the event fired — the
+         # storage lookup is nil-safe where `get_record` would raise (same
+         # guard the :reindex clause uses).
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
+         {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id),
+         :ok <- default_locale_only(record, event) do
+      KilnCMS.Newsletter.send_as_newsletter(record,
+        segment_id: config["segment_id"],
+        subject: config["subject"],
+        automation: %{rule_id: rule_id, published_at: record.published_at}
+      )
+      |> settle_newsletter(record, event)
+    else
+      # A transient read failure (DB blip) must retry, not silently drop the
+      # campaign; the nil/skip guards above fall through to a clean :ok.
+      {:error, error} -> {:error, error}
+      :skipped_locale -> :ok
+      _ -> :ok
+    end
+  end
+
+  # Embedding-driven editorial intelligence (#377): notify editors of
+  # near-duplicate content — a lightweight review gate ("on in_review → email
+  # any suspiciously similar documents"). Silent when nothing is found.
+  defp run(%{action: :flag_duplicates, config: config, org_id: org_id}, event, payload) do
+    intelligence(event, payload, org_id, config, &duplicate_findings/1)
+  end
+
+  # Tag suggestions for the document under review (#377), from the existing
+  # taxonomy ranked by semantic similarity. Silent when nothing to suggest.
+  defp run(%{action: :suggest_tags, config: config, org_id: org_id}, event, payload) do
+    intelligence(event, payload, org_id, config, &tag_findings/1)
+  end
+
   defp run(%{action: :reindex, org_id: org_id}, event, payload) do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
@@ -88,8 +129,131 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
+  # Content is modeled per-locale, and every locale variant's publish emits its
+  # own event — without this guard one article published in three languages
+  # would email the whole list three times. Campaigns follow the default-locale
+  # variant; per-locale campaigns can use a content_type-scoped rule + segment.
+  defp default_locale_only(record, event) do
+    if Map.get(record, :locale, KilnCMS.I18n.default_locale()) == KilnCMS.I18n.default_locale() do
+      :ok
+    else
+      Logger.info("Automation newsletter rule skipped #{event}: non-default locale variant")
+      :skipped_locale
+    end
+  end
+
+  defp settle_newsletter({:ok, _send}, _record, _event), do: :ok
+  defp settle_newsletter({:error, :already_sent}, _record, _event), do: :ok
+
+  # Publish fires artifacts on a sibling Oban job — retry briefly until the
+  # :web artifact exists. Oban snoozes don't consume attempts, so bound the
+  # loop by the publish's age: past the window, firing is broken and retrying
+  # can't help.
+  defp settle_newsletter({:error, :not_fired}, record, event) do
+    if recent_publish?(record) do
+      {:snooze, 30}
+    else
+      Logger.warning(
+        "Automation newsletter rule gave up on #{event}: no fired artifact " <>
+          "#{inspect(@fire_wait_limit_s)}s after publish"
+      )
+
+      :ok
+    end
+  end
+
+  defp settle_newsletter({:error, reason}, _record, event)
+       when reason in [:not_published, :gated] do
+    Logger.info("Automation newsletter rule skipped #{event}: #{inspect(reason)}")
+    :ok
+  end
+
+  defp settle_newsletter({:error, other}, _record, _event), do: {:error, other}
+
+  defp recent_publish?(%{published_at: %DateTime{} = at}),
+    do: DateTime.diff(DateTime.utc_now(), at) < @fire_wait_limit_s
+
+  defp recent_publish?(_record), do: false
+
   # The public content type from a `<type>.<verb>` event name.
   defp event_type(event), do: event |> String.split(".", parts: 2) |> List.first()
+
+  # ── editorial intelligence (#377) ─────────────────────────────────────────
+
+  # Load the live document, run the finder, and email the findings (if any).
+  # A transient read failure returns the error so Oban retries; a vanished
+  # type/document or empty findings is a clean no-op.
+  defp intelligence(event, payload, org_id, config, finder) do
+    case load_document(event, payload, org_id) do
+      {:ok, record} -> deliver_findings(finder.(record), config)
+      {:error, error} -> {:error, error}
+      :skip -> :ok
+    end
+  end
+
+  defp load_document(event, payload, org_id) do
+    with type when is_binary(type) <- event_type(event),
+         id when is_binary(id) <- payload["id"],
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id) do
+      ContentTypes.get_record(type, id, authorize?: false, tenant: org_id, load: [:tags])
+    else
+      _ -> :skip
+    end
+  end
+
+  defp deliver_findings(:none, _config), do: :ok
+
+  defp deliver_findings({subject, html_body}, config),
+    do: send_rule_email(config, escape(subject, :text), html_body)
+
+  # One delivery skeleton for every emailing reaction, so header/policy
+  # changes (from-address, missing-`to` handling) can't diverge per action.
+  defp send_rule_email(config, subject_text, html) do
+    to = config["to"]
+
+    if is_binary(to) and to != "" do
+      new()
+      |> from(Application.fetch_env!(:kiln_cms, :email_from))
+      |> to(to)
+      |> subject(subject_text)
+      |> html_body(html)
+      |> KilnCMS.Mail.deliver_for_worker()
+    else
+      Logger.warning("Automation email rule missing a `to` address; skipping.")
+      :ok
+    end
+  end
+
+  defp duplicate_findings(record) do
+    case KilnCMS.Search.Related.near_duplicates(record) do
+      [] ->
+        :none
+
+      dups ->
+        items =
+          Enum.map_join(dups, "", fn d ->
+            "<li>#{escape(d.title || d.slug, :html)} (#{escape(d.type, :html)}/#{escape(d.slug, :html)})</li>"
+          end)
+
+        {"Review note: possible duplicates of \"#{record.title}\"",
+         "<p>Content similar to <strong>#{escape(record.title, :html)}</strong> already exists:</p>" <>
+           "<ul>#{items}</ul>"}
+    end
+  end
+
+  defp tag_findings(record) do
+    case KilnCMS.Search.Related.suggest_tags(record) do
+      [] ->
+        :none
+
+      suggestions ->
+        items = Enum.map_join(suggestions, "", &"<li>#{escape(&1.tag.name, :html)}</li>")
+
+        {"Tag suggestions for \"#{record.title}\"",
+         "<p>Suggested tags for <strong>#{escape(record.title, :html)}</strong>:</p>" <>
+           "<ul>#{items}</ul>"}
+    end
+  end
 
   defp default_body do
     "<p>The content <strong>{{title}}</strong> ({{type}}) emitted <em>{{event}}</em>.</p>"

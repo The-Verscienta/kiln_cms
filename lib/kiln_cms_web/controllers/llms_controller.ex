@@ -55,7 +55,7 @@ defmodule KilnCMSWeb.LlmsController do
               query: [select: [:title, :slug, :locale, :seo_description], limit: remaining]
             )
             |> Enum.filter(&(&1.locale == default_locale))
-            |> Enum.map(&entry(&1, ContentTypes.public_prefix(ct)))
+            |> Enum.map(&entry(&1, ct))
 
           {:cont, {[%{label: ct.plural, entries: entries} | acc], count + length(entries)}}
         end
@@ -66,10 +66,13 @@ defmodule KilnCMSWeb.LlmsController do
     |> Enum.reject(&(&1.entries == []))
   end
 
-  defp entry(record, prefix) do
+  defp entry(record, ct) do
     %{
       title: record.title,
-      url: "#{base_url()}#{prefix}/#{record.slug}",
+      url: "#{base_url()}#{ContentTypes.public_prefix(ct)}/#{record.slug}",
+      # The fired :llm surface (#357): the clean Markdown form of this document,
+      # linked per the llmstxt.org "markdown versions" convention.
+      md_url: "#{base_url()}/api/content/#{ct.type}/#{record.slug}?surface=llm",
       description: record.seo_description
     }
   end
@@ -90,12 +93,13 @@ defmodule KilnCMSWeb.LlmsController do
     header <> "\n" <> sections
   end
 
-  defp render_entry(%{title: title, url: url, description: desc})
+  defp render_entry(%{title: title, url: url, md_url: md_url, description: desc})
        when is_binary(desc) and desc != "" do
-    "- [#{md(title)}](#{url}): #{md(desc)}"
+    "- [#{md(title)}](#{url}) ([md](#{md_url})): #{md(desc)}"
   end
 
-  defp render_entry(%{title: title, url: url}), do: "- [#{md(title)}](#{url})"
+  defp render_entry(%{title: title, url: url, md_url: md_url}),
+    do: "- [#{md(title)}](#{url}) ([md](#{md_url}))"
 
   # Keep author-controlled text on one Markdown list line and unable to break out
   # of the link label.

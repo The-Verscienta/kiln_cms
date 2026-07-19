@@ -13,7 +13,7 @@ defmodule KilnCMSWeb.GovernanceController do
   def export(conn, %{"type" => type, "id" => id}) do
     case conn.assigns[:current_user] do
       %{role: :admin} ->
-        case Governance.trail(type, id) do
+        case Governance.trail(type, id, KilnCMSWeb.Tenant.current_org_id(conn)) do
           nil ->
             conn |> put_status(:not_found) |> json(%{error: "not_found"})
 
