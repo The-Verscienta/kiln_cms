@@ -1,4 +1,4 @@
-# Granular RBAC (Phase 1)
+# Granular RBAC
 
 Kiln's editorial roles are `:admin` / `:editor` / `:viewer`. Granular RBAC
 ([issue #332](https://github.com/The-Verscienta/kiln_cms/issues/332)) adds a
@@ -41,11 +41,46 @@ exactly like role assignment:
 KilnCMS.Accounts.manage_user_access!(user, %{editable_types: ["post"]}, actor: admin)
 ```
 
-## Phase 2
+## Phase 2, slices 1+2 (shipped)
 
-- **A team-management UI** (`/editor/team`) so admins assign roles + type scope
-  without AshAdmin.
-- **Read-axis scoping** and **per-field** permissions.
+**Membership-resolved scoping (slice 1).** With multi-tenancy (#336), the
+scope axes live on `KilnCMS.Accounts.OrgMembership` too, so one account can be
+a blog editor on site A and unrestricted on site B. The policy checks resolve
+the *effective* scope via `KilnCMS.Accounts.Scoping`: a **non-empty**
+membership scope for the request's org wins; otherwise the user column applies
+(the single-org fallback — existing deployments are unchanged). A tenant-less
+request resolves against the default org, the same org its writes stamp.
+
+**Affiliation is fail-closed.** A user who holds memberships gets **no**
+editorial scope on an org they have no membership for — the org resolves from
+the client-controlled host, so falling back to the (typically empty =
+unrestricted) user column there would let a scoped editor escape their
+restriction by switching hosts. Accounts with no memberships at all (pre-#336
+data) keep the user-column behavior everywhere. Affiliation is memoized per
+process for a few seconds, so the several checks in one request cost one
+lookup.
+
+**Read-axis scoping (slice 2).** `readable_types` (same shape and defaults as
+`editable_types`, on both the user and the membership) scopes **editorial
+visibility**: for types outside a non-empty scope, an editor no longer sees
+drafts/in-review/archived content — they read those types like any signed-in
+consumer (published, audience-gated). Published visibility is never narrowed;
+the consumer-facing audience axis is untouched. Enforced by one policy check,
+`KilnCMS.CMS.Checks.ReadableContentType`, replacing the editors-see-everything
+grant in the Content macro's read policy **and** in the PaperTrail version
+policies — a version's `changes` carry the full document snapshot, so history
+follows the same scope as the document. Set via `:manage_access` (user) or
+the membership, like the other axes.
+
+Interplay with the write axis: an **explicit** `editable_types` entry implies
+editorial visibility for that type (restricting reads never revokes granted
+authoring), but an *empty* (unrestricted) editable scope does not widen reads
+— it would dissolve every read restriction. When scoping `readable_types`,
+scope `editable_types` alongside it.
+
+## Later phases
+
+- **Per-field write grants** (slice 3) and **custom roles + `/editor/team`
+  UI** (slice 4) — see the design note on
+  [#332](https://github.com/The-Verscienta/kiln_cms/issues/332).
 - **Per-dynamic-type** scoping (today all dynamic types share the `entry` key).
-- **Custom roles** — named bundles of permissions defined in the admin (the
-  fuller Directus-style model).

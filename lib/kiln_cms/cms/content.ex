@@ -1339,8 +1339,13 @@ defmodule KilnCMS.CMS.Content do
         # Drafts/in-review/archived remain editors-only. `actor(:audiences)` is
         # nil for anonymous callers, so a gated record simply isn't authorized
         # (the `in` yields no match) rather than erroring.
+        # Granular RBAC read axis (#332): the editors-see-everything grant is
+        # scoped by the editor's effective `readable_types` — empty means all
+        # (the default). A restricted editor reading an out-of-scope type falls
+        # through to the published/audience filters below, i.e. reads it like
+        # any signed-in consumer.
         policy action_type(:read) do
-          authorize_if actor_attribute_equals(:role, :editor)
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) in ^actor(:audiences))
         end

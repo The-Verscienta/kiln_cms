@@ -43,7 +43,15 @@ defmodule KilnCMS.Accounts.OrgMembership do
 
   actions do
     defaults [:read, :create, :update, :destroy]
-    default_accept [:organization_id, :user_id, :role, :audiences, :editable_types]
+
+    default_accept [
+      :organization_id,
+      :user_id,
+      :role,
+      :audiences,
+      :editable_types,
+      :readable_types
+    ]
 
     read :for_user do
       description "The orgs a user belongs to (backs the org switcher)."
@@ -100,6 +108,15 @@ defmodule KilnCMS.Accounts.OrgMembership do
     # The per-org authoring scope (mirrors `User.editable_types`, #332). Empty
     # means no restriction.
     attribute :editable_types, {:array, :string} do
+      default []
+      allow_nil? false
+      public? false
+    end
+
+    # The per-org editorial read scope (mirrors `User.readable_types`, #332
+    # phase 2). Empty means no restriction. A non-empty value here wins over
+    # the user column for this org (see KilnCMS.Accounts.Scoping).
+    attribute :readable_types, {:array, :string} do
       default []
       allow_nil? false
       public? false

@@ -183,7 +183,7 @@ defmodule KilnCMS.Accounts.User do
     # access is granted — self-registration always lands on `:viewer` with no
     # audiences. See KilnCMS.CMS.Audiences and the content read policy.
     update :manage_access do
-      accept [:role, :audiences, :editable_types]
+      accept [:role, :audiences, :editable_types, :readable_types]
     end
 
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
@@ -574,6 +574,18 @@ defmodule KilnCMS.Accounts.User do
     # authoring policies). Access-control config, so `public? false` like
     # `audiences`; set by an admin via `:manage_access`.
     attribute :editable_types, {:array, :string} do
+      default []
+      allow_nil? false
+      public? false
+    end
+
+    # Granular RBAC read axis (#332 phase 2): the content types where an editor
+    # sees non-published content (drafts/in-review/archived). Empty (default) =
+    # all types — editors are unchanged; non-empty restricts editorial
+    # visibility to those types (published content stays readable like any
+    # signed-in consumer). Same conventions as `editable_types` above; the
+    # per-org override lives on `OrgMembership` (see KilnCMS.Accounts.Scoping).
+    attribute :readable_types, {:array, :string} do
       default []
       allow_nil? false
       public? false
