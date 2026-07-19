@@ -30,6 +30,10 @@ defmodule KilnCMS.Accounts do
       define :list_org_memberships, action: :read
       define :list_memberships_for_user, action: :for_user, args: [:user_id]
       define :list_memberships_for_org, action: :for_org, args: [:organization_id]
+
+      # The policy checks' membership lookup (KilnCMS.Accounts.Scoping): one
+      # (user, org) row, read with `authorize?: false` by the checks themselves.
+      define :get_org_membership, action: :read, get_by: [:user_id, :organization_id]
       define :create_org_membership, action: :create
       define :remove_org_membership, action: :destroy
     end
