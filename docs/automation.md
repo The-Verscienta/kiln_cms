@@ -70,10 +70,12 @@ Modules: `KilnCMS.Automation` (domain + executor), `KilnCMS.Automation.Rule`
 
 Phase-1 slice:
 
-- **Triggers** are the three webhook lifecycle events. `in_review` /
-  `returned_to_draft` (review-workflow transitions) don't currently emit through
-  the webhook funnel; wiring them in is a natural Phase-2 addition (the executor
-  already keys on the event name).
+- **Triggers** are the webhook lifecycle events: `published` / `unpublished` /
+  `updated`, plus the review-workflow transitions `in_review` /
+  `returned_to_draft` (#375) — `submit_for_review` and `return_to_draft` emit
+  `<type>.in_review` / `<type>.returned_to_draft` through the same webhook
+  funnel, so both rules ("on `in_review` → notify") and webhook subscriptions
+  can react to them.
 - **One reaction per rule.** Multi-step flows (do A then B) are modeled today as
   several rules on the same trigger; a sequenced multi-action rule is a follow-on.
 - **Reaction set** covers email / broadcast / cache / reindex. Newsletter fan-out
