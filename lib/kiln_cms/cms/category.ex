@@ -118,7 +118,7 @@ defmodule KilnCMS.CMS.Category do
     end
 
     # Admins may do anything.
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
@@ -130,7 +130,7 @@ defmodule KilnCMS.CMS.Category do
 
     # Managing taxonomy is reserved for editors (and admins via the bypass).
     policy action_type([:create, :update]) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     # Hard deletes are admin-only (allowed by the bypass; denied here for all

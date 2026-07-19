@@ -121,6 +121,38 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
+  @doc """
+  The actor's **effective capability tier** on the org the subject runs under
+  (#419 — per-org tiers): `:admin` | `:editor` | `:viewer` | `:none`.
+
+    * a **platform admin** (`User.role == :admin`) is `:admin` everywhere —
+      the operator break-glass; org administration itself stays global;
+    * a member's tier on an org is their **membership's** `role` there (what
+      `/editor/team` assigns);
+    * an affiliated user has **no tier** (`:none`) on an org they hold no
+      membership for — fail-closed, matching the scope axes;
+    * a user with no memberships at all keeps `User.role` (pre-#336 data).
+
+  `subject` may be the query/changeset under authorization, a raw org id
+  (what the web layer passes from `current_org`), or nil (default org).
+  """
+  @spec effective_tier(map() | nil, Ash.Query.t() | Ash.Changeset.t() | String.t() | nil) ::
+          :admin | :editor | :viewer | :none
+  def effective_tier(%{role: :admin}, _subject), do: :admin
+
+  def effective_tier(%{} = actor, subject) do
+    case affiliation(actor, subject_org_id(subject)) do
+      {:member, membership} -> membership.role
+      :unaffiliated -> Map.get(actor, :role) || :none
+      :foreign_org -> :none
+    end
+  end
+
+  def effective_tier(_actor, _subject), do: :none
+
+  defp subject_org_id(org_id) when is_binary(org_id), do: org_id
+  defp subject_org_id(subject), do: org_id(subject)
+
   defp scope(actor, subject, axis) do
     case affiliation(actor, org_id(subject)) do
       {:member, membership} ->

@@ -70,13 +70,13 @@ defmodule KilnCMS.CMS.Consent do
   policies do
     # Recording and reading consent is an editorial action (editors + admins).
     policy action_type([:create, :read]) do
-      authorize_if actor_attribute_equals(:role, :editor)
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
 
     # Deletion is admin-only (compliance records shouldn't be casually removed).
     policy action_type(:destroy) do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

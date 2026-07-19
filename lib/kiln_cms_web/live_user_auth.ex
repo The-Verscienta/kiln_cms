@@ -65,43 +65,46 @@ defmodule KilnCMSWeb.LiveUserAuth do
     end
   end
 
-  # Requires a signed-in user with the :editor or :admin role (content authors).
-  # Mirrors the RBAC content policies so non-editors can't reach authoring UIs.
+  # Requires a signed-in user whose EFFECTIVE tier on this org is editor or
+  # admin (#419). Mirrors the RBAC content policies so non-editors can't
+  # reach authoring UIs — including org-demoted global editors.
   def on_mount(:live_editor_required, _params, _session, socket) do
     case socket.assigns[:current_user] do
-      %{role: role} when role in [:editor, :admin] ->
-        {:cont, socket}
-
       %{} ->
-        {:halt,
-         socket
-         |> Phoenix.LiveView.put_flash(
-           :error,
-           gettext("You need editor access to view that page.")
-         )
-         |> Phoenix.LiveView.redirect(to: ~p"/")}
+        if effective_tier(socket) in [:editor, :admin] do
+          {:cont, socket}
+        else
+          {:halt,
+           socket
+           |> Phoenix.LiveView.put_flash(
+             :error,
+             gettext("You need editor access to view that page.")
+           )
+           |> Phoenix.LiveView.redirect(to: ~p"/")}
+        end
 
       _ ->
         {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/sign-in")}
     end
   end
 
-  # Requires a signed-in user with the :admin role (admin-only authoring UIs:
-  # webhooks, trash). Router-level guard mirroring the per-LiveView mount checks
-  # and the Ash policies, so non-admins can't even mount the route.
+  # Requires an EFFECTIVE :admin tier on this org (#419) — admin-only
+  # authoring UIs (webhooks, trash, team). Router-level guard mirroring the
+  # per-LiveView mount checks and the Ash policies.
   def on_mount(:live_admin_required, _params, _session, socket) do
     case socket.assigns[:current_user] do
-      %{role: :admin} ->
-        {:cont, socket}
-
       %{} ->
-        {:halt,
-         socket
-         |> Phoenix.LiveView.put_flash(
-           :error,
-           gettext("You need admin access to view that page.")
-         )
-         |> Phoenix.LiveView.redirect(to: ~p"/")}
+        if effective_tier(socket) == :admin do
+          {:cont, socket}
+        else
+          {:halt,
+           socket
+           |> Phoenix.LiveView.put_flash(
+             :error,
+             gettext("You need admin access to view that page.")
+           )
+           |> Phoenix.LiveView.redirect(to: ~p"/")}
+        end
 
       _ ->
         {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/sign-in")}
@@ -118,5 +121,17 @@ defmodule KilnCMSWeb.LiveUserAuth do
 
     socket = assign_new(socket, :current_scope, fn -> nil end)
     {:cont, socket}
+  end
+
+  @doc """
+  The current user's effective capability tier on the socket's org (#419 —
+  per-org tiers). Requires `:assign_current_org` to have run (it precedes the
+  tier gates in the router's live sessions).
+  """
+  def effective_tier(socket_or_conn) do
+    KilnCMS.Accounts.Scoping.effective_tier(
+      socket_or_conn.assigns[:current_user],
+      KilnCMSWeb.Tenant.current_org_id(socket_or_conn)
+    )
   end
 end

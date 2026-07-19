@@ -51,7 +51,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :has_excerpt,
         :has_published_feed,
         :icon,
-        :description
+        :description,
+        :schema_org_type
       ]
 
       change KilnCMS.CMS.Changes.DefaultPathSegment
@@ -70,7 +71,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :has_excerpt,
         :has_published_feed,
         :icon,
-        :description
+        :description,
+        :schema_org_type
       ]
     end
 
@@ -103,13 +105,13 @@ defmodule KilnCMS.CMS.TypeDefinition do
   policies do
     # Admins own the schema — defining content types is an admin act, exactly
     # like defining custom fields.
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
     # Editors may read definitions so the editor UI can list dynamic types.
     policy action_type(:read) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type([:create, :update, :destroy]) do
@@ -141,6 +143,11 @@ defmodule KilnCMS.CMS.TypeDefinition do
     # No collisions with compiled content types, reserved router segments, or
     # configured locales (dynamic-vs-dynamic uniqueness is the identities below).
     validate KilnCMS.CMS.Validations.AvailableTypeName
+
+    # Allowlisted so fired @graph nodes only ever carry known page-level types.
+    validate one_of(:schema_org_type, KilnCMS.Firing.SchemaOrg.types()) do
+      message "must be a supported schema.org page type"
+    end
   end
 
   # Multi-tenancy (epic #336): a dynamic content type belongs to one site, so its
@@ -184,6 +191,14 @@ defmodule KilnCMS.CMS.TypeDefinition do
     # Admin-nav niceties.
     attribute :icon, :string, public?: true
     attribute :description, :string, public?: true
+
+    # The schema.org @type fired onto the :json_ld surface's main node (#357,
+    # GEO) — lets a dynamic type declare itself e.g. a MedicalWebPage. Compiled
+    # types declare the same via the Content macro's `schema_org_type:` option.
+    attribute :schema_org_type, :string,
+      allow_nil?: false,
+      default: "Article",
+      public?: true
 
     timestamps()
   end

@@ -114,7 +114,7 @@ defmodule KilnCMS.CMS.Tag do
       authorize_if always()
     end
 
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
@@ -123,7 +123,7 @@ defmodule KilnCMS.CMS.Tag do
     end
 
     policy action_type([:create, :update]) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type(:destroy) do

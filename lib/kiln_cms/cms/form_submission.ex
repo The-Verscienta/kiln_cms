@@ -48,7 +48,7 @@ defmodule KilnCMS.CMS.FormSubmission do
     # Submission contents are visitor-provided data — admin eyes only. The
     # accept pipeline writes with authorize?: false after validating.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

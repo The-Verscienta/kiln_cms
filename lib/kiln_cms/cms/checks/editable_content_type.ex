@@ -23,9 +23,21 @@ defmodule KilnCMS.CMS.Checks.EditableContentType do
   def describe(_opts), do: "an editor permitted to author this content type"
 
   @impl Ash.Policy.SimpleCheck
-  def match?(%{role: :editor} = actor, %{resource: resource, subject: subject}, _opts) do
-    type = KilnCMS.CMS.ContentTypes.type_name(resource)
-    Scoping.permitted?(actor, subject, :editable_types, type)
+  def match?(%{} = actor, %{resource: resource, subject: subject}, _opts) do
+    # Per-org tiers (#419): the EFFECTIVE tier gates authoring, so an
+    # org-granted editor passes here even when their global role is viewer
+    # (admins bypass upstream, but effective admins pass unrestricted too).
+    case Scoping.effective_tier(actor, subject) do
+      :admin ->
+        true
+
+      :editor ->
+        type = KilnCMS.CMS.ContentTypes.type_name(resource)
+        Scoping.permitted?(actor, subject, :editable_types, type)
+
+      _ ->
+        false
+    end
   end
 
   def match?(_actor, _context, _opts), do: false

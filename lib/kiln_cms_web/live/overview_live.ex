@@ -45,6 +45,7 @@ defmodule KilnCMSWeb.OverviewLive do
     {:ok,
      socket
      |> assign(:actor, socket.assigns.current_user)
+     |> assign(:admin?, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign(:page_title, gettext("Overview"))
      |> load_metrics()}
   end
@@ -54,7 +55,7 @@ defmodule KilnCMSWeb.OverviewLive do
     # Every count/aggregate scopes to the current site (epic #336); Ash ignores
     # the tenant on the still-global resources (API keys, analytics).
     org = socket.assigns.current_org
-    admin? = actor.role == :admin
+    admin? = socket.assigns.admin?
     now = DateTime.utc_now()
 
     rows = content_rows(actor, org)

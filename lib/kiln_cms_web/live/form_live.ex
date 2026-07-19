@@ -14,7 +14,7 @@ defmodule KilnCMSWeb.FormLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if actor.role == :admin do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
       {:ok,
        socket
        |> assign(:actor, actor)

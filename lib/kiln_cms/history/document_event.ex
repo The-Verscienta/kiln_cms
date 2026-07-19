@@ -46,8 +46,8 @@ defmodule KilnCMS.History.DocumentEvent do
     # History is internal; reads are editor/admin tooling, writes only via the
     # History API (authorize?: false). Non-editors get nothing.
     policy action_type(:read) do
-      authorize_if actor_attribute_equals(:role, :admin)
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type(:create) do

@@ -93,18 +93,18 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
   policies do
     # Admins own the schema (defining/removing fields is an admin concern).
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
     # Editors may read definitions so the content editor can render the fields.
     policy action_type(:read) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     # Only admins define, change or remove fields.
     policy action_type([:create, :update, :destroy]) do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

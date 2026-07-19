@@ -25,16 +25,26 @@ defmodule KilnCMS.CMS.Checks.ReadableContentType do
   def describe(_opts), do: "an editor whose editorial read scope covers this content type"
 
   @impl Ash.Policy.SimpleCheck
-  def match?(%{role: :editor} = actor, %{resource: resource, subject: subject}, _opts) do
-    type = KilnCMS.CMS.ContentTypes.type_name(resource)
+  def match?(%{} = actor, %{resource: resource, subject: subject}, _opts) do
+    # Per-org tiers (#419): editorial visibility follows the EFFECTIVE tier.
+    case Scoping.effective_tier(actor, subject) do
+      :admin ->
+        true
 
-    # An EXPLICIT editable_types entry is unioned in: restricting what an
-    # editor sees must never revoke drafts of types they were explicitly
-    # granted to author. An empty (unrestricted) editable scope deliberately
-    # does NOT widen reads — it would dissolve every readable_types
-    # restriction (see docs/granular-rbac.md).
-    Scoping.permitted?(actor, subject, :readable_types, type) or
-      Scoping.explicitly_permits?(actor, subject, :editable_types, type)
+      :editor ->
+        type = KilnCMS.CMS.ContentTypes.type_name(resource)
+
+        # An EXPLICIT editable_types entry is unioned in: restricting what an
+        # editor sees must never revoke drafts of types they were explicitly
+        # granted to author. An empty (unrestricted) editable scope
+        # deliberately does NOT widen reads — it would dissolve every
+        # readable_types restriction (see docs/granular-rbac.md).
+        Scoping.permitted?(actor, subject, :readable_types, type) or
+          Scoping.explicitly_permits?(actor, subject, :editable_types, type)
+
+      _ ->
+        false
+    end
   end
 
   def match?(_actor, _context, _opts), do: false

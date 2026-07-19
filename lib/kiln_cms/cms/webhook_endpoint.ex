@@ -113,7 +113,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     # Webhook configuration is admin-only. The delivery pipeline reads endpoints
     # with `authorize?: false` as a system job.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

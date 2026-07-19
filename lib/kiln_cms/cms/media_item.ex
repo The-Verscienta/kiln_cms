@@ -212,7 +212,7 @@ defmodule KilnCMS.CMS.MediaItem do
     end
 
     # Admins may do anything.
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
@@ -225,7 +225,7 @@ defmodule KilnCMS.CMS.MediaItem do
     # Uploading and editing media metadata is reserved for editors (and admins
     # via the bypass above).
     policy action_type([:create, :update]) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     # Deletes are admin-only (allowed by the bypass; denied here for all other

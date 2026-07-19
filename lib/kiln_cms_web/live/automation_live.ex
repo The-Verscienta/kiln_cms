@@ -16,7 +16,7 @@ defmodule KilnCMSWeb.AutomationLive do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
 
-    if actor.role == :admin do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
       {:ok,
        socket
        |> assign(:actor, actor)

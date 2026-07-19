@@ -92,7 +92,7 @@ defmodule KilnCMS.Automation.Rule do
     # Editor-workflow configuration is admin-only; the executor reads with
     # `authorize?: false` (system job).
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

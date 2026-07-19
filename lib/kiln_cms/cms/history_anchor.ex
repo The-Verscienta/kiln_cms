@@ -64,7 +64,7 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # Written by the publish pipeline (`authorize?: false`); reading the audit
     # surface is admin-only.
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 

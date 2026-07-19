@@ -20,7 +20,7 @@ defmodule KilnCMS.CMS.VersionPolicies do
       end
 
       policies do
-        bypass actor_attribute_equals(:role, :admin) do
+        bypass KilnCMS.CMS.Checks.OrgAdmin do
           authorize_if always()
         end
 

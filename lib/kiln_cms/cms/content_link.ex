@@ -73,7 +73,7 @@ defmodule KilnCMS.CMS.ContentLink do
       authorize_if always()
     end
 
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
@@ -84,7 +84,7 @@ defmodule KilnCMS.CMS.ContentLink do
     end
 
     policy action_type([:create, :update, :destroy]) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
   end
 

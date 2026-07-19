@@ -64,10 +64,38 @@ block module may export an optional `to_markdown/1` for a richer rendering.
   coverage; the delivery route answers 503-retryable for a missing artifact
   as usual.
 
-## Later phases
+## Expanded schema.org / JSON-LD (Phase 3, shipped)
 
-- **Expanded schema.org / JSON-LD** — beyond the current `Article`: `FAQPage`,
-  `HowTo`, and for the health domain `MedicalWebPage` + `ClaimReview` (extends
-  `KilnCMS.Firing.Engine`'s `:json_ld` composition).
-- **Citation / source metadata on claims** — ties into content provenance
-  ([#340](https://github.com/The-Verscienta/kiln_cms/issues/340)).
+The fired `:json_ld` surface goes well beyond the original bare `Article`:
+
+**Per-type main node** (`KilnCMS.Firing.SchemaOrg`). Every content type
+declares the schema.org `@type` of its document node — compiled types via the
+Content macro (`use KilnCMS.CMS.Content, type: :page, schema_org_type:
+"WebPage"`), dynamic types (D17) via the `schema_org_type` field on the type
+definition (editable at `/editor/types`), so a health-domain type can fire a
+**`MedicalWebPage`**. Values are allowlisted (`SchemaOrg.types/0`: the
+`Article` family plus the `WebPage` family); unknown values fall back to
+`Article`. Pages fire `WebPage`, posts `BlogPosting`. The node also carries
+the citation-relevant metadata answer engines key on: `datePublished` /
+`dateModified`, `inLanguage`, and the SEO description; Article-family types
+carry the body as `articleBody`, the rest as `text`.
+
+**Structured-data blocks.** Three first-party blocks whose `:json_ld` renders
+expand the `@graph` (and which render meaningfully on *every* surface):
+
+- **`faq`** — Q&A rows, fired as a **`FAQPage`** node (`Question` /
+  `acceptedAnswer`). On `:llm` each question becomes a `###` heading with its
+  answer as the following passage.
+- **`how_to`** — ordered steps, fired as a **`HowTo`** node with positioned
+  `HowToStep`s; a numbered list on `:llm`.
+- **`claim`** — one sourced statement (citation / source metadata on claims,
+  the per-claim counterpart of provenance
+  [#340](https://github.com/The-Verscienta/kiln_cms/issues/340)): fired as a
+  schema.org **`Claim`** node carrying its `citation`, or a **`ClaimReview`**
+  (with `reviewRating`) when a fact-check rating is set. The citation rides
+  the `:web` surface as a `<cite>` link and the `:llm` surface as a trailing
+  `Source: [title](url)` line, so extracting engines pick up the source
+  wherever they read.
+
+Same deploy note as the `:llm` surface: content published before this feature
+carries the old JSON-LD until re-fired.

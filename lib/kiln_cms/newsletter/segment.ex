@@ -40,7 +40,7 @@ defmodule KilnCMS.Newsletter.Segment do
 
   policies do
     policy always() do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 
