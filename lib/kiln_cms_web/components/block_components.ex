@@ -49,6 +49,47 @@ defmodule KilnCMSWeb.BlockComponents do
               <.render_block :for={child <- col.blocks} block={child} />
             </div>
           </div>
+        <% @type == "faq" -> %>
+          <%!-- GEO Q&A block (#357): title in content, item rows in :items. --%>
+          <section class="kiln-faq space-y-2">
+            <h2 :if={@block.content not in [nil, ""]} class="text-xl font-bold">{@block.content}</h2>
+            <details
+              :for={item <- @block[:items] || []}
+              :if={item["question"] not in [nil, ""]}
+              class="kiln-faq-item rounded border border-base-300 p-2"
+            >
+              <summary class="cursor-pointer font-medium">{item["question"]}</summary>
+              <p class="mt-1">{item["answer"]}</p>
+            </details>
+          </section>
+        <% @type == "how_to" -> %>
+          <%!-- GEO step-by-step block (#357): name in content, rows in :steps. --%>
+          <section class="kiln-howto space-y-2">
+            <h2 :if={@block.content not in [nil, ""]} class="text-xl font-bold">{@block.content}</h2>
+            <p :if={@block[:description] not in [nil, ""]} class="text-base-content/80">
+              {@block[:description]}
+            </p>
+            <ol class="list-decimal space-y-1 pl-5">
+              <li :for={step <- @block[:steps] || []} :if={step["text"] not in [nil, ""]}>
+                <strong :if={step["name"] not in [nil, ""]}>{step["name"]}</strong>
+                {step["text"]}
+              </li>
+            </ol>
+          </section>
+        <% @type == "claim" -> %>
+          <%!-- GEO sourced claim (#357): the citation renders inline on-site too. --%>
+          <p class="kiln-claim">
+            {@block.content}
+            <cite :if={@block[:source_title] || @block[:source_url]} class="text-sm">
+              <%= if href = HTMLSanitizer.safe_href(@block[:source_url]) do %>
+                <a href={href} rel="noopener" class="underline">
+                  {@block[:source_title] || href}
+                </a>
+              <% else %>
+                {@block[:source_title]}
+              <% end %>
+            </cite>
+          </p>
         <% @type == "divider" -> %>
           <hr class="border-base-300" />
         <% @type == "form" -> %>
@@ -187,6 +228,29 @@ defmodule KilnCMSWeb.BlockComponents do
       content: nil,
       columns: cols,
       style: KilnCMS.Blocks.Columns.grid_style(data["layout"], data["gap"], length(cols))
+    }
+  end
+
+  # GEO blocks (#357): carry the data-side fields the renderer reads, so the
+  # pop-out preview shows item rows and citations, not just the primary text.
+  defp thin_block(%{type: :faq, content: content, data: data}),
+    do: %{type: "faq", content: content, items: data["items"] || []}
+
+  defp thin_block(%{type: :how_to, content: content, data: data}) do
+    %{
+      type: "how_to",
+      content: content,
+      description: data["description"],
+      steps: data["steps"] || []
+    }
+  end
+
+  defp thin_block(%{type: :claim, content: content, data: data}) do
+    %{
+      type: "claim",
+      content: content,
+      source_title: data["source_title"],
+      source_url: data["source_url"]
     }
   end
 

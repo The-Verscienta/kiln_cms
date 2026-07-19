@@ -173,11 +173,10 @@ defmodule KilnCMS.Firing.Engine do
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n\n")
 
-    article = %{
-      "@type" => "Article",
-      "headline" => Map.get(document, :title),
-      "articleBody" => body
-    }
+    # The main node's @type is declared per content type (#357, GEO): the
+    # Content macro's `schema_org_type:` option or the dynamic type's
+    # definition — so a health-domain type fires e.g. a MedicalWebPage.
+    main = KilnCMS.Firing.SchemaOrg.main_node(document, body)
 
     # Structured data falls out of the typed blocks (decision D9): each block that
     # has a schema.org representation contributes a node to the document @graph. A
@@ -185,7 +184,7 @@ defmodule KilnCMS.Firing.Engine do
     # `columns` — a list of its children's nodes, so flatten before assembling.
     block_nodes = typed |> Enum.flat_map(&json_ld_nodes/1)
 
-    %{"@context" => "https://schema.org", "@graph" => [article | block_nodes]}
+    %{"@context" => "https://schema.org", "@graph" => [main | block_nodes]}
   end
 
   # Normalize a block's `:json_ld` render (nil | node map | list of nodes) to a

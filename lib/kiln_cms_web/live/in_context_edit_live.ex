@@ -562,7 +562,15 @@ defmodule KilnCMSWeb.InContextEditLive do
   # A `columns` container (#335) is rendered through the shared thin-map builder
   # so its nested children show in place (read-only here — structural nested
   # edits live in the full editor, like the other non-text blocks on this surface).
-  defp read_only_block(%KilnCMS.Blocks.Columns{} = struct) do
+  # The GEO blocks (#357) also carry data-side fields (items/steps/citation),
+  # which the thin-map builder surfaces for the shared renderer.
+  defp read_only_block(%mod{} = struct)
+       when mod in [
+              KilnCMS.Blocks.Columns,
+              KilnCMS.Blocks.Faq,
+              KilnCMS.Blocks.HowTo,
+              KilnCMS.Blocks.Claim
+            ] do
     [legacy] = TypedBlocks.to_legacy([struct])
     [thin] = BlockComponents.thin_blocks([legacy])
     thin

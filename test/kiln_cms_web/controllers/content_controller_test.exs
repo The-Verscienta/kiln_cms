@@ -172,6 +172,41 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ ~s(alt="Nested image")
     end
 
+    test "GEO blocks render their items and citations on-site (#357)", %{conn: conn} do
+      page =
+        page(%{
+          title: "GEO Page",
+          blocks: [
+            %{
+              "_type" => "faq",
+              "title" => "FAQ",
+              "items" => [%{"question" => "What?", "answer" => "This."}]
+            },
+            %{
+              "_type" => "how_to",
+              "name" => "Brew",
+              "steps" => [%{"name" => "Boil", "text" => "Boil water."}]
+            },
+            %{
+              "_type" => "claim",
+              "text" => "Water is wet.",
+              "source_title" => "Src",
+              "source_url" => "https://s.example"
+            }
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "kiln-faq"
+      assert html =~ "<summary"
+      assert html =~ "What?"
+      assert html =~ "kiln-howto"
+      assert html =~ "Boil water."
+      assert html =~ "kiln-claim"
+      assert html =~ ~s(href="https://s.example")
+    end
+
     test "form blocks render the live public form on-site", %{conn: conn} do
       actor =
         Ash.Seed.seed!(KilnCMS.Accounts.User, %{

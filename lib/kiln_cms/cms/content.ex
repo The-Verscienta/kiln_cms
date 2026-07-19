@@ -83,6 +83,12 @@ defmodule KilnCMS.CMS.Content do
     excerpt? = Keyword.get(opts, :excerpt?, false)
     dynamic? = Keyword.get(opts, :dynamic?, false)
 
+    # The schema.org @type this type's :json_ld surface fires as its main node
+    # (#357, GEO) — e.g. "BlogPosting", "MedicalWebPage". Must be in
+    # `KilnCMS.Firing.SchemaOrg.types/0`; unknown values fall back to Article
+    # at fire time. Dynamic entries resolve theirs from the TypeDefinition row.
+    schema_org_type = Keyword.get(opts, :schema_org_type, "Article")
+
     # `published?:` is accepted for backward compatibility but ignored: the
     # `/published` feed (read + route + GraphQL query) is universal since the
     # official client (#300) — every delivery consumer needs a server-side
@@ -752,6 +758,11 @@ defmodule KilnCMS.CMS.Content do
           # no user input), never per-request.
           # sobelow_skip ["DOS.StringToAtom"]
           def __kiln_content_section__, do: unquote(String.to_atom(plural))
+
+          # The schema.org @type of this type's fired :json_ld main node
+          # (#357, GEO). Dynamic entries carry theirs on the TypeDefinition
+          # row instead, so the entry tier has no marker.
+          def __kiln_schema_org_type__, do: unquote(schema_org_type)
         end
       end
 

@@ -16,7 +16,8 @@ defmodule KilnCMS.CMS.TypedBlocks do
   accessors tolerate both.
   """
 
-  alias KilnCMS.Blocks.{Columns, Custom, Divider, Embed, Form, Heading, Image, Quote, RichText}
+  alias KilnCMS.Blocks.{Claim, Columns, Custom, Divider, Embed, Faq, Form, Heading, HowTo}
+  alias KilnCMS.Blocks.{Image, Quote, RichText}
   alias KilnCMS.HTMLSanitizer
 
   # Guards recursion for the nested `columns` block: hostile API input can't force
@@ -265,6 +266,31 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp typed(:form, id, content, data, _block),
     do: %Form{id: id, _type: "form", form_slug: data_str(data, "form_slug") || content}
 
+  # GEO blocks (#357): items/steps ride in `data` as raw string-keyed map lists.
+  defp typed(:faq, id, content, data, _block),
+    do: %Faq{id: id, _type: "faq", title: content, items: data_maps(data, "items")}
+
+  defp typed(:how_to, id, content, data, _block) do
+    %HowTo{
+      id: id,
+      _type: "how_to",
+      name: content,
+      description: data_str(data, "description"),
+      steps: data_maps(data, "steps")
+    }
+  end
+
+  defp typed(:claim, id, content, data, _block) do
+    %Claim{
+      id: id,
+      _type: "claim",
+      text: content,
+      source_title: data_str(data, "source_title"),
+      source_url: data_str(data, "source_url"),
+      rating: data_str(data, "rating")
+    }
+  end
+
   # columns, custom, and anything unmapped → the total fallback.
   defp typed(other, id, content, data, _block) do
     %Custom{
@@ -313,6 +339,31 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_legacy(%Form{} = b),
     do: %{type: :form, content: b.form_slug, data: %{"form_slug" => b.form_slug}, id: b.id}
 
+  # GEO blocks (#357): the primary text rides in `content`, the rest in `data`
+  # (items/steps stay raw map lists — see the block modules).
+  defp one_to_legacy(%Faq{} = b),
+    do: %{type: :faq, content: b.title, data: %{"items" => KilnCMS.Blocks.Faq.items(b)}, id: b.id}
+
+  defp one_to_legacy(%HowTo{} = b),
+    do: %{
+      type: :how_to,
+      content: b.name,
+      data: %{"description" => b.description, "steps" => KilnCMS.Blocks.HowTo.steps(b)},
+      id: b.id
+    }
+
+  defp one_to_legacy(%Claim{} = b),
+    do: %{
+      type: :claim,
+      content: b.text,
+      data: %{
+        "source_title" => b.source_title,
+        "source_url" => b.source_url,
+        "rating" => b.rating
+      },
+      id: b.id
+    }
+
   # The container's layout + child tree ride in `data` (`content`/`children` stay
   # empty). Delivery reads `data["columns"]` to render the nested tree — see
   # `KilnCMSWeb.BlockComponents`.
@@ -344,6 +395,14 @@ defmodule KilnCMS.CMS.TypedBlocks do
     case Map.get(data, key) do
       value when is_binary(value) -> value
       _ -> nil
+    end
+  end
+
+  # A jsonb list-of-maps value (faq items / how_to steps); anything else → [].
+  defp data_maps(data, key) do
+    case Map.get(data, key) do
+      list when is_list(list) -> Enum.filter(list, &is_map/1)
+      _ -> []
     end
   end
 

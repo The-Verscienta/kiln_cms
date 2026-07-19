@@ -21,6 +21,11 @@ defmodule KilnCMS.Blocks do
     divider: KilnCMS.Blocks.Divider,
     form: KilnCMS.Blocks.Form,
     columns: KilnCMS.Blocks.Columns,
+    # GEO blocks (#357): structured Q&A, procedures, and sourced claims whose
+    # :json_ld renders expand the fired @graph (FAQPage / HowTo / Claim(Review)).
+    faq: KilnCMS.Blocks.Faq,
+    how_to: KilnCMS.Blocks.HowTo,
+    claim: KilnCMS.Blocks.Claim,
     custom: KilnCMS.Blocks.Custom
   ]
 

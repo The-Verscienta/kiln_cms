@@ -507,9 +507,26 @@ defmodule KilnCMSWeb.ContentController do
         Map.put(base, :form, forms[block.data["form_slug"] || block.content])
 
       true ->
-        base
+        enrich_geo(base, block)
     end
   end
+
+  # GEO blocks (#357): surface the data-side fields the renderer reads.
+  defp enrich_geo(base, %{type: :faq} = block),
+    do: Map.put(base, :items, block.data["items"] || [])
+
+  defp enrich_geo(base, %{type: :how_to} = block) do
+    Map.merge(base, %{description: block.data["description"], steps: block.data["steps"] || []})
+  end
+
+  defp enrich_geo(base, %{type: :claim} = block) do
+    Map.merge(base, %{
+      source_title: block.data["source_title"],
+      source_url: block.data["source_url"]
+    })
+  end
+
+  defp enrich_geo(base, _block), do: base
 
   # Recursively enrich a columns block's nested children (each column's blocks go
   # through the same `enrich_block/3` a top-level block does), and attach the grid

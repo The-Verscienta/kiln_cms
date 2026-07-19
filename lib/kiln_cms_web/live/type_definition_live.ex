@@ -204,6 +204,12 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
             <div class="sm:col-span-2">
               <.input field={@form[:description]} label={gettext("Description")} />
             </div>
+            <.input
+              field={@form[:schema_org_type]}
+              type="select"
+              label={gettext("schema.org type (structured data)")}
+              options={KilnCMS.Firing.SchemaOrg.types()}
+            />
             <label class="flex items-center gap-2 text-sm">
               <input type="hidden" name="type_definition[has_excerpt]" value="false" />
               <input
@@ -308,6 +314,12 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                 <.input field={@edit.form[:plural_label]} label={gettext("Plural name")} />
                 <.input field={@edit.form[:path_segment]} label={gettext("URL segment")} />
                 <.input field={@edit.form[:description]} label={gettext("Description")} />
+                <.input
+                  field={@edit.form[:schema_org_type]}
+                  type="select"
+                  label={gettext("schema.org type")}
+                  options={KilnCMS.Firing.SchemaOrg.types()}
+                />
                 <label class="flex items-center gap-2 text-sm">
                   <input type="hidden" name="type_definition[has_excerpt]" value="false" />
                   <input

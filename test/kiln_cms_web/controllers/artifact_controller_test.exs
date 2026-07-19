@@ -72,7 +72,8 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
 
     assert body["@context"] == "https://schema.org"
     types = Enum.map(body["@graph"], & &1["@type"])
-    assert "Article" in types
+    # Pages fire a WebPage main node (#357, GEO).
+    assert "WebPage" in types
     assert "ImageObject" in types
   end
 
