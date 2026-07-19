@@ -203,6 +203,14 @@ config :kiln_cms, :multitenancy_enabled, true
 # sign per publish); disable only if the audit surface is unwanted.
 config :kiln_cms, :audit_anchors_enabled, true
 
+# Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
+# :registration_enabled's route conditional): `enabled: false` (default) means
+# no SSO strategy is compiled — no sign-in button, no OAuth routes, zero
+# surface. To enable: set `enabled: true` here (or in a deploy overlay),
+# recompile, and provide OIDC_CLIENT_ID / OIDC_CLIENT_SECRET / OIDC_ISSUER /
+# OIDC_REDIRECT_URI at runtime (read in runtime.exs). See docs/sso.md.
+config :kiln_cms, :sso_oidc, enabled: false
+
 # Content locales. Content is modelled per-locale (unique [slug, locale]); the
 # delivery layer serves the requested locale with a fallback to the default.
 # Non-default locales are served under a `/<locale>/…` URL prefix.

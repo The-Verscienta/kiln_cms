@@ -12,6 +12,9 @@ defmodule KilnCMS.Accounts do
   resources do
     resource KilnCMS.Accounts.Token
 
+    # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
+    resource KilnCMS.Accounts.UserIdentity
+
     # The tenant registry (epic #336) + the user↔org membership join. The org is
     # not itself multitenant — it *is* the tenant list every scoped resource is
     # partitioned by.

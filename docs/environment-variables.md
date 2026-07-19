@@ -72,6 +72,18 @@ required (the latter two raise via `System.fetch_env!`). See
 | `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:231`](../config/runtime.exs#L231) |
 | `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:233`](../config/runtime.exs#L233) |
 
+## Optional — SSO (OpenID Connect, #331)
+
+Only read when SSO was compiled in (`config :kiln_cms, :sso_oidc, enabled:
+true` — see docs/sso.md). All four are then required for the flow to work.
+
+| Variable | Purpose | Where it's read |
+|----------|---------|-----------------|
+| `OIDC_CLIENT_ID` | Client id registered at the IdP | `config/runtime.exs` |
+| `OIDC_CLIENT_SECRET` | Client secret (`client_secret_basic`) | `config/runtime.exs` |
+| `OIDC_ISSUER` | Provider base URL (OIDC discovery) | `config/runtime.exs` |
+| `OIDC_REDIRECT_URI` | This site's callback base, e.g. `https://cms.example.com/auth` | `config/runtime.exs` |
+
 ## Optional — outbound email
 
 With none of these set, production uses the dev-only in-memory adapter: the

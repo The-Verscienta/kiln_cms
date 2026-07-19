@@ -35,6 +35,7 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     })
     |> Ash.Changeset.after_action(fn _changeset, user ->
       revoke_tokens(user)
+      remove_identities(user)
       :ok = History.anonymize_actor(user.id)
       {:ok, user}
     end)
@@ -44,6 +45,24 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   # it, so the scrubbed account can never authenticate.
   defp random_hash do
     32 |> :crypto.strong_rand_bytes() |> Base.encode64() |> Bcrypt.hash_pwd_salt()
+  end
+
+  # Delete the user's external-IdP links (#331): a user_identities row carries
+  # the provider's stable subject identifier plus live OAuth access/refresh
+  # tokens — personal data (and usable credentials) that must not survive
+  # erasure, and removing the link also prevents any future SSO sign-in from
+  # re-attaching to the tombstoned account.
+  defp remove_identities(user) do
+    require Ash.Query
+
+    KilnCMS.Accounts.UserIdentity
+    |> Ash.Query.filter(user_id == ^user.id)
+    |> Ash.bulk_destroy!(:destroy, %{},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    )
   end
 
   # Revoke (mark as `revocation`) every stored token for this subject, mirroring
