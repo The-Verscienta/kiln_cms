@@ -133,6 +133,10 @@ config :kiln_cms, :sso_oidc,
   base_url: "https://idp.example.test",
   redirect_uri: "http://localhost:4002/auth"
 
+# Passkeys (#331): stub the Wax verification seam — tests exercise the real
+# base64url plumbing, storage, counter regression, and token minting around it.
+config :kiln_cms, KilnCMS.Accounts.WebAuthn, verifier: KilnCMS.StubWebAuthnVerifier
+
 # RBAC scope memoization off: tests mutate memberships/roles mid-process and
 # assert the new scope immediately (prod keeps the few-second process memo).
 config :kiln_cms, KilnCMS.Accounts.Scoping, memo_ttl_ms: 0

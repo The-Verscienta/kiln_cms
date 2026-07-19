@@ -131,6 +131,9 @@ defmodule KilnCMS.MixProject do
       # Required by Swoosh.Adapters.SMTP, the production mailer adapter (config/runtime.exs).
       {:gen_smtp, "~> 1.0"},
       {:req, "~> 0.5"},
+      # WebAuthn/passkey ceremony verification (#331) — attestation and
+      # assertion checks for the first-party passkey strategy.
+      {:wax_, "~> 0.7"},
       # QR code SVG for TOTP enrolment (#331) — pure Elixir, no NIF.
       {:eqrcode, "~> 0.2"},
       {:telemetry_metrics, "~> 1.0"},

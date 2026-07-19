@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.SettingsLive do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.WebAuthn
 
   @impl true
   def mount(_params, _session, socket) do
@@ -24,7 +25,77 @@ defmodule KilnCMSWeb.SettingsLive do
      # Transient enrolment state (secret + provisioning URI + QR) while confirming.
      |> assign(:enrolling, nil)
      # Freshly minted recovery codes, shown exactly once (#331 phase 2).
-     |> assign(:recovery_codes, nil)}
+     |> assign(:recovery_codes, nil)
+     # Passkeys (#331): registered credentials + the in-flight enrolment
+     # challenge (parked in LV state between the JS create() round-trip).
+     |> assign(:passkeys, WebAuthn.list(user))
+     |> assign(:passkey_challenge, nil)}
+  end
+
+  # --- passkeys (#331) -------------------------------------------------------
+
+  @impl true
+  def handle_event("passkey_begin", params, socket) do
+    user = socket.assigns.current_user
+    challenge = WebAuthn.registration_challenge()
+
+    {:noreply,
+     socket
+     |> assign(:passkey_challenge, challenge)
+     |> push_event("passkey-register", %{
+       publicKey: WebAuthn.registration_options(challenge, user),
+       name: params["name"] || ""
+     })}
+  end
+
+  def handle_event("passkey_attestation", payload, socket) do
+    user = socket.assigns.current_user
+
+    case socket.assigns.passkey_challenge do
+      nil ->
+        {:noreply, socket}
+
+      challenge ->
+        socket = assign(socket, :passkey_challenge, nil)
+
+        case WebAuthn.register_passkey(user, challenge, payload) do
+          {:ok, _passkey} ->
+            {:noreply,
+             socket
+             |> assign(:passkeys, WebAuthn.list(user))
+             |> put_flash(:info, gettext("Passkey added — you can sign in with it now."))}
+
+          {:error, _reason} ->
+            {:noreply,
+             put_flash(socket, :error, gettext("Couldn't verify that passkey — try again."))}
+        end
+    end
+  end
+
+  def handle_event("passkey_error", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:passkey_challenge, nil)
+     |> put_flash(
+       :error,
+       gettext("Passkey setup was cancelled or isn't supported by this browser.")
+     )}
+  end
+
+  def handle_event("remove_passkey", %{"id" => id}, socket) do
+    user = socket.assigns.current_user
+
+    socket =
+      with {:ok, passkey} <- Accounts.get_passkey(id, actor: user),
+           :ok <- Accounts.remove_passkey(passkey, actor: user) do
+        socket
+        |> assign(:passkeys, WebAuthn.list(user))
+        |> put_flash(:info, gettext("Passkey removed."))
+      else
+        _ -> put_flash(socket, :error, gettext("Couldn't remove that passkey."))
+      end
+
+    {:noreply, socket}
   end
 
   # --- two-factor authentication (#331) --------------------------------------
@@ -393,6 +464,61 @@ defmodule KilnCMSWeb.SettingsLive do
               {gettext("Enable two-factor authentication")}
             </.button>
           </div>
+        </section>
+
+        <section class="card card-pad max-w-xl" id="passkeys" phx-hook="PasskeyEnroll">
+          <h2 class="mb-1 text-lg font-medium">{gettext("Passkeys")}</h2>
+          <p class="mb-4 text-sm text-base-content/60">
+            {gettext(
+              "Sign in with your device's fingerprint, face, or PIN instead of a password. A passkey verifies you on the device, so it counts as two factors on its own."
+            )}
+          </p>
+
+          <ul :if={@passkeys != []} class="mb-4 divide-y divide-base-content/10">
+            <li
+              :for={passkey <- @passkeys}
+              class="flex items-center justify-between gap-3 py-2"
+              id={"passkey-#{passkey.id}"}
+            >
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium">{passkey.name}</p>
+                <p class="text-xs text-base-content/60">
+                  {gettext("Added %{date}",
+                    date: Calendar.strftime(passkey.inserted_at, "%Y-%m-%d")
+                  )}
+                  <span :if={passkey.last_used_at}>
+                    · {gettext("last used %{date}",
+                      date: Calendar.strftime(passkey.last_used_at, "%Y-%m-%d")
+                    )}
+                  </span>
+                </p>
+              </div>
+              <button
+                type="button"
+                phx-click="remove_passkey"
+                phx-value-id={passkey.id}
+                data-confirm={gettext("Remove this passkey? You can no longer sign in with it.")}
+                aria-label={gettext("Remove passkey")}
+                class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
+              >
+                <.icon name="hero-trash" class="size-4" />
+              </button>
+            </li>
+          </ul>
+
+          <form phx-submit="passkey_begin" class="flex items-end gap-2" id="add-passkey-form">
+            <.input
+              name="name"
+              value=""
+              type="text"
+              label={gettext("Name (e.g. \"MacBook Touch ID\")")}
+              placeholder={gettext("Passkey")}
+            />
+            <.button type="submit" variant="primary">{gettext("Add a passkey")}</.button>
+          </form>
+          <p class="mt-2 text-xs text-base-content/60">
+            {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
+          </p>
         </section>
 
         <section class="card card-pad max-w-xl">

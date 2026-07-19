@@ -30,10 +30,7 @@ defmodule KilnCMSWeb.AuthController do
   the no-2FA path here and by `TwoFactorController` once the code is verified.
   """
   def complete_sign_in(conn, user, message) do
-    # Editors/admins land on the console overview by default; viewers (and
-    # anyone with an explicit return_to) keep their intended destination (#157).
-    default = if user.role in [:editor, :admin], do: ~p"/editor/overview", else: ~p"/"
-    return_to = SafeRedirect.local_path(get_session(conn, :return_to), default)
+    return_to = sign_in_destination(conn, user)
 
     conn
     |> delete_session(:return_to)
@@ -43,6 +40,18 @@ defmodule KilnCMSWeb.AuthController do
     |> assign(:current_user, user)
     |> put_flash(:info, message)
     |> redirect(to: return_to)
+  end
+
+  @doc """
+  Where this user lands after signing in (#157): editors/admins default to the
+  console overview, viewers to the site root, and an explicit `return_to`
+  session value (safe-listed to local paths) wins. Shared by every sign-in
+  completion — the redirecting flows here and the JSON passkey ceremony
+  (`PasskeyController`) — so the landing rules can't drift per method.
+  """
+  def sign_in_destination(conn, user) do
+    default = if user.role in [:editor, :admin], do: ~p"/editor/overview", else: ~p"/"
+    SafeRedirect.local_path(get_session(conn, :return_to), default)
   end
 
   @doc "Sign a pending-2FA token binding the sign-in to a user id + first-factor token."

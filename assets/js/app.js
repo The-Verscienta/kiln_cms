@@ -26,11 +26,14 @@ import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
+import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
 const Hooks = {
   FocusTrap,
+  // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
+  PasskeyEnroll,
   // Presentation console (#355): relay the framed external front end's
   // click-to-edit `postMessage` up to the LiveView, and nudge the iframe to
   // refresh after a save. Mirrors embed.js's parent-side security check —
@@ -557,6 +560,10 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()
+
+// Passkey sign-in affordance on /sign-in (#331) — progressive enhancement,
+// no-op on other pages and on browsers without WebAuthn.
+initPasskeySignIn()
 
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()

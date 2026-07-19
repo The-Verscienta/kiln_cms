@@ -475,6 +475,13 @@ defmodule KilnCMSWeb.Router do
   scope "/", KilnCMSWeb do
     pipe_through :browser_auth
 
+    # Passkey (WebAuthn) sign-in ceremony (#331) — JSON two-step driven by
+    # progressive-enhancement JS on /sign-in; same :auth rate limit + CSRF.
+    # Registered BEFORE auth_routes: its catch-all under /auth would shadow
+    # these paths otherwise.
+    post "/auth/passkey/options", PasskeyController, :options
+    post "/auth/passkey/verify", PasskeyController, :verify
+
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     sign_out_route AuthController
 
