@@ -25,6 +25,12 @@ defmodule KilnCMSWeb.PresentationLive do
   alias KilnCMSWeb.Presentation
   alias KilnCMSWeb.PreviewLive
 
+  # Document scalars the console can edit inline (clicked when they have no block
+  # in the stega payload). Whether a given scalar is actually editable for THIS
+  # type is decided by `scalar_supported?/2` — `excerpt` only exists on types
+  # declared with `excerpt?: true` (e.g. Post, not Page).
+  @scalar_fields ~w(title excerpt)
+
   @impl true
   def mount(%{"type" => type, "slug" => slug}, _session, socket) do
     actor = socket.assigns.current_user
@@ -39,6 +45,7 @@ defmodule KilnCMSWeb.PresentationLive do
        |> assign(:preview_url, Presentation.preview_url(ct, record))
        |> assign(:frontend_origin, Presentation.frontend_origin())
        |> assign(:editing, nil)
+       |> assign(:scalar_changes, %{})
        |> assign(:save_state, :saved)
        |> assign(:conflict, false)
        |> assign(:region_version, 0)
@@ -66,6 +73,7 @@ defmodule KilnCMSWeb.PresentationLive do
     socket
     |> assign(:record, record)
     |> assign(:page_title, gettext("Presentation: %{title}", title: record.title))
+    |> assign(:scalar_changes, %{})
     |> assign(:block_inputs, InlineEditing.block_inputs(typed))
     |> assign(:blocks, InlineEditing.editable_blocks(typed))
   end
@@ -74,15 +82,44 @@ defmodule KilnCMSWeb.PresentationLive do
 
   @impl true
   # The bridge posts the stega payload `{type, id, slug, field, block}`. Open the
-  # clicked block in the pane when it's inline-editable; otherwise offer the full
+  # clicked block in the pane when it's inline-editable; a document scalar (no
+  # block — e.g. `title`) opens a scalar input; anything else offers the full
   # editor.
-  def handle_event("edit_field", payload, socket) do
-    block_id = payload["block"]
-
+  def handle_event("edit_field", %{"block" => block_id} = payload, socket)
+      when is_binary(block_id) do
     case Enum.find(socket.assigns.blocks, &(&1.id == block_id and &1.field != nil)) do
       nil -> {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
       block -> {:noreply, assign(socket, :editing, block)}
     end
+  end
+
+  def handle_event("edit_field", %{"field" => field}, socket)
+      when field in @scalar_fields do
+    if scalar_supported?(socket, field) do
+      {:noreply, assign(socket, :editing, {:scalar, field, scalar_value(socket, field)})}
+    else
+      # e.g. clicking `excerpt` on a type without one — the `:update` action
+      # wouldn't accept it, so offer the full editor instead of a panel that
+      # can't save.
+      {:noreply, assign(socket, :editing, {:unsupported, field})}
+    end
+  end
+
+  def handle_event("edit_field", payload, socket) do
+    {:noreply, assign(socket, :editing, {:unsupported, payload["field"] || "content"})}
+  end
+
+  # A document scalar input (title/excerpt) changed.
+  def handle_event("update_scalar", %{"field" => field, "value" => value}, socket)
+      when field in @scalar_fields do
+    {:noreply,
+     socket
+     |> update(:scalar_changes, &Map.put(&1, field, value))
+     |> update(:editing, fn
+       {:scalar, ^field, _old} -> {:scalar, field, value}
+       other -> other
+     end)
+     |> assign(:save_state, :unsaved)}
   end
 
   # A contenteditable region (InlineText/InlineRichText hook) pushed a new value.
@@ -102,10 +139,15 @@ defmodule KilnCMSWeb.PresentationLive do
   end
 
   def handle_event("save", _params, socket) do
-    case InlineEditing.write(
+    changes =
+      socket.assigns.scalar_changes
+      |> Map.new(fn {field, value} -> {String.to_existing_atom(field), value} end)
+      |> Map.put(:blocks, socket.assigns.block_inputs)
+
+    case InlineEditing.write_changes(
            socket.assigns.record,
            :update,
-           socket.assigns.block_inputs,
+           changes,
            socket.assigns.actor
          ) do
       {:ok, record} ->
@@ -149,6 +191,19 @@ defmodule KilnCMSWeb.PresentationLive do
      |> assign(:conflict, false)
      |> assign(:save_state, :saved)
      |> assign(:editing, nil)}
+  end
+
+  # `title` is universal; `excerpt` exists only on types declared `excerpt?: true`.
+  defp scalar_supported?(_socket, "title"), do: true
+  defp scalar_supported?(socket, "excerpt"), do: socket.assigns.ct.excerpt?
+  defp scalar_supported?(_socket, _field), do: false
+
+  # The current value of a document scalar — a pending edit if any, else the record.
+  defp scalar_value(socket, field) do
+    case Map.fetch(socket.assigns.scalar_changes, field) do
+      {:ok, pending} -> pending
+      :error -> to_string(Map.get(socket.assigns.record, String.to_existing_atom(field)) || "")
+    end
   end
 
   defp block_index(socket, id) do
@@ -242,6 +297,32 @@ defmodule KilnCMSWeb.PresentationLive do
             </.link>
           </div>
 
+          <div :if={match?({:scalar, _, _}, @editing)} class="flex min-h-0 flex-1 flex-col">
+            <% {:scalar, field, value} = @editing %>
+            <div class="flex items-center justify-between border-b border-base-300 px-4 py-2">
+              <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">
+                {@kind} · {field}
+              </span>
+              <button type="button" phx-click="close_panel" class="text-xs underline">
+                {gettext("Close")}
+              </button>
+            </div>
+            <div class="min-h-0 flex-1 overflow-auto p-4">
+              <form id="scalar-edit-form" phx-change="update_scalar" phx-submit="save">
+                <input type="hidden" name="field" value={field} />
+                <input
+                  type="text"
+                  name="value"
+                  value={value}
+                  phx-debounce="200"
+                  class="input input-bordered w-full"
+                  aria-label={field}
+                />
+              </form>
+            </div>
+            <.save_footer conflict={@conflict} save_state={@save_state} />
+          </div>
+
           <div :if={is_map(@editing)} class="flex min-h-0 flex-1 flex-col">
             <div class="flex items-center justify-between border-b border-base-300 px-4 py-2">
               <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">
@@ -261,27 +342,29 @@ defmodule KilnCMSWeb.PresentationLive do
               <.edit_region block={@editing} version={@region_version} />
             </div>
 
-            <div class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
-              <button
-                :if={@conflict}
-                type="button"
-                phx-click="reload"
-                class="btn btn-sm btn-ghost"
-              >
-                {gettext("Reload")}
-              </button>
-              <button
-                type="button"
-                phx-click="save"
-                disabled={@save_state == :saved}
-                class="btn btn-sm btn-primary ml-auto"
-              >
-                {gettext("Save")}
-              </button>
-            </div>
+            <.save_footer conflict={@conflict} save_state={@save_state} />
           </div>
         </aside>
       </div>
+    </div>
+    """
+  end
+
+  # Shared Save/Reload footer for the edit pane.
+  defp save_footer(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
+      <button :if={@conflict} type="button" phx-click="reload" class="btn btn-sm btn-ghost">
+        {gettext("Reload")}
+      </button>
+      <button
+        type="button"
+        phx-click="save"
+        disabled={@save_state == :saved}
+        class="btn btn-sm btn-primary ml-auto"
+      >
+        {gettext("Save")}
+      </button>
     </div>
     """
   end

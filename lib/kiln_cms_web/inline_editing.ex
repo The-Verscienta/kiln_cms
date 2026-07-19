@@ -79,14 +79,21 @@ defmodule KilnCMSWeb.InlineEditing do
   @spec write(struct(), :update | :autosave, [map()], term()) ::
           {:ok, struct()} | :conflict | {:error, term()}
   def write(record, action, block_inputs, actor) do
+    write_changes(record, action, %{blocks: block_inputs}, actor)
+  end
+
+  @doc """
+  Like `write/4` but persists an arbitrary `changes` map (e.g. blocks **and**
+  document scalars such as `title`) — the Presentation console (#355) edits both.
+  """
+  @spec write_changes(struct(), :update | :autosave, map(), term()) ::
+          {:ok, struct()} | :conflict | {:error, term()}
+  def write_changes(record, action, changes, actor) when is_map(changes) do
     record
     # Scope the update to the record's own org (epic #336); `org_id` is
     # writable? false, so the tenant is the only way to keep the write in the
     # right site. Covers both the in-context editor and the Presentation console.
-    |> Ash.Changeset.for_update(action, %{blocks: block_inputs},
-      actor: actor,
-      tenant: record.org_id
-    )
+    |> Ash.Changeset.for_update(action, changes, actor: actor, tenant: record.org_id)
     |> Ash.update()
     |> case do
       {:ok, updated} -> {:ok, updated}

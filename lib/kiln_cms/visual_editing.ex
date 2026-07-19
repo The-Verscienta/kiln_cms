@@ -67,6 +67,13 @@ defmodule KilnCMS.VisualEditing do
       {"blocks", children} when is_list(children) ->
         {"blocks", annotate_blocks(children, base)}
 
+      # Rich-text `body` is a Portable Text array (not a string leaf), so encode
+      # into each span's text — every rendered word carries the block address, so
+      # a click anywhere in the rich text resolves to this block (#355).
+      {"body", body} when is_list(body) and not is_nil(block_id) ->
+        {"body",
+         annotate_portable_text(body, Map.merge(base, %{"field" => "body", "block" => block_id}))}
+
       {k, v} when is_binary(v) and k not in @skip_keys and not is_nil(block_id) ->
         {k, Stega.encode(v, Map.merge(base, %{"field" => k, "block" => block_id}))}
 
@@ -76,6 +83,27 @@ defmodule KilnCMS.VisualEditing do
   end
 
   defp annotate_block(other, _base), do: other
+
+  # Walk a Portable Text body (`[%{"children" => [spans]}]`) and stega-encode each
+  # span's text. Spans have no stable key, so the address is block-level (the edit
+  # round-trip opens the whole rich-text block) — the per-span encoding just makes
+  # every rendered word clickable.
+  defp annotate_portable_text(body, payload) do
+    Enum.map(body, fn
+      %{"children" => children} = pt_block when is_list(children) ->
+        %{pt_block | "children" => Enum.map(children, &annotate_span(&1, payload))}
+
+      other ->
+        other
+    end)
+  end
+
+  defp annotate_span(%{"_type" => "span", "text" => text} = span, payload)
+       when is_binary(text) and text != "" do
+    %{span | "text" => Stega.encode(text, payload)}
+  end
+
+  defp annotate_span(other, _payload), do: other
 
   defp annotate_column(%{"blocks" => children} = col, base) do
     %{col | "blocks" => annotate_blocks(children, base)}

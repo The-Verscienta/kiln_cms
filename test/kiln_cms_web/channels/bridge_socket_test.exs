@@ -79,6 +79,48 @@ defmodule KilnCMSWeb.BridgeSocketTest do
     assert id == post.id
   end
 
+  test "a dynamic-type entry connects and receives forwarded updates (#355 tail)" do
+    admin = user(:admin)
+
+    definition =
+      KilnCMS.CMS.create_type_definition!(
+        %{name: "bs#{System.unique_integer([:positive])}", label: "BS"},
+        actor: admin
+      )
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(
+        definition.name,
+        %{title: "Entry", slug: "bs-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    # The bridge connects with the dynamic type NAME — the same value the entry
+    # editor uses as its `kind`, so the preview topic matches.
+    assert {:ok, state} =
+             BridgeSocket.connect(%{
+               params: %{"type" => definition.name, "id" => entry.id, "api_key" => key(admin)}
+             })
+
+    assert {:ok, ^state} = BridgeSocket.init(state)
+
+    payload = %{title: "Edited", excerpt: false, blocks: []}
+
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      PreviewLive.topic(definition.name, entry.id),
+      {:preview_update, payload}
+    )
+
+    assert_receive {:preview_update, ^payload}
+
+    assert {:push, {:text, json}, ^state} =
+             BridgeSocket.handle_info({:preview_update, payload}, state)
+
+    assert %{"event" => "update", "type" => type, "title" => "Edited"} = Jason.decode!(json)
+    assert type == definition.name
+  end
+
   test "an anonymous connection is refused for a draft but allowed once published" do
     admin = user(:admin)
     post = draft(admin)
