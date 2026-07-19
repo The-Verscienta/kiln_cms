@@ -29,10 +29,14 @@ defmodule KilnCMS.Forms do
   @spec honeypot_field() :: String.t()
   def honeypot_field, do: @honeypot_field
 
-  @doc "One active form by slug, fields included — or nil."
-  @spec get_active(String.t()) :: struct() | nil
-  def get_active(slug) when is_binary(slug) do
-    case CMS.get_active_form_by_slug(slug, load: [:fields], authorize?: true) do
+  @doc """
+  One active form by slug within `org` (the request's site — epic #336), fields
+  included, or nil. `org` defaults to the sole org so any tenant-less caller keeps
+  working under the single-org rollout.
+  """
+  @spec get_active(String.t(), Ash.ToTenant.t() | nil) :: struct() | nil
+  def get_active(slug, org \\ KilnCMS.Accounts.default_org_id()) when is_binary(slug) do
+    case CMS.get_active_form_by_slug(slug, load: [:fields], authorize?: true, tenant: org) do
       {:ok, form} -> form
       _ -> nil
     end
@@ -75,22 +79,26 @@ defmodule KilnCMS.Forms do
   end
 
   defp fields(%{fields: fields}) when is_list(fields), do: fields
-  defp fields(form), do: CMS.form_fields_for!(form.id, authorize?: false)
+  defp fields(form), do: CMS.form_fields_for!(form.id, authorize?: false, tenant: form.org_id)
 
   defp record(form, data, opts) do
+    # Every write here is scoped to the form's own site (epic #336): the
+    # submission lands in the form's org, and the webhook dispatch is scoped to it.
     submission =
       CMS.create_form_submission!(
         %{form_id: form.id, data: data, locale: Keyword.get(opts, :locale)},
-        authorize?: false
+        authorize?: false,
+        tenant: form.org_id
       )
 
     notify(form, data)
-    KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data})
+    KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
     submission
   end
 
   defp notify(%{notify_email: email} = form, data) when is_binary(email) and email != "" do
-    %{form_id: form.id, data: data}
+    # `org_id` scopes the worker's form re-fetch to the form's site (epic #336).
+    %{form_id: form.id, org_id: form.org_id, data: data}
     |> KilnCMS.Forms.NotificationWorker.new()
     |> Oban.insert!()
   end

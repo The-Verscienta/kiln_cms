@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.FormLive do
 
   @impl true
   def handle_event("create_form", %{"form" => params}, socket) do
-    case CMS.create_form(params, actor: socket.assigns.actor) do
+    case CMS.create_form(params, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
       {:ok, form} ->
         {:noreply,
          socket
@@ -56,7 +56,10 @@ defmodule KilnCMSWeb.FormLive do
   end
 
   def handle_event("save_form", %{"form" => params}, socket) do
-    case CMS.update_form(socket.assigns.selected.form, params, actor: socket.assigns.actor) do
+    case CMS.update_form(socket.assigns.selected.form, params,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
       {:ok, form} ->
         {:noreply,
          socket
@@ -71,9 +74,10 @@ defmodule KilnCMSWeb.FormLive do
 
   def handle_event("delete_form", %{"id" => id}, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
-    with {:ok, form} <- CMS.get_form(id, actor: actor),
-         :ok <- CMS.destroy_form(form, actor: actor) do
+    with {:ok, form} <- CMS.get_form(id, actor: actor, tenant: org),
+         :ok <- CMS.destroy_form(form, actor: actor, tenant: org) do
       {:noreply,
        socket
        |> assign(:selected, nil)
@@ -89,7 +93,10 @@ defmodule KilnCMSWeb.FormLive do
   def handle_event("add_field", %{"field" => params}, socket) do
     params = Map.put(params, "form_id", socket.assigns.selected.form.id)
 
-    case CMS.create_form_field(normalize_field(params), actor: socket.assigns.actor) do
+    case CMS.create_form_field(normalize_field(params),
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
       {:ok, _field} ->
         {:noreply, socket |> assign_selected(socket.assigns.selected.form.id)}
 
@@ -102,7 +109,9 @@ defmodule KilnCMSWeb.FormLive do
     actor = socket.assigns.actor
     field = Enum.find(socket.assigns.selected.fields, &(&1.id == id))
 
-    if field, do: CMS.destroy_form_field(field, actor: actor)
+    if field,
+      do: CMS.destroy_form_field(field, actor: actor, tenant: socket.assigns.current_org)
+
     {:noreply, assign_selected(socket, socket.assigns.selected.form.id)}
   end
 
@@ -110,9 +119,10 @@ defmodule KilnCMSWeb.FormLive do
 
   def handle_event("delete_submission", %{"id" => id}, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
-    with {:ok, submission} <- CMS.get_form_submission(id, actor: actor) do
-      CMS.destroy_form_submission(submission, actor: actor)
+    with {:ok, submission} <- CMS.get_form_submission(id, actor: actor, tenant: org) do
+      CMS.destroy_form_submission(submission, actor: actor, tenant: org)
     end
 
     {:noreply, assign_selected(socket, socket.assigns.selected.form.id)}
@@ -138,6 +148,7 @@ defmodule KilnCMSWeb.FormLive do
       :forms,
       CMS.list_forms!(
         actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
         load: [:submission_count],
         query: [sort: [inserted_at: :asc]]
       )
@@ -146,12 +157,13 @@ defmodule KilnCMSWeb.FormLive do
 
   defp assign_selected(socket, id) do
     actor = socket.assigns.actor
-    form = CMS.get_form!(id, actor: actor)
+    org = socket.assigns.current_org
+    form = CMS.get_form!(id, actor: actor, tenant: org)
 
     assign(socket, :selected, %{
       form: form,
-      fields: CMS.form_fields_for!(form.id, actor: actor),
-      submissions: CMS.recent_form_submissions!(form.id, actor: actor)
+      fields: CMS.form_fields_for!(form.id, actor: actor, tenant: org),
+      submissions: CMS.recent_form_submissions!(form.id, actor: actor, tenant: org)
     })
   end
 

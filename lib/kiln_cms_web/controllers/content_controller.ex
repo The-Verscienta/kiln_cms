@@ -405,7 +405,7 @@ defmodule KilnCMSWeb.ContentController do
     flat = flatten_block_tree(tree)
 
     media = load_block_media(flat, org_id)
-    forms = load_block_forms(flat)
+    forms = load_block_forms(flat, org_id)
     Enum.map(tree, &enrich_block(&1, media, forms))
   end
 
@@ -443,7 +443,7 @@ defmodule KilnCMSWeb.ContentController do
 
   # Batch-load the active forms referenced by form blocks (fields included),
   # keyed by slug — inactive/unknown slugs simply don't enrich.
-  defp load_block_forms(blocks) do
+  defp load_block_forms(blocks, org_id) do
     slugs =
       for b <- blocks,
           to_string(b.type) == "form",
@@ -452,7 +452,8 @@ defmodule KilnCMSWeb.ContentController do
           uniq: true,
           do: slug
 
-    Map.new(slugs, &{&1, KilnCMS.Forms.get_active(&1)})
+    # Tenant-scoped so a page only embeds forms from its own site (#336).
+    Map.new(slugs, &{&1, KilnCMS.Forms.get_active(&1, org_id)})
   end
 
   # Batch-load the media items referenced by image blocks (so we render one

@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.WebhookLive do
        |> assign(:page_title, gettext("Webhooks"))
        |> assign(:available_events, WebhookEndpoint.events())
        |> assign(:edit, nil)
-       |> assign(:form, create_form(actor))
+       |> assign(:form, create_form(actor, socket.assigns.current_org))
        |> load_endpoints()
        |> load_deliveries()}
     else
@@ -49,7 +49,7 @@ defmodule KilnCMSWeb.WebhookLive do
       {:ok, _endpoint} ->
         {:noreply,
          socket
-         |> assign(:form, create_form(socket.assigns.actor))
+         |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
          |> load_endpoints()
          |> put_flash(:info, gettext("Webhook added."))}
 
@@ -61,7 +61,11 @@ defmodule KilnCMSWeb.WebhookLive do
   # --- inline edit -----------------------------------------------------------
 
   def handle_event("edit", %{"id" => id}, socket) do
-    {:noreply, assign(socket, :edit, %{id: id, form: edit_form(id, socket.assigns.actor)})}
+    {:noreply,
+     assign(socket, :edit, %{
+       id: id,
+       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+     })}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -90,11 +94,15 @@ defmodule KilnCMSWeb.WebhookLive do
 
   def handle_event("toggle_active", %{"id" => id}, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     socket =
-      with {:ok, endpoint} <- CMS.get_webhook_endpoint(id, actor: actor),
+      with {:ok, endpoint} <- CMS.get_webhook_endpoint(id, actor: actor, tenant: org),
            {:ok, _} <-
-             CMS.update_webhook_endpoint(endpoint, %{active: !endpoint.active}, actor: actor) do
+             CMS.update_webhook_endpoint(endpoint, %{active: !endpoint.active},
+               actor: actor,
+               tenant: org
+             ) do
         load_endpoints(socket)
       else
         _ -> put_flash(socket, :error, gettext("Couldn't update that webhook."))
@@ -109,7 +117,7 @@ defmodule KilnCMSWeb.WebhookLive do
     actor = socket.assigns.actor
 
     socket =
-      case CMS.get_webhook_endpoint(id, actor: actor) do
+      case CMS.get_webhook_endpoint(id, actor: actor, tenant: socket.assigns.current_org) do
         {:ok, endpoint} ->
           Webhooks.ping(endpoint)
 
@@ -129,7 +137,7 @@ defmodule KilnCMSWeb.WebhookLive do
     actor = socket.assigns.actor
 
     socket =
-      case CMS.get_webhook_delivery(id, actor: actor) do
+      case CMS.get_webhook_delivery(id, actor: actor, tenant: socket.assigns.current_org) do
         {:ok, delivery} ->
           Webhooks.redeliver(delivery)
           socket |> load_deliveries() |> put_flash(:info, gettext("Redelivery queued."))
@@ -144,9 +152,11 @@ defmodule KilnCMSWeb.WebhookLive do
   def handle_event("delete", %{"id" => id}, socket) do
     actor = socket.assigns.actor
 
+    org = socket.assigns.current_org
+
     socket =
-      with {:ok, endpoint} <- CMS.get_webhook_endpoint(id, actor: actor),
-           :ok <- CMS.destroy_webhook_endpoint(endpoint, actor: actor) do
+      with {:ok, endpoint} <- CMS.get_webhook_endpoint(id, actor: actor, tenant: org),
+           :ok <- CMS.destroy_webhook_endpoint(endpoint, actor: actor, tenant: org) do
         socket |> load_endpoints() |> put_flash(:info, gettext("Webhook deleted."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't delete that webhook."))
@@ -161,7 +171,11 @@ defmodule KilnCMSWeb.WebhookLive do
     assign(
       socket,
       :endpoints,
-      CMS.list_webhook_endpoints!(actor: socket.assigns.actor, query: [sort: [inserted_at: :asc]])
+      CMS.list_webhook_endpoints!(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
+        query: [sort: [inserted_at: :asc]]
+      )
     )
   end
 
@@ -169,19 +183,23 @@ defmodule KilnCMSWeb.WebhookLive do
     assign(
       socket,
       :deliveries,
-      CMS.recent_webhook_deliveries!(actor: socket.assigns.actor, load: [:endpoint])
+      CMS.recent_webhook_deliveries!(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
+        load: [:endpoint]
+      )
     )
   end
 
-  defp create_form(actor),
+  defp create_form(actor, org),
     do:
       WebhookEndpoint
-      |> AshPhoenix.Form.for_create(:create, actor: actor, as: "webhook")
+      |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "webhook")
       |> to_form()
 
-  defp edit_form(id, actor) do
-    CMS.get_webhook_endpoint!(id, actor: actor)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, as: "webhook")
+  defp edit_form(id, actor, org) do
+    CMS.get_webhook_endpoint!(id, actor: actor, tenant: org)
+    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "webhook")
     |> to_form()
   end
 

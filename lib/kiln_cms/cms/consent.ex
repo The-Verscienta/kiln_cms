@@ -80,8 +80,27 @@ defmodule KilnCMS.CMS.Consent do
     end
   end
 
+  # Multi-tenancy (epic #336): a consent belongs to the same site as the content
+  # it clears. `global?: true` keeps the tenant optional; the publish-gate read
+  # (`Validations.RequiredConsent`, `authorize?: false`) inherits the content
+  # changeset's tenant, so a consent only clears content on its own site.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on a scoped record,
+    # else the default org; never accepted from input.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # Soft polymorphic reference to the content item (matches how the firing
     # engine / newsletter key content), not an FK.
@@ -112,5 +131,15 @@ defmodule KilnCMS.CMS.Consent do
     attribute :recorded_by_id, :uuid, public?: true
 
     timestamps()
+  end
+
+  relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 end
