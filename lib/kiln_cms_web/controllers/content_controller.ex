@@ -39,7 +39,7 @@ defmodule KilnCMSWeb.ContentController do
         not_found(conn)
 
       payload ->
-        track_view("page", payload.record.id)
+        track_view("page", payload.record.id, payload.record.org_id)
         render_content(conn, :show_page, payload, ct)
     end
   end
@@ -64,7 +64,7 @@ defmodule KilnCMSWeb.ContentController do
         not_found(conn)
 
       payload ->
-        track_view("post", payload.record.id)
+        track_view("post", payload.record.id, payload.record.org_id)
         render_content(conn, :show_post, payload, ct)
     end
   end
@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.ContentController do
            Cache.fetch_published(org_id, to_string(ct.type), slug, locale, fn ->
              payload(fetch, locale, ct, org_id)
            end) do
-      track_view(to_string(ct.type), payload.record.id)
+      track_view(to_string(ct.type), payload.record.id, payload.record.org_id)
       render_content(conn, :show, payload, ct)
     else
       _ -> not_found(conn)
@@ -572,18 +572,19 @@ defmodule KilnCMSWeb.ContentController do
   # task would run outside the ExUnit SQL sandbox connection (leaking a connection
   # past the owning test and racing assertions). Running it inline keeps the
   # upsert on the request's sandbox-owned connection.
-  defp track_view(type, id) do
+  defp track_view(type, id, org_id) do
     if Application.get_env(:kiln_cms, :async_analytics, true) do
-      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_view(type, id) end)
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_view(type, id, org_id) end)
     else
-      record_view(type, id)
+      record_view(type, id, org_id)
     end
 
     :ok
   end
 
-  defp record_view(type, id) do
-    Analytics.record_view(type, id, authorize?: false)
+  # The view counter lands in the viewed record's own site (epic #336).
+  defp record_view(type, id, org_id) do
+    Analytics.record_view(type, id, authorize?: false, tenant: org_id)
   rescue
     _ -> :ok
   end

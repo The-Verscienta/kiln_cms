@@ -52,8 +52,27 @@ defmodule KilnCMS.Analytics.ContentView do
     end
   end
 
+  # Multi-tenancy (epic #336): a view counter belongs to the site whose content
+  # was viewed. `global?: true` keeps the tenant optional; the delivery-path
+  # record (`authorize?: false`) carries the viewed record's org, and the upsert
+  # identity gains `org_id` so counters never collide across sites.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant (the viewed
+    # record's org) on the delivery-path record, else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # The content type's atom name as a string (e.g. "page", "post") + the
     # record id. Kept type-agnostic so any content type counts with no wiring.
@@ -66,6 +85,16 @@ defmodule KilnCMS.Analytics.ContentView do
     attribute :last_viewed_at, :utc_datetime_usec, public?: true
 
     timestamps()
+  end
+
+  relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   identities do

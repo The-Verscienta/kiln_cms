@@ -97,8 +97,28 @@ defmodule KilnCMS.Newsletter.Subscriber do
     end
   end
 
+  # Multi-tenancy (epic #336): a subscriber belongs to one site, so the same
+  # email can subscribe to two sites independently. `global?: true` keeps the
+  # tenant optional; the public token lookups (`by_confirm_token`/
+  # `by_unsubscribe_token`) run tenant-less (the token is the secret), and the
+  # subsequent confirm/unsubscribe update uses the found row's own org.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on subscribe, else
+    # the default org; never accepted from input.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :email, :ci_string, allow_nil?: false, public?: true
     attribute :name, :string, public?: true
@@ -123,6 +143,14 @@ defmodule KilnCMS.Newsletter.Subscriber do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     many_to_many :segments, KilnCMS.Newsletter.Segment do
       through KilnCMS.Newsletter.SegmentMembership
       source_attribute_on_join_resource :subscriber_id

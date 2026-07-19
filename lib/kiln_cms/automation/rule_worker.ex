@@ -25,8 +25,12 @@ defmodule KilnCMS.Automation.RuleWorker do
   alias KilnCMS.CMS.ContentTypes
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"rule_id" => rule_id, "event" => event, "payload" => payload}}) do
-    case Automation.get_rule(rule_id, authorize?: false) do
+  def perform(%Oban.Job{
+        args: %{"rule_id" => rule_id, "event" => event, "payload" => payload} = args
+      }) do
+    # `org_id` scopes the rule read to its own site (epic #336); pre-#336 jobs
+    # carry none — a nil tenant reads globally, finding the row by its unique id.
+    case Automation.get_rule(rule_id, authorize?: false, tenant: args["org_id"]) do
       {:ok, %{enabled: true} = rule} -> run(rule, event, payload)
       # Rule deleted or disabled since the event fired — nothing to do.
       _ -> :ok
@@ -58,26 +62,23 @@ defmodule KilnCMS.Automation.RuleWorker do
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:automation_event, event, payload})
   end
 
-  defp run(%{action: :invalidate_cache}, event, payload) do
+  defp run(%{action: :invalidate_cache, org_id: org_id}, event, payload) do
     type = event_type(event)
     slug = payload["slug"]
-    # Automation rules aren't org-scoped yet (scoped in the "remaining resources"
-    # PR), and org_id isn't in the external event payload, so target the default
-    # org (#336). Correct while the single-org rollout guard holds.
-    org_id = KilnCMS.Accounts.default_org_id()
 
+    # Bust the rule's own site (epic #336).
     if is_binary(type) and is_binary(slug), do: KilnCMS.Cache.bust(org_id, type, slug)
     KilnCMS.Cache.bust_sitemap(org_id)
     KilnCMS.Cache.bust_llms(org_id)
     :ok
   end
 
-  defp run(%{action: :reindex}, event, payload) do
+  defp run(%{action: :reindex, org_id: org_id}, event, payload) do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
-         storage when not is_nil(storage) <- ContentTypes.storage_type(type) do
-      # See invalidate_cache above re: the default-org fallback (#336).
-      %{"org_id" => KilnCMS.Accounts.default_org_id(), "type" => to_string(storage), "id" => id}
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id) do
+      # Re-fire under the rule's own site (epic #336).
+      %{"org_id" => org_id, "type" => to_string(storage), "id" => id}
       |> KilnCMS.Firing.FireWorker.new()
       |> Oban.insert()
 

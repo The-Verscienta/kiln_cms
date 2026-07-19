@@ -44,8 +44,25 @@ defmodule KilnCMS.Newsletter.Segment do
     end
   end
 
+  # Multi-tenancy (epic #336): a segment belongs to one site, so its slug is
+  # unique per org. `global?: true` keeps the tenant optional.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on create, else
+    # the default org; never accepted from input.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :name, :string, allow_nil?: false, public?: true
     attribute :slug, :string, allow_nil?: false, public?: true
@@ -62,6 +79,14 @@ defmodule KilnCMS.Newsletter.Segment do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     many_to_many :subscribers, KilnCMS.Newsletter.Subscriber do
       through KilnCMS.Newsletter.SegmentMembership
       source_attribute_on_join_resource :segment_id

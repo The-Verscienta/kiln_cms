@@ -61,8 +61,28 @@ defmodule KilnCMS.History.DocumentEvent do
     end
   end
 
+  # Multi-tenancy (epic #336): an event belongs to the same site as the document
+  # it records. `global?: true` keeps the tenant optional; the append/read system
+  # jobs (`authorize?: false`) carry the document's org. The `:doc_seq` identity
+  # keeps its name (only its columns gain `org_id`), so the
+  # `document_events_doc_seq_index` reference in `KilnCMS.History` stays valid.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant (the document's
+    # org) on append, else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     attribute :document_type, :atom,
       allow_nil?: false,
@@ -90,6 +110,16 @@ defmodule KilnCMS.History.DocumentEvent do
     attribute :actor_id, :uuid, public?: true
 
     create_timestamp :inserted_at
+  end
+
+  relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
   end
 
   identities do

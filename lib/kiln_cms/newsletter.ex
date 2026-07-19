@@ -85,10 +85,14 @@ defmodule KilnCMS.Newsletter do
             segment_id: opts[:segment_id],
             sent_by_id: opts[:actor] && opts[:actor].id
           },
-          authorize?: false
+          authorize?: false,
+          # The campaign lands in the document's site (epic #336).
+          tenant: document.org_id
         )
 
-      %{"newsletter_send_id" => send.id}
+      # `org_id` rides into the worker args so the fan-out runs under the send's
+      # tenant.
+      %{"newsletter_send_id" => send.id, "org_id" => send.org_id}
       |> SendWorker.new()
       |> Oban.insert!()
 
@@ -107,11 +111,9 @@ defmodule KilnCMS.Newsletter do
   # live editable tree (same guarantee as public delivery).
   @doc false
   @spec artifact_html(struct() | NewsletterSend.t()) :: {:ok, String.t()} | {:error, :not_fired}
-  def artifact_html(%NewsletterSend{content_type: type, content_id: id}) do
-    # NewsletterSend isn't org-scoped yet (newsletter is scoped in a later PR),
-    # so resolve the artifact under the default org (epic #336). Correct while the
-    # single-org rollout guard is in force; revisit when NewsletterSend gains org_id.
-    read_web_artifact(KilnCMS.Accounts.default_org_id(), String.to_existing_atom(type), id)
+  def artifact_html(%NewsletterSend{org_id: org_id, content_type: type, content_id: id}) do
+    # Resolve the artifact under the campaign's own site (epic #336).
+    read_web_artifact(org_id, String.to_existing_atom(type), id)
   end
 
   def artifact_html(document) do

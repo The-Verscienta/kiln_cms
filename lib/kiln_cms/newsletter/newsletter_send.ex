@@ -78,8 +78,27 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
     end
   end
 
+  # Multi-tenancy (epic #336): a campaign belongs to the site whose content it
+  # sends. `global?: true` keeps the tenant optional; `create_send` carries the
+  # document's org, and the send/mail workers scope their reads to `send.org_id`
+  # (retiring the default-org fallback the rollout left in `KilnCMS.Newsletter`).
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant (the document's
+    # org) on create, else the default org.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # The published document this campaign rendered (`"post"` / `"page"` /
     # `"entry"`) + its id. A soft polymorphic reference (matching how the firing
@@ -109,6 +128,14 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     belongs_to :segment, KilnCMS.Newsletter.Segment do
       public? true
     end

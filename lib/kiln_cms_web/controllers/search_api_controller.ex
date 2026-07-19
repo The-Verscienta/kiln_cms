@@ -85,7 +85,10 @@ defmodule KilnCMSWeb.SearchApiController do
       |> Enum.map(&length/1)
       |> Enum.sum()
 
-    Search.record_query(query, total, locale: locale)
+    Search.record_query(query, total,
+      locale: locale,
+      tenant: KilnCMSWeb.Tenant.current_org_id(conn)
+    )
 
     suggestion = if total < @suggest_below, do: Search.suggest(query, read_opts), else: nil
 

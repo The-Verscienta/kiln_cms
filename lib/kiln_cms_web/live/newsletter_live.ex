@@ -15,14 +15,15 @@ defmodule KilnCMSWeb.NewsletterLive do
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
+    org = socket.assigns.current_org
 
     if actor.role == :admin do
       {:ok,
        socket
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Newsletter"))
-       |> assign(:segment_form, segment_form(actor))
-       |> assign(:subscriber_form, subscriber_form(actor))
+       |> assign(:segment_form, segment_form(actor, org))
+       |> assign(:subscriber_form, subscriber_form(actor, org))
        |> assign(:send_params, %{"post_id" => "", "segment_id" => "", "subject" => ""})
        |> load_segments()
        |> load_subscribers()
@@ -49,7 +50,7 @@ defmodule KilnCMSWeb.NewsletterLive do
       {:ok, _segment} ->
         {:noreply,
          socket
-         |> assign(:segment_form, segment_form(socket.assigns.actor))
+         |> assign(:segment_form, segment_form(socket.assigns.actor, socket.assigns.current_org))
          |> load_segments()
          |> put_flash(:info, gettext("Segment created."))}
 
@@ -59,9 +60,11 @@ defmodule KilnCMSWeb.NewsletterLive do
   end
 
   def handle_event("delete_segment", %{"id" => id}, socket) do
+    org = socket.assigns.current_org
+
     socket =
-      with {:ok, segment} <- Newsletter.get_segment(id, actor: socket.assigns.actor),
-           :ok <- Newsletter.destroy_segment(segment, actor: socket.assigns.actor) do
+      with {:ok, segment} <- Newsletter.get_segment(id, actor: socket.assigns.actor, tenant: org),
+           :ok <- Newsletter.destroy_segment(segment, actor: socket.assigns.actor, tenant: org) do
         socket |> load_segments() |> load_posts() |> put_flash(:info, gettext("Segment deleted."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't delete that segment."))
@@ -86,7 +89,10 @@ defmodule KilnCMSWeb.NewsletterLive do
       {:ok, _subscriber} ->
         {:noreply,
          socket
-         |> assign(:subscriber_form, subscriber_form(socket.assigns.actor))
+         |> assign(
+           :subscriber_form,
+           subscriber_form(socket.assigns.actor, socket.assigns.current_org)
+         )
          |> load_subscribers()
          |> put_flash(:info, gettext("Subscriber added (pending confirmation)."))}
 
@@ -96,9 +102,13 @@ defmodule KilnCMSWeb.NewsletterLive do
   end
 
   def handle_event("confirm_subscriber", %{"id" => id}, socket) do
+    org = socket.assigns.current_org
+
     socket =
-      with {:ok, subscriber} <- Newsletter.get_subscriber(id, actor: socket.assigns.actor),
-           {:ok, _} <- Newsletter.confirm_subscriber(subscriber, actor: socket.assigns.actor) do
+      with {:ok, subscriber} <-
+             Newsletter.get_subscriber(id, actor: socket.assigns.actor, tenant: org),
+           {:ok, _} <-
+             Newsletter.confirm_subscriber(subscriber, actor: socket.assigns.actor, tenant: org) do
         socket |> load_subscribers() |> put_flash(:info, gettext("Subscriber confirmed."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't confirm that subscriber."))
@@ -108,9 +118,12 @@ defmodule KilnCMSWeb.NewsletterLive do
   end
 
   def handle_event("remove_subscriber", %{"id" => id}, socket) do
+    org = socket.assigns.current_org
+
     socket =
-      with {:ok, subscriber} <- Newsletter.get_subscriber(id, actor: socket.assigns.actor),
-           :ok <- Ash.destroy(subscriber, actor: socket.assigns.actor) do
+      with {:ok, subscriber} <-
+             Newsletter.get_subscriber(id, actor: socket.assigns.actor, tenant: org),
+           :ok <- Ash.destroy(subscriber, actor: socket.assigns.actor, tenant: org) do
         socket |> load_subscribers() |> put_flash(:info, gettext("Subscriber removed."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't remove that subscriber."))
@@ -160,7 +173,11 @@ defmodule KilnCMSWeb.NewsletterLive do
   # --- data ------------------------------------------------------------------
 
   defp load_segments(socket) do
-    assign(socket, :segments, Newsletter.list_segments!(actor: socket.assigns.actor))
+    assign(
+      socket,
+      :segments,
+      Newsletter.list_segments!(actor: socket.assigns.actor, tenant: socket.assigns.current_org)
+    )
   end
 
   defp load_subscribers(socket) do
@@ -168,7 +185,7 @@ defmodule KilnCMSWeb.NewsletterLive do
       Subscriber
       |> Ash.Query.sort(inserted_at: :desc)
       |> Ash.Query.limit(100)
-      |> Ash.read!(actor: socket.assigns.actor)
+      |> Ash.read!(actor: socket.assigns.actor, tenant: socket.assigns.current_org)
 
     socket
     |> assign(:subscribers, subscribers)
@@ -183,7 +200,7 @@ defmodule KilnCMSWeb.NewsletterLive do
       |> Ash.Query.filter(state == :published and audience == :public)
       |> Ash.Query.sort(published_at: :desc)
       |> Ash.Query.limit(100)
-      |> Ash.read!(actor: socket.assigns.actor)
+      |> Ash.read!(actor: socket.assigns.actor, tenant: socket.assigns.current_org)
 
     assign(socket, :posts, posts)
   end
@@ -192,19 +209,23 @@ defmodule KilnCMSWeb.NewsletterLive do
     assign(
       socket,
       :sends,
-      Newsletter.recent_sends!(actor: socket.assigns.actor, load: [:segment])
+      Newsletter.recent_sends!(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
+        load: [:segment]
+      )
     )
   end
 
-  defp segment_form(actor) do
+  defp segment_form(actor, org) do
     Segment
-    |> AshPhoenix.Form.for_create(:create, actor: actor, as: "segment")
+    |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "segment")
     |> to_form()
   end
 
-  defp subscriber_form(actor) do
+  defp subscriber_form(actor, org) do
     Subscriber
-    |> AshPhoenix.Form.for_create(:subscribe, actor: actor, as: "subscriber")
+    |> AshPhoenix.Form.for_create(:subscribe, actor: actor, tenant: org, as: "subscriber")
     |> to_form()
   end
 

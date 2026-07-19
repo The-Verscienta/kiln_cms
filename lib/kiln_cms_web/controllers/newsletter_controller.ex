@@ -37,7 +37,13 @@ defmodule KilnCMSWeb.NewsletterController do
         page(conn, gettext("Link not recognized"), gettext("This unsubscribe link is invalid."))
 
       subscriber ->
-        {:ok, _} = Newsletter.unsubscribe_subscriber(subscriber, authorize?: false)
+        # The token lookup spans orgs (the token is the secret); the update runs
+        # under the found subscriber's own site (epic #336).
+        {:ok, _} =
+          Newsletter.unsubscribe_subscriber(subscriber,
+            authorize?: false,
+            tenant: subscriber.org_id
+          )
 
         page(
           conn,
@@ -70,7 +76,8 @@ defmodule KilnCMSWeb.NewsletterController do
         )
 
       subscriber ->
-        {:ok, _} = Newsletter.confirm_subscriber(subscriber, authorize?: false)
+        {:ok, _} =
+          Newsletter.confirm_subscriber(subscriber, authorize?: false, tenant: subscriber.org_id)
 
         page(
           conn,

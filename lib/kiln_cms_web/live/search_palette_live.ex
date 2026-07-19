@@ -46,7 +46,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           length(results.pages) + length(results.posts) + length(results.entries) +
             length(results.media)
 
-        record_query_async(query, total)
+        record_query_async(query, total, socket.assigns.current_org)
 
         socket |> assign(:query, query) |> assign(:searched, true) |> assign(:results, results)
       end
@@ -59,18 +59,21 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   # shared Task.Supervisor's max_children (drops under load); failures swallowed.
   # `:async_analytics` is off under test so the write stays on the test's SQL
   # sandbox connection rather than leaking from a detached task.
-  defp record_query_async(query, total) do
+  defp record_query_async(query, total, org) do
     if Application.get_env(:kiln_cms, :async_analytics, true) do
-      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_query(query, total) end)
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+        record_query(query, total, org)
+      end)
     else
-      record_query(query, total)
+      record_query(query, total, org)
     end
 
     :ok
   end
 
-  defp record_query(query, total) do
-    Search.record_query(query, total)
+  # The recorded query lands in the current site (epic #336).
+  defp record_query(query, total, org) do
+    Search.record_query(query, total, tenant: org)
   rescue
     _ -> :ok
   end

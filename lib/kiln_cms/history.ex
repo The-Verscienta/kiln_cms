@@ -51,6 +51,9 @@ defmodule KilnCMS.History do
   end
 
   defp do_record(document_type, document_id, kind, payload, opts, retries) do
+    # Stamp the event with the document's own site when the caller knows it
+    # (epic #336); reads/seq computation key on the globally-unique document_id,
+    # so they stay org-correct without a tenant. Defaults to the sole org.
     result =
       append_event(
         %{
@@ -61,7 +64,8 @@ defmodule KilnCMS.History do
           payload: payload,
           actor_id: opts[:actor_id]
         },
-        authorize?: false
+        authorize?: false,
+        tenant: opts[:org_id]
       )
 
     case result do

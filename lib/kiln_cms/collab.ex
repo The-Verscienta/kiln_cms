@@ -34,7 +34,11 @@ defmodule KilnCMS.Collab do
   @spec apply_op(atom(), term(), tuple(), keyword()) :: {:ok, KilnCMS.History.DocumentEvent.t()}
   def apply_op(type, id, op, opts \\ []) do
     {kind, payload} = to_event(op)
-    {:ok, event} = History.record(type, id, kind, payload, actor_id: opts[:actor_id])
+
+    # `:org_id` (when the caller provides it) stamps the event with the document's
+    # site (epic #336); History reads key on the globally-unique document id.
+    {:ok, event} =
+      History.record(type, id, kind, payload, actor_id: opts[:actor_id], org_id: opts[:org_id])
 
     Phoenix.PubSub.broadcast(
       KilnCMS.PubSub,
