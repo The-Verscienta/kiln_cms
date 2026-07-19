@@ -133,7 +133,8 @@ defmodule KilnCMS.Search do
   @spec hybrid(atom() | String.t() | module(), String.t(), keyword()) :: [struct()]
   def hybrid(type, query, opts \\ []) when is_binary(query) do
     resource = search_resource(type)
-    read_opts = Keyword.take(opts, [:actor, :authorize?])
+    # `:tenant` scopes the multitenant content legs to the request's org (#336).
+    read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     limit = Keyword.get(opts, :limit, 20)
     k = Keyword.get(opts, :k, @rrf_k)
@@ -241,7 +242,8 @@ defmodule KilnCMS.Search do
           optional(atom()) => [struct()]
         }
   def global(query, opts \\ []) when is_binary(query) do
-    read_opts = Keyword.take(opts, [:actor, :authorize?])
+    # `:tenant` scopes the multitenant content legs to the request's org (#336).
+    read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     limit = Keyword.get(opts, :limit, 10)
 
@@ -278,6 +280,9 @@ defmodule KilnCMS.Search do
           query,
           [load: [:type_name | content_load]] ++ hybrid_opts
         ),
+      # NOTE (#336): MediaItem/Category/Tag are NOT org-scoped yet, so these three
+      # sections stay cross-org (they ignore the `:tenant` in `read_opts`). Content
+      # + entries above ARE scoped. Closes when those resources gain `org_id`.
       media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []),
       # Taxonomy (name/description, typo-tolerant) — matched categories and
       # tags so editors and headless frontends can jump to filtered listings.
@@ -301,7 +306,8 @@ defmodule KilnCMS.Search do
   """
   @spec facets(String.t(), keyword()) :: %{categories: [map()], tags: [map()]}
   def facets(query, opts \\ []) when is_binary(query) do
-    read_opts = Keyword.take(opts, [:actor, :authorize?])
+    # `:tenant` scopes the multitenant content legs to the request's org (#336).
+    read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
 
     matches =
@@ -364,7 +370,8 @@ defmodule KilnCMS.Search do
   """
   @spec suggest(String.t(), keyword()) :: String.t() | nil
   def suggest(query, opts \\ []) when is_binary(query) do
-    read_opts = Keyword.take(opts, [:actor, :authorize?])
+    # `:tenant` scopes the multitenant content legs to the request's org (#336).
+    read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
     locale = Keyword.get(opts, :locale) || KilnCMS.I18n.default_locale()
     down = String.downcase(query)
 

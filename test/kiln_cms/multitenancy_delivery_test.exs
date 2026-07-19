@@ -181,4 +181,24 @@ defmodule KilnCMS.MultitenancyDeliveryTest do
       assert body["title"] == "B about"
     end
   end
+
+  describe "the search API resolves the tenant from the host (#336)" do
+    setup %{conn: conn} do
+      a = org("search-a")
+      b = org("search-b")
+      # A distinctive term both orgs publish a page for.
+      term = "zzq#{System.unique_integer([:positive])}"
+      pa = publish_page(a, "a-#{term}", "#{term} guide")
+      pb = publish_page(b, "b-#{term}", "#{term} guide")
+      %{conn: conn, a: a, b: b, term: term, pa: pa, pb: pb}
+    end
+
+    test "org A's host returns only A's content, never B's", ctx do
+      conn = %{ctx.conn | host: "#{ctx.a.slug}.#{Tenant.base_host()}"}
+      body = conn |> get(~p"/api/search?q=#{ctx.term}") |> json_response(200)
+      ids = body["results"]["pages"] |> Enum.map(& &1["id"])
+      assert ctx.pa.id in ids
+      refute ctx.pb.id in ids
+    end
+  end
 end

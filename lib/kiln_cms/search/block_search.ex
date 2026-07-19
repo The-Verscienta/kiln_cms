@@ -12,7 +12,9 @@ defmodule KilnCMS.Search.BlockSearch do
   @doc """
   Search blocks by semantic similarity.
 
-  Options: `:block_type` (facet to one type), `:limit` (default 10).
+  Options: `:block_type` (facet to one type), `:limit` (default 10), `:org_id`
+  (tenant — scopes results to one org, epic #336; `nil` spans all orgs under
+  `global?: true`).
   Returns `BlockEmbedding` rows nearest first; `[]` if semantic search is off.
   """
   @spec search(String.t(), keyword()) :: [BlockEmbedding.t()]
@@ -23,6 +25,6 @@ defmodule KilnCMS.Search.BlockSearch do
       block_type: opts[:block_type],
       limit: opts[:limit] || 10
     })
-    |> Ash.read!(authorize?: false)
+    |> Ash.read!(authorize?: false, tenant: opts[:org_id])
   end
 end

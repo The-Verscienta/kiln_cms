@@ -67,7 +67,8 @@ defmodule KilnCMS.Search.Meilisearch do
     if enabled?() do
       request(:patch, "/indexes/#{index_name()}/settings", %{
         searchableAttributes: ["title", "excerpt", "body"],
-        filterableAttributes: ["type", "locale"],
+        # `org_id` is filterable so every query can force the tenant facet (#336).
+        filterableAttributes: ["org_id", "type", "locale"],
         sortableAttributes: ["published_at"]
       })
     else
@@ -121,6 +122,8 @@ defmodule KilnCMS.Search.Meilisearch do
   Query the index. Returns the raw Meilisearch hits (maps with the indexed
   fields plus `_formatted` highlights). Options:
 
+    * `:org_id` — **required** (epic #336): the tenant to scope results to. Every
+      query forces `org_id = "<id>"`, so search never spans orgs.
     * `:limit` — max hits (default 20)
     * `:type` — restrict to `:page` / `:post`
     * `:locale` — restrict to a locale
@@ -156,6 +159,9 @@ defmodule KilnCMS.Search.Meilisearch do
 
     %{
       id: document_id(type, record.id),
+      # The owning org (#336) — indexed as a filterable facet so search can scope
+      # per site. The `id` stays global (a UUID; no cross-org collision).
+      org_id: record.org_id,
       type: to_string(type),
       record_id: record.id,
       title: record.title,
@@ -174,17 +180,19 @@ defmodule KilnCMS.Search.Meilisearch do
   # ── Internals ─────────────────────────────────────────────────────────────
 
   defp put_filter(body, opts) do
+    # `org_id` is a MANDATORY tenant facet (#336): every query forces it so search
+    # can never span orgs. A UUID, so quoted (like `locale`, unlike bare `type`).
+    org_id = opts[:org_id] || raise ArgumentError, "Meilisearch.search/2 requires :org_id"
+
     filters =
       [
+        ~s(org_id = "#{org_id}"),
         opts[:type] && "type = #{opts[:type]}",
         opts[:locale] && ~s(locale = "#{opts[:locale]}")
       ]
       |> Enum.reject(&is_nil/1)
 
-    case filters do
-      [] -> body
-      list -> Map.put(body, :filter, Enum.join(list, " AND "))
-    end
+    Map.put(body, :filter, Enum.join(filters, " AND "))
   end
 
   defp unix(%DateTime{} = dt), do: DateTime.to_unix(dt)

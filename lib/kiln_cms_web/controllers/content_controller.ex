@@ -141,18 +141,17 @@ defmodule KilnCMSWeb.ContentController do
         nil -> %{}
       end
 
+    # Scope search to the request's org (#336); content sections are per-site.
+    org_id = current_org_id(conn)
+
     results =
       if query == "" do
         %{posts: [], pages: [], entries: []}
       else
-        # NOTE (epic #336): `KilnCMS.Search.global` is NOT yet tenant-scoped — the
-        # search subsystem doesn't accept a tenant, so this (and the headless
-        # `SearchApiController`) span all orgs. Safe under the single-org rollout
-        # guard; the tenant facet lands with the search PR (PR 3) before real
-        # multi-org is enabled. Do not lift the guard until then.
         r =
           KilnCMS.Search.global(query,
             authorize?: true,
+            tenant: org_id,
             locale: locale,
             limit: 20,
             filters: filters
@@ -166,7 +165,8 @@ defmodule KilnCMSWeb.ContentController do
     facets =
       if query == "",
         do: [],
-        else: KilnCMS.Search.facets(query, authorize?: true, locale: locale).categories
+        else:
+          KilnCMS.Search.facets(query, authorize?: true, tenant: org_id, locale: locale).categories
 
     # A sparse result set gets a trigram "did you mean" (published titles
     # only) — the fuzzy hybrid leg may have rescued a typo's hits, and the
@@ -176,7 +176,7 @@ defmodule KilnCMSWeb.ContentController do
 
     suggestion =
       if query != "" and total < 3,
-        do: KilnCMS.Search.suggest(query, authorize?: true, locale: locale)
+        do: KilnCMS.Search.suggest(query, authorize?: true, tenant: org_id, locale: locale)
 
     conn
     # Don't cache personalized/empty query result pages on shared caches.

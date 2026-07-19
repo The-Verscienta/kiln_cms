@@ -64,6 +64,8 @@ defmodule KilnCMS.Ask do
       read_opts = [
         actor: opts[:actor],
         authorize?: Keyword.get(opts, :authorize?, true),
+        # Tenant (#336): retrieval via `Search.global` scopes to this org.
+        tenant: opts[:tenant],
         locale: locale,
         limit: clamp(opts[:limit])
       ]
