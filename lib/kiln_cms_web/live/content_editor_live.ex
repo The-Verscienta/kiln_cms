@@ -227,7 +227,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket,
       :translations,
       KilnCMS.CMS.Translations.coverage(socket.assigns.kind, socket.assigns.record,
-        actor: socket.assigns.actor
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org
       )
     )
   end

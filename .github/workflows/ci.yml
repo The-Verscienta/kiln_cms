@@ -279,7 +279,9 @@ jobs:
           path: |
             deps
             _build/test_strict
-          key: strict-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          # v2: the v1 cache holds a half-compiled gproc from before the
+          # local.rebar bootstrap step existed.
+          key: strict-v2-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
 
       - name: Install dependencies
         # local.rebar explicitly: this job has no warm _build cache on first
@@ -295,4 +297,5 @@ jobs:
         run: mix ash.codegen --check
 
       - name: Run the strict smoke suite
-        run: mix test test/kiln_cms/strict_tenancy_test.exs
+        # test_helper includes only :strict_tenancy-tagged tests on this leg.
+        run: mix test
