@@ -132,3 +132,7 @@ config :kiln_cms, :sso_oidc,
   client_secret: "kiln-test-secret",
   base_url: "https://idp.example.test",
   redirect_uri: "http://localhost:4002/auth"
+
+# Passkeys (#331): stub the Wax verification seam — tests exercise the real
+# base64url plumbing, storage, counter regression, and token minting around it.
+config :kiln_cms, KilnCMS.Accounts.WebAuthn, verifier: KilnCMS.StubWebAuthnVerifier

@@ -15,6 +15,15 @@ defmodule KilnCMS.Accounts do
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
     resource KilnCMS.Accounts.UserIdentity
 
+    # WebAuthn credentials (#331 passkeys) — written only by the verified
+    # ceremony (KilnCMS.Accounts.WebAuthn); self-managed from /editor/settings.
+    resource KilnCMS.Accounts.Passkey do
+      define :list_passkeys, action: :for_user, args: [:user_id]
+      define :get_passkey, action: :read, get_by: [:id]
+      define :rename_passkey, action: :rename
+      define :remove_passkey, action: :destroy
+    end
+
     # The tenant registry (epic #336) + the user↔org membership join. The org is
     # not itself multitenant — it *is* the tenant list every scoped resource is
     # partitioned by.

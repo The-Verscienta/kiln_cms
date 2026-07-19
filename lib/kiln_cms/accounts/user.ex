@@ -351,6 +351,18 @@ defmodule KilnCMS.Accounts.User do
       get_by :email
     end
 
+    # Passkey sign-in (#331): returns the verified account with its session
+    # token minted (metadata), mirroring the built-in strategies. Performs NO
+    # authentication itself — only KilnCMS.Accounts.WebAuthn.authenticate/2
+    # calls it (authorize?: false), after Wax verified the WebAuthn assertion.
+    read :sign_in_with_passkey do
+      description "Completes a WebAuthn-verified sign-in (system-only)."
+      argument :user_id, :uuid, allow_nil?: false
+      get? true
+      filter expr(id == ^arg(:user_id))
+      prepare KilnCMS.Accounts.Preparations.PasskeySessionToken
+    end
+
     update :reset_password_with_token do
       argument :reset_token, :string do
         allow_nil? false
@@ -501,6 +513,15 @@ defmodule KilnCMS.Accounts.User do
     # above; this makes the intent explicit and forbids everyone else).
     policy action(:anonymize) do
       authorize_if actor_attribute_equals(:role, :admin)
+    end
+
+    # The passkey sign-in completion mints a session token — system-only
+    # (`authorize?: false` from WebAuthn.authenticate/2 after assertion
+    # verification). Hard-forbidden for every authorized caller: combined with
+    # the self-only read policy above this is defense-in-depth against any
+    # actor minting a token for another account.
+    policy action(:sign_in_with_passkey) do
+      forbid_if always()
     end
 
     # Assigning the editorial role and consumer audiences is an admin action —
