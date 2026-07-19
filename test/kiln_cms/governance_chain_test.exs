@@ -118,6 +118,31 @@ defmodule KilnCMS.Governance.ChainTest do
     assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
   end
 
+  test "rotating the signing key yields :unverifiable, never a false TAMPERED" do
+    page = published_page(admin())
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+    # Rotate: a different key is now configured; the old anchor's signature
+    # can't be checked, but intact history must not read as tampering.
+    rotated = KilnCMS.Keys.generate_rsa_pem()
+    var = "KILN_TEST_ROTATED_#{System.unique_integer([:positive])}"
+    System.put_env(var, rotated)
+    prev = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Provenance,
+      Keyword.merge(prev || [], signing_key: {:env, %{"var" => var}})
+    )
+
+    on_exit(fn ->
+      Application.put_env(:kiln_cms, KilnCMS.Provenance, prev)
+      System.delete_env(var)
+    end)
+
+    assert :unverifiable = Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
   test "an unpublished draft is simply unanchored" do
     draft =
       CMS.create_page!(
@@ -144,7 +169,12 @@ defmodule KilnCMS.Governance.ChainTest do
     trail = KilnCMS.Governance.trail("page", page.id)
     assert trail.chain == :verified
 
-    rename = Enum.find(trail.timeline, &("title" in &1.changed and &1.action == :update))
+    rename =
+      Enum.find(
+        trail.timeline,
+        &(&1.action == :update and Enum.any?(&1.diffs, fn {f, _} -> f == "title" end))
+      )
+
     assert {"title", {"Anchored", "Renamed"}} in rename.diffs
   end
 end

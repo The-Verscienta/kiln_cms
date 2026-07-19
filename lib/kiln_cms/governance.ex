@@ -58,7 +58,14 @@ defmodule KilnCMS.Governance do
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          {:ok, record} when not is_nil(record) <-
            Ash.get(ct.resource, id, authorize?: false, error?: false) do
-      timeline = timeline(ct.resource, id)
+      # One ascending versions read feeds BOTH the timeline and the chain
+      # verification (which folds a prefix of the same list).
+      versions = versions_asc(ct.resource, id)
+      # Anchors key on the STORAGE type (what the publish hook records) — the
+      # generic :entry tier for dynamic types, not the public name.
+      storage = to_string(ContentTypes.storage_type(ct))
+      anchor = KilnCMS.Governance.Chain.latest_anchor(storage, id, record.org_id)
+      timeline = timeline(versions)
 
       %{
         item: %{
@@ -67,14 +74,16 @@ defmodule KilnCMS.Governance do
           title: record.title,
           slug: record.slug,
           state: record.state,
+          org_id: record.org_id,
           published_at: Map.get(record, :published_at)
         },
         timeline: timeline,
         publishes: for(e <- timeline, e.publish?, do: e.at),
         # Tamper-evidence (#356): does the anchored history still reproduce the
         # signed chain hash minted at the last publish?
-        chain:
-          KilnCMS.Governance.Chain.verify(ct.resource, to_string(ct.type), id, record.org_id),
+        chain: KilnCMS.Governance.Chain.verify_loaded(versions, storage, id, record.org_id),
+        # Edits since the last anchor — covered at the next publish.
+        unanchored_tail: KilnCMS.Governance.Chain.unanchored_tail(versions, anchor),
         # Scoped to the record's own site (epic #336) so the trail only shows
         # consents from the same org as the content.
         consents:
@@ -88,24 +97,27 @@ defmodule KilnCMS.Governance do
     end
   end
 
+  # A document's versions, ascending — the same order the chain folds in.
+  defp versions_asc(resource, id) do
+    Module.concat(resource, Version)
+    |> Ash.Query.filter(version_source_id == ^id)
+    |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
+    |> Ash.read!(authorize?: false)
+  end
+
   # The PaperTrail version timeline, newest first: each version's action, time,
-  # which fields it changed, and the old → new value pair per field (#352).
-  # `:changes_only` tracking stores each version's NEW values; the "old" side is
-  # the most recent earlier version's value for that field (nil when the field
-  # had never been set/tracked before), accumulated in one ascending pass.
-  defp timeline(resource, id) do
+  # and the old → new value pair per changed field (#352, `diffs` — the changed
+  # field names are its keys). `:changes_only` tracking stores each version's
+  # NEW values; the "old" side is the most recent earlier version's value for
+  # that field (nil when never set before), accumulated in one ascending pass.
+  defp timeline(versions_asc) do
     {events, _last_known} =
-      Module.concat(resource, Version)
-      |> Ash.Query.filter(version_source_id == ^id)
-      |> Ash.Query.sort(version_inserted_at: :asc)
-      |> Ash.read!(authorize?: false)
-      |> Enum.map_reduce(%{}, fn version, last_known ->
+      Enum.map_reduce(versions_asc, %{}, fn version, last_known ->
         changes = version.changes || %{}
 
         event = %{
           action: version.version_action_name,
           at: version.version_inserted_at,
-          changed: changes |> Map.keys() |> Enum.sort(),
           diffs:
             changes
             |> Enum.map(fn {field, new} -> {field, {Map.get(last_known, field), new}} end)

@@ -61,7 +61,13 @@ defmodule KilnCMSWeb.GovernanceLive do
         note: presence(params["note"])
       }
 
-    case KilnCMS.CMS.record_consent(attrs, actor: socket.assigns.current_user) do
+    # The consent lands in the content's own site (epic #336) — without the
+    # tenant it would default to the default org, invisible to the trail read
+    # and to the RequiredConsent publish gate.
+    case KilnCMS.CMS.record_consent(attrs,
+           actor: socket.assigns.current_user,
+           tenant: item.org_id
+         ) do
       {:ok, _consent} ->
         {:noreply,
          socket
@@ -106,13 +112,19 @@ defmodule KilnCMSWeb.GovernanceLive do
         class="rounded bg-success/15 px-1.5 py-0.5 text-xs font-medium text-success"
       >
         <.icon name="hero-shield-check" class="size-3.5" />
-        {gettext("History verified — anchored chain intact and signature valid")}
+        {gettext("Anchored history verified — chain intact, signature valid")}
       </span>
       <span
         :if={@chain == :unsigned}
         class="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success/80"
       >
         {gettext("History intact (anchor unsigned — no signing key configured)")}
+      </span>
+      <span
+        :if={@chain == :unverifiable}
+        class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
+      >
+        {gettext("History intact; anchor signed under a previous key (rotate-safe, not re-checkable)")}
       </span>
       <span
         :if={@chain == :unanchored}
@@ -200,6 +212,11 @@ defmodule KilnCMSWeb.GovernanceLive do
           {@trail.item.type} · {@trail.item.state}
         </p>
         <.chain_badge chain={@trail.chain} />
+        <p :if={@trail.unanchored_tail > 0} class="mt-1 text-xs text-base-content/60">
+          {gettext("%{count} edit(s) since the last anchor — covered at the next publish.",
+            count: @trail.unanchored_tail
+          )}
+        </p>
         <a
           href={~p"/editor/governance/#{@trail.item.type}/#{@trail.item.id}/export.json"}
           class="btn btn-sm btn-default mt-3"
@@ -291,7 +308,9 @@ defmodule KilnCMSWeb.GovernanceLive do
                 </td>
                 <td class="max-w-md text-xs text-base-content/60">
                   <details :if={e.diffs != []}>
-                    <summary class="cursor-pointer truncate">{Enum.join(e.changed, ", ")}</summary>
+                    <summary class="cursor-pointer truncate">
+                      {e.diffs |> Enum.map(&elem(&1, 0)) |> Enum.join(", ")}
+                    </summary>
                     <%!-- Side-by-side old → new per changed field (#352). --%>
                     <dl class="mt-2 space-y-1">
                       <div

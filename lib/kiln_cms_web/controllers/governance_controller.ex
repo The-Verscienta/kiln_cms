@@ -39,14 +39,18 @@ defmodule KilnCMSWeb.GovernanceController do
       item: trail.item,
       generated_at: DateTime.utc_now(),
       chain: chain_status(trail.chain),
+      unanchored_tail: trail.unanchored_tail,
       timeline:
         Enum.map(trail.timeline, fn event ->
           %{
-            event
-            | diffs:
-                Map.new(event.diffs, fn {field, {old, new}} ->
-                  {field, %{old: old, new: new}}
-                end)
+            action: event.action,
+            at: event.at,
+            publish?: event.publish?,
+            changed: Enum.map(event.diffs, &elem(&1, 0)),
+            diffs:
+              Map.new(event.diffs, fn {field, {old, new}} ->
+                {field, %{old: old, new: new}}
+              end)
           }
         end),
       consents:

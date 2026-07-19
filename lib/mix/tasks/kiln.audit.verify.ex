@@ -9,8 +9,10 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
 
   Prints one line per anchored document and exits non-zero if any chain fails
   to reproduce its anchor — i.e. anchored history was altered, deleted, or
-  reordered, or an anchor signature no longer verifies. `unsigned` (intact but
-  minted without a signing key) and `unanchored tail` states are informational.
+  reordered, or an anchor signature made under the currently configured key no
+  longer verifies. `intact (unsigned)` / `intact (signed under a previous
+  key)` are informational; edits newer than a document's latest anchor are
+  covered at its next publish.
   """
   use Mix.Task
 
@@ -22,9 +24,17 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   @impl Mix.Task
   def run(_args) do
     results =
-      for ct <- ContentTypes.all(),
-          record <- Ash.read!(ct.resource, authorize?: false),
-          verdict = Chain.verify(ct.resource, to_string(ct.type), record.id, record.org_id),
+      for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(),
+          # Minimal select — the verifier needs identity, not block trees. The
+          # dynamic tier shares the :entry storage resource, which is also what
+          # the publish hook keys anchors on.
+          record <-
+            ContentTypes.list!(ct,
+              authorize?: false,
+              query: [select: [:id, :slug, :org_id]]
+            ),
+          storage = to_string(ContentTypes.storage_type(ct)),
+          verdict = Chain.verify(ct.resource, storage, record.id, record.org_id),
           verdict != :unanchored do
         line(ct.type, record, verdict)
         verdict
@@ -42,6 +52,7 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
       case verdict do
         :verified -> "VERIFIED"
         :unsigned -> "intact (unsigned)"
+        :unverifiable -> "intact (signed under a previous key)"
         {:tampered, reason} -> "TAMPERED — #{reason}"
       end
 
