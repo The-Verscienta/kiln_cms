@@ -33,16 +33,25 @@ The raw secret is stored as `users.totp_secret` (`bytea`, `sensitive?`,
 sign-in gate and the owner's enrolment UI. 2FA is "enabled" iff
 `totp_confirmed_at` is set.
 
-## Scope & Phase 2
+## Recovery codes & QR (Phase 2, shipped)
 
-Phase 1 is TOTP only. Deliberately out of scope for now (Phase 2, see #331):
+- **Recovery codes.** Confirming enrolment mints 10 one-time codes
+  (`XXXX-XXXX`), shown exactly once — only SHA-256 hashes are stored
+  (`totp_recovery_hashes`; the codes are 40-bit uniform random, so a fast hash
+  is appropriate, matched in constant time). At the sign-in gate a recovery
+  code works in place of the 6-digit TOTP and is **burned in the same update**
+  (`:consume_totp_recovery_code`), so it can never sign in twice.
+  `/editor/settings` shows the unused count and can regenerate the set (needs a
+  current authenticator code; regeneration invalidates unused codes). Disabling
+  2FA clears the set.
+- **QR-code image.** Enrolment renders the `otpauth://` URI as an inline SVG QR
+  (`eqrcode`, pure Elixir) alongside the setup key.
 
-- **Recovery / backup codes.** Today a user who loses their authenticator must
-  have an admin clear `totp_secret`/`totp_confirmed_at` (e.g. via the console or
-  `bin/kiln_cms rpc`). Recovery codes are the first Phase 2 addition.
-- **QR-code image.** Enrolment shows the setup key + `otpauth://` URI for manual
-  entry; a scannable QR image needs a QR encoder (a new dependency).
-- **SSO (OAuth2/OIDC/SAML) and passkeys/WebAuthn** — the other half of #331.
+## Scope & later phases
+
+Still out of scope (the other half of #331):
+
+- **SSO (OAuth2/OIDC/SAML) and passkeys/WebAuthn**.
   `assent` (bundled with `ash_authentication`) already supports OAuth2/OIDC, so
   SSO needs no new dependency; it was deferred here only because it can't be
   verified without a live identity provider.
