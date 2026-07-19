@@ -41,13 +41,35 @@ engine as live delivery, the historical artifact is faithful to what was
 actually published, and **drafts/edits made after that publish never leak** into
 it.
 
+## The collection view (#338 phase 2, shipped)
+
+**"What was published on this site on date X?"** —
+
+    GET /api/content/:type?as_of=2026-03-01          # REST
+    { contentAsOf(type: "post", asOf: $t) { … } }    # GraphQL twin
+
+Index entries (`slug`, `title`, `published_at`, `href` to the per-document
+snapshot) reconstructed from version history: a document counts as published
+iff its last publish/unpublish transition ≤ `as_of` was a publish, and its
+title/slug are replayed to that publish (a later rename doesn't leak in).
+Unlike the single-document read, the **index respects unpublish** — a list
+that included since-removed content would misrepresent the site as it stood.
+Bounded (`limit`, default 100, max 500) — the last-transition scan runs as one
+`DISTINCT ON` SQL pass, so cost scales with matching documents, never with
+total publish history — and results are server-cached for 5 minutes.
+Compiled types only (a dynamic type answers 404 — the documented later-phase
+boundary), and content whose history predates version tracking can't be
+reconstructed and is omitted.
+
 ## Scope & later phases
 
-- **Lookup is by the current record's id** (resolved from the slug), so content
-  that has since been unpublished/removed isn't reachable — id-addressable
-  history is a later phase.
-- A temporary unpublish "dark window" still reports the most recent publish
-  (dark-window awareness is a later phase).
+- **Single-document lookup is by the current record's id** (resolved from the
+  slug), so a since-deleted document's snapshot isn't reachable that way — use
+  the collection index for discovery; id-addressable single-doc history is a
+  later phase.
+- The single-document read's temporary-unpublish "dark window" still reports
+  the most recent publish (dark-window awareness is a later phase; the
+  collection index already accounts for it).
 - Compiled types (page/post/project types); dynamic (D17) entries are a later
   phase.
 - Pairs with **#356** (tamper-evident history + signed versions) and **#352**

@@ -93,6 +93,21 @@ defmodule KilnCMS.Blocks do
   @spec search_text(struct()) :: String.t()
   def search_text(%module{} = block), do: module.search_text(block)
 
+  @doc """
+  Markdown projection of a block for the `:llm` fired surface (#357). A block
+  module opts into a richer rendering by exporting `to_markdown/1` (headings
+  emit real `#` levels, containers recurse over their children through this
+  dispatcher); everything else falls back to its plain-text projection.
+  """
+  @spec to_markdown(struct()) :: String.t() | nil
+  def to_markdown(%module{} = block) do
+    if function_exported?(module, :to_markdown, 1) do
+      module.to_markdown(block)
+    else
+      search_text(block)
+    end
+  end
+
   defp kiln_block?(module) do
     Code.ensure_loaded?(module) and
       function_exported?(module, :render, 2) and

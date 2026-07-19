@@ -27,12 +27,14 @@ defmodule KilnCMS.Governance do
   Returns lightweight maps: `%{type, id, title, slug, state}`.
   """
   @spec content_index(pos_integer()) :: [map()]
-  def content_index(limit \\ 50) do
+  def content_index(org_id, limit \\ 50) do
+    # Scoped to the request's site (epic #336) so the governance dashboard only
+    # lists the current org's content.
     Enum.flat_map(ContentTypes.all(), fn ct ->
       ct.resource
       |> Ash.Query.sort(updated_at: :desc)
       |> Ash.Query.limit(limit)
-      |> Ash.read!(authorize?: false)
+      |> Ash.read!(authorize?: false, tenant: org_id)
       |> Enum.map(fn record ->
         %{
           type: to_string(ct.type),
@@ -53,14 +55,17 @@ defmodule KilnCMS.Governance do
         publishes: [DateTime],       # publish points, newest first (for #338 links)
         consents: [%KilnCMS.CMS.Consent{}]}
   """
-  @spec trail(String.t(), Ash.UUID.t()) :: map() | nil
-  def trail(type, id) do
-    with ct when not is_nil(ct) <- ContentTypes.get(type),
+  @spec trail(String.t(), Ash.UUID.t(), Ash.UUID.t()) :: map() | nil
+  def trail(type, id, org_id) do
+    # Scoped to the request's site (epic #336): the type resolves, the record
+    # loads, and the version timeline reads all under `org_id`, so an admin on
+    # one site's host can never pull another org's content or audit trail by id.
+    with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          {:ok, record} when not is_nil(record) <-
-           Ash.get(ct.resource, id, authorize?: false, error?: false) do
+           Ash.get(ct.resource, id, authorize?: false, tenant: org_id, error?: false) do
       # One ascending versions read feeds BOTH the timeline and the chain
       # verification (which folds a prefix of the same list).
-      versions = versions_asc(ct.resource, id)
+      versions = versions_asc(ct.resource, id, org_id)
       # Anchors key on the STORAGE type (what the publish hook records) — the
       # generic :entry tier for dynamic types, not the public name.
       storage = to_string(ContentTypes.storage_type(ct))
@@ -98,11 +103,12 @@ defmodule KilnCMS.Governance do
   end
 
   # A document's versions, ascending — the same order the chain folds in.
-  defp versions_asc(resource, id) do
+  # Tenant-scoped like every other read in `trail/3` (epic #336).
+  defp versions_asc(resource, id, org_id) do
     Module.concat(resource, Version)
     |> Ash.Query.filter(version_source_id == ^id)
     |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
-    |> Ash.read!(authorize?: false)
+    |> Ash.read!(authorize?: false, tenant: org_id)
   end
 
   # The PaperTrail version timeline, newest first: each version's action, time,

@@ -165,5 +165,40 @@ defmodule KilnCMS.AutomationTest do
 
       assert_receive {:automation_event, "page.published", %{"title" => "Auto"}}
     end
+
+    test "the review-workflow transitions fire in_review / returned_to_draft rules (#375)" do
+      in_review = "e2e-rev-#{System.unique_integer([:positive])}"
+      returned = "e2e-ret-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, "automation:#{in_review}")
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, "automation:#{returned}")
+      rule(%{trigger_event: :in_review, action: :broadcast, config: %{"topic" => in_review}})
+
+      rule(%{
+        trigger_event: :returned_to_draft,
+        action: :broadcast,
+        config: %{"topic" => returned}
+      })
+
+      actor =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "auto-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      page =
+        CMS.create_page!(%{title: "Review", slug: "rev-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      page = CMS.submit_page_for_review!(page, %{}, actor: actor)
+      drain_oban()
+      assert_receive {:automation_event, "page.in_review", %{"title" => "Review"}}
+
+      CMS.return_page_to_draft!(page, %{}, actor: actor)
+      drain_oban()
+      assert_receive {:automation_event, "page.returned_to_draft", %{"title" => "Review"}}
+    end
   end
 end

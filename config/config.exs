@@ -157,7 +157,7 @@ config :kiln_cms, KilnCMS.Repo, types: KilnCMS.PostgrexTypes
 # docs/static-export.md.
 config :kiln_cms, KilnCMS.Firing.StaticExport,
   output_dir: nil,
-  surfaces: [:web, :json, :json_ld]
+  surfaces: [:web, :json, :json_ld, :llm]
 
 # Nx's backend is set per-env: EXLA.Backend in dev/test (where the :exla dep is
 # available — see config/dev.exs + test.exs), Nx.BinaryBackend (Nx's default)
@@ -177,13 +177,24 @@ config :kiln_cms, :graphql_introspection, true
 # which hides the registration route and rejects the registration action.
 config :kiln_cms, :registration_enabled, true
 
-# Multi-tenancy (epic #336). `false` (default) keeps the install single-tenant:
-# the `org_id` axis exists in non-strict `global?: true` mode and every row lives
-# in the seeded default org, but creating a *second* organization is refused —
-# because delivery reads don't yet thread a tenant, a second org would be spanned
-# by every tenant-less read (a cross-site leak). The routing/tenant-resolution PR
-# flips this on once delivery is tenant-aware.
-config :kiln_cms, :multitenancy_enabled, false
+# Multi-tenancy (epic #336). `true`: additional organizations may be created and
+# each is served in isolation by host. The tenant axis is fully threaded — the
+# `SetTenant` plug scopes the headless GraphQL/JSON:API surfaces from the request
+# host, and every controller / LiveView / worker read on a per-site resource
+# passes the tenant (verified by the pre-lift cross-org audit) — so a request on
+# one site's host only ever sees that org's data.
+#
+# Resources remain `global?: true` (non-strict): a tenant-less read fails OPEN
+# (spans orgs) rather than closed. That's safe today because every reachable read
+# is threaded, but a future tenant-less read would silently leak. Flipping the
+# per-site resources to strict `global?: false` (fail-closed) is the recommended
+# next hardening — it requires first reworking the deliberate tenant-less reads
+# (public newsletter-token lookups, AshOban global schedulers, `static_export`).
+#
+# Set to `false` to hard-refuse a second org (a kill switch for single-tenant
+# installs). The seeded default org is created by the backfill migration, which
+# bypasses this guard, so bootstrapping is unaffected either way.
+config :kiln_cms, :multitenancy_enabled, true
 
 # Tamper-evident history anchors (#356): at every publish, the document's full
 # PaperTrail version chain is folded into a canonical hash and recorded

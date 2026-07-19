@@ -29,11 +29,11 @@ defmodule KilnCMSWeb.GovernanceLive do
   defp apply_action(socket, :index, _params) do
     socket
     |> assign(:trail, nil)
-    |> assign(:content, Governance.content_index())
+    |> assign(:content, Governance.content_index(socket.assigns.current_org.id))
   end
 
   defp apply_action(socket, :show, %{"type" => type, "id" => id}) do
-    case Governance.trail(type, id) do
+    case Governance.trail(type, id, socket.assigns.current_org.id) do
       nil ->
         socket
         |> put_flash(:error, gettext("That content couldn't be found."))

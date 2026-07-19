@@ -40,6 +40,11 @@ defmodule KilnCMS.Blocks.Heading do
   @impl Kiln.Block.Renderer
   def search_text(block), do: block.text || ""
 
+  # The :llm surface (#357): a real Markdown heading at this block's level —
+  # one clamp rule shared with the :web render.
+  def to_markdown(block),
+    do: String.duplicate("#", clamp(block.level)) <> " " <> (block.text || "")
+
   defp clamp(level) when level in 1..6, do: level
   defp clamp(_), do: 2
 

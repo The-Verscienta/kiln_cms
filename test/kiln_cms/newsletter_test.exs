@@ -8,6 +8,8 @@ defmodule KilnCMS.NewsletterTest do
   # outside the test process, so they need the shared sandbox connection.
   use KilnCMS.DataCase, async: false
 
+  require Ash.Query
+
   alias KilnCMS.CMS
   alias KilnCMS.Newsletter
 
@@ -147,5 +149,103 @@ defmodule KilnCMS.NewsletterTest do
     drain()
 
     assert recipients(sent_emails(post.title)) == [to_string(staying.email)]
+  end
+
+  describe "automation-driven sends (#376)" do
+    alias KilnCMS.Automation.Rule
+    alias KilnCMS.Automation.RuleWorker
+
+    defp newsletter_rule(attrs \\ %{}) do
+      Ash.Seed.seed!(
+        Rule,
+        Map.merge(
+          %{
+            name: "NL rule #{System.unique_integer([:positive])}",
+            enabled: true,
+            trigger_event: :published,
+            action: :newsletter,
+            config: %{}
+          },
+          attrs
+        )
+      )
+    end
+
+    defp run_rule(rule, post) do
+      RuleWorker.perform(%Oban.Job{
+        args: %{
+          "rule_id" => rule.id,
+          "event" => "post.published",
+          "payload" => %{"id" => post.id, "title" => post.title, "slug" => post.slug},
+          "org_id" => rule.org_id
+        }
+      })
+    end
+
+    defp sends_for(post) do
+      Newsletter.list_sends!(
+        authorize?: false,
+        query: [filter: [content_id: post.id]]
+      )
+    end
+
+    test "on publish, a newsletter rule sends the campaign exactly once (end to end)" do
+      actor = admin()
+      subscriber(actor)
+      rule = newsletter_rule()
+
+      # publish → (firing drains first) → dispatch → rule → send fan-out.
+      post = published_post(actor, "Auto NL #{System.unique_integer([:positive])}")
+      drain()
+
+      assert [send] = sends_for(post)
+      assert send.automation_rule_id == rule.id
+      assert send.content_published_at == post.published_at
+      assert length(sent_emails(post.title)) == 1
+    end
+
+    test "re-delivering the same job never double-sends; a new publish sends again" do
+      actor = admin()
+      subscriber(actor)
+      rule = newsletter_rule(%{trigger_event: :updated})
+      post = published_post(actor, "Dedupe NL #{System.unique_integer([:positive])}")
+
+      assert :ok = run_rule(rule, post)
+      assert :ok = run_rule(rule, post)
+      drain()
+      assert [_only_one] = sends_for(post)
+
+      # A fresh publish revision (new published_at) is a new campaign.
+      post = CMS.unpublish_post!(post, %{}, actor: actor)
+      post = CMS.publish_post!(post, %{}, actor: actor)
+      drain()
+      assert :ok = run_rule(rule, post)
+      assert length(sends_for(post)) == 2
+    end
+
+    test "gated (non-public) content is skipped, not sent and not retried" do
+      actor = admin()
+      subscriber(actor)
+      rule = newsletter_rule()
+
+      post =
+        published_post(actor, "Gated NL #{System.unique_integer([:positive])}", %{
+          audience: :member
+        })
+
+      assert :ok = run_rule(rule, post)
+      assert sends_for(post) == []
+    end
+
+    test "an unfired document snoozes rather than failing" do
+      actor = admin()
+      rule = newsletter_rule()
+
+      # Draft → publish but WITHOUT draining, so no :web artifact exists yet.
+      post = CMS.create_post!(%{title: "Unfired NL", slug: slug()}, actor: actor)
+      post = CMS.publish_post!(post, %{}, actor: actor)
+
+      assert {:snooze, _} = run_rule(rule, post)
+    end
   end
 end

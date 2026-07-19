@@ -99,6 +99,16 @@ defmodule KilnCMSWeb.Presence do
     end)
   end
 
+  @doc """
+  Rename a tracked preview viewer in place (#379 — a token-preview guest picking
+  a display name). Co-viewers see the change via the normal presence diff.
+  """
+  def rename_preview_viewer(pid, kind, id, viewer_key, name) do
+    update(pid, preview_topic(kind, id), viewer_key, fn meta ->
+      %{meta | name: display_name(%{name: name})}
+    end)
+  end
+
   # Privacy (#214): show the user's chosen display name to other editors, never
   # their email local-part (which leaks the address / naming convention). Falls
   # back to a neutral handle when no name is set — identity stays keyed by user

@@ -26,7 +26,12 @@ defmodule KilnCMSWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
-  socket "/ws/gql", KilnCMSWeb.GraphqlSocket, websocket: true, longpoll: true
+  # `connect_info: [:uri]` so the socket can resolve its tenant from the
+  # connecting host (epic #336) — a raw transport bypasses the SetTenant plug, so
+  # without this GraphQL subscriptions/queries over the socket would span orgs.
+  socket "/ws/gql", KilnCMSWeb.GraphqlSocket,
+    websocket: [connect_info: [:uri]],
+    longpoll: [connect_info: [:uri]]
 
   # Collaborative-editing CRDT prototype (token-authenticated; joins refuse
   # unless :collab_prototype is enabled — see KilnCMSWeb.CollabChannel).

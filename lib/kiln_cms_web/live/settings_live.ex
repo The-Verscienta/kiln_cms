@@ -21,8 +21,10 @@ defmodule KilnCMSWeb.SettingsLive do
      |> assign(:profile_form, profile_form(user))
      |> assign(:password_form, password_form(user))
      |> assign(:totp_enabled?, Accounts.totp_enabled?(user))
-     # Transient enrolment state (secret + provisioning URI) while confirming.
-     |> assign(:enrolling, nil)}
+     # Transient enrolment state (secret + provisioning URI + QR) while confirming.
+     |> assign(:enrolling, nil)
+     # Freshly minted recovery codes, shown exactly once (#331 phase 2).
+     |> assign(:recovery_codes, nil)}
   end
 
   # --- two-factor authentication (#331) --------------------------------------
@@ -33,12 +35,15 @@ defmodule KilnCMSWeb.SettingsLive do
 
     case Accounts.setup_totp(user, %{}, actor: user) do
       {:ok, user} ->
+        uri = Totp.otpauth_uri(user.totp_secret, to_string(user.email))
+
         {:noreply,
          socket
          |> assign(:current_user, user)
          |> assign(:enrolling, %{
            secret: Totp.base32_encode(user.totp_secret),
-           uri: Totp.otpauth_uri(user.totp_secret, to_string(user.email))
+           uri: uri,
+           qr_svg: qr_svg(uri)
          })}
 
       {:error, _} ->
@@ -59,12 +64,35 @@ defmodule KilnCMSWeb.SettingsLive do
          |> assign(:current_user, user)
          |> assign(:totp_enabled?, true)
          |> assign(:enrolling, nil)
+         |> assign(:recovery_codes, Ash.Resource.get_metadata(user, :recovery_codes))
          |> put_flash(:info, gettext("Two-factor authentication is now on."))}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, gettext("That code isn't valid — try again."))}
     end
   end
+
+  def handle_event("regenerate_recovery_codes", %{"code" => code}, socket) do
+    user = socket.assigns.current_user
+
+    case Accounts.regenerate_totp_recovery_codes(user, %{code: code}, actor: user) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:current_user, user)
+         |> assign(:recovery_codes, Ash.Resource.get_metadata(user, :recovery_codes))
+         |> put_flash(
+           :info,
+           gettext("New recovery codes generated — the old ones no longer work.")
+         )}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — try again."))}
+    end
+  end
+
+  def handle_event("dismiss_recovery_codes", _params, socket),
+    do: {:noreply, assign(socket, :recovery_codes, nil)}
 
   def handle_event("disable_totp", %{"code" => code}, socket) do
     user = socket.assigns.current_user
@@ -75,6 +103,7 @@ defmodule KilnCMSWeb.SettingsLive do
          socket
          |> assign(:current_user, user)
          |> assign(:totp_enabled?, false)
+         |> assign(:recovery_codes, nil)
          |> put_flash(:info, gettext("Two-factor authentication is now off."))}
 
       {:error, _} ->
@@ -153,6 +182,27 @@ defmodule KilnCMSWeb.SettingsLive do
            gettext("Couldn't change your password. Check your current password and try again.")
          )}
     end
+  end
+
+  # The otpauth URI as an inline QR SVG (eqrcode, pure Elixir). `nil` if
+  # encoding fails for any reason — the setup key remains as the fallback.
+  defp qr_svg(uri) do
+    uri |> EQRCode.encode() |> EQRCode.svg(width: 176)
+  rescue
+    _ -> nil
+  end
+
+  attr :svg, :string, required: true
+
+  # The SVG is generated locally by EQRCode from the otpauth URI we built —
+  # never from user input — so rendering it raw is safe.
+  # sobelow_skip ["XSS.Raw"]
+  defp totp_qr(assigns) do
+    ~H"""
+    <div class="w-fit rounded-lg bg-white p-2" data-role="totp-qr">
+      {Phoenix.HTML.raw(@svg)}
+    </div>
+    """
   end
 
   defp prefs_form(user) do
@@ -251,12 +301,50 @@ defmodule KilnCMSWeb.SettingsLive do
             )}
           </p>
 
+          <div
+            :if={@recovery_codes}
+            class="mb-4 space-y-2 rounded-lg border border-warning/50 bg-warning/10 p-4"
+          >
+            <p class="text-sm font-medium">
+              {gettext("Your recovery codes — save them now, they won't be shown again.")}
+            </p>
+            <p class="text-xs text-base-content/70">
+              {gettext("Each code signs you in once if you lose your authenticator.")}
+            </p>
+            <ul class="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm" data-role="recovery-codes">
+              <li :for={code <- @recovery_codes}>{code}</li>
+            </ul>
+            <button type="button" phx-click="dismiss_recovery_codes" class="btn btn-sm btn-default">
+              {gettext("I've saved them")}
+            </button>
+          </div>
+
           <div :if={@totp_enabled?} class="space-y-3">
             <p class="flex items-center gap-1.5 text-sm font-medium text-success">
               <.icon name="hero-shield-check" class="size-4" />
               {gettext("Two-factor authentication is on.")}
             </p>
-            <form phx-submit="disable_totp" class="flex items-end gap-2">
+            <p class="text-sm text-base-content/70">
+              {gettext("%{count} unused recovery codes remain.",
+                count: length(@current_user.totp_recovery_hashes || [])
+              )}
+            </p>
+            <form
+              id="regenerate-recovery-form"
+              phx-submit="regenerate_recovery_codes"
+              class="flex items-end gap-2"
+            >
+              <.input
+                name="code"
+                value=""
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                label={gettext("Enter a current code to generate new recovery codes")}
+              />
+              <.button type="submit" variant="ghost">{gettext("Regenerate")}</.button>
+            </form>
+            <form id="disable-totp-form" phx-submit="disable_totp" class="flex items-end gap-2">
               <.input
                 name="code"
                 value=""
@@ -272,9 +360,10 @@ defmodule KilnCMSWeb.SettingsLive do
           <div :if={!@totp_enabled? && @enrolling} class="space-y-3">
             <p class="text-sm text-base-content/70">
               {gettext(
-                "Add this key to your authenticator app, then enter the 6-digit code to confirm."
+                "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
               )}
             </p>
+            <.totp_qr :if={@enrolling.qr_svg} svg={@enrolling.qr_svg} />
             <p class="text-sm">
               {gettext("Setup key")}:
               <code class="rounded bg-base-200 px-1.5 py-0.5 font-mono text-sm break-all">{@enrolling.secret}</code>
@@ -283,7 +372,7 @@ defmodule KilnCMSWeb.SettingsLive do
               <summary class="cursor-pointer">{gettext("Provisioning URI")}</summary>
               <code class="break-all">{@enrolling.uri}</code>
             </details>
-            <form phx-submit="confirm_totp" class="flex items-end gap-2">
+            <form id="confirm-totp-form" phx-submit="confirm_totp" class="flex items-end gap-2">
               <.input
                 name="code"
                 value=""

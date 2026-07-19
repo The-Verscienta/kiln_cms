@@ -81,13 +81,13 @@ defmodule KilnCMS.Firing.StaticExportTest do
     manifest = Path.join(out, "index.json") |> File.read!() |> Jason.decode!()
     assert manifest["generator"] == "kiln-static-export"
     assert manifest["base_url"] == "https://cdn.example.test"
-    assert manifest["surfaces"] == ["web", "json", "json_ld"]
+    assert manifest["surfaces"] == ["web", "json", "json_ld", "llm"]
 
     entry = Enum.find(manifest["entries"], &(&1["slug"] == slug))
     assert entry["type"] == "page"
     assert entry["locale"] == "en"
     assert entry["path"] == "content/page/en/#{slug}"
-    assert Enum.sort(entry["surfaces"]) == ["json", "json_ld", "web"]
+    assert Enum.sort(entry["surfaces"]) == ["json", "json_ld", "llm", "web"]
   end
 
   test "namespaces non-default locales" do

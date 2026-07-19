@@ -140,9 +140,19 @@ defmodule KilnCMSWeb.Router do
 
   # Preview endpoint — authorized by a signed token, not a session/bearer.
   # Tightly rate-limited per IP so a leaked/guessable token can't be used to
-  # enumerate or scrape draft content.
+  # enumerate or scrape draft content. Accepts html so a browser opening the
+  # link is redirected to the shared human view (#379); JSON is the default.
   pipeline :preview do
-    plug :accepts, ["json"]
+    plug :accepts, ["json", "html"]
+    # The html branch only ever redirects to the live view, but set the secure
+    # browser headers + CSP regardless (harmless on the JSON responses).
+    plug :put_secure_browser_headers, @browser_csp_headers
+    plug KilnCMSWeb.Plugs.RateLimit, :preview
+  end
+
+  # The human token-preview page (#379): browser pipeline for the LiveView,
+  # fronted by the same tight :preview rate limit.
+  pipeline :preview_page do
     plug KilnCMSWeb.Plugs.RateLimit, :preview
   end
 
@@ -347,7 +357,15 @@ defmodule KilnCMSWeb.Router do
   scope "/api", KilnCMSWeb do
     pipe_through :api
 
+    # Collection view as of a date (#338 phase 2): which documents were
+    # published at that instant, reconstructed from version history.
+    get "/content/:type", ArtifactController, :index_point_in_time
+
     get "/content/:type/:slug", ArtifactController, :show
+
+    # Embedding-driven related content (#339 phase 2): published documents
+    # semantically closest to this one.
+    get "/content/:type/:slug/related", RelatedController, :show
 
     # Visual-editing bridge (#355): the live working copy, stega-annotated so an
     # external front end's overlay maps a rendered value back to its Kiln field.
@@ -399,6 +417,17 @@ defmodule KilnCMSWeb.Router do
     pipe_through :preview
 
     get "/:token", PreviewController, :show
+  end
+
+  # Shared human view of a token preview — external stakeholders without an
+  # editor account join the same presence/cursor session as the editor
+  # pop-out (#379).
+  scope "/preview", KilnCMSWeb do
+    pipe_through [:browser, :preview_page]
+
+    live_session :token_preview do
+      live "/:token/live", TokenPreviewLive, :show
+    end
   end
 
   # Public newsletter confirm/unsubscribe — authorized by an opaque per-subscriber

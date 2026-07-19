@@ -29,17 +29,22 @@ defmodule KilnCMSWeb.PreviewLive do
   def mount(%{"kind" => kind, "id" => id}, _session, socket) do
     if ContentTypes.type?(kind) do
       user = socket.assigns.current_user
-      record = ContentTypes.get_record!(kind, id, actor: user)
+      # Scope the record read to the editor's current site (epic #336) so a
+      # preview can only open that site's content.
+      org = socket.assigns.current_org
+      record = ContentTypes.get_record!(kind, id, actor: user, tenant: org)
 
       socket =
         socket
         |> assign(:kind, kind)
         |> assign(:record_id, id)
         |> assign(:page_title, gettext("Preview: %{title}", title: record.title))
-        |> assign(:excerpt?, ContentTypes.get!(kind).excerpt?)
+        |> assign(:excerpt?, ContentTypes.get!(kind, org.id).excerpt?)
         |> assign(:title, record.title)
         |> assign(:excerpt, Map.get(record, :excerpt))
         |> assign(:blocks, content_blocks(record))
+        |> assign(:locale, record.locale)
+        |> assign(:variants, locale_variants(kind, record, user))
         |> assign(:viewers, [])
         |> assign(:cursors, %{})
         |> assign(:viewer_key, nil)
@@ -71,6 +76,20 @@ defmodule KilnCMSWeb.PreviewLive do
     else
       socket
     end
+  end
+
+  # The record's locale siblings (same slug, any state the viewer may read),
+  # for the shared locale switcher (#378). Scoped to the record's own org.
+  defp locale_variants(kind, record, user) do
+    ContentTypes.list!(kind,
+      actor: user,
+      tenant: record.org_id,
+      query: [filter: [slug: record.slug], select: [:id, :locale]]
+    )
+    |> Enum.map(&%{id: &1.id, locale: &1.locale})
+    |> Enum.sort_by(& &1.locale)
+  rescue
+    _ -> [%{id: record.id, locale: record.locale}]
   end
 
   defp content_blocks(record) do
@@ -112,6 +131,12 @@ defmodule KilnCMSWeb.PreviewLive do
     {:noreply, assign(socket, :cursors, Map.delete(socket.assigns.cursors, key))}
   end
 
+  # A co-viewer switched the shared locale (#378): everyone follows to the
+  # sibling document's preview, where presence re-forms.
+  def handle_info({:preview_switch, id}, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/editor/preview/#{socket.assigns.kind}/#{id}")}
+  end
+
   # Ignore any unexpected message rather than crashing the preview process.
   def handle_info(_message, socket), do: {:noreply, socket}
 
@@ -134,6 +159,21 @@ defmodule KilnCMSWeb.PreviewLive do
         self(),
         Presence.preview_cursor_topic(socket.assigns.kind, socket.assigns.record_id),
         {:preview_cursor, cursor}
+      )
+    end
+
+    {:noreply, socket}
+  end
+
+  # Switch every co-viewer (self included) to a locale sibling — broadcast on
+  # the preview topic, so the whole group stays on the same variant (#378).
+  # Only ids from the resolved sibling list are accepted.
+  def handle_event("switch_variant", %{"id" => id}, socket) do
+    if Enum.any?(socket.assigns.variants, &(&1.id == id)) and id != socket.assigns.record_id do
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        topic(socket.assigns.kind, socket.assigns.record_id),
+        {:preview_switch, id}
       )
     end
 
@@ -170,7 +210,31 @@ defmodule KilnCMSWeb.PreviewLive do
   def render(assigns) do
     ~H"""
     <div class="sticky top-0 z-20 flex items-center justify-between gap-2 bg-warning/90 px-4 py-1.5 text-xs font-medium text-warning-content">
-      <span>{gettext("Draft preview — not the published page")}</span>
+      <div class="flex items-center gap-2">
+        <span>{gettext("Draft preview — not the published page")}</span>
+        <%!-- Shared locale switcher (#378): changing it moves every co-viewer,
+              so the group always reviews the same language variant. --%>
+        <form
+          :if={length(@variants) > 1}
+          id="preview-locale-form"
+          phx-change="switch_variant"
+          class="flex items-center"
+        >
+          <label for="preview-locale-switch" class="sr-only">{gettext("Locale")}</label>
+          <select
+            id="preview-locale-switch"
+            name="id"
+            class="select select-xs w-auto min-h-0 border-warning-content/40 bg-warning/60 font-medium uppercase"
+          >
+            <option :for={v <- @variants} value={v.id} selected={v.id == @record_id}>
+              {v.locale}
+            </option>
+          </select>
+        </form>
+        <span :if={length(@variants) <= 1} class="font-semibold uppercase" data-role="locale">
+          {@locale}
+        </span>
+      </div>
       <.presence_bar viewers={@viewers} />
     </div>
     <%!-- The cursor layer sits over the preview; the hook reports pointer moves
