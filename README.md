@@ -179,6 +179,17 @@ locked-down. See [`docs/staging-environments.md`](docs/staging-environments.md) 
 the one-command flow, the Docker/Coolify recipe, and the safety guards, and
 [`docs/deploy-staging.md`](docs/deploy-staging.md) for the deploy/operator checklist.
 
+### Write API + visual editing
+
+The write-capable headless APIs (#330) and the visual-editing bridge / Presentation
+console (#355) deploy on a plain Redeploy — no migration, no `POOL_SIZE` change, no
+required secret. Two conscious calls: the headless surface is now **writable** by
+`:read_write` API keys (audit them), and the bridge is inert cross-origin until you
+set `CORS_ORIGINS` (+ `PRESENTATION_PREVIEW_URL`). See
+[`docs/deploy-write-visual-editing.md`](docs/deploy-write-visual-editing.md) for the
+checklist and [`docs/visual-editing-bridge.md`](docs/visual-editing-bridge.md) for
+the front-end integration guide.
+
 ### Production hardening checklist
 
 - **`dev_routes` must stay off.** It is only set in `config/dev.exs`; `config/prod.exs`
