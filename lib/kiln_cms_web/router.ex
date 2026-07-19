@@ -357,7 +357,15 @@ defmodule KilnCMSWeb.Router do
   scope "/api", KilnCMSWeb do
     pipe_through :api
 
+    # Collection view as of a date (#338 phase 2): which documents were
+    # published at that instant, reconstructed from version history.
+    get "/content/:type", ArtifactController, :index_point_in_time
+
     get "/content/:type/:slug", ArtifactController, :show
+
+    # Embedding-driven related content (#339 phase 2): published documents
+    # semantically closest to this one.
+    get "/content/:type/:slug/related", RelatedController, :show
 
     # Visual-editing bridge (#355): the live working copy, stega-annotated so an
     # external front end's overlay maps a rendered value back to its Kiln field.

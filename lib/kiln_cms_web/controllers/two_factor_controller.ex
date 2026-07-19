@@ -21,19 +21,36 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   def create(conn, %{"code" => code}) do
     with {:ok, user} <- pending_user(conn),
-         true <- is_binary(code) and Totp.valid?(user.totp_secret, String.trim(code)) do
+         {:ok, user} <- second_factor(user, code) do
       AuthController.complete_sign_in(conn, user, gettext("You are now signed in"))
     else
       :error ->
         # Pending token missing/expired — restart from sign-in.
         redirect(conn, to: ~p"/sign-in")
 
-      _invalid_code ->
+      :invalid ->
         render_form(conn, 401, gettext("That code isn't valid. Try again."))
     end
   end
 
   def create(conn, _params), do: redirect(conn, to: ~p"/sign-in")
+
+  # The 6-digit TOTP — or, when the authenticator is unavailable, a one-time
+  # recovery code, burned on use in the same update (#331). The consume action
+  # returns a fresh record; the pending first-factor token from `pending_user/1`
+  # is reattached so `complete_sign_in` can store the session.
+  defp second_factor(user, code) when is_binary(code) do
+    if Totp.valid?(user.totp_secret, String.trim(code)) do
+      {:ok, user}
+    else
+      case Accounts.consume_totp_recovery_code(user, %{code: code}, authorize?: false) do
+        {:ok, updated} -> {:ok, %{updated | __metadata__: user.__metadata__}}
+        {:error, _} -> :invalid
+      end
+    end
+  end
+
+  defp second_factor(_user, _code), do: :invalid
 
   # Resolve the pending token to the awaiting user, or `:error` if it's
   # missing/expired/tampered or the account no longer has 2FA.
@@ -75,13 +92,13 @@ defmodule KilnCMSWeb.TwoFactorController do
       <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#1c1a17;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#ececec;">
         <main style="width:100%;max-width:360px;padding:0 24px;">
           <h1 style="font-size:20px;font-weight:600;margin:0 0 8px;">#{h(gettext("Two-factor authentication"))}</h1>
-          <p style="color:#a3a3a3;font-size:14px;margin:0 0 20px;">#{h(gettext("Enter the 6-digit code from your authenticator app."))}</p>
+          <p style="color:#a3a3a3;font-size:14px;margin:0 0 20px;">#{h(gettext("Enter the 6-digit code from your authenticator app, or one of your recovery codes."))}</p>
           #{error_html}
           <form method="post" action="#{~p"/sign-in/verify"}">
             <input type="hidden" name="_csrf_token" value="#{h(token)}" />
             <input
-              type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
-              pattern="[0-9]*" maxlength="6" autofocus required
+              type="text" name="code" autocomplete="one-time-code"
+              maxlength="12" autofocus required
               style="width:100%;box-sizing:border-box;padding:12px;font-size:18px;letter-spacing:4px;text-align:center;border-radius:10px;border:1px solid #3a352f;background:#26231f;color:#ececec;"
             />
             <button

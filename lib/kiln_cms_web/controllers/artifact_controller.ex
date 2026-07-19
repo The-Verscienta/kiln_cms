@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
 
-  @surfaces %{"json" => :json, "json_ld" => :json_ld, "web" => :web}
+  @surfaces KilnCMS.Firing.Surfaces.name_map()
   # How long clients should wait before retrying a still-compiling artifact.
   @retry_after_seconds 2
   # Artifacts are immutable per publish (republish updates `updated_at` and
@@ -57,6 +57,92 @@ defmodule KilnCMSWeb.ArtifactController do
   # Point-in-time delivery (#338): `?as_of=<ISO8601 date or datetime>` serves the
   # artifact for this content *as it was published on that date*, reconstructed
   # from PaperTrail history and re-fired in memory (KilnCMS.Firing.PointInTime).
+  @doc """
+  `GET /api/content/:type?as_of=` — the **collection as of a date** (#338
+  phase 2): index entries for every document of `type` that was published at
+  that instant (title/slug reconstructed from history), each linking its
+  point-in-time artifact. `as_of` is required — the live collection view is
+  the JSON:API / GraphQL surface's job.
+  """
+  def index_point_in_time(conn, %{"type" => type, "as_of" => raw} = params) do
+    org_id = current_org_id(conn)
+
+    # Compiled types only: a dynamic (D17) descriptor has `resource: nil` and
+    # version history lives on the shared entry tier — the documented
+    # "dynamic entries are a later phase" boundary, enforced instead of 500ing.
+    with {:ok, as_of} <- parse_as_of(raw),
+         ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
+         resource when not is_nil(resource) <- ct.resource do
+      limit = index_limit(params)
+
+      entries =
+        KilnCMS.Cache.fetch(
+          {:pit_index, org_id, type, DateTime.to_iso8601(as_of), limit},
+          :timer.minutes(5),
+          fn -> PointInTime.index(org_id, resource, as_of, limit: limit) end
+        )
+
+      entries =
+        Enum.map(entries, fn entry ->
+          %{
+            slug: entry.slug,
+            title: entry.title,
+            published_at: entry.published_at,
+            # The per-document snapshot endpoint resolves by CURRENT slug and
+            # published state — a since-unpublished or since-renamed document
+            # has no working snapshot URL (id-addressable history is the
+            # documented later phase), so emit an honest null over a dead link.
+            href: snapshot_href(org_id, ct.type, type, entry.slug, as_of)
+          }
+        end)
+
+      conn
+      |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
+      |> put_resp_header("x-kiln-as-of", DateTime.to_iso8601(as_of))
+      |> json(%{as_of: as_of, type: type, entries: entries})
+    else
+      :error ->
+        error(
+          conn,
+          :bad_request,
+          "invalid_as_of",
+          "`as_of` must be an ISO 8601 date or datetime."
+        )
+
+      _ ->
+        error(conn, :not_found, "not_found", "Unknown content type.")
+    end
+  end
+
+  def index_point_in_time(conn, _params) do
+    error(
+      conn,
+      :bad_request,
+      "missing_as_of",
+      "This collection view is historical: pass `as_of` (the live collection is served by the JSON:API/GraphQL surfaces)."
+    )
+  end
+
+  defp snapshot_href(org_id, storage_type, public_type, slug, as_of) do
+    locale = KilnCMS.I18n.default_locale()
+
+    case Delivery.published(org_id, storage_type, slug, locale) do
+      {:ok, _record} ->
+        "/api/content/#{public_type}/#{slug}?as_of=#{DateTime.to_iso8601(as_of)}"
+
+      _ ->
+        nil
+    end
+  end
+
+  # Bounded page size for the historical index.
+  defp index_limit(params) do
+    case Integer.parse(params["limit"] || "") do
+      {n, ""} when n in 1..500 -> n
+      _ -> 100
+    end
+  end
+
   # The content must still be resolvable now (lookup is by the current record's
   # id); see the module for scope.
   defp show_point_in_time(conn, %{"type" => type, "slug" => slug} = params) do
@@ -69,7 +155,7 @@ defmodule KilnCMSWeb.ArtifactController do
          record when not is_nil(record) <- published(org_id, ct.type, slug, locale),
          {:ok, body, published_at} <-
            PointInTime.read(org_id, ct.resource, record.id, surface, as_of) do
-      serve_point_in_time(conn, as_of, published_at, body)
+      serve_point_in_time(conn, as_of, published_at, params["surface"] || "json", body)
     else
       :error ->
         error(
@@ -104,12 +190,14 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Historical snapshots are immutable for a given (content, as_of), so they're
   # cacheable; the headers name the requested moment and the effective publish.
-  defp serve_point_in_time(conn, as_of, published_at, body) do
+  defp serve_point_in_time(conn, as_of, published_at, surface, body) do
     conn
     |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
     |> put_resp_header("x-kiln-as-of", DateTime.to_iso8601(as_of))
     |> put_resp_header("x-kiln-published-at", DateTime.to_iso8601(published_at))
-    |> json(body)
+    # Same per-surface envelope as live delivery — :llm is raw text/markdown
+    # with or without as_of.
+    |> respond(surface, body)
   end
 
   # Standard error envelope shared with the other headless surfaces (#190):
@@ -137,9 +225,19 @@ defmodule KilnCMSWeb.ArtifactController do
     if etag in get_req_header(conn, "if-none-match") do
       send_resp(conn, :not_modified, "")
     else
-      json(conn, body)
+      respond(conn, surface, body)
     end
   end
+
+  # The :llm surface is raw Markdown (#357) — LLM crawlers fetch it directly,
+  # so no JSON envelope; every other surface keeps the JSON body.
+  defp respond(conn, "llm", %{"markdown" => markdown}) do
+    conn
+    |> put_resp_content_type("text/markdown")
+    |> send_resp(200, markdown)
+  end
+
+  defp respond(conn, _surface, body), do: json(conn, body)
 
   # Advertise the signed provenance manifest for this artifact (#340) when
   # provenance is enabled, so consumers can discover the verification surface

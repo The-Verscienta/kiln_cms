@@ -181,14 +181,16 @@ defmodule KilnCMSWeb.OpenApi do
           summary: "Fetch a published document's fired artifact",
           description:
             "Returns the immutable, pre-compiled output for a published page/post " <>
-              "(Kiln v2 — D9). `surface` selects `json` (default), `json_ld`, or " <>
-              "`web`. Public; only published content is reachable. A 503 with " <>
-              "`Retry-After` means the artifact is still compiling.",
+              "(Kiln v2 — D9). `surface` selects `json` (default), `json_ld`, " <>
+              "`web`, or `llm` — `llm` responds with raw `text/markdown` (#357), " <>
+              "every other surface with JSON. Public; only published content is " <>
+              "reachable. A 503 with `Retry-After` means the artifact is still " <>
+              "compiling.",
           security: [],
           parameters: [
             path_param(:type, "Content type (e.g. `page`, `post`)"),
             path_param(:slug, "Content slug"),
-            query_param(:surface, "Artifact surface", enum: ["json", "json_ld", "web"]),
+            query_param(:surface, "Artifact surface", enum: ["json", "json_ld", "web", "llm"]),
             query_param(:locale, "Locale code (defaults to the site default)")
           ],
           responses: %{

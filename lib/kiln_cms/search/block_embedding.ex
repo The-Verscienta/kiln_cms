@@ -65,6 +65,35 @@ defmodule KilnCMS.Search.BlockEmbedding do
       ]
     end
 
+    # Nearest neighbours of an already-computed vector (#339 phase 2): the
+    # doc-to-doc similarity primitive behind related-content / near-duplicate /
+    # tag suggestions — no re-embedding, and the excluded document keeps a
+    # record from matching itself.
+    read :nearest_to_vector do
+      argument :vector, {:array, :float}, allow_nil?: false
+      argument :exclude_document_id, :uuid
+      argument :limit, :integer, default: 20
+
+      filter expr(not is_nil(^ref(:embedding)))
+
+      filter expr(
+               is_nil(^arg(:exclude_document_id)) or
+                 ^ref(:document_id) != ^arg(:exclude_document_id)
+             )
+
+      prepare fn query, _context ->
+        if KilnCMS.Search.semantic?() do
+          vector = Ash.Query.get_argument(query, :vector)
+
+          query
+          |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+          |> Ash.Query.limit(Ash.Query.get_argument(query, :limit))
+        else
+          Ash.Query.limit(query, 0)
+        end
+      end
+    end
+
     # Block-granular nearest-neighbour, with optional block_type faceting (D16).
     read :nearest do
       argument :query, :string, allow_nil?: false

@@ -54,6 +54,8 @@ defmodule KilnCMS.Accounts do
       define :setup_totp, action: :setup_totp
       define :confirm_totp, action: :confirm_totp
       define :disable_totp, action: :disable_totp
+      define :regenerate_totp_recovery_codes, action: :regenerate_totp_recovery_codes
+      define :consume_totp_recovery_code, action: :consume_totp_recovery_code
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
       # GDPR Art. 17 erasure (#212) — admin-only; pass `actor: admin`.

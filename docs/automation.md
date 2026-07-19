@@ -31,6 +31,9 @@ Manage rules at **`/editor/automation`** (admin-only). A rule is:
 | `broadcast` | `Phoenix.PubSub` broadcast `{:automation_event, event, payload}` | `topic` (default `"automation"`) |
 | `invalidate_cache` | Bust the record's content cache (+ sitemap/llms) | — |
 | `reindex` | Re-fire the record (refreshes artifacts + search indexes) | — |
+| `newsletter` | Send the published document to subscribers (#376) | `segment_id` (omit = all confirmed), `subject` (defaults to the title) |
+| `flag_duplicates` | Email near-duplicate findings for the document (#377) | `to` |
+| `suggest_tags` | Email semantic tag suggestions for the document (#377) | `to` |
 
 `send_email` subject/body and templates support `{{title}}`, `{{slug}}`,
 `{{id}}`, `{{type}}`, `{{event}}` (each HTML-escaped).
@@ -70,15 +73,26 @@ Modules: `KilnCMS.Automation` (domain + executor), `KilnCMS.Automation.Rule`
 
 Phase-1 slice:
 
-- **Triggers** are the three webhook lifecycle events. `in_review` /
-  `returned_to_draft` (review-workflow transitions) don't currently emit through
-  the webhook funnel; wiring them in is a natural Phase-2 addition (the executor
-  already keys on the event name).
+- **Triggers** are the webhook lifecycle events: `published` / `unpublished` /
+  `updated`, plus the review-workflow transitions `in_review` /
+  `returned_to_draft` (#375) — `submit_for_review` and `return_to_draft` emit
+  `<type>.in_review` / `<type>.returned_to_draft` through the same webhook
+  funnel, so both rules ("on `in_review` → notify") and webhook subscriptions
+  can react to them.
 - **One reaction per rule.** Multi-step flows (do A then B) are modeled today as
   several rules on the same trigger; a sequenced multi-action rule is a follow-on.
-- **Reaction set** covers email / broadcast / cache / reindex. Newsletter fan-out
-  and the agentic editorial tasks noted on the issue (auto internal-linking,
-  metadata generation, compliance checks) are future actions that slot behind the
-  same `action` enum.
+- **Reaction set** covers email / broadcast / cache / reindex / newsletter
+  (#376 — "on `published` → send to segment X", deduped per {rule, content,
+  publish revision} on the campaign ledger, so re-fires never double-send),
+  plus the embedding-driven editorial-intelligence reactions (#377):
+  `flag_duplicates` and `suggest_tags` pair naturally with the `in_review`
+  trigger as lightweight review gates — silent when nothing is found, no-ops
+  when semantic search is disabled. The *model-driven* half of #377 (an LLM
+  acting through the MCP surface — drafting internal links, generating
+  metadata) deliberately lives OUTSIDE the CMS: these reactions and the
+  `KilnCMS.Search.Related` seams are what such an agent consumes.
+- **Pending-duplicate dedupe:** a re-fired duplicate event collapses onto the
+  still-queued job for the same {rule, event, document}; an event arriving
+  while the first job runs or retries is never dropped.
 - **Config** is entered as JSON; per-action structured form fields are a UI
   refinement.

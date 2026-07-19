@@ -45,11 +45,27 @@ Behaviour:
 Implementation: `KilnCMSWeb.LlmsController`, route in `router.ex`, cache helpers
 in `KilnCMS.Cache` (`llms_key/0`, `bust_llms/0`).
 
-## Phase 2 (planned)
+## The `:llm` surface (Phase 2, shipped)
 
-- **`:llm` fired artifact surface** — a clean, chunked Markdown rendering of each
-  document (extends the firing engine's per-surface model; `llms.txt` would then
-  link to `.md` versions).
+Every document now fires a fourth surface, **`:llm`** — a clean, chunked
+Markdown rendering (`KilnCMS.Firing.LlmMarkdown`): the title as `#`, heading
+blocks as real `##…` headings, everything else as its plain-text projection,
+blocks separated by blank lines so each is a naturally chunkable passage. A
+block module may export an optional `to_markdown/1` for a richer rendering.
+
+- Delivered raw as `text/markdown` at
+  `GET /api/content/:type/:slug?surface=llm` (same immutable-artifact,
+  cache-and-ETag path as the other surfaces).
+- `llms.txt` links each entry's `([md](…?surface=llm))` form, per the
+  llmstxt.org "markdown versions" convention.
+- Included in static export (`llm.md`).
+- **Deploy note:** content published before this feature has no `:llm`
+  artifact until re-fired — run a re-fire sweep (or re-publish) for full
+  coverage; the delivery route answers 503-retryable for a missing artifact
+  as usual.
+
+## Later phases
+
 - **Expanded schema.org / JSON-LD** — beyond the current `Article`: `FAQPage`,
   `HowTo`, and for the health domain `MedicalWebPage` + `ClaimReview` (extends
   `KilnCMS.Firing.Engine`'s `:json_ld` composition).

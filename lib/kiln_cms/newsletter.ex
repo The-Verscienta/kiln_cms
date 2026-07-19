@@ -72,32 +72,91 @@ defmodule KilnCMS.Newsletter do
   `:gated` — a non-public audience — or `:not_fired` when no `:web` artifact
   exists yet). Actual delivery happens asynchronously via the fan-out worker.
   """
-  @spec send_as_newsletter(struct(), keyword()) :: {:ok, struct()} | {:error, atom()}
+  @spec send_as_newsletter(struct(), keyword()) ::
+          {:ok, struct()} | {:error, atom() | Ash.Error.t()}
   def send_as_newsletter(document, opts \\ []) do
+    automation = opts[:automation]
+
     with :ok <- ensure_sendable(document),
          {:ok, _html} <- artifact_html(document) do
-      {:ok, send} =
-        create_send(
-          %{
-            content_type: to_string(Firing.Engine.document_type(document)),
-            content_id: document.id,
-            subject: opts[:subject] || document.title,
-            segment_id: opts[:segment_id],
-            sent_by_id: opts[:actor] && opts[:actor].id
-          },
-          authorize?: false,
-          # The campaign lands in the document's site (epic #336).
-          tenant: document.org_id
-        )
-
-      # `org_id` rides into the worker args so the fan-out runs under the send's
-      # tenant.
-      %{"newsletter_send_id" => send.id, "org_id" => send.org_id}
-      |> SendWorker.new()
-      |> Oban.insert!()
-
-      {:ok, send}
+      # Ledger row + fan-out job commit in ONE transaction (Oban jobs are
+      # Postgres rows), so a crash between them can't strand a campaign that
+      # the automation dedupe would then permanently block as :already_sent.
+      # Notifications are collected and emitted after commit (the Ash idiom
+      # for actions inside a wrapping transaction).
+      KilnCMS.Repo.transaction(fn -> create_and_enqueue(document, opts, automation) end)
+      |> settle_transaction()
     end
+  end
+
+  defp create_and_enqueue(document, opts, automation) do
+    create_send(
+      %{
+        content_type: to_string(Firing.Engine.document_type(document)),
+        content_id: document.id,
+        subject: opts[:subject] || document.title,
+        segment_id: opts[:segment_id],
+        sent_by_id: opts[:actor] && opts[:actor].id,
+        # Automation provenance + dedupe key (#376) — nil for manual sends.
+        automation_rule_id: automation && automation.rule_id,
+        content_published_at: automation && automation.published_at
+      },
+      authorize?: false,
+      # The campaign lands in the document's site (epic #336).
+      tenant: document.org_id,
+      return_notifications?: true
+    )
+    |> dedupe_conflict()
+    |> case do
+      {:ok, send, notifications} ->
+        # `org_id` rides into the worker args so the fan-out runs under the
+        # send's tenant.
+        %{"newsletter_send_id" => send.id, "org_id" => send.org_id}
+        |> SendWorker.new()
+        |> Oban.insert!()
+
+        {send, notifications}
+
+      {:error, reason} ->
+        KilnCMS.Repo.rollback(reason)
+    end
+  end
+
+  defp settle_transaction({:ok, {send, notifications}}) do
+    Ash.Notifier.notify(notifications)
+    {:ok, send}
+  end
+
+  # A failing create inside the wrapping transaction rolls back with the
+  # changeset itself (Ash's own rollback) — classify its errors the same way
+  # as a returned error.
+  defp settle_transaction({:error, %Ash.Changeset{errors: errors}} = error) do
+    if dedupe_errors?(errors), do: {:error, :already_sent}, else: error
+  end
+
+  defp settle_transaction({:error, _reason} = error), do: error
+
+  # An automation-driven campaign for the same {rule, content, publish revision}
+  # already exists (the `:automation_dedupe` identity) — a re-fired event or
+  # re-delivered job, not a new publish. Matched structurally on the identity's
+  # fields (the `KilnCMS.History.seq_conflict?/1` idiom), never on error text.
+  defp dedupe_conflict({:error, %Ash.Error.Invalid{errors: errors} = error}) do
+    if dedupe_errors?(errors), do: {:error, :already_sent}, else: {:error, error}
+  end
+
+  defp dedupe_conflict(other), do: other
+
+  defp dedupe_errors?(errors) do
+    Enum.any?(errors, fn
+      %Ash.Error.Changes.InvalidAttribute{field: field} ->
+        field in [:automation_rule_id, :content_id, :content_published_at]
+
+      %{constraint_name: "newsletter_sends_automation_dedupe_index"} ->
+        true
+
+      _ ->
+        false
+    end)
   end
 
   # A document is safe to newsletter only when it is published *and*
