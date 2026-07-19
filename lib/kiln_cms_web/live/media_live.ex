@@ -35,7 +35,7 @@ defmodule KilnCMSWeb.MediaLive do
      # `query: nil` is a sentinel: the first handle_params always loads.
      |> assign(:actor, actor)
      |> assign(:page_title, gettext("Media library"))
-     |> assign(:is_admin, actor.role == :admin)
+     |> assign(:is_admin, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign(:query, nil)
      |> assign(:selected, nil)
      |> assign(:view, :library)

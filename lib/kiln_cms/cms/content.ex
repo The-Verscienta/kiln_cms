@@ -1331,7 +1331,7 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # Admins may do anything.
-        bypass actor_attribute_equals(:role, :admin) do
+        bypass KilnCMS.CMS.Checks.OrgAdmin do
           authorize_if always()
         end
 
@@ -1368,12 +1368,12 @@ defmodule KilnCMS.CMS.Content do
 
         # Publishing is an admin approval step — editors submit for review instead.
         policy action([:publish, :publish_scheduled]) do
-          authorize_if actor_attribute_equals(:role, :admin)
+          authorize_if KilnCMS.CMS.Checks.OrgAdmin
         end
 
         # Sending reviewed content back to the author is admin-only.
         policy action(:return_to_draft) do
-          authorize_if actor_attribute_equals(:role, :admin)
+          authorize_if KilnCMS.CMS.Checks.OrgAdmin
         end
 
         # Hard deletes are admin-only.

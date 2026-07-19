@@ -245,7 +245,14 @@ defmodule KilnCMSWeb.Layouts do
   attr :active, :atom, default: nil
 
   defp console_nav(assigns) do
-    role = assigns.current_user && assigns.current_user.role
+    # Effective capability tier on the current site (#419) — a global editor
+    # demoted (or promoted) by an org membership sees the nav for that tier.
+    role =
+      KilnCMS.Accounts.Scoping.effective_tier(
+        assigns[:current_user],
+        KilnCMSWeb.Tenant.current_org_id(%{assigns: assigns})
+      )
+
     multi_locale? = length(KilnCMS.I18n.locales()) > 1
 
     author = [
@@ -351,7 +358,7 @@ defmodule KilnCMSWeb.Layouts do
       end
 
     plugin =
-      for item <- Kiln.Plugins.nav_items(), nav_item_visible?(item, assigns.current_user) do
+      for item <- Kiln.Plugins.nav_items(), nav_item_visible?(item, role) do
         %{key: nil, label: item.label, path: item.path, icon: "hero-puzzle-piece"}
       end
 
@@ -604,7 +611,7 @@ defmodule KilnCMSWeb.Layouts do
     <%!-- Plugin-contributed nav (D18), each gated by its declared role. --%>
     <a
       :for={item <- Kiln.Plugins.nav_items()}
-      :if={@current_user && nav_item_visible?(item, @current_user)}
+      :if={@current_user && nav_item_visible?(item, @current_user.role)}
       href={item.path}
       class={@item}
     >
@@ -615,11 +622,12 @@ defmodule KilnCMSWeb.Layouts do
     """
   end
 
-  # A plugin nav item is visible when the user meets its declared role
-  # (`:editor` admits admins too, mirroring the core links).
-  defp nav_item_visible?(%{role: :admin}, user), do: user.role == :admin
-  defp nav_item_visible?(%{role: :editor}, user), do: user.role in [:editor, :admin]
-  defp nav_item_visible?(_item, _user), do: false
+  # A plugin nav item is visible when the user's effective tier meets its
+  # declared role (`:editor` admits admins too, mirroring the core links);
+  # `:viewer`/`:none` see neither.
+  defp nav_item_visible?(%{role: :admin}, tier), do: tier == :admin
+  defp nav_item_visible?(%{role: :editor}, tier), do: tier in [:editor, :admin]
+  defp nav_item_visible?(_item, _tier), do: false
 
   @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.

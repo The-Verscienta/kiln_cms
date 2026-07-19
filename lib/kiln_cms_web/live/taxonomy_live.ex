@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
     {:ok,
      socket
      |> assign(:actor, actor)
+     |> assign(:admin?, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign(:page_title, gettext("Taxonomy"))
      |> assign(:edit, nil)
      |> assign(:cat_form, create_form(:category, actor, org))
@@ -228,7 +229,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
             submit="create_cat"
             records={@categories}
             edit={@edit}
-            actor={@actor}
+            admin?={@admin?}
             with_description={true}
           />
           <.taxonomy_column
@@ -240,7 +241,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
             submit="create_tag"
             records={@tags}
             edit={@edit}
-            actor={@actor}
+            admin?={@admin?}
             with_description={false}
           />
         </div>
@@ -257,7 +258,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
   attr :submit, :string, required: true
   attr :records, :list, required: true
   attr :edit, :any, required: true
-  attr :actor, :map, required: true
+  attr :admin?, :boolean, required: true
   attr :with_description, :boolean, required: true
 
   defp taxonomy_column(assigns) do
@@ -330,7 +331,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
                 {gettext("Edit")}
               </button>
               <button
-                :if={@actor.role == :admin}
+                :if={@admin?}
                 type="button"
                 phx-click="delete"
                 phx-value-type={@kind}

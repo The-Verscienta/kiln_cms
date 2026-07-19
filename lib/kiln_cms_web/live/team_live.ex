@@ -27,7 +27,7 @@ defmodule KilnCMSWeb.TeamLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if actor.role == :admin do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
       {:ok,
        socket
        |> assign(:actor, actor)
@@ -235,11 +235,10 @@ defmodule KilnCMSWeb.TeamLive do
     end
   end
 
-  # The membership tier is per-site data ahead of the #336 per-org policy
-  # flip; capability today follows the account's global role.
+  # Per-org tiers are LIVE (#419): the membership tier governs this site.
   defp tier_hint do
     gettext(
-      "Site tier is recorded for the upcoming per-site roles; today a member's capability follows their account role (managed in account access), while custom roles and scopes below apply now."
+      "The site tier governs this member's capability on THIS site (platform admins always retain access); custom roles and scopes refine it."
     )
   end
 

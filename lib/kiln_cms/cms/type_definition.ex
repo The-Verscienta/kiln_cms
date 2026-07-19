@@ -103,13 +103,13 @@ defmodule KilnCMS.CMS.TypeDefinition do
   policies do
     # Admins own the schema — defining content types is an admin act, exactly
     # like defining custom fields.
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
     # Editors may read definitions so the editor UI can list dynamic types.
     policy action_type(:read) do
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type([:create, :update, :destroy]) do

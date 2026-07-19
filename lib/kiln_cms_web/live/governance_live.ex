@@ -11,7 +11,7 @@ defmodule KilnCMSWeb.GovernanceLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if socket.assigns.current_user.role == :admin do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
       {:ok, assign(socket, :page_title, gettext("Governance"))}
     else
       {:ok,

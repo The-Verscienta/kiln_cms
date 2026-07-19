@@ -210,9 +210,9 @@ defmodule KilnCMSWeb.Router do
     ash_authentication_live_session :editor_routes,
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_editor_required},
-        {KilnCMSWeb.LiveUserAuth, :restore_locale},
-        {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/media", MediaLive, :index
       live "/editor", EditorLive, :index
@@ -243,9 +243,9 @@ defmodule KilnCMSWeb.Router do
     ash_authentication_live_session :admin_routes,
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_admin_required},
-        {KilnCMSWeb.LiveUserAuth, :restore_locale},
-        {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index

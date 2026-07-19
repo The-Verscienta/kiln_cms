@@ -55,7 +55,7 @@ defmodule KilnCMS.CMS.Form do
   end
 
   policies do
-    bypass actor_attribute_equals(:role, :admin) do
+    bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
     end
 
@@ -63,7 +63,7 @@ defmodule KilnCMS.CMS.Form do
     # publicly); everything else form-shaped is for editors and up.
     policy action_type(:read) do
       authorize_if action(:active_by_slug)
-      authorize_if actor_attribute_equals(:role, :editor)
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     # Building forms is an admin concern (like webhooks / field definitions).

@@ -130,9 +130,26 @@ add by existing account email, set tier / custom role / per-member scope
 overrides, remove — and its custom roles. Scope inputs are plain
 comma-separated type lists and a JSON textarea for field grants.
 
+## Per-org capability tiers (shipped — #419)
+
+The membership's `role` is the member's **effective tier on that org**:
+`OrgAdmin`/`OrgEditor` policy checks (resolving through the same memoized
+`Scoping` affiliation) replace the global-role grants on every org-scoped
+resource, and the web layer (route gates, console nav, workflow buttons)
+reads `Scoping.effective_tier/2`. Semantics:
+
+- a **platform admin** (`User.role == :admin`) keeps `:admin` everywhere —
+  the operator break-glass; user/org/membership administration itself stays
+  on the global role (that's where tiers are granted);
+- members get their membership tier; affiliated users have **no tier** on
+  orgs they hold no membership for (fail-closed, like the scope axes);
+- accounts with no memberships at all keep `User.role` (pre-#336 data).
+
+So `/editor/team`'s tier select now *governs*: an org can promote a global
+viewer to site editor, or demote a global editor to site viewer, without
+touching their other sites.
+
 ## Later phases
 
 - **Per-dynamic-type** scoping (today all dynamic types share the `entry` key).
-- Per-org capability tiers (the membership `role` atom informs the org
-  switcher today; the content policies still read `User.role` — the #336
-  strict-mode hardening is the natural point to flip that).
+- Strict tenancy (`global?: false`) — #419 PRs 2–3.

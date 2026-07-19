@@ -34,12 +34,18 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
   alias KilnCMS.Accounts.Scoping
 
   @impl true
-  def change(changeset, _opts, %{actor: %{role: :editor} = actor}) do
-    type = KilnCMS.CMS.ContentTypes.type_name(changeset.resource)
+  def change(changeset, _opts, %{actor: %{} = actor}) do
+    # Per-org tiers (#419): grants bind whoever is an EFFECTIVE editor here;
+    # effective admins are exempt (mirroring the policy bypass).
+    if Scoping.effective_tier(actor, changeset) == :editor do
+      type = KilnCMS.CMS.ContentTypes.type_name(changeset.resource)
 
-    case Scoping.field_grant(actor, changeset, type) do
-      nil -> changeset
-      allowed -> enforce(changeset, allowed)
+      case Scoping.field_grant(actor, changeset, type) do
+        nil -> changeset
+        allowed -> enforce(changeset, allowed)
+      end
+    else
+      changeset
     end
   end
 
