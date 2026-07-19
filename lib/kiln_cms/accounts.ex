@@ -34,8 +34,19 @@ defmodule KilnCMS.Accounts do
       # The policy checks' membership lookup (KilnCMS.Accounts.Scoping): one
       # (user, org) row, read with `authorize?: false` by the checks themselves.
       define :get_org_membership, action: :read, get_by: [:user_id, :organization_id]
+      define :update_org_membership, action: :update
       define :create_org_membership, action: :create
       define :remove_org_membership, action: :destroy
+    end
+
+    # Custom roles (#332 slice 4) — named bundles of the grant axes, assigned
+    # to memberships via `role_id`. Admin-managed from /editor/team.
+    resource KilnCMS.Accounts.Role do
+      define :list_roles_for_org, action: :for_org, args: [:organization_id]
+      define :get_role, action: :read, get_by: [:id]
+      define :create_role, action: :create
+      define :update_role, action: :update
+      define :destroy_role, action: :destroy
     end
 
     # API keys for third-party / headless access (admin-managed). Pass

@@ -4,18 +4,22 @@ defmodule KilnCMS.Accounts.Scoping do
   (granular RBAC #332 × multi-tenancy #336).
 
   A scope axis (`:editable_types` — which types an editor may author;
-  `:readable_types` — which types an editor may see beyond published) lives in
-  two places, resolved most-specific-first:
+  `:readable_types` — which types an editor may see beyond published;
+  `field_grants` — which attributes they may change per type) lives in three
+  places, resolved most-specific-first:
 
     1. the user's `KilnCMS.Accounts.OrgMembership` for the request's org —
-       the **per-org** value, so one account can be a blog editor on site A
-       and unrestricted on site B; and
-    2. `KilnCMS.Accounts.User` itself — the pre-#336 single-org column, the
-       fallback.
+       the **per-org, per-user** value, so one account can be a blog editor on
+       site A and unrestricted on site B;
+    2. the membership's assigned `KilnCMS.Accounts.Role` (slice 4) — the named
+       bundle, so "Blog editor" is defined once and assigned many times;
+    3. `KilnCMS.Accounts.User` itself — the pre-#336 single-org column, kept
+       as the final fallback.
 
   A **non-empty** value wins at each level (empty means "unrestricted", which
   is indistinguishable from "unconfigured" — narrowing is always possible at a
-  more specific level, widening means clearing the broader level).
+  more specific level, widening means clearing the broader level); the
+  `field_grants` map resolves **per type key** across the levels.
 
   **Affiliation is fail-closed.** A user who holds memberships — the multi-org
   model — gets NO editorial scope on an org they have no membership for: the
@@ -28,11 +32,12 @@ defmodule KilnCMS.Accounts.Scoping do
   writes stamp.
 
   Called from the content policy checks (`EditableContentType` /
-  `ReadableContentType`), the single choke points every surface (LiveView,
-  JSON:API, GraphQL, MCP) authorizes through. The membership lookup is one
-  indexed `(user_id, organization_id)` get, memoized per process for a few
-  seconds (several checks run per request), and short-circuits for non-editor
-  actors — the anonymous delivery hot path never pays it.
+  `ReadableContentType`) and the `EnforceFieldGrants` change — the single
+  choke points every surface (LiveView, JSON:API, GraphQL, MCP) authorizes
+  through. The membership lookup is one indexed `(user_id, organization_id)`
+  get (role loaded alongside), memoized per process for a few seconds
+  (several checks run per request), and short-circuits for non-editor actors
+  — the anonymous delivery hot path never pays it.
   """
 
   alias KilnCMS.Accounts
@@ -85,10 +90,42 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
+  @doc """
+  The actor's effective per-field write grant for `type_name` (slice 3).
+
+  `field_grants` is a map of content-type name → list of attribute names the
+  editor may change (`%{"post" => ["title", "blocks"]}`). Resolution is
+  **per type key** across the levels (membership → role → user) — an override
+  for one type at a more specific level never discards a broader level's
+  restriction on a *different* type. Returns `nil` when no level grants an
+  entry for `type_name` (no per-field restriction), the list of permitted
+  attribute names otherwise, and `[]` (nothing changeable) for a foreign-org
+  actor. Non-list grant values are ignored defensively — the write-time shape
+  validation is the real guard.
+  """
+  @spec field_grant(map(), Ash.Changeset.t() | nil, String.t() | nil) :: [String.t()] | nil
+  def field_grant(_actor, _subject, nil), do: nil
+
+  def field_grant(actor, subject, type_name) do
+    case affiliation(actor, org_id(subject)) do
+      {:member, membership} ->
+        grant_key(membership, type_name) ||
+          grant_key(role_of(membership), type_name) ||
+          grant_key(actor, type_name)
+
+      :unaffiliated ->
+        grant_key(actor, type_name)
+
+      :foreign_org ->
+        []
+    end
+  end
+
   defp scope(actor, subject, axis) do
     case affiliation(actor, org_id(subject)) do
       {:member, membership} ->
-        list_axis(membership, axis) || list_axis(actor, axis) || []
+        list_axis(membership, axis) || list_axis(role_of(membership), axis) ||
+          list_axis(actor, axis) || []
 
       :unaffiliated ->
         list_axis(actor, axis) || []
@@ -108,6 +145,20 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
+  defp grant_key(nil, _type_name), do: nil
+
+  defp grant_key(source, type_name) do
+    with grants when is_map(grants) <- Map.get(source, :field_grants),
+         fields when is_list(fields) <- Map.get(grants, type_name) do
+      fields
+    else
+      _ -> nil
+    end
+  end
+
+  defp role_of(%{custom_role: %{} = role}), do: role
+  defp role_of(_membership), do: nil
+
   # ── membership affiliation ─────────────────────────────────────────────────
 
   # The actor's relationship to the org, memoized per process:
@@ -123,7 +174,8 @@ defmodule KilnCMS.Accounts.Scoping do
   defp resolve_affiliation(user_id, org_id) do
     case Accounts.get_org_membership(user_id, org_id,
            authorize?: false,
-           not_found_error?: false
+           not_found_error?: false,
+           load: [:custom_role]
          ) do
       {:ok, %{} = membership} -> {:member, membership}
       _ -> if any_membership?(user_id), do: :foreign_org, else: :unaffiliated
@@ -139,9 +191,10 @@ defmodule KilnCMS.Accounts.Scoping do
 
   defp memo(key, fun) do
     now = System.monotonic_time(:millisecond)
+    ttl = memo_ttl_ms()
 
     case Process.get(key) do
-      {value, at} when now - at < @memo_ttl_ms ->
+      {value, at} when now - at < ttl ->
         value
 
       _ ->
@@ -151,42 +204,10 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
-  @doc """
-  The actor's effective per-field write grant for `type_name` (slice 3).
-
-  `field_grants` is a map of content-type name → list of attribute names the
-  editor may change (`%{"post" => ["title", "blocks"]}`). Resolution is
-  **per type key** across the levels (membership, then the user column) — an
-  override for one type at a more specific level never discards a broader
-  level's restriction on a *different* type. Returns `nil` when no level
-  grants an entry for `type_name` (no per-field restriction), the list of
-  permitted attribute names otherwise, and `[]` (nothing changeable) for a
-  foreign-org actor. Non-list grant values are ignored defensively — the
-  write-time shape validation is the real guard.
-  """
-  @spec field_grant(map(), Ash.Changeset.t() | nil, String.t() | nil) :: [String.t()] | nil
-  def field_grant(_actor, _subject, nil), do: nil
-
-  def field_grant(actor, subject, type_name) do
-    case affiliation(actor, org_id(subject)) do
-      {:member, membership} ->
-        grant_key(membership, type_name) || grant_key(actor, type_name)
-
-      :unaffiliated ->
-        grant_key(actor, type_name)
-
-      :foreign_org ->
-        []
-    end
-  end
-
-  defp grant_key(source, type_name) do
-    with grants when is_map(grants) <- Map.get(source, :field_grants),
-         fields when is_list(fields) <- Map.get(grants, type_name) do
-      fields
-    else
-      _ -> nil
-    end
+  # Config-overridable so tests (which mutate memberships/roles mid-process)
+  # can turn the memo off; production keeps the default.
+  defp memo_ttl_ms do
+    :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:memo_ttl_ms, @memo_ttl_ms)
   end
 
   # The org the authorization runs under. Queries/changesets carry the resolved

@@ -113,8 +113,26 @@ Deliberate semantics:
   user): an override for one type never discards another level's restriction
   on a different type.
 
+## Phase 2, slice 4 (shipped) — custom roles + `/editor/team`
+
+**Custom roles.** `KilnCMS.Accounts.Role` is a named, org-owned bundle of the
+three grant axes — define "Blog editor" once, assign it to memberships via
+`role_id`. Resolution becomes membership-attribute → role-attribute →
+user-column (non-empty wins at each level), so a membership can still override
+its role per axis. Deleting a role nilifies assignments (members fall back to
+their own scope). The capability *tier* (`:admin`/`:editor`/`:viewer`) stays
+on the user — a custom role refines an editor's scope, it does not replace the
+tier, and the built-ins therefore need no seeded rows: a membership without a
+custom role simply has no extra restriction bundle.
+
+**Team UI.** `/editor/team` (admin-only) manages the current org's members —
+add by existing account email, set tier / custom role / per-member scope
+overrides, remove — and its custom roles. Scope inputs are plain
+comma-separated type lists and a JSON textarea for field grants.
+
 ## Later phases
 
-- **Custom roles + `/editor/team` UI** (slice 4) — see the design note on
-  [#332](https://github.com/The-Verscienta/kiln_cms/issues/332).
 - **Per-dynamic-type** scoping (today all dynamic types share the `entry` key).
+- Per-org capability tiers (the membership `role` atom informs the org
+  switcher today; the content policies still read `User.role` — the #336
+  strict-mode hardening is the natural point to flip that).

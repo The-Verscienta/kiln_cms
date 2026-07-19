@@ -30,6 +30,9 @@ defmodule KilnCMS.Accounts.OrgMembership do
       # A membership is meaningless without its org/user — clean up on delete.
       reference :organization, on_delete: :delete
       reference :user, on_delete: :delete
+      # Deleting a custom role must not delete memberships — they fall back to
+      # their own / the user's scope axes.
+      reference :custom_role, on_delete: :nilify
     end
 
     # The unique identity is `(user_id, organization_id)` (user_id-leading), which
@@ -58,7 +61,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
       :audiences,
       :editable_types,
       :readable_types,
-      :field_grants
+      :field_grants,
+      :role_id
     ]
 
     read :for_user do
@@ -98,6 +102,8 @@ defmodule KilnCMS.Accounts.OrgMembership do
     # A malformed grant map must fail on the admin's write, not crash the
     # editor's next save (see the validation module).
     validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
+    # A client-supplied role_id must reference a role of THIS org.
+    validate KilnCMS.Accounts.Validations.RoleBelongsToOrg, on: [:create, :update]
   end
 
   attributes do
@@ -157,6 +163,15 @@ defmodule KilnCMS.Accounts.OrgMembership do
     belongs_to :user, KilnCMS.Accounts.User do
       allow_nil? false
       attribute_writable? true
+    end
+
+    # The optional custom role (#332 slice 4) — a named bundle of the three
+    # grant axes. Named `custom_role` because `:role` is the capability-tier
+    # atom attribute above; nil = no bundle (the built-in behavior).
+    belongs_to :custom_role, KilnCMS.Accounts.Role do
+      source_attribute :role_id
+      attribute_writable? true
+      public? false
     end
   end
 

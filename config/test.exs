@@ -132,3 +132,7 @@ config :kiln_cms, :sso_oidc,
   client_secret: "kiln-test-secret",
   base_url: "https://idp.example.test",
   redirect_uri: "http://localhost:4002/auth"
+
+# RBAC scope memoization off: tests mutate memberships/roles mid-process and
+# assert the new scope immediately (prod keeps the few-second process memo).
+config :kiln_cms, KilnCMS.Accounts.Scoping, memo_ttl_ms: 0
