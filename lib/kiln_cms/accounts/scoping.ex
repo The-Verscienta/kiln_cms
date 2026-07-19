@@ -4,29 +4,30 @@ defmodule KilnCMS.Accounts.Scoping do
   (granular RBAC #332 × multi-tenancy #336).
 
   A scope axis (`:editable_types` — which types an editor may author;
-  `:readable_types` — which types an editor may see beyond published) lives in
-  two places:
+  `:readable_types` — which types an editor may see beyond published;
+  `field_grants` — which attributes they may change per type) lives in three
+  places, resolved most-specific-first:
 
-    * on the user's `KilnCMS.Accounts.OrgMembership` for the request's org —
-      the **per-org** value, so one account can be a blog editor on site A and
-      unrestricted on site B; and
-    * on `KilnCMS.Accounts.User` itself — the pre-#336 single-org column, kept
-      as the fallback.
+    1. the user's `KilnCMS.Accounts.OrgMembership` for the request's org —
+       the **per-org, per-user** value, so one account can be a blog editor on
+       site A and unrestricted on site B;
+    2. the membership's assigned `KilnCMS.Accounts.Role` (slice 4) — the named
+       bundle, so "Blog editor" is defined once and assigned many times;
+    3. `KilnCMS.Accounts.User` itself — the pre-#336 single-org column, kept
+       as the final fallback.
 
-  Resolution: a **non-empty** membership scope wins; otherwise the user column
-  applies. (An empty list means "unrestricted" on both levels, so an empty
-  membership can't be distinguished from an unconfigured one — narrowing is
-  always possible per-org, widening means clearing the user column. Slice 4's
-  named roles subsume this.) The tenant comes from the query/changeset under
-  authorization; a tenant-less request resolves against the default org — the
-  same org those writes stamp content with.
+  A **non-empty** value wins at each level (empty means "unrestricted", which
+  is indistinguishable from "unconfigured" — narrowing is always possible at a
+  more specific level, widening means clearing the broader level). The tenant
+  comes from the query/changeset under authorization; a tenant-less request
+  resolves against the default org — the same org those writes stamp.
 
   Called from the content policy checks (`EditableContentType` /
-  `ReadableContentType`), which is the single choke point every surface
-  (LiveView, JSON:API, GraphQL, MCP) authorizes through. The membership lookup
-  is one indexed `(user_id, organization_id)` get per policy evaluation and
-  short-circuits for non-editor actors, so the anonymous delivery hot path
-  never pays it.
+  `ReadableContentType`) and the `EnforceFieldGrants` change — the single
+  choke points every surface (LiveView, JSON:API, GraphQL, MCP) authorizes
+  through. The membership lookup is one indexed `(user_id, organization_id)`
+  get (role loaded alongside) per policy evaluation and short-circuits for
+  non-editor actors, so the anonymous delivery hot path never pays it.
   """
 
   alias KilnCMS.Accounts
@@ -55,74 +56,80 @@ defmodule KilnCMS.Accounts.Scoping do
   """
   @spec effective_types(map(), Ash.Query.t() | Ash.Changeset.t() | nil, atom()) :: [String.t()]
   def effective_types(actor, subject, axis) when axis in @axes do
-    membership_types(actor, org_id(subject), axis) || user_types(actor, axis)
-  end
+    membership = membership(actor, org_id(subject))
 
-  # The per-org value, when a membership exists and configures this axis.
-  # Returns nil (→ user-column fallback) when there is no membership row or its
-  # scope is empty/unset.
-  defp membership_types(%{id: user_id}, org_id, axis)
-       when is_binary(user_id) and is_binary(org_id) do
-    case Accounts.get_org_membership(user_id, org_id,
-           authorize?: false,
-           not_found_error?: false
-         ) do
-      {:ok, %{} = membership} ->
-        case Map.get(membership, axis) do
-          scope when scope in [nil, []] -> nil
-          scope -> scope
-        end
-
-      _ ->
-        nil
-    end
-  end
-
-  defp membership_types(_actor, _org_id, _axis), do: nil
-
-  defp user_types(actor, axis) do
-    case Map.get(actor, axis) do
-      scope when is_list(scope) -> scope
-      _ -> []
-    end
+    first_configured([
+      fn -> list_axis(membership, axis) end,
+      fn -> list_axis(role_of(membership), axis) end,
+      fn -> list_axis(actor, axis) end
+    ]) || []
   end
 
   @doc """
   The actor's effective per-field write grant for `type_name` (slice 3).
 
   `field_grants` is a map of content-type name → list of attribute names the
-  editor may change (`%{"post" => ["title", "blocks"]}`). Resolution mirrors
-  the list axes: a **non-empty** membership map wins wholesale for the
-  request's org, else the user column. Returns `nil` when the effective map
-  has no entry for `type_name` — no per-field restriction — or the list of
-  permitted attribute names.
+  editor may change (`%{"post" => ["title", "blocks"]}`). The membership →
+  role → user resolution applies to the **whole map**. Returns `nil` when the
+  effective map has no entry for `type_name` — no per-field restriction — or
+  the list of permitted attribute names.
   """
   @spec field_grant(map(), Ash.Changeset.t() | nil, String.t() | nil) :: [String.t()] | nil
   def field_grant(_actor, _subject, nil), do: nil
 
   def field_grant(actor, subject, type_name) do
-    grants = membership_grants(actor, org_id(subject)) || user_grants(actor)
+    membership = membership(actor, org_id(subject))
+
+    grants =
+      first_configured([
+        fn -> map_axis(membership) end,
+        fn -> map_axis(role_of(membership)) end,
+        fn -> map_axis(actor) end
+      ]) || %{}
+
     Map.get(grants, type_name)
   end
 
-  defp membership_grants(%{id: user_id}, org_id) when is_binary(user_id) and is_binary(org_id) do
-    case Accounts.get_org_membership(user_id, org_id,
-           authorize?: false,
-           not_found_error?: false
-         ) do
-      {:ok, %{field_grants: grants}} when is_map(grants) and map_size(grants) > 0 -> grants
+  # First non-nil ("configured") value in resolution order.
+  defp first_configured(levels), do: Enum.find_value(levels, & &1.())
+
+  # A list axis counts as configured only when non-empty.
+  defp list_axis(nil, _axis), do: nil
+
+  defp list_axis(source, axis) do
+    case Map.get(source, axis) do
+      scope when is_list(scope) and scope != [] -> scope
       _ -> nil
     end
   end
 
-  defp membership_grants(_actor, _org_id), do: nil
+  # The field-grants map counts as configured only when non-empty.
+  defp map_axis(nil), do: nil
 
-  defp user_grants(actor) do
-    case Map.get(actor, :field_grants) do
-      grants when is_map(grants) -> grants
-      _ -> %{}
+  defp map_axis(source) do
+    case Map.get(source, :field_grants) do
+      grants when is_map(grants) and map_size(grants) > 0 -> grants
+      _ -> nil
     end
   end
+
+  defp role_of(%{custom_role: %{} = role}), do: role
+  defp role_of(_membership), do: nil
+
+  # The actor's membership for the org, with its custom role loaded — one
+  # indexed get, `authorize?: false` (the caller *is* the authorization).
+  defp membership(%{id: user_id}, org_id) when is_binary(user_id) and is_binary(org_id) do
+    case Accounts.get_org_membership(user_id, org_id,
+           authorize?: false,
+           not_found_error?: false,
+           load: [:custom_role]
+         ) do
+      {:ok, %{} = membership} -> membership
+      _ -> nil
+    end
+  end
+
+  defp membership(_actor, _org_id), do: nil
 
   # The org the authorization runs under. Queries/changesets carry the resolved
   # tenant attribute value in `to_tenant` (set by `Ash.ToTenant` from the org
