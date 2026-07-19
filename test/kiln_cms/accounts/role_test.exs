@@ -69,6 +69,46 @@ defmodule KilnCMS.Accounts.RoleTest do
       assert :ok = Accounts.destroy_role(role, actor: admin)
     end
 
+    test "a membership cannot be bound to another org's role" do
+      admin = user(:admin)
+
+      other_org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Other #{System.unique_integer([:positive])}",
+          slug: "other-#{System.unique_integer([:positive])}"
+        })
+
+      foreign_role = seed_role(%{org_id: other_org.id})
+      editor = user(:editor)
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               Accounts.create_org_membership(
+                 %{
+                   user_id: editor.id,
+                   organization_id: Accounts.default_org_id(),
+                   role: :editor,
+                   role_id: foreign_role.id
+                 },
+                 actor: admin
+               )
+
+      assert Exception.message(error) =~ "role of this organization"
+
+      # Same-org roles bind fine.
+      home_role = seed_role(%{})
+
+      assert {:ok, _} =
+               Accounts.create_org_membership(
+                 %{
+                   user_id: editor.id,
+                   organization_id: Accounts.default_org_id(),
+                   role: :editor,
+                   role_id: home_role.id
+                 },
+                 actor: admin
+               )
+    end
+
     test "role names are unique per org" do
       admin = user(:admin)
       org_id = Accounts.default_org_id()

@@ -8,6 +8,8 @@ defmodule KilnCMS.CMS.GranularRbacPhase2Test do
   alias KilnCMS.Accounts.Organization
   alias KilnCMS.CMS
 
+  require Ash.Query
+
   defp user(role, attrs \\ %{}) do
     Ash.Seed.seed!(
       KilnCMS.Accounts.User,
@@ -124,12 +126,78 @@ defmodule KilnCMS.CMS.GranularRbacPhase2Test do
 
       editor = user(:editor)
       membership(editor, scoped_org, %{readable_types: ["post"]})
+      # The default-org membership every backfilled account has (unscoped).
+      membership(editor, %{id: KilnCMS.Accounts.default_org_id()}, %{})
 
       refute draft.id in (CMS.list_pages!(actor: editor, tenant: scoped_org) |> Enum.map(& &1.id))
 
-      # The same editor on the default org (no membership scope) is unrestricted.
+      # The same editor on the default org (membership with no scope) is
+      # unrestricted.
       default_draft = CMS.create_page!(%{title: "Default draft", slug: slug()}, actor: admin)
       assert default_draft.id in (CMS.list_pages!(actor: editor) |> Enum.map(& &1.id))
+    end
+
+    test "restricting read never revokes drafts of editable types (union)" do
+      admin = user(:admin)
+      draft = CMS.create_page!(%{title: "Editable draft", slug: slug()}, actor: admin)
+
+      # Reads scoped to posts only, but pages remain editable — the write axis
+      # is unioned into editorial visibility, so the draft stays reachable.
+      editor = user(:editor, %{readable_types: ["post"], editable_types: ["page", "post"]})
+
+      assert draft.id in (CMS.list_pages!(actor: editor) |> Enum.map(& &1.id))
+    end
+
+    test "version history follows the editorial read scope" do
+      admin = user(:admin)
+      draft = CMS.create_page!(%{title: "Secret draft", slug: slug()}, actor: admin)
+
+      restricted = user(:editor, %{readable_types: ["post"]})
+      unrestricted = user(:editor)
+
+      version_ids = fn actor ->
+        KilnCMS.CMS.Page.Version
+        |> Ash.Query.filter(version_source_id == ^draft.id)
+        |> Ash.read!(actor: actor)
+        |> Enum.map(& &1.id)
+      end
+
+      assert version_ids.(unrestricted) != []
+      # The draft's snapshot must not leak through its history.
+      assert version_ids.(restricted) == []
+    end
+  end
+
+  describe "fail-closed affiliation (#336 interplay)" do
+    test "an editor with memberships gets no editorial scope on a foreign org" do
+      admin = user(:admin)
+      home_org = org()
+      foreign_org = org()
+
+      draft =
+        CMS.create_page!(%{title: "Foreign draft", slug: slug()},
+          actor: admin,
+          tenant: foreign_org
+        )
+
+      editor = user(:editor)
+      membership(editor, home_org, %{editable_types: ["post"]})
+
+      # No membership on foreign_org: no authoring, and drafts are invisible —
+      # switching hosts must not escape the home-org restriction.
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.create_post(%{title: "P", slug: slug()}, actor: editor, tenant: foreign_org)
+
+      refute draft.id in (CMS.list_pages!(actor: editor, tenant: foreign_org)
+                          |> Enum.map(& &1.id))
+    end
+
+    test "a user with no memberships keeps the user-column behavior (legacy)" do
+      editor = user(:editor)
+      some_org = org()
+
+      assert {:ok, _} =
+               CMS.create_post(%{title: "P", slug: slug()}, actor: editor, tenant: some_org)
     end
 
     test "admins and manage_access carry the new axis" do

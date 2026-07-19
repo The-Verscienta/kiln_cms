@@ -110,20 +110,13 @@ defmodule KilnCMSWeb.TeamLive do
     do: {:noreply, assign(socket, :member_edit, nil)}
 
   def handle_event("save_member", %{"member" => params}, socket) do
-    case submit_scoped(socket.assigns.member_edit.form, params) do
-      {:ok, _} ->
-        {:noreply,
-         socket |> assign(:member_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved."))}
-
-      {:error, form} ->
-        {:noreply, assign(socket, :member_edit, %{socket.assigns.member_edit | form: form})}
-
-      {:invalid_json, form} ->
-        {:noreply,
-         socket
-         |> assign(:member_edit, %{socket.assigns.member_edit | form: form})
-         |> put_flash(:error, gettext("Field grants must be a JSON object."))}
-    end
+    handle_submit(
+      socket,
+      socket.assigns.member_edit.form,
+      params,
+      &assign(&1, :member_edit, %{&1.assigns.member_edit | form: &2}),
+      &(&1 |> assign(:member_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved.")))
+    )
   end
 
   # --- roles -----------------------------------------------------------------
@@ -131,23 +124,16 @@ defmodule KilnCMSWeb.TeamLive do
   def handle_event("create_role", %{"role" => params}, socket) do
     params = Map.put(params, "org_id", socket.assigns.current_org.id)
 
-    case submit_scoped(socket.assigns.role_form, params) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> assign(:role_form, role_form(socket.assigns.actor))
-         |> load_data()
-         |> put_flash(:info, gettext("Role added."))}
-
-      {:error, form} ->
-        {:noreply, assign(socket, :role_form, form)}
-
-      {:invalid_json, form} ->
-        {:noreply,
-         socket
-         |> assign(:role_form, form)
-         |> put_flash(:error, gettext("Field grants must be a JSON object."))}
-    end
+    handle_submit(
+      socket,
+      socket.assigns.role_form,
+      params,
+      &assign(&1, :role_form, &2),
+      &(&1
+        |> assign(:role_form, role_form(&1.assigns.actor))
+        |> load_data()
+        |> put_flash(:info, gettext("Role added.")))
+    )
   end
 
   def handle_event("edit_role", %{"id" => id}, socket) do
@@ -169,20 +155,13 @@ defmodule KilnCMSWeb.TeamLive do
     do: {:noreply, assign(socket, :role_edit, nil)}
 
   def handle_event("save_role", %{"role" => params}, socket) do
-    case submit_scoped(socket.assigns.role_edit.form, params) do
-      {:ok, _} ->
-        {:noreply,
-         socket |> assign(:role_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved."))}
-
-      {:error, form} ->
-        {:noreply, assign(socket, :role_edit, %{socket.assigns.role_edit | form: form})}
-
-      {:invalid_json, form} ->
-        {:noreply,
-         socket
-         |> assign(:role_edit, %{socket.assigns.role_edit | form: form})
-         |> put_flash(:error, gettext("Field grants must be a JSON object."))}
-    end
+    handle_submit(
+      socket,
+      socket.assigns.role_edit.form,
+      params,
+      &assign(&1, :role_edit, %{&1.assigns.role_edit | form: &2}),
+      &(&1 |> assign(:role_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved.")))
+    )
   end
 
   def handle_event("delete_role", %{"id" => id}, socket) do
@@ -235,6 +214,33 @@ defmodule KilnCMSWeb.TeamLive do
     Role
     |> AshPhoenix.Form.for_create(:create, actor: actor, as: "role")
     |> to_form()
+  end
+
+  # One outcome handler for every scoped submit (member edit, role create,
+  # role edit): `set_form` re-assigns the failed form, `on_ok` applies the
+  # success transition. Keeps the invalid-JSON flash from drifting per event.
+  defp handle_submit(socket, form, params, set_form, on_ok) do
+    case submit_scoped(form, params) do
+      {:ok, _} ->
+        {:noreply, on_ok.(socket)}
+
+      {:error, form} ->
+        {:noreply, set_form.(socket, form)}
+
+      {:invalid_json, form} ->
+        {:noreply,
+         socket
+         |> set_form.(form)
+         |> put_flash(:error, gettext("Field grants must be a JSON object."))}
+    end
+  end
+
+  # The membership tier is per-site data ahead of the #336 per-org policy
+  # flip; capability today follows the account's global role.
+  defp tier_hint do
+    gettext(
+      "Site tier is recorded for the upcoming per-site roles; today a member's capability follows their account role (managed in account access), while custom roles and scopes below apply now."
+    )
   end
 
   # Scope-axis inputs arrive as text: comma-separated type lists and a JSON
@@ -365,44 +371,32 @@ defmodule KilnCMSWeb.TeamLive do
 
           <form phx-submit="add_member" class="card card-pad space-y-4" id="add-member-form">
             <div class="grid gap-4 sm:grid-cols-3">
-              <div>
-                <label class="text-sm font-medium" for="member-email">{gettext("Email")}</label>
-                <input
-                  id="member-email"
-                  name="member[email]"
-                  type="email"
-                  required
-                  placeholder="colleague@example.com"
-                  class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 text-sm"
-                />
-              </div>
-              <div>
-                <label class="text-sm font-medium" for="member-role">{gettext("Tier")}</label>
-                <select
-                  id="member-role"
-                  name="member[role]"
-                  class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 text-sm"
-                >
-                  <option :for={{label, value} <- tier_options()} value={value}>{label}</option>
-                </select>
-              </div>
-              <div>
-                <label class="text-sm font-medium" for="member-role-id">
-                  {gettext("Custom role")}
-                </label>
-                <select
-                  id="member-role-id"
-                  name="member[role_id]"
-                  class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 text-sm"
-                >
-                  <option :for={{label, value} <- custom_role_options(@roles)} value={value}>
-                    {label}
-                  </option>
-                </select>
-              </div>
+              <.input
+                name="member[email]"
+                value=""
+                type="email"
+                required
+                label={gettext("Email")}
+                placeholder="colleague@example.com"
+              />
+              <.input
+                name="member[role]"
+                value="viewer"
+                type="select"
+                label={gettext("Site tier")}
+                options={tier_options()}
+              />
+              <.input
+                name="member[role_id]"
+                value=""
+                type="select"
+                label={gettext("Custom role")}
+                options={custom_role_options(@roles)}
+              />
             </div>
             <p class="text-xs text-base-content/60">
               {gettext("The account must already exist — invite people via sign-up or SSO first.")}
+              {tier_hint()}
             </p>
             <.button type="submit" variant="primary">{gettext("Add member")}</.button>
           </form>
@@ -463,7 +457,7 @@ defmodule KilnCMSWeb.TeamLive do
                   <.input
                     field={@member_edit.form[:role]}
                     type="select"
-                    label={gettext("Tier")}
+                    label={gettext("Site tier")}
                     options={tier_options()}
                   />
                   <.input
@@ -473,6 +467,7 @@ defmodule KilnCMSWeb.TeamLive do
                     options={custom_role_options(@roles)}
                   />
                 </div>
+                <p class="text-xs text-base-content/60">{tier_hint()}</p>
                 <.scope_fields form={@member_edit.form} prefix="member" />
                 <div class="flex gap-2">
                   <.button type="submit" variant="primary">{gettext("Save")}</.button>
@@ -593,44 +588,29 @@ defmodule KilnCMSWeb.TeamLive do
 
     ~H"""
     <div class="grid gap-4 sm:grid-cols-2">
-      <div>
-        <label class="text-sm font-medium" for={@form[:editable_types].id}>
-          {gettext("Editable types")}
-        </label>
-        <input
-          id={@form[:editable_types].id}
-          name={"#{@prefix}[editable_types]"}
-          type="text"
-          value={@editable_text}
-          placeholder={gettext("post, page — empty = all")}
-          class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 text-sm"
-        />
-      </div>
-      <div>
-        <label class="text-sm font-medium" for={@form[:readable_types].id}>
-          {gettext("Readable types (editorial)")}
-        </label>
-        <input
-          id={@form[:readable_types].id}
-          name={"#{@prefix}[readable_types]"}
-          type="text"
-          value={@readable_text}
-          placeholder={gettext("post — empty = all")}
-          class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 text-sm"
-        />
-      </div>
+      <.input
+        name={"#{@prefix}[editable_types]"}
+        value={@editable_text}
+        type="text"
+        label={gettext("Editable types")}
+        placeholder={gettext("post, page — empty = all")}
+      />
+      <.input
+        name={"#{@prefix}[readable_types]"}
+        value={@readable_text}
+        type="text"
+        label={gettext("Readable types (editorial)")}
+        placeholder={gettext("post — empty = all")}
+      />
     </div>
     <div>
-      <label class="text-sm font-medium" for={@form[:field_grants].id}>
-        {gettext("Field grants (JSON)")}
-      </label>
-      <textarea
-        id={@form[:field_grants].id}
+      <.input
         name={"#{@prefix}[field_grants]"}
-        rows="3"
-        class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 font-mono text-xs"
+        value={@grants_json}
+        type="textarea"
+        label={gettext("Field grants (JSON)")}
         placeholder={~s({"post": ["title", "blocks"]})}
-      >{@grants_json}</textarea>
+      />
       <p class="mt-1 text-xs text-base-content/60">
         {gettext("Content type → attributes a member may change. Empty = no field restriction.")}
       </p>

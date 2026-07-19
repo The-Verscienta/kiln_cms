@@ -19,6 +19,9 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
       *what* an editor may edit, not *which verbs* they may run.
     * The headless `block_tree` argument (#330) is the API's way to write the
       `blocks` attribute, so supplying it requires the `"blocks"` grant.
+    * `restore_version` rewrites the whole document from a snapshot via
+      force-changes that param inspection cannot see — a field-granted editor
+      is refused the verb outright rather than silently bypassing the grant.
     * Relationship arguments (`tag_ids`, related links) are curation, not
       attributes — ungoverned here (documented in docs/granular-rbac.md).
     * Creates are ungoverned: authoring a *new* document is gated by
@@ -32,7 +35,9 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
 
   @impl true
   def change(changeset, _opts, %{actor: %{role: :editor} = actor}) do
-    case Scoping.field_grant(actor, changeset, content_type(changeset.resource)) do
+    type = KilnCMS.CMS.ContentTypes.type_name(changeset.resource)
+
+    case Scoping.field_grant(actor, changeset, type) do
       nil -> changeset
       allowed -> enforce(changeset, allowed)
     end
@@ -40,14 +45,21 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
 
   def change(changeset, _opts, _context), do: changeset
 
+  # A version restore force-changes every restorable field — no param-level
+  # grant check can scope it, so a granted editor may not run it at all.
+  defp enforce(%{action: %{name: :restore_version}} = changeset, _allowed) do
+    Ash.Changeset.add_error(changeset,
+      field: :version_id,
+      message: "restoring a version requires full field access for this content type"
+    )
+  end
+
   defp enforce(changeset, allowed) do
     changeset.action.accept
     |> Enum.filter(&violation?(changeset, &1, allowed))
     |> Enum.map(&to_string/1)
-    |> then(fn
-      [] -> maybe_block_tree_violation(changeset, allowed)
-      violations -> Enum.reduce(violations, changeset, &add_violation(&2, &1))
-    end)
+    |> Enum.reduce(changeset, &add_violation(&2, &1))
+    |> maybe_block_tree_violation(allowed)
   end
 
   defp violation?(changeset, attr, allowed) do
@@ -77,10 +89,4 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
   # code interface).
   defp supplied?(params, attr),
     do: Map.has_key?(params, attr) or Map.has_key?(params, to_string(attr))
-
-  defp content_type(resource) do
-    if function_exported?(resource, :__kiln_content_type__, 0) do
-      to_string(resource.__kiln_content_type__())
-    end
-  end
 end

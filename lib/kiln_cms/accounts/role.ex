@@ -48,7 +48,11 @@ defmodule KilnCMS.Accounts.Role do
       accept [:name, :description, :editable_types, :readable_types, :field_grants, :org_id]
     end
 
-    update :update, primary?: true
+    update :update do
+      primary? true
+      # The shape validation inspects the whole grants map — non-atomic.
+      require_atomic? false
+    end
 
     read :for_org do
       description "The custom roles defined by an org (backs /editor/team)."
@@ -63,6 +67,12 @@ defmodule KilnCMS.Accounts.Role do
     policy always() do
       authorize_if actor_attribute_equals(:role, :admin)
     end
+  end
+
+  validations do
+    # A malformed grant map must fail on the admin's write, not crash the
+    # editors it applies to (see the validation module).
+    validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
   end
 
   attributes do
