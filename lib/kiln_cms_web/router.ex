@@ -145,8 +145,8 @@ defmodule KilnCMSWeb.Router do
   pipeline :preview do
     plug :accepts, ["json", "html"]
     # The html branch only ever redirects to the live view, but set the secure
-    # browser headers regardless (harmless on the JSON responses).
-    plug :put_secure_browser_headers
+    # browser headers + CSP regardless (harmless on the JSON responses).
+    plug :put_secure_browser_headers, @browser_csp_headers
     plug KilnCMSWeb.Plugs.RateLimit, :preview
   end
 
