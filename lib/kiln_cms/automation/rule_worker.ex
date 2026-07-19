@@ -14,6 +14,9 @@ defmodule KilnCMS.Automation.RuleWorker do
     * `:invalidate_cache` — bust the record's content cache (+ sitemap/llms).
     * `:reindex` — re-fire the record (refreshes artifacts + search indexes) via
       `KilnCMS.Firing.FireWorker`.
+    * `:newsletter` — send the published document to subscribers via
+      `KilnCMS.Newsletter` (#376; `config` `"segment_id"`/`"subject"`, both
+      optional). Deduped per {rule, content, publish revision}.
   """
   use Oban.Worker, queue: :default, max_attempts: 5
 
@@ -73,6 +76,39 @@ defmodule KilnCMS.Automation.RuleWorker do
     :ok
   end
 
+  # "On publish → send the newsletter" (#376 / #337 phase 2). Loads the live
+  # record (the payload is a serialized snapshot) and hands it to the existing
+  # newsletter machinery, which refuses unpublished/gated/unfired content. The
+  # `automation` key makes {rule, content, publish revision} unique on the send
+  # ledger, so a re-fired event or re-delivered job can't double-send; a
+  # genuinely new publish (fresh `published_at`) sends again.
+  # How long after publish we keep waiting for the fired artifact.
+  @fire_wait_limit_s 30 * 60
+
+  defp run(%{action: :newsletter, config: config, org_id: org_id, id: rule_id}, event, payload) do
+    with type when is_binary(type) <- event_type(event),
+         id when is_binary(id) <- payload["id"],
+         # The type may have been deleted/archived since the event fired — the
+         # storage lookup is nil-safe where `get_record` would raise (same
+         # guard the :reindex clause uses).
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
+         {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id),
+         :ok <- default_locale_only(record, event) do
+      KilnCMS.Newsletter.send_as_newsletter(record,
+        segment_id: config["segment_id"],
+        subject: config["subject"],
+        automation: %{rule_id: rule_id, published_at: record.published_at}
+      )
+      |> settle_newsletter(record, event)
+    else
+      # A transient read failure (DB blip) must retry, not silently drop the
+      # campaign; the nil/skip guards above fall through to a clean :ok.
+      {:error, error} -> {:error, error}
+      :skipped_locale -> :ok
+      _ -> :ok
+    end
+  end
+
   defp run(%{action: :reindex, org_id: org_id}, event, payload) do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
@@ -87,6 +123,52 @@ defmodule KilnCMS.Automation.RuleWorker do
       _ -> :ok
     end
   end
+
+  # Content is modeled per-locale, and every locale variant's publish emits its
+  # own event — without this guard one article published in three languages
+  # would email the whole list three times. Campaigns follow the default-locale
+  # variant; per-locale campaigns can use a content_type-scoped rule + segment.
+  defp default_locale_only(record, event) do
+    if Map.get(record, :locale, KilnCMS.I18n.default_locale()) == KilnCMS.I18n.default_locale() do
+      :ok
+    else
+      Logger.info("Automation newsletter rule skipped #{event}: non-default locale variant")
+      :skipped_locale
+    end
+  end
+
+  defp settle_newsletter({:ok, _send}, _record, _event), do: :ok
+  defp settle_newsletter({:error, :already_sent}, _record, _event), do: :ok
+
+  # Publish fires artifacts on a sibling Oban job — retry briefly until the
+  # :web artifact exists. Oban snoozes don't consume attempts, so bound the
+  # loop by the publish's age: past the window, firing is broken and retrying
+  # can't help.
+  defp settle_newsletter({:error, :not_fired}, record, event) do
+    if recent_publish?(record) do
+      {:snooze, 30}
+    else
+      Logger.warning(
+        "Automation newsletter rule gave up on #{event}: no fired artifact " <>
+          "#{inspect(@fire_wait_limit_s)}s after publish"
+      )
+
+      :ok
+    end
+  end
+
+  defp settle_newsletter({:error, reason}, _record, event)
+       when reason in [:not_published, :gated] do
+    Logger.info("Automation newsletter rule skipped #{event}: #{inspect(reason)}")
+    :ok
+  end
+
+  defp settle_newsletter({:error, other}, _record, _event), do: {:error, other}
+
+  defp recent_publish?(%{published_at: %DateTime{} = at}),
+    do: DateTime.diff(DateTime.utc_now(), at) < @fire_wait_limit_s
+
+  defp recent_publish?(_record), do: false
 
   # The public content type from a `<type>.<verb>` event name.
   defp event_type(event), do: event |> String.split(".", parts: 2) |> List.first()

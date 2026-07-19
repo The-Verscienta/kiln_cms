@@ -24,7 +24,9 @@ defmodule KilnCMS.Automation.Rule do
 
   # Reactions. HTTP/Slack notifications are the (signed, SSRF-safe) webhook
   # feature's job; automation adds the reactions webhooks can't do.
-  @action_kinds [:send_email, :broadcast, :invalidate_cache, :reindex]
+  # `:newsletter` (#376) fans a published document out to subscribers via the
+  # existing newsletter machinery — "on publish → send the newsletter".
+  @action_kinds [:send_email, :broadcast, :invalidate_cache, :reindex, :newsletter]
 
   @doc "Lifecycle events a rule can trigger on."
   def triggers, do: @triggers
