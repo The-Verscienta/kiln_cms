@@ -140,3 +140,9 @@ config :kiln_cms, KilnCMS.Accounts.WebAuthn, verifier: KilnCMS.StubWebAuthnVerif
 # RBAC scope memoization off: tests mutate memberships/roles mid-process and
 # assert the new scope immediately (prod keeps the few-second process memo).
 config :kiln_cms, KilnCMS.Accounts.Scoping, memo_ttl_ms: 0
+
+# Strict tenancy (#419) is COMPILE-TIME; the main suite predates it and calls
+# interfaces tenant-less (resolving the default org), so tests compile
+# fail-open. The strict CI leg sets KILN_STRICT_TEST=1 and runs the
+# @moduletag :strict_tenancy smoke suite against a strict-compiled build.
+config :kiln_cms, :strict_tenancy, System.get_env("KILN_STRICT_TEST") == "1"

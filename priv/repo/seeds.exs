@@ -74,7 +74,13 @@ IO.puts("Seeding demo content…")
 
 ensure_content.(
   "page welcome",
-  fn -> CMS.list_pages!(query: [filter: [slug: "welcome"]], authorize?: false) end,
+  fn ->
+    CMS.list_pages!(
+      query: [filter: [slug: "welcome"]],
+      authorize?: false,
+      tenant: KilnCMS.Accounts.default_org_id()
+    )
+  end,
   fn ->
     CMS.create_page!(
       %{
@@ -92,15 +98,24 @@ ensure_content.(
           }
         ]
       },
-      actor: admin
+      actor: admin,
+      tenant: KilnCMS.Accounts.default_org_id()
     )
   end,
-  fn page -> CMS.publish_page!(page, %{}, actor: admin) end
+  fn page ->
+    CMS.publish_page!(page, %{}, actor: admin, tenant: KilnCMS.Accounts.default_org_id())
+  end
 )
 
 ensure_content.(
   "page about",
-  fn -> CMS.list_pages!(query: [filter: [slug: "about"]], authorize?: false) end,
+  fn ->
+    CMS.list_pages!(
+      query: [filter: [slug: "about"]],
+      authorize?: false,
+      tenant: KilnCMS.Accounts.default_org_id()
+    )
+  end,
   fn ->
     CMS.create_page!(
       %{
@@ -110,7 +125,8 @@ ensure_content.(
           %{type: :rich_text, content: "<p>This is an unpublished draft page.</p>", order: 0}
         ]
       },
-      actor: admin
+      actor: admin,
+      tenant: KilnCMS.Accounts.default_org_id()
     )
   end,
   nil
@@ -118,7 +134,13 @@ ensure_content.(
 
 ensure_content.(
   "post hello-world",
-  fn -> CMS.list_posts!(query: [filter: [slug: "hello-world"]], authorize?: false) end,
+  fn ->
+    CMS.list_posts!(
+      query: [filter: [slug: "hello-world"]],
+      authorize?: false,
+      tenant: KilnCMS.Accounts.default_org_id()
+    )
+  end,
   fn ->
     CMS.create_post!(
       %{
@@ -135,10 +157,13 @@ ensure_content.(
           }
         ]
       },
-      actor: admin
+      actor: admin,
+      tenant: KilnCMS.Accounts.default_org_id()
     )
   end,
-  fn post -> CMS.publish_post!(post, %{}, actor: admin) end
+  fn post ->
+    CMS.publish_post!(post, %{}, actor: admin, tenant: KilnCMS.Accounts.default_org_id())
+  end
 )
 
 IO.puts("Seeding complete.")

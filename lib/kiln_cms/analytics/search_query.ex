@@ -30,7 +30,7 @@ defmodule KilnCMS.Analytics.SearchQuery do
   # retention window. Runs nightly as a trusted system job. Surfaced to editors
   # via the search-palette disclosure (#220).
   oban do
-    # The nightly purge scheduler scans globally (`global? true`), while the
+    # The nightly purge scheduler scans globally (`global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)`), while the
     # worker destroys under each row's own `org_id` tenant (epic #336).
     use_tenant_from_record? true
 
@@ -121,7 +121,7 @@ defmodule KilnCMS.Analytics.SearchQuery do
   multitenancy do
     strategy :attribute
     attribute :org_id
-    global? true
+    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
   end
 
   attributes do

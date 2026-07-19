@@ -43,7 +43,7 @@ defmodule KilnCMS.CMS.WebhookDelivery do
   end
 
   oban do
-    # The nightly prune scheduler scans globally (`global? true`), while the
+    # The nightly prune scheduler scans globally (`global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)`), while the
     # prune worker runs under each row's own `org_id` tenant (epic #336) — one
     # site's retention sweep never touches another's ledger.
     use_tenant_from_record? true
@@ -105,7 +105,7 @@ defmodule KilnCMS.CMS.WebhookDelivery do
   multitenancy do
     strategy :attribute
     attribute :org_id
-    global? true
+    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
   end
 
   attributes do
