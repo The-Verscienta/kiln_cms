@@ -12,7 +12,8 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     extensions: [AshAdmin.Resource]
 
   # Lifecycle verbs a content type can emit. `<type>.<verb>` is the event name.
-  @verbs ~w(published unpublished updated)
+  # `in_review` / `returned_to_draft` are the review-workflow transitions (#375).
+  @verbs ~w(published unpublished updated in_review returned_to_draft)
 
   @doc "The lifecycle verbs every content type can emit."
   def verbs, do: @verbs

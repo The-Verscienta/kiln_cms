@@ -140,10 +140,36 @@ defmodule KilnCMS.WebhooksTest do
   test "selectable events include every content type crossed with each verb" do
     events = KilnCMS.CMS.WebhookEndpoint.events()
 
-    for verb <- ~w(published unpublished updated) do
+    for verb <- ~w(published unpublished updated in_review returned_to_draft) do
       assert "page.#{verb}" in events
       assert "post.#{verb}" in events
     end
+  end
+
+  test "review-workflow transitions dispatch in_review / returned_to_draft events (#375)" do
+    stub_capture()
+    admin = admin()
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    page = CMS.create_page!(%{title: "Reviewable", slug: slug()}, actor: admin)
+
+    page = CMS.submit_page_for_review!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    assert_received {:delivered, "example.test", "/hook", headers, body}
+    assert headers["x-kilncms-event"] == "page.in_review"
+
+    assert %{"event" => "page.in_review", "data" => %{"state" => "in_review"}} =
+             Jason.decode!(body)
+
+    CMS.return_page_to_draft!(page, %{}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    assert_received {:delivered, "example.test", "/hook", headers, body}
+    assert headers["x-kilncms-event"] == "page.returned_to_draft"
+
+    assert %{"event" => "page.returned_to_draft", "data" => %{"state" => "draft"}} =
+             Jason.decode!(body)
   end
 
   test "webhook endpoints are admin-only" do
