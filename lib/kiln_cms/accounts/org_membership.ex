@@ -42,7 +42,14 @@ defmodule KilnCMS.Accounts.OrgMembership do
   end
 
   actions do
-    defaults [:read, :create, :update, :destroy]
+    defaults [:read, :create, :destroy]
+
+    # Explicit (not a default) so the grant-shape validation — which inspects
+    # the whole map and has no atomic expression — can run.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
 
     default_accept [
       :organization_id,
@@ -85,6 +92,12 @@ defmodule KilnCMS.Accounts.OrgMembership do
     policy action_type([:create, :update, :destroy]) do
       forbid_if always()
     end
+  end
+
+  validations do
+    # A malformed grant map must fail on the admin's write, not crash the
+    # editor's next save (see the validation module).
+    validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
   end
 
   attributes do

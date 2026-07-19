@@ -5,6 +5,8 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
   alias KilnCMS.Accounts.Organization
   alias KilnCMS.CMS
 
+  require Ash.Query
+
   defp user(role, attrs \\ %{}) do
     Ash.Seed.seed!(
       KilnCMS.Accounts.User,
@@ -98,6 +100,115 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
     end
   end
 
+  describe "review fixes" do
+    test "a field-granted editor cannot bypass the grant via restore_version" do
+      admin = user(:admin)
+      post = post!(admin)
+      {:ok, post} = CMS.update_post(post, %{title: "Second revision"}, actor: admin)
+
+      editor = user(:editor, %{field_grants: %{"post" => ["title"]}})
+
+      version =
+        KilnCMS.CMS.Post.Version
+        |> Ash.Query.filter(version_source_id == ^post.id)
+        |> Ash.Query.sort(version_inserted_at: :asc)
+        |> Ash.read!(authorize?: false)
+        |> List.first()
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               post
+               |> Ash.Changeset.for_update(:restore_version, %{version_id: version.id},
+                 actor: editor
+               )
+               |> Ash.update()
+
+      assert Exception.message(error) =~ "full field access"
+
+      # An ungranted editor may still restore.
+      free_editor = user(:editor)
+
+      assert {:ok, _} =
+               post
+               |> Ash.Changeset.for_update(:restore_version, %{version_id: version.id},
+                 actor: free_editor
+               )
+               |> Ash.update()
+    end
+
+    test "malformed grant shapes are rejected at write time, not at edit time" do
+      admin = user(:admin)
+      editor = user(:editor)
+
+      # String instead of list — the admin's write must fail.
+      assert {:error, %Ash.Error.Invalid{}} =
+               KilnCMS.Accounts.manage_user_access(
+                 editor,
+                 %{field_grants: %{"post" => "title"}},
+                 actor: admin
+               )
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               KilnCMS.Accounts.create_org_membership(
+                 %{
+                   user_id: editor.id,
+                   organization_id: KilnCMS.Accounts.default_org_id(),
+                   role: :editor,
+                   field_grants: %{"post" => [1, 2]}
+                 },
+                 authorize?: false
+               )
+
+      assert {:ok, _} =
+               KilnCMS.Accounts.manage_user_access(
+                 editor,
+                 %{field_grants: %{"post" => ["title"]}},
+                 actor: admin
+               )
+    end
+
+    test "grant maps resolve per type key across levels" do
+      org =
+        Ash.Seed.seed!(Organization, %{
+          name: "PerKey #{System.unique_integer([:positive])}",
+          slug: "perkey-#{System.unique_integer([:positive])}"
+        })
+
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "Pg", slug: slug()}, actor: admin, tenant: org)
+
+      # User level restricts pages; the membership overrides POSTS only — the
+      # page restriction must survive the membership's map.
+      editor = user(:editor, %{field_grants: %{"page" => ["title"]}})
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: editor.id,
+        organization_id: org.id,
+        role: :editor,
+        field_grants: %{"post" => ["title"]}
+      })
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.update_page(page, %{seo_title: "Nope"}, actor: editor, tenant: org)
+    end
+
+    test "an attribute violation and a block_tree violation report together" do
+      admin = user(:admin)
+      post = post!(admin)
+      editor = user(:editor, %{field_grants: %{"post" => ["title"]}})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.update_post(
+                 post,
+                 %{excerpt: "New", block_tree: [%{"type" => "markdown", "text" => "hi"}]},
+                 actor: editor
+               )
+
+      message = Exception.message(error)
+      assert message =~ "excerpt"
+      assert message =~ "blocks"
+    end
+  end
+
   describe "membership resolution" do
     test "a membership grant wins over the user column for that org" do
       org =
@@ -123,7 +234,14 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
       assert {:error, %Ash.Error.Invalid{}} =
                CMS.update_post(post, %{excerpt: "Nope"}, actor: editor, tenant: org)
 
-      # The same editor on the default org has no grants → unrestricted.
+      # On the default org (via their backfilled, grant-less membership) the
+      # same editor is unrestricted.
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: editor.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :editor
+      })
+
       default_post = post!(admin)
       assert {:ok, _} = CMS.update_post(default_post, %{excerpt: "Free"}, actor: editor)
     end

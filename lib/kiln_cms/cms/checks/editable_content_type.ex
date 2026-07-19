@@ -24,14 +24,9 @@ defmodule KilnCMS.CMS.Checks.EditableContentType do
 
   @impl Ash.Policy.SimpleCheck
   def match?(%{role: :editor} = actor, %{resource: resource, subject: subject}, _opts) do
-    Scoping.permitted?(actor, subject, :editable_types, content_type(resource))
+    type = KilnCMS.CMS.ContentTypes.type_name(resource)
+    Scoping.permitted?(actor, subject, :editable_types, type)
   end
 
   def match?(_actor, _context, _opts), do: false
-
-  defp content_type(resource) do
-    if function_exported?(resource, :__kiln_content_type__, 0) do
-      to_string(resource.__kiln_content_type__())
-    end
-  end
 end

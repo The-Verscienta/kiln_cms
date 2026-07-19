@@ -184,6 +184,9 @@ defmodule KilnCMS.Accounts.User do
     # audiences. See KilnCMS.CMS.Audiences and the content read policy.
     update :manage_access do
       accept [:role, :audiences, :editable_types, :readable_types, :field_grants]
+      # The shape validation inspects the whole map — no atomic expression.
+      require_atomic? false
+      validate KilnCMS.Accounts.Validations.FieldGrantsShape
     end
 
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and

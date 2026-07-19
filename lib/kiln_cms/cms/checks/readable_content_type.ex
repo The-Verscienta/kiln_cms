@@ -26,14 +26,16 @@ defmodule KilnCMS.CMS.Checks.ReadableContentType do
 
   @impl Ash.Policy.SimpleCheck
   def match?(%{role: :editor} = actor, %{resource: resource, subject: subject}, _opts) do
-    Scoping.permitted?(actor, subject, :readable_types, content_type(resource))
+    type = KilnCMS.CMS.ContentTypes.type_name(resource)
+
+    # An EXPLICIT editable_types entry is unioned in: restricting what an
+    # editor sees must never revoke drafts of types they were explicitly
+    # granted to author. An empty (unrestricted) editable scope deliberately
+    # does NOT widen reads — it would dissolve every readable_types
+    # restriction (see docs/granular-rbac.md).
+    Scoping.permitted?(actor, subject, :readable_types, type) or
+      Scoping.explicitly_permits?(actor, subject, :editable_types, type)
   end
 
   def match?(_actor, _context, _opts), do: false
-
-  defp content_type(resource) do
-    if function_exported?(resource, :__kiln_content_type__, 0) do
-      to_string(resource.__kiln_content_type__())
-    end
-  end
 end
