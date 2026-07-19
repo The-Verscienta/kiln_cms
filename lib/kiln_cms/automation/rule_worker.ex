@@ -92,7 +92,8 @@ defmodule KilnCMS.Automation.RuleWorker do
          # storage lookup is nil-safe where `get_record` would raise (same
          # guard the :reindex clause uses).
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
-         {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id) do
+         {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id),
+         :ok <- default_locale_only(record, event) do
       case KilnCMS.Newsletter.send_as_newsletter(record,
              segment_id: config["segment_id"],
              subject: config["subject"],
@@ -128,6 +129,10 @@ defmodule KilnCMS.Automation.RuleWorker do
           {:error, other}
       end
     else
+      # A transient read failure (DB blip) must retry, not silently drop the
+      # campaign; the nil/skip guards above fall through to a clean :ok.
+      {:error, error} -> {:error, error}
+      :skipped_locale -> :ok
       _ -> :ok
     end
   end
@@ -144,6 +149,19 @@ defmodule KilnCMS.Automation.RuleWorker do
       :ok
     else
       _ -> :ok
+    end
+  end
+
+  # Content is modeled per-locale, and every locale variant's publish emits its
+  # own event — without this guard one article published in three languages
+  # would email the whole list three times. Campaigns follow the default-locale
+  # variant; per-locale campaigns can use a content_type-scoped rule + segment.
+  defp default_locale_only(record, event) do
+    if Map.get(record, :locale, KilnCMS.I18n.default_locale()) == KilnCMS.I18n.default_locale() do
+      :ok
+    else
+      Logger.info("Automation newsletter rule skipped #{event}: non-default locale variant")
+      :skipped_locale
     end
   end
 

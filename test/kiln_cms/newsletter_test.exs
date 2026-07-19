@@ -183,9 +183,10 @@ defmodule KilnCMS.NewsletterTest do
     end
 
     defp sends_for(post) do
-      KilnCMS.Newsletter.NewsletterSend
-      |> Ash.Query.filter(content_id == ^post.id)
-      |> Ash.read!(authorize?: false)
+      Newsletter.list_sends!(
+        authorize?: false,
+        query: [filter: [content_id: post.id]]
+      )
     end
 
     test "on publish, a newsletter rule sends the campaign exactly once (end to end)" do
