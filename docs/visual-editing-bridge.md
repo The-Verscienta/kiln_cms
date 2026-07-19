@@ -153,16 +153,38 @@ elements, where there's no text to encode), annotate elements yourself from the
 - **Never ship the editor key to the public site.** Load `bridge.js` and the key
   only in the edit-mode build.
 
+## The Presentation console (side-by-side editing)
+
+Beyond the deep-link, Kiln ships a **Presentation console** at
+`/editor/presentation/:type/:slug` (editor/admin) — your front end framed on the
+left, an inline field editor on the right, Sanity Presentation-style.
+
+Point Kiln at your front end with a URL template (the origin is derived from it
+for `postMessage` validation):
+
+```
+PRESENTATION_PREVIEW_URL="https://front.example.com{path}?kilnPreview=1"
+```
+
+Placeholders: `{path}` (the locale-prefixed public path, e.g. `/blog/hello`),
+`{type}`, `{slug}`, `{locale}`. A bare base URL gets `{path}` appended. Your
+front end serves that URL with `bridge.js` in edit mode (the `?kilnPreview=1`
+flag is yours to gate on).
+
+The loop: click a region in the framed site → `bridge.js` `postMessage`s the
+field up to the console (origin-validated) → the console opens that block's
+field in the right pane → edit (same contenteditable hooks as in-context
+editing) → **Save** writes through Ash (`:update`, policies + PaperTrail native)
+→ the console broadcasts on the preview topic, so `bridge.js` (over `/ws/bridge`)
+re-fetches and the frame updates. No deep-link tab needed.
+
+The inline fields are heading / quote / rich-text (same as #354); other fields
+offer an "Open the full editor" link.
+
 ## Limitations & follow-ons
 
-- **Deep-link, not inline editing (this iteration).** Clicking opens the Kiln
-  editor focused on the field, rather than editing inline on your page. Inline
-  editing off-page would need a client re-implementation of TipTap and the
-  autosave protocol; the deep-link reuses Kiln's editor, policies, versioning and
-  re-fire as-is.
-- **A Kiln-hosted "Presentation" console** (your site in an iframe with a
-  side-by-side editor, driven by the `postMessage` hook above) is the natural
-  next step.
+- **Console inline fields** cover heading/quote/rich-text today; document scalars
+  (title/SEO) and other block types route to the full editor.
 - **Rich-text bodies** are addressed at the block level (`_id` + `data-kiln-*`),
   not per-span; Portable Text arrays aren't stega-encoded.
 - **Live push** covers compiled types (page/post); the dynamic entry tier is a

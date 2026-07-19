@@ -91,6 +91,17 @@ if visual_editing = System.get_env("VISUAL_EDITING_ENABLED") do
   config :kiln_cms, :visual_editing_enabled, visual_editing not in ~w(false 0 no off)
 end
 
+# ## Presentation console (#355) — where the external front end serves content
+#
+# The Kiln-hosted side-by-side editing console iframes the external front end.
+# Kiln doesn't render that front end, so point it here — a URL template with
+# `{path}`/`{type}`/`{slug}`/`{locale}` placeholders (a bare base URL gets
+# `{path}` appended). Unset ⇒ the console shows a setup hint. The origin is
+# derived from this for `postMessage` validation. See `KilnCMSWeb.Presentation`.
+if preview_url = System.get_env("PRESENTATION_PREVIEW_URL") do
+  config :kiln_cms, :presentation_preview_url, preview_url
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

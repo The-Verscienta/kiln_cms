@@ -31,6 +31,33 @@ const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
 const Hooks = {
   FocusTrap,
+  // Presentation console (#355): relay the framed external front end's
+  // click-to-edit `postMessage` up to the LiveView, and nudge the iframe to
+  // refresh after a save. Mirrors embed.js's parent-side security check —
+  // trust only messages from THIS iframe's window, and (when known) only from
+  // the configured front-end origin.
+  PresentationFrame: {
+    mounted() {
+      this.origin = this.el.dataset.frontendOrigin || null
+      this.onMessage = e => {
+        if (e.source !== this.el.contentWindow) return
+        if (this.origin && e.origin !== this.origin) return
+        const d = e.data
+        if (d && d.source === "kiln-bridge" && d.event === "edit" && d.payload) {
+          this.pushEvent("edit_field", d.payload)
+        }
+      }
+      window.addEventListener("message", this.onMessage)
+      // Server → iframe: tell bridge.js to re-fetch after a Kiln-side save.
+      this.handleEvent("presentation:refresh", () => {
+        const win = this.el.contentWindow
+        if (win) win.postMessage({source: "kiln-console", event: "refresh"}, this.origin || "*")
+      })
+    },
+    destroyed() {
+      window.removeEventListener("message", this.onMessage)
+    },
+  },
   // Deep-link focus from the visual-editing bridge (#355): when the in-context
   // editor is opened as `/editor/site/:type/:slug?focus=<block_id>`, scroll that
   // block into view, focus its editable region, and pulse it so the editor lands

@@ -294,6 +294,25 @@
     clean: clean,
   };
 
+  // When embedded in the Kiln Presentation console (#355), the parent nudges us
+  // to refresh after a Kiln-side save: re-fetch via the registered onUpdate
+  // callbacks if the front end wired them, else fall back to a full reload.
+  window.addEventListener("message", function (e) {
+    var d = e.data;
+    if (!d || d.source !== "kiln-console" || d.event !== "refresh") return;
+    if (updateCallbacks.length) {
+      updateCallbacks.forEach(function (cb) {
+        try {
+          cb({ event: "refresh" });
+        } catch (err) {
+          /* front end's problem */
+        }
+      });
+    } else {
+      window.location.reload();
+    }
+  });
+
   window.KilnBridge = api;
 
   if (script && script.hasAttribute("data-kiln-auto")) {
