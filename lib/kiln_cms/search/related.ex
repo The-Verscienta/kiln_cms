@@ -16,11 +16,8 @@ defmodule KilnCMS.Search.Related do
   Everything is org-scoped and a no-op (empty results) when semantic search is
   disabled, mirroring the rest of the search stack.
   """
-  require Ash.Query
-
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Search
-  alias KilnCMS.Search.BlockEmbedding
 
   @typedoc "A scored neighbouring document."
   @type neighbour :: %{
@@ -79,9 +76,12 @@ defmodule KilnCMS.Search.Related do
       KilnCMS.CMS.list_tags!(authorize?: false, tenant: record.org_id)
       |> Enum.reject(&MapSet.member?(applied, &1.id))
       |> Enum.flat_map(fn tag ->
-        case Search.embed_document(tag.name) do
-          {:ok, vector} -> [%{tag: tag, distance: cosine_distance(centroid, vector)}]
-          _ -> []
+        case tag_vector(tag.name) do
+          vector when is_list(vector) ->
+            [%{tag: tag, distance: cosine_distance(centroid, vector)}]
+
+          _ ->
+            []
         end
       end)
       |> Enum.sort_by(& &1.distance)
@@ -92,21 +92,17 @@ defmodule KilnCMS.Search.Related do
   end
 
   @doc """
-  Recorded search queries that found nothing (or nearly nothing) — what
-  readers looked for and the site didn't have. Options: `:max_results`
-  (queries with at most this many results count as gaps; default 0) and
+  Recorded search queries that found nothing — what readers looked for and
+  the site didn't have (the Analytics `:zero_result` read). Options:
   `:limit` (default 20, most-searched first).
   """
   @spec content_gaps(Ash.UUID.t(), keyword()) :: [map()]
   def content_gaps(org_id, opts \\ []) do
-    max_results = Keyword.get(opts, :max_results, 0)
-    limit = Keyword.get(opts, :limit, 20)
-
-    KilnCMS.Analytics.SearchQuery
-    |> Ash.Query.filter(not is_nil(result_count) and result_count <= ^max_results)
-    |> Ash.Query.sort(count: :desc)
-    |> Ash.Query.limit(limit)
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    KilnCMS.Analytics.zero_result_searches!(
+      authorize?: false,
+      tenant: org_id,
+      query: [limit: Keyword.get(opts, :limit, 20)]
+    )
     |> Enum.map(&%{query: &1.query, searches: &1.count, results: &1.result_count})
   end
 
@@ -117,14 +113,12 @@ defmodule KilnCMS.Search.Related do
   defp neighbours(record, fetch_limit) do
     with true <- Search.semantic?(),
          centroid when is_list(centroid) <- centroid(record) do
-      BlockEmbedding
-      |> Ash.Query.for_read(:nearest_to_vector, %{
-        vector: centroid,
-        exclude_document_id: record.id,
-        limit: fetch_limit * 3
-      })
-      |> Ash.Query.load(semantic_distance: %{query_vector: centroid})
-      |> Ash.read!(authorize?: false, tenant: record.org_id)
+      KilnCMS.SearchIndex.nearest_block_embeddings!(
+        %{vector: centroid, exclude_document_id: record.id, limit: fetch_limit * 3},
+        authorize?: false,
+        tenant: record.org_id,
+        load: [semantic_distance: %{query_vector: centroid}]
+      )
       |> Enum.group_by(&{&1.document_type, &1.document_id})
       |> Enum.map(fn {{type, id}, embeddings} ->
         {type, id, embeddings |> Enum.map(& &1.semantic_distance) |> Enum.min()}
@@ -143,9 +137,10 @@ defmodule KilnCMS.Search.Related do
     storage = KilnCMS.Firing.Engine.document_type(record)
 
     vectors =
-      BlockEmbedding
-      |> Ash.Query.for_read(:for_document, %{document_type: storage, document_id: record.id})
-      |> Ash.read!(authorize?: false, tenant: record.org_id)
+      KilnCMS.SearchIndex.block_embeddings_for!(storage, record.id,
+        authorize?: false,
+        tenant: record.org_id
+      )
       |> Enum.map(&to_list(&1.embedding))
       |> Enum.reject(&is_nil/1)
 
@@ -176,6 +171,17 @@ defmodule KilnCMS.Search.Related do
         distance: distance
       }
     ]
+  end
+
+  # Tag-name vectors are pure functions of the (stable) name — memoized so a
+  # 500-tag org doesn't re-run 500 model inferences per triggering event.
+  defp tag_vector(name) do
+    KilnCMS.Cache.fetch({:tag_vector, Search.model(), name}, :timer.hours(6), fn ->
+      case Search.embed_document(name) do
+        {:ok, vector} -> vector
+        _ -> nil
+      end
+    end)
   end
 
   defp mean(vectors) do

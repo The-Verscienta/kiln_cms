@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.RelatedController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Firing.Delivery
   alias KilnCMS.Search.Related
 
   @max_age_seconds 300
@@ -18,7 +19,7 @@ defmodule KilnCMSWeb.RelatedController do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
-         record when not is_nil(record) <- published(org_id, type, slug, locale) do
+         {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale) do
       related =
         record
         |> Related.related_documents(limit: limit(params))
@@ -36,6 +37,22 @@ defmodule KilnCMSWeb.RelatedController do
       |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
       |> json(%{type: type, slug: slug, related: related})
     else
+      # Cache-first, DB-outage-aware resolution (same posture as delivery):
+      # a database outage answers 503-retryable, never a cacheable 404.
+      :unavailable ->
+        conn
+        |> put_status(:service_unavailable)
+        |> put_resp_header("retry-after", "2")
+        |> json(%{
+          errors: [
+            %{
+              status: "503",
+              code: "temporarily_unavailable",
+              detail: "Content is temporarily unavailable; retry shortly."
+            }
+          ]
+        })
+
       _ ->
         conn
         |> put_status(:not_found)
@@ -48,12 +65,5 @@ defmodule KilnCMSWeb.RelatedController do
       {n, ""} when n in 1..20 -> n
       _ -> 5
     end
-  end
-
-  # Same published-only, org-scoped lookup as artifact delivery.
-  defp published(org_id, type, slug, locale) do
-    ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false, tenant: org_id)
-  rescue
-    _ -> nil
   end
 end
