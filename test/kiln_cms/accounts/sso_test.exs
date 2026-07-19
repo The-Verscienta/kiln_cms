@@ -38,7 +38,7 @@ defmodule KilnCMS.Accounts.SsoTest do
     assert user.role == :viewer
     assert user.name == "Priya IdP"
     # The IdP verified the email — no second confirmation loop.
-    reloaded = Ash.get!(User, user.id, authorize?: false)
+    reloaded = KilnCMS.Accounts.get_user!(user.id, authorize?: false)
     refute is_nil(reloaded.confirmed_at)
   end
 
@@ -47,6 +47,47 @@ defmodule KilnCMS.Accounts.SsoTest do
     assert Exception.message(error) =~ "not verified"
 
     assert {:error, _} = register(%{"email_verified" => true})
+  end
+
+  test "a string \"true\" claim is accepted; an ABSENT claim is rejected by default" do
+    assert {:ok, _} = register(%{"email" => email(), "email_verified" => "true"})
+
+    assert {:error, error} = register(%{"email" => email()})
+    assert Exception.message(error) =~ "not verified"
+  end
+
+  test "assume_email_verified lets claim-omitting IdPs (e.g. Entra) through" do
+    prev = Application.get_env(:kiln_cms, :sso_oidc, [])
+    Application.put_env(:kiln_cms, :sso_oidc, Keyword.put(prev, :assume_email_verified, true))
+    on_exit(fn -> Application.put_env(:kiln_cms, :sso_oidc, prev) end)
+
+    assert {:ok, _} = register(%{"email" => email()})
+  end
+
+  test "invite-only still admits an identity-linked user whose IdP email changed" do
+    Application.put_env(:kiln_cms, :registration_enabled, false)
+    on_exit(fn -> Application.delete_env(:kiln_cms, :registration_enabled) end)
+
+    # First link happens while the account exists under the old email.
+    address = email()
+
+    Ash.Seed.seed!(User, %{
+      email: address,
+      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+      confirmed_at: DateTime.utc_now(),
+      role: :editor
+    })
+
+    sub = "stable-sub-#{System.unique_integer([:positive])}"
+    assert {:ok, user} = register(%{"email" => address, "email_verified" => true, "sub" => sub})
+
+    # The IdP now asserts a brand-new email for the SAME subject: no email
+    # match, but the stored identity makes the account known — not a
+    # "registration" to refuse.
+    assert {:ok, linked} =
+             register(%{"email" => email(), "email_verified" => true, "sub" => sub})
+
+    assert linked.id == user.id
   end
 
   test "an existing account links as-is — role and name untouched" do
@@ -66,7 +107,7 @@ defmodule KilnCMS.Accounts.SsoTest do
 
     assert linked.id == existing.id
 
-    reloaded = Ash.get!(User, existing.id, authorize?: false)
+    reloaded = KilnCMS.Accounts.get_user!(existing.id, authorize?: false)
     assert reloaded.role == :admin
     assert reloaded.name == "Chosen Name"
   end

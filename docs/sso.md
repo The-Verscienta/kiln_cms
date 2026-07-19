@@ -33,9 +33,22 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
   re-target an account.
 - **Verified email only for first-time linking** (`trust_email_verified?`):
   attaching an SSO identity to an *existing* local account requires the IdP's
-  `email_verified: true` claim — point Kiln only at a provider that reliably
-  asserts email ownership. An unverified match is rejected outright, and our
+  `email_verified` claim (`true`, or the string `"true"` from string-typed
+  providers) — point Kiln only at a provider that reliably asserts email
+  ownership. An unverified match is rejected outright, and our
   `RegisterWithSso` change independently refuses any unverified claim.
+  Providers that **omit** the claim entirely (Entra ID does by default) are
+  rejected unless you explicitly set
+  `config :kiln_cms, :sso_oidc, assume_email_verified: true` — only do this
+  for an IdP that exclusively asserts owned addresses.
+- **Invite-only + identity linking:** with registration disabled, SSO admits
+  accounts known by their **linked provider identity or** their email — an
+  identity-linked employee whose corporate email changes stays signed in;
+  unknown identities are refused.
+- **Unconfirmed password accounts:** an account that self-registered with a
+  password but never confirmed its email cannot be silently taken over via
+  SSO — the sign-in is refused with guidance to confirm or reset first (the
+  library's hijack prevention).
 - **Linking, not privilege.** An existing account signs in as-is (role,
   audiences, display name untouched). A new user lands as `:viewer` with no
   audiences — identical to password self-registration; an admin grants access
