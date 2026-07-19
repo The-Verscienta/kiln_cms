@@ -63,9 +63,12 @@ Phase-1 slice:
 
 - **Cursors, not selections.** Live text-selection / caret sharing inside the
   block editor is a bigger, CRDT-adjacent effort; this covers preview cursors.
-- **Multi-variant / multi-locale in one shared view** (from the issue) — the
-  preview is per `{kind, id}` today; a shared variant/locale switcher that all
-  viewers follow is a natural follow-on.
+- **Shared locale switcher** (#378) — the ribbon shows the document's locale;
+  when locale siblings exist (same slug, other locales) it becomes a switcher
+  that moves **every co-viewer** to the sibling's preview (a `{:preview_switch,
+  id}` broadcast on the preview topic → everyone `push_navigate`s together, and
+  presence re-forms there). Late joiners follow the shared URL, so the group is
+  always on the same variant.
 - **Presence on the token preview** (`/preview/:token`, the headless draft
   surface) could reuse the same machinery for external stakeholders without an
   editor account.
