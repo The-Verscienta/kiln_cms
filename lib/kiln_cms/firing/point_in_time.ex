@@ -23,6 +23,81 @@ defmodule KilnCMS.Firing.PointInTime do
   alias KilnCMS.Firing.Engine
 
   @publish_actions [:publish, :publish_scheduled]
+  @unpublish_actions [:unpublish, :unpublish_scheduled]
+
+  @doc """
+  The **collection view as of a date** (#338 phase 2): every document of
+  `resource` that was published at `as_of`, as lightweight index entries
+
+      %{id, slug, title, published_at}
+
+  reconstructed from version history (title/slug as they were at that
+  document's last publish ≤ `as_of`). A document unpublished before `as_of`
+  is excluded — unlike the single-document `read/5`, an index that listed
+  since-removed content would misrepresent the site as it stood. Bounded by
+  `limit` (newest publishes first).
+  """
+  @spec index(Ash.UUID.t(), module(), DateTime.t(), keyword()) :: [map()]
+  def index(org_id, resource, %DateTime{} = as_of, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+    version_module = Module.concat(resource, Version)
+
+    version_module
+    |> state_events(as_of, org_id)
+    |> published_as_of()
+    |> Enum.sort_by(fn {_id, published_at} -> published_at end, {:desc, DateTime})
+    |> Enum.take(limit)
+    |> Enum.map(fn {id, published_at} ->
+      entry(version_module, resource, id, published_at, org_id)
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # One slim read of every state-transition version up to `as_of` — action,
+  # source and time only (never the `changes` payloads).
+  defp state_events(version_module, as_of, org_id) do
+    version_module
+    |> Ash.Query.filter(
+      version_inserted_at <= ^as_of and
+        version_action_name in ^(@publish_actions ++ @unpublish_actions)
+    )
+    |> Ash.Query.select([:version_source_id, :version_action_name, :version_inserted_at])
+    |> Ash.Query.sort(version_inserted_at: :asc)
+    |> Ash.read!(authorize?: false, tenant: org_id)
+  end
+
+  # A document counts as published at `as_of` iff its LAST state transition up
+  # to that instant was a publish; keep that publish's timestamp for the entry.
+  defp published_as_of(events) do
+    events
+    |> Enum.group_by(& &1.version_source_id)
+    |> Enum.flat_map(fn {id, evts} ->
+      last = List.last(evts)
+
+      if last.version_action_name in @publish_actions,
+        do: [{id, last.version_inserted_at}],
+        else: []
+    end)
+  end
+
+  # Replay up to the effective publish for the index fields. `nil` when the
+  # replayed state carries no slug (malformed history) — dropped by the caller.
+  defp entry(version_module, _resource, id, published_at, org_id) do
+    state = replay(version_module, id, published_at, org_id)
+
+    case state do
+      %{"slug" => slug} when is_binary(slug) ->
+        %{
+          id: id,
+          slug: slug,
+          title: state["title"],
+          published_at: published_at
+        }
+
+      _ ->
+        nil
+    end
+  end
 
   @doc """
   The fired `surface` body for `resource`/`id` as published at or before

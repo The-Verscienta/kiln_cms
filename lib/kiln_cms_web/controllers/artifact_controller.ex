@@ -57,6 +57,64 @@ defmodule KilnCMSWeb.ArtifactController do
   # Point-in-time delivery (#338): `?as_of=<ISO8601 date or datetime>` serves the
   # artifact for this content *as it was published on that date*, reconstructed
   # from PaperTrail history and re-fired in memory (KilnCMS.Firing.PointInTime).
+  @doc """
+  `GET /api/content/:type?as_of=` — the **collection as of a date** (#338
+  phase 2): index entries for every document of `type` that was published at
+  that instant (title/slug reconstructed from history), each linking its
+  point-in-time artifact. `as_of` is required — the live collection view is
+  the JSON:API / GraphQL surface's job.
+  """
+  def index_point_in_time(conn, %{"type" => type, "as_of" => raw} = params) do
+    org_id = current_org_id(conn)
+
+    with {:ok, as_of} <- parse_as_of(raw),
+         ct when not is_nil(ct) <- ContentTypes.get(type) do
+      entries =
+        PointInTime.index(org_id, ct.resource, as_of, limit: index_limit(params))
+        |> Enum.map(fn entry ->
+          %{
+            slug: entry.slug,
+            title: entry.title,
+            published_at: entry.published_at,
+            href: "/api/content/#{type}/#{entry.slug}?as_of=#{DateTime.to_iso8601(as_of)}"
+          }
+        end)
+
+      conn
+      |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
+      |> put_resp_header("x-kiln-as-of", DateTime.to_iso8601(as_of))
+      |> json(%{as_of: as_of, type: type, entries: entries})
+    else
+      :error ->
+        error(
+          conn,
+          :bad_request,
+          "invalid_as_of",
+          "`as_of` must be an ISO 8601 date or datetime."
+        )
+
+      _ ->
+        error(conn, :not_found, "not_found", "Unknown content type.")
+    end
+  end
+
+  def index_point_in_time(conn, _params) do
+    error(
+      conn,
+      :bad_request,
+      "missing_as_of",
+      "This collection view is historical: pass `as_of` (the live collection is served by the JSON:API/GraphQL surfaces)."
+    )
+  end
+
+  # Bounded page size for the historical index.
+  defp index_limit(params) do
+    case Integer.parse(params["limit"] || "") do
+      {n, ""} when n in 1..500 -> n
+      _ -> 100
+    end
+  end
+
   # The content must still be resolvable now (lookup is by the current record's
   # id); see the module for scope.
   defp show_point_in_time(conn, %{"type" => type, "slug" => slug} = params) do
