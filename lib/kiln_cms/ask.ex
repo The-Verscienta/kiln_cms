@@ -99,7 +99,8 @@ defmodule KilnCMS.Ask do
 
     dynamic =
       Enum.flat_map(sections.entries, fn record ->
-        case ContentTypes.get_dynamic(record.type_name) do
+        # Resolve the entry's dynamic type within its own site (epic #336).
+        case ContentTypes.get_dynamic(record.type_name, record.org_id) do
           nil -> []
           ct -> [source(record, record.type_name, ct, locale)]
         end

@@ -116,18 +116,22 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
-  @doc "Cache key for the dynamic content-type registry (D17) descriptors."
-  def type_registry_key, do: "content_types:dynamic"
+  @doc """
+  Cache key for a site's dynamic content-type registry (D17) descriptors.
+  Per-org (epic #336): a `TypeDefinition` belongs to one site, so each org caches
+  its own registry and one site's dynamic types never leak into another's.
+  """
+  def type_registry_key(org_id), do: "content_types:dynamic:#{org_id}"
 
   @doc """
-  Drop the cached dynamic-type registry so a TypeDefinition write is visible on
-  the next request instead of waiting out the TTL. Like the sitemap key, this
-  aggregate isn't touched by per-record `bust/2`, so `Changes.BustTypeRegistry`
-  calls it explicitly.
+  Drop a site's cached dynamic-type registry so a `TypeDefinition` write is
+  visible on the next request instead of waiting out the TTL. Like the sitemap
+  key, this aggregate isn't touched by per-record `bust/3`, so
+  `Changes.BustTypeRegistry` calls it explicitly with the writing record's org.
   """
-  @spec bust_type_registry() :: :ok
-  def bust_type_registry do
-    if enabled?(), do: Cachex.del(@cache, type_registry_key())
+  @spec bust_type_registry(Ash.UUID.t()) :: :ok
+  def bust_type_registry(org_id) do
+    if enabled?(), do: Cachex.del(@cache, type_registry_key(org_id))
     :ok
   end
 

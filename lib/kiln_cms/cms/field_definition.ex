@@ -132,8 +132,28 @@ defmodule KilnCMS.CMS.FieldDefinition do
     validate KilnCMS.CMS.Validations.ReferenceTarget
   end
 
+  # Multi-tenancy (epic #336): a field belongs to the same site as the content
+  # type (compiled type-name or dynamic `TypeDefinition`) it customizes.
+  # `global?: true` keeps the tenant optional; tenant-less reads/writes land in
+  # the default org via the `org_id` default.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on a scoped create,
+    # else the default org; never accepted from input (`writable?: false`, absent
+    # from `default_accept`) — the cross-site boundary.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # Which compiled content type this field is attached to (atom, e.g.
     # `:page`) — nil for a field owned by a dynamic type (see the
@@ -179,6 +199,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     # The dynamic type owning this field (nil for compiled-scoped fields).
     belongs_to :type_definition, KilnCMS.CMS.TypeDefinition do
       allow_nil? true
@@ -187,9 +215,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   identities do
-    # One field name per owner. Two identities, one per scope — Postgres treats
-    # NULLs as distinct, so each acts as a partial unique index over the rows
-    # where its scope column is set.
+    # One field name per owner **per org** (Ash prepends `org_id`). Two
+    # identities, one per scope — Postgres treats NULLs as distinct, so each acts
+    # as a partial unique index over the rows where its scope column is set.
     identity :unique_field, [:content_type, :name]
     identity :unique_definition_field, [:type_definition_id, :name]
   end

@@ -13,7 +13,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
   artifacts), so it is create-only. Types are soft-deleted (AshArchival): an
   archived type stops resolving publicly but its entries remain editable and
   exportable, and a restore brings it back intact — which is also why `name`
-  and `path_segment` stay globally unique across archived rows.
+  and `path_segment` stay unique (per site — epic #336) across archived rows.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -143,8 +143,28 @@ defmodule KilnCMS.CMS.TypeDefinition do
     validate KilnCMS.CMS.Validations.AvailableTypeName
   end
 
+  # Multi-tenancy (epic #336): a dynamic content type belongs to one site, so its
+  # name/path_segment are unique **per org** (two sites can each define "recipe").
+  # `global?: true` keeps the tenant optional: tenant-less reads/writes (the
+  # single-org rollout, seeds) land in the default org via the `org_id` default.
+  multitenancy do
+    strategy :attribute
+    attribute :org_id
+    global? true
+  end
+
   attributes do
     uuid_primary_key :id
+
+    # The owning organization (epic #336). Set from the tenant on a scoped create,
+    # else the default org; never accepted from input (`writable?: false`, absent
+    # from `accept`) — the cross-site boundary.
+    attribute :org_id, :uuid do
+      allow_nil? false
+      default &KilnCMS.Accounts.default_org_id/0
+      writable? false
+      public? false
+    end
 
     # Permanent machine key, e.g. "recipe". Create-only (see `:update`).
     attribute :name, :string, allow_nil?: false, public?: true
@@ -169,6 +189,14 @@ defmodule KilnCMS.CMS.TypeDefinition do
   end
 
   relationships do
+    # The owning organization — the tenant axis is the `org_id` attribute above.
+    belongs_to :organization, KilnCMS.Accounts.Organization do
+      source_attribute :org_id
+      define_attribute? false
+      attribute_writable? false
+      public? false
+    end
+
     # The dynamic type's schema: admin-defined fields, rendered by the editor
     # and enforced on write by `Changes.ApplyCustomFields`.
     has_many :field_definitions, KilnCMS.CMS.FieldDefinition do
@@ -178,8 +206,9 @@ defmodule KilnCMS.CMS.TypeDefinition do
   end
 
   identities do
-    # Globally unique — including archived rows, so restoring a type can never
-    # collide with a later re-creation of the same name.
+    # Unique **per org** (Ash prepends `org_id`) — including archived rows, so
+    # restoring a type can never collide with a later re-creation of the same
+    # name within the same site.
     identity :unique_name, [:name]
     identity :unique_path_segment, [:path_segment]
   end

@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         actor = socket.assigns.current_user
         org = socket.assigns.current_org
         record = fetch!(kind, id, actor, org)
-        field_definitions = field_definitions(kind, actor)
+        field_definitions = field_definitions(kind, actor, org)
 
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
@@ -81,7 +81,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:ok,
          socket
          |> assign(:kind, kind)
-         |> assign(:has_excerpt, ContentTypes.get!(kind).excerpt?)
+         |> assign(:has_excerpt, ContentTypes.get!(kind, org_id(org)).excerpt?)
          |> assign(:actor, actor)
          |> assign(:block_types, block_types())
          |> assign(:nested_child_types, @nested_child_types)
@@ -129,7 +129,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # between editors over the collab channel (see KilnCMS.Collab.Crdt).
          |> assign(:collab_token, collab_token(actor))
          |> assign(:collab_topic, "collab:#{kind}:#{id}")
-         |> assign(:siblings, siblings(kind, id, actor))
+         |> assign(:siblings, siblings(kind, id, actor, org))
          |> assign_record(record)}
     end
   end
@@ -137,8 +137,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The content type being edited: from the `:type` param on the generic
   # `/editor/content/:type/:id` route, or the `live_action` on the legacy
   # `/editor/pages|posts/:id` routes. Returns nil for an unknown type.
-  defp content_kind(%{"type" => type}, _socket) do
-    case ContentTypes.get(type) do
+  defp content_kind(%{"type" => type}, socket) do
+    # Resolve the type within the current site (epic #336) — a dynamic type name
+    # only names a type on the org that defined it.
+    case ContentTypes.get(type, org_id(socket.assigns.current_org)) do
       nil -> nil
       ct -> ct.type
     end
@@ -287,10 +289,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the same window as the media picker so a large library can't blow up the mount.
   # Only id + title — these fill a <select>; without the select, 500 siblings
   # would each carry their full blocks JSONB tree in this editor's heap.
-  defp siblings(kind, id, actor) do
+  defp siblings(kind, id, actor, org) do
     kind
     |> ContentTypes.list!(
       actor: actor,
+      tenant: org,
       query: [select: [:id, :title], sort: [updated_at: :desc], limit: @max_media]
     )
     |> Enum.reject(&(&1.id == id))
@@ -343,16 +346,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # A dynamic kind's custom fields are scoped by its TypeDefinition, a compiled
-  # kind's by its type atom (see FieldDefinition's two scopes).
-  defp field_definitions(kind, actor) do
-    case ContentTypes.get!(kind) do
+  # kind's by its type atom (see FieldDefinition's two scopes). Resolved and read
+  # under the current org (epic #336).
+  defp field_definitions(kind, actor, org) do
+    case ContentTypes.get!(kind, org_id(org)) do
       %{source: :dynamic, definition: definition} ->
-        CMS.field_definitions_for_definition!(definition.id, actor: actor)
+        CMS.field_definitions_for_definition!(definition.id, actor: actor, tenant: org)
 
       ct ->
-        CMS.field_definitions_for!(ct.type, actor: actor)
+        CMS.field_definitions_for!(ct.type, actor: actor, tenant: org)
     end
   end
+
+  # `ContentTypes.get!/2` keys the dynamic-type registry by a raw org_id.
+  defp org_id(%{id: id}), do: id
+  defp org_id(id) when is_binary(id), do: id
 
   # Pick-lists for `:reference` custom fields: per definition, the target
   # type's records as `{title, id}` options — narrow select and the same window
@@ -362,7 +370,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Enum.filter(&(&1.field_type == :reference))
     |> Map.new(fn definition ->
       options =
-        case ContentTypes.get(definition.target_type) do
+        case ContentTypes.get(definition.target_type, org_id(org)) do
           nil ->
             []
 

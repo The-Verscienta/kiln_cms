@@ -39,8 +39,9 @@ defmodule KilnCMSWeb.LlmsController do
     default_locale = KilnCMS.I18n.default_locale()
 
     {groups, _count} =
-      Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(), {[], 0}, fn ct,
-                                                                                      {acc, count} ->
+      Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id), {[], 0}, fn ct,
+                                                                                            {acc,
+                                                                                             count} ->
         remaining = @max_entries - count
 
         if remaining <= 0 do

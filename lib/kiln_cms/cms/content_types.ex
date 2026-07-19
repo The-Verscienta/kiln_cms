@@ -75,17 +75,26 @@ defmodule KilnCMS.CMS.ContentTypes do
   `get_by_path/1`, so it must not cost a DB round-trip per request. Busted on
   every TypeDefinition write, TTL as the backstop.
   """
-  @spec dynamic_all() :: [t()]
-  def dynamic_all do
+  # Multi-tenancy (epic #336): the dynamic-type registry is per-org — a
+  # `TypeDefinition` belongs to one site. `org_id` defaults to the sole org so
+  # every tenant-less caller keeps working under the single-org rollout; the
+  # delivery/editor hot paths thread the request's real org. Cached per-org (the
+  # key carries `org_id`), so one site's types never leak into another's.
+  @spec dynamic_all(Ash.UUID.t()) :: [t()]
+  def dynamic_all(org_id \\ KilnCMS.Accounts.default_org_id()) do
     if cache_registry?() do
-      KilnCMS.Cache.fetch(KilnCMS.Cache.type_registry_key(), @registry_ttl, &load_dynamic/0)
+      KilnCMS.Cache.fetch(
+        KilnCMS.Cache.type_registry_key(org_id),
+        @registry_ttl,
+        fn -> load_dynamic(org_id) end
+      )
     else
-      load_dynamic()
+      load_dynamic(org_id)
     end
   end
 
-  defp load_dynamic do
-    KilnCMS.CMS.list_type_definitions!(authorize?: false)
+  defp load_dynamic(org_id) do
+    KilnCMS.CMS.list_type_definitions!(authorize?: false, tenant: org_id)
     |> Enum.map(&describe_dynamic/1)
     |> Enum.sort_by(& &1.label)
   end
@@ -96,10 +105,13 @@ defmodule KilnCMS.CMS.ContentTypes do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:cache_registry?, true)
   end
 
-  @doc "Look up a dynamic content type by its name string. Returns nil if unknown."
-  @spec get_dynamic(String.t()) :: t() | nil
-  def get_dynamic(name) when is_binary(name),
-    do: Enum.find(dynamic_all(), &(&1.type == name))
+  @doc """
+  Look up a dynamic content type by its name string, within `org_id` (defaults to
+  the sole org — epic #336). Returns nil if unknown.
+  """
+  @spec get_dynamic(String.t(), Ash.UUID.t()) :: t() | nil
+  def get_dynamic(name, org_id \\ KilnCMS.Accounts.default_org_id()) when is_binary(name),
+    do: Enum.find(dynamic_all(org_id), &(&1.type == name))
 
   @doc "Router-owned first URL segments a dynamic type may not use."
   @spec reserved_path_segments() :: [String.t()]
@@ -158,13 +170,14 @@ defmodule KilnCMS.CMS.ContentTypes do
   for an unknown name. The single source of truth for firing/export/reindex
   callers that need the storage key from a public type.
   """
-  @spec storage_type(t() | atom() | String.t()) :: atom() | nil
-  def storage_type(%{source: :dynamic}), do: :entry
-  def storage_type(%{type: type}), do: type
-  def storage_type(type) when is_atom(type), do: type
+  @spec storage_type(t() | atom() | String.t(), Ash.UUID.t()) :: atom() | nil
+  def storage_type(type_or_descriptor, org_id \\ KilnCMS.Accounts.default_org_id())
+  def storage_type(%{source: :dynamic}, _org_id), do: :entry
+  def storage_type(%{type: type}, _org_id), do: type
+  def storage_type(type, _org_id) when is_atom(type), do: type
 
-  def storage_type(type) when is_binary(type) do
-    case get(type) do
+  def storage_type(type, org_id) when is_binary(type) do
+    case get(type, org_id) do
       %{source: :dynamic} -> :entry
       %{type: atom} -> atom
       _ -> nil
@@ -175,10 +188,10 @@ defmodule KilnCMS.CMS.ContentTypes do
   Find a content type by its public URL segment, e.g. "blog" or "products" —
   compiled first, then dynamic (`TypeDefinition.path_segment`).
   """
-  @spec get_by_path(String.t()) :: t() | nil
-  def get_by_path(segment) do
+  @spec get_by_path(String.t(), Ash.UUID.t()) :: t() | nil
+  def get_by_path(segment, org_id \\ KilnCMS.Accounts.default_org_id()) do
     Enum.find(all(), &(&1.path_segment == segment)) ||
-      Enum.find(dynamic_all(), &(&1.path_segment == segment))
+      Enum.find(dynamic_all(org_id), &(&1.path_segment == segment))
   end
 
   @doc "The atom types of all content types."
@@ -193,27 +206,30 @@ defmodule KilnCMS.CMS.ContentTypes do
   compiled always wins a name collision (which `TypeDefinition` validation
   prevents anyway). Atoms only ever name compiled types.
   """
-  @spec get(atom() | String.t() | t() | nil) :: t() | nil
-  def get(nil), do: nil
+  @spec get(atom() | String.t() | t() | nil, Ash.UUID.t()) :: t() | nil
+  def get(type, org_id \\ KilnCMS.Accounts.default_org_id())
+
+  def get(nil, _org_id), do: nil
 
   # An already-resolved descriptor passes through — iteration call sites hand
   # the descriptor straight to the dispatch helpers, so a type archived between
   # listing and dispatch can't turn into a lookup miss mid-request.
-  def get(%{type: _} = descriptor), do: descriptor
+  def get(%{type: _} = descriptor, _org_id), do: descriptor
 
-  def get(type) when is_atom(type), do: Enum.find(all(), &(&1.type == type))
+  # Atoms only ever name compiled types (org-independent).
+  def get(type, _org_id) when is_atom(type), do: Enum.find(all(), &(&1.type == type))
 
-  def get(type) when is_binary(type) do
+  def get(type, org_id) when is_binary(type) do
     case safe_existing_atom(type) do
-      nil -> get_dynamic(type)
-      atom -> get(atom) || get_dynamic(type)
+      nil -> get_dynamic(type, org_id)
+      atom -> get(atom) || get_dynamic(type, org_id)
     end
   end
 
-  @doc "Like `get/1` but raises for an unknown type (descriptors pass through)."
-  @spec get!(atom() | String.t() | t()) :: t()
-  def get!(type) do
-    get(type) || raise ArgumentError, "unknown content type: #{inspect(type)}"
+  @doc "Like `get/2` but raises for an unknown type (descriptors pass through)."
+  @spec get!(atom() | String.t() | t(), Ash.UUID.t()) :: t()
+  def get!(type, org_id \\ KilnCMS.Accounts.default_org_id()) do
+    get(type, org_id) || raise ArgumentError, "unknown content type: #{inspect(type)}"
   end
 
   @doc "Whether `type` is a known content type."
@@ -234,14 +250,14 @@ defmodule KilnCMS.CMS.ContentTypes do
   # must stamp the type) branch explicitly.
 
   def list!(type, opts \\ []) do
-    case get!(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} -> CMS.list_entries!(scoped(opts, definition))
       _compiled -> call(type, "list_#{plural(type)}!", [opts])
     end
   end
 
   def get_record!(type, id, opts \\ []) do
-    case get!(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} -> CMS.get_entry!(id, scoped(opts, definition))
       _compiled -> call(type, "get_#{atom(type)}!", [id, opts])
     end
@@ -249,7 +265,7 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   # Non-bang fetch by id (`{:ok, record} | {:error, _}`), e.g. for preview links.
   def get_record(type, id, opts \\ []) do
-    case get!(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} -> CMS.get_entry(id, scoped(opts, definition))
       _compiled -> call(type, "get_#{atom(type)}", [id, opts])
     end
@@ -258,7 +274,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   # Public delivery: fetch a single published record by slug + locale (returns
   # nil rather than raising on a miss).
   def get_published_by_slug(type, slug, locale, opts \\ []) do
-    case get!(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} ->
         CMS.get_published_entry_by_slug!(slug, locale, definition.id, opts)
 
@@ -269,7 +285,7 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   # Every published locale variant of a slug (for hreflang / language switching).
   def list_translations(type, slug, opts \\ []) do
-    case get!(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} ->
         CMS.list_entry_translations!(slug, definition.id, opts)
 
@@ -279,7 +295,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   end
 
   def create!(type, attrs, opts \\ []) do
-    case get!(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} ->
         CMS.create_entry!(Map.put(attrs, :type_definition_id, definition.id), opts)
 
@@ -300,7 +316,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   end
 
   def list_trashed!(type, opts \\ []) do
-    case get!(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} ->
         CMS.list_trashed_entries!(scoped(opts, definition))
 
@@ -354,6 +370,19 @@ defmodule KilnCMS.CMS.ContentTypes do
       # interface-name plural — entries share one interface set.
       %{source: :dynamic} -> "entries"
       ct -> ct.plural
+    end
+  end
+
+  # The request org for resolving a dynamic type (epic #336): the `:tenant` opt
+  # normalized to an `org_id` — an Organization struct (LiveView `current_org`), a
+  # raw uuid (controllers), or nil → the sole org (the single-org rollout / any
+  # tenant-less internal caller). So a dynamic type resolves under the writing
+  # site, and the default keeps every existing caller working unchanged.
+  defp org_from(opts) do
+    case Keyword.get(opts, :tenant) do
+      nil -> KilnCMS.Accounts.default_org_id()
+      %{id: id} -> id
+      id when is_binary(id) -> id
     end
   end
 

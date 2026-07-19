@@ -5,7 +5,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   update (incl. restore), or archive.
 
   Published payloads of an archived type may linger under their own
-  `{name, slug}` cache keys until their short TTL passes; `get_by_path/1`
+  `{name, slug}` cache keys until their short TTL passes; `get_by_path/2`
   stops resolving the type immediately, so only already-cached responses ride
   out the window.
   """
@@ -14,13 +14,12 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   @impl true
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_action(changeset, fn _changeset, record ->
-      # The type registry is global (TypeDefinition isn't org-scoped yet); the
-      # sitemap/llms are per-org (#336). With the single-org rollout guard in
-      # force, bust the default org's copies. Revisit (bust every org) when
-      # TypeDefinition becomes tenant-scoped.
-      KilnCMS.Cache.bust_type_registry()
-      KilnCMS.Cache.bust_sitemap(KilnCMS.Accounts.default_org_id())
-      KilnCMS.Cache.bust_llms(KilnCMS.Accounts.default_org_id())
+      # The type registry, sitemap and llms.txt are all per-org (#336): bust the
+      # writing type's own site so its editors/delivery see the change at once
+      # (another org's cached registry is unaffected).
+      KilnCMS.Cache.bust_type_registry(record.org_id)
+      KilnCMS.Cache.bust_sitemap(record.org_id)
+      KilnCMS.Cache.bust_llms(record.org_id)
       {:ok, record}
     end)
   end

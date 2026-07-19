@@ -119,13 +119,15 @@ defmodule KilnCMSWeb.DynamicDeliveryTest do
     # sandboxes) — turn it on for this sync test to exercise the bust path.
     Application.put_env(:kiln_cms, ContentTypes, cache_registry?: true)
 
+    org_id = KilnCMS.Accounts.default_org_id()
+
     on_exit(fn ->
       Application.put_env(:kiln_cms, ContentTypes, cache_registry?: false)
-      Cache.bust_type_registry()
+      Cache.bust_type_registry(org_id)
     end)
 
     # Start clean of anything a previous test may have cached.
-    Cache.bust_type_registry()
+    Cache.bust_type_registry(org_id)
 
     actor = admin()
     definition = define_type!(actor)

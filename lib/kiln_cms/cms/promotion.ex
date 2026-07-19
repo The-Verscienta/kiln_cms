@@ -86,8 +86,9 @@ defmodule KilnCMS.CMS.Promotion do
     Ash.Notifier.notify(notifications)
 
     # The type moved tiers: delivery must re-resolve it as compiled, and any
-    # cached payloads/artifact bodies for it are stale.
-    KilnCMS.Cache.bust_type_registry()
+    # cached payloads/artifact bodies for it are stale. Bust the definition's own
+    # site (epic #336).
+    KilnCMS.Cache.bust_type_registry(definition.org_id)
     KilnCMS.Cache.bust_published()
 
     {:ok, result}
@@ -179,6 +180,9 @@ defmodule KilnCMS.CMS.Promotion do
   end
 
   # Every custom field keeps working — it just belongs to the compiled type now.
+  # `org_id` is left untouched, so the rescoped fields stay in the definition's
+  # site; `type_definition_id` is a globally-unique key, so the WHERE already
+  # matches only this definition's (same-org) fields — no org predicate needed.
   defp rescope_field_definitions(definition, target) do
     Repo.query!(
       """
