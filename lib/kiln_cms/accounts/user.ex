@@ -342,7 +342,9 @@ defmodule KilnCMS.Accounts.User do
     end
 
     # Finish enrolment by proving a code from the new secret; only then is 2FA
-    # actually enforced at sign-in.
+    # actually enforced at sign-in. Also mints the one-time recovery-code set
+    # (#331 phase 2) — plaintext codes ride back once as `:recovery_codes`
+    # metadata; only hashes are stored.
     update :confirm_totp do
       description "Confirm 2FA enrolment with a code from the authenticator app."
       accept []
@@ -352,6 +354,35 @@ defmodule KilnCMS.Accounts.User do
 
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
+      change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
+    end
+
+    # Replace the recovery-code set — requires a current authenticator code, so
+    # a walk-up attacker on an open session can't mint themselves backup codes.
+    # Unused codes from the previous set stop working immediately.
+    update :regenerate_totp_recovery_codes do
+      description "Mint a fresh 2FA recovery-code set (invalidates the old one)."
+      accept []
+      require_atomic? false
+
+      argument :code, :string, allow_nil?: false, sensitive?: true
+
+      validate KilnCMS.Accounts.Validations.ValidTotpCode
+      change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
+    end
+
+    # Second-factor fallback at the sign-in gate (#331): validate-and-burn one
+    # recovery code atomically. Called pre-authentication as a system action
+    # (`authorize?: false` from `TwoFactorController`) — the user isn't signed
+    # in until this succeeds.
+    update :consume_totp_recovery_code do
+      description "Use (and invalidate) one 2FA recovery code."
+      accept []
+      require_atomic? false
+
+      argument :code, :string, allow_nil?: false, sensitive?: true
+
+      change KilnCMS.Accounts.Changes.ConsumeRecoveryCode
     end
 
     # Turn 2FA off — requires a current code, so a walk-up attacker on an open
@@ -366,6 +397,7 @@ defmodule KilnCMS.Accounts.User do
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change set_attribute(:totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)
+      change set_attribute(:totp_recovery_hashes, [])
     end
   end
 
@@ -400,7 +432,14 @@ defmodule KilnCMS.Accounts.User do
 
     # 2FA is strictly self-service: a user manages the second factor on their own
     # account only (the admin bypass above still lets an operator intervene).
-    policy action([:setup_totp, :confirm_totp, :disable_totp]) do
+    # `:consume_totp_recovery_code` runs pre-auth as a system call
+    # (`authorize?: false` from the 2FA gate), so it needs no anonymous grant here.
+    policy action([
+             :setup_totp,
+             :confirm_totp,
+             :disable_totp,
+             :regenerate_totp_recovery_codes
+           ]) do
       authorize_if expr(id == ^actor(:id))
     end
 
@@ -523,6 +562,17 @@ defmodule KilnCMS.Accounts.User do
 
     attribute :totp_confirmed_at, :utc_datetime_usec do
       public? false
+    end
+
+    # SHA-256 hashes of the unused one-time recovery codes (#331 phase 2);
+    # plaintext is shown once at generation and never stored. Managed only by
+    # the dedicated actions (generate / consume / disable).
+    attribute :totp_recovery_hashes, {:array, :string} do
+      allow_nil? false
+      default []
+      sensitive? true
+      public? false
+      writable? false
     end
   end
 

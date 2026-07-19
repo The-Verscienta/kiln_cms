@@ -57,4 +57,46 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
     assert conn.resp_body =~ "isn&#39;t valid" or conn.resp_body =~ "isn't valid"
     refute is_nil(get_session(conn, :pending_2fa))
   end
+
+  describe "recovery codes (#331 phase 2)" do
+    alias KilnCMS.Accounts.RecoveryCodes
+
+    defp with_recovery_codes(user) do
+      codes = RecoveryCodes.generate()
+
+      user =
+        Ash.Seed.update!(user, %{totp_recovery_hashes: Enum.map(codes, &RecoveryCodes.hash/1)})
+
+      {user, codes}
+    end
+
+    test "a recovery code completes sign-in and is burned on use", %{conn: conn} do
+      {user, [code | _]} = with_recovery_codes(enabled_user())
+
+      conn2 = conn |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => code})
+      assert redirected_to(conn2) == ~p"/editor/overview"
+
+      # One fewer unused code, and the same code never works again.
+      reloaded = KilnCMS.Accounts.get_user!(user.id, authorize?: false)
+      assert length(reloaded.totp_recovery_hashes) == RecoveryCodes.count() - 1
+
+      retry = build_conn() |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => code})
+      assert retry.status == 401
+    end
+
+    test "a recovery code is accepted case- and format-insensitively", %{conn: conn} do
+      {user, [code | _]} = with_recovery_codes(enabled_user())
+      variant = code |> String.downcase() |> String.replace("-", " ")
+
+      conn = conn |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => variant})
+      assert redirected_to(conn) == ~p"/editor/overview"
+    end
+
+    test "an unknown recovery code is rejected", %{conn: conn} do
+      {user, _codes} = with_recovery_codes(enabled_user())
+
+      conn = conn |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => "AAAA-AAAA"})
+      assert conn.status == 401
+    end
+  end
 end

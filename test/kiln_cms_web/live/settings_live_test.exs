@@ -141,4 +141,53 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       assert result =~ "Couldn&#39;t change your password"
     end
   end
+
+  describe "two-factor enrolment (#331)" do
+    alias KilnCMS.Accounts
+    alias KilnCMS.Accounts.RecoveryCodes
+    alias KilnCMS.Accounts.Totp
+
+    defp current_code(user),
+      do: Totp.code_at(reload(user).totp_secret, System.system_time(:second))
+
+    test "enrolment shows a QR code; confirming mints show-once recovery codes", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, _html} = live(log_in(conn, user), ~p"/editor/settings")
+
+      lv |> element("button", "Enable two-factor authentication") |> render_click()
+      html = render(lv)
+      assert html =~ "totp-qr"
+      assert html =~ "<svg"
+
+      lv |> form("#confirm-totp-form", %{"code" => current_code(user)}) |> render_submit()
+
+      # The freshly minted codes are on screen (show-once) and only hashes stored.
+      html = render(lv)
+      assert html =~ "recovery-codes"
+      assert length(Regex.scan(~r/[A-Z2-7]{4}-[A-Z2-7]{4}/, html)) >= RecoveryCodes.count()
+      assert length(reload(user).totp_recovery_hashes) == RecoveryCodes.count()
+
+      lv |> element("button", "saved them") |> render_click()
+      refute render(lv) =~ "recovery-codes"
+    end
+
+    test "regenerating replaces the set; disabling clears it", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      code = Totp.code_at(user.totp_secret, System.system_time(:second))
+      {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
+      original = reload(user).totp_recovery_hashes
+
+      {:ok, lv, _html} = live(log_in(conn, user), ~p"/editor/settings")
+
+      lv |> form("#regenerate-recovery-form", %{"code" => current_code(user)}) |> render_submit()
+      regenerated = reload(user).totp_recovery_hashes
+      assert length(regenerated) == RecoveryCodes.count()
+      assert MapSet.disjoint?(MapSet.new(original), MapSet.new(regenerated))
+
+      lv |> form("#disable-totp-form", %{"code" => current_code(user)}) |> render_submit()
+      assert reload(user).totp_recovery_hashes == []
+      assert is_nil(reload(user).totp_secret)
+    end
+  end
 end
