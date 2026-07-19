@@ -40,18 +40,20 @@ defmodule KilnCMSWeb.GraphqlSchema do
       arg :limit, :integer
 
       resolve fn %{type: type, as_of: as_of} = args, resolution ->
+        # Compiled types only — a dynamic (D17) descriptor has resource: nil
+        # (the documented later-phase boundary), so error cleanly, never crash.
         case KilnCMS.CMS.ContentTypes.get(type) do
-          nil ->
-            {:error, "unknown content type"}
-
-          ct ->
+          %{resource: resource} when not is_nil(resource) ->
             {:ok,
              KilnCMS.Firing.PointInTime.index(
                graphql_org_id(resolution),
-               ct.resource,
+               resource,
                as_of,
                limit: min(args[:limit] || 100, 500)
              )}
+
+          _ ->
+            {:error, "unknown content type (historical collections cover compiled types)"}
         end
       end
     end

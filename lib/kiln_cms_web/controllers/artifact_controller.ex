@@ -67,11 +67,23 @@ defmodule KilnCMSWeb.ArtifactController do
   def index_point_in_time(conn, %{"type" => type, "as_of" => raw} = params) do
     org_id = current_org_id(conn)
 
+    # Compiled types only: a dynamic (D17) descriptor has `resource: nil` and
+    # version history lives on the shared entry tier — the documented
+    # "dynamic entries are a later phase" boundary, enforced instead of 500ing.
     with {:ok, as_of} <- parse_as_of(raw),
-         ct when not is_nil(ct) <- ContentTypes.get(type) do
+         ct when not is_nil(ct) <- ContentTypes.get(type),
+         resource when not is_nil(resource) <- ct.resource do
+      limit = index_limit(params)
+
       entries =
-        PointInTime.index(org_id, ct.resource, as_of, limit: index_limit(params))
-        |> Enum.map(fn entry ->
+        KilnCMS.Cache.fetch(
+          {:pit_index, org_id, type, DateTime.to_iso8601(as_of), limit},
+          :timer.minutes(5),
+          fn -> PointInTime.index(org_id, resource, as_of, limit: limit) end
+        )
+
+      entries =
+        Enum.map(entries, fn entry ->
           %{
             slug: entry.slug,
             title: entry.title,

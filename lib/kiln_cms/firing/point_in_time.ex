@@ -23,7 +23,9 @@ defmodule KilnCMS.Firing.PointInTime do
   alias KilnCMS.Firing.Engine
 
   @publish_actions [:publish, :publish_scheduled]
-  @unpublish_actions [:unpublish, :unpublish_scheduled]
+  # Archive is a state transition OUT of :published too — an archived
+  # document must stop appearing in the historical index from that moment.
+  @unpublish_actions [:unpublish, :unpublish_scheduled, :archive]
 
   @doc """
   The **collection view as of a date** (#338 phase 2): every document of
@@ -43,42 +45,49 @@ defmodule KilnCMS.Firing.PointInTime do
     version_module = Module.concat(resource, Version)
 
     version_module
-    |> state_events(as_of, org_id)
-    |> published_as_of()
-    |> Enum.sort_by(fn {_id, published_at} -> published_at end, {:desc, DateTime})
-    |> Enum.take(limit)
+    |> published_as_of(as_of, org_id, limit)
     |> Enum.map(fn {id, published_at} ->
       entry(version_module, resource, id, published_at, org_id)
     end)
     |> Enum.reject(&is_nil/1)
   end
 
-  # One slim read of every state-transition version up to `as_of` — action,
-  # source and time only (never the `changes` payloads).
-  defp state_events(version_module, as_of, org_id) do
-    version_module
-    |> Ash.Query.filter(
-      version_inserted_at <= ^as_of and
-        version_action_name in ^(@publish_actions ++ @unpublish_actions)
-    )
-    |> Ash.Query.select([:version_source_id, :version_action_name, :version_inserted_at])
-    |> Ash.Query.sort(version_inserted_at: :asc)
-    |> Ash.read!(authorize?: false, tenant: org_id)
-  end
+  # "Last state transition ≤ as_of per document, keep only publishes" in ONE
+  # SQL pass (DISTINCT ON + LIMIT), so the work scales with the number of
+  # matching documents (bounded by `limit`), never with total publish history —
+  # this backs an unauthenticated endpoint. Raw SQL is deliberate here: Ash has
+  # no DISTINCT ON, and version tables are already read as system data.
+  defp published_as_of(version_module, as_of, org_id, limit) do
+    table = AshPostgres.DataLayer.Info.table(version_module)
+    actions = Enum.map(@publish_actions ++ @unpublish_actions, &to_string/1)
+    publishes = Enum.map(@publish_actions, &to_string/1)
 
-  # A document counts as published at `as_of` iff its LAST state transition up
-  # to that instant was a publish; keep that publish's timestamp for the entry.
-  defp published_as_of(events) do
-    events
-    |> Enum.group_by(& &1.version_source_id)
-    |> Enum.flat_map(fn {id, evts} ->
-      last = List.last(evts)
+    %{rows: rows} =
+      KilnCMS.Repo.query!(
+        """
+        SELECT version_source_id, version_inserted_at FROM (
+          SELECT DISTINCT ON (version_source_id)
+            version_source_id, version_action_name, version_inserted_at
+          FROM #{table}
+          WHERE version_inserted_at <= $1
+            AND version_action_name = ANY($2)
+            AND ($4::uuid IS NULL OR org_id = $4)
+          ORDER BY version_source_id, version_inserted_at DESC, id DESC
+        ) latest
+        WHERE version_action_name = ANY($3)
+        ORDER BY version_inserted_at DESC
+        LIMIT $5
+        """,
+        [DateTime.to_naive(as_of), actions, publishes, org_uuid(org_id), limit]
+      )
 
-      if last.version_action_name in @publish_actions,
-        do: [{id, last.version_inserted_at}],
-        else: []
+    Enum.map(rows, fn [source_id, published_at] ->
+      {Ecto.UUID.cast!(source_id), DateTime.from_naive!(published_at, "Etc/UTC")}
     end)
   end
+
+  defp org_uuid(nil), do: nil
+  defp org_uuid(org_id), do: Ecto.UUID.dump!(org_id)
 
   # Replay up to the effective publish for the index fields. `nil` when the
   # replayed state carries no slug (malformed history) — dropped by the caller.
