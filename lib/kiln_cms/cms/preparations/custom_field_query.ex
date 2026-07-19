@@ -62,24 +62,34 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # --- definitions in scope ---------------------------------------------------
 
   # Compiled types own a fixed content-type atom; the entry tier's schema
-  # depends on which dynamic type the query is scoped to (see moduledoc).
+  # depends on which dynamic type the query is scoped to (see moduledoc). All
+  # definition reads run under the query's org (epic #336) so a filter/sort only
+  # ever resolves against the requesting site's field schema.
   defp definitions(%{resource: resource} = query) do
+    tenant = query.to_tenant
+
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
-      entry_definitions(query)
+      entry_definitions(query, tenant)
     else
-      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), authorize?: false)
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(),
+        authorize?: false,
+        tenant: tenant
+      )
     end
   end
 
-  defp entry_definitions(query) do
+  defp entry_definitions(query, tenant) do
     cond do
       id = equality_filter_value(query, :type_definition_id) ->
-        KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false)
+        KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
 
       name = equality_filter_value(query, :type_name) ->
-        case KilnCMS.CMS.get_type_definition_by_name(name, authorize?: false) do
+        case KilnCMS.CMS.get_type_definition_by_name(name, authorize?: false, tenant: tenant) do
           {:ok, definition} ->
-            KilnCMS.CMS.field_definitions_for_definition!(definition.id, authorize?: false)
+            KilnCMS.CMS.field_definitions_for_definition!(definition.id,
+              authorize?: false,
+              tenant: tenant
+            )
 
           _ ->
             []
@@ -88,7 +98,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       true ->
         KilnCMS.CMS.list_field_definitions!(
           query: [filter: [type_definition_id: [is_nil: false]]],
-          authorize?: false
+          authorize?: false,
+          tenant: tenant
         )
     end
   end

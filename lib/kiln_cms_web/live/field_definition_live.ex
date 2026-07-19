@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
+    org = socket.assigns.current_org
 
     if actor.role == :admin do
       {:ok,
@@ -29,11 +30,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Custom fields"))
        |> assign(:content_types, ContentTypes.all())
-       |> assign(:dynamic_types, ContentTypes.dynamic_all())
+       |> assign(:dynamic_types, ContentTypes.dynamic_all(org_id(org)))
        |> assign(:field_types, FieldDefinition.field_types())
-       |> assign(:target_types, target_types())
+       |> assign(:target_types, target_types(org_id(org)))
        |> assign(:edit, nil)
-       |> assign(:form, create_form(actor))
+       |> assign(:form, create_form(actor, org))
        |> load_definitions()}
     else
       # Defense-in-depth: the `:live_admin_required` on_mount guard already
@@ -58,7 +59,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {:ok, _definition} ->
         {:noreply,
          socket
-         |> assign(:form, create_form(socket.assigns.actor))
+         |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
          |> load_definitions()
          |> put_flash(:info, gettext("Field added."))}
 
@@ -70,7 +71,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # --- inline edit -----------------------------------------------------------
 
   def handle_event("edit", %{"id" => id}, socket) do
-    {:noreply, assign(socket, :edit, %{id: id, form: edit_form(id, socket.assigns.actor)})}
+    {:noreply,
+     assign(socket, :edit, %{
+       id: id,
+       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+     })}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -97,10 +102,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   def handle_event("delete", %{"id" => id}, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     socket =
-      with {:ok, definition} <- CMS.get_field_definition(id, actor: actor),
-           :ok <- CMS.destroy_field_definition(definition, actor: actor) do
+      with {:ok, definition} <- CMS.get_field_definition(id, actor: actor, tenant: org),
+           :ok <- CMS.destroy_field_definition(definition, actor: actor, tenant: org) do
         socket |> load_definitions() |> put_flash(:info, gettext("Field deleted."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't delete that field."))
@@ -115,6 +121,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     definitions =
       CMS.list_field_definitions!(
         actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org,
         query: [sort: [position: :asc, name: :asc]]
       )
 
@@ -144,17 +151,21 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
-  defp create_form(actor),
+  defp create_form(actor, org),
     do:
       FieldDefinition
-      |> AshPhoenix.Form.for_create(:create, actor: actor, as: "field_definition")
+      |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "field_definition")
       |> to_form()
 
-  defp edit_form(id, actor) do
-    CMS.get_field_definition!(id, actor: actor)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, as: "field_definition")
+  defp edit_form(id, actor, org) do
+    CMS.get_field_definition!(id, actor: actor, tenant: org)
+    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "field_definition")
     |> to_form()
   end
+
+  # The dynamic-type registry (`ContentTypes.*`) keys by a raw org_id.
+  defp org_id(%{id: id}), do: id
+  defp org_id(id) when is_binary(id), do: id
 
   # Options are entered one-per-line (or comma-separated) in a textarea and
   # stored as a string array. Split, trim and drop blanks before they reach the
@@ -174,8 +185,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # What a `:reference` field may point at: every type, compiled or dynamic,
   # as `{label, name string}` select options.
-  defp target_types do
-    Enum.map(ContentTypes.all() ++ ContentTypes.dynamic_all(), &{&1.label, to_string(&1.type)})
+  defp target_types(org_id) do
+    Enum.map(
+      ContentTypes.all() ++ ContentTypes.dynamic_all(org_id),
+      &{&1.label, to_string(&1.type)}
+    )
   end
 
   # Whether the reference-target select applies to the form's current type.

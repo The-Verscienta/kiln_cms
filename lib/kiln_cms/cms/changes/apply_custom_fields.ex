@@ -75,14 +75,24 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # The definitions in scope: a compiled content type's (by its type atom) or,
   # on the generic entry tier, the owning dynamic type's (by definition id —
   # nil while the entry is still invalid means simply no custom fields yet).
+  # Read under the writing org (epic #336) so a record only ever sees its own
+  # site's field schema.
   defp definitions_for(%{resource: resource} = changeset) do
+    tenant = changeset.to_tenant
+
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
       case Ash.Changeset.get_attribute(changeset, :type_definition_id) do
-        nil -> []
-        id -> KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false)
+        nil ->
+          []
+
+        id ->
+          KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
       end
     else
-      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), authorize?: false)
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(),
+        authorize?: false,
+        tenant: tenant
+      )
     end
   end
 

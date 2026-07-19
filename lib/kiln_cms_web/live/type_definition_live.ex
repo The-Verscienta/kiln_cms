@@ -15,12 +15,13 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
+    org = socket.assigns.current_org
 
     {:ok,
      socket
      |> assign(:actor, actor)
      |> assign(:edit, nil)
-     |> assign(:form, create_form(actor))
+     |> assign(:form, create_form(actor, org))
      |> load_definitions()}
   end
 
@@ -36,7 +37,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
       {:ok, _definition} ->
         {:noreply,
          socket
-         |> assign(:form, create_form(socket.assigns.actor))
+         |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
          |> load_definitions()
          |> put_flash(:info, gettext("Content type created. Now add its fields."))}
 
@@ -48,7 +49,11 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
   # --- inline edit -------------------------------------------------------------
 
   def handle_event("edit", %{"id" => id}, socket) do
-    {:noreply, assign(socket, :edit, %{id: id, form: edit_form(id, socket.assigns.actor)})}
+    {:noreply,
+     assign(socket, :edit, %{
+       id: id,
+       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+     })}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -77,10 +82,11 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   def handle_event("archive", %{"id" => id}, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     socket =
-      with {:ok, definition} <- CMS.get_type_definition(id, actor: actor),
-           :ok <- CMS.destroy_type_definition(definition, actor: actor) do
+      with {:ok, definition} <- CMS.get_type_definition(id, actor: actor, tenant: org),
+           :ok <- CMS.destroy_type_definition(definition, actor: actor, tenant: org) do
         socket |> load_definitions() |> put_flash(:info, gettext("Content type archived."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't archive that content type."))
@@ -91,10 +97,11 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   def handle_event("restore", %{"id" => id}, socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     socket =
-      with {:ok, definition} <- get_archived(id, actor),
-           {:ok, _} <- CMS.restore_type_definition(definition, actor: actor) do
+      with {:ok, definition} <- get_archived(id, actor, org),
+           {:ok, _} <- CMS.restore_type_definition(definition, actor: actor, tenant: org) do
         socket |> load_definitions() |> put_flash(:info, gettext("Content type restored."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't restore that content type."))
@@ -107,33 +114,37 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   defp load_definitions(socket) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     socket
     |> assign(
       :definitions,
-      CMS.list_type_definitions!(actor: actor, load: [:field_definitions])
+      CMS.list_type_definitions!(actor: actor, tenant: org, load: [:field_definitions])
     )
-    |> assign(:archived, CMS.list_archived_type_definitions!(actor: actor))
+    |> assign(:archived, CMS.list_archived_type_definitions!(actor: actor, tenant: org))
   end
 
   # The default reads exclude archived rows (AshArchival), so restore has to
   # find its record through the `:archived` read.
-  defp get_archived(id, actor) do
-    case Enum.find(CMS.list_archived_type_definitions!(actor: actor), &(&1.id == id)) do
+  defp get_archived(id, actor, org) do
+    case Enum.find(
+           CMS.list_archived_type_definitions!(actor: actor, tenant: org),
+           &(&1.id == id)
+         ) do
       nil -> :error
       definition -> {:ok, definition}
     end
   end
 
-  defp create_form(actor),
+  defp create_form(actor, org),
     do:
       KilnCMS.CMS.TypeDefinition
-      |> AshPhoenix.Form.for_create(:create, actor: actor, as: "type_definition")
+      |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "type_definition")
       |> to_form()
 
-  defp edit_form(id, actor) do
-    CMS.get_type_definition!(id, actor: actor)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, as: "type_definition")
+  defp edit_form(id, actor, org) do
+    CMS.get_type_definition!(id, actor: actor, tenant: org)
+    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "type_definition")
     |> to_form()
   end
 

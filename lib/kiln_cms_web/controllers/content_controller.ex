@@ -75,7 +75,7 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     org_id = current_org_id(conn)
 
-    with ct when not is_nil(ct) <- ContentTypes.get_by_path(type),
+    with ct when not is_nil(ct) <- ContentTypes.get_by_path(type, org_id),
          fetch =
            &ContentTypes.get_published_by_slug(ct.type, slug, &1,
              not_found_error?: false,
