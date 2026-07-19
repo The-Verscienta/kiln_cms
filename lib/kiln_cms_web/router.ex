@@ -144,6 +144,9 @@ defmodule KilnCMSWeb.Router do
   # link is redirected to the shared human view (#379); JSON is the default.
   pipeline :preview do
     plug :accepts, ["json", "html"]
+    # The html branch only ever redirects to the live view, but set the secure
+    # browser headers regardless (harmless on the JSON responses).
+    plug :put_secure_browser_headers
     plug KilnCMSWeb.Plugs.RateLimit, :preview
   end
 
