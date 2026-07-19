@@ -60,6 +60,9 @@ defmodule KilnCMS.Firing.PointInTime do
   # matching documents (bounded by `limit`), never with total publish history —
   # this backs an unauthenticated endpoint. Raw SQL is deliberate here: Ash has
   # no DISTINCT ON, and version tables are already read as system data.
+  # The only interpolation is the TABLE NAME from AshPostgres compile-time
+  # metadata — every runtime value is a bound parameter.
+  # sobelow_skip ["SQL.Query"]
   defp published_as_of(version_module, as_of, org_id, limit) do
     table = AshPostgres.DataLayer.Info.table(version_module)
     actions = Enum.map(@publish_actions ++ @unpublish_actions, &to_string/1)
@@ -109,6 +112,7 @@ defmodule KilnCMS.Firing.PointInTime do
 
   # The row still exists in ANY workflow state (archived/trashed rows do; hard
   # purges don't). Raw existence probe — reads across archival state.
+  # sobelow_skip ["SQL.Query"]
   defp still_exists?(resource, id, org_id) do
     table = AshPostgres.DataLayer.Info.table(resource)
 
@@ -123,6 +127,7 @@ defmodule KilnCMS.Firing.PointInTime do
 
   # Fold title/slug through history WITHOUT loading block trees: only versions
   # whose changes touched either key, last value wins.
+  # sobelow_skip ["SQL.Query"]
   defp title_slug_at(version_module, id, up_to) do
     table = AshPostgres.DataLayer.Info.table(version_module)
 
