@@ -52,14 +52,30 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
     end
   end
 
+  # Warm the caches (resolution + fired body) while the DB is up, then dispatch
+  # the same GET from a process with no DB access. The content cache is global
+  # and other suites bust it WIDE mid-run (media/form/promotion writes call
+  # `Cache.bust_published/0`), so a concurrent async test can wipe our warm
+  # entry between warm-up and the outage dispatch — when that race hits (503),
+  # re-warm and try again. The property under test — a WARM entry is served
+  # without Postgres — is unaffected by the retry.
+  defp warm_then_get_without_db(path, retries \\ 3) do
+    assert json_response(get(build_conn(), path), 200)
+
+    resp = without_db(fn -> get(build_conn(), path) end)
+
+    if resp.status == 503 and retries > 0 do
+      warm_then_get_without_db(path, retries - 1)
+    else
+      resp
+    end
+  end
+
   test "serves warm content through a full database outage" do
     slug = published_page()
-    # Warm the caches (resolution + fired body) while the DB is up.
-    assert json_response(get(build_conn(), ~p"/api/content/page/#{slug}"), 200)
 
-    # Now dispatch from a process with no DB access — the warm path never touches
-    # Postgres, so delivery keeps answering.
-    resp = without_db(fn -> get(build_conn(), ~p"/api/content/page/#{slug}") end)
+    # The warm path never touches Postgres, so delivery keeps answering.
+    resp = warm_then_get_without_db(~p"/api/content/page/#{slug}")
     assert json_response(resp, 200)["slug"] == slug
   end
 
@@ -73,7 +89,7 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
              )
     end
 
-    resp = without_db(fn -> get(build_conn(), ~p"/api/content/page/#{slug}?surface=web") end)
+    resp = warm_then_get_without_db(~p"/api/content/page/#{slug}?surface=web")
     assert json_response(resp, 200)["html"] =~ "Cached"
   end
 
