@@ -84,7 +84,9 @@ defmodule KilnCMSWeb.BridgeSocketTest do
 
     definition =
       KilnCMS.CMS.create_type_definition!(
-        %{name: "bs#{System.unique_integer([:positive])}", label: "BS"}, actor: admin)
+        %{name: "bs#{System.unique_integer([:positive])}", label: "BS"},
+        actor: admin
+      )
 
     entry =
       KilnCMS.CMS.ContentTypes.create!(
