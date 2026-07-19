@@ -147,4 +147,58 @@ defmodule KilnCMSWeb.PreviewLiveTest do
     refute html =~ "remote-cursor"
     refute html =~ "2 viewing"
   end
+
+  describe "shared locale switcher (#378)" do
+    defp with_translation(page) do
+      CMS.create_page!(
+        %{
+          title: "Gemeinsamer Entwurf",
+          slug: page.slug,
+          locale: "de",
+          blocks: [%{type: :heading, content: "Zusammen", data: %{"level" => 1}, order: 0}]
+        },
+        authorize?: false
+      )
+    end
+
+    test "switching moves every co-viewer to the sibling locale" do
+      page = a_page()
+      de = with_translation(page)
+      path = "/editor/preview/page/#{page.id}"
+
+      {:ok, alice, _} = live(conn_for("Alice"), path)
+      {:ok, bob, _} = live(conn_for("Bob"), path)
+      eventually(bob, "2 viewing")
+
+      # Both see the switcher with both locales.
+      assert render(alice) =~ "preview-locale-switch"
+      assert render(alice) =~ "de"
+
+      # Alice switches; Alice AND Bob are navigated to the German variant.
+      render_change(alice, "switch_variant", %{"id" => de.id})
+      assert_redirect(alice, "/editor/preview/page/#{de.id}")
+      assert_redirect(bob, "/editor/preview/page/#{de.id}")
+    end
+
+    test "an id outside the sibling list is ignored" do
+      page = a_page()
+      _de = with_translation(page)
+      other = a_page()
+
+      {:ok, alice, _} = live(conn_for("Alice"), "/editor/preview/page/#{page.id}")
+
+      render_change(alice, "switch_variant", %{"id" => other.id})
+      refute_redirected(alice, "/editor/preview/page/#{other.id}")
+    end
+
+    test "a single-locale document shows a locale badge, not a switcher" do
+      page = a_page()
+
+      {:ok, alice, _} = live(conn_for("Alice"), "/editor/preview/page/#{page.id}")
+
+      html = render(alice)
+      refute html =~ "preview-locale-switch"
+      assert html =~ ~s(data-role="locale")
+    end
+  end
 end
