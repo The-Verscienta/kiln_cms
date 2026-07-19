@@ -51,6 +51,14 @@ defmodule KilnCMS.Firing.FireWorker do
       :ok
   end
 
+  # Back-compat (epic #336): a job enqueued by the pre-multi-tenancy release has
+  # no `"org_id"` in its args. Rather than FunctionClauseError → retry → discard
+  # across the deploy boundary, default it to the sole (default) org and
+  # re-dispatch. Safe while the single-org rollout guard holds.
+  def perform(%Oban.Job{args: %{"type" => _, "id" => _} = args} = job) do
+    perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
+  end
+
   defp enqueue_indexing(org_id, type, id) do
     # Re-index per-block embeddings for the fired content (decision D16).
     if KilnCMS.Search.semantic?() do

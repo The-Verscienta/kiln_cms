@@ -33,6 +33,12 @@ defmodule KilnCMS.Search.EmbeddingWorker do
     end
   end
 
+  # Back-compat (epic #336): default the sole org for a job enqueued before
+  # multi-tenancy (no `"org_id"`) instead of crashing across the deploy boundary.
+  def perform(%Oban.Job{args: %{"resource" => _, "id" => _} = args} = job) do
+    perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
+  end
+
   defp embed(resource, org_id, id) do
     case Ash.get(resource, id, authorize?: false, tenant: org_id) do
       {:ok, %{search_text: text} = record} when is_binary(text) and text != "" ->

@@ -35,6 +35,14 @@ defmodule KilnCMS.Firing.RefireWorker do
     end
   end
 
+  # Back-compat (epic #336): a re-fire job enqueued by the pre-multi-tenancy
+  # release has no `"org_id"`. Default it to the sole org and re-dispatch instead
+  # of crashing across the deploy boundary. Re-fire waves fan out widely, so many
+  # such jobs can be in flight at cutover.
+  def perform(%Oban.Job{args: %{"type" => _, "id" => _, "visited" => _} = args} = job) do
+    perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
+  end
+
   defp refire(org_id, type, id, visited) do
     case References.load_published(org_id, type, id) do
       {:ok, document} ->

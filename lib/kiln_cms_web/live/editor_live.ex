@@ -56,14 +56,16 @@ defmodule KilnCMSWeb.EditorLive do
   # than @page_size rows of any single type.
   defp fetch_page(socket, cursor) do
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
     query = page_query(socket.assigns.status, socket.assigns.query, cursor)
 
     per_type =
       Enum.map(editable_types(), fn ct ->
         # Dispatch on the descriptor itself so a type archived between listing
-        # and dispatch can't turn into a registry-lookup miss.
+        # and dispatch can't turn into a registry-lookup miss. Scoped to the
+        # current site's org (epic #336) so the index only lists this org's content.
         ct
-        |> ContentTypes.list!(actor: actor, query: query)
+        |> ContentTypes.list!(actor: actor, tenant: org, query: query)
         |> Enum.map(&{ct.type, &1})
       end)
 
@@ -158,6 +160,7 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("confirm_bulk", _params, socket) do
     verb = socket.assigns.confirming_bulk
     actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
     {ok, skipped} =
       Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {ok, skipped} ->
@@ -165,8 +168,8 @@ defmodule KilnCMSWeb.EditorLive do
 
         result =
           if verb == "delete",
-            do: destroy(kind, id, actor),
-            else: do_transition(kind, verb, get!(kind, id, actor), actor)
+            do: destroy(kind, id, actor, org),
+            else: do_transition(kind, verb, get!(kind, id, actor, org), actor, org)
 
         case result do
           :ok -> {ok + 1, skipped}
@@ -225,11 +228,12 @@ defmodule KilnCMSWeb.EditorLive do
       assign(socket, :translated, nil)
     else
       actor = socket.assigns.actor
+      org = socket.assigns.current_org
 
       translated =
         socket.assigns.items
         |> Enum.group_by(fn {kind, _r} -> kind end, fn {_kind, r} -> r.slug end)
-        |> Enum.flat_map(fn {kind, slugs} -> covered_slugs(kind, slugs, locales, actor) end)
+        |> Enum.flat_map(fn {kind, slugs} -> covered_slugs(kind, slugs, locales, actor, org) end)
         |> MapSet.new()
 
       assign(socket, :translated, translated)
@@ -238,10 +242,11 @@ defmodule KilnCMSWeb.EditorLive do
 
   # The {kind, slug} pairs among `slugs` whose slug group has a variant in
   # every configured locale.
-  defp covered_slugs(kind, slugs, locales, actor) do
+  defp covered_slugs(kind, slugs, locales, actor, org) do
     kind
     |> ContentTypes.list!(
       actor: actor,
+      tenant: org,
       query: [filter: expr(slug in ^slugs), select: [:slug, :locale]]
     )
     |> Enum.group_by(& &1.slug, & &1.locale)
@@ -282,28 +287,32 @@ defmodule KilnCMSWeb.EditorLive do
 
   defp transition(socket, %{"kind" => kind, "id" => id}, verb) do
     actor = socket.assigns.actor
-    record = get!(kind, id, actor)
+    org = socket.assigns.current_org
+    record = get!(kind, id, actor, org)
 
-    case do_transition(kind, verb, record, actor) do
+    case do_transition(kind, verb, record, actor, org) do
       {:ok, _} -> socket |> load_items() |> put_flash(:info, gettext("Updated."))
       _ -> put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
   end
 
-  # `tenant:` stamps the new record with the current site's org (epic #336);
-  # `org_id` is writable? false, so the tenant is the only way to set it.
+  # All dispatch to the current site's org (epic #336): reads/writes are
+  # tenant-scoped so an editor on one site's subdomain can only see and act on
+  # that site's content. `org_id` is writable? false, so the tenant is the only
+  # way to set/scope it.
   defp create!(kind, attrs, actor, org),
     do: ContentTypes.create!(kind, attrs, actor: actor, tenant: org)
 
-  defp get!(kind, id, actor), do: ContentTypes.get_record!(kind, id, actor: actor)
+  defp get!(kind, id, actor, org),
+    do: ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
-  defp do_transition(kind, verb, record, actor),
-    do: ContentTypes.transition(kind, verb, record, actor: actor)
+  defp do_transition(kind, verb, record, actor, org),
+    do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: org)
 
   # Hard delete (soft via archival). Admin-only; the policy rejects others, in
   # which case the item is counted as skipped.
-  defp destroy(kind, id, actor),
-    do: ContentTypes.destroy(kind, get!(kind, id, actor), actor: actor)
+  defp destroy(kind, id, actor, org),
+    do: ContentTypes.destroy(kind, get!(kind, id, actor, org), actor: actor, tenant: org)
 
   # The set of selection keys ("kind:id") for the currently loaded items (the
   # status/search filter already ran server-side).

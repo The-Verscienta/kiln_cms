@@ -87,6 +87,40 @@ defmodule KilnCMS.MultitenancyDeliveryTest do
     test "a nil/blank host resolves to the default org" do
       assert Tenant.resolve_org(nil).id == Accounts.default_org_id()
     end
+
+    test "resolution is case-insensitive (hosts are per RFC 3986)" do
+      o = org("caseorg")
+      # An uppercased Host header must resolve like its lowercase form.
+      assert Tenant.resolve_org(String.upcase("#{o.slug}.#{Tenant.base_host()}")).id == o.id
+    end
+  end
+
+  describe "Oban back-compat: pre-#336 jobs (no org_id) default to the sole org" do
+    test "FireWorker fires an old-format job under the default org" do
+      # A page in the default org (tenant-less create), then a FireWorker job with
+      # the OLD arg shape (no "org_id") — must NOT FunctionClauseError.
+      slug = "legacy-#{System.unique_integer([:positive])}"
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Legacy",
+            slug: slug,
+            blocks: [%{type: :rich_text, content: "<p>x</p>", order: 0}]
+          },
+          authorize?: false
+        )
+
+      _ = CMS.publish_page!(page, actor: admin(), authorize?: false)
+
+      assert :ok =
+               KilnCMS.Firing.FireWorker.perform(%Oban.Job{
+                 args: %{"type" => "page", "id" => page.id}
+               })
+
+      assert {:ok, %{"title" => "Legacy"}} =
+               KilnCMS.Firing.Engine.read(Accounts.default_org_id(), :page, page.id, :json)
+    end
   end
 
   describe "delivery isolation for a shared slug" do

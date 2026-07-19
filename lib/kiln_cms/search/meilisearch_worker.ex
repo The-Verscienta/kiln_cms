@@ -42,6 +42,13 @@ defmodule KilnCMS.Search.MeilisearchWorker do
     end
   end
 
+  # Back-compat (epic #336): an upsert job enqueued before multi-tenancy has no
+  # `"org_id"` — default it to the sole org and re-dispatch rather than crash
+  # across the deploy boundary. (The `delete` clause above needs no org_id.)
+  def perform(%Oban.Job{args: %{"op" => "upsert", "type" => _, "id" => _} = args} = job) do
+    perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
+  end
+
   # Only published, non-archived documents belong in the index (public view).
   defp load(org_id, "page", id),
     do: published(CMS.get_page(id, authorize?: false, tenant: org_id))

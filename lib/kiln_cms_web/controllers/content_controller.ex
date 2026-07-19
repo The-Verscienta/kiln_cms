@@ -141,6 +141,11 @@ defmodule KilnCMSWeb.ContentController do
       if query == "" do
         %{posts: [], pages: [], entries: []}
       else
+        # NOTE (epic #336): `KilnCMS.Search.global` is NOT yet tenant-scoped — the
+        # search subsystem doesn't accept a tenant, so this (and the headless
+        # `SearchApiController`) span all orgs. Safe under the single-org rollout
+        # guard; the tenant facet lands with the search PR (PR 3) before real
+        # multi-org is enabled. Do not lift the guard until then.
         r =
           KilnCMS.Search.global(query,
             authorize?: true,

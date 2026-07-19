@@ -28,6 +28,12 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
     end
   end
 
+  # Back-compat (epic #336): default the sole org for a job enqueued before
+  # multi-tenancy (no `"org_id"`) instead of crashing across the deploy boundary.
+  def perform(%Oban.Job{args: %{"type" => _, "id" => _} = args} = job) do
+    perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
+  end
+
   defp load(org_id, "page", id), do: CMS.get_page(id, authorize?: false, tenant: org_id)
   defp load(org_id, "post", id), do: CMS.get_post(id, authorize?: false, tenant: org_id)
   defp load(_org_id, _type, _id), do: :error

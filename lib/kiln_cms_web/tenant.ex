@@ -32,15 +32,36 @@ defmodule KilnCMSWeb.Tenant do
   """
   @spec resolve_org(String.t() | nil) :: KilnCMS.Accounts.Organization.t()
   def resolve_org(host) when is_binary(host) and host != "" do
-    KilnCMS.Cache.fetch({:tenant_host, host}, @cache_ttl, fn -> resolve_uncached(host) end)
+    # Hostnames are case-insensitive (RFC 3986) and `socket.host_uri`/`conn.host`
+    # aren't normalized, so downcase before matching/caching — otherwise
+    # `Acme.Example.com` fails the suffix/slug match and mis-resolves to the
+    # default org, and case variants fragment the cache (#336 review).
+    host = String.downcase(host)
+
+    # Only KNOWN hosts (the base host + real org subdomains/custom domains) are
+    # cached; an unknown/unresolved host returns `nil` here (uncached) and the
+    # caller supplies the default org. This keeps a flood of distinct attacker
+    # Host headers under `*.<base>` from inserting per-host entries into the
+    # shared, size-capped content cache and evicting hot published pages (#336
+    # review, resolution-cache DoS).
+    resolve_cached(host) || Accounts.default_org()
   end
 
   def resolve_org(_), do: Accounts.default_org()
 
-  defp resolve_uncached(host) do
-    with nil <- by_subdomain(host),
-         nil <- by_custom_domain(host) do
-      Accounts.default_org()
+  defp resolve_cached(host) do
+    KilnCMS.Cache.fetch({:tenant_host, host}, @cache_ttl, fn -> resolve_known(host) end)
+  end
+
+  # A real org (by subdomain slug or custom domain), or the default org when the
+  # host IS the canonical base host. `nil` for anything else — a `nil` is not
+  # cached (see `KilnCMS.Cache.commit/2`), so unknown hosts never pollute the cache.
+  defp resolve_known(host) do
+    cond do
+      host == base_host() -> Accounts.default_org()
+      org = by_subdomain(host) -> org
+      org = by_custom_domain(host) -> org
+      true -> nil
     end
   end
 
