@@ -261,7 +261,9 @@ jobs:
 
     env:
       KILN_STRICT_TEST: "1"
-      MIX_BUILD_PATH: _build/test_strict
+      # MIX_BUILD_ROOT (not MIX_BUILD_PATH): rebar deps (gproc) lose their
+      # include paths under a bare BUILD_PATH.
+      MIX_BUILD_ROOT: _build_strict
       MIX_TEST_PARTITION: strict
 
     steps:
@@ -278,7 +280,7 @@ jobs:
         with:
           path: |
             deps
-            _build/test_strict
+            _build_strict
           # v2: the v1 cache holds a half-compiled gproc from before the
           # local.rebar bootstrap step existed.
           key: strict-v2-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}

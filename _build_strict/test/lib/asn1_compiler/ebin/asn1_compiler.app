@@ -1,0 +1,1 @@
+{application,asn1_compiler,[{modules,['Elixir.Mix.Tasks.Compile.Asn1']},{optional_applications,[]},{applications,[kernel,stdlib,elixir]},{description,"A mix compiler for the ASN.1 format leveraging Erlang's `:asn1_ct`.\n"},{registered,[]},{vsn,"0.1.1"}]}.
