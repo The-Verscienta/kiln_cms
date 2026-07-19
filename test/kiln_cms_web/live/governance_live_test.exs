@@ -94,4 +94,46 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
     assert forbidden.status == 403
   end
+
+  test "the detail shows the chain status and can record a consent (#352/#356)", %{conn: conn} do
+    admin = authed_user(:admin)
+    post = CMS.create_post!(%{title: "Chain Post", slug: slug()}, actor: admin)
+    CMS.publish_post!(post, %{}, actor: admin)
+
+    {:ok, view, html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+    # An anchor was minted at publish; no signing key in test config → intact/unsigned.
+    assert html =~ "chain-status"
+    assert html =~ "History intact" or html =~ "History verified"
+
+    # Record a consent from the dashboard.
+    view
+    |> form("#record-consent-form", %{
+      "consent" => %{
+        "kind" => "reviewer_signoff",
+        "grantor" => "Dr. Grace",
+        "reference" => "TICKET-42",
+        "note" => ""
+      }
+    })
+    |> render_submit()
+
+    html = render(view)
+    assert html =~ "Dr. Grace"
+    assert html =~ "TICKET-42"
+
+    assert [consent] = CMS.list_consents_for!("post", post.id, authorize?: false)
+    assert consent.kind == :reviewer_signoff
+  end
+
+  test "old → new value diffs are shown in the timeline (#352)", %{conn: conn} do
+    admin = authed_user(:admin)
+    post = CMS.create_post!(%{title: "Before", slug: slug()}, actor: admin)
+    CMS.update_post!(post, %{title: "After"}, actor: admin)
+
+    {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+    assert html =~ "Before"
+    assert html =~ "After"
+  end
 end

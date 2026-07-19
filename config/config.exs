@@ -196,6 +196,13 @@ config :kiln_cms, :registration_enabled, true
 # bypasses this guard, so bootstrapping is unaffected either way.
 config :kiln_cms, :multitenancy_enabled, true
 
+# Tamper-evident history anchors (#356): at every publish, the document's full
+# PaperTrail version chain is folded into a canonical hash and recorded
+# (RSA-signed when a provenance signing key is configured — see
+# `config :kiln_cms, KilnCMS.Provenance` below). Cheap (one hash fold + local
+# sign per publish); disable only if the audit surface is unwanted.
+config :kiln_cms, :audit_anchors_enabled, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero

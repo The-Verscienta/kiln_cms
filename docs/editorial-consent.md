@@ -50,9 +50,15 @@ absent config is a no-op, so existing publishing is unchanged
 
 ## Scope & the rest of #356
 
-Phase 1 is the consent side of #356. The **tamper-evident audit log** — hash-
-chaining and signing every PaperTrail version so history can't be altered
-undetectably — is the follow-on phase (it hooks version creation and extends the
-#340 signing key). A team/governance UI for recording + reviewing consent lands
-with #352. The publish gate is currently a single global required-kinds list;
-per-content-type requirements are a later phase.
+Phase 1 was the consent side of #356. The **tamper-evident audit log** phase 2
+shipped as **signed history anchors**: at every publish the document's full
+PaperTrail version chain is folded into a canonical hash and recorded
+append-only (`KilnCMS.CMS.HistoryAnchor`), RSA-signed via the #340 signing key
+when configured — see `KilnCMS.Governance.Chain`, `mix kiln.audit.verify`, and
+the chain status on the governance dashboard. Any later alteration, deletion,
+or reordering of anchored history is detected; edits after the newest anchor
+are covered at the next publish. Per-write chaining (an entry per version at
+write time, closing that between-publish window) remains the finer-grained
+follow-on. Consent recording now has a dashboard UI (#352). The publish gate
+is currently a single global required-kinds list; per-content-type
+requirements are a later phase.

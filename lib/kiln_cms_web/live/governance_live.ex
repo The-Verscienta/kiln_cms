@@ -40,9 +40,51 @@ defmodule KilnCMSWeb.GovernanceLive do
         |> push_navigate(to: ~p"/editor/governance")
 
       trail ->
-        assign(socket, :trail, trail)
+        socket
+        |> assign(:trail, trail)
+        |> assign(:consent_form, blank_consent_form())
     end
   end
+
+  # Record a consent from the dashboard (#352 — consent management UI).
+  @impl true
+  def handle_event("record_consent", %{"consent" => params}, socket) do
+    item = socket.assigns.trail.item
+
+    attrs =
+      %{
+        content_type: item.type,
+        content_id: item.id,
+        kind: params["kind"],
+        reference: presence(params["reference"]),
+        grantor: presence(params["grantor"]),
+        note: presence(params["note"])
+      }
+
+    # The consent lands in the content's own site (epic #336) — without the
+    # tenant it would default to the default org, invisible to the trail read
+    # and to the RequiredConsent publish gate.
+    case KilnCMS.CMS.record_consent(attrs,
+           actor: socket.assigns.current_user,
+           tenant: item.org_id
+         ) do
+      {:ok, _consent} ->
+        {:noreply,
+         socket
+         |> assign(:trail, Governance.trail(item.type, item.id, item.org_id))
+         |> assign(:consent_form, blank_consent_form())
+         |> put_flash(:info, gettext("Consent recorded."))}
+
+      {:error, _error} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't record that consent."))}
+    end
+  end
+
+  defp blank_consent_form,
+    do: to_form(%{"kind" => nil, "reference" => "", "grantor" => "", "note" => ""}, as: "consent")
+
+  defp presence(value) when is_binary(value) and value != "", do: value
+  defp presence(_), do: nil
 
   # Point-in-time delivery URL (#338) for one publish instant.
   defp point_in_time_url(item, %DateTime{} = at) do
@@ -50,6 +92,56 @@ defmodule KilnCMSWeb.GovernanceLive do
   end
 
   defp when_str(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
+
+  # Compact display of a version value: strings verbatim, everything else
+  # inspected and capped (block trees can be huge).
+  defp diff_value(nil), do: gettext("(unset)")
+  defp diff_value(value) when is_binary(value), do: String.slice(value, 0, 160)
+
+  defp diff_value(value),
+    do: value |> inspect(limit: 8, printable_limit: 160) |> String.slice(0, 160)
+
+  attr :chain, :any, required: true
+
+  # Tamper-evidence status from the signed history anchors (#356).
+  defp chain_badge(assigns) do
+    ~H"""
+    <p class="mt-2 text-sm" data-role="chain-status">
+      <span
+        :if={@chain == :verified}
+        class="rounded bg-success/15 px-1.5 py-0.5 text-xs font-medium text-success"
+      >
+        <.icon name="hero-shield-check" class="size-3.5" />
+        {gettext("Anchored history verified — chain intact, signature valid")}
+      </span>
+      <span
+        :if={@chain == :unsigned}
+        class="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success/80"
+      >
+        {gettext("History intact (anchor unsigned — no signing key configured)")}
+      </span>
+      <span
+        :if={@chain == :unverifiable}
+        class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
+      >
+        {gettext("History intact; anchor signed under a previous key (rotate-safe, not re-checkable)")}
+      </span>
+      <span
+        :if={@chain == :unanchored}
+        class="rounded bg-base-200 px-1.5 py-0.5 text-xs font-medium text-base-content/60"
+      >
+        {gettext("Not yet anchored — anchors are minted at publish")}
+      </span>
+      <span
+        :if={match?({:tampered, _}, @chain)}
+        class="rounded bg-error/15 px-1.5 py-0.5 text-xs font-medium text-error"
+      >
+        <.icon name="hero-exclamation-triangle" class="size-3.5" />
+        {gettext("HISTORY TAMPERED: %{reason}", reason: elem(@chain, 1))}
+      </span>
+    </p>
+    """
+  end
 
   # --- render ----------------------------------------------------------------
 
@@ -63,7 +155,7 @@ defmodule KilnCMSWeb.GovernanceLive do
       active={:governance}
     >
       <.index :if={is_nil(@trail)} content={@content} />
-      <.detail :if={@trail} trail={@trail} />
+      <.detail :if={@trail} trail={@trail} consent_form={@consent_form} />
     </Layouts.console>
     """
   end
@@ -106,6 +198,7 @@ defmodule KilnCMSWeb.GovernanceLive do
   end
 
   attr :trail, :map, required: true
+  attr :consent_form, :any, required: true
 
   defp detail(assigns) do
     ~H"""
@@ -117,6 +210,12 @@ defmodule KilnCMSWeb.GovernanceLive do
         <h1 class="mt-1 text-2xl font-semibold">{@trail.item.title}</h1>
         <p class="text-sm text-base-content/60">
           {@trail.item.type} · {@trail.item.state}
+        </p>
+        <.chain_badge chain={@trail.chain} />
+        <p :if={@trail.unanchored_tail > 0} class="mt-1 text-xs text-base-content/60">
+          {gettext("%{count} edit(s) since the last anchor — covered at the next publish.",
+            count: @trail.unanchored_tail
+          )}
         </p>
         <a
           href={~p"/editor/governance/#{@trail.item.type}/#{@trail.item.id}/export.json"}
@@ -142,6 +241,42 @@ defmodule KilnCMSWeb.GovernanceLive do
             <code :if={c.reference} class="ml-2 text-xs text-base-content/60">{c.reference}</code>
           </li>
         </ul>
+
+        <%!-- Record a consent without leaving the dashboard (#352). Stores a
+              *reference* to the clearing document, never the document itself. --%>
+        <details class="card p-3">
+          <summary class="cursor-pointer text-sm font-medium">
+            {gettext("Record a consent")}
+          </summary>
+          <.form
+            for={@consent_form}
+            id="record-consent-form"
+            phx-submit="record_consent"
+            class="mt-3 grid gap-2 sm:grid-cols-2"
+          >
+            <label class="text-xs">
+              {gettext("Kind")}
+              <select name="consent[kind]" class="select select-sm mt-1 w-full" required>
+                <option :for={kind <- KilnCMS.CMS.Consent.kinds()} value={kind}>{kind}</option>
+              </select>
+            </label>
+            <label class="text-xs">
+              {gettext("Reference (ticket / document id)")}
+              <input name="consent[reference]" class="input input-sm mt-1 w-full" />
+            </label>
+            <label class="text-xs">
+              {gettext("Grantor")}
+              <input name="consent[grantor]" class="input input-sm mt-1 w-full" />
+            </label>
+            <label class="text-xs">
+              {gettext("Note")}
+              <input name="consent[note]" class="input input-sm mt-1 w-full" />
+            </label>
+            <div class="sm:col-span-2">
+              <.button type="submit" variant="primary">{gettext("Record consent")}</.button>
+            </div>
+          </.form>
+        </details>
       </section>
 
       <section class="space-y-3">
@@ -171,8 +306,26 @@ defmodule KilnCMSWeb.GovernanceLive do
                     {e.action}
                   </span>
                 </td>
-                <td class="max-w-64 truncate text-xs text-base-content/60">
-                  {Enum.join(e.changed, ", ")}
+                <td class="max-w-md text-xs text-base-content/60">
+                  <details :if={e.diffs != []}>
+                    <summary class="cursor-pointer truncate">
+                      {e.diffs |> Enum.map(&elem(&1, 0)) |> Enum.join(", ")}
+                    </summary>
+                    <%!-- Side-by-side old → new per changed field (#352). --%>
+                    <dl class="mt-2 space-y-1">
+                      <div
+                        :for={{field, {old, new}} <- e.diffs}
+                        class="grid grid-cols-[8rem_1fr] gap-2"
+                      >
+                        <dt class="truncate font-medium">{field}</dt>
+                        <dd class="min-w-0">
+                          <span class="block truncate text-error/80 line-through">{diff_value(old)}</span>
+                          <span class="block truncate text-success">{diff_value(new)}</span>
+                        </dd>
+                      </div>
+                    </dl>
+                  </details>
+                  <span :if={e.diffs == []}>—</span>
                 </td>
                 <td>
                   <a
