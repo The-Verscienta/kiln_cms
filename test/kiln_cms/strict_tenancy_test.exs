@@ -134,4 +134,29 @@ defmodule KilnCMS.StrictTenancyTest do
       |> Ash.read!(authorize?: false)
     end
   end
+
+  test "the re-fire sweep (#357) runs per-org under strict tenancy" do
+    actor = admin()
+
+    page =
+      CMS.create_page!(
+        %{title: "Sweep me", slug: slug(), blocks: [%{type: :heading, content: "H", order: 0}]},
+        actor: actor,
+        tenant: org_id()
+      )
+
+    page = CMS.publish_page!(page, %{}, actor: actor, tenant: org_id())
+    KilnCMS.DataCase.drain_oban()
+
+    # Simulate pre-deploy content: drop its artifacts, then sweep them back.
+    :ok = KilnCMS.Firing.Engine.purge(org_id(), :page, page.id)
+    assert :error = KilnCMS.Firing.Engine.read(org_id(), :page, page.id, :json_ld)
+
+    counts = KilnCMS.Firing.Sweep.run()
+    assert counts.page >= 1
+    KilnCMS.DataCase.drain_oban()
+
+    assert {:ok, %{"@graph" => _}} =
+             KilnCMS.Firing.Engine.read(org_id(), :page, page.id, :json_ld)
+  end
 end

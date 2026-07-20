@@ -60,9 +60,8 @@ block module may export an optional `to_markdown/1` for a richer rendering.
   llmstxt.org "markdown versions" convention.
 - Included in static export (`llm.md`).
 - **Deploy note:** content published before this feature has no `:llm`
-  artifact until re-fired — run a re-fire sweep (or re-publish) for full
-  coverage; the delivery route answers 503-retryable for a missing artifact
-  as usual.
+  artifact until re-fired — run the re-fire sweep (below) for full coverage;
+  the delivery route answers 503-retryable for a missing artifact as usual.
 
 ## Expanded schema.org / JSON-LD (Phase 3, shipped)
 
@@ -99,3 +98,23 @@ expand the `@graph` (and which render meaningfully on *every* surface):
 
 Same deploy note as the `:llm` surface: content published before this feature
 carries the old JSON-LD until re-fired.
+
+## Re-fire sweep
+
+`KilnCMS.Firing.Sweep.run/0` enqueues one `FireWorker` per **published** Page /
+Post / dynamic Entry (all locales, all orgs), refreshing every fired surface
+through the normal `:firing` Oban queue — bounded concurrency, retries,
+reference invalidation and search re-indexing included; editorial state,
+versions and timestamps untouched. Run it once after any deploy that changes
+what firing produces:
+
+```bash
+# dev / checkout
+mix kiln.refire_all
+
+# prod release — against the running node (Coolify → app container terminal)
+/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"
+
+# watch it drain (0 = done)
+/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.pending() |> IO.inspect()"
+```
