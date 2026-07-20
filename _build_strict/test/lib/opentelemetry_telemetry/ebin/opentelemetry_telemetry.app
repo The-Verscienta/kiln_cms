@@ -1,1 +1,0 @@
-{application,opentelemetry_telemetry,[{modules,['Elixir.OpentelemetryTelemetry',otel_telemetry]},{optional_applications,[]},{applications,[kernel,stdlib,elixir,logger,opentelemetry_api,telemetry]},{description,"Telemetry to OpenTelemetry Bridge"},{registered,[]},{vsn,"1.1.2"}]}.

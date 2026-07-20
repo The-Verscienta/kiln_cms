@@ -1,1 +1,0 @@
-{application,xla,[{modules,['Elixir.Collectable.XLA.Checksumer','Elixir.Mix.Tasks.Xla.Checksum','Elixir.Mix.Tasks.Xla.Info','Elixir.XLA','Elixir.XLA.Checksumer','Elixir.XLA.Utils']},{optional_applications,[]},{applications,[kernel,stdlib,elixir,logger,inets,ssl,public_key,crypto]},{description,"Precompiled XLA binaries"},{registered,[]},{vsn,"0.10.0"}]}.
