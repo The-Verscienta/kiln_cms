@@ -869,6 +869,13 @@ defmodule KilnCMS.CMS.Content do
         # No FK from version -> source, so a `:purge` can hard-delete a record
         # whose history exists. Versions of purged content are kept as audit rows.
         reference_source?(false)
+        # "Who" on each version (#352): the acting user, when the write carried
+        # one. Nilify on user deletion — the audit row must outlive the account.
+        belongs_to_actor(:user, KilnCMS.Accounts.User,
+          domain: KilnCMS.Accounts,
+          on_delete: :nilify
+        )
+
         mixin({KilnCMS.CMS.VersionPolicies, :policies, []})
         version_extensions(authorizers: [Ash.Policy.Authorizer])
       end

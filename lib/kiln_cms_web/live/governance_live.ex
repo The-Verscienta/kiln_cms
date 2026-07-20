@@ -217,13 +217,22 @@ defmodule KilnCMSWeb.GovernanceLive do
             count: @trail.unanchored_tail
           )}
         </p>
-        <a
-          href={~p"/editor/governance/#{@trail.item.type}/#{@trail.item.id}/export.json"}
-          class="btn btn-sm btn-default mt-3"
-          download
-        >
-          <.icon name="hero-arrow-down-tray" class="size-4" /> {gettext("Export trail (JSON)")}
-        </a>
+        <div class="mt-3 flex gap-2">
+          <a
+            href={~p"/editor/governance/#{@trail.item.type}/#{@trail.item.id}/export.json"}
+            class="btn btn-sm btn-default"
+            download
+          >
+            <.icon name="hero-arrow-down-tray" class="size-4" /> {gettext("Export trail (JSON)")}
+          </a>
+          <a
+            href={~p"/editor/governance/#{@trail.item.type}/#{@trail.item.id}/export.csv"}
+            class="btn btn-sm btn-default"
+            download
+          >
+            <.icon name="hero-arrow-down-tray" class="size-4" /> {gettext("Export trail (CSV)")}
+          </a>
+        </div>
       </div>
 
       <section class="space-y-3">
@@ -290,6 +299,7 @@ defmodule KilnCMSWeb.GovernanceLive do
               <tr>
                 <th>{gettext("When")}</th>
                 <th>{gettext("Action")}</th>
+                <th>{gettext("Who")}</th>
                 <th>{gettext("Changed")}</th>
                 <th>{gettext("Point in time")}</th>
               </tr>
@@ -305,6 +315,11 @@ defmodule KilnCMSWeb.GovernanceLive do
                   ]}>
                     {e.action}
                   </span>
+                </td>
+                <%!-- "Who" (#352): the acting user on the version, when the
+                      write carried one (older versions predate attribution). --%>
+                <td class="whitespace-nowrap text-xs text-base-content/70">
+                  {e.actor || "—"}
                 </td>
                 <td class="max-w-md text-xs text-base-content/60">
                   <details :if={e.diffs != []}>
@@ -328,8 +343,10 @@ defmodule KilnCMSWeb.GovernanceLive do
                   <span :if={e.diffs == []}>—</span>
                 </td>
                 <td>
+                  <%!-- Point-in-time delivery (#338) serves compiled types
+                        only — no dead links for dynamic entries. --%>
                   <a
-                    :if={e.publish?}
+                    :if={e.publish? && !@trail.item.dynamic?}
                     href={point_in_time_url(@trail.item, e.at)}
                     class="text-xs text-primary hover:underline"
                     target="_blank"

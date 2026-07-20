@@ -95,6 +95,50 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
     assert forbidden.status == 403
   end
 
+  test "the CSV export returns the flat trail to admins only", %{conn: conn} do
+    admin = authed_user(:admin)
+    post = CMS.create_post!(%{title: "CSV, \"Exported\"", slug: slug()}, actor: admin)
+    CMS.publish_post!(post, %{}, actor: admin)
+
+    CMS.record_consent!(
+      %{content_type: "post", content_id: post.id, kind: :reviewer_signoff, grantor: "Dr. Ada"},
+      actor: admin
+    )
+
+    response =
+      conn
+      |> log_in(admin)
+      |> get(~p"/editor/governance/post/#{post.id}/export.csv")
+
+    assert response.status == 200
+    assert response.resp_headers |> List.keyfind("content-type", 0) |> elem(1) =~ "text/csv"
+
+    body = response.resp_body
+    assert String.starts_with?(body, "kind,at,action,who,publish,changed")
+    assert body =~ "version,"
+    assert body =~ "publish"
+    # The acting user lands in the "who" column; consents ride along.
+    assert body =~ to_string(admin.email)
+    assert body =~ "consent,"
+    assert body =~ "Dr. Ada"
+
+    # Editors are forbidden.
+    forbidden =
+      conn
+      |> log_in(authed_user(:editor))
+      |> get(~p"/editor/governance/post/#{post.id}/export.csv")
+
+    assert forbidden.status == 403
+  end
+
+  test "the timeline shows who made each change (#352)", %{conn: conn} do
+    admin = authed_user(:admin)
+    post = CMS.create_post!(%{title: "Who Post", slug: slug()}, actor: admin)
+
+    {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+    assert html =~ to_string(admin.email)
+  end
+
   test "the detail shows the chain status and can record a consent (#352/#356)", %{conn: conn} do
     admin = authed_user(:admin)
     post = CMS.create_post!(%{title: "Chain Post", slug: slug()}, actor: admin)

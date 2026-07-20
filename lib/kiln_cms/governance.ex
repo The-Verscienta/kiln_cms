@@ -19,32 +19,74 @@ defmodule KilnCMS.Governance do
           action: atom(),
           at: DateTime.t(),
           changed: [String.t()],
-          publish?: boolean()
+          publish?: boolean(),
+          actor: String.t() | nil
         }
 
   @doc """
-  Recent governable content (compiled types), newest first — the dashboard index.
-  Returns lightweight maps: `%{type, id, title, slug, state}`.
+  Recent governable content (compiled AND dynamic types), newest first — the
+  dashboard index. Returns lightweight maps: `%{type, id, title, slug, state}`.
   """
-  @spec content_index(pos_integer()) :: [map()]
+  @spec content_index(Ash.UUID.t(), pos_integer()) :: [map()]
   def content_index(org_id, limit \\ 50) do
     # Scoped to the request's site (epic #336) so the governance dashboard only
     # lists the current org's content.
-    Enum.flat_map(ContentTypes.all(), fn ct ->
-      ct.resource
-      |> Ash.Query.sort(updated_at: :desc)
-      |> Ash.Query.limit(limit)
-      |> Ash.read!(authorize?: false, tenant: org_id)
-      |> Enum.map(fn record ->
-        %{
-          type: to_string(ct.type),
-          id: record.id,
-          title: record.title,
-          slug: record.slug,
-          state: record.state
-        }
+    compiled =
+      Enum.flat_map(ContentTypes.all(), fn ct ->
+        ct.resource
+        |> Ash.Query.sort(updated_at: :desc)
+        |> Ash.Query.limit(limit)
+        |> Ash.read!(authorize?: false, tenant: org_id)
+        |> Enum.map(fn record ->
+          %{
+            type: to_string(ct.type),
+            id: record.id,
+            title: record.title,
+            slug: record.slug,
+            state: record.state
+          }
+        end)
       end)
-    end)
+
+    compiled ++ dynamic_index(org_id, limit)
+  end
+
+  # Dynamic (D17) entries for the index: one read of the shared entry tier,
+  # labeled with each entry's public type name. Entries whose definition no
+  # longer resolves (archived between reads) are dropped — their trail page
+  # couldn't resolve the type either.
+  defp dynamic_index(org_id, limit) do
+    case ContentTypes.dynamic_all(org_id) do
+      [] ->
+        []
+
+      descriptors ->
+        names = Map.new(descriptors, &{&1.definition.id, &1.type})
+
+        KilnCMS.CMS.Entry
+        |> Ash.Query.sort(updated_at: :desc)
+        |> Ash.Query.limit(limit)
+        |> Ash.read!(authorize?: false, tenant: org_id)
+        |> Enum.flat_map(&entry_row(&1, names))
+    end
+  end
+
+  defp entry_row(record, names) do
+    case names[record.type_definition_id] do
+      nil ->
+        []
+
+      type ->
+        [
+          %{
+            type: type,
+            id: record.id,
+            title: record.title,
+            slug: record.slug,
+            state: record.state
+          }
+        ]
+    end
   end
 
   @doc """
@@ -61,16 +103,18 @@ defmodule KilnCMS.Governance do
     # loads, and the version timeline reads all under `org_id`, so an admin on
     # one site's host can never pull another org's content or audit trail by id.
     with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
+         resource = storage_resource(ct),
          {:ok, record} when not is_nil(record) <-
-           Ash.get(ct.resource, id, authorize?: false, tenant: org_id, error?: false) do
+           Ash.get(resource, id, authorize?: false, tenant: org_id, error?: false),
+         true <- record_matches_type?(ct, record) do
       # One ascending versions read feeds BOTH the timeline and the chain
       # verification (which folds a prefix of the same list).
-      versions = versions_asc(ct.resource, id, org_id)
+      versions = versions_asc(resource, id, org_id)
       # Anchors key on the STORAGE type (what the publish hook records) — the
       # generic :entry tier for dynamic types, not the public name.
       storage = to_string(ContentTypes.storage_type(ct))
       anchor = KilnCMS.Governance.Chain.latest_anchor(storage, id, record.org_id)
-      timeline = timeline(versions)
+      timeline = timeline(versions, actor_names(versions))
 
       %{
         item: %{
@@ -80,7 +124,10 @@ defmodule KilnCMS.Governance do
           slug: record.slug,
           state: record.state,
           org_id: record.org_id,
-          published_at: Map.get(record, :published_at)
+          published_at: Map.get(record, :published_at),
+          # Point-in-time delivery (#338) is compiled-only today — the
+          # dashboard suppresses "view as of then" links for dynamic entries.
+          dynamic?: ct.source == :dynamic
         },
         timeline: timeline,
         publishes: for(e <- timeline, e.publish?, do: e.at),
@@ -102,6 +149,19 @@ defmodule KilnCMS.Governance do
     end
   end
 
+  # The table a type's records (and versions) live in: dynamic types share the
+  # generic entry tier (D17), compiled types own their resource.
+  defp storage_resource(%{source: :dynamic}), do: KilnCMS.CMS.Entry
+  defp storage_resource(%{resource: resource}), do: resource
+
+  # A dynamic type's trail must only serve entries of THAT type — the entry
+  # tier is shared, so without this check an id of one dynamic type could be
+  # read under another type's name.
+  defp record_matches_type?(%{source: :dynamic, definition: definition}, record),
+    do: record.type_definition_id == definition.id
+
+  defp record_matches_type?(_ct, _record), do: true
+
   # A document's versions, ascending — the same order the chain folds in.
   # Tenant-scoped like every other read in `trail/3` (epic #336).
   defp versions_asc(resource, id, org_id) do
@@ -111,12 +171,29 @@ defmodule KilnCMS.Governance do
     |> Ash.read!(authorize?: false, tenant: org_id)
   end
 
+  # "Who" (#352): resolve the versions' acting users to display names in one
+  # read. Users are global (not org-scoped); a deleted account leaves a nil
+  # `user_id` (nilified FK) and renders as unattributed.
+  defp actor_names(versions) do
+    ids = versions |> Enum.map(& &1.user_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    if ids == [] do
+      %{}
+    else
+      KilnCMS.Accounts.User
+      |> Ash.Query.filter(id in ^ids)
+      |> Ash.read!(authorize?: false)
+      |> Map.new(&{&1.id, &1.name || to_string(&1.email)})
+    end
+  end
+
   # The PaperTrail version timeline, newest first: each version's action, time,
-  # and the old → new value pair per changed field (#352, `diffs` — the changed
-  # field names are its keys). `:changes_only` tracking stores each version's
-  # NEW values; the "old" side is the most recent earlier version's value for
-  # that field (nil when never set before), accumulated in one ascending pass.
-  defp timeline(versions_asc) do
+  # actor (when the write carried one), and the old → new value pair per
+  # changed field (#352, `diffs` — the changed field names are its keys).
+  # `:changes_only` tracking stores each version's NEW values; the "old" side
+  # is the most recent earlier version's value for that field (nil when never
+  # set before), accumulated in one ascending pass.
+  defp timeline(versions_asc, actor_names) do
     {events, _last_known} =
       Enum.map_reduce(versions_asc, %{}, fn version, last_known ->
         changes = version.changes || %{}
@@ -124,6 +201,7 @@ defmodule KilnCMS.Governance do
         event = %{
           action: version.version_action_name,
           at: version.version_inserted_at,
+          actor: version.user_id && Map.get(actor_names, version.user_id),
           diffs:
             changes
             |> Enum.map(fn {field, new} -> {field, {Map.get(last_known, field), new}} end)
