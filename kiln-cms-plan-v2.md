@@ -3,7 +3,7 @@
 
 *One declarative definition. Recursive structure. Kiln-fired performance, correctness, and leverage.*
 
-*Design & architecture plan — working concept, not a shipping product.*
+*Original design & architecture plan — since realized. All six roadmap phases have shipped (several exceeded, e.g. CRDT collaboration and runtime-defined content types), and three of the four v1 non-goals were later built deliberately (visual page building, multi-tenancy, rich-text CRDT). Kept as design history; see the README for the current feature set.*
 
 ---
 
