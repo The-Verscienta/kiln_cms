@@ -1,0 +1,1 @@
+{application,ex_hash_ring,[{modules,['Elixir.ExHashRing','Elixir.ExHashRing.Configuration','Elixir.ExHashRing.Hash','Elixir.ExHashRing.Info','Elixir.ExHashRing.Node','Elixir.ExHashRing.Ring','Elixir.ExHashRing.Utils']},{optional_applications,[]},{applications,[kernel,stdlib,elixir]},{description,"ex_hash_ring"},{registered,[]},{vsn,"6.0.4"},{mod,{'Elixir.ExHashRing',[]}}]}.

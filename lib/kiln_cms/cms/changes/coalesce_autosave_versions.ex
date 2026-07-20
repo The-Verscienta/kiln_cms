@@ -40,7 +40,7 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
   defp coalesce(record) do
     version_module = Module.concat(record.__struct__, Version)
 
-    case trailing_autosave_versions(version_module, record.id) do
+    case trailing_autosave_versions(version_module, record.id, record.org_id) do
       # Nothing to collapse: a single (or zero) trailing autosave version.
       versions when length(versions) <= 1 ->
         :ok
@@ -51,34 +51,42 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
         merged =
           Enum.reduce(versions, %{}, fn version, acc -> Map.merge(acc, version.changes) end)
 
-        Ash.update!(keep, %{changes: merged}, action: :update, authorize?: false)
-        Enum.each(superseded, &Ash.destroy!(&1, action: :destroy, authorize?: false))
+        Ash.update!(keep, %{changes: merged},
+          action: :update,
+          authorize?: false,
+          tenant: record.org_id
+        )
+
+        Enum.each(
+          superseded,
+          &Ash.destroy!(&1, action: :destroy, authorize?: false, tenant: record.org_id)
+        )
     end
   end
 
   # The contiguous run of autosave versions newer than the most recent manual
   # (non-autosave) version, ordered oldest → newest.
-  defp trailing_autosave_versions(version_module, source_id) do
+  defp trailing_autosave_versions(version_module, source_id, org_id) do
     query =
       version_module
       |> Ash.Query.filter(version_source_id == ^source_id and version_action_name == :autosave)
       |> Ash.Query.sort(version_inserted_at: :asc)
 
     query =
-      case latest_manual_version_timestamp(version_module, source_id) do
+      case latest_manual_version_timestamp(version_module, source_id, org_id) do
         nil -> query
         boundary -> Ash.Query.filter(query, version_inserted_at > ^boundary)
       end
 
-    Ash.read!(query, authorize?: false)
+    Ash.read!(query, authorize?: false, tenant: org_id)
   end
 
-  defp latest_manual_version_timestamp(version_module, source_id) do
+  defp latest_manual_version_timestamp(version_module, source_id, org_id) do
     version_module
     |> Ash.Query.filter(version_source_id == ^source_id and version_action_name != :autosave)
     |> Ash.Query.sort(version_inserted_at: :desc)
     |> Ash.Query.limit(1)
-    |> Ash.read_one!(authorize?: false)
+    |> Ash.read_one!(authorize?: false, tenant: org_id)
     |> case do
       nil -> nil
       version -> version.version_inserted_at

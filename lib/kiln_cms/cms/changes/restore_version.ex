@@ -23,11 +23,13 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   defp apply_version(changeset, version_id) do
     version_module = Module.concat(changeset.resource, Version)
     source_id = changeset.data.id
+    # Version twins are tenant-strict (#419) — reads carry the record org.
+    org_id = changeset.data.org_id
 
-    case fetch_target(version_module, version_id, source_id) do
+    case fetch_target(version_module, version_id, source_id, org_id) do
       {:ok, target} ->
         version_module
-        |> replay(source_id, target.version_inserted_at)
+        |> replay(source_id, target.version_inserted_at, org_id)
         |> restore_fields(changeset)
 
       :error ->
@@ -38,10 +40,10 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
     end
   end
 
-  defp fetch_target(version_module, version_id, source_id) do
+  defp fetch_target(version_module, version_id, source_id, org_id) do
     version_module
     |> Ash.Query.filter(id == ^version_id and version_source_id == ^source_id)
-    |> Ash.read_one(authorize?: false)
+    |> Ash.read_one(authorize?: false, tenant: org_id)
     |> case do
       {:ok, %{} = version} -> {:ok, version}
       _ -> :error
@@ -50,11 +52,11 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
 
   # Merge every version's changes up to the target, in chronological order, to
   # reconstruct the full attribute set at that point.
-  defp replay(version_module, source_id, up_to) do
+  defp replay(version_module, source_id, up_to, org_id) do
     version_module
     |> Ash.Query.filter(version_source_id == ^source_id and version_inserted_at <= ^up_to)
     |> Ash.Query.sort(version_inserted_at: :asc)
-    |> Ash.read!(authorize?: false)
+    |> Ash.read!(authorize?: false, tenant: org_id)
     |> Enum.reduce(%{}, fn version, acc -> Map.merge(acc, version.changes) end)
   end
 

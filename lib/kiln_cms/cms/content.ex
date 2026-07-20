@@ -792,7 +792,7 @@ defmodule KilnCMS.CMS.Content do
       multitenancy do
         strategy :attribute
         attribute :org_id
-        global? true
+        global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
       end
 
       # Content-focused AshAdmin overrides (issue #25). AshAdmin is the dev/CRUD
@@ -894,7 +894,7 @@ defmodule KilnCMS.CMS.Content do
       # Background publishing of scheduled content + nightly purge of old trash.
       oban do
         # Multi-tenancy (epic #336): the scheduler's `where` scan runs globally
-        # (the resource is `global? true`, so its reads act as allow-global and
+        # (each org scanned explicitly via list_tenants under strict tenancy) and
         # see every org's due records), while each worker action re-runs under the
         # record's own `org_id` tenant — so a scheduled publish/unpublish/purge/
         # sweep fires each record into the right site. AshOban also auto-partitions

@@ -124,7 +124,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   multitenancy do
     strategy :attribute
     attribute :org_id
-    global? true
+    global? !Application.compile_env(:kiln_cms, :strict_tenancy, true)
   end
 
   attributes do

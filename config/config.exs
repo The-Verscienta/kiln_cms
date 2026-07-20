@@ -196,6 +196,15 @@ config :kiln_cms, :registration_enabled, true
 # bypasses this guard, so bootstrapping is unaffected either way.
 config :kiln_cms, :multitenancy_enabled, true
 
+# Strict (fail-closed) tenancy (#419): every action on an org-scoped resource
+# REQUIRES a tenant (`global?: false`); the sanctioned exceptions are marked
+# `multitenancy :bypass` per action (newsletter token lookups). COMPILE-TIME:
+# the value is baked into the resource DSL — changing it needs a recompile.
+# The standard test env compiles fail-open for the pre-#419 suite; a dedicated
+# CI leg (KILN_STRICT_TEST=1, --only strict_tenancy) exercises the strict
+# build. Set `false` only to restore the legacy fail-open rollout behavior.
+config :kiln_cms, :strict_tenancy, true
+
 # Tamper-evident history anchors (#356): at every publish, the document's full
 # PaperTrail version chain is folded into a canonical hash and recorded
 # (RSA-signed when a provenance signing key is configured — see
