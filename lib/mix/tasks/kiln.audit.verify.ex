@@ -23,14 +23,18 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
 
   @impl Mix.Task
   def run(_args) do
+    # Strict tenancy (#419): verify per org — the content/version reads and the
+    # dynamic-type registry both require a tenant.
     results =
-      for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(),
+      for org_id <- KilnCMS.Accounts.list_org_ids(),
+          ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(org_id),
           # Minimal select — the verifier needs identity, not block trees. The
           # dynamic tier shares the :entry storage resource, which is also what
           # the publish hook keys anchors on.
           record <-
             ContentTypes.list!(ct,
               authorize?: false,
+              tenant: org_id,
               query: [select: [:id, :slug, :org_id]]
             ),
           storage = to_string(ContentTypes.storage_type(ct)),

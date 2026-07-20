@@ -86,7 +86,12 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     assigns = assign(assigns, :count, result_count(assigns.results))
 
     ~H"""
-    <Layouts.console flash={@flash} current_user={@current_user} page_title={@page_title}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      current_org={@current_org}
+      page_title={@page_title}
+    >
       <div class="mx-auto max-w-2xl space-y-6">
         <div>
           <h1 class="text-2xl font-semibold">{gettext("Search")}</h1>

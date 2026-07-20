@@ -112,6 +112,11 @@ defmodule KilnCMSWeb.Layouts do
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
   attr :current_user, :map, default: nil, doc: "the signed-in user, if any"
+
+  attr :current_org, :map,
+    default: nil,
+    doc: "the request's org (#419) — the nav's effective-tier is resolved against it"
+
   attr :page_title, :string, default: nil, doc: "shown in the top bar"
 
   attr :active, :atom,
@@ -158,7 +163,7 @@ defmodule KilnCMSWeb.Layouts do
           <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
         </div>
         <nav class="flex-1 overflow-y-auto px-2 py-2" aria-label={gettext("Primary")}>
-          <.console_nav current_user={@current_user} active={@active} />
+          <.console_nav current_user={@current_user} current_org={@current_org} active={@active} />
         </nav>
         <div class="border-t border-base-content/10 p-2">
           <div class="flex gap-1 px-1 pb-2 text-xs text-base-content/50">
@@ -242,15 +247,18 @@ defmodule KilnCMSWeb.Layouts do
   # plus any plugin-contributed items. `active` (an atom like :content) lights
   # the matching link via aria-current, which the `.side-link` style keys off.
   attr :current_user, :map, default: nil
+  attr :current_org, :map, default: nil
   attr :active, :atom, default: nil
 
   defp console_nav(assigns) do
-    # Effective capability tier on the current site (#419) — a global editor
+    # Effective capability tier on the CURRENT site (#419) — a global editor
     # demoted (or promoted) by an org membership sees the nav for that tier.
+    # Resolve against the passed `current_org` (falling back to the default org
+    # only when absent), NOT the default org unconditionally.
     role =
       KilnCMS.Accounts.Scoping.effective_tier(
         assigns[:current_user],
-        KilnCMSWeb.Tenant.current_org_id(%{assigns: assigns})
+        assigns[:current_org] || KilnCMSWeb.Tenant.current_org_id(%{assigns: assigns})
       )
 
     multi_locale? = length(KilnCMS.I18n.locales()) > 1
@@ -533,7 +541,10 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   # Shared authoring-nav links — rendered inline on desktop and stacked in the
-  # mobile menu, so they're defined once.
+  # mobile menu, so they're defined once. Used only by `Layouts.app` (the `/`
+  # landing header), which has no site context — so these gate on the global
+  # `@current_user.role` (≈ the effective tier on the default org). The
+  # per-org-tier nav is `console_nav` on the authoring surface (#419).
   attr :current_user, :map, default: nil
 
   defp nav_links(assigns) do

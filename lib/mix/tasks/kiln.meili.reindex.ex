@@ -45,12 +45,15 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
   end
 
   defp enqueue_source({_resource, lister}, acc) do
-    # Filter in the DB and select only what the job args need.
+    # Strict tenancy (#419): list published docs per org (reads need a tenant).
     published =
-      lister.(
-        authorize?: false,
-        query: [filter: [state: :published], select: [:id, :state, :org_id]]
-      )
+      Enum.flat_map(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        lister.(
+          authorize?: false,
+          tenant: org_id,
+          query: [filter: [state: :published], select: [:id, :state, :org_id]]
+        )
+      end)
 
     published
     |> Enum.map(fn record ->

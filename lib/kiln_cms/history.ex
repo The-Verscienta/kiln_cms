@@ -29,17 +29,34 @@ defmodule KilnCMS.History do
   @spec anonymize_actor(Ecto.UUID.t()) :: :ok
   def anonymize_actor(actor_id) when is_binary(actor_id) do
     # An erased user's events may live in several orgs — iterate them
-    # explicitly (#419 strict-tenancy prep) instead of one tenant-less
-    # global sweep.
-    for org_id <- KilnCMS.Accounts.list_org_ids() do
-      DocumentEvent
-      |> Ash.Query.filter(actor_id == ^actor_id)
-      |> Ash.bulk_update!(:anonymize_actor, %{},
-        authorize?: false,
-        tenant: org_id,
-        return_records?: false,
-        return_errors?: true
-      )
+    # explicitly (#419 strict-tenancy prep) instead of one tenant-less global
+    # sweep. Each org is isolated: one org's transient failure must not abort
+    # erasure for the rest (a partial GDPR erasure is a compliance gap), so a
+    # failure is logged and the sweep continues, then re-raised at the end so
+    # the caller can retry (the op is idempotent).
+    failures =
+      Enum.reduce(KilnCMS.Accounts.list_org_ids(), [], fn org_id, failed ->
+        try do
+          DocumentEvent
+          |> Ash.Query.filter(actor_id == ^actor_id)
+          |> Ash.bulk_update!(:anonymize_actor, %{},
+            authorize?: false,
+            tenant: org_id,
+            return_records?: false,
+            return_errors?: true
+          )
+
+          failed
+        rescue
+          error ->
+            require Logger
+            Logger.error("anonymize_actor failed for org #{org_id}: #{inspect(error)}")
+            [org_id | failed]
+        end
+      end)
+
+    unless failures == [] do
+      raise "anonymize_actor incomplete for orgs #{inspect(failures)} — retry the erasure"
     end
 
     :ok

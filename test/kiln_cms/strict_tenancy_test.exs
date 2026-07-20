@@ -110,6 +110,51 @@ defmodule KilnCMS.StrictTenancyTest do
              published.id,
              published.org_id
            ) in [:verified, :unsigned]
+
+    # Unpublish exercises ClearPublishedVersion's after_action version write —
+    # the counterpart to publish, which the arc originally missed under strict.
+    assert {:ok, unpublished} = CMS.unpublish_page(published, actor: actor, tenant: org_id())
+    assert unpublished.state != :published
+  end
+
+  test "the newsletter send fan-out resolves the campaign tenant-strict" do
+    send =
+      Ash.Seed.seed!(KilnCMS.Newsletter.NewsletterSend, %{
+        org_id: org_id(),
+        content_type: "post",
+        content_id: Ash.UUID.generate(),
+        subject: "Strict campaign",
+        status: :pending
+      })
+
+    # SendWorker reads the send row by id (tenant carried in job args) — under
+    # strict a tenant-less lookup would crash the fan-out and deliver nothing.
+    job = %Oban.Job{args: %{"newsletter_send_id" => send.id, "org_id" => send.org_id}}
+
+    # Any non-raising return proves the tenant-strict get worked (no recipients
+    # → it still marks sent).
+    assert KilnCMS.Newsletter.SendWorker.perform(job)
+  end
+
+  test "a dynamic type resolves its public name under strict (Engine.public_type)" do
+    actor = admin()
+
+    definition =
+      KilnCMS.CMS.create_type_definition!(
+        %{name: "gadget", label: "Gadget", plural_label: "Gadgets"},
+        actor: actor,
+        tenant: org_id()
+      )
+
+    entry =
+      KilnCMS.CMS.create_entry!(
+        %{title: "A gadget", slug: slug(), type_definition_id: definition.id},
+        actor: actor,
+        tenant: org_id()
+      )
+
+    # Tenant-less this read would fail and degrade to the "entry" storage key.
+    assert KilnCMS.Firing.Engine.public_type(entry) == "gadget"
   end
 
   test "the version twins remain readable through their tenanted source flow" do

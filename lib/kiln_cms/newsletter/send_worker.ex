@@ -15,8 +15,17 @@ defmodule KilnCMS.Newsletter.SendWorker do
   alias KilnCMS.Newsletter.MailWorker
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"newsletter_send_id" => send_id}}) do
-    case Newsletter.get_send!(send_id, authorize?: false, not_found_error?: false) do
+  def perform(%Oban.Job{args: %{"newsletter_send_id" => send_id} = args}) do
+    # The enqueuer carries the campaign's org (newsletter.ex); under strict
+    # tenancy (#419) the send lookup itself needs it (default-org fallback for
+    # any legacy job that predates the arg).
+    tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
+
+    case Newsletter.get_send!(send_id,
+           authorize?: false,
+           not_found_error?: false,
+           tenant: tenant
+         ) do
       nil ->
         {:cancel, "newsletter send #{send_id} not found"}
 

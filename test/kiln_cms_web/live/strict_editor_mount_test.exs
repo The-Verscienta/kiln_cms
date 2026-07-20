@@ -59,7 +59,9 @@ defmodule KilnCMSWeb.StrictEditorMountTest do
 
   test "the editor index mounts under strict tenancy", %{conn: conn} do
     conn = log_in(conn, authed_admin())
-    {:ok, _view, html} = live(conn, ~p"/editor")
-    assert html =~ "editor" or html
+    {:ok, view, _html} = live(conn, ~p"/editor")
+    # A real content check: the index renders its "Content" heading, not just
+    # a non-crashing mount.
+    assert has_element?(view, "h1", "Content")
   end
 end

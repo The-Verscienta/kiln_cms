@@ -131,26 +131,40 @@ defmodule KilnCMS.Accounts.Scoping do
       `/editor/team` assigns);
     * an affiliated user has **no tier** (`:none`) on an org they hold no
       membership for — fail-closed, matching the scope axes;
-    * a user with no memberships at all keeps `User.role` (pre-#336 data).
+    * a user with **no memberships at all** keeps `User.role`, but only on the
+      **default org** (pre-#336 single-org data): on any *other* org a
+      membership-less account is `:none`, so a legacy global editor can't reach
+      a second site by switching hosts.
 
   `subject` may be the query/changeset under authorization, a raw org id
-  (what the web layer passes from `current_org`), or nil (default org).
+  (what the web layer passes from `current_org`), an `%Organization{}`, or nil
+  (default org).
   """
-  @spec effective_tier(map() | nil, Ash.Query.t() | Ash.Changeset.t() | String.t() | nil) ::
-          :admin | :editor | :viewer | :none
+  @spec effective_tier(
+          map() | nil,
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
+        ) :: :admin | :editor | :viewer | :none
   def effective_tier(%{role: :admin}, _subject), do: :admin
 
   def effective_tier(%{} = actor, subject) do
-    case affiliation(actor, subject_org_id(subject)) do
+    org = subject_org_id(subject)
+
+    case affiliation(actor, org) do
       {:member, membership} -> membership.role
-      :unaffiliated -> Map.get(actor, :role) || :none
+      :unaffiliated -> legacy_tier(actor, org)
       :foreign_org -> :none
     end
   end
 
   def effective_tier(_actor, _subject), do: :none
 
+  # A membership-less account's global role applies only on the default org.
+  defp legacy_tier(actor, org) do
+    if org == Accounts.default_org_id(), do: Map.get(actor, :role) || :none, else: :none
+  end
+
   defp subject_org_id(org_id) when is_binary(org_id), do: org_id
+  defp subject_org_id(%KilnCMS.Accounts.Organization{id: id}), do: id
   defp subject_org_id(subject), do: org_id(subject)
 
   defp scope(actor, subject, axis) do

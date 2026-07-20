@@ -87,10 +87,15 @@ defmodule KilnCMS.Mail.Settings do
   end
 
   policies do
-    # Mail settings are admin-only. The delivery pipeline reads them with
-    # `authorize?: false` as a system job (KilnCMS.Mail.dkim_config/0).
+    # PLATFORM-admin only, NOT a per-org tier (#419): this is an instance-wide
+    # singleton (DKIM key, relay credentials) with no `multitenancy` block, so
+    # it must gate on the global `User.role` — an `OrgAdmin` check would
+    # resolve a tenant-less subject to the default org and let a default-org
+    # membership admin rewrite mail config for every site. The delivery
+    # pipeline reads with `authorize?: false` as a system job
+    # (KilnCMS.Mail.dkim_config/0).
     policy always() do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if actor_attribute_equals(:role, :admin)
     end
   end
 
