@@ -275,9 +275,10 @@ defmodule KilnCMSWeb.Router do
     # to `current_user`.
     get "/editor/account/export.json", AccountController, :export
 
-    # Governance trail export (#352) — file download, admin-gated in the
+    # Governance trail exports (#352) — file downloads, admin-gated in the
     # controller against the `:browser`-loaded user.
     get "/editor/governance/:type/:id/export.json", GovernanceController, :export
+    get "/editor/governance/:type/:id/export.csv", GovernanceController, :export_csv
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only
