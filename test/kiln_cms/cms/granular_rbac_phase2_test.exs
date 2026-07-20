@@ -192,12 +192,21 @@ defmodule KilnCMS.CMS.GranularRbacPhase2Test do
                           |> Enum.map(& &1.id))
     end
 
-    test "a user with no memberships keeps the user-column behavior (legacy)" do
+    test "a user with no memberships keeps the user-column behavior on the default org" do
+      # Legacy (membership-less) accounts keep their global role — but only on
+      # the default org (single-org installs). On a *foreign* org a
+      # membership-less editor is fail-closed (#419 review hardening), so it
+      # can't reach a second site by switching hosts.
       editor = user(:editor)
-      some_org = org()
 
       assert {:ok, _} =
-               CMS.create_post(%{title: "P", slug: slug()}, actor: editor, tenant: some_org)
+               CMS.create_post(%{title: "P", slug: slug()},
+                 actor: editor,
+                 tenant: KilnCMS.Accounts.default_org_id()
+               )
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.create_post(%{title: "P", slug: slug()}, actor: editor, tenant: org())
     end
 
     test "admins and manage_access carry the new axis" do

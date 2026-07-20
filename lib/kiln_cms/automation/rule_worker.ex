@@ -33,7 +33,10 @@ defmodule KilnCMS.Automation.RuleWorker do
       }) do
     # `org_id` scopes the rule read to its own site (epic #336); pre-#336 jobs
     # carry none — a nil tenant reads globally, finding the row by its unique id.
-    case Automation.get_rule(rule_id, authorize?: false, tenant: args["org_id"]) do
+    case Automation.get_rule(rule_id,
+           authorize?: false,
+           tenant: args["org_id"] || KilnCMS.Accounts.default_org_id()
+         ) do
       {:ok, %{enabled: true} = rule} -> run(rule, event, payload)
       # Rule deleted or disabled since the event fired — nothing to do.
       _ -> :ok

@@ -22,7 +22,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       {:ok,
        socket
        |> assign(:actor, actor)

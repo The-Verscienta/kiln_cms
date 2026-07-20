@@ -42,9 +42,12 @@ defmodule Mix.Tasks.Kiln.EmbedAll do
   end
 
   defp enqueue_source({resource, lister}, acc) do
-    # Only ids (+ the tenant, #336) are needed — don't drag
-    # blocks/search_text/embedding along.
-    records = lister.(authorize?: false, query: [select: [:id, :org_id]])
+    # Strict tenancy (#419): list per org (the reads require a tenant). Only ids
+    # (+ the tenant, #336) are needed — don't drag blocks/search_text/embedding.
+    records =
+      Enum.flat_map(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        lister.(authorize?: false, tenant: org_id, query: [select: [:id, :org_id]])
+      end)
 
     records
     |> Enum.map(fn %{id: id, org_id: org_id} ->

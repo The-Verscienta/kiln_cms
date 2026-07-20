@@ -20,12 +20,21 @@ defmodule KilnCMS.Newsletter.MailWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{
-        args: %{"newsletter_send_id" => send_id, "subscriber_id" => subscriber_id}
+        args: %{"newsletter_send_id" => send_id, "subscriber_id" => subscriber_id} = args
       }) do
-    send = Newsletter.get_send!(send_id, authorize?: false, not_found_error?: false)
+    # Strict tenancy (#419): the per-recipient job carries the campaign's org
+    # (enqueued by SendWorker); default-org fallback for any legacy job.
+    tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
+
+    send =
+      Newsletter.get_send!(send_id, authorize?: false, not_found_error?: false, tenant: tenant)
 
     subscriber =
-      Newsletter.get_subscriber!(subscriber_id, authorize?: false, not_found_error?: false)
+      Newsletter.get_subscriber!(subscriber_id,
+        authorize?: false,
+        not_found_error?: false,
+        tenant: tenant
+      )
 
     cond do
       is_nil(send) ->

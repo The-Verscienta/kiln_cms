@@ -79,7 +79,7 @@ defmodule KilnCMS.CMS.OrgTiersTest do
     assert {:ok, _} = CMS.create_page(%{title: "Pg", slug: slug()}, actor: platform, tenant: site)
   end
 
-  test "affiliated users have no tier on foreign orgs; legacy accounts keep User.role" do
+  test "affiliated users have no tier on foreign orgs; legacy accounts keep User.role on the default org only" do
     site = org()
     foreign = org()
 
@@ -87,8 +87,12 @@ defmodule KilnCMS.CMS.OrgTiersTest do
     membership(member, site, :editor)
     assert Scoping.effective_tier(member, foreign.id) == :none
 
+    # A membership-less legacy account keeps its global role on the DEFAULT org
+    # (single-org installs), but is :none on any other org — it can't reach a
+    # second site by switching hosts (#419 review hardening).
     legacy = user(:editor)
-    assert Scoping.effective_tier(legacy, foreign.id) == :editor
+    assert Scoping.effective_tier(legacy, KilnCMS.Accounts.default_org_id()) == :editor
+    assert Scoping.effective_tier(legacy, foreign.id) == :none
   end
 
   test "the scope axes bind the effective editor (org-promoted viewer under a grant)" do
@@ -106,5 +110,47 @@ defmodule KilnCMS.CMS.OrgTiersTest do
 
     assert {:error, %Ash.Error.Forbidden{}} =
              CMS.create_page(%{title: "Pg", slug: slug()}, actor: promoted, tenant: site)
+  end
+
+  describe "global vs per-org resources (review fixes)" do
+    test "instance-wide mail settings gate on the global role, not a per-org tier" do
+      # A default-org membership admin who is only a global viewer must NOT be
+      # authorized to touch instance-wide mail config (the escalation the
+      # review found); a real platform admin must.
+      site_admin = user(:viewer)
+      membership(site_admin, %{id: KilnCMS.Accounts.default_org_id()}, :admin)
+      platform = user(:admin)
+
+      refute Ash.can?({KilnCMS.Mail.Settings, :init}, site_admin)
+      assert Ash.can?({KilnCMS.Mail.Settings, :init}, platform)
+
+      # Same boundary on the suppression ledger.
+      refute Ash.can?({KilnCMS.Mail.SuppressedRecipient, :suppress}, site_admin)
+      assert Ash.can?({KilnCMS.Mail.SuppressedRecipient, :suppress}, platform)
+    end
+
+    test "newsletter subscribers follow the per-org tier like their siblings" do
+      site = org()
+      admin = user(:admin)
+
+      sub =
+        Ash.Seed.seed!(KilnCMS.Newsletter.Subscriber, %{
+          org_id: site.id,
+          email: "s-#{System.unique_integer([:positive])}@example.com",
+          status: :confirmed
+        })
+
+      # An org admin (global viewer) can read their site's subscribers.
+      site_admin = user(:viewer)
+      membership(site_admin, site, :admin)
+
+      ids =
+        KilnCMS.Newsletter.list_subscribers!(actor: site_admin, tenant: site)
+        |> Enum.map(& &1.id)
+
+      assert sub.id in ids
+      # sanity: an admin actor is fine too
+      assert is_list(KilnCMS.Newsletter.list_subscribers!(actor: admin, tenant: site))
+    end
   end
 end

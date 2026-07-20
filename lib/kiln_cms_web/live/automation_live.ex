@@ -211,6 +211,7 @@ defmodule KilnCMSWeb.AutomationLive do
     <Layouts.console
       flash={@flash}
       current_user={@current_user}
+      current_org={@current_org}
       page_title={@page_title}
       active={:automation}
     >

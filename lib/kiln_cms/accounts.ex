@@ -115,8 +115,7 @@ defmodule KilnCMS.Accounts do
   """
   @spec list_org_ids() :: [Ash.UUID.t()]
   def list_org_ids do
-    KilnCMS.Accounts.Organization
-    |> Ash.read!(authorize?: false)
+    list_organizations!(authorize?: false, query: [select: [:id]])
     |> Enum.map(& &1.id)
   end
 

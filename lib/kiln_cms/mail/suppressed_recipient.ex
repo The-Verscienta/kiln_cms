@@ -38,10 +38,13 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
   end
 
   policies do
-    # Admin-only management. The delivery pipeline writes and reads suppressions
-    # as the system (`authorize?: false`) — like the webhook delivery worker.
+    # PLATFORM-admin only, NOT a per-org tier (#419): the suppression ledger is
+    # instance-wide (no `multitenancy` block), so it gates on the global
+    # `User.role` — an `OrgAdmin` check would resolve to the default org and
+    # expose the cross-site bounce list to a default-org membership admin. The
+    # delivery pipeline writes/reads as the system (`authorize?: false`).
     policy always() do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if actor_attribute_equals(:role, :admin)
     end
   end
 

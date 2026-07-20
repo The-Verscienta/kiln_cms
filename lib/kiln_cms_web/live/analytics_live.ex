@@ -24,7 +24,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
      socket
      |> assign(:page_title, gettext("Analytics"))
      |> assign(:total, total_views(actor, org))
-     |> assign(:rows, decorate_all(rows))}
+     |> assign(:rows, decorate_all(rows, org))}
   end
 
   # SUM over zero rows yields nil (despite Ash.sum's number() typing, which is
@@ -40,14 +40,14 @@ defmodule KilnCMSWeb.AnalyticsLive do
   # Resolve counter rows to display data with one id-batched query per content
   # type (instead of a point query per row), tolerating content that has since
   # been deleted or whose type was removed.
-  defp decorate_all(rows) do
+  defp decorate_all(rows, org) do
     titles =
       rows
       |> Enum.group_by(& &1.content_type)
       |> Enum.flat_map(fn {type, type_rows} ->
-        case ContentTypes.get(type) do
+        case ContentTypes.get(type, org_id(org)) do
           nil -> []
-          ct -> batch_lookup(ct, Enum.map(type_rows, & &1.content_id))
+          ct -> batch_lookup(ct, Enum.map(type_rows, & &1.content_id), org)
         end
       end)
       |> Map.new()
@@ -55,14 +55,20 @@ defmodule KilnCMSWeb.AnalyticsLive do
     Enum.map(rows, &decorate(&1, titles))
   end
 
-  defp batch_lookup(ct, ids) do
+  # The title-resolution read is tenant-strict (#419) — scope to the dashboard's
+  # own org, like every other read on this page.
+  defp batch_lookup(ct, ids, org) do
     ct.type
     |> ContentTypes.list!(
       authorize?: false,
+      tenant: org,
       query: [filter: [id: [in: ids]], select: [:id, :title, :slug]]
     )
     |> Enum.map(&{&1.id, {&1.title, &1.slug}})
   end
+
+  defp org_id(%{id: id}), do: id
+  defp org_id(id), do: id
 
   defp decorate(row, titles) do
     case ContentTypes.get(row.content_type) do
@@ -104,6 +110,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
     <Layouts.console
       flash={@flash}
       current_user={@current_user}
+      current_org={@current_org}
       page_title={@page_title}
       active={:analytics}
     >

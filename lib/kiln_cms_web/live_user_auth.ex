@@ -134,4 +134,19 @@ defmodule KilnCMSWeb.LiveUserAuth do
       KilnCMSWeb.Tenant.current_org_id(socket_or_conn)
     )
   end
+
+  @doc """
+  Whether the current user is a **platform** admin (global `User.role`), the
+  gate for consoles backed by instance-wide/global resources — API keys,
+  team+membership administration, mail settings (#419). These are NOT per-org
+  tiers: a per-org membership admin must not reach them (their resource
+  policies stay on the global role, so `effective_tier` would admit them to a
+  page every action then forbids).
+  """
+  def platform_admin?(socket_or_conn) do
+    case socket_or_conn.assigns[:current_user] do
+      %{role: :admin} -> true
+      _ -> false
+    end
+  end
 end

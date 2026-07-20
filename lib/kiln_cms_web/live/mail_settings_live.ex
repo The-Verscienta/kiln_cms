@@ -17,7 +17,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       {:ok,
        socket
        |> assign(:actor, actor)
@@ -362,6 +362,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
     <Layouts.console
       flash={@flash}
       current_user={@current_user}
+      current_org={@current_org}
       page_title={@page_title}
       active={:mail}
     >

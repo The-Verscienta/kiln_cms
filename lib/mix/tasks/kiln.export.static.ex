@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Kiln.Export.Static do
 
   @requirements ["app.start"]
 
-  @switches [surface: :string, base_url: :string]
+  @switches [surface: :string, base_url: :string, org_id: :string, all_orgs: :boolean]
 
   @impl Mix.Task
   def run(args) do
@@ -32,12 +32,15 @@ defmodule Mix.Tasks.Kiln.Export.Static do
 
     case positional do
       [out_dir | _] ->
-        export_opts =
+        base_opts =
           []
           |> put_surfaces(opts[:surface])
           |> put_base_url(opts[:base_url])
 
-        {:ok, result} = StaticExport.export(out_dir, export_opts)
+        # Static export is per-site (#419). Default: the default org. `--org_id`
+        # exports one specific site; `--all_orgs` fans out into per-org
+        # subtrees so a fleet export can't silently drop non-default sites.
+        result = run_export(out_dir, base_opts, opts)
 
         Mix.shell().info(
           "Exported #{result.count} document(s) " <>
@@ -47,6 +50,30 @@ defmodule Mix.Tasks.Kiln.Export.Static do
 
       [] ->
         Mix.raise("Usage: mix kiln.export.static <out_dir> [--surface web,json,json_ld,llm]")
+    end
+  end
+
+  # `--all_orgs` writes each site into `<out_dir>/<org_id>/`, summing the
+  # counts; otherwise one site (`--org_id` or the default org).
+  defp run_export(out_dir, base_opts, opts) do
+    cond do
+      opts[:all_orgs] ->
+        KilnCMS.Accounts.list_org_ids()
+        |> Enum.map(fn org_id ->
+          StaticExport.export(Path.join(out_dir, org_id), Keyword.put(base_opts, :org_id, org_id))
+        end)
+        |> Enum.reduce(fn {:ok, r}, {:ok, acc} ->
+          {:ok, %{acc | count: acc.count + r.count, skipped: acc.skipped + r.skipped}}
+        end)
+        |> then(fn {:ok, result} -> %{result | out_dir: out_dir} end)
+
+      org_id = opts[:org_id] ->
+        {:ok, result} = StaticExport.export(out_dir, Keyword.put(base_opts, :org_id, org_id))
+        result
+
+      true ->
+        {:ok, result} = StaticExport.export(out_dir, base_opts)
+        result
     end
   end
 

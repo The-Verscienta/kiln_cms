@@ -103,8 +103,11 @@ defmodule KilnCMS.Firing.Engine do
   storage key is an implementation detail headless consumers never see.
   """
   @spec public_type(struct()) :: String.t()
-  def public_type(%{type_definition_id: id}) when not is_nil(id) do
-    case KilnCMS.CMS.get_type_definition(id, authorize?: false) do
+  def public_type(%{type_definition_id: id, org_id: org_id}) when not is_nil(id) do
+    # The definition read is tenant-strict (#419): scope to the document's own
+    # org, else the read raises and every dynamic doc silently degrades to the
+    # "entry" storage key in webhooks/provenance/search.
+    case KilnCMS.CMS.get_type_definition(id, authorize?: false, tenant: org_id) do
       {:ok, definition} -> definition.name
       # Archived/removed definition — fall back to the storage key.
       _ -> "entry"

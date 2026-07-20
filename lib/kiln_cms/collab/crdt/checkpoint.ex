@@ -23,9 +23,17 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   @doc "Materialize `doc`'s fragments into the record behind `doc_key`. Best-effort."
   @spec write_back(String.t(), Yex.Doc.t()) :: :ok
   def write_back("collab:" <> rest, doc) do
+    # Strict tenancy (#419): the collab doc key carries no org, so the
+    # checkpoint resolves the default org. Correct for single-org / default-org
+    # installs (every deployment today); a multi-org collab session on a
+    # non-default site would need the org encoded in the doc key — a prototype
+    # limitation tracked with the rest of the collab work (#258).
+    tenant = KilnCMS.Accounts.default_org_id()
+
     with [kind, id] <- String.split(rest, ":", parts: 2),
-         ct when not is_nil(ct) <- ContentTypes.get(kind),
-         {:ok, %{state: :draft} = record} <- ContentTypes.get_record(ct, id, authorize?: false) do
+         ct when not is_nil(ct) <- ContentTypes.get(kind, tenant),
+         {:ok, %{state: :draft} = record} <-
+           ContentTypes.get_record(ct, id, authorize?: false, tenant: tenant) do
       current = Enum.map(record.blocks, &TypedBlocks.input_map/1)
       materialized = Enum.map(record.blocks, &materialize_block(&1, doc))
 
@@ -57,7 +65,10 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
 
   defp save(record, blocks_input) do
     record
-    |> Ash.Changeset.for_update(:autosave, %{blocks: blocks_input}, authorize?: false)
+    |> Ash.Changeset.for_update(:autosave, %{blocks: blocks_input},
+      authorize?: false,
+      tenant: record.org_id
+    )
     |> Ash.update()
     |> case do
       {:ok, _saved} ->
