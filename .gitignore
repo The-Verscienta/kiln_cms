@@ -1,5 +1,7 @@
 # The directory Mix will write compiled artifacts to.
 /_build/
+# The strict-tenancy build root (CI's MIX_BUILD_ROOT; also used locally).
+/_build_strict/
 
 # If you run "mix test --cover", coverage assets end up here.
 /cover/

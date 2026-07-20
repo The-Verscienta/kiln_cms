@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     '/Users/pf1/Github/kiln_cms/.claude/worktrees/p3-todos-plan-371e6b/_build_strict/test/lib/bcrypt_elixir/priv/bcrypt_nif.so'
-relocations:     []
-...
