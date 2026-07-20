@@ -57,3 +57,4 @@ err.log
 
 # Downstream project overlay config (never committed to the reusable core).
 /config/project.exs
+_build_strict/
