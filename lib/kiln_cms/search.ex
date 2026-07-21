@@ -179,27 +179,41 @@ defmodule KilnCMS.Search do
 
     args = Map.merge(%{query: query, locale: locale}, filters)
 
-    keyword = run_leg(resource, :search, args, read_opts, load)
-    semantic = run_leg(resource, :search_semantic, args, read_opts, load, semantic_context(opts))
+    # The legs fetch bare records. Fusion needs only ids and order, and
+    # reranking reads title/excerpt, which are attributes — so loading calcs
+    # here would compute them for up to `@hybrid_candidates` rows *per leg*
+    # to keep `limit` of them. `highlight` is a `ts_headline` over the whole
+    # document, so that is most of the query's cost thrown away.
+    keyword = run_leg(resource, :search, args, read_opts)
+    semantic = run_leg(resource, :search_semantic, args, read_opts, semantic_context(opts))
 
     fuzzy =
       if filters == %{} and length(keyword) < @fuzzy_fallback_threshold do
-        run_leg(resource, :autocomplete, %{prefix: query, locale: locale}, read_opts, load)
+        run_leg(resource, :autocomplete, %{prefix: query, locale: locale}, read_opts)
       else
         []
       end
 
-    fused =
-      [{keyword, 1.0}, {semantic, 1.0}, {fuzzy, @fuzzy_weight}]
-      |> reciprocal_rank_fusion(k)
-      |> Enum.take(limit)
+    [{keyword, 1.0}, {semantic, 1.0}, {fuzzy, @fuzzy_weight}]
+    |> reciprocal_rank_fusion(k)
+    |> Enum.take(limit)
+    |> maybe_rerank(query, opts)
+    |> load_results(load, read_opts)
+  end
 
+  defp maybe_rerank(records, query, opts) do
     if Keyword.get(opts, :rerank, false) and rerank?() do
-      rerank(query, fused)
+      rerank(query, records)
     else
-      fused
+      records
     end
   end
+
+  # Calculations are loaded once fusion has settled on the records actually
+  # being returned — see the note in `hybrid/3`.
+  defp load_results([], _load, _read_opts), do: []
+  defp load_results(records, [], _read_opts), do: records
+  defp load_results(records, load, read_opts), do: Ash.load!(records, load, read_opts)
 
   # The one embedding a global sweep pays. `:unavailable` (disabled, or the
   # embedder failed) tells each section's prepare to skip its semantic leg
@@ -507,13 +521,12 @@ defmodule KilnCMS.Search do
   # the truncation the old post-read `Enum.take/2` did after loading every row.
   # `context` is set before `for_read` so the action's prepares can see it —
   # that is how a precomputed query vector reaches `Content.semantic_sort/1`.
-  defp run_leg(resource, action, args, read_opts, load, context \\ %{}) do
+  defp run_leg(resource, action, args, read_opts, context \\ %{}) do
     resource
     |> Ash.Query.new()
     |> Ash.Query.limit(@hybrid_candidates)
     |> Ash.Query.set_context(context)
     |> Ash.Query.for_read(action, args)
-    |> Ash.Query.load(load)
     |> Ash.read!(read_opts)
   end
 
