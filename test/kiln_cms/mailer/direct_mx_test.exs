@@ -82,6 +82,10 @@ defmodule KilnCMS.Mailer.DirectMXTest do
       assert config[:auth] == :never
       assert config[:tls] == :if_available
       assert config[:tls_options][:verify] == :verify_none
+      # Regression: without this, TLS 1.3 STARTTLS to GnuTLS-built Exim MXes
+      # aborts with a fatal hello_middlebox_assert alert (RFC 8446 §D.4 makes
+      # middlebox-compat optional; Erlang asserts it by default).
+      assert config[:tls_options][:middlebox_comp_mode] == false
       assert config[:sockopts] == [:inet]
       assert config[:hostname] == "kiln.example.com"
       # No DKIM options until a key is configured (Phase 3).

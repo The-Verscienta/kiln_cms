@@ -78,7 +78,17 @@ defmodule KilnCMS.Mailer.DirectMX do
         tls: Keyword.get(config, :tls, :if_available),
         # verify_none is deliberate (see @moduledoc): opportunistic STARTTLS
         # encrypts the hop but cannot authenticate arbitrary MX hosts.
-        tls_options: [verify: :verify_none, versions: [:"tlsv1.2", :"tlsv1.3"]],
+        # middlebox_comp_mode: false — GnuTLS-built Exim (the stock
+        # Debian/Ubuntu package) skips the TLS 1.3 middlebox-compatibility
+        # ChangeCipherSpec, and Erlang's client asserts it by default, so the
+        # handshake dies with a fatal hello_middlebox_assert alert and the
+        # delivery fails. Compat mode is optional per RFC 8446 §D.4; disabling
+        # it interops with both behaviours.
+        tls_options: [
+          verify: :verify_none,
+          versions: [:"tlsv1.2", :"tlsv1.3"],
+          middlebox_comp_mode: false
+        ],
         sockopts: [:inet]
       ]
       |> maybe_put(:dkim, dkim)
