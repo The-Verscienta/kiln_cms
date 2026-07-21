@@ -34,6 +34,36 @@ defmodule KilnCMS.Search do
   def pooling, do: cfg(:pooling, :cls_token_pooling)
 
   @doc """
+  Compiled batch size of the embedding serving.
+
+  `Nx.Serving` **pads a partial batch up to this size**, so a lone
+  interactive query costs a full batch's compute. Throughput is largely
+  unaffected by the choice (the per-token matmuls dominate, and they are
+  already large at batch 1), so an install that embeds one query at a time —
+  a semantic search box, a related-content section — wants this small even
+  though a bulk backfill does not care. Default 8.
+  """
+  @spec batch_size() :: pos_integer()
+  def batch_size, do: cfg(:batch_size, 8)
+
+  @doc """
+  Compiled sequence length of the embedding serving. Inputs are padded (or
+  truncated) to it, so cost is driven by this number and *not* by the real
+  input length.
+
+  A **list** compiles one computation per length and routes each input to the
+  smallest one that fits it. That is usually what you want: queries are a
+  handful of tokens while documents run to the full window, and a single
+  fixed length has to serve both — so `[64, 128, 512]` keeps long documents
+  at full fidelity while letting a short query skip the padding it does not
+  need. The cost is compile time and memory per extra bucket.
+
+  Default 512 (single length, the model's full window).
+  """
+  @spec sequence_length() :: pos_integer() | [pos_integer()]
+  def sequence_length, do: cfg(:sequence_length, 512)
+
+  @doc """
   Instruction prefixes some retrieval models expect, prepended before
   embedding. Asymmetric models (e.g. multilingual-e5) need `query: ` on the
   query and `passage: ` on the document; bge query instructions go here too.

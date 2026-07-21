@@ -12,6 +12,11 @@ defmodule KilnCMS.Search.Serving do
   the bge family, `:mean_pooling` for multilingual MiniLM / e5), matching how
   the chosen model was trained. See `docs/semantic-search-plan.md` for the
   multilingual model recipe.
+
+  The compiled shape is `KilnCMS.Search.batch_size/0` ×
+  `KilnCMS.Search.sequence_length/0`. Inputs are padded to it, so that shape —
+  not the real input size — is what each embedding costs; installs that serve
+  interactive queries should read both docs before keeping the defaults.
   """
   @name __MODULE__
 
@@ -32,7 +37,10 @@ defmodule KilnCMS.Search.Serving do
     {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, model})
 
     Bumblebee.Text.text_embedding(model_info, tokenizer,
-      compile: [batch_size: 8, sequence_length: 512],
+      compile: [
+        batch_size: KilnCMS.Search.batch_size(),
+        sequence_length: KilnCMS.Search.sequence_length()
+      ],
       defn_options: KilnCMS.Search.defn_options(),
       output_attribute: :hidden_state,
       output_pool: KilnCMS.Search.pooling(),
