@@ -65,13 +65,31 @@ defmodule KilnCMS.CMS.Content do
   # nothing when semantic search is disabled or the query can't be embedded.
   def semantic_sort(query) do
     with true <- KilnCMS.Search.semantic?(),
-         {:ok, vector} <- KilnCMS.Search.embed_query(Ash.Query.get_argument(query, :query)) do
+         {:ok, vector} <- query_vector(query) do
       query
       |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
       |> cap_unbounded()
     else
       # Disabled, or the query couldn't be embedded — no semantic results.
       _ -> Ash.Query.limit(query, 0)
+    end
+  end
+
+  # A caller running this leg across many resources can embed the query once
+  # and hand the vector down in the query context — `KilnCMS.Search.global/2`
+  # does, because it fans out one search per content type and would otherwise
+  # pay an identical embedding per section. Embedding is by far the most
+  # expensive step in a semantic search, so that is the difference between one
+  # embedding per request and one per registered type.
+  #
+  # `:unavailable` means the caller tried and failed; don't retry it here once
+  # per section. No context at all means nobody embedded ahead of us — the
+  # single-resource callers (the per-type search routes) land here.
+  defp query_vector(query) do
+    case query.context do
+      %{query_vector: vector} when is_list(vector) -> {:ok, vector}
+      %{query_vector: :unavailable} -> :error
+      _ -> KilnCMS.Search.embed_query(Ash.Query.get_argument(query, :query))
     end
   end
 
