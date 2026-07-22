@@ -19,6 +19,9 @@ defmodule Kiln.Plugin do
       (`%{label: "...", path: "/editor/...", role: :editor | :admin}`).
     * `admin_routes/0` — LiveViews mounted in the admin-gated live session
       (`{"/editor/my-plugin", MyPlugin.PanelLive, :index}`).
+    * `editor_routes/0` — LiveViews mounted in the editor-gated live session,
+      for plugin surfaces org editors (not only admins) may use. Same route
+      shape as `admin_routes/0`.
     * `children/0` — supervision child specs appended to the app tree.
     * `oban_queues/0` — background queues merged into the Oban config at
       boot (`[my_queue: 3]`).
@@ -64,6 +67,7 @@ defmodule Kiln.Plugin do
   @callback field_types() :: [module()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
+  @callback editor_routes() :: [admin_route()]
   @callback children() :: [Supervisor.child_spec() | {module(), term()} | module()]
   @callback oban_queues() :: keyword(pos_integer())
 
@@ -106,6 +110,9 @@ defmodule Kiln.Plugin do
       def admin_routes, do: []
 
       @impl Kiln.Plugin
+      def editor_routes, do: []
+
+      @impl Kiln.Plugin
       def children, do: []
 
       @impl Kiln.Plugin
@@ -120,6 +127,7 @@ defmodule Kiln.Plugin do
                      field_types: 0,
                      nav_items: 0,
                      admin_routes: 0,
+                     editor_routes: 0,
                      children: 0,
                      oban_queues: 0
     end
