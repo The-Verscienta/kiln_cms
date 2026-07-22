@@ -82,7 +82,13 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         "#{plugin.name()}: admin route #{inspect(path)} must live under /editor"
       end
 
-    nav ++ routes
+    editor_routes =
+      for {path, _lv, _action} <- plugin.editor_routes(),
+          not String.starts_with?(path, "/editor") do
+        "#{plugin.name()}: editor route #{inspect(path)} must live under /editor"
+      end
+
+    nav ++ routes ++ editor_routes
   end
 
   defp block_collisions(plugins) do

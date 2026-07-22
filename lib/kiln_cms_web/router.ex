@@ -236,6 +236,11 @@ defmodule KilnCMSWeb.Router do
       # Presentation console (#355): iframe an EXTERNAL front end for side-by-side
       # editing, driven by bridge.js postMessage. Needs PRESENTATION_PREVIEW_URL.
       live "/editor/presentation/:type/:slug", PresentationLive, :show
+
+      # Plugin editor panels (D18) — compiled in from each installed plugin's
+      # `editor_routes/0`, editor-gated by this live_session like the rest.
+      import KilnCMSWeb.PluginRouter
+      plugin_editor_routes()
     end
 
     # Admin-only authoring UIs. Guarded at the router (live_session) level, not

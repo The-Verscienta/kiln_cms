@@ -20,13 +20,14 @@ defmodule Kiln.PluginsTest do
     })
   end
 
+  # Membership assertions, not exact-list: a downstream overlay runs this
+  # suite with its own plugin installed next to the fixture (projects/README).
   test "the registry reflects the installed plugin" do
     assert FixturePlugin in Kiln.Plugins.all()
     assert FixturePlugin.CalloutBlock in Kiln.Plugins.blocks()
-    assert Kiln.Plugins.oban_queues() == [fixture: 1]
+    assert Keyword.get(Kiln.Plugins.oban_queues(), :fixture) == 1
 
-    assert [%{label: "Fixture", path: "/editor/fixture", role: :admin}] =
-             Kiln.Plugins.nav_items()
+    assert %{label: "Fixture", path: "/editor/fixture", role: :admin} in Kiln.Plugins.nav_items()
   end
 
   test "manifests/0 exposes the catalog metadata + contribution surface" do
