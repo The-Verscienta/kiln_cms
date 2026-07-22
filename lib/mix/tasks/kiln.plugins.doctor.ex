@@ -88,7 +88,17 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         "#{plugin.name()}: editor route #{inspect(path)} must live under /editor"
       end
 
-    nav ++ routes ++ editor_routes
+    public_routes =
+      for {path, _lv, _action} <- plugin.public_routes(),
+          not String.starts_with?(path, "/") or
+            Enum.any?(
+              ["/editor", "/api", "/gql", "/mcp"],
+              &String.starts_with?(path, &1)
+            ) do
+        "#{plugin.name()}: public route #{inspect(path)} must be absolute and outside /editor, /api, /gql, /mcp"
+      end
+
+    nav ++ routes ++ editor_routes ++ public_routes
   end
 
   defp block_collisions(plugins) do

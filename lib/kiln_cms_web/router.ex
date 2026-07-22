@@ -561,6 +561,24 @@ defmodule KilnCMSWeb.Router do
     end
   end
 
+  # Plugin public pages (D18) — compiled in from each installed plugin's
+  # `public_routes/0`. Registered BEFORE the delivery catch-alls below, so a
+  # plugin path (e.g. /book) can't be shadowed by a content slug. Anonymous:
+  # `:current_user` assigns the user when present but requires nothing.
+  scope "/" do
+    pipe_through :browser
+
+    ash_authentication_live_session :plugin_public_routes,
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :current_user},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
+      import KilnCMSWeb.PluginRouter
+      plugin_public_routes()
+    end
+  end
+
   # Public content delivery (HTML). Defined last among "/" routes so the
   # root-level `/:slug` page route can't shadow auth/editor/SEO/dev paths above.
   # Only published content is reachable (see ContentController).

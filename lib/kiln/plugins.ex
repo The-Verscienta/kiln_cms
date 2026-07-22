@@ -34,6 +34,10 @@ defmodule Kiln.Plugins do
   @spec editor_routes() :: [Kiln.Plugin.admin_route()]
   def editor_routes, do: Enum.flat_map(all(), & &1.editor_routes())
 
+  @doc "Every plugin-declared public route."
+  @spec public_routes() :: [Kiln.Plugin.admin_route()]
+  def public_routes, do: Enum.flat_map(all(), & &1.public_routes())
+
   @doc "Every plugin supervision child, appended to the app tree at boot."
   @spec children() :: [Supervisor.child_spec() | {module(), term()} | module()]
   def children, do: Enum.flat_map(all(), & &1.children())
@@ -63,6 +67,7 @@ defmodule Kiln.Plugins do
           nav_items: non_neg_integer(),
           admin_routes: non_neg_integer(),
           editor_routes: non_neg_integer(),
+          public_routes: non_neg_integer(),
           oban_queues: keyword(pos_integer()),
           children: non_neg_integer()
         }
@@ -90,6 +95,7 @@ defmodule Kiln.Plugins do
       nav_items: length(plugin.nav_items()),
       admin_routes: length(plugin.admin_routes()),
       editor_routes: length(plugin.editor_routes()),
+      public_routes: length(plugin.public_routes()),
       oban_queues: plugin.oban_queues(),
       children: length(plugin.children())
     }
