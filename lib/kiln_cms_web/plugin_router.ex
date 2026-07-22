@@ -18,6 +18,10 @@ defmodule KilnCMSWeb.PluginRouter do
     expand_routes(Kiln.Plugins.editor_routes())
   end
 
+  defmacro plugin_public_routes do
+    expand_routes(Kiln.Plugins.public_routes())
+  end
+
   defp expand_routes(plugin_routes) do
     routes =
       for {path, live_view, action} <- plugin_routes do
