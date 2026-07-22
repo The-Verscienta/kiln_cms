@@ -64,6 +64,20 @@ defmodule KilnCMS.Search do
   def sequence_length, do: cfg(:sequence_length, 512)
 
   @doc """
+  How many of `global/2`'s sections may run concurrently.
+
+  Sections are independent, so they fan out rather than running one round trip
+  after another. The bound matters because each one holds a DB connection for
+  the duration of its queries — unbounded fan-out would drain the Ecto pool
+  (`POOL_SIZE`, default 10) and starve everything else on the node. The
+  default deliberately leaves most of the pool free for concurrent traffic;
+  raise it if your pool is sized for it, and remember a *second* simultaneous
+  search wants the same headroom. Default 4.
+  """
+  @spec section_concurrency() :: pos_integer()
+  def section_concurrency, do: cfg(:section_concurrency, 4)
+
+  @doc """
   Instruction prefixes some retrieval models expect, prepended before
   embedding. Asymmetric models (e.g. multilingual-e5) need `query: ` on the
   query and `passage: ` on the document; bge query instructions go here too.
@@ -122,6 +136,12 @@ defmodule KilnCMS.Search do
   # standard k=60 dampens the contribution of low-ranked results).
   @hybrid_candidates 50
   @rrf_k 60
+
+  # Ceiling on a single `global/2` section. Generous — it exists to stop one
+  # wedged query hanging the request forever, not to bound normal latency, and
+  # a timeout takes the whole call down rather than silently dropping a
+  # section.
+  @section_timeout :timer.seconds(30)
 
   # The typo-tolerance fallback: when the keyword leg finds fewer hits than
   # this, a trigram leg joins the fusion — at reduced weight, so fuzzy
@@ -342,29 +362,55 @@ defmodule KilnCMS.Search do
     # reserved section below would be overwritten by the merge — same family
     # of collisions `ContentTypes.path_segment/2` guards public URLs against.
     compiled =
-      Map.new(KilnCMS.CMS.ContentTypes.all(), fn ct ->
-        {ct.section, hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts)}
+      Enum.map(KilnCMS.CMS.ContentTypes.all(), fn ct ->
+        {ct.section, fn -> hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts) end}
       end)
 
-    Map.merge(compiled, %{
+    fixed = [
       # One section across every dynamic type. `type_name` (an expression
       # calc, so it doesn't run TypeDefinition's editor-only read policy for
       # anonymous callers) labels each hit with its dynamic type.
-      entries:
-        hybrid(
-          KilnCMS.CMS.Entry,
-          query,
-          [load: [:type_name | content_load]] ++ hybrid_opts
-        ),
+      {:entries,
+       fn ->
+         hybrid(KilnCMS.CMS.Entry, query, [load: [:type_name | content_load]] ++ hybrid_opts)
+       end},
       # NOTE (#336): MediaItem/Category/Tag are NOT org-scoped yet, so these three
       # sections stay cross-org (they ignore the `:tenant` in `read_opts`). Content
       # + entries above ARE scoped. Closes when those resources gain `org_id`.
-      media: section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []),
+      {:media,
+       fn -> section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []) end},
       # Taxonomy (name/description, typo-tolerant) — matched categories and
       # tags so editors and headless frontends can jump to filtered listings.
-      categories: section(KilnCMS.CMS.Category, :search, %{query: query}, read_opts, limit, []),
-      tags: section(KilnCMS.CMS.Tag, :search, %{query: query}, read_opts, limit, [])
-    })
+      {:categories,
+       fn -> section(KilnCMS.CMS.Category, :search, %{query: query}, read_opts, limit, []) end},
+      {:tags, fn -> section(KilnCMS.CMS.Tag, :search, %{query: query}, read_opts, limit, []) end}
+    ]
+
+    run_sections(compiled ++ fixed)
+  end
+
+  # Sections are independent — no section's results affect another's — so they
+  # run concurrently rather than one round trip after another. On an install
+  # with a dozen registered content types that is the difference between ~19
+  # sequential sweeps and `section_concurrency/0` at a time.
+  #
+  # Concurrency is bounded because each section holds a DB connection for the
+  # duration of its queries: unbounded fan-out would drain the Ecto pool
+  # (`POOL_SIZE`, default 10) and starve every other request on the node. The
+  # default leaves most of the pool free for concurrent traffic; raise it if
+  # your pool is sized for it.
+  #
+  # A failing section still takes the whole call down, matching the previous
+  # `Ash.read!` behaviour — a search that silently omits a section would be
+  # worse than one that errors.
+  defp run_sections(sections) do
+    sections
+    |> Task.async_stream(fn {key, run} -> {key, run.()} end,
+      max_concurrency: section_concurrency(),
+      timeout: @section_timeout,
+      ordered: false
+    )
+    |> Enum.into(%{}, fn {:ok, pair} -> pair end)
   end
 
   @doc """
