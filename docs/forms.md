@@ -25,6 +25,17 @@ and review submissions in the same builder.
   no IP, no user agent** (rate limiting uses the IP transiently). Admin-only
   to read or delete; deleting a form removes its submissions.
 
+## Multi-page forms
+
+A `page_break` field splits the form into steps; the form's
+`progress_indicator` (steps / bar / none) renders above a paged form.
+`/form-pages.js` shows one page at a time, injects Previous/Next (labels
+translated server-side via data attributes), runs the current page through
+native validation before advancing, and reveals Submit on the last page —
+one POST at the end, nothing stored per page. Without JS all pages render
+stacked and the form still works. Headless clients split the field list on
+`page_break` entries the same way (the schema carries `progress_indicator`).
+
 ## Conditional logic
 
 A field can be shown only when rules over *earlier* fields match

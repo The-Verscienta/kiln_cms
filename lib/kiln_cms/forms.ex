@@ -193,7 +193,8 @@ defmodule KilnCMS.Forms do
 
   defp to_number(_other), do: :error
 
-  defp resolve(%{field_type: type}, _raw) when type in [:heading, :divider], do: :skip
+  defp resolve(%{field_type: type}, _raw) when type in [:heading, :divider, :page_break],
+    do: :skip
 
   # A required consent isn't satisfied by any value — only by true (the
   # rendered checkbox posts "false" via its hidden twin when unchecked).

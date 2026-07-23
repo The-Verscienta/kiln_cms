@@ -127,11 +127,16 @@ defmodule KilnCMSWeb.BlockComponents do
   attr :embed, :boolean, default: false
 
   def public_form(assigns) do
+    pages = split_form_pages(assigns.form.fields)
+    assigns = assign(assigns, pages: pages, multi?: length(pages) > 1)
+
     ~H"""
     <form
       method="post"
       action={"/forms/" <> @form.slug}
       class="kiln-form space-y-4 rounded-lg border border-base-300 p-4"
+      data-prev-label={gettext("Previous")}
+      data-next-label={gettext("Next")}
     >
       <p :if={@form.description} class="text-sm text-base-content/70">{@form.description}</p>
 
@@ -146,16 +151,60 @@ defmodule KilnCMSWeb.BlockComponents do
         </label>
       </div>
 
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
-        <%!-- data-kiln-conditions drives /form-conditions.js (show/hide +
-              disable); the server re-checks the same rules on submit. --%>
-        <div
-          :for={field <- @form.fields}
-          class={field_width_class(field)}
-          data-kiln-field={field.name}
-          data-kiln-conditions={field.conditions != %{} && Jason.encode!(field.conditions)}
+      <%!-- Multi-page progress (phase 5). /form-pages.js swaps the class
+            strings from the data attributes as the visitor advances. --%>
+      <ol
+        :if={@multi? and @form.progress_indicator == :steps}
+        data-kiln-steps
+        data-active-class="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-content"
+        data-inactive-class="flex size-7 items-center justify-center rounded-full bg-base-200 text-xs font-medium text-base-content/60"
+        aria-label={gettext("Form steps")}
+        class="kiln-form-steps flex items-center gap-2"
+      >
+        <li
+          :for={index <- 1..length(@pages)}
+          aria-current={index == 1 && "step"}
+          class={[
+            "flex size-7 items-center justify-center rounded-full text-xs font-medium",
+            index == 1 && "bg-primary text-primary-content",
+            index != 1 && "bg-base-200 text-base-content/60"
+          ]}
         >
-          <.public_form_field field={field} />
+          {index}
+        </li>
+      </ol>
+
+      <div
+        :if={@multi? and @form.progress_indicator == :bar}
+        data-kiln-progress
+        class="h-2 overflow-hidden rounded bg-base-200"
+      >
+        <div
+          data-kiln-progress-fill
+          class="h-full rounded bg-primary"
+          style={"width: #{round(100 / length(@pages))}%"}
+        >
+        </div>
+      </div>
+
+      <%!-- Without JS every page renders stacked and the form stays fully
+            usable; /form-pages.js hides all but one and injects Prev/Next. --%>
+      <div
+        :for={{page_fields, page_index} <- Enum.with_index(@pages)}
+        class="kiln-form-page space-y-4"
+        data-kiln-page={page_index}
+      >
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
+          <%!-- data-kiln-conditions drives /form-conditions.js (show/hide +
+                disable); the server re-checks the same rules on submit. --%>
+          <div
+            :for={field <- page_fields}
+            class={field_width_class(field)}
+            data-kiln-field={field.name}
+            data-kiln-conditions={field.conditions != %{} && Jason.encode!(field.conditions)}
+          >
+            <.public_form_field field={field} />
+          </div>
         </div>
       </div>
 
@@ -167,6 +216,31 @@ defmodule KilnCMSWeb.BlockComponents do
       </button>
     </form>
     """
+  end
+
+  @doc """
+  Splits an ordered field list into pages on `:page_break` fields (the break
+  itself renders nothing). Empty pages (leading/consecutive breaks) are
+  dropped; a form with no breaks is a single page. Shared with the headless
+  docs — `GET /api/forms/:slug` clients split the same way.
+  """
+  @spec split_form_pages([map()]) :: [[map()]]
+  def split_form_pages(fields) do
+    fields
+    |> Enum.chunk_while(
+      [],
+      fn field, acc ->
+        if field.field_type == :page_break,
+          do: {:cont, Enum.reverse(acc), []},
+          else: {:cont, [field | acc]}
+      end,
+      fn acc -> {:cont, Enum.reverse(acc), []} end
+    )
+    |> Enum.reject(&(&1 == []))
+    |> case do
+      [] -> [[]]
+      pages -> pages
+    end
   end
 
   @doc """
@@ -193,6 +267,12 @@ defmodule KilnCMSWeb.BlockComponents do
     ~H"""
     <hr class="border-base-300" />
     """
+  end
+
+  # A page break renders nothing inline — `public_form/1` splits the field
+  # list on it instead. Clause kept so a stray direct call stays harmless.
+  def public_form_field(%{field: %{field_type: :page_break}} = assigns) do
+    ~H""
   end
 
   def public_form_field(%{field: %{field_type: :hidden}} = assigns) do

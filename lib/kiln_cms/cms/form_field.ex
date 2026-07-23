@@ -15,7 +15,8 @@ defmodule KilnCMS.CMS.FormField do
 
   # Submission value types — JSON-native, public-input-friendly (no media /
   # reference pickers on anonymous forms). :heading and :divider are
-  # display-only (no submission value); :hidden carries its default_value.
+  # display-only (no submission value); :hidden carries its default_value;
+  # :page_break splits the form into steps (phase 5) and is display-only too.
   @field_types [
     :string,
     :text,
@@ -33,6 +34,7 @@ defmodule KilnCMS.CMS.FormField do
     :consent,
     :heading,
     :divider,
+    :page_break,
     :hidden
   ]
 
@@ -40,7 +42,7 @@ defmodule KilnCMS.CMS.FormField do
   @choice_types [:select, :radio, :checkboxes]
 
   # Types that never produce a submission value.
-  @display_types [:heading, :divider]
+  @display_types [:heading, :divider, :page_break]
 
   @doc "The value types a form field may declare."
   @spec field_types() :: [atom()]

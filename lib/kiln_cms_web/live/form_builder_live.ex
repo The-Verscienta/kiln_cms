@@ -92,6 +92,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
         entries: [
           %{type: :heading, label: gettext("Heading"), icon: "hero-bars-3-center-left"},
           %{type: :divider, label: gettext("Divider"), icon: "hero-minus"},
+          %{type: :page_break, label: gettext("Page break"), icon: "hero-scissors"},
           %{type: :hidden, label: gettext("Hidden"), icon: "hero-eye-slash"}
         ]
       }
@@ -106,8 +107,8 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp range_types, do: [:integer, :number]
   defp pattern_types, do: [:string, :phone, :url]
   defp placeholder_types, do: [:string, :text, :email, :phone, :url, :integer, :number]
-  defp no_required_types, do: [:heading, :divider, :hidden]
-  defp no_default_types, do: [:checkboxes, :heading, :divider, :consent]
+  defp no_required_types, do: [:heading, :divider, :page_break, :hidden]
+  defp no_default_types, do: [:checkboxes, :heading, :divider, :page_break, :consent]
 
   # --- tabs --------------------------------------------------------------------
 
@@ -646,8 +647,20 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   {gettext("Hidden field")} <code>{field.name}</code>
                 </div>
 
+                <%!-- A page break renders nothing inline publicly — mark the
+                      split point on the canvas instead. --%>
+                <div
+                  :if={field.field_type == :page_break}
+                  class="flex items-center gap-2 text-xs text-base-content/60"
+                >
+                  <span class="h-px flex-1 border-t border-dashed border-base-300"></span>
+                  <.icon name="hero-scissors" class="size-3.5" />
+                  {gettext("Page break")}
+                  <span class="h-px flex-1 border-t border-dashed border-base-300"></span>
+                </div>
+
                 <fieldset
-                  :if={field.field_type != :hidden}
+                  :if={field.field_type not in [:hidden, :page_break]}
                   disabled
                   class="pointer-events-none select-none"
                 >
@@ -711,7 +724,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   />
                 </div>
 
-                <div :if={selected.field_type not in [:heading, :divider]}>
+                <div :if={selected.field_type not in [:heading, :divider, :page_break]}>
                   <label for="fs-name" class="font-medium">{gettext("Machine name")}</label>
                   <input
                     id="fs-name"
@@ -816,7 +829,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   </p>
                 </div>
 
-                <div :if={selected.field_type != :divider}>
+                <div :if={selected.field_type not in [:divider, :page_break]}>
                   <label for="fs-help" class="font-medium">{gettext("Help text")}</label>
                   <input
                     id="fs-help"
@@ -1061,6 +1074,25 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 placeholder={gettext("Submit")}
                 class="field-input mt-1"
               />
+            </div>
+            <div>
+              <label for="gf-progress" class="text-sm font-medium">
+                {gettext("Progress indicator")}
+              </label>
+              <select id="gf-progress" name="form[progress_indicator]" class="field-select mt-1">
+                <option value="steps" selected={@form.progress_indicator == :steps}>
+                  {gettext("Steps")}
+                </option>
+                <option value="bar" selected={@form.progress_indicator == :bar}>
+                  {gettext("Progress bar")}
+                </option>
+                <option value="none" selected={@form.progress_indicator == :none}>
+                  {gettext("None")}
+                </option>
+              </select>
+              <p class="mt-1 text-xs text-base-content/60">
+                {gettext("Shown above multi-page forms (add Page break fields to split pages).")}
+              </p>
             </div>
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="form[active]" value="false" />

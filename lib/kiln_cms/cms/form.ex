@@ -40,7 +40,8 @@ defmodule KilnCMS.CMS.Form do
       :active,
       :success_message,
       :notify_email,
-      :submit_label
+      :submit_label,
+      :progress_indicator
     ]
 
     create :create, primary?: true
@@ -138,6 +139,16 @@ defmodule KilnCMS.CMS.Form do
 
     # Submit-button text; nil falls back to the translated "Submit".
     attribute :submit_label, :string, public?: true
+
+    # Multi-page forms (phase 5): what renders above a paged form —
+    # numbered steps, a percentage bar, or nothing. Ignored without a
+    # :page_break field.
+    attribute :progress_indicator, :atom do
+      constraints one_of: [:steps, :bar, :none]
+      default :steps
+      allow_nil? false
+      public? true
+    end
 
     timestamps()
   end

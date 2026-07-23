@@ -23,7 +23,8 @@ defmodule KilnCMSWeb do
   # overlay SDK, #355) are hand-written and live at `priv/static/`, outside the
   # gitignored `assets/` build output.
   def static_paths,
-    do: ~w(assets fonts images favicon.ico embed.js embed-frame.js bridge.js form-conditions.js)
+    do:
+      ~w(assets fonts images favicon.ico embed.js embed-frame.js bridge.js form-conditions.js form-pages.js)
 
   def router do
     quote do

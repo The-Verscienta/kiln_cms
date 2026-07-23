@@ -223,6 +223,7 @@ defmodule KilnCMS.FormsTest do
       form!([
         %{name: "intro", label: "About you", field_type: :heading},
         %{name: "sep", label: "Divider", field_type: :divider},
+        %{name: "step", label: "Next page", field_type: :page_break},
         %{name: "email", label: "Email", field_type: :email}
       ])
 
@@ -231,7 +232,8 @@ defmodule KilnCMS.FormsTest do
                "email" => "a@b.co",
                # Even a crafted param for a display field is ignored.
                "intro" => "spoofed",
-               "sep" => "spoofed"
+               "sep" => "spoofed",
+               "step" => "spoofed"
              })
 
     assert submission.data == %{"email" => "a@b.co"}

@@ -232,6 +232,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
           slug: form.slug,
           description: "Say hi.",
           submit_label: "Send it",
+          progress_indicator: "bar",
           active: "true"
         }
       })
@@ -242,6 +243,21 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert updated.name == "Contact us"
     assert updated.submit_label == "Send it"
     assert updated.description == "Say hi."
+    assert updated.progress_indicator == :bar
+  end
+
+  test "adding a page break shows the split marker on the canvas", %{conn: conn} do
+    {form, [], lv, _html} = builder(conn, authed_user(:admin))
+
+    html =
+      lv
+      |> element(~s(button[phx-click="add_field"][phx-value-type="page_break"]))
+      |> render_click()
+
+    assert [field] = CMS.form_fields_for!(form.id, authorize?: false)
+    assert field.field_type == :page_break
+    assert html =~ "Page break"
+    assert html =~ "hero-scissors"
   end
 
   test "the embed tab shows a copyable snippet", %{conn: conn} do
@@ -444,6 +460,71 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert html =~ "data-kiln-conditions="
     assert html =~ "form-conditions.js"
     assert html =~ ~s(data-kiln-field="note")
+  end
+
+  test "page breaks split the embed into pages with a steps indicator", %{conn: conn} do
+    admin = authed_user(:admin)
+    form = CMS.create_form!(%{name: "Paged", slug: "fb-paged"}, actor: admin)
+
+    fields = [
+      %{name: "email", label: "Email", field_type: :email, required: true},
+      %{name: "step_2", label: "Next page", field_type: :page_break},
+      %{name: "message", label: "Message", field_type: :text},
+      %{name: "step_3", label: "Next page", field_type: :page_break},
+      %{name: "rating", label: "Rating", field_type: :rating}
+    ]
+
+    for {attrs, position} <- Enum.with_index(fields) do
+      CMS.create_form_field!(
+        Map.merge(%{form_id: form.id, position: position}, attrs),
+        actor: admin
+      )
+    end
+
+    html = conn |> get("/forms/#{form.slug}/embed") |> html_response(200)
+
+    # Three page containers, a steps indicator, translated nav labels for the
+    # pager script, and the script itself.
+    assert html =~ ~s(data-kiln-page="0")
+    assert html =~ ~s(data-kiln-page="2")
+    refute html =~ ~s(data-kiln-page="3")
+    assert html =~ "data-kiln-steps"
+    assert html =~ ~s(data-prev-label="Previous")
+    assert html =~ ~s(data-next-label="Next")
+    assert html =~ "form-pages.js"
+  end
+
+  test "a single-page form renders no steps indicator", %{conn: conn} do
+    admin = authed_user(:admin)
+    form = CMS.create_form!(%{name: "Flat", slug: "fb-flat"}, actor: admin)
+
+    CMS.create_form_field!(
+      %{form_id: form.id, name: "email", label: "Email", field_type: :email},
+      actor: admin
+    )
+
+    html = conn |> get("/forms/#{form.slug}/embed") |> html_response(200)
+
+    assert html =~ ~s(data-kiln-page="0")
+    refute html =~ ~s(data-kiln-page="1")
+    refute html =~ "data-kiln-steps"
+    refute html =~ "data-kiln-progress"
+  end
+
+  test "empty pages from stray breaks are dropped" do
+    fields = [
+      %{field_type: :page_break},
+      %{field_type: :string},
+      %{field_type: :page_break},
+      %{field_type: :page_break},
+      %{field_type: :text}
+    ]
+
+    pages = KilnCMSWeb.BlockComponents.split_form_pages(fields)
+    assert length(pages) == 2
+    assert [[%{field_type: :string}], [%{field_type: :text}]] = pages
+
+    assert KilnCMSWeb.BlockComponents.split_form_pages([]) == [[]]
   end
 
   test "the public form renders the phase-2 field types", %{conn: conn} do

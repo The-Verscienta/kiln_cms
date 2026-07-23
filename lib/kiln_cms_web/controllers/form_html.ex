@@ -34,6 +34,8 @@ defmodule KilnCMSWeb.FormHTML do
         </script>
         <script defer src={~p"/form-conditions.js"}>
         </script>
+        <script defer src={~p"/form-pages.js"}>
+        </script>
       </body>
     </html>
     """

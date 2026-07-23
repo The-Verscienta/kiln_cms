@@ -71,6 +71,7 @@ defmodule KilnCMSWeb.FormController do
           description: form.description,
           success_message: form.success_message,
           submit_label: form.submit_label,
+          progress_indicator: form.progress_indicator,
           honeypot_field: Forms.honeypot_field(),
           submit_url: "/forms/#{form.slug}",
           fields:
