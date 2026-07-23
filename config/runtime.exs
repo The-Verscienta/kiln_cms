@@ -367,6 +367,24 @@ if config_env() == :prod do
         System.get_env("SMTP_HOST") ||
           raise "MAIL_MODE=smtp requires SMTP_HOST (the relay to send through)"
 
+      # Explicit TLS options for STARTTLS: since OTP 26 the ssl app defaults to
+      # `verify_peer` with no CA store configured, so gen_smtp's handshake to any
+      # relay dies with :tls_failed unless we supply one. Verify against
+      # CAStore's bundle (with SNI, required by multi-tenant relays) by default;
+      # SMTP_TLS_VERIFY=false keeps the connection encrypted but skips peer
+      # verification, for relays with self-signed or mismatched certificates.
+      smtp_tls_options =
+        if System.get_env("SMTP_TLS_VERIFY") == "false" do
+          [verify: :verify_none]
+        else
+          [
+            verify: :verify_peer,
+            cacertfile: CAStore.file_path(),
+            server_name_indication: String.to_charlist(smtp_host),
+            depth: 3
+          ]
+        end
+
       config :kiln_cms, KilnCMS.Mailer,
         adapter: Swoosh.Adapters.SMTP,
         relay: smtp_host,
@@ -374,6 +392,7 @@ if config_env() == :prod do
         username: System.get_env("SMTP_USERNAME"),
         password: System.get_env("SMTP_PASSWORD"),
         tls: if(System.get_env("SMTP_TLS") == "false", do: :never, else: :always),
+        tls_options: smtp_tls_options,
         auth: :always
 
     "direct" ->
