@@ -196,6 +196,22 @@ defmodule KilnCMSWeb.FormBuilderLive do
     {:noreply, socket |> apply_order(order) |> reload_fields()}
   end
 
+  # --- conditional logic --------------------------------------------------------
+
+  def handle_event("logic_add_rule", _params, socket) do
+    update_selected_conditions(socket, fn conditions ->
+      Map.update(conditions, "rules", [blank_rule()], &(&1 ++ [blank_rule()]))
+    end)
+  end
+
+  def handle_event("logic_remove_rule", %{"index" => index}, socket) do
+    index = String.to_integer(index)
+
+    update_selected_conditions(socket, fn conditions ->
+      Map.update(conditions, "rules", [], &List.delete_at(&1, index))
+    end)
+  end
+
   # --- form settings -----------------------------------------------------------
 
   def handle_event("save_form", %{"form" => params}, socket) do
@@ -249,6 +265,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
       default_value: field.default_value,
       width: field.width,
       validation: field.validation,
+      conditions: field.conditions,
       position: field.position
     }
 
@@ -324,6 +341,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     |> Map.drop(["id", "_target"])
     |> normalize_options(field)
     |> normalize_validation()
+    |> normalize_conditions(field)
   end
 
   defp normalize_options(params, field) do
@@ -382,6 +400,68 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   defp normalize_rule(key, value), do: [{key, value}]
+
+  # The "Conditional logic" section posts a logic_enabled toggle plus nested
+  # rule rows (rules arrive as an index-keyed map). Disabling clears the map;
+  # enabling with nothing stored yet seeds one blank rule row.
+  defp normalize_conditions(%{"logic_enabled" => enabled} = params, field) do
+    params = Map.delete(params, "logic_enabled")
+
+    cond do
+      enabled == "false" ->
+        Map.put(params, "conditions", %{})
+
+      field.conditions == %{} and params["conditions"] == nil ->
+        Map.put(params, "conditions", %{"logic" => "all", "rules" => [blank_rule()]})
+
+      true ->
+        Map.update(params, "conditions", field.conditions, &normalize_rule_rows/1)
+    end
+  end
+
+  defp normalize_conditions(params, _field), do: params
+
+  defp normalize_rule_rows(%{} = conditions) do
+    rules =
+      (conditions["rules"] || %{})
+      |> Enum.sort_by(fn {index, _rule} -> String.to_integer(index) end)
+      |> Enum.map(fn {_index, rule} -> Map.take(rule, ["field", "operator", "value"]) end)
+
+    %{"logic" => conditions["logic"] || "all", "rules" => rules}
+  end
+
+  defp normalize_rule_rows(_other), do: %{}
+
+  defp blank_rule, do: %{"field" => "", "operator" => "eq", "value" => ""}
+
+  defp update_selected_conditions(socket, fun) do
+    with %FormField{} = field <-
+           Enum.find(socket.assigns.fields, &(&1.id == socket.assigns.selected_id)) do
+      CMS.update_form_field(field, %{conditions: fun.(field.conditions)}, actor_opts(socket))
+    end
+
+    {:noreply, reload_fields(socket)}
+  end
+
+  # Rules may only reference value-producing fields ABOVE the target — the
+  # same order the server folds fields in, so no forward references or cycles.
+  defp rule_source_fields(fields, selected) do
+    fields
+    |> Enum.take_while(&(&1.id != selected.id))
+    |> Enum.reject(&(&1.field_type in FormField.display_types()))
+  end
+
+  defp operators do
+    [
+      {"eq", gettext("is")},
+      {"neq", gettext("is not")},
+      {"contains", gettext("contains")},
+      {"empty", gettext("is empty")},
+      {"not_empty", gettext("is not empty")},
+      {"gt", gettext("is greater than")},
+      {"lt", gettext("is less than")}
+    ]
+  end
 
   # Checkboxes store a list — join it; `to_string/1` would concatenate the
   # entries as chardata ("ab" from ["a", "b"]).
@@ -545,6 +625,15 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   >
                     <.icon name="hero-trash" class="size-3.5" />
                   </button>
+                </div>
+
+                <%!-- Conditional-logic marker: this field shows/hides by rule. --%>
+                <div
+                  :if={field.conditions != %{}}
+                  title={gettext("Shown conditionally")}
+                  class="absolute -top-2.5 left-2 z-10 rounded border border-base-300 bg-base-100 px-1 text-base-content/60"
+                >
+                  <.icon name="hero-arrows-right-left" class="size-3" />
                 </div>
 
                 <%!-- A hidden input renders nothing — show a chip so it stays
@@ -828,6 +917,106 @@ defmodule KilnCMSWeb.FormBuilderLive do
                       phx-debounce="300"
                       class="field-input mt-1"
                     />
+                  </div>
+                </div>
+
+                <div class="space-y-3 border-t border-base-content/10 pt-3">
+                  <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                    {gettext("Conditional logic")}
+                  </h3>
+
+                  <label class="flex items-center gap-2">
+                    <input type="hidden" name="field[logic_enabled]" value="false" />
+                    <input
+                      type="checkbox"
+                      name="field[logic_enabled]"
+                      value="true"
+                      checked={selected.conditions != %{}}
+                      class="size-4 rounded border border-base-content/30 accent-primary"
+                    />
+                    {gettext("Show this field only when rules match")}
+                  </label>
+
+                  <div :if={selected.conditions != %{}} class="space-y-2">
+                    <div class="flex items-center gap-2 text-xs">
+                      {gettext("Show when")}
+                      <select
+                        name="field[conditions][logic]"
+                        aria-label={gettext("Rule logic")}
+                        class="field-select w-auto"
+                      >
+                        <option value="all" selected={selected.conditions["logic"] != "any"}>
+                          {gettext("all")}
+                        </option>
+                        <option value="any" selected={selected.conditions["logic"] == "any"}>
+                          {gettext("any")}
+                        </option>
+                      </select>
+                      {gettext("rules match:")}
+                    </div>
+
+                    <div
+                      :for={{rule, index} <- Enum.with_index(selected.conditions["rules"] || [])}
+                      class="space-y-1 rounded border border-base-content/10 p-2"
+                    >
+                      <div class="flex items-center justify-between gap-1">
+                        <select
+                          name={"field[conditions][rules][#{index}][field]"}
+                          aria-label={gettext("Rule field")}
+                          class="field-select text-xs"
+                        >
+                          <option value="">{gettext("— pick a field —")}</option>
+                          <option
+                            :for={source <- rule_source_fields(@fields, selected)}
+                            value={source.name}
+                            selected={rule["field"] == source.name}
+                          >
+                            {source.label}
+                          </option>
+                        </select>
+                        <button
+                          type="button"
+                          phx-click="logic_remove_rule"
+                          phx-value-index={index}
+                          aria-label={gettext("Remove rule")}
+                          class="btn btn-sm btn-ghost shrink-0 hover:text-error"
+                        >
+                          <.icon name="hero-x-mark" class="size-3.5" />
+                        </button>
+                      </div>
+                      <div class="grid grid-cols-2 gap-1">
+                        <select
+                          name={"field[conditions][rules][#{index}][operator]"}
+                          aria-label={gettext("Rule operator")}
+                          class="field-select text-xs"
+                        >
+                          <option
+                            :for={{op, label} <- operators()}
+                            value={op}
+                            selected={(rule["operator"] || "eq") == op}
+                          >
+                            {label}
+                          </option>
+                        </select>
+                        <input
+                          name={"field[conditions][rules][#{index}][value]"}
+                          value={rule["value"]}
+                          phx-debounce="300"
+                          aria-label={gettext("Rule value")}
+                          class="field-input text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <button type="button" phx-click="logic_add_rule" class="btn btn-sm btn-default">
+                      {gettext("Add rule")}
+                    </button>
+
+                    <p :if={rule_source_fields(@fields, selected) == []} class="text-xs text-warning">
+                      {gettext(
+                        "Rules can only reference fields above this one — move this field down or add fields first."
+                      )}
+                    </p>
                   </div>
                 </div>
               </form>

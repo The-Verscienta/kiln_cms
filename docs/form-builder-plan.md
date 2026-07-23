@@ -120,7 +120,8 @@ email table and submissions view must render lists.
   submitted data; hidden fields skip `required` validation and their values are
   discarded (prevents smuggling data through hidden fields).
 - Conditional **confirmations** and **notifications** (both products): per-rule
-  success message / notify address, evaluated server-side only.
+  success message / notify address, evaluated server-side only. *(Deferred to
+  phase 6, where confirmations/notifications are reworked anyway.)*
 
 ## Phase 5 — Multi-page forms
 

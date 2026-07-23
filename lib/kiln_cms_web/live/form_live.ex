@@ -95,6 +95,7 @@ defmodule KilnCMSWeb.FormLive do
             default_value: field.default_value,
             width: field.width,
             validation: field.validation,
+            conditions: field.conditions,
             position: field.position
           },
           opts

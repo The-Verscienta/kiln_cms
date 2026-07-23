@@ -32,6 +32,8 @@ defmodule KilnCMSWeb.FormHTML do
         <BlockComponents.public_form form={@form} embed />
         <script defer src={~p"/embed-frame.js"}>
         </script>
+        <script defer src={~p"/form-conditions.js"}>
+        </script>
       </body>
     </html>
     """

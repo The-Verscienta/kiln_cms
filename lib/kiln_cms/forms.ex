@@ -107,18 +107,91 @@ defmodule KilnCMS.Forms do
 
   # --- coercion ---------------------------------------------------------------
 
+  # Fields are folded in display order, so a field's conditions see exactly
+  # the (coerced) values of the fields above it — the same subset the builder
+  # lets rules reference. An invisible field is skipped wholesale: `required`
+  # doesn't apply and any submitted value is discarded (no smuggling data
+  # through fields the visitor never saw).
   defp coerce(fields, params) do
-    {data, errors} =
-      Enum.reduce(fields, {%{}, %{}}, fn field, {data, errors} ->
-        case resolve(field, Map.get(params, field.name)) do
-          :skip -> {data, errors}
-          {:ok, value} -> {Map.put(data, field.name, value), errors}
-          {:error, message} -> {data, Map.put(errors, field.name, message)}
-        end
-      end)
+    {data, errors} = Enum.reduce(fields, {%{}, %{}}, &coerce_field(&1, &2, params))
 
     if errors == %{}, do: {:ok, data}, else: {:error, errors}
   end
+
+  defp coerce_field(field, {data, errors}, params) do
+    if visible?(field, data) do
+      case resolve(field, Map.get(params, field.name)) do
+        :skip -> {data, errors}
+        {:ok, value} -> {Map.put(data, field.name, value), errors}
+        {:error, message} -> {data, Map.put(errors, field.name, message)}
+      end
+    else
+      {data, errors}
+    end
+  end
+
+  @doc """
+  Whether a field is visible given the (coerced) values submitted so far —
+  the server-side twin of `form-conditions.js`. Empty conditions and
+  incomplete rules (blank field name, unknown operator) evaluate as visible:
+  a half-built rule must never hide data collection.
+  """
+  @spec visible?(struct() | map(), map()) :: boolean()
+  def visible?(%{conditions: %{"rules" => rules} = conditions}, data) when is_list(rules) do
+    results = Enum.map(rules, &rule_matches?(&1, data))
+
+    case conditions["logic"] do
+      "any" -> results == [] or Enum.any?(results)
+      _all -> Enum.all?(results)
+    end
+  end
+
+  def visible?(_field, _data), do: true
+
+  defp rule_matches?(%{"field" => name} = rule, data) when is_binary(name) and name != "" do
+    matches?(rule["operator"] || "eq", Map.get(data, name), rule["value"])
+  end
+
+  defp rule_matches?(_incomplete, _data), do: true
+
+  # Checkbox (list) answers: eq/contains mean membership, neq means absence.
+  defp matches?("eq", value, target) when is_list(value), do: to_string(target) in value
+  defp matches?("eq", value, target), do: to_string(value) == to_string(target)
+  defp matches?("neq", value, target), do: not matches?("eq", value, target)
+
+  defp matches?("contains", value, target) when is_list(value), do: to_string(target) in value
+
+  defp matches?("contains", value, target),
+    do: String.contains?(to_string(value), to_string(target))
+
+  defp matches?("empty", value, _target), do: value in [nil, "", []]
+  defp matches?("not_empty", value, _target), do: value not in [nil, "", []]
+
+  defp matches?("gt", value, target), do: numeric(value, target, &Kernel.>/2)
+  defp matches?("lt", value, target), do: numeric(value, target, &Kernel.</2)
+
+  # Unknown operator (newer schema than this node?) — never hide the field.
+  defp matches?(_operator, _value, _target), do: true
+
+  defp numeric(value, target, compare) do
+    with {:ok, left} <- to_number(value),
+         {:ok, right} <- to_number(target) do
+      compare.(left, right)
+    else
+      _not_numeric -> false
+    end
+  end
+
+  defp to_number(value) when is_number(value), do: {:ok, value}
+
+  defp to_number(value) when is_binary(value) do
+    case Float.parse(String.trim(value)) do
+      {n, ""} -> {:ok, n}
+      _invalid -> :error
+    end
+  end
+
+  defp to_number(_other), do: :error
 
   defp resolve(%{field_type: type}, _raw) when type in [:heading, :divider], do: :skip
 

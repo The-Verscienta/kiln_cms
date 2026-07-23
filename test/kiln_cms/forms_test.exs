@@ -347,6 +347,114 @@ defmodule KilnCMS.FormsTest do
     end
   end
 
+  # --- conditional logic --------------------------------------------------------
+
+  defp conditional_form! do
+    form!([
+      %{name: "plan", label: "Plan", field_type: :radio, options: ["basic", "pro"]},
+      %{
+        name: "company",
+        label: "Company",
+        field_type: :string,
+        required: true,
+        conditions: %{
+          "logic" => "all",
+          "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+        }
+      }
+    ])
+  end
+
+  test "an invisible field skips required and discards a smuggled value" do
+    form = conditional_form!()
+
+    # plan=basic hides company: required doesn't apply, and a submitted value
+    # for it is dropped.
+    assert {:ok, submission} =
+             Forms.submit(form, %{"plan" => "basic", "company" => "Evil Corp"})
+
+    assert submission.data == %{"plan" => "basic"}
+  end
+
+  test "a visible conditional field enforces required" do
+    form = conditional_form!()
+
+    assert {:error, %{"company" => "is required"}} = Forms.submit(form, %{"plan" => "pro"})
+
+    assert {:ok, submission} =
+             Forms.submit(form, %{"plan" => "pro", "company" => "ACME"})
+
+    assert submission.data == %{"plan" => "pro", "company" => "ACME"}
+  end
+
+  test "any-logic, contains-on-lists and numeric operators" do
+    form =
+      form!([
+        %{name: "colors", label: "Colors", field_type: :checkboxes, options: ["red", "blue"]},
+        %{name: "guests", label: "Guests", field_type: :integer},
+        %{
+          name: "reason",
+          label: "Reason",
+          field_type: :string,
+          conditions: %{
+            "logic" => "any",
+            "rules" => [
+              %{"field" => "colors", "operator" => "contains", "value" => "red"},
+              %{"field" => "guests", "operator" => "gt", "value" => "5"}
+            ]
+          }
+        }
+      ])
+
+    # Neither rule matches — reason is dropped.
+    assert {:ok, s1} =
+             Forms.submit(form, %{"colors" => ["blue"], "guests" => "2", "reason" => "x"})
+
+    refute Map.has_key?(s1.data, "reason")
+
+    # The numeric rule matches — reason is kept.
+    assert {:ok, s2} =
+             Forms.submit(form, %{"colors" => ["blue"], "guests" => "9", "reason" => "party"})
+
+    assert s2.data["reason"] == "party"
+  end
+
+  test "incomplete or unknown-operator rules never hide a field" do
+    form =
+      form!([
+        %{name: "email", label: "Email", field_type: :email},
+        %{
+          name: "note",
+          label: "Note",
+          field_type: :string,
+          conditions: %{"logic" => "all", "rules" => [%{"field" => "", "operator" => "eq"}]}
+        }
+      ])
+
+    assert {:ok, submission} = Forms.submit(form, %{"note" => "kept"})
+    assert submission.data["note"] == "kept"
+  end
+
+  test "malformed conditions are rejected at write time" do
+    actor = admin()
+    form = CMS.create_form!(%{name: "Contact", slug: slug()}, actor: actor)
+
+    bad = [
+      %{"logic" => "sometimes", "rules" => []},
+      %{"logic" => "all", "rules" => "nope"},
+      %{"logic" => "all", "rules" => [%{"field" => "x", "operator" => "matches"}]},
+      %{"logic" => "all", "rules" => [], "extra" => true}
+    ]
+
+    for conditions <- bad do
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.create_form_field(
+                 %{form_id: form.id, name: "note", label: "Note", conditions: conditions},
+                 actor: actor
+               )
+    end
+  end
+
   test "checkbox list values render joined in the notification email" do
     form =
       form!(%{notify_email: "team@example.com"}, [

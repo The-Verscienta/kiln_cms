@@ -147,7 +147,14 @@ defmodule KilnCMSWeb.BlockComponents do
       </div>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
-        <div :for={field <- @form.fields} class={field_width_class(field)}>
+        <%!-- data-kiln-conditions drives /form-conditions.js (show/hide +
+              disable); the server re-checks the same rules on submit. --%>
+        <div
+          :for={field <- @form.fields}
+          class={field_width_class(field)}
+          data-kiln-field={field.name}
+          data-kiln-conditions={field.conditions != %{} && Jason.encode!(field.conditions)}
+        >
           <.public_form_field field={field} />
         </div>
       </div>

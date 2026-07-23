@@ -85,7 +85,8 @@ defmodule KilnCMSWeb.FormController do
                 placeholder: field.placeholder,
                 default_value: field.default_value,
                 width: field.width,
-                validation: field.validation
+                validation: field.validation,
+                conditions: field.conditions
               }
             end)
         })

@@ -84,7 +84,8 @@ defmodule KilnCMS.CMS.FormField do
       :placeholder,
       :default_value,
       :width,
-      :validation
+      :validation,
+      :conditions
     ]
 
     create :create, primary?: true
@@ -139,6 +140,9 @@ defmodule KilnCMS.CMS.FormField do
 
     # Validation-rule map: known keys, sane numbers, compilable pattern.
     validate KilnCMS.CMS.Validations.FieldRules
+
+    # Conditional-logic map: known shape, known operators.
+    validate KilnCMS.CMS.Validations.FieldConditions
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as its form.
@@ -198,6 +202,19 @@ defmodule KilnCMS.CMS.FormField do
     # "pattern" (anchored regex, must compile — see FieldRules),
     # "message" (custom error text overriding the rule defaults).
     attribute :validation, :map do
+      default %{}
+      allow_nil? false
+      public? true
+    end
+
+    # Conditional visibility ("smart logic"). String keys (JSONB):
+    # %{"logic" => "all" | "any",
+    #   "rules" => [%{"field" => name, "operator" => op, "value" => v}]}
+    # with operators eq/neq/contains/empty/not_empty/gt/lt. Empty map = always
+    # shown. Evaluated client-side (form-conditions.js) for UX and re-evaluated
+    # server-side in `KilnCMS.Forms` as the authority — a hidden field skips
+    # `required` and its submitted value is discarded.
+    attribute :conditions, :map do
       default %{}
       allow_nil? false
       public? true

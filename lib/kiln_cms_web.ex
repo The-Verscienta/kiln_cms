@@ -22,7 +22,8 @@ defmodule KilnCMSWeb do
   # `embed-frame.js` (iframe height reporter) and `bridge.js` (the visual-editing
   # overlay SDK, #355) are hand-written and live at `priv/static/`, outside the
   # gitignored `assets/` build output.
-  def static_paths, do: ~w(assets fonts images favicon.ico embed.js embed-frame.js bridge.js)
+  def static_paths,
+    do: ~w(assets fonts images favicon.ico embed.js embed-frame.js bridge.js form-conditions.js)
 
   def router do
     quote do

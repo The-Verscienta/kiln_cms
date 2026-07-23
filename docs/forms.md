@@ -25,6 +25,18 @@ and review submissions in the same builder.
   no IP, no user agent** (rate limiting uses the IP transiently). Admin-only
   to read or delete; deleting a form removes its submissions.
 
+## Conditional logic
+
+A field can be shown only when rules over *earlier* fields match
+(`conditions` map: `logic` all/any + rules of `field` / `operator` /
+`value`, operators `eq neq contains empty not_empty gt lt`; checkbox
+answers treat eq/contains as membership). `/form-conditions.js` (a
+standalone script shared by on-site pages and the embed) toggles visibility
+and disables hidden inputs; **the server re-evaluates the same rules on
+submit** — a hidden field skips `required` and its submitted value is
+discarded, so nothing can be smuggled through fields the visitor never saw.
+Incomplete rules (blank field, unknown operator) never hide a field.
+
 ## Templates
 
 The create flow offers "Blank form" or a built-in template (contact,

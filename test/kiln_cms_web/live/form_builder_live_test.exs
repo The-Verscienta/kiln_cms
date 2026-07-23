@@ -333,6 +333,119 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
            }
   end
 
+  test "enabling conditional logic seeds a blank rule; rule edits persist", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    {form, [_plan, note], lv, _html} =
+      builder(conn, admin, %{}, [
+        %{name: "plan", label: "Plan", field_type: :radio, options: ["basic", "pro"]},
+        %{name: "note", label: "Note", field_type: :string, position: 1}
+      ])
+
+    lv
+    |> element(~s(button[phx-click="select_field"][phx-value-id="#{note.id}"]))
+    |> render_click()
+
+    # Toggling the checkbox fires the settings form's phx-change with no rule
+    # rows yet — the builder seeds one blank rule.
+    lv
+    |> form("#field-settings-#{note.id}", %{
+      field: %{label: "Note", name: "note", field_type: "string", logic_enabled: "true"}
+    })
+    |> render_change()
+
+    seeded = form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "note"))
+
+    assert seeded.conditions == %{
+             "logic" => "all",
+             "rules" => [%{"field" => "", "operator" => "eq", "value" => ""}]
+           }
+
+    # Now the rule row renders — fill it in.
+    lv
+    |> form("#field-settings-#{note.id}", %{
+      field: %{
+        label: "Note",
+        name: "note",
+        field_type: "string",
+        logic_enabled: "true",
+        conditions: %{
+          logic: "any",
+          rules: %{"0" => %{field: "plan", operator: "eq", value: "pro"}}
+        }
+      }
+    })
+    |> render_change()
+
+    updated =
+      form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "note"))
+
+    assert updated.conditions == %{
+             "logic" => "any",
+             "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+           }
+
+    # Add + remove rule rows via the panel buttons.
+    lv |> element(~s(button[phx-click="logic_add_rule"])) |> render_click()
+
+    two_rules =
+      form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "note"))
+
+    assert length(two_rules.conditions["rules"]) == 2
+
+    lv
+    |> element(~s(button[phx-click="logic_remove_rule"][phx-value-index="1"]))
+    |> render_click()
+
+    one_rule =
+      form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "note"))
+
+    assert length(one_rule.conditions["rules"]) == 1
+
+    # Disabling clears the map.
+    lv
+    |> form("#field-settings-#{note.id}", %{
+      field: %{label: "Note", name: "note", field_type: "string", logic_enabled: "false"}
+    })
+    |> render_change()
+
+    cleared =
+      form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "note"))
+
+    assert cleared.conditions == %{}
+  end
+
+  test "the embed page carries conditions data and the conditions script", %{conn: conn} do
+    admin = authed_user(:admin)
+    form = CMS.create_form!(%{name: "Logic", slug: "fb-logic"}, actor: admin)
+
+    CMS.create_form_field!(
+      %{form_id: form.id, name: "plan", label: "Plan", field_type: :radio, options: ["a", "b"]},
+      actor: admin
+    )
+
+    CMS.create_form_field!(
+      %{
+        form_id: form.id,
+        name: "note",
+        label: "Note",
+        field_type: :string,
+        position: 1,
+        conditions: %{
+          "logic" => "all",
+          "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "b"}]
+        }
+      },
+      actor: admin
+    )
+
+    html = conn |> get("/forms/#{form.slug}/embed") |> html_response(200)
+
+    assert html =~ "data-kiln-conditions="
+    assert html =~ "form-conditions.js"
+    assert html =~ ~s(data-kiln-field="note")
+  end
+
   test "the public form renders the phase-2 field types", %{conn: conn} do
     admin = authed_user(:admin)
     form = CMS.create_form!(%{name: "Everything", slug: "fb-phase2"}, actor: admin)
