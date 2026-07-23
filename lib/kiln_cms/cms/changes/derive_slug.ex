@@ -19,14 +19,22 @@ defmodule KilnCMS.CMS.Changes.DeriveSlug do
   @impl true
   def change(changeset, _opts, _context) do
     with blank when blank in [nil, ""] <- Ash.Changeset.get_attribute(changeset, :slug),
-         title when is_binary(title) <- Ash.Changeset.get_attribute(changeset, :title),
-         base when base != "" <- KilnCMS.Slug.derive(title) do
+         base when base != "" <- KilnCMS.Slug.derive(derivation_source(changeset)) do
       slug = Slugs.ensure_unique(base, scope(changeset))
       Ash.Changeset.force_change_attribute(changeset, :slug, slug)
     else
       # Slug present, no title yet, or an unsluggable title ("!!!") — leave the
       # changeset alone and let the usual required/format validations speak.
       _ -> changeset
+    end
+  end
+
+  # SEO tie-in: the focus keyphrase (first entry of `seo_keywords`) beats the
+  # title as the derivation source — slug = focus keyphrase, Yoast-style.
+  defp derivation_source(changeset) do
+    case KilnCMS.Slug.focus_keyphrase(attribute_if_present(changeset, :seo_keywords)) do
+      "" -> Ash.Changeset.get_attribute(changeset, :title) || ""
+      keyphrase -> keyphrase
     end
   end
 

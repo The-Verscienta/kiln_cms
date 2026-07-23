@@ -136,6 +136,7 @@ defmodule KilnCMS.CMS.Content do
           :blocks,
           :seo_title,
           :seo_description,
+          :seo_keywords,
           :seo_image,
           :canonical_url,
           :locale,
@@ -1478,6 +1479,9 @@ defmodule KilnCMS.CMS.Content do
 
         attribute :seo_title, :string, public?: true
         attribute :seo_description, :string, public?: true
+        # Comma-separated keyphrases; the first is the focus keyphrase and
+        # drives slug auto-derivation (Yoast-style: slug = focus keyphrase).
+        attribute :seo_keywords, :string, public?: true
         # og:image URL and rel=canonical for SEO/social.
         attribute :seo_image, :string, public?: true
         attribute :canonical_url, :string, public?: true

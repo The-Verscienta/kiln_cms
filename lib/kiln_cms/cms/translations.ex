@@ -31,6 +31,7 @@ defmodule KilnCMS.CMS.Translations do
     :excerpt,
     :seo_title,
     :seo_description,
+    :seo_keywords,
     :seo_image,
     :audience,
     :custom_fields,

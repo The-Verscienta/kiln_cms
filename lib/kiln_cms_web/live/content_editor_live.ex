@@ -223,7 +223,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp slug_customized?(record) do
     slug = record.slug || ""
-    not (Regex.match?(~r/\Auntitled-\d+\z/, slug) or slug == Slug.derive(record.title || ""))
+
+    derived =
+      case Slug.focus_keyphrase(Map.get(record, :seo_keywords)) do
+        "" -> Slug.derive(record.title || "")
+        keyphrase -> Slug.derive(keyphrase)
+      end
+
+    # A dedupe suffix (`guide-kiln-2`) still counts as underived, so the slug
+    # keeps tracking the title/keyphrase across autosaves.
+    not (Regex.match?(~r/\Auntitled-\d+\z/, slug) or slug == derived or
+           String.replace(slug, ~r/-\d+\z/, "") == derived)
   end
 
   # Keep the slug tracking the title until the author pins it by typing in the
@@ -234,18 +244,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
       target == ["form", "slug"] ->
         {params, assign(socket, :slug_customized?, String.trim(params["slug"] || "") != "")}
 
-      target == ["form", "title"] and not socket.assigns.slug_customized? ->
-        {Map.put(params, "slug", derive_unique_slug(socket, params["title"] || "")), socket}
+      target in [["form", "title"], ["form", "seo_keywords"]] and
+          not socket.assigns.slug_customized? ->
+        {Map.put(params, "slug", derive_unique_slug(socket, slug_source(params))), socket}
 
       true ->
         {params, socket}
     end
   end
 
+  # SEO tie-in: the focus keyphrase (first entry of the keywords field) beats
+  # the title as the derivation source, mirroring `DeriveSlug`.
+  defp slug_source(params) do
+    case Slug.focus_keyphrase(params["seo_keywords"]) do
+      "" -> params["title"] || ""
+      keyphrase -> keyphrase
+    end
+  end
+
   # Derivation + pathauto-style dedupe, so the slug shown live is the one that
   # will actually save ("guide-kiln-2" when "guide-kiln" is taken).
-  defp derive_unique_slug(socket, title) do
-    case Slug.derive(title) do
+  defp derive_unique_slug(socket, source) do
+    case Slug.derive(source) do
       "" -> ""
       base -> KilnCMS.CMS.Slugs.ensure_unique(base, slug_scope(socket))
     end
@@ -2771,6 +2791,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {field_attrs("seo_description")}
                   />
                   <.field_cursors field="seo_description" cursors={@cursors} />
+                </div>
+                <div class={["relative", lock_ring(@locked_fields, "seo_keywords")]}>
+                  <.input
+                    field={@form[:seo_keywords]}
+                    label={gettext("SEO keywords")}
+                    readonly={field_locked?(@locked_fields, "seo_keywords")}
+                    {field_attrs("seo_keywords")}
+                  />
+                  <p class="mt-1 text-xs text-base-content/60">
+                    {gettext("Comma-separated; the first keyphrase drives the auto-derived slug.")}
+                  </p>
+                  <.field_cursors field="seo_keywords" cursors={@cursors} />
                 </div>
                 <div class={["relative", lock_ring(@locked_fields, "seo_image")]}>
                   <.input
