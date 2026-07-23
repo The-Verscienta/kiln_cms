@@ -38,7 +38,14 @@ mix ecto.migrate --migrations-path priv/repo/migrations \
                  --migrations-path projects/acupuncture/priv/repo/migrations
 ```
 
-A deployment image does the same at build time, before `mix compile`:
+A deployment image does the same at build time via the core Dockerfile's
+`PROJECT` build arg — activation and the priv merge in one flag:
+
+```bash
+docker build --build-arg PROJECT=acupuncture .
+```
+
+Equivalent manual COPY steps, for a custom Dockerfile:
 
 ```dockerfile
 COPY projects/acupuncture/project.exs config/project.exs
