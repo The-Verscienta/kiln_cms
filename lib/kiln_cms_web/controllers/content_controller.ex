@@ -36,7 +36,7 @@ defmodule KilnCMSWeb.ContentController do
            payload(fetch, locale, ct, org_id)
          end) do
       nil ->
-        not_found(conn)
+        follow_redirect_or_404(conn, "/" <> slug)
 
       payload ->
         track_view("page", payload.record.id, payload.record.org_id)
@@ -61,7 +61,7 @@ defmodule KilnCMSWeb.ContentController do
            payload(fetch, locale, ct, org_id)
          end) do
       nil ->
-        not_found(conn)
+        follow_redirect_or_404(conn, "/blog/" <> slug)
 
       payload ->
         track_view("post", payload.record.id, payload.record.org_id)
@@ -90,7 +90,22 @@ defmodule KilnCMSWeb.ContentController do
       track_view(to_string(ct.type), payload.record.id, payload.record.org_id)
       render_content(conn, :show, payload, ct)
     else
-      _ -> not_found(conn)
+      _ -> follow_redirect_or_404(conn, "/" <> type <> "/" <> slug)
+    end
+  end
+
+  # Retired URL? A published slug rename leaves a `CMS.Redirect` behind — 301
+  # to the record's current path so inbound links and SEO equity survive.
+  # Resolution is live (no chains); anything unresolvable 404s as before.
+  defp follow_redirect_or_404(conn, path) do
+    case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
+      nil ->
+        not_found(conn)
+
+      to ->
+        conn
+        |> put_status(:moved_permanently)
+        |> redirect(to: to)
     end
   end
 

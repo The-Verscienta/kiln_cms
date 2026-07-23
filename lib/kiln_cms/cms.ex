@@ -243,6 +243,14 @@ defmodule KilnCMS.CMS do
       define :record_webhook_delivery_attempt, action: :record_attempt
     end
 
+    # 301 redirects from retired public paths (pathauto companion) — written
+    # automatically on published slug renames, resolved by delivery.
+    resource KilnCMS.CMS.Redirect do
+      define :create_redirect, action: :create
+      define :list_redirects, action: :read
+      define :destroy_redirect, action: :destroy
+    end
+
     # Editorial/authorization consent linked to content (#356).
     resource KilnCMS.CMS.Consent do
       define :record_consent, action: :record

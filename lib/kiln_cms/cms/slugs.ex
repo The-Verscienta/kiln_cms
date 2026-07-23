@@ -30,6 +30,30 @@ defmodule KilnCMS.CMS.Slugs do
   def storage_resource(%{resource: resource}), do: resource
 
   @doc """
+  The registry descriptor for a **stored** content record: dynamic entries
+  resolve through their `type_definition_id`, compiled records through their
+  resource's type marker. `nil` when the type is no longer registered.
+  """
+  @spec descriptor_for_record(struct()) :: ContentTypes.t() | nil
+  def descriptor_for_record(record) do
+    org_id = Map.get(record, :org_id) || KilnCMS.Accounts.default_org_id()
+
+    case record do
+      %{type_definition_id: definition_id} when not is_nil(definition_id) ->
+        Enum.find(
+          ContentTypes.dynamic_all(org_id),
+          &(&1.definition && &1.definition.id == definition_id)
+        )
+
+      %struct{} ->
+        case ContentTypes.type_name(struct) do
+          nil -> nil
+          type -> ContentTypes.get(type, org_id)
+        end
+    end
+  end
+
+  @doc """
   First URL segments a **root-served** slug may not use: segments the router
   owns plus every content type's public prefix (compiled + the org's dynamic
   types) — a root `/<slug>` equal to any of these is unreachable.
