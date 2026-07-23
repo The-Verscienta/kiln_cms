@@ -70,6 +70,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         org = socket.assigns.current_org
         record = fetch!(kind, id, actor, org)
         field_definitions = field_definitions(kind, actor, org)
+        content_type = ContentTypes.get!(kind, org_id(org))
 
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
@@ -82,7 +83,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:ok,
          socket
          |> assign(:kind, kind)
-         |> assign(:has_excerpt, ContentTypes.get!(kind, org_id(org)).excerpt?)
+         |> assign(:content_type, content_type)
+         |> assign(:has_excerpt, content_type.excerpt?)
          |> assign(:actor, actor)
          |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
          |> assign(:block_types, block_types())
@@ -233,12 +235,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {params, assign(socket, :slug_customized?, String.trim(params["slug"] || "") != "")}
 
       target == ["form", "title"] and not socket.assigns.slug_customized? ->
-        {Map.put(params, "slug", Slug.derive(params["title"] || "")), socket}
+        {Map.put(params, "slug", derive_unique_slug(socket, params["title"] || "")), socket}
 
       true ->
         {params, socket}
     end
   end
+
+  # Derivation + pathauto-style dedupe, so the slug shown live is the one that
+  # will actually save ("guide-kiln-2" when "guide-kiln" is taken).
+  defp derive_unique_slug(socket, title) do
+    case Slug.derive(title) do
+      "" -> ""
+      base -> KilnCMS.CMS.Slugs.ensure_unique(base, slug_scope(socket))
+    end
+  end
+
+  defp slug_scope(socket) do
+    ct = socket.assigns.content_type
+    record = socket.assigns.record
+
+    [
+      resource: KilnCMS.CMS.Slugs.storage_resource(ct),
+      root?: is_nil(ct.path_segment),
+      type_definition_id: ct.definition && ct.definition.id,
+      locale: record.locale,
+      org_id: Map.get(record, :org_id),
+      tenant: socket.assigns.current_org,
+      exclude_id: record.id
+    ]
+  end
+
+  # The full public path previewed under the slug field, live from the form.
+  defp live_public_path(form, content_type),
+    do: KilnCMS.CMS.Slugs.public_path(content_type, form[:slug].value)
 
   # Seed the socket-managed children of every stored `columns` block, keyed by the
   # block's stable id (#335). Children live in socket state (not bound form
@@ -2475,6 +2505,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   readonly={field_locked?(@locked_fields, "slug")}
                   {field_attrs("slug")}
                 />
+                <p class="mt-1 text-xs text-base-content/60">
+                  {gettext("URL:")}
+                  <a
+                    :if={@record.state == :published}
+                    href={live_public_path(@form, @content_type)}
+                    target="_blank"
+                    rel="noopener"
+                    class="link font-mono"
+                  >
+                    {live_public_path(@form, @content_type)}
+                  </a>
+                  <span :if={@record.state != :published} class="font-mono">
+                    {live_public_path(@form, @content_type)}
+                  </span>
+                </p>
                 <.field_cursors field="slug" cursors={@cursors} />
               </div>
             </div>

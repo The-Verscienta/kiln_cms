@@ -110,6 +110,42 @@ defmodule KilnCMS.CMS.ContentModelTest do
       admin = user(:admin)
       assert {:error, _} = CMS.create_page(%{title: "!!!"}, actor: admin)
     end
+
+    test "derived slugs dedupe pathauto-style instead of colliding" do
+      admin = user(:admin)
+
+      first = CMS.create_page!(%{title: "A Guide to the Kiln Dedupe"}, actor: admin)
+      second = CMS.create_page!(%{title: "The Guide to a Kiln Dedupe!"}, actor: admin)
+      third = CMS.create_page!(%{title: "Guide to the Kiln Dedupe"}, actor: admin)
+
+      assert first.slug == "guide-kiln-dedupe"
+      assert second.slug == "guide-kiln-dedupe-2"
+      assert third.slug == "guide-kiln-dedupe-3"
+    end
+
+    test "a derived root slug steps around section URLs (a page titled \"Blog\")" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "Blog"}, actor: admin)
+      assert page.slug == "blog-2"
+    end
+  end
+
+  describe "root URL collisions" do
+    test "an explicit page slug a section route would shadow is rejected" do
+      admin = user(:admin)
+
+      assert {:error, error} = CMS.create_page(%{title: "T", slug: "blog"}, actor: admin)
+      assert Exception.message(error) =~ "conflicts with the /blog section"
+
+      # Router-owned segments are equally off-limits at the root.
+      assert {:error, _} = CMS.create_page(%{title: "T", slug: "search"}, actor: admin)
+    end
+
+    test "a post may use a section word as its slug (it lives under /blog/)" do
+      admin = user(:admin)
+      post = CMS.create_post!(%{title: "T", slug: "blog"}, actor: admin)
+      assert post.slug == "blog"
+    end
   end
 
   describe "published calculation" do

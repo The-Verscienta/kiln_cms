@@ -203,6 +203,17 @@ defmodule KilnCMS.CMS.ContentTypes do
   def public_prefix(%{path_segment: segment}), do: "/" <> segment
 
   @doc """
+  Whether a content resource is served at the site root (`/<slug>`, no type
+  prefix). The dynamic entry tier has no content-type markers and is never
+  root-served (dynamic types always get a `path_segment`).
+  """
+  @spec root_served?(module()) :: boolean()
+  def root_served?(resource) do
+    Code.ensure_loaded?(resource) and function_exported?(resource, :__kiln_content_type__, 0) and
+      is_nil(path_segment(resource.__kiln_content_type__(), resource.__kiln_content_plural__()))
+  end
+
+  @doc """
   The **storage tier** atom for a content type (D17): dynamic types store under
   the generic `:entry` tier, compiled types under their own atom. Accepts a
   registry descriptor, a type atom, or a public type-name string; returns `nil`

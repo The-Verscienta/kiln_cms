@@ -44,8 +44,8 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
-  defp open_editor(conn, user, page) do
-    {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/content/page/#{page.id}")
+  defp open_editor(conn, user, page, type \\ "page") do
+    {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/content/#{type}/#{page.id}")
     lv
   end
 
@@ -99,6 +99,36 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
     change(lv, "slug", %{"title" => "Pinned", "slug" => ""})
     change(lv, "title", %{"title" => "Fresh Start for the Draft", "slug" => ""})
     assert slug_value(lv) == "fresh-start-draft"
+  end
+
+  test "live derivation dedupes against an existing record", %{conn: conn} do
+    editor = authed_user(:editor)
+    CMS.create_page!(%{title: "Existing", slug: "guide-kiln"}, actor: editor)
+    n = System.unique_integer([:positive])
+    page = CMS.create_page!(%{title: "Untitled page", slug: "untitled-#{n}"}, actor: editor)
+    lv = open_editor(conn, editor, page)
+
+    change(lv, "title", %{"title" => "A Guide to the Kiln", "slug" => "untitled-#{n}"})
+    assert slug_value(lv) == "guide-kiln-2"
+  end
+
+  test "the full public URL is previewed under the slug field", %{conn: conn} do
+    editor = authed_user(:editor)
+    slug = "url-preview-#{System.unique_integer([:positive])}"
+    post = CMS.create_post!(%{title: "Post", slug: slug}, actor: editor)
+    lv = open_editor(conn, editor, post, "post")
+
+    assert render(lv) =~ "/blog/#{slug}"
+  end
+
+  test "published content links its live URL", %{conn: conn} do
+    admin = authed_user(:admin)
+    slug = "live-link-#{System.unique_integer([:positive])}"
+    page = CMS.create_page!(%{title: "Live", slug: slug}, actor: admin)
+    published = CMS.publish_page!(page, %{}, actor: admin)
+    lv = open_editor(conn, admin, published)
+
+    assert has_element?(lv, ~s{a[href="/#{slug}"]})
   end
 
   test "a published record's slug never follows the title", %{conn: conn} do
