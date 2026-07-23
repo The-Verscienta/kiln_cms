@@ -164,15 +164,42 @@ defmodule KilnCMSWeb.BlockComponents do
 
   @doc """
   One admin-defined field of a public form: label, input (typed, with
-  placeholder/default), and help text. Extracted from `public_form/1` so the
-  form builder's canvas (`FormBuilderLive`) renders the exact same markup —
-  the preview can't drift from the public form.
+  placeholder/default and validation attributes mirroring the server rules),
+  and help text. Extracted from `public_form/1` so the form builder's canvas
+  (`FormBuilderLive`) renders the exact same markup — the preview can't drift
+  from the public form.
+
+  Head-per-shape: display-only types (`:heading`, `:divider`), the invisible
+  `:hidden`, and the general labeled-input clause. The struct is matched as a
+  plain map on purpose (see the `Kiln.Block` clean-compile gotcha).
   """
   attr :field, :map, required: true
 
+  def public_form_field(%{field: %{field_type: :heading}} = assigns) do
+    ~H"""
+    <h3 class="text-lg font-semibold">{@field.label}</h3>
+    <p :if={@field.help_text} class="mt-1 text-sm text-base-content/70">{@field.help_text}</p>
+    """
+  end
+
+  def public_form_field(%{field: %{field_type: :divider}} = assigns) do
+    ~H"""
+    <hr class="border-base-300" />
+    """
+  end
+
+  def public_form_field(%{field: %{field_type: :hidden}} = assigns) do
+    ~H"""
+    <input type="hidden" name={@field.name} value={@field.default_value} />
+    """
+  end
+
   def public_form_field(assigns) do
     ~H"""
-    <label :if={@field.field_type != :boolean} class="mb-1 block text-sm font-medium">
+    <label
+      :if={@field.field_type not in [:boolean, :consent]}
+      class="mb-1 block text-sm font-medium"
+    >
       {@field.label}
       <span :if={@field.required} aria-hidden="true" class="text-error">*</span>
     </label>
@@ -183,6 +210,8 @@ defmodule KilnCMSWeb.BlockComponents do
           name={@field.name}
           required={@field.required}
           placeholder={@field.placeholder}
+          minlength={@field.validation["min_length"]}
+          maxlength={@field.validation["max_length"]}
           class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
         >{@field.default_value}</textarea>
       <% :select -> %>
@@ -196,13 +225,47 @@ defmodule KilnCMSWeb.BlockComponents do
             {opt}
           </option>
         </select>
-      <% :boolean -> %>
+      <% :radio -> %>
+        <div class="space-y-1">
+          <label :for={opt <- @field.options} class="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name={@field.name}
+              value={opt}
+              required={@field.required}
+              checked={opt == @field.default_value}
+            />
+            {opt}
+          </label>
+        </div>
+      <% :checkboxes -> %>
+        <div class="space-y-1">
+          <label :for={opt <- @field.options} class="flex items-center gap-2 text-sm">
+            <input type="checkbox" name={@field.name <> "[]"} value={opt} />
+            {opt}
+          </label>
+        </div>
+      <% :rating -> %>
+        <div class="flex gap-4">
+          <label :for={n <- 1..5} class="flex items-center gap-1 text-sm">
+            <input
+              type="radio"
+              name={@field.name}
+              value={n}
+              required={@field.required}
+              checked={to_string(n) == @field.default_value}
+            />
+            {n}
+          </label>
+        </div>
+      <% type when type in [:boolean, :consent] -> %>
         <label class="flex items-center gap-2 text-sm">
           <input type="hidden" name={@field.name} value="false" />
           <input
             type="checkbox"
             name={@field.name}
             value="true"
+            required={@field.field_type == :consent and @field.required}
             checked={@field.default_value == "true"}
           />
           <span class="font-medium">
@@ -217,6 +280,12 @@ defmodule KilnCMSWeb.BlockComponents do
           required={@field.required}
           placeholder={@field.placeholder}
           value={@field.default_value}
+          minlength={other not in [:integer, :number, :date] && @field.validation["min_length"]}
+          maxlength={other not in [:integer, :number, :date] && @field.validation["max_length"]}
+          min={other in [:integer, :number] && @field.validation["min"]}
+          max={other in [:integer, :number] && @field.validation["max"]}
+          pattern={other in [:string, :phone, :url] && @field.validation["pattern"]}
+          step={if other == :number, do: "any"}
           class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
         />
     <% end %>
@@ -235,7 +304,10 @@ defmodule KilnCMSWeb.BlockComponents do
   def field_width_class(_field), do: "sm:col-span-6"
 
   defp form_input_type(:email), do: "email"
+  defp form_input_type(:phone), do: "tel"
+  defp form_input_type(:url), do: "url"
   defp form_input_type(:integer), do: "number"
+  defp form_input_type(:number), do: "number"
   defp form_input_type(:date), do: "date"
   defp form_input_type(_), do: "text"
 

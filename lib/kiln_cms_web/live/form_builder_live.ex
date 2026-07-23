@@ -58,19 +58,56 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  # The palette: every field type with a friendly label + icon. A function
-  # (not an attribute) so gettext resolves per-request locale.
+  # The palette: every field type with a friendly label + icon, grouped the
+  # way WPForms groups its "Add Fields" panel. A function (not an attribute)
+  # so gettext resolves per-request locale.
   defp palette do
     [
-      %{type: :string, label: gettext("Single line text"), icon: "hero-pencil"},
-      %{type: :text, label: gettext("Paragraph text"), icon: "hero-bars-3-bottom-left"},
-      %{type: :email, label: gettext("Email"), icon: "hero-at-symbol"},
-      %{type: :integer, label: gettext("Number"), icon: "hero-hashtag"},
-      %{type: :boolean, label: gettext("Checkbox"), icon: "hero-check-circle"},
-      %{type: :date, label: gettext("Date"), icon: "hero-calendar"},
-      %{type: :select, label: gettext("Dropdown"), icon: "hero-chevron-up-down"}
+      %{
+        title: gettext("Standard"),
+        entries: [
+          %{type: :string, label: gettext("Single line text"), icon: "hero-pencil"},
+          %{type: :text, label: gettext("Paragraph text"), icon: "hero-bars-3-bottom-left"},
+          %{type: :email, label: gettext("Email"), icon: "hero-at-symbol"},
+          %{type: :phone, label: gettext("Phone"), icon: "hero-phone"},
+          %{type: :url, label: gettext("Website / URL"), icon: "hero-link"},
+          %{type: :integer, label: gettext("Number"), icon: "hero-hashtag"},
+          %{type: :number, label: gettext("Decimal number"), icon: "hero-calculator"},
+          %{type: :date, label: gettext("Date"), icon: "hero-calendar"}
+        ]
+      },
+      %{
+        title: gettext("Choices"),
+        entries: [
+          %{type: :select, label: gettext("Dropdown"), icon: "hero-chevron-up-down"},
+          %{type: :radio, label: gettext("Multiple choice"), icon: "hero-list-bullet"},
+          %{type: :checkboxes, label: gettext("Checkboxes"), icon: "hero-queue-list"},
+          %{type: :boolean, label: gettext("Checkbox"), icon: "hero-check-circle"},
+          %{type: :rating, label: gettext("Rating (1–5)"), icon: "hero-star"},
+          %{type: :consent, label: gettext("Consent"), icon: "hero-shield-check"}
+        ]
+      },
+      %{
+        title: gettext("Layout"),
+        entries: [
+          %{type: :heading, label: gettext("Heading"), icon: "hero-bars-3-center-left"},
+          %{type: :divider, label: gettext("Divider"), icon: "hero-minus"},
+          %{type: :hidden, label: gettext("Hidden"), icon: "hero-eye-slash"}
+        ]
+      }
     ]
   end
+
+  defp palette_entries, do: Enum.flat_map(palette(), & &1.entries)
+
+  # Which options-panel sections apply per type.
+  defp choice_type?(type), do: type in FormField.choice_types()
+  defp length_types, do: [:string, :text, :email, :phone, :url]
+  defp range_types, do: [:integer, :number]
+  defp pattern_types, do: [:string, :phone, :url]
+  defp placeholder_types, do: [:string, :text, :email, :phone, :url, :integer, :number]
+  defp no_required_types, do: [:heading, :divider, :hidden]
+  defp no_default_types, do: [:checkboxes, :heading, :divider, :consent]
 
   # --- tabs --------------------------------------------------------------------
 
@@ -86,7 +123,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   def handle_event("add_field", %{"type" => type}, socket) do
     fields = socket.assigns.fields
-    entry = Enum.find(palette(), &(Atom.to_string(&1.type) == type))
+    entry = Enum.find(palette_entries(), &(Atom.to_string(&1.type) == type))
 
     if entry do
       attrs = %{
@@ -95,7 +132,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
         label: entry.label,
         field_type: entry.type,
         options:
-          if(entry.type == :select, do: [gettext("Option 1"), gettext("Option 2")], else: []),
+          if(choice_type?(entry.type),
+            do: [gettext("Option 1"), gettext("Option 2")],
+            else: []
+          ),
         position: next_position(fields)
       }
 
@@ -208,6 +248,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
       placeholder: field.placeholder,
       default_value: field.default_value,
       width: field.width,
+      validation: field.validation,
       position: field.position
     }
 
@@ -273,12 +314,19 @@ defmodule KilnCMSWeb.FormBuilderLive do
     |> Enum.find(&(!MapSet.member?(taken, &1)))
   end
 
-  # Options-panel params → update attrs. Options arrive newline-separated (only
-  # while the textarea is rendered, i.e. the field is a select); switching a
-  # field *to* select seeds a starter option so it stays valid.
+  # Options-panel params → update attrs. Options arrive newline-separated
+  # (only while the textarea is rendered, i.e. the field is a choice type);
+  # switching a field *to* a choice type seeds starter options so it stays
+  # valid. Validation rules arrive as strings and are normalized to the typed
+  # map `KilnCMS.Forms` enforces (blank/unparsable entries drop the rule).
   defp field_params(params, field) do
-    params = Map.drop(params, ["id", "_target"])
+    params
+    |> Map.drop(["id", "_target"])
+    |> normalize_options(field)
+    |> normalize_validation()
+  end
 
+  defp normalize_options(params, field) do
     params =
       case Map.fetch(params, "options") do
         {:ok, raw} ->
@@ -292,13 +340,53 @@ defmodule KilnCMSWeb.FormBuilderLive do
           params
       end
 
-    if params["field_type"] == "select" and field.options == [] and
+    if params["field_type"] in ["select", "radio", "checkboxes"] and field.options == [] and
          params["options"] in [nil, []] do
       Map.put(params, "options", [gettext("Option 1"), gettext("Option 2")])
     else
       params
     end
   end
+
+  defp normalize_validation(%{"validation" => rules} = params) when is_map(rules) do
+    normalized =
+      rules
+      |> Enum.flat_map(fn {key, value} -> normalize_rule(key, String.trim(value)) end)
+      |> Map.new()
+
+    Map.put(params, "validation", normalized)
+  end
+
+  defp normalize_validation(params), do: params
+
+  defp normalize_rule(_key, ""), do: []
+
+  defp normalize_rule(key, value) when key in ["min_length", "max_length"] do
+    case Integer.parse(value) do
+      {n, ""} when n >= 0 -> [{key, n}]
+      _invalid -> []
+    end
+  end
+
+  defp normalize_rule(key, value) when key in ["min", "max"] do
+    case Integer.parse(value) do
+      {n, ""} ->
+        [{key, n}]
+
+      _not_integer ->
+        case Float.parse(value) do
+          {n, ""} -> [{key, n}]
+          _invalid -> []
+        end
+    end
+  end
+
+  defp normalize_rule(key, value), do: [{key, value}]
+
+  # Checkboxes store a list — join it; `to_string/1` would concatenate the
+  # entries as chardata ("ab" from ["a", "b"]).
+  defp display_value(value) when is_list(value), do: Enum.join(value, ", ")
+  defp display_value(value), do: to_string(value)
 
   defp error_message(%{errors: errors}) when is_list(errors) and errors != [] do
     errors
@@ -375,20 +463,22 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
         <div :if={@tab == :fields} class="grid gap-4 lg:grid-cols-[13rem_minmax(0,1fr)_19rem]">
           <%!-- Palette: click a type to append it to the form. --%>
-          <aside class="card card-pad h-fit space-y-1" aria-label={gettext("Add a field")}>
-            <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
-              {gettext("Add a field")}
-            </h2>
-            <button
-              :for={entry <- palette()}
-              type="button"
-              phx-click="add_field"
-              phx-value-type={entry.type}
-              class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-200"
-            >
-              <.icon name={entry.icon} class="size-4 text-base-content/60" />
-              {entry.label}
-            </button>
+          <aside class="card card-pad h-fit space-y-3" aria-label={gettext("Add a field")}>
+            <div :for={group <- palette()} class="space-y-1">
+              <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                {group.title}
+              </h2>
+              <button
+                :for={entry <- group.entries}
+                type="button"
+                phx-click="add_field"
+                phx-value-type={entry.type}
+                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-200"
+              >
+                <.icon name={entry.icon} class="size-4 text-base-content/60" />
+                {entry.label}
+              </button>
+            </div>
           </aside>
 
           <%!-- Canvas: the real public-form markup, one selectable card per field. --%>
@@ -457,7 +547,21 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   </button>
                 </div>
 
-                <fieldset disabled class="pointer-events-none select-none">
+                <%!-- A hidden input renders nothing — show a chip so it stays
+                      visible (and selectable) on the canvas. --%>
+                <div
+                  :if={field.field_type == :hidden}
+                  class="flex items-center gap-1.5 text-xs text-base-content/60"
+                >
+                  <.icon name="hero-eye-slash" class="size-3.5" />
+                  {gettext("Hidden field")} <code>{field.name}</code>
+                </div>
+
+                <fieldset
+                  :if={field.field_type != :hidden}
+                  disabled
+                  class="pointer-events-none select-none"
+                >
                   <.public_form_field field={field} />
                 </fieldset>
               </div>
@@ -504,7 +608,11 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 <input type="hidden" name="field[id]" value={selected.id} />
 
                 <div>
-                  <label for="fs-label" class="font-medium">{gettext("Label")}</label>
+                  <label for="fs-label" class="font-medium">
+                    {if selected.field_type == :heading,
+                      do: gettext("Heading text"),
+                      else: gettext("Label")}
+                  </label>
                   <input
                     id="fs-label"
                     name="field[label]"
@@ -514,7 +622,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   />
                 </div>
 
-                <div>
+                <div :if={selected.field_type not in [:heading, :divider]}>
                   <label for="fs-name" class="font-medium">{gettext("Machine name")}</label>
                   <input
                     id="fs-name"
@@ -533,7 +641,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <label for="fs-type" class="font-medium">{gettext("Type")}</label>
                     <select id="fs-type" name="field[field_type]" class="field-select mt-1">
                       <option
-                        :for={entry <- palette()}
+                        :for={entry <- palette_entries()}
                         value={entry.type}
                         selected={entry.type == selected.field_type}
                       >
@@ -557,7 +665,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   </div>
                 </div>
 
-                <label class="flex items-center gap-2">
+                <label
+                  :if={selected.field_type not in no_required_types()}
+                  class="flex items-center gap-2"
+                >
                   <input type="hidden" name="field[required]" value="false" />
                   <input
                     type="checkbox"
@@ -566,10 +677,12 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     checked={selected.required}
                     class="size-4 rounded border border-base-content/30 accent-primary"
                   />
-                  {gettext("Required")}
+                  {if selected.field_type == :consent,
+                    do: gettext("Required (must be accepted to submit)"),
+                    else: gettext("Required")}
                 </label>
 
-                <div :if={selected.field_type == :select}>
+                <div :if={choice_type?(selected.field_type)}>
                   <label for="fs-options" class="font-medium">
                     {gettext("Options — one per line")}
                   </label>
@@ -582,7 +695,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   >{Enum.join(selected.options, "\n")}</textarea>
                 </div>
 
-                <div :if={selected.field_type not in [:boolean, :select]}>
+                <div :if={selected.field_type in placeholder_types()}>
                   <label for="fs-placeholder" class="font-medium">{gettext("Placeholder")}</label>
                   <input
                     id="fs-placeholder"
@@ -593,8 +706,12 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   />
                 </div>
 
-                <div>
-                  <label for="fs-default" class="font-medium">{gettext("Default value")}</label>
+                <div :if={selected.field_type not in no_default_types()}>
+                  <label for="fs-default" class="font-medium">
+                    {if selected.field_type == :hidden,
+                      do: gettext("Value"),
+                      else: gettext("Default value")}
+                  </label>
                   <input
                     id="fs-default"
                     name="field[default_value]"
@@ -605,9 +722,12 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   <p :if={selected.field_type == :boolean} class="mt-1 text-xs text-base-content/60">
                     {gettext("Use \"true\" to pre-check the box.")}
                   </p>
+                  <p :if={selected.field_type == :rating} class="mt-1 text-xs text-base-content/60">
+                    {gettext("A number from 1 to 5.")}
+                  </p>
                 </div>
 
-                <div>
+                <div :if={selected.field_type != :divider}>
                   <label for="fs-help" class="font-medium">{gettext("Help text")}</label>
                   <input
                     id="fs-help"
@@ -616,6 +736,99 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     phx-debounce="300"
                     class="field-input mt-1"
                   />
+                </div>
+
+                <div
+                  :if={
+                    selected.field_type in length_types() or
+                      selected.field_type in range_types()
+                  }
+                  class="space-y-3 border-t border-base-content/10 pt-3"
+                >
+                  <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                    {gettext("Validation")}
+                  </h3>
+
+                  <div :if={selected.field_type in length_types()} class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="fs-min-length" class="font-medium">{gettext("Min length")}</label>
+                      <input
+                        id="fs-min-length"
+                        type="number"
+                        min="0"
+                        name="field[validation][min_length]"
+                        value={selected.validation["min_length"]}
+                        phx-debounce="300"
+                        class="field-input mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label for="fs-max-length" class="font-medium">{gettext("Max length")}</label>
+                      <input
+                        id="fs-max-length"
+                        type="number"
+                        min="0"
+                        name="field[validation][max_length]"
+                        value={selected.validation["max_length"]}
+                        phx-debounce="300"
+                        class="field-input mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div :if={selected.field_type in range_types()} class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="fs-min" class="font-medium">{gettext("Min value")}</label>
+                      <input
+                        id="fs-min"
+                        type="number"
+                        step="any"
+                        name="field[validation][min]"
+                        value={selected.validation["min"]}
+                        phx-debounce="300"
+                        class="field-input mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label for="fs-max" class="font-medium">{gettext("Max value")}</label>
+                      <input
+                        id="fs-max"
+                        type="number"
+                        step="any"
+                        name="field[validation][max]"
+                        value={selected.validation["max"]}
+                        phx-debounce="300"
+                        class="field-input mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div :if={selected.field_type in pattern_types()}>
+                    <label for="fs-pattern" class="font-medium">{gettext("Pattern (regex)")}</label>
+                    <input
+                      id="fs-pattern"
+                      name="field[validation][pattern]"
+                      value={selected.validation["pattern"]}
+                      phx-debounce="500"
+                      class="field-input mt-1 font-mono text-xs"
+                    />
+                    <p class="mt-1 text-xs text-base-content/60">
+                      {gettext("Matched against the whole value.")}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label for="fs-message" class="font-medium">
+                      {gettext("Custom error message")}
+                    </label>
+                    <input
+                      id="fs-message"
+                      name="field[validation][message]"
+                      value={selected.validation["message"]}
+                      phx-debounce="300"
+                      class="field-input mt-1"
+                    />
+                  </div>
                 </div>
               </form>
             </div>
@@ -781,7 +994,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
               <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
                 <div :for={{key, value} <- submission.data} class="flex gap-2">
                   <dt class="font-medium">{key}</dt>
-                  <dd class="min-w-0 break-words text-base-content/80">{to_string(value)}</dd>
+                  <dd class="min-w-0 break-words text-base-content/80">{display_value(value)}</dd>
                 </div>
               </dl>
             </li>

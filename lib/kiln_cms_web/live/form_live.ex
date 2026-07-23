@@ -75,6 +75,7 @@ defmodule KilnCMSWeb.FormLive do
             placeholder: field.placeholder,
             default_value: field.default_value,
             width: field.width,
+            validation: field.validation,
             position: field.position
           },
           opts

@@ -274,6 +274,112 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert CMS.recent_form_submissions!(form.id, authorize?: false) == []
   end
 
+  test "adding a radio field seeds starter options too", %{conn: conn} do
+    {form, [], lv, _html} = builder(conn, authed_user(:admin))
+
+    lv
+    |> element(~s(button[phx-click="add_field"][phx-value-type="radio"]))
+    |> render_click()
+
+    assert [field] = CMS.form_fields_for!(form.id, authorize?: false)
+    assert field.field_type == :radio
+    assert length(field.options) == 2
+  end
+
+  test "a hidden field shows as a chip on the canvas", %{conn: conn} do
+    {_form, [field], _lv, html} =
+      builder(conn, authed_user(:admin), %{}, [
+        %{name: "source", label: "Source", field_type: :hidden, default_value: "landing-a"}
+      ])
+
+    assert html =~ "Hidden field"
+    assert html =~ field.name
+  end
+
+  test "the validation section stores typed rules", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    {form, [field], lv, _html} =
+      builder(conn, admin, %{}, [
+        %{name: "code", label: "Code", field_type: :string}
+      ])
+
+    lv
+    |> element(~s(button[phx-click="select_field"][phx-value-id="#{field.id}"]))
+    |> render_click()
+
+    lv
+    |> form("#field-settings-#{field.id}", %{
+      field: %{
+        label: "Code",
+        name: "code",
+        field_type: "string",
+        validation: %{
+          min_length: "3",
+          max_length: "",
+          pattern: "[A-Z]+",
+          message: "letters only"
+        }
+      }
+    })
+    |> render_change()
+
+    updated = form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
+
+    assert updated.validation == %{
+             "min_length" => 3,
+             "pattern" => "[A-Z]+",
+             "message" => "letters only"
+           }
+  end
+
+  test "the public form renders the phase-2 field types", %{conn: conn} do
+    admin = authed_user(:admin)
+    form = CMS.create_form!(%{name: "Everything", slug: "fb-phase2"}, actor: admin)
+
+    fields = [
+      %{name: "intro", label: "About you", field_type: :heading},
+      %{name: "sep", label: "Divider", field_type: :divider},
+      %{name: "phone", label: "Phone", field_type: :phone},
+      %{name: "site", label: "Site", field_type: :url},
+      %{name: "amount", label: "Amount", field_type: :number},
+      %{name: "plan", label: "Plan", field_type: :radio, options: ["basic", "pro"]},
+      %{name: "colors", label: "Colors", field_type: :checkboxes, options: ["red", "blue"]},
+      %{name: "stars", label: "Stars", field_type: :rating},
+      %{name: "gdpr", label: "I agree", field_type: :consent, required: true},
+      %{name: "source", label: "Source", field_type: :hidden, default_value: "landing-a"},
+      %{
+        name: "code",
+        label: "Code",
+        field_type: :string,
+        validation: %{"min_length" => 3, "max_length" => 8, "pattern" => "[A-Z]+"}
+      }
+    ]
+
+    for {attrs, position} <- Enum.with_index(fields) do
+      CMS.create_form_field!(
+        Map.merge(%{form_id: form.id, position: position}, attrs),
+        actor: admin
+      )
+    end
+
+    html = conn |> get("/forms/#{form.slug}/embed") |> html_response(200)
+
+    assert html =~ "<h3"
+    assert html =~ "About you"
+    assert html =~ "<hr"
+    assert html =~ ~s(type="tel")
+    assert html =~ ~s(type="url")
+    assert html =~ ~s(step="any")
+    assert html =~ ~s(type="radio" name="plan" value="basic")
+    assert html =~ ~s(name="colors[]")
+    assert html =~ ~s(name="stars" value="5")
+    assert html =~ ~s(type="hidden" name="source" value="landing-a")
+    assert html =~ ~s(minlength="3")
+    assert html =~ ~s(maxlength="8")
+    assert html =~ ~s(pattern="[A-Z]+")
+  end
+
   test "the public form renders placeholder, default, width and submit label", %{conn: conn} do
     admin = authed_user(:admin)
 

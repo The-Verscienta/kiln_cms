@@ -14,12 +14,45 @@ defmodule KilnCMS.CMS.FormField do
     extensions: [AshAdmin.Resource]
 
   # Submission value types — JSON-native, public-input-friendly (no media /
-  # reference pickers on anonymous forms).
-  @field_types [:string, :text, :email, :integer, :boolean, :date, :select]
+  # reference pickers on anonymous forms). :heading and :divider are
+  # display-only (no submission value); :hidden carries its default_value.
+  @field_types [
+    :string,
+    :text,
+    :email,
+    :phone,
+    :url,
+    :integer,
+    :number,
+    :date,
+    :select,
+    :radio,
+    :checkboxes,
+    :boolean,
+    :rating,
+    :consent,
+    :heading,
+    :divider,
+    :hidden
+  ]
+
+  # Types whose value is one/many of the admin-listed `options`.
+  @choice_types [:select, :radio, :checkboxes]
+
+  # Types that never produce a submission value.
+  @display_types [:heading, :divider]
 
   @doc "The value types a form field may declare."
   @spec field_types() :: [atom()]
   def field_types, do: @field_types
+
+  @doc "Types whose value comes from the admin-listed `options`."
+  @spec choice_types() :: [atom()]
+  def choice_types, do: @choice_types
+
+  @doc "Display-only types (no submission value)."
+  @spec display_types() :: [atom()]
+  def display_types, do: @display_types
 
   admin do
     resource_group :content
@@ -50,7 +83,8 @@ defmodule KilnCMS.CMS.FormField do
       :position,
       :placeholder,
       :default_value,
-      :width
+      :width,
+      :validation
     ]
 
     create :create, primary?: true
@@ -100,8 +134,11 @@ defmodule KilnCMS.CMS.FormField do
       message "must be lowercase letters, digits and underscores, starting with a letter"
     end
 
-    # A :select field is meaningless without choices.
+    # A choice field (select/radio/checkboxes) is meaningless without choices.
     validate KilnCMS.CMS.Validations.SelectOptions
+
+    # Validation-rule map: known keys, sane numbers, compilable pattern.
+    validate KilnCMS.CMS.Validations.FieldRules
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as its form.
@@ -151,6 +188,17 @@ defmodule KilnCMS.CMS.FormField do
     attribute :width, :atom do
       constraints one_of: [:full, :half, :third]
       default :full
+      allow_nil? false
+      public? true
+    end
+
+    # Per-field validation rules, enforced server-side by `KilnCMS.Forms` and
+    # mirrored as HTML attributes client-side. String keys (JSONB):
+    # "min_length"/"max_length" (strings), "min"/"max" (numbers),
+    # "pattern" (anchored regex, must compile — see FieldRules),
+    # "message" (custom error text overriding the rule defaults).
+    attribute :validation, :map do
+      default %{}
       allow_nil? false
       public? true
     end

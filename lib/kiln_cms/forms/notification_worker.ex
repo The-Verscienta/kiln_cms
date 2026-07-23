@@ -50,6 +50,10 @@ defmodule KilnCMS.Forms.NotificationWorker do
     """
   end
 
+  # Checkboxes store a list — join the (escaped) entries; `to_string/1` would
+  # concatenate them as chardata ("ab" from ["a", "b"]).
+  defp h(value) when is_list(value), do: Enum.map_join(value, ", ", &h/1)
+
   defp h(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end

@@ -8,10 +8,19 @@ and review submissions in the same builder.
 ## Model
 
 - `Form` — name, public `slug`, description, `active` flag, success message,
-  optional `notify_email`.
-- `FormField` — machine name (the key in each submission), label, type
-  (`string`, `text`, `email`, `integer`, `boolean`, `date`, `select`),
-  required flag, select options, help text, order.
+  optional `notify_email`, submit-button label.
+- `FormField` — machine name (the key in each submission), label, type,
+  required flag, choice options, help text, placeholder, default value,
+  width (full/half/third on a 6-column grid), validation rules, order.
+  Types: `string`, `text`, `email`, `phone`, `url`, `integer`, `number`
+  (decimal), `date`, `select`, `radio`, `checkboxes` (multi — stored as a
+  list), `boolean`, `rating` (1–5), `consent` (when required, must be
+  accepted), plus display-only `heading` / `divider` and `hidden` (submits
+  its configured value).
+  Validation rules (`validation` map, enforced server-side and mirrored as
+  HTML attributes): `min_length`/`max_length`, `min`/`max`, `pattern`
+  (anchored regex, matched with a ReDoS timeout guard), `message` (custom
+  error text).
 - `FormSubmission` — the coerced `data` map plus a timestamp. **Privacy-first:
   no IP, no user agent** (rate limiting uses the IP transiently). Admin-only
   to read or delete; deleting a form removes its submissions.

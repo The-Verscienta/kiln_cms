@@ -120,17 +120,37 @@ defmodule KilnCMS.Forms do
     if errors == %{}, do: {:ok, data}, else: {:error, errors}
   end
 
+  defp resolve(%{field_type: type}, _raw) when type in [:heading, :divider], do: :skip
+
+  # A required consent isn't satisfied by any value — only by true (the
+  # rendered checkbox posts "false" via its hidden twin when unchecked).
+  defp resolve(%{field_type: :consent} = field, raw) do
+    case {field.required, cast(field, raw)} do
+      {true, {:ok, true}} -> {:ok, true}
+      {true, _not_accepted} -> {:error, "must be accepted"}
+      {false, _any} -> if blank?(raw), do: :skip, else: cast(field, raw)
+    end
+  end
+
   defp resolve(field, raw) do
     cond do
       blank?(raw) and field.required -> {:error, "is required"}
       blank?(raw) -> :skip
-      true -> cast(field, raw)
+      true -> validated_cast(field, raw)
     end
   end
 
+  defp blank?([]), do: true
   defp blank?(value), do: value in [nil, ""] or (is_binary(value) and String.trim(value) == "")
 
-  defp cast(%{field_type: type}, value) when type in [:string, :text] do
+  defp validated_cast(field, raw) do
+    with {:ok, value} <- cast(field, raw),
+         :ok <- apply_rules(field, value) do
+      {:ok, value}
+    end
+  end
+
+  defp cast(%{field_type: type}, value) when type in [:string, :text, :hidden] do
     {:ok, value |> to_string() |> String.trim()}
   end
 
@@ -140,6 +160,28 @@ defmodule KilnCMS.Forms do
     if Regex.match?(~r/\A[^\s@]+@[^\s@]+\.[^\s@]+\z/, str),
       do: {:ok, str},
       else: {:error, "must be an email address"}
+  end
+
+  defp cast(%{field_type: :phone}, value) do
+    str = value |> to_string() |> String.trim()
+    digits = String.replace(str, ~r/[\s().\-]/, "")
+
+    if Regex.match?(~r/\A\+?\d{5,20}\z/, digits),
+      do: {:ok, str},
+      else: {:error, "must be a phone number"}
+  end
+
+  defp cast(%{field_type: :url}, value) do
+    str = value |> to_string() |> String.trim()
+
+    case URI.new(str) do
+      {:ok, %URI{scheme: scheme, host: host}}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        {:ok, str}
+
+      _invalid ->
+        {:error, "must be a web address (https://…)"}
+    end
   end
 
   defp cast(%{field_type: :integer}, value) do
@@ -155,7 +197,27 @@ defmodule KilnCMS.Forms do
     end
   end
 
-  defp cast(%{field_type: :boolean}, value) do
+  defp cast(%{field_type: :number}, value) do
+    case value do
+      v when is_number(v) ->
+        {:ok, v}
+
+      v ->
+        case Float.parse(to_string(v)) do
+          {n, ""} -> {:ok, n}
+          _ -> {:error, "must be a number"}
+        end
+    end
+  end
+
+  defp cast(%{field_type: :rating}, value) do
+    case Integer.parse(to_string(value)) do
+      {n, ""} when n in 1..5 -> {:ok, n}
+      _ -> {:error, "must be a rating from 1 to 5"}
+    end
+  end
+
+  defp cast(%{field_type: type}, value) when type in [:boolean, :consent] do
     case value do
       v when is_boolean(v) -> {:ok, v}
       v when v in ["true", "1", "on"] -> {:ok, true}
@@ -171,8 +233,73 @@ defmodule KilnCMS.Forms do
     end
   end
 
-  defp cast(%{field_type: :select, options: options}, value) do
+  defp cast(%{field_type: type, options: options}, value) when type in [:select, :radio] do
     str = value |> to_string() |> String.trim()
     if str in options, do: {:ok, str}, else: {:error, "is not one of the allowed options"}
+  end
+
+  # Multi-choice: the browser posts `name[]` inputs as a list (a lone string
+  # still counts as one choice). Every picked value must be a listed option.
+  defp cast(%{field_type: :checkboxes, options: options}, value) do
+    picked = value |> List.wrap() |> Enum.map(&(&1 |> to_string() |> String.trim()))
+
+    if Enum.all?(picked, &(&1 in options)),
+      do: {:ok, picked},
+      else: {:error, "includes a value that is not one of the allowed options"}
+  end
+
+  # --- validation rules ---------------------------------------------------------
+
+  # `field.validation` rules, enforced after a successful cast. Write-time
+  # checking (Validations.FieldRules) keeps the map trustworthy; anything
+  # malformed that slips through is skipped rather than blocking visitors.
+  defp apply_rules(%{validation: rules}, value) when is_map(rules) and rules != %{} do
+    message = rules["message"]
+
+    Enum.find_value(rules, :ok, fn rule ->
+      case broken_rule(rule, value) do
+        nil -> nil
+        default_message -> {:error, message || default_message}
+      end
+    end)
+  end
+
+  defp apply_rules(_field, _value), do: :ok
+
+  defp broken_rule({"min_length", min}, value) when is_integer(min) and is_binary(value) do
+    if String.length(value) < min, do: "must be at least #{min} characters"
+  end
+
+  defp broken_rule({"max_length", max}, value) when is_integer(max) and is_binary(value) do
+    if String.length(value) > max, do: "must be at most #{max} characters"
+  end
+
+  defp broken_rule({"min", min}, value) when is_number(min) and is_number(value) do
+    if value < min, do: "must be at least #{min}"
+  end
+
+  defp broken_rule({"max", max}, value) when is_number(max) and is_number(value) do
+    if value > max, do: "must be at most #{max}"
+  end
+
+  defp broken_rule({"pattern", pattern}, value) when is_binary(pattern) and is_binary(value) do
+    case Regex.compile("\\A(?:#{pattern})\\z") do
+      {:ok, regex} -> if !safe_match?(regex, value), do: "is not in the expected format"
+      _invalid -> nil
+    end
+  end
+
+  defp broken_rule(_rule, _value), do: nil
+
+  # Admin-authored pattern vs visitor-supplied value: bound the match so a
+  # pathological combination can't stall the request (ReDoS). On timeout the
+  # value is rejected — fail closed, the pattern exists to constrain input.
+  defp safe_match?(regex, value) do
+    task = Task.async(fn -> Regex.match?(regex, value) end)
+
+    case Task.yield(task, 100) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      _timeout -> false
+    end
   end
 end
