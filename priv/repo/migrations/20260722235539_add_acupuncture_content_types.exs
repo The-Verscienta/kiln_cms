@@ -17,7 +17,8 @@ defmodule KilnCMS.Repo.Migrations.AddAcupunctureContentTypes do
             name: "team_members_org_id_fkey",
             type: :uuid,
             prefix: "public"
-          ), null: false
+          ),
+          null: false
 
       add :title, :text, null: false
       add :slug, :text, null: false
@@ -100,7 +101,8 @@ defmodule KilnCMS.Repo.Migrations.AddAcupunctureContentTypes do
             name: "testimonials_org_id_fkey",
             type: :uuid,
             prefix: "public"
-          ), null: false
+          ),
+          null: false
 
       add :title, :text, null: false
       add :slug, :text, null: false
@@ -210,7 +212,8 @@ defmodule KilnCMS.Repo.Migrations.AddAcupunctureContentTypes do
             name: "conditions_org_id_fkey",
             type: :uuid,
             prefix: "public"
-          ), null: false
+          ),
+          null: false
 
       add :title, :text, null: false
       add :slug, :text, null: false
@@ -320,7 +323,8 @@ defmodule KilnCMS.Repo.Migrations.AddAcupunctureContentTypes do
             name: "faqs_org_id_fkey",
             type: :uuid,
             prefix: "public"
-          ), null: false
+          ),
+          null: false
 
       add :title, :text, null: false
       add :slug, :text, null: false
