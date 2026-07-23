@@ -20,6 +20,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Slug
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
 
@@ -203,11 +204,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:record, record)
     |> assign(:page_title, record.title)
+    |> assign(:slug_customized?, slug_customized?(record))
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> seed_block_children(record)
     |> refresh_preview()
     |> load_versions()
     |> load_translations()
+  end
+
+  # Whether the slug is the author's own (pinned) or still auto-derived — while
+  # not customized, editing the title re-derives the slug live (WordPress-style).
+  # Published/scheduled content is always treated as pinned: a title edit must
+  # never silently move a live URL. The `untitled-<n>` scaffold slug stamped by
+  # the list view's "New" button counts as underived.
+  defp slug_customized?(%{state: state}) when state != :draft, do: true
+
+  defp slug_customized?(record) do
+    slug = record.slug || ""
+    not (Regex.match?(~r/\Auntitled-\d+\z/, slug) or slug == Slug.derive(record.title || ""))
+  end
+
+  # Keep the slug tracking the title until the author pins it by typing in the
+  # slug field themselves (see `slug_customized?/1`). Clearing the slug field
+  # unpins it — derivation resumes, and `DeriveSlug` fills any blank on save.
+  defp sync_slug(params, target, socket) do
+    cond do
+      target == ["form", "slug"] ->
+        {params, assign(socket, :slug_customized?, String.trim(params["slug"] || "") != "")}
+
+      target == ["form", "title"] and not socket.assigns.slug_customized? ->
+        {Map.put(params, "slug", Slug.derive(params["title"] || "")), socket}
+
+      true ->
+        {params, socket}
+    end
   end
 
   # Seed the socket-managed children of every stored `columns` block, keyed by the
@@ -429,12 +459,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: record.org_id)
 
   @impl true
-  def handle_event("validate", %{"form" => params}, socket) do
+  def handle_event("validate", %{"form" => params} = event, socket) do
     # The columns children live in socket state (they aren't bound form inputs);
     # re-inject them so a keystroke's partial params can't wipe the nested tree.
     # GEO item rows (faq/how_to, #357) ARE bound inputs, but arrive as indexed
     # maps — normalize them to the lists their {:array, :map} fields cast.
     params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+    {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}

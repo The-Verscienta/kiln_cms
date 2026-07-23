@@ -74,6 +74,44 @@ defmodule KilnCMS.CMS.ContentModelTest do
     end
   end
 
+  describe "slug derivation" do
+    test "create without a slug derives it from the title, stop words stripped" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "A Guide to the Kiln Firing"}, actor: admin)
+      assert page.slug == "guide-kiln-firing"
+    end
+
+    test "an explicit slug always wins" do
+      admin = user(:admin)
+      explicit = slug()
+      page = CMS.create_page!(%{title: "A Guide to the Kiln", slug: explicit}, actor: admin)
+      assert page.slug == explicit
+    end
+
+    test "clearing the slug on update regenerates it from the title" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "T", slug: slug()}, actor: admin)
+
+      updated =
+        CMS.update_page!(page, %{title: "New Name for the Page", slug: ""}, actor: admin)
+
+      assert updated.slug == "new-name-page"
+    end
+
+    test "an untouched slug survives a title-only update" do
+      admin = user(:admin)
+      original = slug()
+      page = CMS.create_page!(%{title: "T", slug: original}, actor: admin)
+      updated = CMS.update_page!(page, %{title: "Renamed"}, actor: admin)
+      assert updated.slug == original
+    end
+
+    test "a title that derives to nothing still requires a slug" do
+      admin = user(:admin)
+      assert {:error, _} = CMS.create_page(%{title: "!!!"}, actor: admin)
+    end
+  end
+
   describe "published calculation" do
     test "is false for a draft and true once published" do
       admin = user(:admin)
