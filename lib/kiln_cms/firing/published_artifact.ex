@@ -77,6 +77,10 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     end
   end
 
+  validations do
+    validate {KilnCMS.Firing.Validations.KnownDocumentType, attributes: [:document_type]}
+  end
+
   # Multi-tenancy (epic #336): artifacts are partitioned by the owning org so the
   # delivery hot path (and cache eviction) stays per-site. `global?: true` keeps
   # the tenant optional for the current tenant-less firing engine; the org_id is
@@ -102,9 +106,10 @@ defmodule KilnCMS.Firing.PublishedArtifact do
 
     # `:entry` is the generic tier for admin-defined dynamic types (D17): one
     # storage key for all of them, the dynamic name lives on the entry row.
+    # Validated against the ContentTypes registry at runtime (see
+    # `Validations.KnownDocumentType`) so generated compiled types fire too.
     attribute :document_type, :atom do
       allow_nil? false
-      constraints one_of: [:page, :post, :entry]
       public? true
     end
 

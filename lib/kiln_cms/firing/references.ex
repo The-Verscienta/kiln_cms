@@ -23,6 +23,9 @@ defmodule KilnCMS.Firing.References do
 
   # `"entry"` is the generic tier holding every admin-defined dynamic type
   # (D17) — one storage key, the dynamic name is recoverable from the row.
+  # Compiled content types beyond these resolve through the ContentTypes
+  # registry (see `type_atom/1`), so a `mix kiln.gen.content` type fires
+  # without touching this module.
   @types %{"page" => :page, "post" => :post, "entry" => :entry}
 
   @doc "Reference edges out of a document: `[%{from: {type,id}, to: {type,id}}]`."
@@ -106,7 +109,22 @@ defmodule KilnCMS.Firing.References do
   @doc "Map a stored type string to its atom (whitelisted; avoids dynamic atoms)."
   @spec type_atom(atom() | String.t()) :: atom() | nil
   def type_atom(type) when is_atom(type), do: type
-  def type_atom(type) when is_binary(type), do: Map.get(@types, type)
+
+  def type_atom(type) when is_binary(type) do
+    case Map.get(@types, type) do
+      nil ->
+        # Any other compiled content type registered on a content domain —
+        # `ContentTypes.get/1` resolves strings via safe_existing_atom, so no
+        # dynamic atoms are created.
+        case CMS.ContentTypes.get(type) do
+          %{source: :compiled, type: atom} -> atom
+          _ -> nil
+        end
+
+      atom ->
+        atom
+    end
+  end
 
   @doc "Load a document by type+id only if it is currently published."
   @spec load_published(Ash.UUID.t(), atom(), term()) :: {:ok, struct()} | :error
@@ -119,7 +137,16 @@ defmodule KilnCMS.Firing.References do
   def load_published(org_id, :entry, id),
     do: published(CMS.get_entry(id, authorize?: false, tenant: org_id))
 
-  def load_published(_org_id, _type, _id), do: :error
+  # Any other compiled content type: resolve its resource from the registry.
+  def load_published(org_id, type, id) do
+    case CMS.ContentTypes.get(type) do
+      %{source: :compiled, resource: resource} ->
+        published(Ash.get(resource, id, authorize?: false, tenant: org_id))
+
+      _ ->
+        :error
+    end
+  end
 
   defp published({:ok, %{state: :published} = doc}), do: {:ok, doc}
   defp published(_), do: :error
