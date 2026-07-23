@@ -1135,6 +1135,8 @@ defmodule KilnCMS.CMS.Content do
           change optimistic_lock(:lock_version)
           # Clearing the slug regenerates it from the title — see `:create`.
           change KilnCMS.CMS.Changes.DeriveSlug
+          # Renaming a published slug leaves a 301 behind at the old URL.
+          change KilnCMS.CMS.Changes.RecordSlugRedirect
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
