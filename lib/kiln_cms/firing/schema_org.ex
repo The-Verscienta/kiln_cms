@@ -57,6 +57,7 @@ defmodule KilnCMS.Firing.SchemaOrg do
 
     %{"@type" => type, "headline" => Map.get(document, :title), body_key => body}
     |> put_if("description", Map.get(document, :seo_description))
+    |> put_if("keywords", Map.get(document, :seo_keywords))
     |> put_if("inLanguage", Map.get(document, :locale))
     |> put_if("datePublished", iso(Map.get(document, :published_at)))
     |> put_if("dateModified", iso(Map.get(document, :updated_at)))

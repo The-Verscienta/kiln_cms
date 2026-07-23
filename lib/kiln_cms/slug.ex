@@ -25,6 +25,17 @@ defmodule KilnCMS.Slug do
 
   def derive(_title), do: ""
 
+  @doc """
+  The first comma-separated keyphrase of an SEO keywords string — the focus
+  keyphrase that takes priority over the title when deriving a slug. `""`
+  when blank/nil.
+  """
+  def focus_keyphrase(keywords) when is_binary(keywords) do
+    keywords |> String.split(",", parts: 2) |> hd() |> String.trim()
+  end
+
+  def focus_keyphrase(_keywords), do: ""
+
   @doc "Plain slug transform (no stop-word stripping) — used for taxonomy names."
   def slugify(text) when is_binary(text) do
     text

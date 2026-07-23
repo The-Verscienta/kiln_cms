@@ -101,6 +101,37 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
     assert slug_value(lv) == "fresh-start-draft"
   end
 
+  test "editing SEO keywords re-derives an unpinned slug from the focus keyphrase",
+       %{conn: conn} do
+    editor = authed_user(:editor)
+    n = System.unique_integer([:positive])
+    page = CMS.create_page!(%{title: "Untitled page", slug: "untitled-#{n}"}, actor: editor)
+    lv = open_editor(conn, editor, page)
+
+    change(lv, "seo_keywords", %{
+      "title" => "Untitled page",
+      "slug" => "untitled-#{n}",
+      "seo_keywords" => "Ceramic Kiln Care, pottery"
+    })
+
+    assert slug_value(lv) == "ceramic-kiln-care"
+  end
+
+  test "SEO keywords never move a pinned slug", %{conn: conn} do
+    editor = authed_user(:editor)
+    slug = "hand-chosen-#{System.unique_integer([:positive])}"
+    page = CMS.create_page!(%{title: "Pinned", slug: slug}, actor: editor)
+    lv = open_editor(conn, editor, page)
+
+    change(lv, "seo_keywords", %{
+      "title" => "Pinned",
+      "slug" => slug,
+      "seo_keywords" => "ceramic kiln"
+    })
+
+    assert slug_value(lv) == slug
+  end
+
   test "live derivation dedupes against an existing record", %{conn: conn} do
     editor = authed_user(:editor)
     CMS.create_page!(%{title: "Existing", slug: "guide-kiln"}, actor: editor)

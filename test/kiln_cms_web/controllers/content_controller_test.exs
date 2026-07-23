@@ -262,6 +262,15 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ ~s(property="og:title" content="Meta Title")
     end
 
+    test "SEO keywords flow to the meta tag and JSON-LD", %{conn: conn} do
+      page = page(%{seo_keywords: "ceramic kiln, pottery firing"})
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ ~s(name="keywords" content="ceramic kiln, pottery firing")
+      assert html =~ ~s("keywords":"ceramic kiln, pottery firing")
+    end
+
     test "404s for a draft page's slug", %{conn: conn} do
       page = page(%{state: :draft})
       assert conn |> get(~p"/#{page.slug}") |> response(404)

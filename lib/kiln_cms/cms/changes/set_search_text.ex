@@ -11,7 +11,7 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
 
   alias KilnCMS.CMS.BlockText
 
-  @text_fields [:title, :seo_title, :seo_description, :excerpt]
+  @text_fields [:title, :seo_title, :seo_description, :seo_keywords, :excerpt]
 
   @impl true
   def change(changeset, _opts, _context) do

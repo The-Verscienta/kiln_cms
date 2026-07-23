@@ -334,6 +334,7 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
     |> assign(:meta_description, record.seo_description)
+    |> assign(:meta_keywords, record.seo_keywords)
     |> assign(:canonical_url, record.canonical_url || locale_url(ct, record.slug, record.locale))
     |> assign(:og_image, record.seo_image)
     |> assign(:og_type, "article")

@@ -35,6 +35,7 @@ defmodule KilnCMSWeb.StructuredData do
       "publisher" => %{"@type" => "Organization", "name" => site_name()}
     }
     |> maybe_put("description", record.seo_description)
+    |> maybe_put("keywords", record.seo_keywords)
     |> maybe_put("image", record.seo_image)
     |> maybe_put("datePublished", iso8601(record.published_at))
     |> maybe_put("dateModified", iso8601(record.updated_at))

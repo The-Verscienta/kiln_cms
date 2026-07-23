@@ -128,6 +128,30 @@ defmodule KilnCMS.CMS.ContentModelTest do
       page = CMS.create_page!(%{title: "Blog"}, actor: admin)
       assert page.slug == "blog-2"
     end
+
+    test "the SEO focus keyphrase beats the title as the derivation source" do
+      admin = user(:admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "A Very Long Marketing Title", seo_keywords: "Ceramic Kiln Care, pottery"},
+          actor: admin
+        )
+
+      assert page.slug == "ceramic-kiln-care"
+    end
+
+    test "an explicit slug still beats the keyphrase" do
+      admin = user(:admin)
+      explicit = slug()
+
+      page =
+        CMS.create_page!(%{title: "T", slug: explicit, seo_keywords: "ceramic kiln"},
+          actor: admin
+        )
+
+      assert page.slug == explicit
+    end
   end
 
   describe "root URL collisions" do

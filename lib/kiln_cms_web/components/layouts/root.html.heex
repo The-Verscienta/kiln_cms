@@ -6,6 +6,7 @@
     <meta name="csrf-token" content={get_csrf_token()} />
     <.live_title default="KilnCMS" suffix=" · KilnCMS" phx-no-format>{assigns[:page_title]}</.live_title>
     <meta :if={assigns[:meta_description]} name="description" content={@meta_description} />
+    <meta :if={assigns[:meta_keywords]} name="keywords" content={@meta_keywords} />
     <link :if={assigns[:canonical_url]} rel="canonical" href={@canonical_url} />
     <meta :if={assigns[:page_title]} property="og:title" content={@page_title} />
     <meta :if={assigns[:meta_description]} property="og:description" content={@meta_description} />

@@ -36,4 +36,16 @@ defmodule KilnCMS.SlugTest do
       assert Slug.derive(nil) == ""
     end
   end
+
+  describe "focus_keyphrase/1" do
+    test "returns the first comma-separated keyphrase, trimmed" do
+      assert Slug.focus_keyphrase("ceramic kiln , pottery, firing") == "ceramic kiln"
+      assert Slug.focus_keyphrase("solo phrase") == "solo phrase"
+    end
+
+    test "blank or nil keywords yield the empty string" do
+      assert Slug.focus_keyphrase("   ") == ""
+      assert Slug.focus_keyphrase(nil) == ""
+    end
+  end
 end
