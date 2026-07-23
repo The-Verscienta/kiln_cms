@@ -90,6 +90,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:preview_open?, Presence.previews_open?(kind, id))
          |> assign(:cursors, %{})
          |> assign(:self_field, nil)
+         # Deep-link focus from an external front end (#355): `?focus=<field>`
+         # scrolls to and pulses that field's input on load (block ids use the
+         # in-context editor's `?focus=`; this is the custom/core-field twin).
+         |> assign(:focus_field, params["focus"])
          # Debounced draft autosave: pending timer ref + status indicator state.
          |> assign(:autosave_timer, nil)
          |> assign(:save_state, :saved)
@@ -2320,6 +2324,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         data-unsaved-message={gettext("You have unsaved changes. Leave without saving?")}
         class="space-y-6"
       >
+        <span
+          :if={@focus_field}
+          id="focus-field"
+          phx-hook="FocusField"
+          data-kiln-focus={@focus_field}
+          hidden
+        ></span>
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div>
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
