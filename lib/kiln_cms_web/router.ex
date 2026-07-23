@@ -390,6 +390,10 @@ defmodule KilnCMSWeb.Router do
     # hreflang set without hard-coding the site's configured languages.
     get "/locales", LocalesController, :index
 
+    # Path resolution for headless routing: what lives at this URL — published
+    # content ("ok"), a pathauto redirect ("moved", 301 it yourself), or 404.
+    get "/resolve", ResolveController, :show
+
     # Admin-defined form schemas, for headless frontends hydrating
     # `data-kiln-form` placeholders (submissions POST via :public_form below).
     get "/forms/:slug", FormController, :schema

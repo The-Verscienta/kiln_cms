@@ -102,7 +102,7 @@ defmodule KilnCMSWeb.ContentController do
       nil ->
         not_found(conn)
 
-      to ->
+      %{to: to} ->
         conn
         |> put_status(:moved_permanently)
         |> redirect(to: to)

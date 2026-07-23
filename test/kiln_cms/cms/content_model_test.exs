@@ -154,6 +154,17 @@ defmodule KilnCMS.CMS.ContentModelTest do
     end
   end
 
+  describe "path calculation" do
+    test "exposes the full public URL (type prefix + slug)" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "T", slug: slug()}, actor: admin)
+      post = CMS.create_post!(%{title: "T", slug: slug()}, actor: admin)
+
+      assert CMS.get_page!(page.id, load: [:path], actor: admin).path == "/" <> page.slug
+      assert CMS.get_post!(post.id, load: [:path], actor: admin).path == "/blog/" <> post.slug
+    end
+  end
+
   describe "root URL collisions" do
     test "an explicit page slug a section route would shadow is rejected" do
       admin = user(:admin)

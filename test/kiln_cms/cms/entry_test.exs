@@ -64,6 +64,15 @@ defmodule KilnCMS.CMS.EntryTest do
       end
     end
 
+    test "the path calculation resolves the dynamic type's URL prefix" do
+      admin = user(:admin)
+      recipes = define_type!(admin)
+      entry = ContentTypes.create!(recipes.name, %{title: "Pancakes", slug: slug()}, actor: admin)
+
+      loaded = ContentTypes.get_record!(recipes.name, entry.id, actor: admin, load: [:path])
+      assert loaded.path == "/#{recipes.path_segment}/#{entry.slug}"
+    end
+
     test "the publishing workflow runs end-to-end and public reads are type-scoped" do
       admin = user(:admin)
       recipes = define_type!(admin)
