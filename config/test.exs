@@ -31,6 +31,11 @@ config :kiln_cms, KilnCMS.Storage.S3,
   public_base_url: "https://cdn.test/kiln-test",
   req_options: [plug: {Req.Test, KilnCMS.Storage.S3}]
 
+# Route Unsplash HTTP through a Req.Test stub. No access key here — the
+# integration stays disabled unless a test opts in by merging one into the
+# `:unsplash` app env.
+config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
+
 # Extra locales so the locale-aware delivery tests have something to switch to.
 config :kiln_cms, :i18n, default_locale: "en", locales: ["en", "fr", "es"]
 

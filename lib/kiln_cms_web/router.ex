@@ -9,9 +9,11 @@ defmodule KilnCMSWeb.Router do
   # `script-src` directive is finalized per-pipeline (see `put_*_browser_csp`).
   # `style-src` keeps 'unsafe-inline' because inline `style=` attributes can't
   # carry a nonce; everything else is locked to same-origin.
+  @img_src_base "img-src 'self' data: blob:"
+
   @base_csp "default-src 'self'; " <>
               "style-src 'self' 'unsafe-inline'; " <>
-              "img-src 'self' data: blob:; " <>
+              "#{@img_src_base}; " <>
               "font-src 'self' data:; " <>
               "connect-src 'self' ws: wss:; " <>
               "frame-src 'self' https://www.youtube.com https://player.vimeo.com; " <>
@@ -147,6 +149,7 @@ defmodule KilnCMSWeb.Router do
     # The html branch only ever redirects to the live view, but set the secure
     # browser headers + CSP regardless (harmless on the JSON responses).
     plug :put_secure_browser_headers, @browser_csp_headers
+    plug :put_static_browser_csp
     plug KilnCMSWeb.Plugs.RateLimit, :preview
   end
 
@@ -170,6 +173,7 @@ defmodule KilnCMSWeb.Router do
     # browser CSP applies as-is, no per-request nonce needed. (An *embedded*
     # submission swaps in the embed CSP; see FormController.submit/2.)
     plug :put_secure_browser_headers, @browser_csp_headers
+    plug :put_static_browser_csp
     plug KilnCMSWeb.Plugs.RateLimit, :form
   end
 
@@ -180,6 +184,7 @@ defmodule KilnCMSWeb.Router do
   pipeline :form_embed do
     plug :accepts, ["html"]
     plug :put_secure_browser_headers, @browser_csp_headers
+    plug :put_static_browser_csp
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
@@ -627,8 +632,32 @@ defmodule KilnCMSWeb.Router do
     |> Plug.Conn.assign(:csp_nonce, nonce)
     |> Plug.Conn.put_resp_header(
       "content-security-policy",
-      "script-src 'self' 'nonce-#{nonce}'; #{@base_csp}"
+      "script-src 'self' 'nonce-#{nonce}'; #{base_csp()}"
     )
+  end
+
+  # Runtime variant of `@base_csp`: identical except `img-src` also allows
+  # operator-configured external image hosts (`config :kiln_cms, :csp_img_src`
+  # / `CSP_IMG_SRC` — for media libraries whose files serve from an external
+  # CDN, e.g. Cloudflare Images) plus Unsplash's thumbnail host while the
+  # media library's Unsplash integration is enabled.
+  defp base_csp do
+    extra = Application.get_env(:kiln_cms, :csp_img_src, []) ++ KilnCMS.Unsplash.csp_img_src()
+
+    case Enum.uniq(extra) do
+      [] ->
+        @base_csp
+
+      hosts ->
+        String.replace(@base_csp, @img_src_base, @img_src_base <> " " <> Enum.join(hosts, " "))
+    end
+  end
+
+  # For pipelines that keep the static (nonce-less) `script-src 'self'` policy:
+  # re-issue the same header as `@browser_csp_headers`, but with the runtime
+  # img-src so preview/public pages can render externally-hosted media too.
+  defp put_static_browser_csp(conn, _opts) do
+    Plug.Conn.put_resp_header(conn, "content-security-policy", "script-src 'self'; #{base_csp()}")
   end
 
   # Swagger UI CSP: strict same-origin everything except swagger-ui's cdnjs
@@ -649,7 +678,7 @@ defmodule KilnCMSWeb.Router do
     |> Plug.Conn.assign(:csp_nonce, generate_csp_nonce())
     |> Plug.Conn.put_resp_header(
       "content-security-policy",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; #{@base_csp}"
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; #{base_csp()}"
     )
   end
 
