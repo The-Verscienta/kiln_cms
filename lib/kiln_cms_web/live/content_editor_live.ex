@@ -1923,6 +1923,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The typed block name (string) for a sub-form's union member.
   defp block_type_string(bf), do: bf |> block_member() |> Kiln.Block.Info.name() |> to_string()
 
+  # HTML the TipTap editor hydrates from. Canonical Portable Text (`body` —
+  # what imports, visual editing, and the MCP tools write) takes precedence,
+  # rendered to HTML; `legacy_html` is the fallback for un-migrated content.
+  # Without the body branch, PT-backed blocks opened as an EMPTY editor and a
+  # save then wiped the content: the form only round-trips `legacy_html`, so
+  # `body` was silently replaced by an empty string. Edited blocks save back
+  # through `legacy_html` (body cleared by the same form round-trip), which
+  # every render path already prefers second — no data is lost, the storage
+  # just downgrades from PT to sanitized HTML until a full TipTap<->PT
+  # round-trip ships.
+  defp rich_text_editor_html(bf) do
+    case bf[:body].value do
+      [_ | _] = body -> KilnCMS.Blocks.PortableText.to_html(body)
+      _ -> bf[:legacy_html].value || ""
+    end
+  end
+
   # The first string/rich_text field — the block's primary text field.
   defp primary_field_name(nil), do: nil
 
@@ -2516,7 +2533,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         id={"rt-#{bf.index}-v#{@editor_version}"}
                         phx-hook="RichText"
                         phx-update="ignore"
-                        data-content={bf[:legacy_html].value || ""}
+                        data-content={rich_text_editor_html(bf)}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:legacy_html].name}
                         data-collab-token={@collab_token}
