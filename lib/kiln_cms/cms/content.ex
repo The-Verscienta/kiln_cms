@@ -1097,6 +1097,9 @@ defmodule KilnCMS.CMS.Content do
 
         create :create do
           primary? true
+          # A blank/omitted slug is derived from the title (stop words
+          # stripped), so a title alone is enough to create content.
+          change KilnCMS.CMS.Changes.DeriveSlug
           # Stamp the acting user as the author (system/seed creates leave nil).
           change relate_actor(:author, allow_nil?: true)
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
@@ -1128,6 +1131,8 @@ defmodule KilnCMS.CMS.Content do
           # the same draft no longer silently clobber each other — the loser gets
           # a `StaleRecord` error and must reload.
           change optimistic_lock(:lock_version)
+          # Clearing the slug regenerates it from the title — see `:create`.
+          change KilnCMS.CMS.Changes.DeriveSlug
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
@@ -1167,6 +1172,8 @@ defmodule KilnCMS.CMS.Content do
         update :autosave do
           require_atomic? false
           change optimistic_lock(:lock_version)
+          # Clearing the slug regenerates it from the title — see `:create`.
+          change KilnCMS.CMS.Changes.DeriveSlug
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)

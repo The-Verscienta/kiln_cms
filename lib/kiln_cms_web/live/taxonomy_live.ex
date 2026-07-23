@@ -181,17 +181,9 @@ defmodule KilnCMSWeb.TaxonomyLive do
     name = Map.get(params, "name", "")
 
     case String.trim(Map.get(params, "slug", "")) do
-      "" -> Map.put(params, "slug", slugify(name))
+      "" -> Map.put(params, "slug", KilnCMS.Slug.slugify(name))
       _slug -> params
     end
-  end
-
-  defp slugify(name) do
-    name
-    |> String.downcase()
-    |> String.replace(~r/[^a-z0-9\s-]/u, "")
-    |> String.replace(~r/[\s_-]+/, "-")
-    |> String.trim("-")
   end
 
   defp editing?(nil, _type, _id), do: false
