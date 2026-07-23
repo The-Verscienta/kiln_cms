@@ -71,6 +71,20 @@ COPY lib lib
 COPY projects projects
 COPY assets assets
 
+# Activate a project overlay at build time (docker build --build-arg
+# PROJECT=<name>): the subproject's project.exs becomes config/project.exs
+# (compile-time domain/plugin registration — must precede `mix compile`), and
+# its priv/ (migrations, resource snapshots) merges into the core priv/ so
+# boot-time migrate and ash.codegen see the overlay schema. Empty (the
+# default) leaves the core project-agnostic, exactly as before.
+ARG PROJECT=""
+RUN if [ -n "$PROJECT" ]; then \
+  test -f "projects/$PROJECT/project.exs" \
+  || { echo "unknown project overlay: $PROJECT"; exit 1; }; \
+  cp "projects/$PROJECT/project.exs" config/project.exs; \
+  if [ -d "projects/$PROJECT/priv" ]; then cp -R "projects/$PROJECT/priv/." priv/; fi; \
+  fi
+
 # Install JS dependencies (TipTap, etc.) before bundling.
 RUN npm --prefix assets ci
 
