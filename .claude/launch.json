@@ -9,6 +9,16 @@
       "autoPort": false
     },
     {
+      "name": "kiln-cms-worktree",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=/opt/homebrew/bin:$PATH PORT=4100 && exec mix phx.server"
+      ],
+      "port": 4100,
+      "autoPort": false
+    },
+    {
       "name": "phoenix_showcase",
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": [

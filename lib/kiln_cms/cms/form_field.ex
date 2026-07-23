@@ -47,7 +47,10 @@ defmodule KilnCMS.CMS.FormField do
       :required,
       :options,
       :help_text,
-      :position
+      :position,
+      :placeholder,
+      :default_value,
+      :width
     ]
 
     create :create, primary?: true
@@ -136,6 +139,21 @@ defmodule KilnCMS.CMS.FormField do
     attribute :options, {:array, :string}, allow_nil?: false, default: [], public?: true
     attribute :help_text, :string, public?: true
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
+
+    attribute :placeholder, :string, public?: true
+
+    # Pre-filled value: the input's initial value ("true" pre-checks a boolean,
+    # a select pre-picks the matching option). Stored as text; submission-time
+    # coercion in `KilnCMS.Forms` applies to whatever value comes back.
+    attribute :default_value, :string, public?: true
+
+    # Display width on the public form's 6-column grid.
+    attribute :width, :atom do
+      constraints one_of: [:full, :half, :third]
+      default :full
+      allow_nil? false
+      public? true
+    end
 
     timestamps()
   end

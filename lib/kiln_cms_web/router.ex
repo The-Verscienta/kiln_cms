@@ -267,6 +267,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor/governance", GovernanceLive, :index
       live "/editor/governance/:type/:id", GovernanceLive, :show
       live "/editor/forms", FormLive, :index
+      live "/editor/forms/:id", FormBuilderLive, :edit
       live "/editor/api-keys", ApiKeyLive, :index
 
       # Plugin admin panels (D18) — compiled in from each installed plugin's

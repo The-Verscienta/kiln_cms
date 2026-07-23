@@ -146,55 +146,93 @@ defmodule KilnCMSWeb.BlockComponents do
         </label>
       </div>
 
-      <div :for={field <- @form.fields}>
-        <label :if={field.field_type != :boolean} class="mb-1 block text-sm font-medium">
-          {field.label}
-          <span :if={field.required} aria-hidden="true" class="text-error">*</span>
-        </label>
-
-        <%= case field.field_type do %>
-          <% :text -> %>
-            <textarea
-              name={field.name}
-              required={field.required}
-              class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
-            ></textarea>
-          <% :select -> %>
-            <select
-              name={field.name}
-              required={field.required}
-              class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
-            >
-              <option value="">—</option>
-              <option :for={opt <- field.options} value={opt}>{opt}</option>
-            </select>
-          <% :boolean -> %>
-            <label class="flex items-center gap-2 text-sm">
-              <input type="hidden" name={field.name} value="false" />
-              <input type="checkbox" name={field.name} value="true" />
-              <span class="font-medium">{field.label}</span>
-            </label>
-          <% other -> %>
-            <input
-              type={form_input_type(other)}
-              name={field.name}
-              required={field.required}
-              class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
-            />
-        <% end %>
-
-        <p :if={field.help_text} class="mt-1 text-xs text-base-content/60">{field.help_text}</p>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
+        <div :for={field <- @form.fields} class={field_width_class(field)}>
+          <.public_form_field field={field} />
+        </div>
       </div>
 
       <button
         type="submit"
         class="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-content"
       >
-        {gettext("Submit")}
+        {@form.submit_label || gettext("Submit")}
       </button>
     </form>
     """
   end
+
+  @doc """
+  One admin-defined field of a public form: label, input (typed, with
+  placeholder/default), and help text. Extracted from `public_form/1` so the
+  form builder's canvas (`FormBuilderLive`) renders the exact same markup —
+  the preview can't drift from the public form.
+  """
+  attr :field, :map, required: true
+
+  def public_form_field(assigns) do
+    ~H"""
+    <label :if={@field.field_type != :boolean} class="mb-1 block text-sm font-medium">
+      {@field.label}
+      <span :if={@field.required} aria-hidden="true" class="text-error">*</span>
+    </label>
+
+    <%= case @field.field_type do %>
+      <% :text -> %>
+        <textarea
+          name={@field.name}
+          required={@field.required}
+          placeholder={@field.placeholder}
+          class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+        >{@field.default_value}</textarea>
+      <% :select -> %>
+        <select
+          name={@field.name}
+          required={@field.required}
+          class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+        >
+          <option value="">—</option>
+          <option :for={opt <- @field.options} value={opt} selected={opt == @field.default_value}>
+            {opt}
+          </option>
+        </select>
+      <% :boolean -> %>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="hidden" name={@field.name} value="false" />
+          <input
+            type="checkbox"
+            name={@field.name}
+            value="true"
+            checked={@field.default_value == "true"}
+          />
+          <span class="font-medium">
+            {@field.label}
+            <span :if={@field.required} aria-hidden="true" class="text-error">*</span>
+          </span>
+        </label>
+      <% other -> %>
+        <input
+          type={form_input_type(other)}
+          name={@field.name}
+          required={@field.required}
+          placeholder={@field.placeholder}
+          value={@field.default_value}
+          class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+        />
+    <% end %>
+
+    <p :if={@field.help_text} class="mt-1 text-xs text-base-content/60">{@field.help_text}</p>
+    """
+  end
+
+  @doc """
+  The field's column span on the public form's 6-column grid (`width` on
+  `KilnCMS.CMS.FormField`). Shared with the builder canvas.
+  """
+  @spec field_width_class(map()) :: String.t()
+  def field_width_class(%{width: :half}), do: "sm:col-span-3"
+  def field_width_class(%{width: :third}), do: "sm:col-span-2"
+  def field_width_class(_field), do: "sm:col-span-6"
 
   defp form_input_type(:email), do: "email"
   defp form_input_type(:integer), do: "number"

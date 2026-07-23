@@ -70,6 +70,7 @@ defmodule KilnCMSWeb.FormController do
           name: form.name,
           description: form.description,
           success_message: form.success_message,
+          submit_label: form.submit_label,
           honeypot_field: Forms.honeypot_field(),
           submit_url: "/forms/#{form.slug}",
           fields:
@@ -80,7 +81,10 @@ defmodule KilnCMSWeb.FormController do
                 type: field.field_type,
                 required: field.required,
                 options: field.options,
-                help_text: field.help_text
+                help_text: field.help_text,
+                placeholder: field.placeholder,
+                default_value: field.default_value,
+                width: field.width
               }
             end)
         })

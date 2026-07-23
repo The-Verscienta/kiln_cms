@@ -32,7 +32,16 @@ defmodule KilnCMS.CMS.Form do
 
   actions do
     defaults [:read]
-    default_accept [:name, :slug, :description, :active, :success_message, :notify_email]
+
+    default_accept [
+      :name,
+      :slug,
+      :description,
+      :active,
+      :success_message,
+      :notify_email,
+      :submit_label
+    ]
 
     create :create, primary?: true
 
@@ -126,6 +135,9 @@ defmodule KilnCMS.CMS.Form do
 
     # When set, each submission is mailed here (via the :mail queue).
     attribute :notify_email, :string, public?: true
+
+    # Submit-button text; nil falls back to the translated "Submit".
+    attribute :submit_label, :string, public?: true
 
     timestamps()
   end

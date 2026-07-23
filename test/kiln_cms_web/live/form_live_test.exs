@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.FormLiveTest do
   @moduledoc """
-  The form builder (`/editor/forms`, admin-only): create a form, add fields,
-  review + delete submissions.
+  The forms index (`/editor/forms`, admin-only): create (landing in the
+  builder), duplicate, and delete forms. Building happens in
+  `FormBuilderLive` (see `form_builder_live_test.exs`).
   """
   use KilnCMSWeb.ConnCase, async: true
 
@@ -44,72 +45,74 @@ defmodule KilnCMSWeb.FormLiveTest do
              conn |> log_in(authed_user(:editor)) |> live(~p"/editor/forms")
   end
 
-  test "admin builds a form end to end: create, add a field, see a submission", %{conn: conn} do
+  test "creating a form lands in its builder", %{conn: conn} do
     {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/forms")
 
     slug = "fl-#{System.unique_integer([:positive])}"
 
-    # Create — the new form's detail panel opens.
-    html =
-      lv
-      |> form("form[phx-submit=create_form]", %{form: %{name: "Contact", slug: slug}})
-      |> render_submit()
-
-    assert html =~ "add its fields below"
-    assert [created] = CMS.list_forms!(authorize?: false, query: [filter: [slug: slug]])
-
-    # Add a field.
-    html =
-      lv
-      |> form("form[phx-submit=add_field]", %{
-        field: %{
-          label: "Email",
-          name: "email",
-          field_type: "email",
-          required: "true",
-          options: ""
-        }
-      })
-      |> render_submit()
-
-    assert html =~ "email"
-    assert [field] = CMS.form_fields_for!(created.id, authorize?: false)
-    assert field.field_type == :email
-    assert field.required
-
-    # A submission arrives and shows up in the viewer.
-    submission =
-      CMS.create_form_submission!(
-        %{form_id: created.id, data: %{"email" => "visitor@example.com"}},
-        authorize?: false
-      )
-
-    html = lv |> element("button[phx-click=select_form]") |> render_click()
-    assert html =~ "visitor@example.com"
-
-    # And can be deleted.
     lv
-    |> element(~s(button[phx-click="delete_submission"][phx-value-id="#{submission.id}"]))
-    |> render_click()
+    |> form("form[phx-submit=create_form]", %{form: %{name: "Contact", slug: slug}})
+    |> render_submit()
 
-    assert CMS.recent_form_submissions!(created.id, authorize?: false) == []
+    assert [created] = CMS.list_forms!(authorize?: false, query: [filter: [slug: slug]])
+    {path, _flash} = assert_redirect(lv)
+    assert path == "/editor/forms/#{created.id}"
   end
 
-  test "the selected form shows a copyable embed snippet", %{conn: conn} do
+  test "forms list links each form to its builder", %{conn: conn} do
+    admin = authed_user(:admin)
+    form = CMS.create_form!(%{name: "Contact", slug: "fl-link"}, actor: admin)
+
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/forms")
+    assert html =~ ~s(href="/editor/forms/#{form.id}")
+  end
+
+  test "duplicating a form copies its settings and fields, inactive", %{conn: conn} do
     admin = authed_user(:admin)
 
     form =
-      CMS.create_form!(%{name: "Contact", slug: "embed-snippet"}, actor: admin)
+      CMS.create_form!(
+        %{name: "Contact", slug: "fl-dup", success_message: "Merci!", submit_label: "Send"},
+        actor: admin
+      )
+
+    CMS.create_form_field!(
+      %{form_id: form.id, name: "email", label: "Email", field_type: :email, required: true},
+      actor: admin
+    )
 
     {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/forms")
-    html = lv |> element("button[phx-click=select_form]") |> render_click()
 
-    assert html =~ "Embed on another site"
-    assert html =~ "/embed.js"
-    # The snippet sits in a readonly input's value, so its quotes are escaped.
-    assert html =~ "data-kiln-form=&quot;#{form.slug}&quot;"
+    html =
+      lv
+      |> element(~s(button[phx-click="duplicate_form"][phx-value-id="#{form.id}"]))
+      |> render_click()
 
-    # Clicking Copy (via the Clipboard hook) flashes a confirmation.
-    assert lv |> render_hook("copied", %{}) =~ "Embed code copied to clipboard."
+    assert html =~ "Form duplicated"
+
+    assert [copy] = CMS.list_forms!(authorize?: false, query: [filter: [slug: "fl-dup-copy"]])
+    refute copy.active
+    assert copy.success_message == "Merci!"
+    assert copy.submit_label == "Send"
+
+    assert [field] = CMS.form_fields_for!(copy.id, authorize?: false)
+    assert field.name == "email"
+    assert field.field_type == :email
+    assert field.required
+  end
+
+  test "deleting a form removes it from the list", %{conn: conn} do
+    admin = authed_user(:admin)
+    form = CMS.create_form!(%{name: "Contact", slug: "fl-del"}, actor: admin)
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/forms")
+
+    html =
+      lv
+      |> element(~s(button[phx-click="delete_form"][phx-value-id="#{form.id}"]))
+      |> render_click()
+
+    assert html =~ "Form deleted."
+    assert {:error, _} = CMS.get_form(form.id, authorize?: false)
   end
 end
