@@ -36,6 +36,29 @@ faq_categories =
   ~w(about-acupuncture treatment-process insurance-payment appointments-policies safety-side-effects our-practice)
 
 definitions = [
+  # --- post (core type; fields for the migrated Sanity blog) ---------------
+  %{
+    content_type: :post,
+    name: "featured",
+    label: "Featured on homepage",
+    field_type: :boolean,
+    default: "false"
+  },
+  %{
+    content_type: :post,
+    name: "author_name",
+    label: "Author name",
+    field_type: :string,
+    help_text: "Display byline (practitioners are not CMS users)."
+  },
+  %{
+    content_type: :post,
+    name: "author_slug",
+    label: "Author slug",
+    field_type: :string,
+    help_text: "Team-member slug the byline links to."
+  },
+
   # --- condition -----------------------------------------------------------
   %{
     content_type: :condition,
@@ -241,4 +264,5 @@ definitions
   end)
 end)
 
-IO.puts("Done: #{length(definitions)} definitions across 4 content types.")
+types = definitions |> Enum.map(& &1.content_type) |> Enum.uniq() |> length()
+IO.puts("Done: #{length(definitions)} definitions across #{types} content types.")

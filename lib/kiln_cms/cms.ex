@@ -358,7 +358,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Condition do
       define :list_conditions, action: :read
       define :get_condition, action: :read, get_by: [:id]
-      define :get_published_condition_by_slug, action: :public_by_slug, args: [:slug]
+      define :get_published_condition_by_slug, action: :public_by_slug, args: [:slug, :locale]
       define :search_conditions, action: :search, args: [:query]
       define :create_condition, action: :create
       define :update_condition, action: :update
@@ -384,7 +384,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.TeamMember do
       define :list_team_members, action: :read
       define :get_team_member, action: :read, get_by: [:id]
-      define :get_published_team_member_by_slug, action: :public_by_slug, args: [:slug]
+      define :get_published_team_member_by_slug, action: :public_by_slug, args: [:slug, :locale]
       define :search_team_members, action: :search, args: [:query]
       define :create_team_member, action: :create
       define :update_team_member, action: :update
@@ -410,7 +410,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Testimonial do
       define :list_testimonials, action: :read
       define :get_testimonial, action: :read, get_by: [:id]
-      define :get_published_testimonial_by_slug, action: :public_by_slug, args: [:slug]
+      define :get_published_testimonial_by_slug, action: :public_by_slug, args: [:slug, :locale]
       define :search_testimonials, action: :search, args: [:query]
       define :create_testimonial, action: :create
       define :update_testimonial, action: :update
@@ -436,7 +436,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Faq do
       define :list_faqs, action: :read
       define :get_faq, action: :read, get_by: [:id]
-      define :get_published_faq_by_slug, action: :public_by_slug, args: [:slug]
+      define :get_published_faq_by_slug, action: :public_by_slug, args: [:slug, :locale]
       define :search_faqs, action: :search, args: [:query]
       define :create_faq, action: :create
       define :update_faq, action: :update

@@ -171,7 +171,7 @@ if Code.ensure_loaded?(Igniter) do
         {:"list_#{plural}", "define :list_#{plural}, action: :read"},
         {:"get_#{type}", "define :get_#{type}, action: :read, get_by: [:id]"},
         {:"get_published_#{type}_by_slug",
-         "define :get_published_#{type}_by_slug, action: :public_by_slug, args: [:slug]"},
+         "define :get_published_#{type}_by_slug, action: :public_by_slug, args: [:slug, :locale]"},
         {:"search_#{plural}", "define :search_#{plural}, action: :search, args: [:query]"},
         {:"create_#{type}", "define :create_#{type}, action: :create"},
         {:"update_#{type}", "define :update_#{type}, action: :update"},

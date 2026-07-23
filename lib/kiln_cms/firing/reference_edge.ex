@@ -58,6 +58,10 @@ defmodule KilnCMS.Firing.ReferenceEdge do
     end
   end
 
+  validations do
+    validate {KilnCMS.Firing.Validations.KnownDocumentType, attributes: [:from_type, :to_type]}
+  end
+
   # Multi-tenancy (epic #336): edges are partitioned by org so the re-fire wave
   # can never cross a tenant boundary. `global?: true` keeps the tenant optional
   # for the current tenant-less rebuild; org_id comes from tenant/default. The
@@ -80,19 +84,15 @@ defmodule KilnCMS.Firing.ReferenceEdge do
       public? false
     end
 
-    attribute :from_type, :atom,
-      allow_nil?: false,
-      # `:entry` is the generic tier for admin-defined dynamic types (D17).
-      constraints: [one_of: [:page, :post, :entry]],
-      public?: true
+    # Type attributes are validated against the ContentTypes registry at
+    # runtime (`Validations.KnownDocumentType`) — `:entry` is the generic tier
+    # for admin-defined dynamic types (D17), and every compiled content type
+    # (including generated ones) is a valid endpoint.
+    attribute :from_type, :atom, allow_nil?: false, public?: true
 
     attribute :from_id, :uuid, allow_nil?: false, public?: true
 
-    attribute :to_type, :atom,
-      allow_nil?: false,
-      # `:entry` is the generic tier for admin-defined dynamic types (D17).
-      constraints: [one_of: [:page, :post, :entry]],
-      public?: true
+    attribute :to_type, :atom, allow_nil?: false, public?: true
 
     attribute :to_id, :uuid, allow_nil?: false, public?: true
   end
