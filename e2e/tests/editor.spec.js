@@ -1,7 +1,7 @@
 // @ts-check
 // `test` here carries the LiveView navigation guard (see fixtures.js): every
-// page.goto/reload waits for the LiveView socket to connect, so a phx-click or
-// phx-submit issued right after a page load can't be swallowed.
+// page.goto/reload waits for the LiveView to finish joining its channel, so a
+// phx-click or phx-submit issued right after a page load can't be swallowed.
 const { test, expect } = require("./fixtures");
 
 // Demo admin seeded by priv/repo/seeds.exs (mix e2e.setup).
