@@ -19,8 +19,12 @@ async function signInAsAdmin(page) {
 
 // Start a fresh draft page from the editor index and return its slug (the
 // `new` handler creates an "Untitled …" draft and navigates into the editor).
+// Past @max_inline_new_buttons content types the per-type "New …" buttons
+// collapse into the #content-new-menu <details> dropdown, so open it first.
 async function newDraftPage(page) {
   await page.goto("/editor");
+  const newMenu = page.locator("#content-new-menu summary");
+  if (await newMenu.count()) await newMenu.click();
   await page.click('button[phx-click="new"][phx-value-kind="page"]');
   await page.waitForURL(/\/editor\/(content\/page|pages)\//);
   await expect(page.locator('form[id$="-editor"]')).toBeVisible();

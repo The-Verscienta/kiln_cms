@@ -354,5 +354,109 @@ defmodule KilnCMS.CMS do
       define :restore_type_definition, action: :restore
       define :destroy_type_definition, action: :destroy
     end
+
+    resource KilnCMS.CMS.Condition do
+      define :list_conditions, action: :read
+      define :get_condition, action: :read, get_by: [:id]
+      define :get_published_condition_by_slug, action: :public_by_slug, args: [:slug]
+      define :search_conditions, action: :search, args: [:query]
+      define :create_condition, action: :create
+      define :update_condition, action: :update
+      define :submit_condition_for_review, action: :submit_for_review
+      define :return_condition_to_draft, action: :return_to_draft
+      define :publish_condition, action: :publish
+      define :publish_scheduled_condition, action: :publish_scheduled
+      define :unpublish_condition, action: :unpublish
+      define :archive_condition, action: :archive
+      define :unarchive_condition, action: :unarchive
+      define :restore_condition_version, action: :restore_version
+      define :destroy_condition, action: :destroy
+      define :list_trashed_conditions, action: :trashed
+      define :restore_condition, action: :restore
+      define :purge_condition, action: :purge
+      define :list_published_conditions, action: :published
+    end
+
+    resource KilnCMS.CMS.Condition.Version do
+      define :list_condition_versions, action: :read
+    end
+
+    resource KilnCMS.CMS.TeamMember do
+      define :list_team_members, action: :read
+      define :get_team_member, action: :read, get_by: [:id]
+      define :get_published_team_member_by_slug, action: :public_by_slug, args: [:slug]
+      define :search_team_members, action: :search, args: [:query]
+      define :create_team_member, action: :create
+      define :update_team_member, action: :update
+      define :submit_team_member_for_review, action: :submit_for_review
+      define :return_team_member_to_draft, action: :return_to_draft
+      define :publish_team_member, action: :publish
+      define :publish_scheduled_team_member, action: :publish_scheduled
+      define :unpublish_team_member, action: :unpublish
+      define :archive_team_member, action: :archive
+      define :unarchive_team_member, action: :unarchive
+      define :restore_team_member_version, action: :restore_version
+      define :destroy_team_member, action: :destroy
+      define :list_trashed_team_members, action: :trashed
+      define :restore_team_member, action: :restore
+      define :purge_team_member, action: :purge
+      define :list_published_team_members, action: :published
+    end
+
+    resource KilnCMS.CMS.TeamMember.Version do
+      define :list_team_member_versions, action: :read
+    end
+
+    resource KilnCMS.CMS.Testimonial do
+      define :list_testimonials, action: :read
+      define :get_testimonial, action: :read, get_by: [:id]
+      define :get_published_testimonial_by_slug, action: :public_by_slug, args: [:slug]
+      define :search_testimonials, action: :search, args: [:query]
+      define :create_testimonial, action: :create
+      define :update_testimonial, action: :update
+      define :submit_testimonial_for_review, action: :submit_for_review
+      define :return_testimonial_to_draft, action: :return_to_draft
+      define :publish_testimonial, action: :publish
+      define :publish_scheduled_testimonial, action: :publish_scheduled
+      define :unpublish_testimonial, action: :unpublish
+      define :archive_testimonial, action: :archive
+      define :unarchive_testimonial, action: :unarchive
+      define :restore_testimonial_version, action: :restore_version
+      define :destroy_testimonial, action: :destroy
+      define :list_trashed_testimonials, action: :trashed
+      define :restore_testimonial, action: :restore
+      define :purge_testimonial, action: :purge
+      define :list_published_testimonials, action: :published
+    end
+
+    resource KilnCMS.CMS.Testimonial.Version do
+      define :list_testimonial_versions, action: :read
+    end
+
+    resource KilnCMS.CMS.Faq do
+      define :list_faqs, action: :read
+      define :get_faq, action: :read, get_by: [:id]
+      define :get_published_faq_by_slug, action: :public_by_slug, args: [:slug]
+      define :search_faqs, action: :search, args: [:query]
+      define :create_faq, action: :create
+      define :update_faq, action: :update
+      define :submit_faq_for_review, action: :submit_for_review
+      define :return_faq_to_draft, action: :return_to_draft
+      define :publish_faq, action: :publish
+      define :publish_scheduled_faq, action: :publish_scheduled
+      define :unpublish_faq, action: :unpublish
+      define :archive_faq, action: :archive
+      define :unarchive_faq, action: :unarchive
+      define :restore_faq_version, action: :restore_version
+      define :destroy_faq, action: :destroy
+      define :list_trashed_faqs, action: :trashed
+      define :restore_faq, action: :restore
+      define :purge_faq, action: :purge
+      define :list_published_faqs, action: :published
+    end
+
+    resource KilnCMS.CMS.Faq.Version do
+      define :list_faq_versions, action: :read
+    end
   end
 end
