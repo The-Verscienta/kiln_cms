@@ -15,7 +15,21 @@ defmodule KilnCMS.CMS.Redirect do
   use Ash.Resource,
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
-    authorizers: [Ash.Policy.Authorizer]
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshJsonApi.Resource]
+
+  json_api do
+    type "redirect"
+
+    # Read-only list for headless consumers: static-site generators pull the
+    # table (filterable by `updated_at` for incremental builds) to emit
+    # platform-native redirect maps (Netlify `_redirects`, Next.js
+    # `redirects()`). Live fronts should prefer `GET /api/resolve`.
+    routes do
+      base "/redirects"
+      index :read
+    end
+  end
 
   postgres do
     table "redirects"
@@ -35,10 +49,16 @@ defmodule KilnCMS.CMS.Redirect do
   end
 
   policies do
-    # Internal bookkeeping: written by the slug-change hook and read by
-    # delivery, both system-side (`authorize?: false`). Admins may inspect or
-    # prune rows; nobody else touches them.
-    policy always() do
+    # Redirect rows are public information — delivery serves the same mapping
+    # to anyone who hits the old URL — so the list is world-readable (D7, like
+    # taxonomy) for headless/SSG consumers.
+    policy action_type(:read) do
+      authorize_if always()
+    end
+
+    # Writes stay internal: the slug-change hook runs system-side
+    # (`authorize?: false`); only admins may prune rows.
+    policy action_type([:create, :update, :destroy]) do
       authorize_if actor_attribute_equals(:role, :admin)
     end
   end
@@ -71,7 +91,9 @@ defmodule KilnCMS.CMS.Redirect do
     attribute :target_type, :string, allow_nil?: false, public?: true
     attribute :target_id, :uuid, allow_nil?: false, public?: true
 
-    timestamps()
+    # Public so SSG consumers can filter the JSON:API list by `updated_at`
+    # (incremental redirect-map rebuilds).
+    timestamps public?: true
   end
 
   relationships do

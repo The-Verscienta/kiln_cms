@@ -15,10 +15,11 @@ defmodule KilnCMS.CMS.Redirects do
   alias KilnCMS.CMS.Slugs
 
   @doc """
-  The current public path to 301 to for a retired `path` in `locale`, or `nil`
-  when no redirect matches / the target is no longer published.
+  Where a retired `path` in `locale` now lives: `%{to: current_path, type:,
+  slug:, id:}`, or `nil` when no redirect matches / the target is no longer
+  published.
   """
-  @spec resolve(String.t(), String.t(), Ash.UUID.t()) :: String.t() | nil
+  @spec resolve(String.t(), String.t(), Ash.UUID.t()) :: map() | nil
   def resolve(path, locale, org_id) do
     with [redirect] <-
            CMS.list_redirects!(
@@ -29,7 +30,7 @@ defmodule KilnCMS.CMS.Redirects do
          ct when not is_nil(ct) <- ContentTypes.get(redirect.target_type, org_id),
          slug when is_binary(slug) <- published_slug(ct, redirect.target_id, org_id),
          to when to != path <- Slugs.public_path(ct, slug) do
-      to
+      %{to: to, type: to_string(ct.type), slug: slug, id: redirect.target_id}
     else
       _ -> nil
     end

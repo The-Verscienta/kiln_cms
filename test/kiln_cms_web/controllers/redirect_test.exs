@@ -85,6 +85,23 @@ defmodule KilnCMSWeb.RedirectTest do
     assert redirected_to(conn, 301) == "/blog/#{renamed.slug}"
   end
 
+  test "the JSON:API redirects list is world-readable and filterable", %{conn: conn} do
+    page = page(%{})
+    old_slug = page.slug
+    rename!(page, "rd-pg-#{uniq()}")
+
+    body =
+      conn
+      |> put_req_header("accept", "application/vnd.api+json")
+      |> get("/api/json/redirects?filter[path]=/#{old_slug}")
+      |> json_response(200)
+
+    assert [row] = body["data"]
+    assert row["attributes"]["path"] == "/#{old_slug}"
+    assert row["attributes"]["target_type"] == "page"
+    assert row["attributes"]["updated_at"]
+  end
+
   test "real content beats a stale redirect on the same path", %{conn: conn} do
     page = page(%{title: "Original"})
     old_slug = page.slug

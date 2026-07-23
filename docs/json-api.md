@@ -271,6 +271,32 @@ exposed over JSON:API for *reads* — rendered content is served as fired
 artifacts at `GET /api/content/:type/:slug`. For *writes*, send the body via the
 `block_tree` attribute (see [Writing](#writing-330)).
 
+## URLs, pathauto & redirects
+
+Slugs auto-derive server-side (focus keyphrase → title, stop words stripped,
+collision-deduped `base-2`, `base-3`, …), so a `POST` with just a `title` gets
+a final slug back — never implement slugging client-side. Three surfaces let a
+front end handle URLs without mirroring Kiln's scheme:
+
+- **`path` field** — every content read exposes a `path` calculation, the full
+  public path (`/blog/my-post`, `/about`, `/<path_segment>/<slug>` for dynamic
+  types). Request it explicitly: `?fields[post]=title,slug,path`.
+- **`GET /api/resolve?path=/blog/old-slug&locale=en`** — one call answers
+  "what lives at this URL?", for catch-all routes in live (SSR) front ends:
+  `{"status":"ok","type":"post","slug":…,"id":…}` renders,
+  `{"status":"moved","to":"/blog/new-slug",…}` should be answered with your
+  own 301, and a 404 `{"status":"not_found"}` is a real 404. Mirrors delivery
+  exactly: published-only, content beats stale redirects, no redirect chains.
+- **`GET /api/json/redirects`** — the redirect table (world-readable, written
+  automatically when a *published* record's slug changes). Static-site
+  generators pull it — filterable, e.g.
+  `?filter[updated_at][greater_than]=2026-07-01T00:00:00Z` for incremental
+  builds — and emit platform-native maps (Netlify `_redirects`, Next.js
+  `redirects()`). Rows carry `path`, `locale`, `target_type`, `target_id`;
+  resolve a row's *current* destination via `/api/resolve` or the target's
+  `path` field. The `<type>.updated` webhook fires on published renames, so
+  SSGs can rebuild redirect maps on push instead of polling.
+
 ## Writing (#330)
 
 > **Reverses D7.** The JSON:API was originally read-only *by design*; write

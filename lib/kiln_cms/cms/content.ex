@@ -1636,6 +1636,12 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
+        # Full public URL path (type prefix + slug, e.g. `/blog/my-post`) so
+        # headless consumers can link without hard-coding the URL scheme.
+        calculate :path, :string, KilnCMS.CMS.Calculations.PublicPath do
+          public? true
+        end
+
         # Full-text relevance of a row against a query — higher is more
         # relevant. Used to order the `:search` action; `query`/`locale` are the
         # same values that action filters on, so the weighted `search_vector` is
