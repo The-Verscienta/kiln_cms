@@ -1,0 +1,47 @@
+{
+  "name": "Job application",
+  "description": "Contact details, links and a cover letter.",
+  "form": {
+    "success_message": "Application received — we'll be in touch.",
+    "submit_label": "Apply"
+  },
+  "fields": [
+    { "name": "about_you", "label": "About you", "field_type": "heading" },
+    {
+      "name": "full_name",
+      "label": "Your name",
+      "field_type": "string",
+      "required": true,
+      "width": "half"
+    },
+    {
+      "name": "email",
+      "label": "Email",
+      "field_type": "email",
+      "required": true,
+      "width": "half"
+    },
+    { "name": "phone", "label": "Phone", "field_type": "phone", "width": "half" },
+    {
+      "name": "portfolio",
+      "label": "Portfolio / LinkedIn",
+      "field_type": "url",
+      "width": "half",
+      "placeholder": "https://…"
+    },
+    { "name": "application_divider", "label": "Divider", "field_type": "divider" },
+    {
+      "name": "cover_letter",
+      "label": "Cover letter",
+      "field_type": "text",
+      "required": true,
+      "validation": { "min_length": 100, "message": "tell us a bit more (at least 100 characters)" }
+    },
+    {
+      "name": "privacy",
+      "label": "I agree to the processing of my application data",
+      "field_type": "consent",
+      "required": true
+    }
+  ]
+}

@@ -25,6 +25,15 @@ and review submissions in the same builder.
   no IP, no user agent** (rate limiting uses the IP transiently). Admin-only
   to read or delete; deleting a form removes its submissions.
 
+## Templates
+
+The create flow offers "Blank form" or a built-in template (contact,
+feedback, event registration, job application, newsletter signup, quote
+request). Templates are JSON files in `priv/form_templates/` — form settings
+plus an ordered field list — embedded at compile time by
+`KilnCMS.Forms.Templates` and instantiated atomically (a failed field rolls
+back the form). To add one, drop a JSON file in that directory and recompile.
+
 ## Rendering
 
 The `:form` content block references a form by slug:

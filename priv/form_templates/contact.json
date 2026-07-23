@@ -1,0 +1,27 @@
+{
+  "name": "Contact form",
+  "description": "Name, email and message — the classic.",
+  "form": {
+    "success_message": "Thanks — we'll get back to you soon.",
+    "submit_label": "Send message"
+  },
+  "fields": [
+    {
+      "name": "full_name",
+      "label": "Your name",
+      "field_type": "string",
+      "required": true,
+      "width": "half"
+    },
+    {
+      "name": "email",
+      "label": "Email",
+      "field_type": "email",
+      "required": true,
+      "width": "half",
+      "placeholder": "you@example.com"
+    },
+    { "name": "subject", "label": "Subject", "field_type": "string" },
+    { "name": "message", "label": "Message", "field_type": "text", "required": true }
+  ]
+}

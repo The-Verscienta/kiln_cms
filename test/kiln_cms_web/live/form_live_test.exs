@@ -59,6 +59,37 @@ defmodule KilnCMSWeb.FormLiveTest do
     assert path == "/editor/forms/#{created.id}"
   end
 
+  test "creating from a template lands in the builder with the fields seeded", %{conn: conn} do
+    {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/forms")
+
+    # The picker lists the blank card plus the built-in templates.
+    assert html =~ "Blank form"
+    assert html =~ "Contact form"
+    assert html =~ "Newsletter signup"
+
+    slug = "fl-tmpl-#{System.unique_integer([:positive])}"
+
+    lv
+    |> element(~s(button[phx-click="pick_template"][phx-value-key="contact"]))
+    |> render_click()
+
+    lv
+    |> form("form[phx-submit=create_form]", %{form: %{name: "Say hi", slug: slug}})
+    |> render_submit()
+
+    assert [created] = CMS.list_forms!(authorize?: false, query: [filter: [slug: slug]])
+    {path, _flash} = assert_redirect(lv)
+    assert path == "/editor/forms/#{created.id}"
+
+    names =
+      created.id
+      |> CMS.form_fields_for!(authorize?: false)
+      |> Enum.map(& &1.name)
+
+    assert names == ["full_name", "email", "subject", "message"]
+    assert created.submit_label == "Send message"
+  end
+
   test "forms list links each form to its builder", %{conn: conn} do
     admin = authed_user(:admin)
     form = CMS.create_form!(%{name: "Contact", slug: "fl-link"}, actor: admin)

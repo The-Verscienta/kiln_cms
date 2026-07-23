@@ -1,0 +1,25 @@
+{
+  "name": "Feedback survey",
+  "description": "A rating plus what went well and what didn't.",
+  "form": {
+    "success_message": "Thanks for the feedback!",
+    "submit_label": "Send feedback"
+  },
+  "fields": [
+    {
+      "name": "rating",
+      "label": "How would you rate your experience?",
+      "field_type": "rating",
+      "required": true
+    },
+    { "name": "liked", "label": "What did you like?", "field_type": "text" },
+    { "name": "improve", "label": "What could we improve?", "field_type": "text" },
+    {
+      "name": "email",
+      "label": "Email",
+      "field_type": "email",
+      "help_text": "Optional — leave it if we may follow up.",
+      "placeholder": "you@example.com"
+    }
+  ]
+}

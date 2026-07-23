@@ -1,0 +1,30 @@
+{
+  "name": "Newsletter signup",
+  "description": "Email, topics of interest and consent.",
+  "form": {
+    "success_message": "You're subscribed — welcome aboard!",
+    "submit_label": "Subscribe"
+  },
+  "fields": [
+    {
+      "name": "email",
+      "label": "Email",
+      "field_type": "email",
+      "required": true,
+      "placeholder": "you@example.com"
+    },
+    { "name": "first_name", "label": "First name", "field_type": "string" },
+    {
+      "name": "topics",
+      "label": "What are you interested in?",
+      "field_type": "checkboxes",
+      "options": ["Product news", "Tutorials", "Events"]
+    },
+    {
+      "name": "email_consent",
+      "label": "I agree to receive email updates",
+      "field_type": "consent",
+      "required": true
+    }
+  ]
+}

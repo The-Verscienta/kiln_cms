@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.FormLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.Forms.Templates
 
   @impl true
   def mount(_params, _session, socket) do
@@ -20,6 +21,8 @@ defmodule KilnCMSWeb.FormLive do
        socket
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Forms"))
+       |> assign(:templates, Templates.list())
+       |> assign(:template_key, nil)
        |> load_forms()}
     else
       {:ok,
@@ -30,12 +33,28 @@ defmodule KilnCMSWeb.FormLive do
   end
 
   @impl true
+  def handle_event("pick_template", %{"key" => key}, socket) do
+    {:noreply, assign(socket, :template_key, if(key == "", do: nil, else: key))}
+  end
+
   def handle_event("create_form", %{"form" => params}, socket) do
-    case CMS.create_form(params, actor_opts(socket)) do
+    template = socket.assigns.template_key && Templates.get(socket.assigns.template_key)
+
+    result =
+      if template,
+        do: Templates.instantiate(template, params["name"], params["slug"], actor_opts(socket)),
+        else: CMS.create_form(params, actor_opts(socket))
+
+    case result do
       {:ok, form} ->
+        message =
+          if template,
+            do: gettext("Form created from the template — review its fields."),
+            else: gettext("Form created — add its fields.")
+
         {:noreply,
          socket
-         |> put_flash(:info, gettext("Form created — add its fields."))
+         |> put_flash(:info, message)
          |> push_navigate(to: ~p"/editor/forms/#{form.id}")}
 
       {:error, error} ->
@@ -185,6 +204,45 @@ defmodule KilnCMSWeb.FormLive do
                 placeholder="contact"
                 class="field-input mt-1"
               />
+            </div>
+            <div class="sm:col-span-2">
+              <span class="text-sm font-medium">{gettext("Start from")}</span>
+              <div class="mt-1 grid gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  phx-click="pick_template"
+                  phx-value-key=""
+                  class={[
+                    "rounded-lg border p-3 text-left",
+                    @template_key == nil && "border-primary ring-1 ring-primary",
+                    @template_key != nil && "border-base-300 hover:border-primary/40"
+                  ]}
+                >
+                  <span class="text-sm font-medium">{gettext("Blank form")}</span>
+                  <span class="mt-0.5 block text-xs text-base-content/60">
+                    {gettext("Build from scratch in the builder.")}
+                  </span>
+                </button>
+                <button
+                  :for={template <- @templates}
+                  type="button"
+                  phx-click="pick_template"
+                  phx-value-key={template.key}
+                  class={[
+                    "rounded-lg border p-3 text-left",
+                    @template_key == template.key && "border-primary ring-1 ring-primary",
+                    @template_key != template.key && "border-base-300 hover:border-primary/40"
+                  ]}
+                >
+                  <span class="text-sm font-medium">{template.name}</span>
+                  <span class="mt-0.5 block text-xs text-base-content/60">
+                    {template.description}
+                  </span>
+                  <span class="mt-1 block text-xs text-base-content/50">
+                    {gettext("%{count} fields", count: length(template.fields))}
+                  </span>
+                </button>
+              </div>
             </div>
             <div class="sm:col-span-2">
               <.button type="submit" variant="primary">{gettext("Create form")}</.button>

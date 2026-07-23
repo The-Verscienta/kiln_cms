@@ -1,0 +1,46 @@
+{
+  "name": "Event registration",
+  "description": "Attendee details, guests and dietary needs.",
+  "form": {
+    "success_message": "You're registered — see you there!",
+    "submit_label": "Register"
+  },
+  "fields": [
+    {
+      "name": "full_name",
+      "label": "Your name",
+      "field_type": "string",
+      "required": true,
+      "width": "half"
+    },
+    {
+      "name": "email",
+      "label": "Email",
+      "field_type": "email",
+      "required": true,
+      "width": "half"
+    },
+    { "name": "phone", "label": "Phone", "field_type": "phone", "width": "half" },
+    {
+      "name": "guests",
+      "label": "Additional guests",
+      "field_type": "integer",
+      "width": "half",
+      "default_value": "0",
+      "validation": { "min": 0, "max": 10 }
+    },
+    {
+      "name": "dietary",
+      "label": "Dietary preference",
+      "field_type": "select",
+      "options": ["None", "Vegetarian", "Vegan", "Gluten-free"]
+    },
+    { "name": "notes", "label": "Anything we should know?", "field_type": "text" },
+    {
+      "name": "terms",
+      "label": "I agree to the event terms",
+      "field_type": "consent",
+      "required": true
+    }
+  ]
+}
