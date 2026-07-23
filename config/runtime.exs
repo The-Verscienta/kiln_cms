@@ -23,6 +23,20 @@ end
 config :kiln_cms, KilnCMSWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Extra origins allowed in the browser CSP's `img-src` (space-separated), for
+# media libraries whose files serve from an external CDN — e.g.
+# CSP_IMG_SRC="https://imagedelivery.net" for Cloudflare Images. Overrides any
+# `:csp_img_src` default from a project overlay.
+if csp_img_src = System.get_env("CSP_IMG_SRC") do
+  config :kiln_cms, :csp_img_src, String.split(csp_img_src)
+end
+
+# Unsplash media-library integration — the Unsplash tab appears in the media
+# library whenever an access key is configured.
+if unsplash_key = System.get_env("UNSPLASH_ACCESS_KEY") do
+  config :kiln_cms, :unsplash, access_key: unsplash_key
+end
+
 # ## Error tracking (Sentry)
 #
 # Enabled — in any environment — only when SENTRY_DSN is set. With no DSN every

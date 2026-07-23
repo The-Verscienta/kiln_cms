@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.MediaLive do
   alias KilnCMS.CMS
   alias KilnCMS.ImageProcessor
   alias KilnCMS.Storage
+  alias KilnCMS.Unsplash
 
   @accept ~w(.jpg .jpeg .png .webp .gif)
   @max_entries 10
@@ -43,6 +44,13 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:refresh_timer, nil)
      |> assign(:media, [])
      |> assign(:more?, false)
+     |> assign(:unsplash_enabled?, Unsplash.enabled?())
+     |> assign(:unsplash_query, "")
+     |> assign(:unsplash_photos, [])
+     |> assign(:unsplash_page, 1)
+     |> assign(:unsplash_more?, false)
+     |> assign(:unsplash_searching?, false)
+     |> assign(:unsplash_importing, MapSet.new())
      |> allow_upload(:media,
        accept: @accept,
        max_entries: @max_entries,
@@ -141,6 +149,62 @@ defmodule KilnCMSWeb.MediaLive do
 
   def handle_event("show_library", _params, socket),
     do: {:noreply, assign(socket, :view, :library)}
+
+  # --- Unsplash --------------------------------------------------------------
+
+  def handle_event("show_unsplash", _params, socket) do
+    if socket.assigns.unsplash_enabled? do
+      {:noreply, assign(socket, :view, :unsplash)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("unsplash_search", %{"q" => q}, socket) do
+    case String.trim(q) do
+      "" ->
+        {:noreply,
+         socket
+         |> assign(:unsplash_query, "")
+         |> assign(:unsplash_photos, [])
+         |> assign(:unsplash_more?, false)
+         |> assign(:unsplash_searching?, false)}
+
+      query ->
+        {:noreply,
+         socket
+         |> assign(:unsplash_query, query)
+         |> assign(:unsplash_page, 1)
+         |> assign(:unsplash_searching?, true)
+         |> start_async(:unsplash_search, fn -> {query, 1, Unsplash.search(query, 1)} end)}
+    end
+  end
+
+  def handle_event("unsplash_load_more", _params, socket) do
+    %{unsplash_query: query, unsplash_page: page} = socket.assigns
+    next = page + 1
+
+    {:noreply,
+     socket
+     |> assign(:unsplash_searching?, true)
+     |> start_async(:unsplash_search, fn -> {query, next, Unsplash.search(query, next)} end)}
+  end
+
+  def handle_event("unsplash_import", %{"id" => id}, socket) do
+    photo = Enum.find(socket.assigns.unsplash_photos, &(&1.id == id))
+
+    if is_nil(photo) or MapSet.member?(socket.assigns.unsplash_importing, id) do
+      {:noreply, socket}
+    else
+      actor = socket.assigns.actor
+      org = socket.assigns.current_org
+
+      {:noreply,
+       socket
+       |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
+       |> start_async({:unsplash_import, id}, fn -> import_unsplash(photo, actor, org) end)}
+    end
+  end
 
   def handle_event("restore", %{"id" => id}, socket) do
     actor = socket.assigns.actor
@@ -242,6 +306,50 @@ defmodule KilnCMSWeb.MediaLive do
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("URL copied to clipboard."))}
 
+  @impl true
+  def handle_async(:unsplash_search, result, socket) do
+    socket = assign(socket, :unsplash_searching?, false)
+
+    case result do
+      # A result for a query the user has since replaced — drop it.
+      {:ok, {query, _page, _result}} when query != socket.assigns.unsplash_query ->
+        {:noreply, socket}
+
+      {:ok, {_query, page, {:ok, %{photos: photos, more?: more?}}}} ->
+        photos = if page == 1, do: photos, else: socket.assigns.unsplash_photos ++ photos
+
+        {:noreply,
+         socket
+         |> assign(:unsplash_photos, photos)
+         |> assign(:unsplash_page, page)
+         |> assign(:unsplash_more?, more?)}
+
+      _error ->
+        {:noreply,
+         put_flash(socket, :error, gettext("Unsplash search failed — please try again."))}
+    end
+  end
+
+  def handle_async({:unsplash_import, id}, result, socket) do
+    socket =
+      assign(socket, :unsplash_importing, MapSet.delete(socket.assigns.unsplash_importing, id))
+
+    case result do
+      {:ok, {:ok, item}} ->
+        {:noreply,
+         socket
+         |> reload_media()
+         |> put_flash(
+           :info,
+           gettext("Imported %{name} into the library.", name: item.filename)
+         )}
+
+      _error ->
+        {:noreply,
+         put_flash(socket, :error, gettext("Couldn't import that photo from Unsplash."))}
+    end
+  end
+
   # A background variant job finished — refresh the library so the new
   # dimensions/thumbnail show without a manual reload. Completions arrive in
   # bursts (one broadcast per file, to every open MediaLive), so coalesce them
@@ -278,6 +386,62 @@ defmodule KilnCMSWeb.MediaLive do
           case Storage.store(key, source) do
             {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
             _ -> {:error, :storage_failed}
+          end
+        after
+          if stripped?, do: File.rm(source)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Import an Unsplash photo: download (which also reports the download to
+  # Unsplash, per their guidelines), then run the same validate → strip →
+  # store → create pipeline as a direct upload. Runs inside start_async.
+  # sobelow_skip ["Traversal.FileModule"] — path is a server-generated temp file.
+  defp import_unsplash(photo, actor, org) do
+    with {:ok, path} <- Unsplash.download(photo) do
+      try do
+        store_unsplash(path, photo, actor, org)
+      after
+        File.rm(path)
+      end
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp store_unsplash(path, photo, actor, org) do
+    case ImageProcessor.validate_upload(path) do
+      {:ok, %{ext: ext, content_type: content_type}} ->
+        key = Storage.generate_key_with_ext(ext)
+        {source, stripped?} = stripped_source(path, ext)
+
+        try do
+          case Storage.store(key, source) do
+            {:ok, ^key} ->
+              attrs = %{
+                filename: "unsplash-#{photo.id}#{ext}",
+                content_type: content_type,
+                byte_size: File.stat!(source).size,
+                storage_key: key,
+                url: Storage.url(key),
+                alt: photo.alt,
+                caption: Unsplash.attribution(photo)
+              }
+
+              case CMS.create_media_item(attrs, actor: actor, tenant: org) do
+                {:ok, item} ->
+                  enqueue_processing(item)
+                  {:ok, item}
+
+                _ ->
+                  Storage.delete(key)
+                  {:error, :create_failed}
+              end
+
+            _ ->
+              {:error, :storage_failed}
           end
         after
           if stripped?, do: File.rm(source)
@@ -496,7 +660,7 @@ defmodule KilnCMSWeb.MediaLive do
             <h1 class="text-2xl font-semibold">{gettext("Media library")}</h1>
             <p class="text-sm text-base-content/70">{gettext("Upload and manage images.")}</p>
           </div>
-          <div :if={@is_admin} class="tabs" role="tablist">
+          <div :if={@is_admin or @unsplash_enabled?} class="tabs" role="tablist">
             <button
               type="button"
               role="tab"
@@ -507,6 +671,17 @@ defmodule KilnCMSWeb.MediaLive do
               {gettext("Library")}
             </button>
             <button
+              :if={@unsplash_enabled?}
+              type="button"
+              role="tab"
+              aria-selected={to_string(@view == :unsplash)}
+              phx-click="show_unsplash"
+              class="tab"
+            >
+              {gettext("Unsplash")}
+            </button>
+            <button
+              :if={@is_admin}
               type="button"
               role="tab"
               aria-selected={to_string(@view == :trash)}
@@ -519,6 +694,15 @@ defmodule KilnCMSWeb.MediaLive do
         </div>
 
         <.trash_panel :if={@view == :trash} items={@trashed} />
+
+        <.unsplash_panel
+          :if={@view == :unsplash}
+          query={@unsplash_query}
+          photos={@unsplash_photos}
+          more?={@unsplash_more?}
+          searching?={@unsplash_searching?}
+          importing={@unsplash_importing}
+        />
 
         <form
           :if={@view == :library}
@@ -693,6 +877,103 @@ defmodule KilnCMSWeb.MediaLive do
 
       <.media_detail :if={@selected} item={@selected} />
     </Layouts.console>
+    """
+  end
+
+  attr :query, :string, required: true
+  attr :photos, :list, required: true
+  attr :more?, :boolean, required: true
+  attr :searching?, :boolean, required: true
+  attr :importing, :any, required: true
+
+  # Unsplash stock-photo search: importing a result downloads the file
+  # server-side and adds it to the library like a regular upload.
+  defp unsplash_panel(assigns) do
+    ~H"""
+    <div class="space-y-4">
+      <form id="unsplash-search" phx-submit="unsplash_search" class="flex gap-2">
+        <label for="unsplash-search-input" class="sr-only">
+          {gettext("Search Unsplash photos")}
+        </label>
+        <input
+          id="unsplash-search-input"
+          type="text"
+          name="q"
+          value={@query}
+          placeholder={gettext("Search Unsplash photos")}
+          autocomplete="off"
+          class="field-input min-w-0 flex-1"
+        />
+        <.button type="submit" variant="primary" phx-disable-with={gettext("Searching…")}>
+          {gettext("Search")}
+        </.button>
+      </form>
+
+      <p class="text-xs text-base-content/60">
+        {gettext("Photos from Unsplash — importing adds a copy to your library.")}
+      </p>
+
+      <p :if={@searching? and @photos == []} class="text-sm text-base-content/60" role="status">
+        {gettext("Searching…")}
+      </p>
+
+      <p
+        :if={!@searching? and @photos == [] and @query != ""}
+        class="text-sm text-base-content/60"
+        role="status"
+      >
+        {gettext("No photos match “%{query}”.", query: @query)}
+      </p>
+
+      <ul :if={@photos != []} class="grid grid-cols-2 gap-4 sm:grid-cols-3" id="unsplash-grid">
+        <li
+          :for={photo <- @photos}
+          id={"unsplash-#{photo.id}"}
+          class="overflow-hidden rounded border border-base-content/10"
+        >
+          <img
+            src={photo.thumb_url}
+            alt={photo.alt || gettext("Unsplash photo")}
+            loading="lazy"
+            class="aspect-square w-full object-cover"
+          />
+          <div class="flex items-center justify-between gap-2 p-2">
+            <p class="min-w-0 truncate text-[10px] text-base-content/70">
+              <a
+                href={photo.photographer_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="hover:underline"
+              >
+                {photo.photographer}
+              </a>
+            </p>
+            <button
+              type="button"
+              phx-click="unsplash_import"
+              phx-value-id={photo.id}
+              disabled={MapSet.member?(@importing, photo.id)}
+              class="btn btn-sm btn-default shrink-0"
+            >
+              {if MapSet.member?(@importing, photo.id),
+                do: gettext("Importing…"),
+                else: gettext("Import")}
+            </button>
+          </div>
+        </li>
+      </ul>
+
+      <div :if={@more?} class="flex justify-center">
+        <button
+          type="button"
+          phx-click="unsplash_load_more"
+          disabled={@searching?}
+          class="btn btn-default"
+        >
+          {if @searching?, do: gettext("Loading…"), else: gettext("Load more")}
+        </button>
+      </div>
+    </div>
     """
   end
 

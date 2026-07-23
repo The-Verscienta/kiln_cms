@@ -376,4 +376,145 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert processed.height == 1
     end
   end
+
+  describe "unsplash" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "kiln_unsplash_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      Application.put_env(:kiln_cms, KilnCMS.Storage.Local, root: root, base_url: "/uploads")
+
+      previous = Application.get_env(:kiln_cms, :unsplash, [])
+      Application.put_env(:kiln_cms, :unsplash, Keyword.put(previous, :access_key, "test-key"))
+
+      on_exit(fn ->
+        File.rm_rf!(root)
+        Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+        Application.put_env(:kiln_cms, :unsplash, previous)
+      end)
+
+      %{root: root}
+    end
+
+    defp stub_unsplash(png) do
+      Req.Test.stub(KilnCMS.Unsplash, fn conn ->
+        case conn.request_path do
+          "/search/photos" ->
+            Req.Test.json(conn, %{
+              "total_pages" => 1,
+              "results" => [
+                %{
+                  "id" => "abc123",
+                  "width" => 4000,
+                  "height" => 3000,
+                  "alt_description" => "dried herbs on a table",
+                  "urls" => %{"small" => "https://images.unsplash.com/photo-abc123?w=400"},
+                  "links" => %{
+                    "html" => "https://unsplash.com/photos/abc123",
+                    "download_location" => "https://api.unsplash.com/photos/abc123/download"
+                  },
+                  "user" => %{
+                    "name" => "Jane Lens",
+                    "links" => %{"html" => "https://unsplash.com/@janelens"}
+                  }
+                }
+              ]
+            })
+
+          "/photos/abc123/download" ->
+            Req.Test.json(conn, %{"url" => "https://images.unsplash.com/file-abc123"})
+
+          "/file-abc123" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("image/png")
+            |> Plug.Conn.send_resp(200, png)
+        end
+      end)
+    end
+
+    test "the tab is hidden while no access key is configured", %{conn: conn} do
+      previous = Application.get_env(:kiln_cms, :unsplash, [])
+      Application.put_env(:kiln_cms, :unsplash, Keyword.delete(previous, :access_key))
+      on_exit(fn -> Application.put_env(:kiln_cms, :unsplash, previous) end)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+      refute html =~ "show_unsplash"
+    end
+
+    test "searching lists photos with photographer attribution", %{conn: conn} do
+      stub_unsplash(@png)
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      assert html =~ "show_unsplash"
+      lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
+      lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
+
+      html = render_async(lv)
+      assert html =~ "unsplash-abc123"
+      assert html =~ "dried herbs on a table"
+      assert html =~ "Jane Lens"
+      assert html =~ "utm_source=kiln_cms"
+    end
+
+    test "importing a photo stores it in the library with attribution", %{conn: conn, root: root} do
+      stub_unsplash(@png)
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
+      lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
+      render_async(lv)
+
+      lv
+      |> element(~s(button[phx-click="unsplash_import"][phx-value-id="abc123"]))
+      |> render_click()
+
+      html = render_async(lv, 5000)
+      assert html =~ "Imported unsplash-abc123.png into the library."
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.filename == "unsplash-abc123.png"
+      assert item.content_type == "image/png"
+      assert item.alt == "dried herbs on a table"
+      assert item.caption == "Photo by Jane Lens on Unsplash"
+      assert File.exists?(Path.join(root, item.storage_key))
+    end
+
+    test "a failed download surfaces an error flash", %{conn: conn} do
+      Req.Test.stub(KilnCMS.Unsplash, fn conn ->
+        case conn.request_path do
+          "/search/photos" ->
+            Req.Test.json(conn, %{
+              "total_pages" => 1,
+              "results" => [
+                %{
+                  "id" => "abc123",
+                  "urls" => %{"small" => "https://images.unsplash.com/photo-abc123?w=400"},
+                  "links" => %{
+                    "download_location" => "https://api.unsplash.com/photos/abc123/download"
+                  },
+                  "user" => %{"name" => "Jane Lens"}
+                }
+              ]
+            })
+
+          _ ->
+            Plug.Conn.send_resp(conn, 500, "boom")
+        end
+      end)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
+      lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
+      render_async(lv)
+
+      lv
+      |> element(~s(button[phx-click="unsplash_import"][phx-value-id="abc123"]))
+      |> render_click()
+
+      html = render_async(lv, 5000)
+      assert html =~ "Couldn&#39;t import that photo from Unsplash."
+      assert CMS.list_media_items!(authorize?: false) == []
+    end
+  end
 end

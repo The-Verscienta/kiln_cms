@@ -37,6 +37,11 @@ config :kiln_cms,
   # faqs on every delivery surface with no core edits.
   content_domains: [KilnCMS.CMS, Acupuncture.Catalog]
 
+# The migrated media library serves from Cloudflare Images, so the admin,
+# preview and delivery CSPs must allow its host in `img-src` or every
+# thumbnail renders blank. `CSP_IMG_SRC` (runtime.exs) overrides this.
+config :kiln_cms, :csp_img_src, ["https://imagedelivery.net"]
+
 # Register the plugin (D18 seams: `mix kiln.plugins.doctor`, nav, blocks).
 # In test, the core's test.exs registers KilnCMS.FixturePlugin — this file is
 # imported after it and replaces the list, so restate the fixture plugin too.
