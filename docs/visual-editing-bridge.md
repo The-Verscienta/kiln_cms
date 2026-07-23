@@ -134,7 +134,13 @@ elements, where there's no text to encode), annotate elements yourself from the
 - **Live push:** `WS /ws/bridge?type=&id=&api_key=` → JSON frames
   `{event: "update", type, id, title, excerpt}`. Connect refuses if the actor
   can't read the document.
-- **Deep-link:** `/editor/site/:type/:slug?focus=<block_id>`.
+- **Deep-link:** `/editor/site/:type/:slug?focus=<block_id>` (in-context editor,
+  block-level). The structured editor accepts the field-level twin:
+  `/editor/content/:type/:id?focus=<field>` scrolls to, opens (if collapsed),
+  pulses, and focuses that field's input — `<field>` is a custom field's `name`
+  or a core field (`title`, `slug`, `excerpt`, `seo_title`, …). Unknown fields
+  are ignored. Useful when a front end's content lives in custom fields rather
+  than blocks, where the in-context editor has nothing to show.
 - **postMessage:** when `bridge.js` runs inside a parent frame, a click posts
   `{source: "kiln-bridge", event: "edit", payload, url}` to `window.parent`
   instead of opening a tab — the hook a future Kiln "Presentation" console (a

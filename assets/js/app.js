@@ -81,6 +81,32 @@ const Hooks = {
       })
     },
   },
+  // Deep-link focus from an external front end (#355): when the structured
+  // editor is opened as /editor/content/:type/:id?focus=<field>, scroll that
+  // field's input into view, pulse it, and focus it. Custom fields anchor by
+  // their stable input id (custom-field-<name>) and live inside a collapsed
+  // <details>, which must be opened first; core fields (title/slug/excerpt/…)
+  // anchor by their presence-tracking phx-value-field attribute.
+  FocusField: {
+    mounted() {
+      const name = this.el.dataset.kilnFocus
+      if (!name) return
+      requestAnimationFrame(() => {
+        const target =
+          document.getElementById(`custom-field-${name}`) ||
+          document.querySelector(`[phx-value-field="${CSS.escape(name)}"]`)
+        if (!target) return
+        for (let d = target.closest("details"); d; d = d.parentElement.closest("details")) {
+          d.open = true
+        }
+        target.scrollIntoView({behavior: "smooth", block: "center"})
+        const wrap = target.closest("div") || target
+        wrap.classList.add("kiln-focus-pulse")
+        setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
+        if (typeof target.focus === "function") target.focus({preventScroll: true})
+      })
+    },
+  },
   // Multiplayer preview cursors (#343): report this viewer's pointer position
   // as fractions (0..1) of the preview surface, throttled, so co-viewers can
   // render it at the right spot regardless of their window size. The server
