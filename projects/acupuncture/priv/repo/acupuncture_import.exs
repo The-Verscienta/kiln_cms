@@ -1,6 +1,6 @@
 # Import the holistic-acupuncture Sanity export into KilnCMS.
 #
-#     mix run priv/repo/acupuncture_import.exs path/to/kiln-export.json
+#     mix run projects/acupuncture/priv/repo/acupuncture_import.exs path/to/kiln-export.json
 #
 # The export file is produced by the Astro repo's scripts/export-to-kiln.js:
 # media entries (metadata-only, pointing at Cloudflare Images), categories,
@@ -18,11 +18,14 @@
 # attribute is deliberately not writable through the API, so a one-time
 # migration bypass is the least invasive way to preserve original blog dates.
 #
-# Run priv/repo/acupuncture_field_definitions.exs first (custom-field values
-# are validated against the definitions on every write).
+# Requires the acupuncture overlay to be active (config/project.exs registers
+# Acupuncture.Catalog — see projects/acupuncture/README.md). Run
+# projects/acupuncture/priv/repo/acupuncture_field_definitions.exs first
+# (custom-field values are validated against the definitions on every write).
 
 import Ecto.Query
 
+alias Acupuncture.Catalog
 alias KilnCMS.Accounts
 alias KilnCMS.CMS
 alias KilnCMS.Repo
@@ -113,17 +116,19 @@ resolve_blocks = fn blocks ->
 end
 
 # Per-type code interfaces (bang variants; create/list arity 2, update/publish
-# arity 3: record, params, opts).
+# arity 3: record, params, opts). `post` is a core type on KilnCMS.CMS; the
+# four acupuncture types live on the overlay's Acupuncture.Catalog domain.
 interfaces =
   Map.new(~w(post condition team_member testimonial faq), fn type ->
     plural = if type == "faq", do: "faqs", else: "#{type}s"
+    domain = if type == "post", do: CMS, else: Catalog
 
     {type,
      %{
-       list: Function.capture(CMS, :"list_#{plural}!", 2),
-       create: Function.capture(CMS, :"create_#{type}!", 2),
-       update: Function.capture(CMS, :"update_#{type}!", 3),
-       publish: Function.capture(CMS, :"publish_#{type}!", 3)
+       list: Function.capture(domain, :"list_#{plural}!", 2),
+       create: Function.capture(domain, :"create_#{type}!", 2),
+       update: Function.capture(domain, :"update_#{type}!", 3),
+       publish: Function.capture(domain, :"publish_#{type}!", 3)
      }}
   end)
 

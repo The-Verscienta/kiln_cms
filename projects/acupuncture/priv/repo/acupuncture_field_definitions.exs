@@ -1,7 +1,7 @@
 # Custom-field definitions for the acupuncture content types
 # (Condition, TeamMember, Testimonial, Faq). Run with:
 #
-#     mix run priv/repo/acupuncture_field_definitions.exs
+#     mix run projects/acupuncture/priv/repo/acupuncture_field_definitions.exs
 #
 # Idempotent: each definition is looked up by its (content_type, name)
 # identity and created or updated to match this file, so the script is the
