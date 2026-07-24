@@ -19,6 +19,31 @@ defmodule KilnCMS.BlocksTest do
     end
   end
 
+  describe "rich_text :json surface" do
+    test "canonical Portable Text body passes through" do
+      block = %KilnCMS.Blocks.RichText{
+        body: [%{"_type" => "block", "children" => [%{"_type" => "span", "text" => "hi"}]}]
+      }
+
+      assert %{"_type" => "rich_text", "body" => [%{"_type" => "block"} = _]} =
+               KilnCMS.Blocks.render(block, :json)
+    end
+
+    test "TipTap-authored legacy_html survives when body is empty" do
+      block = %KilnCMS.Blocks.RichText{
+        body: [],
+        legacy_html: ~s|<p>prose lives here</p><script>alert(1)</script>|
+      }
+
+      assert %{"_type" => "rich_text", "body" => [], "legacy_html" => html} =
+               KilnCMS.Blocks.render(block, :json)
+
+      # The prose ships; the sanitizer strips what the allowlist forbids.
+      assert html =~ "prose lives here"
+      refute html =~ "<script"
+    end
+  end
+
   describe "dispatch" do
     test "render/2 routes to the block's module" do
       image = %KilnCMS.Blocks.Image{url: "/x.png", alt: "an x", caption: "cap"}

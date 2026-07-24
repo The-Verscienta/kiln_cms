@@ -26,8 +26,22 @@ defmodule KilnCMS.Blocks.RichText do
     end
   end
 
-  def render(block, :json),
-    do: %{"_type" => "rich_text", "body" => block.body || []}
+  def render(block, :json) do
+    case block.body do
+      [_ | _] = body ->
+        %{"_type" => "rich_text", "body" => body}
+
+      _ ->
+        # TipTap-authored prose is stored in legacy_html until the PT round-trip
+        # ships; without this fallback the json artifact carried `body: []` and
+        # headless consumers silently lost the text. Sanitized, same as :web.
+        %{
+          "_type" => "rich_text",
+          "body" => [],
+          "legacy_html" => KilnCMS.HTMLSanitizer.sanitize_rich_text(block.legacy_html)
+        }
+    end
+  end
 
   def render(_block, :json_ld), do: nil
 
