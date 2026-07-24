@@ -755,6 +755,42 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> put_flash(:info, gettext("Reloaded the latest version."))}
   end
 
+  # Keep-mine resolution (T3.5): re-fetch to get the current lock_version, then
+  # save the user's working state over it — deliberately overwriting the other
+  # editor's changes. The alternative to "reload and lose my work".
+  def handle_event("overwrite_conflict", _params, socket) do
+    fresh =
+      fetch!(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> inject_children(socket.assigns.block_children)
+      |> normalize_geo_items()
+
+    case AshPhoenix.Form.submit(build_form(fresh, socket.assigns.actor), params: params) do
+      {:ok, record} ->
+        {:noreply,
+         socket
+         |> cancel_autosave_timer()
+         |> assign_record(record, reseed_children?: false)
+         |> assign(:conflict, false)
+         |> assign(:save_state, :saved)
+         |> put_flash(:info, gettext("Saved your version over the other changes."))}
+
+      {:error, form} ->
+        {:noreply,
+         socket
+         |> assign(:form, form)
+         |> put_flash(:error, gettext("Please fix the errors below."))}
+    end
+  end
+
   def handle_event("workflow", %{"action" => action}, socket) do
     {:noreply, run_workflow(socket, action)}
   end
@@ -831,7 +867,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:save_state, :saved)
          |> put_flash(:info, gettext("Restored that version."))}
 
-      _ ->
+      {:error, error} ->
+        # A restore from a stale tab would overwrite a co-editor's newer save —
+        # the optimistic lock now rejects it; surface as a conflict (T3.4).
+        if stale_error?(error),
+          do: {:noreply, flag_conflict(socket)},
+          else: {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+
+      _other ->
         {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
     end
   end
@@ -862,7 +905,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> assign(:save_state, :saved)
         |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
 
-      _ ->
+      {:error, error} ->
+        # A transition fired from a stale tab (content changed underneath) is
+        # rejected by the optimistic lock — surface it as a conflict to reload,
+        # not a generic "not allowed" (audit T3.4).
+        if stale_error?(error),
+          do: flag_conflict(socket),
+          else: put_flash(socket, :error, gettext("That action isn't allowed right now."))
+
+      _other ->
         put_flash(socket, :error, gettext("That action isn't allowed right now."))
     end
   end
@@ -2491,6 +2542,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
             "Someone else saved changes to this content. Saving is paused so you don't overwrite their work."
           )}
         </span>
+        <button
+          type="button"
+          phx-click="overwrite_conflict"
+          data-confirm={gettext("Overwrite the other changes with your version?")}
+          class="btn btn-sm border border-warning/50 bg-transparent hover:bg-warning/10"
+        >
+          {gettext("Keep my version")}
+        </button>
         <button
           type="button"
           phx-click="reload_conflict"

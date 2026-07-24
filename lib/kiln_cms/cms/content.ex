@@ -1211,8 +1211,15 @@ defmodule KilnCMS.CMS.Content do
         # to drafts.
         unquote(search_actions)
 
+        # The user-triggered workflow + restore actions carry the same optimistic
+        # lock as `:update`/`:autosave`: a transition fired from a stale editor
+        # tab (state or blocks changed underneath it) is rejected with
+        # `StaleRecord` instead of silently overwriting a co-editor's newer save
+        # or firing an artifact off a version the actor never saw (audit T3.4).
+        # The AshOban `*_scheduled` variants stay lock-free — they read fresh.
         update :submit_for_review do
           require_atomic? false
+          change optimistic_lock(:lock_version)
           change transition_state(:in_review)
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "in_review"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :submitted_for_review}
@@ -1220,6 +1227,7 @@ defmodule KilnCMS.CMS.Content do
 
         update :return_to_draft do
           require_atomic? false
+          change optimistic_lock(:lock_version)
           change transition_state(:draft)
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "returned_to_draft"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :returned_to_draft}
@@ -1227,6 +1235,7 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          change optimistic_lock(:lock_version)
           # Compliance gate (#356): block publish when a required editorial consent
           # is missing (config-gated, no-op by default — see the validation).
           validate KilnCMS.CMS.Validations.RequiredConsent
@@ -1257,6 +1266,7 @@ defmodule KilnCMS.CMS.Content do
           # Reverts content fields to a previous PaperTrail version (captured as
           # a new version itself). Workflow state is left unchanged.
           require_atomic? false
+          change optimistic_lock(:lock_version)
           accept []
           argument :version_id, :uuid, allow_nil?: false
           change KilnCMS.CMS.Changes.RestoreVersion
@@ -1264,6 +1274,7 @@ defmodule KilnCMS.CMS.Content do
 
         update :unpublish do
           require_atomic? false
+          change optimistic_lock(:lock_version)
           change transition_state(:draft)
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
@@ -1284,6 +1295,7 @@ defmodule KilnCMS.CMS.Content do
 
         update :archive do
           require_atomic? false
+          change optimistic_lock(:lock_version)
           change transition_state(:archived)
         end
 
@@ -1291,6 +1303,7 @@ defmodule KilnCMS.CMS.Content do
         # :archive).
         update :unarchive do
           require_atomic? false
+          change optimistic_lock(:lock_version)
           change transition_state(:draft)
         end
 

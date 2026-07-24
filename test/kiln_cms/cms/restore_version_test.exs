@@ -94,7 +94,9 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     # reconstructs every field, not just the last one changed.
     page = Ash.update!(page, %{title: "Edited title"}, action: :autosave, actor: admin)
     page = Ash.update!(page, %{seo_title: "Edited SEO"}, action: :autosave, actor: admin)
-    _page = Ash.update!(page, %{slug: "coalesced-slug"}, action: :autosave, actor: admin)
+    # Keep the latest record — :restore_version is optimistic-locked (T3.4), so a
+    # restore must run against the current lock_version, not a stale reference.
+    page = Ash.update!(page, %{slug: "coalesced-slug"}, action: :autosave, actor: admin)
 
     autosaves = Enum.filter(versions(page, admin), &(&1.version_action_name == :autosave))
     assert length(autosaves) == 1
