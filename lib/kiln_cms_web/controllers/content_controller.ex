@@ -94,6 +94,13 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # Deep paths (3+ segments) carry no content routes — they exist only as
+  # redirect sources, e.g. a legacy `/2019/05/old-post` imported from a
+  # previous site (#457).
+  def fallback(conn, %{"path" => segments}) do
+    follow_redirect_or_404(conn, "/" <> Enum.join(segments, "/"))
+  end
+
   # Retired URL? A published slug rename leaves a `CMS.Redirect` behind — 301
   # to the record's current path so inbound links and SEO equity survive.
   # Resolution is live (no chains); anything unresolvable 404s as before.

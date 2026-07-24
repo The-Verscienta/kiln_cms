@@ -259,6 +259,9 @@ defmodule KilnCMSWeb.Router do
       ] do
       live "/editor/trash", TrashLive, :index
       live "/editor/webhooks", WebhookLive, :index
+      # Pathauto redirect management (#457) — list/prune automatic rows, add
+      # manual redirects for legacy URLs.
+      live "/editor/redirects", RedirectLive, :index
       # Team + granular-RBAC management (#332 slice 4).
       live "/editor/team", TeamLive, :index
       # Editorial automation (#342) — no-code "when X happens, do Y" rules.
@@ -604,6 +607,9 @@ defmodule KilnCMSWeb.Router do
     # single-segment page route (different arity — no collision).
     get "/:type/:slug", ContentController, :show_content
     get "/:slug", ContentController, :show_page
+    # Anything deeper only exists as a (manual) redirect source — e.g. a legacy
+    # `/2019/05/old-post` imported from a previous site (#457). 301 or 404.
+    get "/*path", ContentController, :fallback
   end
 
   # Other scopes may use custom stacks.

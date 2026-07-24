@@ -322,6 +322,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-bolt"
           },
           %{
+            key: :redirects,
+            label: gettext("Redirects"),
+            path: ~p"/editor/redirects",
+            icon: "hero-arrow-uturn-right"
+          },
+          %{
             key: :automation,
             label: gettext("Automation"),
             path: ~p"/editor/automation",
