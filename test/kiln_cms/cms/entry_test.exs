@@ -64,6 +64,42 @@ defmodule KilnCMS.CMS.EntryTest do
       end
     end
 
+    test "entries derive slugs from the type's slug pattern (#454)" do
+      admin = user(:admin)
+      type = define_type!(admin, %{slug_pattern: "[yyyy]-[mm]-[title]"})
+      entry = ContentTypes.create!(type.name, %{title: "A Guide to the Kiln"}, actor: admin)
+
+      today = Date.utc_today()
+      month = today.month |> Integer.to_string() |> String.pad_leading(2, "0")
+      assert entry.slug == "#{today.year}-#{month}-guide-kiln"
+    end
+
+    test "the [category] token resolves the record's category slug" do
+      admin = user(:admin)
+      type = define_type!(admin, %{slug_pattern: "[category]-[title]"})
+
+      category =
+        CMS.create_category!(
+          %{name: "News", slug: "news-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      entry =
+        ContentTypes.create!(type.name, %{title: "Big Story", category_id: category.id},
+          actor: admin
+        )
+
+      assert entry.slug == "#{category.slug}-big-story"
+    end
+
+    test "a pattern with unknown tokens is rejected on the type definition" do
+      admin = user(:admin)
+
+      assert_raise Ash.Error.Invalid, ~r/unknown token/, fn ->
+        define_type!(admin, %{slug_pattern: "[titel]"})
+      end
+    end
+
     test "the path calculation resolves the dynamic type's URL prefix" do
       admin = user(:admin)
       recipes = define_type!(admin)

@@ -162,6 +162,34 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
     assert has_element?(lv, ~s{a[href="/#{slug}"]})
   end
 
+  test "a dynamic type's slug pattern drives the editor's live derivation", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    type =
+      CMS.create_type_definition!(
+        %{
+          name: "dyn#{System.unique_integer([:positive])}",
+          label: "Dynamic",
+          slug_pattern: "[yyyy]-[title]"
+        },
+        actor: admin
+      )
+
+    n = System.unique_integer([:positive])
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(
+        type.name,
+        %{title: "Untitled entry", slug: "untitled-#{n}"},
+        actor: admin
+      )
+
+    lv = open_editor(conn, admin, entry, type.name)
+
+    change(lv, "title", %{"title" => "A Guide to the Kiln", "slug" => "untitled-#{n}"})
+    assert slug_value(lv) == "#{Date.utc_today().year}-guide-kiln"
+  end
+
   test "a published record's slug never follows the title", %{conn: conn} do
     admin = authed_user(:admin)
     slug = "live-url-#{System.unique_integer([:positive])}"

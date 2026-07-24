@@ -27,6 +27,7 @@ defmodule KilnCMS.CMS.ContentTypes do
           section: atom() | nil,
           excerpt?: boolean(),
           path_segment: String.t() | nil,
+          slug_pattern: String.t() | nil,
           source: :compiled | :dynamic,
           definition: struct() | nil
         }
@@ -169,6 +170,7 @@ defmodule KilnCMS.CMS.ContentTypes do
       section: resource.__kiln_content_section__(),
       excerpt?: not is_nil(Ash.Resource.Info.attribute(resource, :excerpt)),
       path_segment: path_segment(type, plural),
+      slug_pattern: resource.__kiln_content_slug_pattern__(),
       source: :compiled,
       definition: nil
     }
@@ -185,6 +187,7 @@ defmodule KilnCMS.CMS.ContentTypes do
       section: nil,
       excerpt?: definition.has_excerpt,
       path_segment: definition.path_segment,
+      slug_pattern: definition.slug_pattern,
       source: :dynamic,
       definition: definition
     }

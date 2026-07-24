@@ -107,6 +107,11 @@ defmodule KilnCMS.CMS.Content do
     # at fire time. Dynamic entries resolve theirs from the TypeDefinition row.
     schema_org_type = Keyword.get(opts, :schema_org_type, "Article")
 
+    # Optional pathauto slug pattern (#454), e.g. "[yyyy]-[mm]-[title]" — see
+    # `KilnCMS.Slug.Pattern`. Unknown tokens fail the build here; nil keeps
+    # the default derivation (focus keyphrase → title).
+    slug_pattern = opts |> Keyword.get(:slug_pattern) |> KilnCMS.Slug.Pattern.validate!()
+
     # `published?:` is accepted for backward compatibility but ignored: the
     # `/published` feed (read + route + GraphQL query) is universal since the
     # official client (#300) — every delivery consumer needs a server-side
@@ -782,6 +787,10 @@ defmodule KilnCMS.CMS.Content do
           # (#357, GEO). Dynamic entries carry theirs on the TypeDefinition
           # row instead, so the entry tier has no marker.
           def __kiln_schema_org_type__, do: unquote(schema_org_type)
+
+          # Optional pathauto slug pattern (#454); nil = default derivation.
+          # Dynamic entries carry theirs on the TypeDefinition row.
+          def __kiln_content_slug_pattern__, do: unquote(slug_pattern)
         end
       end
 
