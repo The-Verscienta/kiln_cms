@@ -66,7 +66,6 @@ defmodule KilnCMS.CMS.TypedBlocks do
     end
   end
 
-  defp normalize_rich_text_map(other), do: other
 
   # ── BlockUnion cast normalization (legacy/stored-shape tolerance) ──────────
   # These keep `BlockUnion` accepting legacy block params (no test churn) and
