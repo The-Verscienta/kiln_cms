@@ -112,6 +112,11 @@ defmodule KilnCMS.CMS.Content do
     # the default derivation (focus keyphrase → title).
     slug_pattern = opts |> Keyword.get(:slug_pattern) |> KilnCMS.Slug.Pattern.validate!()
 
+    # Optional pathauto ALIAS pattern (#485), e.g.
+    # "/acupuncture/needle/size/[field:size]" — auto-fills `path_alias`.
+    alias_pattern =
+      opts |> Keyword.get(:alias_pattern) |> KilnCMS.Slug.Pattern.validate!(usage: :alias)
+
     # `published?:` is accepted for backward compatibility but ignored: the
     # `/published` feed (read + route + GraphQL query) is universal since the
     # official client (#300) — every delivery consumer needs a server-side
@@ -791,6 +796,9 @@ defmodule KilnCMS.CMS.Content do
           # Optional pathauto slug pattern (#454); nil = default derivation.
           # Dynamic entries carry theirs on the TypeDefinition row.
           def __kiln_content_slug_pattern__, do: unquote(slug_pattern)
+
+          # Optional pathauto alias pattern (#485); nil = no auto alias.
+          def __kiln_content_alias_pattern__, do: unquote(alias_pattern)
         end
       end
 
@@ -1117,6 +1125,7 @@ defmodule KilnCMS.CMS.Content do
           # A blank/omitted slug is derived from the title (stop words
           # stripped), so a title alone is enough to create content.
           change KilnCMS.CMS.Changes.DeriveSlug
+          change KilnCMS.CMS.Changes.DeriveAlias
           # Stamp the acting user as the author (system/seed creates leave nil).
           change relate_actor(:author, allow_nil?: true)
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
@@ -1152,6 +1161,7 @@ defmodule KilnCMS.CMS.Content do
           change optimistic_lock(:lock_version)
           # Clearing the slug regenerates it from the title — see `:create`.
           change KilnCMS.CMS.Changes.DeriveSlug
+          change KilnCMS.CMS.Changes.DeriveAlias
           # Renaming a published slug leaves a 301 behind at the old URL.
           change KilnCMS.CMS.Changes.RecordSlugRedirect
           argument :tag_ids, {:array, :uuid}
@@ -1197,6 +1207,7 @@ defmodule KilnCMS.CMS.Content do
           change optimistic_lock(:lock_version)
           # Clearing the slug regenerates it from the title — see `:create`.
           change KilnCMS.CMS.Changes.DeriveSlug
+          change KilnCMS.CMS.Changes.DeriveAlias
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)

@@ -52,6 +52,38 @@ defmodule KilnCMS.Slug.PatternTest do
     test "rejects the empty-bracket pattern" do
       assert {:error, _} = Pattern.validate("[]")
     end
+
+    test "field tokens are allowed; malformed ones are not" do
+      assert Pattern.validate("[field:size]-[title]") == :ok
+      assert {:error, _} = Pattern.validate("[field:Bad Name]")
+    end
+
+    test "the slug token is alias-only (circular in a slug pattern)" do
+      assert {:error, _} = Pattern.validate("[slug]")
+      assert Pattern.validate("/kiln/care/[slug]", usage: :alias) == :ok
+    end
+  end
+
+  describe "expand_path/2 (alias patterns, #485 follow-up)" do
+    test "literal segments plus field tokens" do
+      assert Pattern.expand_path("/acupuncture/needle/size/[field:size]", %{
+               custom_fields: %{"size" => "14mm"}
+             }) == "/acupuncture/needle/size/14mm"
+    end
+
+    test "empty segments drop out; an all-empty expansion is nil" do
+      assert Pattern.expand_path("/[category]/[title]", %{title: "Post"}) == "/post"
+      assert Pattern.expand_path("/[category]", %{}) == nil
+    end
+
+    test "the slug token embeds the derived slug" do
+      assert Pattern.expand_path("/kiln/care/[slug]", %{slug: "guide-2"}) == "/kiln/care/guide-2"
+    end
+
+    test "non-scalar field values expand empty" do
+      assert Pattern.expand_path("/x/[field:tags]", %{custom_fields: %{"tags" => ["a", "b"]}}) ==
+               "/x"
+    end
   end
 
   describe "Slugs.derive_base/2 (shared entry point)" do
