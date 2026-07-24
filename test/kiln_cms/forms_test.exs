@@ -457,6 +457,135 @@ defmodule KilnCMS.FormsTest do
     end
   end
 
+  # --- review fixes -------------------------------------------------------------
+
+  test "a nested-map param is rejected (422), not a 500" do
+    form = form!([%{name: "email", label: "Email", field_type: :email, required: true}])
+
+    # Plug parses `email[x]=y` into a map; must not raise on to_string.
+    assert {:error, %{"email" => message}} = Forms.submit(form, %{"email" => %{"x" => "y"}})
+    assert is_binary(message)
+
+    # A list holding a non-scalar is likewise rejected, not crashed.
+    checkboxes =
+      form!([%{name: "c", label: "C", field_type: :checkboxes, options: ["a", "b"]}])
+
+    assert {:error, %{"c" => _}} = Forms.submit(checkboxes, %{"c" => [%{"x" => 1}]})
+  end
+
+  test "a hidden field never enforces required" do
+    form =
+      form!([
+        %{name: "src", label: "Source", field_type: :hidden, required: true, default_value: ""},
+        %{name: "email", label: "Email", field_type: :email}
+      ])
+
+    # Blank hidden value + required must not 422 — the field has no visible input.
+    assert {:ok, submission} = Forms.submit(form, %{"src" => "", "email" => "a@b.co"})
+    refute Map.has_key?(submission.data, "src")
+
+    assert {:ok, with_src} = Forms.submit(form, %{"src" => "landing", "email" => "a@b.co"})
+    assert with_src.data["src"] == "landing"
+  end
+
+  test "visibility is order-independent: a rule may reference a later field" do
+    # Rule source (`plan`) sits AFTER the dependent field (`company`) — a
+    # display-order fold would evaluate against nil and silently drop company.
+    form =
+      form!([
+        %{
+          name: "company",
+          label: "Company",
+          field_type: :string,
+          conditions: %{
+            "logic" => "all",
+            "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+          }
+        },
+        %{name: "plan", label: "Plan", field_type: :radio, options: ["basic", "pro"]}
+      ])
+
+    assert {:ok, shown} = Forms.submit(form, %{"plan" => "pro", "company" => "ACME"})
+    assert shown.data["company"] == "ACME"
+
+    assert {:ok, hidden} = Forms.submit(form, %{"plan" => "basic", "company" => "ACME"})
+    refute Map.has_key?(hidden.data, "company")
+  end
+
+  test "chained conditions converge (a hidden source hides its dependents)" do
+    form =
+      form!([
+        %{name: "a", label: "A", field_type: :string},
+        %{
+          name: "b",
+          label: "B",
+          field_type: :string,
+          conditions: %{"rules" => [%{"field" => "a", "operator" => "eq", "value" => "yes"}]}
+        },
+        %{
+          name: "c",
+          label: "C",
+          field_type: :string,
+          conditions: %{"rules" => [%{"field" => "b", "operator" => "not_empty"}]}
+        }
+      ])
+
+    # a != yes → b hidden → c's source empty → c hidden (its value dropped).
+    assert {:ok, submission} = Forms.submit(form, %{"a" => "no", "b" => "x", "c" => "y"})
+    assert submission.data == %{"a" => "no"}
+
+    # a = yes → b visible → c visible.
+    assert {:ok, all} = Forms.submit(form, %{"a" => "yes", "b" => "x", "c" => "y"})
+    assert all.data == %{"a" => "yes", "b" => "x", "c" => "y"}
+  end
+
+  test "a variant with no effective rule never hijacks the confirmation" do
+    form =
+      form!(
+        %{
+          success_message: "Thanks!",
+          confirmation_variants: [
+            %{"message" => "Draft", "conditions" => %{"logic" => "all", "rules" => []}},
+            %{
+              "message" => "Blank rule",
+              "conditions" => %{
+                "logic" => "all",
+                "rules" => [%{"field" => "", "operator" => "eq"}]
+              }
+            }
+          ]
+        },
+        [%{name: "email", label: "Email", field_type: :email}]
+      )
+
+    # Neither half-built variant matches — base message stands.
+    assert Forms.confirmation(form, %{"email" => "a@b.co"}) == {:message, "Thanks!"}
+  end
+
+  test "the autoresponder skips when subject/body were cleared post-enqueue" do
+    form =
+      form!(
+        %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Hi",
+          autoresponder_body: "Thanks"
+        },
+        [%{name: "email", label: "Email", field_type: :email, required: true}]
+      )
+
+    assert {:ok, _} = Forms.submit(form, %{"email" => "a@b.co"})
+    assert [job] = all_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
+
+    # Admin blanks the body between enqueue and delivery.
+    CMS.update_form!(CMS.get_form!(form.id, authorize?: false), %{autoresponder_body: ""},
+      authorize?: false
+    )
+
+    # The worker must NOT send an empty-body confirmation.
+    perform_job(KilnCMS.Forms.AutoresponderWorker, job.args)
+    refute_received {:email, _email}
+  end
+
   # --- confirmations (phase 6) ----------------------------------------------------
 
   test "confirmation resolution: variants first, then redirect, embeds never redirect" do
@@ -611,6 +740,18 @@ defmodule KilnCMS.FormsTest do
                  name: "F",
                  slug: slug(),
                  confirmation_variants: [%{"message" => "x", "conditions" => %{"logic" => "meh"}}]
+               },
+               actor: actor
+             )
+
+    # A protocol-relative URL would 500 at redirect/2 — reject it at write time.
+    assert {:error, %Ash.Error.Invalid{}} =
+             CMS.create_form(
+               %{
+                 name: "F",
+                 slug: slug(),
+                 confirmation_type: :redirect,
+                 redirect_url: "//evil.example.com/thanks"
                },
                actor: actor
              )

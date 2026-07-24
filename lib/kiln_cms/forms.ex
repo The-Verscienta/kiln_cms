@@ -161,10 +161,20 @@ defmodule KilnCMS.Forms do
   # (blank message, no rules) never hijack the confirmation.
   defp matching_variant(form, data) do
     Enum.find(form.confirmation_variants || [], fn variant ->
-      present?(variant["message"]) and (variant["conditions"] || %{}) != %{} and
+      present?(variant["message"]) and effective_conditions?(variant["conditions"]) and
         conditions_met?(variant["conditions"], data)
     end)
   end
+
+  # A variant only takes over when it carries at least one configured rule (a
+  # non-blank field). An empty/blank rule set matches every submission via
+  # `conditions_met?` (`Enum.all?([]) == true`), which would silently hijack
+  # the base confirmation — so those half-built variants are ignored.
+  defp effective_conditions?(%{"rules" => rules}) when is_list(rules) do
+    Enum.any?(rules, fn rule -> is_map(rule) and present?(rule["field"]) end)
+  end
+
+  defp effective_conditions?(_conditions), do: false
 
   defp redirect_confirmation?(form, embedded?) do
     form.confirmation_type == :redirect and not embedded? and is_binary(form.redirect_url)
@@ -172,27 +182,67 @@ defmodule KilnCMS.Forms do
 
   # --- coercion ---------------------------------------------------------------
 
-  # Fields are folded in display order, so a field's conditions see exactly
-  # the (coerced) values of the fields above it — the same subset the builder
-  # lets rules reference. An invisible field is skipped wholesale: `required`
-  # doesn't apply and any submitted value is discarded (no smuggling data
-  # through fields the visitor never saw).
+  # Only visible fields are coerced+stored; an invisible field is skipped
+  # wholesale so `required` doesn't apply and any submitted value is discarded
+  # (no smuggling data through fields the visitor never saw). Visibility is a
+  # fixpoint over the whole submission (see `visible_field_names/2`), NOT a
+  # top-down fold — so reordering fields, or a rule referencing a field defined
+  # later, can't flip a rule to evaluate against nil and silently drop the
+  # visitor's answer. This matches `form-conditions.js`, which evaluates rules
+  # against the whole form.
   defp coerce(fields, params) do
-    {data, errors} = Enum.reduce(fields, {%{}, %{}}, &coerce_field(&1, &2, params))
+    visible = visible_field_names(fields, params)
+    {data, errors} = Enum.reduce(fields, {%{}, %{}}, &fold_field(&1, &2, params, visible))
 
     if errors == %{}, do: {:ok, data}, else: {:error, errors}
   end
 
-  defp coerce_field(field, {data, errors}, params) do
-    if visible?(field, data) do
+  defp fold_field(field, {data, errors} = acc, params, visible) do
+    if MapSet.member?(visible, field.name) do
       case resolve(field, Map.get(params, field.name)) do
-        :skip -> {data, errors}
+        :skip -> acc
         {:ok, value} -> {Map.put(data, field.name, value), errors}
         {:error, message} -> {data, Map.put(errors, field.name, message)}
       end
     else
-      {data, errors}
+      acc
     end
+  end
+
+  # The set of visible field names, by fixpoint: start with every field
+  # visible, then repeatedly drop any whose conditions fail against the values
+  # of the currently-visible fields, until the set stops changing. Dropping
+  # only removes values, so the set is monotone-decreasing and converges
+  # (bounded by the field count); the result is order-independent.
+  defp visible_field_names(fields, params) do
+    converge(fields, params, MapSet.new(fields, & &1.name))
+  end
+
+  defp converge(fields, params, visible) do
+    values = visible_values(fields, params, visible)
+
+    next =
+      for field <- fields,
+          MapSet.member?(visible, field.name),
+          visible?(field, values),
+          into: MapSet.new(),
+          do: field.name
+
+    if MapSet.equal?(next, visible), do: next, else: converge(fields, params, next)
+  end
+
+  # Best-effort coerced values of the currently-visible fields, for evaluating
+  # conditions. Validation errors and :skip are ignored here — visibility only
+  # needs the values that successfully coerce.
+  defp visible_values(fields, params, visible) do
+    Enum.reduce(fields, %{}, fn field, acc ->
+      with true <- MapSet.member?(visible, field.name),
+           {:ok, value} <- resolve(field, Map.get(params, field.name)) do
+        Map.put(acc, field.name, value)
+      else
+        _ -> acc
+      end
+    end)
   end
 
   @doc """
@@ -280,8 +330,19 @@ defmodule KilnCMS.Forms do
     end
   end
 
+  # A hidden field carries its admin-set default_value and has no visible
+  # input, so `required` never applies (a blank hidden value is just omitted).
+  defp resolve(%{field_type: :hidden} = field, raw) do
+    cond do
+      not acceptable?(raw) -> {:error, "is invalid"}
+      blank?(raw) -> :skip
+      true -> validated_cast(field, raw)
+    end
+  end
+
   defp resolve(field, raw) do
     cond do
+      not acceptable?(raw) -> {:error, "is invalid"}
       blank?(raw) and field.required -> {:error, "is required"}
       blank?(raw) -> :skip
       true -> validated_cast(field, raw)
@@ -290,6 +351,19 @@ defmodule KilnCMS.Forms do
 
   defp blank?([]), do: true
   defp blank?(value), do: value in [nil, ""] or (is_binary(value) and String.trim(value) == "")
+
+  # Public-form values are scalars, or a list of scalars for :checkboxes. A
+  # nested map, or a list holding non-scalars (a crafted `field[x]=y` param),
+  # is malformed — reject it as invalid rather than letting a later
+  # `to_string/1` raise and 500 the anonymous submission endpoint.
+  defp acceptable?(value)
+       when is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value),
+       do: true
+
+  defp acceptable?(value) when is_list(value),
+    do: Enum.all?(value, &(is_binary(&1) or is_number(&1)))
+
+  defp acceptable?(_value), do: false
 
   defp validated_cast(field, raw) do
     with {:ok, value} <- cast(field, raw),

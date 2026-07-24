@@ -55,8 +55,11 @@ defmodule KilnCMS.CMS.Validations.FormConfirmations do
       else: {:error, :notify_email, "must be one or more email addresses, comma-separated"}
   end
 
+  # A same-site path (`/thanks`, but NOT a protocol-relative `//host` — Phoenix
+  # rejects those in `redirect(to:)`, 500ing every submission) or an absolute
+  # http(s) URL.
   defp check_redirect(:redirect, url) do
-    if is_binary(url) and Regex.match?(~r{\A(/|https?://)}, url),
+    if is_binary(url) and Regex.match?(~r{\A(/(?!/)|https?://)}, url),
       do: :ok,
       else:
         {:error, :redirect_url, "a redirect confirmation needs a path (/thanks) or https:// URL"}

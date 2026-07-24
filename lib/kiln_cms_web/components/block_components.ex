@@ -326,7 +326,9 @@ defmodule KilnCMSWeb.BlockComponents do
           </label>
         </div>
       <% :checkboxes -> %>
-        <div class="space-y-1">
+        <%!-- A checkbox group can't carry a native `required`, so mark it for
+              form-pages.js to validate before advancing a multi-page form. --%>
+        <div class="space-y-1" data-kiln-required-group={@field.required && @field.name}>
           <label :for={opt <- @field.options} class="flex items-center gap-2 text-sm">
             <input type="checkbox" name={@field.name <> "[]"} value={opt} />
             {opt}

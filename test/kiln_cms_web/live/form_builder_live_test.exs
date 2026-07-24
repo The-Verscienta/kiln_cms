@@ -657,6 +657,65 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert KilnCMSWeb.BlockComponents.split_form_pages([]) == [[]]
   end
 
+  test "renaming a field cascades into rules that reference it", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    {form, [plan, _dependent], lv, _html} =
+      builder(
+        conn,
+        admin,
+        %{
+          notify_conditions: %{
+            "logic" => "all",
+            "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+          }
+        },
+        [
+          %{
+            name: "plan",
+            label: "Plan",
+            field_type: :radio,
+            options: ["basic", "pro"],
+            position: 0
+          },
+          %{
+            name: "company",
+            label: "Company",
+            field_type: :string,
+            position: 1,
+            conditions: %{
+              "logic" => "all",
+              "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+            }
+          }
+        ]
+      )
+
+    lv
+    |> element(~s(button[phx-click="select_field"][phx-value-id="#{plan.id}"]))
+    |> render_click()
+
+    lv
+    |> form("#field-settings-#{plan.id}", %{
+      field: %{label: "Plan", name: "plan_tier", field_type: "radio"}
+    })
+    |> render_change()
+
+    # The dependent field's rule and the form's notify_conditions both follow.
+    dependent =
+      form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "company"))
+
+    assert dependent.conditions["rules"] == [
+             %{"field" => "plan_tier", "operator" => "eq", "value" => "pro"}
+           ]
+
+    updated_form = CMS.get_form!(form.id, authorize?: false)
+
+    assert updated_form.notify_conditions["rules"] == [
+             %{"field" => "plan_tier", "operator" => "eq", "value" => "pro"}
+           ]
+  end
+
   test "the public form renders the phase-2 field types", %{conn: conn} do
     admin = authed_user(:admin)
     form = CMS.create_form!(%{name: "Everything", slug: "fb-phase2"}, actor: admin)

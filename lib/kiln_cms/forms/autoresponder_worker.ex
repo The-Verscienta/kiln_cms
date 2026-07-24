@@ -22,29 +22,41 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
            authorize?: false,
            tenant: args["org_id"] || KilnCMS.Accounts.default_org_id()
          ) do
-      {:ok, %{autoresponder_enabled: true} = form} ->
-        email =
-          new()
-          |> from(Application.fetch_env!(:kiln_cms, :email_from))
-          |> to(to)
-          |> subject(interpolate(form.autoresponder_subject || "", data, & &1))
-          |> html_body(body(form, data))
-          |> Mail.ensure_message_id("form-auto-#{id}")
-
-        # Replies should reach the site's inbox, not bounce off the sender.
-        email =
-          case reply_to(form) do
-            nil -> email
-            address -> reply_to(email, address)
-          end
-
-        Mail.deliver_for_worker(email)
+      # Re-check subject + body here too, not just `enabled`: an admin may have
+      # cleared them between enqueue and delivery (or a retry), and sending a
+      # blank-subject/blank-body confirmation to a real visitor is worse than
+      # sending nothing.
+      {:ok, %{autoresponder_enabled: true} = form} when is_binary(to) and to != "" ->
+        if present?(form.autoresponder_subject) and present?(form.autoresponder_body),
+          do: deliver(id, form, data, to),
+          else: :ok
 
       # Form deleted or the autoresponder switched off since — nothing to send.
       _ ->
         :ok
     end
   end
+
+  defp deliver(id, form, data, to) do
+    email =
+      new()
+      |> from(Application.fetch_env!(:kiln_cms, :email_from))
+      |> to(to)
+      |> subject(interpolate(form.autoresponder_subject || "", data, & &1))
+      |> html_body(body(form, data))
+      |> Mail.ensure_message_id("form-auto-#{id}")
+
+    # Replies should reach the site's inbox, not bounce off the sender.
+    email =
+      case reply_to(form) do
+        nil -> email
+        address -> reply_to(email, address)
+      end
+
+    Mail.deliver_for_worker(email)
+  end
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}), do: Mail.backoff_seconds(attempt)

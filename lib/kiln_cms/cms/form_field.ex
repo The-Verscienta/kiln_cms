@@ -56,6 +56,16 @@ defmodule KilnCMS.CMS.FormField do
   @spec display_types() :: [atom()]
   def display_types, do: @display_types
 
+  # Every attribute carried over when a field is copied (duplicate field, or
+  # duplicate form) — one list so a new attribute can't be silently dropped.
+  @copyable_attributes ~w(name label field_type required options help_text
+                          position placeholder default_value width validation
+                          conditions)a
+
+  @doc "Attributes copied when a field is duplicated."
+  @spec copyable_attributes() :: [atom()]
+  def copyable_attributes, do: @copyable_attributes
+
   admin do
     resource_group :content
     table_columns [:form_id, :name, :label, :field_type, :required, :position]

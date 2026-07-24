@@ -13,30 +13,47 @@
 (function () {
   "use strict";
 
-  function fieldValue(form, name) {
-    var checked = form.querySelectorAll('[name="' + name + '[]"]:checked');
-    if (checked.length > 0) {
-      return Array.prototype.map.call(checked, function (el) {
-        return el.value;
-      });
-    }
-    if (form.querySelector('[name="' + name + '[]"]')) return [];
+  function enabled(el) {
+    // A field hidden by its own conditions has disabled inputs (and won't POST)
+    // — the server discards it, so we must read it as empty here too.
+    return !el.disabled;
+  }
 
-    var els = form.querySelectorAll('[name="' + name + '"]');
+  function fieldValue(form, name) {
+    // Multi-select checkboxes (name[]): the selected, enabled values.
+    var group = form.querySelectorAll('[name="' + name + '[]"]');
+    if (group.length > 0) {
+      var picked = [];
+      Array.prototype.forEach.call(group, function (el) {
+        if (el.checked && enabled(el)) picked.push(el.value);
+      });
+      return picked;
+    }
+
+    var els = Array.prototype.filter.call(
+      form.querySelectorAll('[name="' + name + '"]'),
+      enabled
+    );
     if (els.length === 0) return null;
 
+    if (els[0].type === "radio") {
+      for (var i = 0; i < els.length; i++) {
+        if (els[i].checked) return els[i].value;
+      }
+      return null;
+    }
+
+    // boolean/consent: a hidden "false" twin PRECEDES the checkbox, so we must
+    // find the checkbox among the elements (not assume it's first) and read its
+    // checked state — not its constant `value="true"` attribute.
+    for (var j = 0; j < els.length; j++) {
+      if (els[j].type === "checkbox") {
+        return els[j].checked ? "true" : "false";
+      }
+    }
+
     var first = els[0];
-    if (first.type === "radio") {
-      var picked = form.querySelector('[name="' + name + '"]:checked');
-      return picked ? picked.value : null;
-    }
-    if (first.type === "checkbox") {
-      // boolean/consent: a hidden "false" twin precedes the checkbox.
-      var box = form.querySelector('input[type=checkbox][name="' + name + '"]');
-      return box && box.checked ? "true" : "false";
-    }
     if (first.type === "hidden" && els.length > 1) {
-      // hidden "false" + something else — prefer the visible input.
       first = els[els.length - 1];
     }
     return first.value;
@@ -80,34 +97,50 @@
 
   function evaluateForm(form) {
     var wrappers = form.querySelectorAll("[data-kiln-conditions]");
-    Array.prototype.forEach.call(wrappers, function (wrap) {
-      var conf;
-      try {
-        conf = JSON.parse(wrap.getAttribute("data-kiln-conditions"));
-      } catch (_e) {
-        return;
-      }
 
-      var rules = (conf && conf.rules) || [];
-      var results = rules.map(function (rule) {
-        // An in-progress rule (blank field) never hides anything.
-        if (!rule || !rule.field) return true;
-        return matches(rule, fieldValue(form, rule.field));
-      });
+    // Iterate to a fixpoint: hiding one field changes what a rule referencing
+    // it sees, so a single pass is order-dependent (a rule can read a field
+    // whose own visibility hasn't been decided yet). Re-evaluate until nothing
+    // changes — the server does the same via its visibility fixpoint. Bounded
+    // by the number of wrappers, with a hard guard.
+    var changed = true;
+    var guard = 0;
 
-      var show =
-        conf && conf.logic === "any"
-          ? results.length === 0 || results.some(Boolean)
-          : results.every(Boolean);
+    while (changed && guard++ < wrappers.length + 1) {
+      changed = false;
 
-      wrap.style.display = show ? "" : "none";
-      Array.prototype.forEach.call(
-        wrap.querySelectorAll("input, select, textarea"),
-        function (el) {
-          el.disabled = !show;
+      Array.prototype.forEach.call(wrappers, function (wrap) {
+        var conf;
+        try {
+          conf = JSON.parse(wrap.getAttribute("data-kiln-conditions"));
+        } catch (_e) {
+          return;
         }
-      );
-    });
+
+        var rules = (conf && conf.rules) || [];
+        var results = rules.map(function (rule) {
+          // An in-progress rule (blank field) never hides anything.
+          if (!rule || !rule.field) return true;
+          return matches(rule, fieldValue(form, rule.field));
+        });
+
+        var show =
+          conf && conf.logic === "any"
+            ? results.length === 0 || results.some(Boolean)
+            : results.every(Boolean);
+
+        if (show === (wrap.style.display === "none")) {
+          changed = true;
+          wrap.style.display = show ? "" : "none";
+          Array.prototype.forEach.call(
+            wrap.querySelectorAll("input, select, textarea"),
+            function (el) {
+              el.disabled = !show;
+            }
+          );
+        }
+      });
+    }
   }
 
   function evaluateAll() {

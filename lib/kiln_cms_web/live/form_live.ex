@@ -62,46 +62,14 @@ defmodule KilnCMSWeb.FormLive do
     end
   end
 
-  # A full copy — settings and fields — created inactive so the duplicate
-  # doesn't instantly render publicly under its new slug.
+  # A full copy — all settings and fields — created inactive so the duplicate
+  # doesn't instantly render publicly under its new slug. Transactional: a
+  # failed field rolls the whole copy back (no half-copied form).
   def handle_event("duplicate_form", %{"id" => id}, socket) do
     opts = actor_opts(socket)
 
     with {:ok, form} <- CMS.get_form(id, opts),
-         {:ok, copy} <-
-           CMS.create_form(
-             %{
-               name: gettext("%{name} (copy)", name: form.name),
-               slug: unique_slug(form.slug, socket.assigns.forms),
-               description: form.description,
-               active: false,
-               success_message: form.success_message,
-               notify_email: form.notify_email,
-               submit_label: form.submit_label
-             },
-             opts
-           ) do
-      for field <- CMS.form_fields_for!(form.id, opts) do
-        CMS.create_form_field(
-          %{
-            form_id: copy.id,
-            name: field.name,
-            label: field.label,
-            field_type: field.field_type,
-            required: field.required,
-            options: field.options,
-            help_text: field.help_text,
-            placeholder: field.placeholder,
-            default_value: field.default_value,
-            width: field.width,
-            validation: field.validation,
-            conditions: field.conditions,
-            position: field.position
-          },
-          opts
-        )
-      end
-
+         {:ok, _copy} <- duplicate(form, socket.assigns.forms, opts) do
       {:noreply,
        socket
        |> load_forms()
@@ -127,6 +95,42 @@ defmodule KilnCMSWeb.FormLive do
   end
 
   # --- data --------------------------------------------------------------------
+
+  defp duplicate(form, existing, opts) do
+    form_attrs =
+      form
+      |> Map.take(CMS.Form.copyable_attributes())
+      |> Map.merge(%{
+        name: gettext("%{name} (copy)", name: form.name),
+        slug: unique_slug(form.slug, existing),
+        active: false
+      })
+
+    KilnCMS.Repo.transaction(fn ->
+      with {:ok, copy} <- CMS.create_form(form_attrs, opts),
+           :ok <- copy_fields(form, copy, opts) do
+        copy
+      else
+        {:error, error} -> KilnCMS.Repo.rollback(error)
+      end
+    end)
+  end
+
+  defp copy_fields(form, copy, opts) do
+    form.id
+    |> CMS.form_fields_for!(opts)
+    |> Enum.reduce_while(:ok, fn field, :ok ->
+      attrs =
+        field
+        |> Map.take(CMS.FormField.copyable_attributes())
+        |> Map.put(:form_id, copy.id)
+
+      case CMS.create_form_field(attrs, opts) do
+        {:ok, _field} -> {:cont, :ok}
+        {:error, error} -> {:halt, {:error, error}}
+      end
+    end)
+  end
 
   defp actor_opts(socket),
     do: [actor: socket.assigns.actor, tenant: socket.assigns.current_org]

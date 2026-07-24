@@ -103,7 +103,23 @@ defmodule KilnCMSWeb.FormLiveTest do
 
     form =
       CMS.create_form!(
-        %{name: "Contact", slug: "fl-dup", success_message: "Merci!", submit_label: "Send"},
+        %{
+          name: "Contact",
+          slug: "fl-dup",
+          success_message: "Merci!",
+          submit_label: "Send",
+          # Phase 5/6 settings must survive duplication too (regression).
+          progress_indicator: :bar,
+          confirmation_type: :redirect,
+          redirect_url: "/thanks",
+          notify_conditions: %{
+            "logic" => "all",
+            "rules" => [%{"field" => "email", "operator" => "not_empty", "value" => ""}]
+          },
+          autoresponder_enabled: true,
+          autoresponder_subject: "Got it",
+          autoresponder_body: "Thanks"
+        },
         actor: admin
       )
 
@@ -125,6 +141,12 @@ defmodule KilnCMSWeb.FormLiveTest do
     refute copy.active
     assert copy.success_message == "Merci!"
     assert copy.submit_label == "Send"
+    assert copy.progress_indicator == :bar
+    assert copy.confirmation_type == :redirect
+    assert copy.redirect_url == "/thanks"
+    assert copy.notify_conditions["rules"] != []
+    assert copy.autoresponder_enabled
+    assert copy.autoresponder_subject == "Got it"
 
     assert [field] = CMS.form_fields_for!(copy.id, authorize?: false)
     assert field.name == "email"

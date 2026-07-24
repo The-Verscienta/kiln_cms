@@ -4,15 +4,19 @@ defmodule KilnCMSWeb.FormExportController do
   `GET /editor/forms/:id/export.csv` (phase 6).
 
   One row per submission (newest first): timestamp, locale, then one column
-  per value-producing field in the form's display order, plus columns for
-  any data keys no current field claims (renamed/deleted fields — old
-  entries keep their answers). Admin-only, gated against the
-  `:browser`-loaded user like the governance exports.
+  per value-producing field in the form's display order, plus columns for any
+  data keys no current field claims (renamed/deleted fields — old entries keep
+  their answers). Admin-only, gated against the `:browser`-loaded user like the
+  governance exports. Streamed (chunked response + keyset-paginated read) so a
+  form with a large submission history never materializes in memory.
   """
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS
-  alias KilnCMS.CMS.FormField
+  alias KilnCMS.CMS.{FormField, FormSubmission}
+  alias KilnCMSWeb.CSV
+
+  @batch 500
 
   # Not HTML: the body is a text/csv attachment (content type + disposition
   # set below), so browsers never render it as a document.
@@ -22,65 +26,71 @@ defmodule KilnCMSWeb.FormExportController do
 
     with :admin <- KilnCMSWeb.LiveUserAuth.effective_tier(conn),
          {:ok, form} <- CMS.get_form(id, authorize?: false, tenant: org) do
-      submissions = CMS.all_form_submissions!(form.id, authorize?: false, tenant: org)
       fields = CMS.form_fields_for!(form.id, authorize?: false, tenant: org)
+      columns = columns(form, fields, org)
 
-      conn
-      |> put_resp_content_type("text/csv")
-      |> put_resp_header(
-        "content-disposition",
-        ~s(attachment; filename="form-#{form.slug}-submissions.csv")
-      )
-      |> send_resp(200, csv(fields, submissions))
+      conn =
+        conn
+        |> put_resp_content_type("text/csv")
+        |> put_resp_header(
+          "content-disposition",
+          ~s(attachment; filename="form-#{form.slug}-submissions.csv")
+        )
+        |> send_chunked(200)
+
+      {:ok, conn} = chunk(conn, CSV.line(["submitted_at", "locale" | columns]))
+
+      form.id
+      |> stream(org)
+      |> Enum.reduce_while(conn, &write_row(&1, &2, columns))
     else
       {:error, _error} -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
       _tier -> conn |> put_status(:forbidden) |> json(%{error: "admin_required"})
     end
   end
 
-  defp csv(fields, submissions) do
+  # Field columns (in form order) plus any orphaned data keys from renamed or
+  # deleted fields. The orphan scan streams the submissions, accumulating only
+  # the (small) set of key strings — never the submissions themselves.
+  defp columns(form, fields, org) do
     field_names =
       fields
       |> Enum.reject(&(&1.field_type in FormField.display_types()))
       |> Enum.map(& &1.name)
 
-    # Data keys no current field claims (renamed/deleted fields) still export.
+    known = MapSet.new(field_names)
+
     extras =
-      submissions
-      |> Enum.flat_map(&Map.keys(&1.data))
-      |> Enum.uniq()
-      |> Kernel.--(field_names)
+      form.id
+      |> stream(org)
+      |> Enum.reduce(MapSet.new(), fn submission, acc ->
+        submission.data |> Map.keys() |> Enum.reduce(acc, &MapSet.put(&2, &1))
+      end)
+      |> MapSet.reject(&MapSet.member?(known, &1))
       |> Enum.sort()
 
-    columns = field_names ++ extras
+    field_names ++ extras
+  end
 
-    rows =
-      Enum.map(submissions, fn submission ->
-        [DateTime.to_iso8601(submission.inserted_at), submission.locale] ++
-          Enum.map(columns, &display(Map.get(submission.data, &1)))
-      end)
+  defp write_row(submission, conn, columns) do
+    case chunk(conn, CSV.line(row(submission, columns))) do
+      {:ok, conn} -> {:cont, conn}
+      # Client hung up mid-download — stop streaming.
+      {:error, _reason} -> {:halt, conn}
+    end
+  end
 
-    Enum.map_join([["submitted_at", "locale" | columns] | rows], &csv_line/1)
+  defp stream(form_id, org) do
+    FormSubmission
+    |> Ash.Query.for_read(:all_for_form, %{form_id: form_id}, authorize?: false, tenant: org)
+    |> Ash.stream!(batch_size: @batch)
+  end
+
+  defp row(submission, columns) do
+    [DateTime.to_iso8601(submission.inserted_at), submission.locale] ++
+      Enum.map(columns, &display(Map.get(submission.data, &1)))
   end
 
   defp display(value) when is_list(value), do: Enum.join(value, "; ")
   defp display(value), do: value
-
-  defp csv_line(fields), do: Enum.map_join(fields, ",", &csv_field/1) <> "\r\n"
-
-  # RFC 4180: quote a field when it holds a comma, quote, or newline; quotes
-  # double. Prefix any formula-leading character so a spreadsheet app never
-  # executes a cell that came from visitor-entered content (CSV injection).
-  defp csv_field(nil), do: ""
-
-  defp csv_field(value) do
-    value = to_string(value)
-    value = if String.match?(value, ~r/\A[=+\-@\t\r]/), do: "'" <> value, else: value
-
-    if String.contains?(value, [",", "\"", "\n", "\r"]) do
-      "\"" <> String.replace(value, "\"", "\"\"") <> "\""
-    else
-      value
-    end
-  end
 end

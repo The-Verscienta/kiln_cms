@@ -168,9 +168,14 @@ defmodule KilnCMSWeb.FormBuilderLive do
     field = Enum.find(socket.assigns.fields, &(&1.id == id))
 
     case field && CMS.update_form_field(field, field_params(params, field), actor_opts(socket)) do
-      nil -> {:noreply, socket}
-      {:ok, _field} -> {:noreply, reload_fields(socket)}
-      {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error))}
+      nil ->
+        {:noreply, socket}
+
+      {:ok, updated} ->
+        {:noreply, socket |> cascade_rename(field.name, updated.name) |> reload_fields()}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, error_message(error))}
     end
   end
 
@@ -309,21 +314,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # --- data --------------------------------------------------------------------
 
   defp copy_field(socket, field, fields) do
-    attrs = %{
-      form_id: field.form_id,
-      name: unique_name(field.name, fields),
-      label: field.label,
-      field_type: field.field_type,
-      required: field.required,
-      options: field.options,
-      help_text: field.help_text,
-      placeholder: field.placeholder,
-      default_value: field.default_value,
-      width: field.width,
-      validation: field.validation,
-      conditions: field.conditions,
-      position: field.position
-    }
+    attrs =
+      field
+      |> Map.take(FormField.copyable_attributes())
+      |> Map.merge(%{form_id: field.form_id, name: unique_name(field.name, fields)})
 
     case CMS.create_form_field(attrs, actor_opts(socket)) do
       {:ok, copy} ->
@@ -340,6 +334,70 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   defp insert_after(ids, target, new_id),
     do: Enum.flat_map(ids, &if(&1 == target, do: [&1, new_id], else: [&1]))
+
+  # When a field's machine name changes, rewrite every rule that referenced the
+  # old name — other fields' visibility conditions, the form's
+  # notify_conditions, and its confirmation_variants — so smart logic keeps
+  # working instead of silently evaluating against a now-missing key.
+  defp cascade_rename(socket, same, same), do: socket
+
+  defp cascade_rename(socket, old, new) do
+    for field <- socket.assigns.fields,
+        field.name != new,
+        references_field?(field.conditions, old) do
+      CMS.update_form_field(
+        field,
+        %{conditions: rename_in_conditions(field.conditions, old, new)},
+        actor_opts(socket)
+      )
+    end
+
+    form = socket.assigns.form
+
+    updates =
+      %{}
+      |> put_if_changed(
+        :notify_conditions,
+        form.notify_conditions,
+        rename_in_conditions(form.notify_conditions, old, new)
+      )
+      |> put_if_changed(
+        :confirmation_variants,
+        form.confirmation_variants,
+        Enum.map(form.confirmation_variants || [], fn variant ->
+          Map.update(variant, "conditions", %{}, &rename_in_conditions(&1, old, new))
+        end)
+      )
+
+    if updates == %{} do
+      socket
+    else
+      case CMS.update_form(form, updates, actor_opts(socket)) do
+        {:ok, updated} -> assign(socket, :form, updated)
+        _error -> socket
+      end
+    end
+  end
+
+  defp put_if_changed(map, _key, same, same), do: map
+  defp put_if_changed(map, key, _old, new), do: Map.put(map, key, new)
+
+  defp references_field?(%{"rules" => rules}, name) when is_list(rules),
+    do: Enum.any?(rules, &(is_map(&1) and &1["field"] == name))
+
+  defp references_field?(_conditions, _name), do: false
+
+  defp rename_in_conditions(%{"rules" => rules} = conditions, old, new) when is_list(rules) do
+    Map.put(
+      conditions,
+      "rules",
+      Enum.map(rules, fn rule ->
+        if is_map(rule) and rule["field"] == old, do: Map.put(rule, "field", new), else: rule
+      end)
+    )
+  end
+
+  defp rename_in_conditions(conditions, _old, _new), do: conditions
 
   defp actor_opts(socket),
     do: [actor: socket.assigns.actor, tenant: socket.assigns.current_org]

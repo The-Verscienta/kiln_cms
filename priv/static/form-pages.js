@@ -57,6 +57,24 @@
           return false;
         }
       }
+
+      // A required :checkboxes group can't use native `required`, so validate
+      // it here (skip groups hidden by conditions — offsetParent is null).
+      var groups = page.querySelectorAll("[data-kiln-required-group]");
+      for (var g = 0; g < groups.length; g++) {
+        var group = groups[g];
+        if (group.offsetParent === null) continue;
+        if (!group.querySelector("input[type=checkbox]:checked")) {
+          var box = group.querySelector("input[type=checkbox]");
+          if (box && box.setCustomValidity) {
+            box.setCustomValidity("Please select at least one option.");
+            box.reportValidity();
+            box.setCustomValidity("");
+          }
+          return false;
+        }
+      }
+
       return true;
     }
 

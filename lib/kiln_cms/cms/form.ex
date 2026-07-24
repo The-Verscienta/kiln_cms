@@ -19,6 +19,19 @@ defmodule KilnCMS.CMS.Form do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshAdmin.Resource]
 
+  # Every writable setting carried over when a form is duplicated (name/slug
+  # are fresh, active is forced off). Kept as one list so a new setting can't
+  # be silently dropped by the duplicate flow.
+  @copyable_attributes ~w(description active success_message notify_email
+                          submit_label progress_indicator confirmation_type
+                          redirect_url confirmation_variants notify_conditions
+                          autoresponder_enabled autoresponder_subject
+                          autoresponder_body)a
+
+  @doc "Writable settings copied when a form is duplicated."
+  @spec copyable_attributes() :: [atom()]
+  def copyable_attributes, do: @copyable_attributes
+
   admin do
     resource_group :content
     table_columns [:name, :slug, :active, :inserted_at]
