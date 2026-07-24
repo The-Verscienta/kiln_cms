@@ -262,6 +262,8 @@ defmodule KilnCMSWeb.Router do
       # Pathauto redirect management (#457) — list/prune automatic rows, add
       # manual redirects for legacy URLs.
       live "/editor/redirects", RedirectLive, :index
+      # Bulk slug regeneration (#455) — dry-run preview + background apply.
+      live "/editor/slugs", SlugRegenLive, :index
       # Team + granular-RBAC management (#332 slice 4).
       live "/editor/team", TeamLive, :index
       # Editorial automation (#342) — no-code "when X happens, do Y" rules.

@@ -328,6 +328,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-arrow-uturn-right"
           },
           %{
+            key: :slugs,
+            label: gettext("Slugs"),
+            path: ~p"/editor/slugs",
+            icon: "hero-link"
+          },
+          %{
             key: :automation,
             label: gettext("Automation"),
             path: ~p"/editor/automation",

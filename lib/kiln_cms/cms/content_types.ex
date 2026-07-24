@@ -363,6 +363,10 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
+  @doc "Generic update through the type's own code interface (primary `:update`)."
+  def update(type, record, attrs, opts \\ []),
+    do: call(type, "update_#{atom(type)}", [record, attrs, opts])
+
   def list_versions!(type, opts \\ []), do: call(type, "list_#{atom(type)}_versions!", [opts])
 
   def restore_version(type, record, version_id, opts \\ []) do
