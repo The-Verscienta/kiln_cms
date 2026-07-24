@@ -49,6 +49,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :plural_label,
         :path_segment,
         :slug_pattern,
+        :alias_pattern,
         :has_excerpt,
         :has_published_feed,
         :icon,
@@ -71,6 +72,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :plural_label,
         :path_segment,
         :slug_pattern,
+        :alias_pattern,
         :has_excerpt,
         :has_published_feed,
         :icon,
@@ -193,6 +195,11 @@ defmodule KilnCMS.CMS.TypeDefinition do
     # slugs, e.g. "[yyyy]-[mm]-[title]" — see `KilnCMS.Slug.Pattern`. Nil =
     # default derivation (focus keyphrase → title).
     attribute :slug_pattern, :string, public?: true
+
+    # Optional pathauto alias pattern (#485): composes each entry's
+    # multi-segment `path_alias`, e.g. "/acupuncture/needle/size/[field:size]".
+    # Nil = no auto alias (flat URLs; aliases stay manual).
+    attribute :alias_pattern, :string, public?: true
 
     # Mirror the Content macro's `:excerpt?` / `:published?` options.
     attribute :has_excerpt, :boolean, allow_nil?: false, default: false, public?: true

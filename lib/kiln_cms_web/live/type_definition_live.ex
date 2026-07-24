@@ -213,8 +213,20 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
               />
               <p class="mt-1 text-xs text-base-content/60">
                 {gettext(
-                  "Tokens: %{tokens}. Composes the last URL segment; blank = derive from the SEO keyphrase or title.",
+                  "Tokens: %{tokens}, [field:<name>]. Composes the last URL segment; blank = derive from the SEO keyphrase or title.",
                   tokens: Enum.map_join(KilnCMS.Slug.Pattern.tokens(), ", ", &"[#{&1}]")
+                )}
+              </p>
+            </div>
+            <div class="sm:col-span-2">
+              <.input
+                field={@form[:alias_pattern]}
+                label={gettext("Path alias pattern (optional)")}
+                placeholder="/acupuncture/needle/size/[field:size]"
+              />
+              <p class="mt-1 text-xs text-base-content/60">
+                {gettext(
+                  "Auto-fills each entry's multi-segment canonical URL. Same tokens plus [slug]; segments that expand empty drop out. Blank = flat URLs."
                 )}
               </p>
             </div>
@@ -332,6 +344,11 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                   field={@edit.form[:slug_pattern]}
                   label={gettext("Slug pattern (optional)")}
                   placeholder="[yyyy]-[mm]-[title]"
+                />
+                <.input
+                  field={@edit.form[:alias_pattern]}
+                  label={gettext("Path alias pattern (optional)")}
+                  placeholder="/kiln/care/[slug]"
                 />
                 <.input
                   field={@edit.form[:schema_org_type]}

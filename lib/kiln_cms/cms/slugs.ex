@@ -161,12 +161,96 @@ defmodule KilnCMS.CMS.Slugs do
       title: record.title,
       seo_keywords: Map.get(record, :seo_keywords),
       category_slug: record_category_slug(record),
+      slug: record.slug,
+      custom_fields: Map.get(record, :custom_fields),
       date: record.published_at || record.scheduled_at || Map.get(record, :inserted_at)
     }
   end
 
   defp record_category_slug(%{category: %{slug: slug}}), do: slug
   defp record_category_slug(_record), do: nil
+
+  @doc """
+  Pattern-expansion context from a **changeset being written** — the same
+  keys and date-anchor chain as `record_context/1`, shared by `DeriveSlug`
+  and `DeriveAlias`. The category read runs only when the pattern actually
+  mentions `[category]`.
+  """
+  @spec changeset_context(Ash.Changeset.t(), String.t() | nil) :: KilnCMS.Slug.Pattern.context()
+  def changeset_context(changeset, pattern) do
+    %{
+      title: Ash.Changeset.get_attribute(changeset, :title),
+      seo_keywords: changeset_attribute(changeset, :seo_keywords),
+      category_slug: changeset_category_slug(changeset, pattern),
+      slug: Ash.Changeset.get_attribute(changeset, :slug),
+      custom_fields: changeset_attribute(changeset, :custom_fields),
+      # Stable date anchor: publish date when set, else the scheduled date,
+      # else the record's creation date (nil on create → today, which then IS
+      # the creation date). Never re-read from the wall clock afterwards.
+      date:
+        Ash.Changeset.get_attribute(changeset, :published_at) ||
+          Ash.Changeset.get_attribute(changeset, :scheduled_at) ||
+          Map.get(changeset.data, :inserted_at)
+    }
+  end
+
+  @doc "get_attribute/2, but nil when the resource lacks the attribute."
+  @spec changeset_attribute(Ash.Changeset.t(), atom()) :: term()
+  def changeset_attribute(changeset, name) do
+    if Ash.Resource.Info.attribute(changeset.resource, name),
+      do: Ash.Changeset.get_attribute(changeset, name)
+  end
+
+  @doc """
+  The type's slug or alias pattern for a changeset: compiled types carry
+  theirs as compile-time markers; dynamic entries resolve theirs with one
+  keyed read of their TypeDefinition row (the row id is globally unique, so
+  this is tenant-correct even though the org_id attribute isn't materialized
+  until after action changes run).
+  """
+  @spec pattern_for(Ash.Changeset.t(), :slug | :alias) :: String.t() | nil
+  def pattern_for(changeset, kind) do
+    resource = changeset.resource
+    marker = marker_for(kind)
+
+    if Code.ensure_loaded?(resource) and function_exported?(resource, marker, 0) do
+      apply(resource, marker, [])
+    else
+      dynamic_pattern(changeset, kind)
+    end
+  end
+
+  defp marker_for(:slug), do: :__kiln_content_slug_pattern__
+  defp marker_for(:alias), do: :__kiln_content_alias_pattern__
+
+  defp dynamic_pattern(changeset, kind) do
+    with definition_id when not is_nil(definition_id) <-
+           changeset_attribute(changeset, :type_definition_id),
+         {:ok, definition} <-
+           KilnCMS.CMS.get_type_definition(definition_id,
+             authorize?: false,
+             tenant: changeset.tenant
+           ) do
+      case kind do
+        :slug -> definition.slug_pattern
+        :alias -> definition.alias_pattern
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  defp changeset_category_slug(changeset, pattern) do
+    with true <- KilnCMS.Slug.Pattern.uses?(pattern, "category"),
+         category_id when not is_nil(category_id) <-
+           changeset_attribute(changeset, :category_id),
+         {:ok, category} <-
+           KilnCMS.CMS.get_category(category_id, authorize?: false, tenant: changeset.tenant) do
+      category.slug
+    else
+      _ -> nil
+    end
+  end
 
   @doc """
   Whether `slug` is still auto-derived relative to `derived` (the current
