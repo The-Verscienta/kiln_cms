@@ -338,6 +338,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp live_public_path(form, content_type),
     do: KilnCMS.CMS.Slugs.public_path(content_type, form[:slug].value)
 
+  # Yoast-style advisory hints under the slug field (#456) — pure checks over
+  # the live form state, never blocking a save.
+  defp slug_lints(form) do
+    KilnCMS.Slug.Lint.lint(%{
+      slug: form[:slug].value,
+      title: form[:title].value,
+      seo_title: form[:seo_title].value,
+      seo_keywords: form[:seo_keywords].value
+    })
+  end
+
+  defp lint_message(:slug_long, _pinned?),
+    do: gettext("Long slug — search engines and shared links favor short URLs (≤ 6 words).")
+
+  # A pinned slug won't re-derive on its own, so tell the author how.
+  defp lint_message(:keyphrase_not_in_slug, true),
+    do:
+      gettext(
+        "The slug doesn't contain the focus keyphrase — clear the slug field to re-derive it."
+      )
+
+  defp lint_message(:keyphrase_not_in_slug, false),
+    do: gettext("The slug doesn't contain the focus keyphrase.")
+
+  defp lint_message(:keyphrase_not_in_title, _pinned?),
+    do: gettext("The focus keyphrase doesn't appear in the title or SEO title.")
+
   # Seed the socket-managed children of every stored `columns` block, keyed by the
   # block's stable id (#335). Children live in socket state (not bound form
   # inputs) because a `{:array, :map}` field isn't an AshPhoenix sub-form; they're
@@ -2681,6 +2708,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {live_public_path(@form, @content_type)}
                   </span>
                 </p>
+                <ul :if={slug_lints(@form) != []} class="mt-1 space-y-0.5">
+                  <li
+                    :for={finding <- slug_lints(@form)}
+                    class="flex items-start gap-1 text-xs text-warning"
+                  >
+                    <.icon name="hero-light-bulb" class="mt-0.5 size-3 shrink-0" />
+                    <span>{lint_message(finding, @slug_customized?)}</span>
+                  </li>
+                </ul>
                 <.field_cursors field="slug" cursors={@cursors} />
               </div>
             </div>
