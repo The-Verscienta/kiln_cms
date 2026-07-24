@@ -231,7 +231,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     children =
       record.blocks
       |> KilnCMS.CMS.TypedBlocks.to_typed()
-      |> Enum.filter(&match?(%KilnCMS.Blocks.Columns{}, &1))
+      # Only id-bearing columns blocks: without a stable id, two legacy columns
+      # blocks would collide on the `nil` key in `Map.new` and show each other's
+      # children (T1.3). An id-less block keeps its stored children via the
+      # form's own `columns` param instead — just not inline-editable.
+      |> Enum.filter(
+        &(match?(%KilnCMS.Blocks.Columns{}, &1) and is_binary(&1.id) and &1.id != "")
+      )
       |> Map.new(fn %KilnCMS.Blocks.Columns{} = c -> {c.id, normalize_columns(c.columns)} end)
 
     assign(socket, :block_children, children)
@@ -1198,10 +1204,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Rebuild every column of a block from a per-column list of child ids (a nested
-  # drag result), preserving each child's current attrs by id.
+  # drag result), preserving each child's current attrs by id. The client
+  # payload is trusted for ORDER only: a child it doesn't mention (added just
+  # before the drop) is kept in its original column, and the current column
+  # count is preserved, so a stale drag can't drop a child or collapse a column
+  # (docs/audit-content-editor.md, T1.4).
   defp rebuild_columns(current, cols) do
-    by_id = current |> Enum.flat_map(& &1["blocks"]) |> Map.new(&{&1["id"], &1})
-    Enum.map(cols, fn ids -> %{"blocks" => pick_children(by_id, ids)} end)
+    by_id = current |> Enum.flat_map(&(&1["blocks"] || [])) |> Map.new(&{&1["id"], &1})
+    mentioned = cols |> List.flatten() |> MapSet.new()
+    reordered = Enum.map(cols, &pick_children(by_id, &1))
+    count = max(length(current), length(reordered))
+
+    Enum.map(0..(count - 1)//1, fn i ->
+      orphans =
+        current
+        |> Enum.at(i, %{"blocks" => []})
+        |> Map.get("blocks", [])
+        |> List.wrap()
+        |> Enum.reject(&MapSet.member?(mentioned, &1["id"]))
+
+      %{"blocks" => Enum.at(reordered, i, []) ++ orphans}
+    end)
   end
 
   defp pick_children(by_id, ids),
@@ -2249,7 +2272,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Simple per-type field editors for a nested child block. Inputs are nameless
   # (they never enter the form's params) and commit to socket state via
-  # `col_update_child` on blur/change — see the columns handlers.
+  # `col_update_child`. They commit on every (debounced) change AND on blur:
+  # committing only on blur meant an interim re-render (an autosave reload, a
+  # collaborator cursor) reset the input to its last-committed value and dropped
+  # in-progress keystrokes (docs/audit-content-editor.md, T1.1).
   attr :block_id, :any, required: true
   attr :child, :map, required: true
 
@@ -2267,7 +2293,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         type="text"
         value={@child[field] || ""}
         placeholder={ph}
+        phx-change="col_update_child"
         phx-blur="col_update_child"
+        phx-debounce="300"
         phx-value-id={@block_id}
         phx-value-child={@child["id"]}
         phx-value-field={field}

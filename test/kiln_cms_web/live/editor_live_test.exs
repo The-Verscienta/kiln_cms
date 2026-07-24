@@ -1720,6 +1720,43 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert child["text"] == "Keep me"
     end
 
+    test "a reorder that omits a just-added child keeps it (T1.4 regression)", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      # Two heading children in column 0.
+      for _ <- 1..2 do
+        lv
+        |> element(
+          "button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']"
+        )
+        |> render_click()
+      end
+
+      child_ids =
+        ~r/data-child-id="([^"]+)"/
+        |> Regex.scan(render(lv))
+        |> Enum.map(fn [_, cid] -> cid end)
+
+      assert length(child_ids) == 2
+      [first_child | _] = child_ids
+
+      # A stale nested-drag payload mentioning only the FIRST child (the second
+      # was added after the DOM snapshot). The omitted child must survive.
+      render_hook(lv, "col_reorder", %{"id" => id, "cols" => [[first_child], []]})
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      [%{"blocks" => col0}, _] = block.data["columns"]
+      assert Enum.sort(Enum.map(col0, & &1["id"])) == Enum.sort(child_ids)
+    end
+
     test "the nested block renders in the live preview", %{conn: conn} do
       page = draft_page(%{blocks: []})
 
