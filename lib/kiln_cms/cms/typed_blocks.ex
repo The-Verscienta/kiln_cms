@@ -66,7 +66,6 @@ defmodule KilnCMS.CMS.TypedBlocks do
     end
   end
 
-
   # ── BlockUnion cast normalization (legacy/stored-shape tolerance) ──────────
   # These keep `BlockUnion` accepting legacy block params (no test churn) and
   # legacy stored rows (lazy conversion, no data migration).
