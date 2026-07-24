@@ -276,6 +276,44 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
     assert slug_value(lv) == "untitled-#{n}"
   end
 
+  test "SEO lint hints appear for keyphrase mismatches and long slugs", %{conn: conn} do
+    editor = authed_user(:editor)
+    slug = "hand-chosen-lint-#{System.unique_integer([:positive])}"
+    page = CMS.create_page!(%{title: "Lint Case", slug: slug}, actor: editor)
+    lv = open_editor(conn, editor, page)
+
+    # Pinned slug + keyphrase it doesn't contain → hint with the recovery tip.
+    html =
+      change(lv, "seo_keywords", %{
+        "title" => "Lint Case",
+        "slug" => slug,
+        "seo_keywords" => "ceramic kiln"
+      })
+
+    assert html =~ "clear the slug field to re-derive"
+    assert html =~ "doesn&#39;t appear in the title"
+
+    # A long hand-typed slug gets the length hint.
+    html =
+      change(lv, "slug", %{
+        "title" => "Lint Case",
+        "slug" => "one-two-three-four-five-six-seven-eight",
+        "seo_keywords" => ""
+      })
+
+    assert html =~ "favor short URLs"
+  end
+
+  test "no lint hints on a clean derived slug", %{conn: conn} do
+    editor = authed_user(:editor)
+    n = System.unique_integer([:positive])
+    page = CMS.create_page!(%{title: "Untitled page", slug: "untitled-#{n}"}, actor: editor)
+    lv = open_editor(conn, editor, page)
+
+    html = change(lv, "title", %{"title" => "Clean Kiln Guide", "slug" => "untitled-#{n}"})
+    refute html =~ "hero-light-bulb"
+  end
+
   test "a published record's slug never follows the title", %{conn: conn} do
     admin = authed_user(:admin)
     slug = "live-url-#{System.unique_integer([:positive])}"
