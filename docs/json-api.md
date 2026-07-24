@@ -335,6 +335,18 @@ which **sanitizes** rich-text HTML and media URLs. On an update, **omit**
 `block_tree` to leave the body untouched (a metadata-only `PATCH` never wipes
 it); send `[]` to clear it.
 
+### Optimistic concurrency — `expected_version`
+
+Each record exposes a read-only `lock_version` integer, bumped on every write.
+To avoid clobbering a concurrent edit, read it and echo it back on your `PATCH`
+as the **`expected_version`** attribute: if the record has changed since
+(its `lock_version` no longer matches), the update is rejected with a 422 on
+`expected_version` instead of overwriting the newer content. Omitting
+`expected_version` keeps the previous last-writer-wins behavior, so it's
+opt-in and backward-compatible. (Stateless requests load the row fresh, so the
+server-side lock alone can't protect them — this is how a headless client gets
+ETag-style safety.)
+
 ### Re-fire semantics
 
 Firing (immutable per-surface artifact regeneration) is bound to `:publish`, so

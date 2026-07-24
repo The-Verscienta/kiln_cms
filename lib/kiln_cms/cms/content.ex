@@ -1128,6 +1128,11 @@ defmodule KilnCMS.CMS.Content do
           # the same draft no longer silently clobber each other — the loser gets
           # a `StaleRecord` error and must reload.
           change optimistic_lock(:lock_version)
+          # Opt-in concurrency for stateless writers: a client that sends the
+          # `lock_version` it read is rejected if the record moved on (audit
+          # T3.3). LiveView omits it and relies on `optimistic_lock` above.
+          argument :expected_version, :integer
+          change KilnCMS.CMS.Changes.CheckExpectedVersion
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
@@ -1554,8 +1559,15 @@ defmodule KilnCMS.CMS.Content do
         attribute :embedded_at, :utc_datetime_usec
 
         # Optimistic-concurrency version, bumped on every `:update` (see the
-        # action's `optimistic_lock`). Internal.
-        attribute :lock_version, :integer, allow_nil?: false, default: 1, public?: false
+        # action's `optimistic_lock`). Public so a headless client can read it
+        # and echo it back via the `:update` `expected_version` argument for
+        # ETag-style conflict detection (audit T3.3); never client-writable
+        # (managed by `optimistic_lock`), so exposure is read-only.
+        attribute :lock_version, :integer,
+          allow_nil?: false,
+          default: 1,
+          public?: true,
+          writable?: false
 
         # Crash-recovery snapshot of the editor's working state (a form-params
         # map), written by the debounced autosave for content we don't
