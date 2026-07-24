@@ -46,9 +46,42 @@ defmodule KilnCMS.VisualEditing do
     json
     |> encode_field("title", Map.put(base, "field", "title"))
     |> Map.update("blocks", [], fn blocks -> annotate_blocks(blocks, base) end)
+    |> annotate_custom_fields(base)
   end
 
   def annotate(json), do: json
+
+  # Custom fields (present on the annotated preview, not the public artifact):
+  # each plain-string value is stega-encoded with `{type, id, slug, field}` —
+  # no `block`, so the bridge deep-links these to the structured editor's
+  # field-level `?focus=` (#442). Values consumers *parse* are left untouched:
+  # JSON-encoded structures (a common importer convention for structured
+  # custom fields) and URLs, where an invisible tail would corrupt
+  # `JSON.parse` or an `src`/`href`. Non-string values pass through.
+  defp annotate_custom_fields(%{"custom_fields" => cf} = json, base) when is_map(cf) do
+    %{
+      json
+      | "custom_fields" =>
+          Map.new(cf, fn
+            {name, value} when is_binary(value) ->
+              if encodable_custom_value?(value) do
+                {name, Stega.encode(value, Map.put(base, "field", name))}
+              else
+                {name, value}
+              end
+
+            pair ->
+              pair
+          end)
+    }
+  end
+
+  defp annotate_custom_fields(json, _base), do: json
+
+  defp encodable_custom_value?(value) do
+    trimmed = String.trim(value)
+    trimmed != "" and not String.starts_with?(trimmed, ["{", "[", "http://", "https://"])
+  end
 
   defp annotate_blocks(blocks, base) when is_list(blocks) do
     Enum.map(blocks, &annotate_block(&1, base))

@@ -34,6 +34,11 @@ defmodule KilnCMSWeb.VisualEditingController do
          record when not is_nil(record) <-
            fetch_by_slug(ct.type, slug, locale, actor, KilnCMSWeb.Tenant.current_org_id(conn)),
          {:ok, %{json: json}} <- Engine.fire(record, mode: :preview) do
+      # The public `:json` artifact deliberately omits custom fields; the
+      # annotated preview mirrors what a custom-fields-driven front end
+      # renders, so it carries the working copy's map (stega-annotated below).
+      json = Map.put(json, "custom_fields", record.custom_fields || %{})
+
       conn
       # Per-actor draft content: never cache in a shared cache.
       |> put_resp_header("cache-control", "no-store")
