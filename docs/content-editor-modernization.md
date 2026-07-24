@@ -58,6 +58,20 @@ Each theme is PR-sized and independently shippable, ordered so early themes de-r
 later ones. Effort is rough (S/M/L); risk flags where we touch the block-state model.
 
 ### Theme A — Entry editor information architecture *(Contentful-class)* · **M · low risk**
+
+> **Status: IN PROGRESS.** Sticky action bar + tabbed right inspector landed.
+> The loose header is now a slim breadcrumb (back link + live title `<h1>`) above a
+> `sticky top-14` action bar carrying the state pill, schedule chips, presence
+> roster, autosave status, workflow buttons, and Save — always reachable. The old
+> stack of collapsed `<details>` (Organization, Custom fields, SEO & scheduling,
+> Translations, Version history) moved into a persistent right rail with a
+> **Preview / Settings / History** tab strip; the preview is now the default tab.
+> **Key invariant:** panels are toggled by CSS `hidden`, never `:if`, so Settings
+> fields stay mounted and survive submit even when their tab isn't active; a red
+> dot on the Settings tab surfaces validation errors hiding in an inactive panel.
+> `switch_inspector_tab` is guarded + no-ops on garbled input. Remaining for A:
+> full "side-by-side" preview toggle, empty states, and design-token calibration.
+
 Re-compose the screen from "two-column form + accordion pile" into three coherent
 regions:
 - **Content column** — title, slug, and the block canvas, with generous rhythm.

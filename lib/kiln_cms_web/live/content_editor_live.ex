@@ -103,6 +103,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # restore) so rich-text blocks remount and reload TipTap from the new
          # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
          |> assign(:editor_version, 0)
+         # Right inspector rail (Theme A): which panel is showing. All panels stay
+         # mounted (form fields must survive submit) — the tab only toggles CSS
+         # visibility, never `:if`.
+         |> assign(:inspector_tab, :preview)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -485,6 +489,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
   end
+
+  # Right inspector rail (Theme A): switch the visible panel. Pure view state —
+  # every panel stays mounted, so no form data is touched.
+  def handle_event("switch_inspector_tab", %{"tab" => tab}, socket)
+      when tab in ~w(settings preview history) do
+    {:noreply, assign(socket, :inspector_tab, String.to_existing_atom(tab))}
+  end
+
+  # Unknown/garbled tab value — ignore it rather than crash the editor.
+  def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
 
   def handle_event("field_focus", %{"field" => field}, socket) do
     broadcast_cursor(socket, field)
@@ -2619,48 +2633,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
           data-kiln-focus={@focus_field}
           hidden
         ></span>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-          <div>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div class="min-w-0">
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
               &larr; {gettext("All content")}
             </.link>
-            <h1 class="mt-1 text-2xl font-semibold">{gettext("Edit %{kind}", kind: @kind)}</h1>
-            <p class="text-sm text-base-content/60">
-              {gettext("State:")} <span class="font-medium">{state_label(@record.state)}</span>
-            </p>
-            <%!-- After saving a schedule, nothing else says it exists (U-M4). --%>
-            <p
-              :if={@record.scheduled_at && @record.state in [:draft, :in_review]}
-              class="mt-0.5 flex items-center gap-1 text-sm text-base-content/60"
-            >
-              <.icon name="hero-clock" class="size-4" />
-              {gettext("Scheduled to publish")}
-              <time
-                id="scheduled-publish-badge"
-                phx-hook="LocalTime"
-                datetime={DateTime.to_iso8601(@record.scheduled_at)}
-              >{Calendar.strftime(@record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
-            </p>
-            <p
-              :if={@record.unpublish_at && @record.state == :published}
-              class="mt-0.5 flex items-center gap-1 text-sm text-base-content/60"
-            >
-              <.icon name="hero-clock" class="size-4" />
-              {gettext("Scheduled to unpublish")}
-              <time
-                id="scheduled-unpublish-badge"
-                phx-hook="LocalTime"
-                datetime={DateTime.to_iso8601(@record.unpublish_at)}
-              >{Calendar.strftime(@record.unpublish_at, "%Y-%m-%d %H:%M")} UTC</time>
-            </p>
-            <.presence_roster editors={@editors} current_id={@actor.id} />
+            <h1 class="mt-1 truncate text-2xl font-semibold">
+              {(@form[:title].value not in [nil, ""] && @form[:title].value) ||
+                gettext("Edit %{kind}", kind: @kind)}
+            </h1>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              phx-click="open_media_browser"
-              class="btn btn-sm btn-default"
-            >
+            <button type="button" phx-click="open_media_browser" class="btn btn-sm btn-default">
               <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Media library")}
             </button>
             <.link
@@ -2679,25 +2663,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
             >
               <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
             </.link>
-            <.autosave_status
-              :if={@record.state == :draft or @save_state != :saved}
-              state={@save_state}
-            />
-            <.workflow_buttons state={@record.state} tier={@tier} />
-            <.button
-              type="submit"
-              variant="primary"
-              disabled={@conflict}
-              phx-disable-with={gettext("Saving…")}
-              title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
-            >
-              {gettext("Save")}
-            </.button>
           </div>
         </div>
 
-        <div class="grid gap-6 lg:grid-cols-2">
-          <div class="space-y-6">
+        <.editor_action_bar
+          kind={@kind}
+          record={@record}
+          save_state={@save_state}
+          tier={@tier}
+          conflict={@conflict}
+          editors={@editors}
+          actor={@actor}
+        />
+
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div class="min-w-0 space-y-6">
             <div class="grid gap-4 sm:grid-cols-2">
               <div class={["relative", lock_ring(@locked_fields, "title")]}>
                 <.input
@@ -2886,12 +2866,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
               <.block_inserter block_types={@block_types} />
             </div>
+          </div>
 
-            <details class="rounded border border-base-content/15 p-3" open>
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Organization & relationships")}
-              </summary>
-              <div class="mt-3 space-y-3">
+          <%!-- Right inspector rail (Theme A): Settings / Preview / History.
+                EVERY panel stays mounted so its form fields survive submit — the
+                tab toggles CSS visibility only, never `:if`. On mobile the rail
+                stacks below the content column; on desktop it's a sticky sidebar
+                that scrolls internally when the settings run long. --%>
+          <div class="space-y-3 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto lg:pr-0.5">
+            <.inspector_tabs
+              tab={@inspector_tab}
+              settings_alert={any_custom_field_errors?(@form, @field_definitions)}
+            />
+
+            <%!-- ── Preview ─────────────────────────────────────────────── --%>
+            <div class={[@inspector_tab != :preview && "hidden"]}>
+              <.preview_article form={@form} html={@preview_html} />
+            </div>
+
+            <%!-- ── Settings ────────────────────────────────────────────── --%>
+            <div class={["space-y-4", @inspector_tab != :settings && "hidden"]}>
+              <.inspector_section title={gettext("Organization & relationships")}>
                 <.input
                   field={@form[:category_id]}
                   type="select"
@@ -2920,18 +2915,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   value={selected_ids(@form, @related_field, current_ids(@related_current))}
                   options={Enum.map(@siblings, &{&1.title, &1.id})}
                 />
-              </div>
-            </details>
+              </.inspector_section>
 
-            <details
-              :if={@field_definitions != []}
-              class="rounded border border-base-content/15 p-3"
-              open={any_custom_field_errors?(@form, @field_definitions)}
-            >
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Custom fields")}
-              </summary>
-              <div class="mt-3 space-y-3">
+              <.inspector_section :if={@field_definitions != []} title={gettext("Custom fields")}>
                 <.custom_field_input
                   :for={definition <- @field_definitions}
                   definition={definition}
@@ -2940,14 +2926,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   errors={custom_field_errors(@form, definition.name)}
                   options={custom_field_options(definition, @media, @reference_options)}
                 />
-              </div>
-            </details>
+              </.inspector_section>
 
-            <details class="rounded border border-base-content/15 p-3">
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("SEO & scheduling")}
-              </summary>
-              <div class="mt-3 space-y-3">
+              <.inspector_section title={gettext("SEO & scheduling")}>
                 <div class={["relative", lock_ring(@locked_fields, "seo_title")]}>
                   <.input
                     field={@form[:seo_title]}
@@ -3045,116 +3026,94 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {gettext("Published content is taken back to draft at this time.")}
                   </p>
                 </div>
-              </div>
-            </details>
+              </.inspector_section>
+            </div>
 
-            <details
-              :if={length(@translations) > 1}
-              class="rounded border border-base-content/15 p-3"
-              open
-            >
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Translations")}
-              </summary>
-              <ul class="mt-3 space-y-2">
-                <li
-                  :for={cov <- @translations}
-                  class="flex items-center justify-between gap-3 text-sm"
-                >
-                  <span class="flex items-center gap-2">
-                    <span class="font-mono text-xs font-semibold uppercase">{cov.locale}</span>
+            <%!-- ── History ─────────────────────────────────────────────── --%>
+            <div class={["space-y-4", @inspector_tab != :history && "hidden"]}>
+              <.inspector_section :if={length(@translations) > 1} title={gettext("Translations")}>
+                <ul class="space-y-2">
+                  <li
+                    :for={cov <- @translations}
+                    class="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <span class="flex items-center gap-2">
+                      <span class="font-mono text-xs font-semibold uppercase">{cov.locale}</span>
+                      <span
+                        :if={cov.record && cov.record.id == @record.id}
+                        class="text-xs text-base-content/50"
+                      >
+                        {gettext("(this one)")}
+                      </span>
+                      <span
+                        :if={cov.stale?}
+                        class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warning"
+                        title={gettext("The source locale was updated after this translation.")}
+                      >
+                        {gettext("Outdated")}
+                      </span>
+                    </span>
                     <span
                       :if={cov.record && cov.record.id == @record.id}
-                      class="text-xs text-base-content/50"
+                      class="text-xs text-base-content/70"
                     >
-                      {gettext("(this one)")}
+                      {state_label(cov.status)}
                     </span>
-                    <span
-                      :if={cov.stale?}
-                      class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warning"
-                      title={gettext("The source locale was updated after this translation.")}
+                    <.link
+                      :if={cov.record && cov.record.id != @record.id}
+                      navigate={~p"/editor/content/#{@kind}/#{cov.record.id}"}
+                      class="text-xs text-primary hover:underline"
                     >
-                      {gettext("Outdated")}
-                    </span>
-                  </span>
-                  <span
-                    :if={cov.record && cov.record.id == @record.id}
-                    class="text-xs text-base-content/70"
-                  >
-                    {state_label(cov.status)}
-                  </span>
-                  <.link
-                    :if={cov.record && cov.record.id != @record.id}
-                    navigate={~p"/editor/content/#{@kind}/#{cov.record.id}"}
-                    class="text-xs text-primary hover:underline"
-                  >
-                    {state_label(cov.status)} — {gettext("edit")}
-                  </.link>
-                  <button
-                    :if={is_nil(cov.record)}
-                    type="button"
-                    phx-click="create_translation"
-                    phx-value-locale={cov.locale}
-                    class="btn btn-sm btn-default"
-                  >
-                    {gettext("Create translation")}
-                  </button>
-                </li>
-              </ul>
-            </details>
-
-            <details class="rounded border border-base-content/15 p-3">
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Version history (%{count})", count: length(@versions))}
-              </summary>
-              <p :if={@versions == []} class="mt-3 text-sm text-base-content/60">
-                {gettext("No saved versions yet.")}
-              </p>
-              <ul :if={@versions != []} class="mt-3 space-y-2">
-                <li
-                  :for={version <- @versions}
-                  class="flex items-center justify-between gap-3 text-sm"
-                >
-                  <span class="text-base-content/70">
-                    {version.version_action_name} · {Calendar.strftime(
-                      version.version_inserted_at,
-                      "%Y-%m-%d %H:%M"
-                    )}
-                    <span
-                      :if={version.id == @record.published_version_id}
-                      class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
+                      {state_label(cov.status)} — {gettext("edit")}
+                    </.link>
+                    <button
+                      :if={is_nil(cov.record)}
+                      type="button"
+                      phx-click="create_translation"
+                      phx-value-locale={cov.locale}
+                      class="btn btn-sm btn-default"
                     >
-                      {gettext("Live published")}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    phx-click="restore"
-                    phx-value-version_id={version.id}
-                    data-confirm={gettext("Restore content to this version?")}
-                    class="btn btn-sm btn-default"
+                      {gettext("Create translation")}
+                    </button>
+                  </li>
+                </ul>
+              </.inspector_section>
+
+              <.inspector_section title={
+                gettext("Version history (%{count})", count: length(@versions))
+              }>
+                <p :if={@versions == []} class="text-sm text-base-content/60">
+                  {gettext("No saved versions yet.")}
+                </p>
+                <ul :if={@versions != []} class="space-y-2">
+                  <li
+                    :for={version <- @versions}
+                    class="flex items-center justify-between gap-3 text-sm"
                   >
-                    {gettext("Restore")}
-                  </button>
-                </li>
-              </ul>
-            </details>
-          </div>
-
-          <div class="lg:sticky lg:top-4 lg:self-start">
-            <%!-- Mobile (#138): a collapsed disclosure so the preview doesn't bury
-                  the form's Save/SEO/version sections below a full-height panel. --%>
-            <details class="rounded border border-base-content/15 p-3 lg:hidden">
-              <summary class="cursor-pointer text-lg font-medium">{gettext("Preview")}</summary>
-              <div class="mt-3">
-                <.preview_article form={@form} html={@preview_html} />
-              </div>
-            </details>
-
-            <%!-- Desktop: the preview sits inline as the sticky second column. --%>
-            <div class="hidden lg:block">
-              <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-              <.preview_article form={@form} html={@preview_html} />
+                    <span class="text-base-content/70">
+                      {version.version_action_name} · {Calendar.strftime(
+                        version.version_inserted_at,
+                        "%Y-%m-%d %H:%M"
+                      )}
+                      <span
+                        :if={version.id == @record.published_version_id}
+                        class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
+                      >
+                        {gettext("Live published")}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      phx-click="restore"
+                      phx-value-version_id={version.id}
+                      data-confirm={gettext("Restore content to this version?")}
+                      class="btn btn-sm btn-default"
+                    >
+                      {gettext("Restore")}
+                    </button>
+                  </li>
+                </ul>
+              </.inspector_section>
             </div>
           </div>
         </div>
@@ -3170,6 +3129,148 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </Layouts.console>
     """
   end
+
+  # Sticky editor action bar (Theme A). Sits just under the console shell header
+  # (`sticky top-14`, below the shell's `top-0` z-20 bar) so Save, workflow, and
+  # the live save state are always reachable no matter how long the content runs.
+  attr :kind, :atom, required: true
+  attr :record, :any, required: true
+  attr :save_state, :atom, required: true
+  attr :tier, :atom, required: true
+  attr :conflict, :boolean, required: true
+  attr :editors, :list, required: true
+  attr :actor, :any, required: true
+
+  defp editor_action_bar(assigns) do
+    ~H"""
+    <div class="sticky top-14 z-10 rounded-lg border border-base-content/10 bg-base-100/90 px-3 py-2.5 shadow-sm backdrop-blur">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class={[
+            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+            state_badge_class(@record.state)
+          ]}>
+            <span class="size-1.5 rounded-full bg-current opacity-70"></span>
+            {state_label(@record.state)}
+          </span>
+          <%!-- After saving a schedule, nothing else says it exists (U-M4). --%>
+          <span
+            :if={@record.scheduled_at && @record.state in [:draft, :in_review]}
+            class="inline-flex items-center gap-1 text-xs text-base-content/60"
+          >
+            <.icon name="hero-clock" class="size-3.5" />
+            {gettext("Publishes")}
+            <time
+              id="scheduled-publish-badge"
+              phx-hook="LocalTime"
+              datetime={DateTime.to_iso8601(@record.scheduled_at)}
+            >{Calendar.strftime(@record.scheduled_at, "%b %-d, %H:%M")} UTC</time>
+          </span>
+          <span
+            :if={@record.unpublish_at && @record.state == :published}
+            class="inline-flex items-center gap-1 text-xs text-base-content/60"
+          >
+            <.icon name="hero-clock" class="size-3.5" />
+            {gettext("Unpublishes")}
+            <time
+              id="scheduled-unpublish-badge"
+              phx-hook="LocalTime"
+              datetime={DateTime.to_iso8601(@record.unpublish_at)}
+            >{Calendar.strftime(@record.unpublish_at, "%b %-d, %H:%M")} UTC</time>
+          </span>
+          <.presence_roster editors={@editors} current_id={@actor.id} />
+        </div>
+
+        <div class="ml-auto flex flex-wrap items-center gap-2">
+          <.autosave_status
+            :if={@record.state == :draft or @save_state != :saved}
+            state={@save_state}
+          />
+          <.workflow_buttons state={@record.state} tier={@tier} />
+          <.button
+            type="submit"
+            variant="primary"
+            disabled={@conflict}
+            phx-disable-with={gettext("Saving…")}
+            title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
+          >
+            {gettext("Save")}
+          </.button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Tab strip for the right inspector rail (Theme A). Switching is pure view
+  # state; the panels themselves stay mounted (toggled by CSS in render/1).
+  # `settings_alert` raises a dot on the Settings tab so validation errors in a
+  # hidden panel still get noticed.
+  attr :tab, :atom, required: true
+  attr :settings_alert, :boolean, default: false
+
+  defp inspector_tabs(assigns) do
+    ~H"""
+    <div
+      role="tablist"
+      aria-label={gettext("Inspector")}
+      class="flex items-center gap-1 rounded-lg bg-base-200/60 p-1 text-sm"
+    >
+      <button
+        :for={
+          {id, label, icon, alert} <- [
+            {:preview, gettext("Preview"), "hero-eye", false},
+            {:settings, gettext("Settings"), "hero-adjustments-horizontal", @settings_alert},
+            {:history, gettext("History"), "hero-clock", false}
+          ]
+        }
+        type="button"
+        role="tab"
+        aria-selected={to_string(@tab == id)}
+        phx-click="switch_inspector_tab"
+        phx-value-tab={id}
+        class={[
+          "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-medium transition",
+          (@tab == id && "bg-base-100 text-base-content shadow-sm") ||
+            "text-base-content/60 hover:text-base-content"
+        ]}
+      >
+        <.icon name={icon} class="size-4" />
+        <span>{label}</span>
+        <span
+          :if={alert}
+          class="size-1.5 rounded-full bg-error"
+          title={gettext("This panel has validation errors")}
+        ></span>
+      </button>
+    </div>
+    """
+  end
+
+  # A titled card inside an inspector panel (Theme A). Replaces the old buried
+  # `<details>` accordions with an always-expanded, clearly-labelled section —
+  # the panel's tab already gates visibility, so no per-section collapsing.
+  attr :title, :string, required: true
+  slot :inner_block, required: true
+
+  defp inspector_section(assigns) do
+    ~H"""
+    <section class="rounded-lg border border-base-content/10 p-4">
+      <h3 class="mb-3 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+        {@title}
+      </h3>
+      <div class="space-y-3">
+        {render_slot(@inner_block)}
+      </div>
+    </section>
+    """
+  end
+
+  # Pill color for a content state in the action bar.
+  defp state_badge_class(:published), do: "bg-success/15 text-success"
+  defp state_badge_class(:in_review), do: "bg-warning/15 text-warning"
+  defp state_badge_class(:archived), do: "bg-base-content/10 text-base-content/60"
+  defp state_badge_class(_), do: "bg-info/15 text-info"
 
   attr :editors, :list, required: true
   attr :current_id, :string, required: true

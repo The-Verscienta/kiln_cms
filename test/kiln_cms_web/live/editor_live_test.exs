@@ -318,7 +318,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
 
-      assert html =~ "Edit post"
+      # The editor heading now shows the entry's own title (Theme A).
+      assert html =~ "Old post"
       # Excerpt is a post-only field.
       assert html =~ "Excerpt"
 
@@ -392,7 +393,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, editor_html} =
         build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      assert editor_html =~ "Scheduled to publish"
+      assert editor_html =~ "Publishes"
       assert editor_html =~ ~s(id="scheduled-publish-badge")
       # The schedule input is the local/UTC hook pair, labelled with the tz.
       assert editor_html =~ ~s(phx-hook="UtcDatetimeInput")
@@ -427,8 +428,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert invalid =~ "Level (level) must be a whole number"
       assert invalid =~ ~s(id="custom-field-level-errors")
       assert invalid =~ ~s(aria-invalid="true")
-      # The collapsed "Custom fields" details opens so the error is visible.
-      assert invalid =~ ~r/<details[^>]*open/
+      # The custom-field panel now lives in the Settings inspector tab; when it
+      # holds errors, the tab raises an alert dot so a hidden panel gets noticed
+      # (Theme A). The field itself is always mounted, so the inline error shows
+      # regardless of the active tab.
+      assert invalid =~ "This panel has validation errors"
     end
   end
 
@@ -696,6 +700,74 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       render_hook(lv, "open_picker", %{"index" => "boom"})
       assert render(lv) =~ "Picker"
+    end
+  end
+
+  # Modernization Theme A: the metadata that used to live in buried <details>
+  # accordions now sits in a persistent tabbed right inspector (Settings /
+  # Preview / History). The critical invariant: every panel stays mounted so
+  # form fields survive submit even when their tab isn't the active one.
+  describe "inspector rail (modernization theme A)" do
+    test "renders the tab strip with Preview active by default", %{conn: conn} do
+      page = draft_page(%{title: "Tabbed"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(role="tablist")
+      # Preview is the default panel.
+      assert html =~ ~s(phx-value-tab="preview")
+      assert html =~ ~s(phx-value-tab="settings")
+      assert html =~ ~s(phx-value-tab="history")
+    end
+
+    test "settings fields stay in the DOM while another tab is active (survive submit)",
+         %{conn: conn} do
+      page = draft_page(%{title: "Fields present"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Default tab is Preview, yet the Settings panel's inputs must still be
+      # rendered (only CSS-hidden) — otherwise they'd drop from the form on save.
+      assert html =~ ~s(name="form[seo_title]")
+      assert html =~ ~s(name="form[category_id]")
+
+      # Switching tabs is pure view state and never removes those inputs.
+      switched = render_hook(lv, "switch_inspector_tab", %{"tab" => "settings"})
+      assert switched =~ ~s(name="form[seo_title]")
+    end
+
+    test "switching to the Settings tab marks it selected", %{conn: conn} do
+      page = draft_page(%{title: "Switch"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      html = render_hook(lv, "switch_inspector_tab", %{"tab" => "history"})
+      assert html =~ ~s(aria-selected="true")
+    end
+
+    test "an unknown tab value is a no-op, not a crash", %{conn: conn} do
+      page = draft_page(%{title: "Guarded tab"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "switch_inspector_tab", %{"tab" => "bogus"})
+      assert render(lv) =~ "Guarded tab"
+    end
+
+    test "a settings (SEO) field still saves after tab switching", %{conn: conn} do
+      page = draft_page(%{title: "SEO save"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "switch_inspector_tab", %{"tab" => "settings"})
+      lv |> form("#page-editor", form: %{seo_title: "Findable"}) |> render_submit()
+
+      assert CMS.get_page!(page.id, authorize?: false).seo_title == "Findable"
     end
   end
 
@@ -1496,7 +1568,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
-      assert html =~ "Edit page"
+      # The editor heading shows the entry's own title now (Theme A).
+      assert html =~ "Generic old"
 
       lv |> form("#page-editor", form: %{title: "Generic new"}) |> render_submit()
       assert CMS.get_page!(page.id, authorize?: false).title == "Generic new"
@@ -1508,7 +1581,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
-      assert html =~ "Edit post"
+      # The editor heading shows the entry's own title now (Theme A).
+      assert html =~ "A post"
       assert html =~ "Excerpt"
     end
 
@@ -1678,9 +1752,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(phx-disable-with="Submitting…")
     end
 
-    # Regression for #138: on mobile the preview is a collapsible disclosure so it
-    # doesn't bury the form; on desktop it stays inline as the sticky column.
-    test "the preview is collapsible on mobile and inline on desktop", %{conn: conn} do
+    # The live preview now lives in the right inspector's Preview tab, which is
+    # the default panel (Theme A supersedes the #138 mobile-disclosure layout).
+    test "the preview renders in the default Preview inspector tab", %{conn: conn} do
       page =
         draft_page(%{
           title: "PrevPage",
@@ -1690,9 +1764,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
-      assert html =~ ~r/<details[^>]*lg:hidden/
-      assert html =~ "<summary"
-      assert html =~ "hidden lg:block"
+      # The Preview tab exists and is selected by default, and the block renders.
+      assert html =~ ~s(role="tablist")
+      assert html =~ ~s(phx-value-tab="preview")
       assert html =~ "PrevBlock"
       # #152: removing a block asks for confirmation first.
       assert html =~
