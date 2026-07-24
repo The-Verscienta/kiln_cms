@@ -5,6 +5,13 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.{Block, BlockUnion, TypedBlocks}
 
+  # Stands in for a block struct contributed by a plugin whose module the core
+  # to_legacy/1 clauses know nothing about (audit T5.4).
+  defmodule PluginBlock do
+    @moduledoc false
+    defstruct [:id, :_type, :content, data: %{}]
+  end
+
   describe "BlockUnion (Ash.Type.Union)" do
     test "casts a tagged map to the matching typed block, wrapped in Ash.Union" do
       {:ok, %Ash.Union{type: :heading, value: %Blocks.Heading{} = heading}} =
@@ -98,6 +105,36 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
                %{type: :heading, content: "T", data: %{"level" => 2}},
                %{type: :quote, content: "q", data: %{"citation" => "c"}}
              ] = TypedBlocks.to_legacy(typed)
+    end
+  end
+
+  describe "round-trip safety for unknown / malformed blocks (audit theme 5)" do
+    test "an unknown typed block type is preserved as Custom without dropping fields (T5.5)" do
+      [block] =
+        TypedBlocks.to_typed([
+          %{"_type" => "gallery", "id" => "g1", "image_ids" => ["a", "b"], "title" => "Gallery"}
+        ])
+
+      assert %Blocks.Custom{legacy_type: "gallery"} = block
+      assert block.data["image_ids"] == ["a", "b"]
+      assert block.data["title"] == "Gallery"
+    end
+
+    test "a foreign (plugin) block struct degrades to a legacy map instead of crashing (T5.4)" do
+      plugin = %PluginBlock{id: "p1", _type: "plugin", content: "hi", data: %{"k" => "v"}}
+
+      assert [%{type: :custom, content: "hi", data: %{"k" => "v"}, id: "p1"}] =
+               TypedBlocks.to_legacy([plugin])
+    end
+
+    test "a non-struct value passed to to_legacy does not raise (T5.4)" do
+      assert [%{type: :custom}] = TypedBlocks.to_legacy(["garbage"])
+    end
+
+    test "a non-map entry in a legacy block list degrades to Custom (T5.6)" do
+      typed = TypedBlocks.from_legacy(["garbage", 42, %Block{type: :heading, content: "ok"}])
+
+      assert [%Blocks.Custom{}, %Blocks.Custom{}, %Blocks.Heading{text: "ok"}] = typed
     end
   end
 

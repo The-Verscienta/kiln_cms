@@ -660,6 +660,45 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Audit theme 4: client-supplied index params must never crash the LiveView.
+  # A garbled or out-of-range "index" used to hit String.to_integer/Enum.at
+  # unguarded; now every such event is a no-op that keeps the session alive.
+  describe "block index guards (audit theme 4)" do
+    test "a non-numeric move_block index is a no-op, not a crash", %{conn: conn} do
+      page = draft_page(%{title: "Guarded"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Garbage index — the LV survives and stays rendered.
+      render_hook(lv, "move_block", %{"index" => "nope", "dir" => "up"})
+      assert render(lv) =~ "Guarded"
+    end
+
+    test "an out-of-range move_block index does not swap the wrong blocks", %{conn: conn} do
+      page = draft_page(%{title: "Bounds"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A wildly out-of-range and a negative index both no-op rather than
+      # resolving to the last element via Enum.at/-1.
+      render_hook(lv, "move_block", %{"index" => "9999", "dir" => "down"})
+      render_hook(lv, "move_block", %{"index" => "-1", "dir" => "up"})
+      assert render(lv) =~ "Bounds"
+    end
+
+    test "a non-numeric open_picker index is a no-op, not a crash", %{conn: conn} do
+      page = draft_page(%{title: "Picker"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "open_picker", %{"index" => "boom"})
+      assert render(lv) =~ "Picker"
+    end
+  end
+
   describe "/editor/trash" do
     test "editors are redirected away", %{conn: conn} do
       assert {:error,

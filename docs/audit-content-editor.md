@@ -183,6 +183,15 @@ away everything since mount.
 
 ## Theme 4 — crashes that kill the session (and its unsaved work)
 
+> **Status: FIXED.** A strict `parse_index/1` (`{:ok, i}` | `:error`) replaces every
+> unguarded `String.to_integer` on client `index`/`item` params in `open_picker`,
+> `move_block`, `put_block`, and `geo_item_remove` — a garbled value is now a no-op,
+> not a crash (T4.1). `move_block` bounds-checks *both* the source and target index,
+> so a negative/out-of-range source no longer resolves to the last element via
+> `Enum.at/-1` (T4.3). The two post-save reloads use a non-raising `fetch/4` with a
+> `|| record` fallback instead of the bang variant (T4.2). Tests:
+> `editor_live_test.exs` "block index guards".
+
 **T4.1 — Unguarded `String.to_integer` on client params crashes the LiveView.**
 *(confirmed)* `open_picker` (455), `move_block` (591), `put_block` list branch
 (1037), and the `sort_by` key (1099) call `String.to_integer` on client-supplied
@@ -203,6 +212,20 @@ element — silently swapping the first and last blocks instead of a no-op.
 ---
 
 ## Theme 5 — wrong-target actions & block round-trip edge cases
+
+> **Status: round-trip safety FIXED; positional addressing mitigated.** `to_legacy`
+> gained a catch-all — an unrecognized/plugin block struct (or a non-map) degrades to
+> a Custom-shaped legacy map instead of `FunctionClauseError`-ing a 500 across
+> delivery/preview/API (T5.4). `struct_from_typed_map` now detects an unknown/
+> uninstalled `_type` (collapsed to `:custom`) and preserves the original type tag as
+> `legacy_type` plus all foreign fields into `data`, so nothing is silently emptied
+> (T5.5). `from_legacy` guards non-map list entries (T5.6). `geo_item_remove` uses the
+> strict `parse_index` and rejects garbled input rather than defaulting to row 0
+> (T5.3). Tests: `typed_blocks_test.exs` "round-trip safety for unknown / malformed
+> blocks". **Deferred:** T5.1/T5.2 positional→id addressing for the media picker is a
+> larger change (the crash is guarded, but a concurrent reorder can still target the
+> wrong block); the RichText-flatten and version-migration tail in T5.6 are pre-existing
+> and out of scope for a reliability pass.
 
 **T5.1 — Positional addressing survives reorders/removals, so the picker writes
 to the wrong block.** *(confirmed)* `open_picker` stores `:picking` = the block's

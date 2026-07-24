@@ -180,14 +180,36 @@ defmodule KilnCMS.CMS.TypedBlocks do
   # Build a typed struct from a typed map (string or atom keys), upcasting first.
   defp struct_from_typed_map(map) do
     map = map |> stringify() |> KilnCMS.Blocks.Upcaster.upcast_block_map()
+    raw_type = to_string(get(map, :_type))
 
-    case KilnCMS.Blocks.fetch(block_type_atom(map)) do
-      {:ok, mod} ->
-        struct(mod, typed_struct_kv(mod, map))
+    # An unknown/uninstalled block type (e.g. a plugin block whose module is no
+    # longer loaded) collapses to `:custom` via `block_type_atom`. Blindly building
+    # a Custom would drop the block's own fields, so preserve the original type tag
+    # + all foreign fields into `data` so nothing is lost (audit T5.5).
+    if block_type_atom(map) == :custom and raw_type not in ["custom", ""] do
+      %Custom{
+        _type: "custom",
+        legacy_type: raw_type,
+        content: get(map, :content),
+        data: foreign_data(map)
+      }
+    else
+      case KilnCMS.Blocks.fetch(block_type_atom(map)) do
+        {:ok, mod} ->
+          struct(mod, typed_struct_kv(mod, map))
 
-      :error ->
-        %Custom{_type: "custom", content: get(map, :content), data: get(map, :data) || %{}}
+        :error ->
+          %Custom{_type: "custom", content: get(map, :content), data: get(map, :data) || %{}}
+      end
     end
+  end
+
+  @custom_reserved ~w(id _type _version legacy_type content data)
+  # Everything the Custom struct doesn't natively hold, folded into `data` so an
+  # unknown block round-trips without losing its payload.
+  defp foreign_data(map) do
+    extra = Map.drop(map, @custom_reserved)
+    Map.merge(get(map, :data) || %{}, extra)
   end
 
   @type_atoms Map.new(KilnCMS.Blocks.union_types(), fn {name, _opts} ->
@@ -224,6 +246,12 @@ defmodule KilnCMS.CMS.TypedBlocks do
     |> List.wrap()
     |> Enum.map(&one_from_legacy/1)
   end
+
+  # A non-map entry in a legacy block list (corrupt/hand-edited data) can't be
+  # interpreted as a block — degrade to an empty Custom rather than crashing the
+  # whole read (audit T5.6).
+  defp one_from_legacy(other) when not is_map(other),
+    do: %Custom{_type: "custom", data: %{}}
 
   defp one_from_legacy(block) do
     id = get(block, :id)
@@ -377,6 +405,19 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}
+
+  # Anything unrecognized — a plugin-contributed block struct, or malformed
+  # stored data — degrades to a Custom-shaped legacy map rather than raising a
+  # FunctionClauseError that would 500 delivery/preview/the API (audit T5.4).
+  defp one_to_legacy(%{} = other),
+    do: %{
+      type: :custom,
+      content: get(other, :content),
+      data: get(other, :data) || %{},
+      id: get(other, :id)
+    }
+
+  defp one_to_legacy(_other), do: %{type: :custom, content: nil, data: %{}, id: nil}
 
   # ── accessors tolerant of struct (atom keys) and jsonb map (string keys) ──
   defp get(block, key), do: Map.get(block, key) || Map.get(block, to_string(key))

@@ -329,6 +329,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
   end
 
+  # Non-raising reload for the post-save path: if the record was concurrently
+  # deleted or its access revoked between the write and the reload, return nil
+  # so the caller can fall back to the just-saved struct instead of crashing the
+  # LiveView (audit T4.2).
+  defp fetch(kind, id, actor, org) do
+    case ContentTypes.get_record(kind, id,
+           actor: actor,
+           tenant: org,
+           load: [:category, :featured_image, :tags, related_name(kind)]
+         ) do
+      {:ok, record} -> record
+      _error -> nil
+    end
+  end
+
   # Other content of the same kind, for the "related content" picker. Bounded to
   # the same window as the media picker so a large library can't blow up the mount.
   # Only id + title — these fill a <select>; without the select, 500 siblings
@@ -482,8 +497,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Open the media browser to fill a specific image block.
-  def handle_event("open_picker", %{"index" => index}, socket),
-    do: {:noreply, assign(socket, :picking, String.to_integer(index))}
+  def handle_event("open_picker", %{"index" => index}, socket) do
+    case parse_index(index) do
+      {:ok, i} -> {:noreply, assign(socket, :picking, i)}
+      :error -> {:noreply, socket}
+    end
+  end
 
   # Open the media browser from the editor chrome to insert a *new* image block.
   def handle_event("open_media_browser", _params, socket),
@@ -588,7 +607,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket
       )
       when field in ["items", "steps"] do
-    update_geo_items(socket, index, field, &List.delete_at(&1, to_int(item)))
+    # Guard the row index: the old `to_int` fell back to 0, so a stale/garbled
+    # value deleted the FIRST row instead of the intended one (audit T5.3).
+    case parse_index(item) do
+      {:ok, i} -> update_geo_items(socket, index, field, &List.delete_at(&1, i))
+      :error -> {:noreply, socket}
+    end
   end
 
   def handle_event("remove_block", %{"path" => path}, socket) do
@@ -607,16 +631,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Keyboard-accessible alternative to drag-and-drop reordering (#171): swap a
   # block with its neighbour and announce the new position to screen readers.
   def handle_event("move_block", %{"index" => index, "dir" => dir}, socket) do
-    i = String.to_integer(index)
     count = blocks_count(socket.assigns.form)
-    j = if dir == "up", do: i - 1, else: i + 1
 
-    if j >= 0 and j < count do
-      order =
-        0..(count - 1)
-        |> Enum.map(&to_string/1)
-        |> swap_at(i, j)
-
+    # Parse strictly and bounds-check BOTH ends: a garbled index no longer
+    # crashes the LiveView, and a negative source no longer resolves to the last
+    # element via Enum.at/-1 and swaps the wrong blocks (audit T4.1/T4.3).
+    with {:ok, i} <- parse_index(index),
+         true <- i < count,
+         j when j >= 0 and j < count <- if(dir == "up", do: i - 1, else: i + 1) do
+      order = 0..(count - 1) |> Enum.map(&to_string/1) |> swap_at(i, j)
       form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
 
       {:noreply,
@@ -628,7 +651,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          gettext("Moved block to position %{pos} of %{count}", pos: j + 1, count: count)
        )}
     else
-      {:noreply, socket}
+      _ -> {:noreply, socket}
     end
   end
 
@@ -713,9 +736,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case result do
       {:ok, record} ->
         # Re-fetch so the relationship pickers reflect the saved links (the
-        # submit result doesn't carry loaded relationships).
+        # submit result doesn't carry loaded relationships); fall back to the
+        # saved struct if the reload fails (deleted/access revoked, T4.2).
         reloaded =
-          fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
+          fetch(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org) ||
+            record
 
         {:noreply,
          socket
@@ -1020,7 +1045,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case result do
       {:ok, record} ->
         reloaded =
-          fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
+          fetch(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org) ||
+            record
 
         socket
         |> assign_record(reloaded, reseed_children?: false)
@@ -1147,7 +1173,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         Map.update(blocks, to_string(index), fields, &Map.merge(&1, fields))
 
       blocks when is_list(blocks) ->
-        List.update_at(blocks, String.to_integer(index), &Map.merge(&1 || %{}, fields))
+        case parse_index(index) do
+          {:ok, i} -> List.update_at(blocks, i, &Map.merge(&1 || %{}, fields))
+          :error -> blocks
+        end
     end)
   end
 
@@ -1454,6 +1483,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp to_int(_), do: 0
+
+  # Strict, non-negative index parse for client-supplied positional params:
+  # `{:ok, i}` or `:error` (never a silent 0), so a bad value no-ops the handler
+  # instead of crashing or targeting the wrong element (audit T4).
+  defp parse_index(value) when is_integer(value) and value >= 0, do: {:ok, value}
+
+  defp parse_index(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, ""} when int >= 0 -> {:ok, int}
+      _invalid -> :error
+    end
+  end
+
+  defp parse_index(_value), do: :error
 
   # The media id currently on an image block sub-form, if any.
   defp media_id_of(bf), do: bf[:media_id].value
