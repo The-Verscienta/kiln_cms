@@ -133,11 +133,15 @@ no confirmation.
 > rejected instead of clobbering newer content or firing off an unseen version;
 > the AshOban `*_scheduled` variants stay lock-free), and the conflict banner
 > gained a "Keep my version" resolution (re-fetch current version, save the
-> user's working state over it) alongside "Reload latest". **Remaining:**
-> T3.1/T3.2 (single-saver election gated on the dev-only collab flag; two-tab
-> self-conflict) and T3.3 (headless PATCH has no effective lock — `lock_version`
-> is `public?: false`, so stateless writers can't echo it) need behavioral /
-> API-contract changes and are deferred.
+> user's working state over it) alongside "Reload latest". T3.3 done too:
+> `lock_version` is now public (read-only) and `:update` takes an optional
+> `expected_version` argument — a stateless client echoes the version it read
+> and the write is rejected on mismatch (ETag-style), so a headless PATCH no
+> longer silently clobbers a concurrent editor. **Remaining:** T3.1/T3.2
+> (single-saver election, two-tab self-conflict) are inherent to concurrent
+> editing without CRDT — fully solving them means graduating the collab
+> prototype to prod; they're mitigated today by the presence roster + conflict
+> banner + keep-mine.
 
 **T3.1 — The single-saver election is gated behind `collab_prototype`, which is
 OFF in production, so concurrent draft editors both autosave and the loser is
