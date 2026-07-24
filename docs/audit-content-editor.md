@@ -86,6 +86,17 @@ stale-index removal a mis-targeted block could resurface orphaned children.
 
 ## Theme 2 — no draft recovery; a blip or reconnect discards edits
 
+> **Status: mostly fixed.** A server-side crash-recovery snapshot was added: the
+> content resource gained `draft_snapshot`/`draft_saved_at`, a side-channel
+> `:snapshot_draft` action (touches only those, never live content/state/version/
+> artifacts), and the editor writes the working state to it on the debounced
+> autosave for non-draft content (live is still only applied via explicit Save).
+> On reopen, a "restore unsaved changes?" banner offers Restore / Discard; any
+> real save clears the snapshot. This resolves T2.1 (published edits now
+> recoverable) and T2.4 (translation flush). **Residual:** T2.2's sub-2s draft
+> debounce-window loss and T2.3's connect-race are inherent to the debounced
+> server round-trip and would need client-side capture — deferred.
+
 **T2.1 — Published / in-review / archived content never autosaves; edits live
 only in memory until manual Save, and a reconnect discards them.** *(confirmed)*
 `mark_dirty` (~836) sets `save_state: :unsaved` with **no timer** for non-draft

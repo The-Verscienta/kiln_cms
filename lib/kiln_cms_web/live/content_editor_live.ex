@@ -135,9 +135,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:collab_token, collab_token(actor))
          |> assign(:collab_topic, "collab:#{kind}:#{id}")
          |> assign(:siblings, siblings(kind, id, actor, org))
+         # Crash-recovery (T2): a snapshot newer than the last real save means a
+         # previous session left unsaved work — offer to restore it. Computed
+         # only at mount so it never re-appears mid-edit as this session snapshots.
+         |> assign(:recoverable_draft, recoverable_draft(record))
          |> assign_record(record)}
     end
   end
+
+  # `%{at: DateTime}` when the record carries a working snapshot, else nil. A
+  # snapshot's mere presence means unsaved work: every real save clears it
+  # (`:update`/`:autosave` null it out), so a leftover snapshot at mount is
+  # always a previous session's un-applied edits.
+  defp recoverable_draft(%{draft_snapshot: snapshot, draft_saved_at: at}) when is_map(snapshot) do
+    %{at: at}
+  end
+
+  defp recoverable_draft(_record), do: nil
 
   # The content type being edited: from the `:type` param on the generic
   # `/editor/content/:type/:id` route, or the `live_action` on the legacy
@@ -198,6 +212,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
+
+  # Debounced crash-recovery snapshot for non-draft content (T2): persist the
+  # working editor state to `draft_snapshot` without touching live content.
+  def handle_info(:snapshot, socket), do: {:noreply, write_snapshot(socket)}
 
   # `reseed_children?: false` on a post-save reload keeps the LIVE socket-managed
   # columns children instead of rebuilding them from the just-saved DB record —
@@ -743,6 +761,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # One-click translation: duplicate this record's content into a new draft in
   # the target locale and jump to its editor.
+  # Load a previous session's recovered working state into the form and let the
+  # user Save it (or keep editing). The snapshot itself is left in place until a
+  # real save clears it, so a second crash still recovers.
+  def handle_event("restore_draft", _params, socket) do
+    snapshot = socket.assigns.record.draft_snapshot || %{}
+
+    socket =
+      socket
+      |> assign(:block_children, children_from_params(snapshot))
+      |> revalidate(snapshot)
+      |> assign(:recoverable_draft, nil)
+      |> assign(:editor_version, socket.assigns.editor_version + 1)
+      |> broadcast_preview_and_refresh()
+      |> mark_dirty()
+
+    {:noreply, socket}
+  end
+
+  # Throw away the recovered working state — the live content stands.
+  def handle_event("discard_draft", _params, socket) do
+    socket =
+      case snapshot_draft(socket.assigns.record, nil, socket) do
+        {:ok, record} -> assign(socket, :record, record)
+        {:error, _error} -> socket
+      end
+
+    {:noreply, assign(socket, :recoverable_draft, nil)}
+  end
+
   def handle_event("create_translation", %{"locale" => locale}, socket) do
     # Flush any pending draft autosave first: this handler navigates away, which
     # kills the debounced autosave timer, so unsaved edits on the source record
@@ -840,7 +887,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     cond do
       not draft?(socket) ->
-        assign(socket, :save_state, :unsaved)
+        # Published/in-review/archived content is applied to live only via the
+        # explicit Save, so the indicator stays "unsaved" — but write a
+        # debounced working snapshot behind the scenes so a crash/reconnect can
+        # recover the edits (T2).
+        socket
+        |> cancel_autosave_timer()
+        |> assign(:autosave_timer, Process.send_after(self(), :snapshot, @autosave_debounce_ms))
+        |> assign(:save_state, :unsaved)
 
       collab_active?(socket) and not persister?(socket) ->
         socket
@@ -1165,6 +1219,51 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp inject_block(other, _block_children), do: other
+
+  # ── crash-recovery snapshot (T2) ────────────────────────────────────────────
+
+  # Persist the working editor state (form params with columns children
+  # injected — the same payload a save would use) to `draft_snapshot`, leaving
+  # `socket.assigns.form` untouched. Updates `:record` only so `draft_saved_at`
+  # stays current; the restore prompt is computed at mount, not from `:record`.
+  defp write_snapshot(socket) do
+    socket = assign(socket, :autosave_timer, nil)
+
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> inject_children(socket.assigns.block_children)
+
+    case snapshot_draft(socket.assigns.record, params, socket) do
+      {:ok, record} -> assign(socket, :record, record)
+      {:error, _error} -> socket
+    end
+  end
+
+  defp snapshot_draft(record, snapshot, socket) do
+    record
+    |> Ash.Changeset.for_update(:snapshot_draft, %{draft_snapshot: snapshot},
+      actor: socket.assigns.actor,
+      tenant: record.org_id
+    )
+    |> Ash.update()
+  end
+
+  # Rebuild the socket-managed columns children from a restored snapshot's
+  # params (each columns block carries its `columns` array there).
+  defp children_from_params(params) do
+    params
+    |> params_blocks()
+    |> Enum.flat_map(fn
+      %{"id" => id, "columns" => cols} when is_binary(id) and is_list(cols) -> [{id, cols}]
+      _block -> []
+    end)
+    |> Map.new()
+  end
+
+  defp params_blocks(%{"blocks" => blocks}) when is_map(blocks), do: Map.values(blocks)
+  defp params_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  defp params_blocks(_params), do: []
 
   # Drop socket-managed children for columns blocks no longer present in the form
   # (e.g. a removed block), so the map can't grow unbounded across a session or
@@ -2352,6 +2451,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
       page_title={@page_title}
       active={:content}
     >
+      <%!-- Crash-recovery prompt (T2): a previous session left unsaved work. --%>
+      <div
+        :if={@recoverable_draft}
+        id="draft-recovery"
+        role="alert"
+        class="mb-4 flex flex-wrap items-center gap-3 rounded border border-primary/40 bg-primary/10 px-4 py-3 text-sm"
+      >
+        <.icon name="hero-arrow-uturn-left" class="size-5 text-primary" />
+        <span class="flex-1">
+          {gettext("You have unsaved changes from a previous session.")}
+        </span>
+        <button
+          type="button"
+          phx-click="restore_draft"
+          class="btn btn-sm border-transparent bg-primary text-primary-content hover:opacity-90"
+        >
+          {gettext("Restore")}
+        </button>
+        <button
+          type="button"
+          phx-click="discard_draft"
+          data-confirm={gettext("Discard the recovered changes?")}
+          class="btn btn-sm btn-ghost"
+        >
+          {gettext("Discard")}
+        </button>
+      </div>
       <div
         :if={@conflict}
         id="edit-conflict"

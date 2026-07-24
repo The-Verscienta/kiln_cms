@@ -500,11 +500,96 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute html =~ "Unsaved changes"
 
       lv |> form("#page-editor", form: %{title: "Sneaky edit"}) |> render_change()
-      send(lv.pid, :autosave)
+      send(lv.pid, :snapshot)
       render(lv)
 
       # The published record is only changed via the explicit Save button.
       assert CMS.get_page!(page.id, authorize?: false).title == "Live"
+    end
+  end
+
+  # T2 crash recovery: non-draft content isn't applied to live automatically,
+  # but its working state is snapshotted so a crash/reconnect can recover it.
+  describe "crash-recovery snapshot" do
+    test "editing published content snapshots the working state, live untouched",
+         %{conn: conn} do
+      page = draft_page(%{title: "Live", state: :published})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "Working edit"}) |> render_change()
+      send(lv.pid, :snapshot)
+      render(lv)
+
+      reloaded = CMS.get_page!(page.id, authorize?: false)
+      # Live content + state untouched...
+      assert reloaded.title == "Live"
+      assert reloaded.state == :published
+      # ...but the edit is recoverable.
+      assert reloaded.draft_snapshot["title"] == "Working edit"
+      assert reloaded.draft_saved_at
+    end
+
+    test "reopening offers to restore, and restoring loads the snapshot", %{conn: conn} do
+      page = draft_page(%{title: "Live", state: :published})
+
+      # A prior session's leftover working snapshot.
+      page
+      |> Ash.Changeset.for_update(:snapshot_draft, %{draft_snapshot: %{"title" => "Recovered"}},
+        authorize?: false
+      )
+      |> Ash.update!()
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "unsaved changes from a previous session"
+
+      restored = lv |> element("button[phx-click='restore_draft']") |> render_click()
+      # The form now shows the recovered title, and the banner is gone.
+      assert restored =~ "Recovered"
+      refute restored =~ "unsaved changes from a previous session"
+      # Live content still not changed until an explicit save.
+      assert CMS.get_page!(page.id, authorize?: false).title == "Live"
+    end
+
+    test "discarding clears the snapshot", %{conn: conn} do
+      page = draft_page(%{title: "Live", state: :published})
+
+      page
+      |> Ash.Changeset.for_update(:snapshot_draft, %{draft_snapshot: %{"title" => "Recovered"}},
+        authorize?: false
+      )
+      |> Ash.update!()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> element("button[phx-click='discard_draft']") |> render_click()
+
+      reloaded = CMS.get_page!(page.id, authorize?: false)
+      assert reloaded.draft_snapshot == nil
+      assert reloaded.draft_saved_at == nil
+    end
+
+    test "an explicit save clears any recovery snapshot", %{conn: conn} do
+      page = draft_page(%{title: "Draft", state: :draft})
+
+      page
+      |> Ash.Changeset.for_update(:snapshot_draft, %{draft_snapshot: %{"title" => "Stale"}},
+        authorize?: false
+      )
+      |> Ash.update!()
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "Saved"}) |> render_submit()
+
+      reloaded = CMS.get_page!(page.id, authorize?: false)
+      assert reloaded.title == "Saved"
+      assert reloaded.draft_snapshot == nil
     end
 
     # Audit U-H1: non-draft content gets no autosave, so unsaved edits must be

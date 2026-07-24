@@ -1153,6 +1153,9 @@ defmodule KilnCMS.CMS.Content do
           # write-through, in-context editing) would leave the fired artifact
           # stale. `only_when: :published` keeps draft edits/autosaves silent.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # A real save supersedes any crash-recovery snapshot.
+          change set_attribute(:draft_snapshot, nil)
+          change set_attribute(:draft_saved_at, nil)
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
@@ -1179,8 +1182,23 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+          # A real save supersedes any crash-recovery snapshot.
+          change set_attribute(:draft_snapshot, nil)
+          change set_attribute(:draft_saved_at, nil)
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
+        end
+
+        # Side-channel write of the editor's working state for crash recovery
+        # (T2). Deliberately minimal: it touches ONLY draft_snapshot/
+        # draft_saved_at — no live blocks, no state/version bump, no re-fire, no
+        # search/embedding — so a published page's snapshot never leaks into
+        # delivery. Last-writer-wins (no optimistic lock): it's disposable
+        # working state, cleared by any real save.
+        update :snapshot_draft do
+          require_atomic? false
+          accept [:draft_snapshot]
+          change KilnCMS.CMS.Changes.StampDraftSavedAt
         end
 
         # Keyword search, semantic search, and autocomplete — each paired with
@@ -1525,6 +1543,14 @@ defmodule KilnCMS.CMS.Content do
         # Optimistic-concurrency version, bumped on every `:update` (see the
         # action's `optimistic_lock`). Internal.
         attribute :lock_version, :integer, allow_nil?: false, default: 1, public?: false
+
+        # Crash-recovery snapshot of the editor's working state (a form-params
+        # map), written by the debounced autosave for content we don't
+        # auto-apply to live — published/in-review/archived (T2). `draft_saved_at`
+        # gates the "restore unsaved changes?" prompt and is cleared on any real
+        # save. Internal working state, never delivered.
+        attribute :draft_snapshot, :map, public?: false
+        attribute :draft_saved_at, :utc_datetime_usec, public?: false
 
         # Public so headless consumers can serialize and sort on them (Ash 3
         # defaults attributes to public?: false, and AshJsonApi rejects a
