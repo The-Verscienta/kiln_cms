@@ -205,6 +205,19 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
             <div class="sm:col-span-2">
               <.input field={@form[:description]} label={gettext("Description")} />
             </div>
+            <div class="sm:col-span-2">
+              <.input
+                field={@form[:slug_pattern]}
+                label={gettext("Slug pattern (optional)")}
+                placeholder="[yyyy]-[mm]-[title]"
+              />
+              <p class="mt-1 text-xs text-base-content/60">
+                {gettext(
+                  "Tokens: %{tokens}. Composes the last URL segment; blank = derive from the SEO keyphrase or title.",
+                  tokens: Enum.map_join(KilnCMS.Slug.Pattern.tokens(), ", ", &"[#{&1}]")
+                )}
+              </p>
+            </div>
             <.input
               field={@form[:schema_org_type]}
               type="select"
@@ -315,6 +328,11 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                 <.input field={@edit.form[:plural_label]} label={gettext("Plural name")} />
                 <.input field={@edit.form[:path_segment]} label={gettext("URL segment")} />
                 <.input field={@edit.form[:description]} label={gettext("Description")} />
+                <.input
+                  field={@edit.form[:slug_pattern]}
+                  label={gettext("Slug pattern (optional)")}
+                  placeholder="[yyyy]-[mm]-[title]"
+                />
                 <.input
                   field={@edit.form[:schema_org_type]}
                   type="select"

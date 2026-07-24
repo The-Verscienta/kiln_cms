@@ -27,6 +27,7 @@ defmodule KilnCMS.CMS.ContentTypes do
           section: atom() | nil,
           excerpt?: boolean(),
           path_segment: String.t() | nil,
+          slug_pattern: String.t() | nil,
           source: :compiled | :dynamic,
           definition: struct() | nil
         }
@@ -169,6 +170,13 @@ defmodule KilnCMS.CMS.ContentTypes do
       section: resource.__kiln_content_section__(),
       excerpt?: not is_nil(Ash.Resource.Info.attribute(resource, :excerpt)),
       path_segment: path_segment(type, plural),
+      # Guarded like DeriveSlug's marker probe, so a resource compiled against
+      # the pre-#454 macro (stale beam, external :content_domains) degrades to
+      # "no pattern" instead of crashing the whole registry.
+      slug_pattern:
+        if(function_exported?(resource, :__kiln_content_slug_pattern__, 0),
+          do: resource.__kiln_content_slug_pattern__()
+        ),
       source: :compiled,
       definition: nil
     }
@@ -185,6 +193,7 @@ defmodule KilnCMS.CMS.ContentTypes do
       section: nil,
       excerpt?: definition.has_excerpt,
       path_segment: definition.path_segment,
+      slug_pattern: definition.slug_pattern,
       source: :dynamic,
       definition: definition
     }

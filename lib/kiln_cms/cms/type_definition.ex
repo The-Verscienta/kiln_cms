@@ -48,6 +48,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :label,
         :plural_label,
         :path_segment,
+        :slug_pattern,
         :has_excerpt,
         :has_published_feed,
         :icon,
@@ -56,6 +57,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
       ]
 
       change KilnCMS.CMS.Changes.DefaultPathSegment
+      validate KilnCMS.CMS.Validations.SlugPatternTokens
     end
 
     # `name` is deliberately not updatable — it keys entries, delivery URLs and
@@ -68,12 +70,15 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :label,
         :plural_label,
         :path_segment,
+        :slug_pattern,
         :has_excerpt,
         :has_published_feed,
         :icon,
         :description,
         :schema_org_type
       ]
+
+      validate KilnCMS.CMS.Validations.SlugPatternTokens
     end
 
     # Soft-delete (AshArchival): the type disappears from the registry but its
@@ -183,6 +188,11 @@ defmodule KilnCMS.CMS.TypeDefinition do
     # First URL segment for public delivery. Defaults to `"#{name}s"` on create
     # (see `Changes.DefaultPathSegment`).
     attribute :path_segment, :string, allow_nil?: false, public?: true
+
+    # Optional pathauto slug pattern (#454): tokens compose this type's entry
+    # slugs, e.g. "[yyyy]-[mm]-[title]" — see `KilnCMS.Slug.Pattern`. Nil =
+    # default derivation (focus keyphrase → title).
+    attribute :slug_pattern, :string, public?: true
 
     # Mirror the Content macro's `:excerpt?` / `:published?` options.
     attribute :has_excerpt, :boolean, allow_nil?: false, default: false, public?: true
