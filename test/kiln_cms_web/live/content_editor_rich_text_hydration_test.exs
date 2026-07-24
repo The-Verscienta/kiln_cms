@@ -86,18 +86,10 @@ defmodule KilnCMSWeb.ContentEditorRichTextHydrationTest do
   test "a form-shaped save (TipTap JSON string body) stores Portable Text", %{conn: conn} do
     admin = authed_admin()
 
+    import KilnCMS.TipTapFixtures
+
     tiptap =
-      Jason.encode!(%{
-        "type" => "doc",
-        "content" => [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "Saved from TipTap"}]},
-          %{"type" => "bulletList", "content" => [
-            %{"type" => "listItem", "content" => [
-              %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "item"}]}
-            ]}
-          ]}
-        ]
-      })
+      Jason.encode!(doc([para("Saved from TipTap"), bullet_list([list_item(para("item"))])]))
 
     page =
       CMS.create_page!(
@@ -137,19 +129,19 @@ defmodule KilnCMSWeb.ContentEditorRichTextHydrationTest do
 
     [%Ash.Union{value: existing}] = page.blocks
 
-    tiptap =
-      Jason.encode!(%{
-        "type" => "doc",
-        "content" => [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "edited prose"}]}
-        ]
-      })
+    import KilnCMS.TipTapFixtures
+
+    tiptap = Jason.encode!(doc(para("edited prose")))
 
     # The block editor's form posts the existing id + the hook's body JSON.
     updated =
       CMS.update_page!(
         page,
-        %{blocks: [%{"_type" => "rich_text", "id" => existing.id, "body" => tiptap, "legacy_html" => ""}]},
+        %{
+          blocks: [
+            %{"_type" => "rich_text", "id" => existing.id, "body" => tiptap, "legacy_html" => ""}
+          ]
+        },
         actor: admin
       )
 
@@ -175,17 +167,9 @@ defmodule KilnCMSWeb.ContentEditorRichTextHydrationTest do
 
     {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
 
-    doc = %{
-      "type" => "doc",
-      "content" => [
-        %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "typed live"}]},
-        %{"type" => "bulletList", "content" => [
-          %{"type" => "listItem", "content" => [
-            %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "a list item"}]}
-          ]}
-        ]}
-      ]
-    }
+    import KilnCMS.TipTapFixtures
+
+    doc = doc([para("typed live"), bullet_list([list_item(para("a list item"))])])
 
     render_hook(lv, "rich_text_body", %{"id" => existing.id, "idx" => "0", "doc" => doc})
     lv |> form("#page-editor") |> render_submit()

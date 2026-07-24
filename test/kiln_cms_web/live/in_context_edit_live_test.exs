@@ -197,12 +197,9 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
 
-      tiptap = %{
-        "type" => "doc",
-        "content" => [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "Rewritten prose."}]}
-        ]
-      }
+      import KilnCMS.TipTapFixtures
+
+      tiptap = doc(para("Rewritten prose."))
 
       render_hook(lv, "update_block", %{"id" => ids.rich, "value" => tiptap})
       send(lv.pid, :autosave)

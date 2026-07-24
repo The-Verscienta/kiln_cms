@@ -13,7 +13,10 @@ defmodule KilnCMS.CMS.TypedBlocksBodyCastTest do
   @tiptap %{
     "type" => "doc",
     "content" => [
-      %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "typed in TipTap"}]}
+      %{
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "text" => "typed in TipTap"}]
+      }
     ]
   }
 
@@ -43,8 +46,13 @@ defmodule KilnCMS.CMS.TypedBlocksBodyCastTest do
 
   test "canonical Portable Text passes through" do
     pt = [
-      %{"_type" => "block", "_key" => "b0", "style" => "normal", "markDefs" => [],
-        "children" => [%{"_type" => "span", "text" => "already PT", "marks" => []}]}
+      %{
+        "_type" => "block",
+        "_key" => "b0",
+        "style" => "normal",
+        "markDefs" => [],
+        "children" => [%{"_type" => "span", "text" => "already PT", "marks" => []}]
+      }
     ]
 
     block = cast_rich_text(pt)

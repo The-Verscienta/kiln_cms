@@ -127,36 +127,25 @@ defmodule KilnCMS.Blocks.PortableTextTest do
 
   describe "lists, code blocks and rules" do
     test "bullet and ordered lists round-trip, including nesting" do
-      tiptap = %{
-        "type" => "doc",
-        "content" => [
-          %{"type" => "bulletList", "content" => [
-            %{"type" => "listItem", "content" => [
-              %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "one"}]},
-              %{"type" => "bulletList", "content" => [
-                %{"type" => "listItem", "content" => [
-                  %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "one-a"}]}
-                ]}
-              ]}
-            ]},
-            %{"type" => "listItem", "content" => [
-              %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "two"}]}
-            ]}
-          ]},
-          %{"type" => "orderedList", "content" => [
-            %{"type" => "listItem", "content" => [
-              %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "first"}]}
-            ]}
-          ]}
-        ]
-      }
+      import KilnCMS.TipTapFixtures
+
+      tiptap =
+        doc([
+          bullet_list([
+            list_item([para("one"), bullet_list([list_item(para("one-a"))])]),
+            list_item(para("two"))
+          ]),
+          ordered_list([list_item(para("first"))])
+        ])
 
       pt = PortableText.from_tiptap(tiptap)
 
-      assert [%{"listItem" => "bullet", "level" => 1},
-              %{"listItem" => "bullet", "level" => 2},
-              %{"listItem" => "bullet", "level" => 1},
-              %{"listItem" => "number", "level" => 1}] =
+      assert [
+               %{"listItem" => "bullet", "level" => 1},
+               %{"listItem" => "bullet", "level" => 2},
+               %{"listItem" => "bullet", "level" => 1},
+               %{"listItem" => "number", "level" => 1}
+             ] =
                Enum.map(pt, &Map.take(&1, ["listItem", "level"]))
 
       assert PortableText.to_html(pt) ==
@@ -165,33 +154,47 @@ defmodule KilnCMS.Blocks.PortableTextTest do
 
     test "a nested list of a different kind stays inside its parent item" do
       pt = [
-        %{"_type" => "block", "_key" => "a", "style" => "normal", "listItem" => "bullet",
-          "level" => 1, "markDefs" => [],
-          "children" => [%{"_type" => "span", "text" => "b1", "marks" => []}]},
-        %{"_type" => "block", "_key" => "b", "style" => "normal", "listItem" => "number",
-          "level" => 2, "markDefs" => [],
-          "children" => [%{"_type" => "span", "text" => "n1", "marks" => []}]},
-        %{"_type" => "block", "_key" => "c", "style" => "normal", "listItem" => "bullet",
-          "level" => 1, "markDefs" => [],
-          "children" => [%{"_type" => "span", "text" => "b2", "marks" => []}]}
+        %{
+          "_type" => "block",
+          "_key" => "a",
+          "style" => "normal",
+          "listItem" => "bullet",
+          "level" => 1,
+          "markDefs" => [],
+          "children" => [%{"_type" => "span", "text" => "b1", "marks" => []}]
+        },
+        %{
+          "_type" => "block",
+          "_key" => "b",
+          "style" => "normal",
+          "listItem" => "number",
+          "level" => 2,
+          "markDefs" => [],
+          "children" => [%{"_type" => "span", "text" => "n1", "marks" => []}]
+        },
+        %{
+          "_type" => "block",
+          "_key" => "c",
+          "style" => "normal",
+          "listItem" => "bullet",
+          "level" => 1,
+          "markDefs" => [],
+          "children" => [%{"_type" => "span", "text" => "b2", "marks" => []}]
+        }
       ]
 
       assert PortableText.to_html(pt) == "<ul><li>b1<ol><li>n1</li></ol></li><li>b2</li></ul>"
     end
 
     test "code blocks, horizontal rules and hard breaks convert" do
-      tiptap = %{
-        "type" => "doc",
-        "content" => [
-          %{"type" => "codeBlock", "content" => [%{"type" => "text", "text" => "IO.puts(1)"}]},
-          %{"type" => "horizontalRule"},
-          %{"type" => "paragraph", "content" => [
-            %{"type" => "text", "text" => "a"},
-            %{"type" => "hardBreak"},
-            %{"type" => "text", "text" => "b"}
-          ]}
-        ]
-      }
+      import KilnCMS.TipTapFixtures
+
+      tiptap =
+        doc([
+          tt_node("codeBlock", [text("IO.puts(1)")]),
+          tt_node("horizontalRule"),
+          para([text("a"), tt_node("hardBreak"), text("b")])
+        ])
 
       pt = PortableText.from_tiptap(tiptap)
       html = PortableText.to_html(pt)
