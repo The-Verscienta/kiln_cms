@@ -35,6 +35,17 @@ defmodule KilnCMSWeb.SitemapControllerTest do
     refute body =~ "secret-#{n}"
   end
 
+  test "a record's path alias replaces its flat URL (#485)", %{conn: conn} do
+    n = System.unique_integer([:positive])
+    alias_path = "/library/shelf/book-#{n}"
+
+    Ash.Seed.seed!(Page, %{title: "A", slug: "pa-#{n}", state: :published, path_alias: alias_path})
+
+    body = conn |> get(~p"/sitemap.xml") |> response(200)
+    assert body =~ "<loc>http://localhost:4000#{alias_path}</loc>"
+    refute body =~ "<loc>http://localhost:4000/pa-#{n}</loc>"
+  end
+
   test "the URL set is bounded — output is a finite list, not the full table streamed",
        %{conn: conn} do
     n = System.unique_integer([:positive])

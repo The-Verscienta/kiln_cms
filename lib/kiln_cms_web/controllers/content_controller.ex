@@ -39,8 +39,7 @@ defmodule KilnCMSWeb.ContentController do
         follow_redirect_or_404(conn, "/" <> slug)
 
       payload ->
-        track_view("page", payload.record.id, payload.record.org_id)
-        render_content(conn, :show_page, payload, ct)
+        serve(conn, :show_page, "page", payload, ct)
     end
   end
 
@@ -64,8 +63,7 @@ defmodule KilnCMSWeb.ContentController do
         follow_redirect_or_404(conn, "/blog/" <> slug)
 
       payload ->
-        track_view("post", payload.record.id, payload.record.org_id)
-        render_content(conn, :show_post, payload, ct)
+        serve(conn, :show_post, "post", payload, ct)
     end
   end
 
@@ -87,10 +85,24 @@ defmodule KilnCMSWeb.ContentController do
            Cache.fetch_published(org_id, to_string(ct.type), slug, locale, fn ->
              payload(fetch, locale, ct, org_id)
            end) do
-      track_view(to_string(ct.type), payload.record.id, payload.record.org_id)
-      render_content(conn, :show, payload, ct)
+      serve(conn, :show, to_string(ct.type), payload, ct)
     else
       _ -> follow_redirect_or_404(conn, "/" <> type <> "/" <> slug)
+    end
+  end
+
+  # Serve a payload at its canonical URL: a record with a `path_alias` (#485)
+  # 301s its flat `/<prefix>/<slug>` URL to the alias; everything else renders.
+  defp serve(conn, view, type_string, payload, ct) do
+    alias_path = Map.get(payload.record, :path_alias)
+
+    if is_binary(alias_path) and conn.request_path != alias_path do
+      conn
+      |> put_status(:moved_permanently)
+      |> redirect(to: alias_path)
+    else
+      track_view(type_string, payload.record.id, payload.record.org_id)
+      render_content(conn, view, payload, ct)
     end
   end
 
@@ -101,20 +113,50 @@ defmodule KilnCMSWeb.ContentController do
     follow_redirect_or_404(conn, "/" <> Enum.join(segments, "/"))
   end
 
-  # Retired URL? A published slug rename leaves a `CMS.Redirect` behind — 301
-  # to the record's current path so inbound links and SEO equity survive.
-  # Resolution is live (no chains); anything unresolvable 404s as before.
+  # Every URL miss funnels here: first a multi-segment path alias (#485) —
+  # the canonical home of aliased content — then the redirect table (a
+  # published rename leaves a `CMS.Redirect` behind; resolution is live, no
+  # chains); anything unresolvable 404s as before.
   defp follow_redirect_or_404(conn, path) do
-    case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
-      nil ->
-        not_found(conn)
+    serve_alias(conn, path) ||
+      case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
+        nil ->
+          not_found(conn)
 
-      %{to: to} ->
-        conn
-        |> put_status(:moved_permanently)
-        |> redirect(to: to)
+        %{to: to} ->
+          conn
+          |> put_status(:moved_permanently)
+          |> redirect(to: to)
+      end
+  end
+
+  # Render the published record whose `path_alias` is this path, through the
+  # same payload pipeline as the flat routes (uncached: alias hits are already
+  # the miss path, and slug-keyed cache busting can't see alias keys).
+  defp serve_alias(conn, path) do
+    locale = locale(conn)
+    org_id = current_org_id(conn)
+
+    lookup = fn loc -> KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id) end
+
+    case lookup.(locale) || lookup.(I18n.default_locale()) do
+      nil ->
+        nil
+
+      {ct, record} ->
+        payload = %{
+          record: record,
+          blocks: blocks(record, org_id),
+          translations: translations(ct, record.slug, org_id)
+        }
+
+        serve(conn, alias_view(ct), to_string(ct.type), payload, ct)
     end
   end
+
+  defp alias_view(%{type: :page}), do: :show_page
+  defp alias_view(%{type: :post}), do: :show_post
+  defp alias_view(_ct), do: :show
 
   # Posts shown per page on the public blog index. Bounds per-request memory/DB
   # load — the `:published` read is paginated and capped at its `max_page_size`.

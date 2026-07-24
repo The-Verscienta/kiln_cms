@@ -335,8 +335,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # The full public path previewed under the slug field, live from the form.
-  defp live_public_path(form, content_type),
-    do: KilnCMS.CMS.Slugs.public_path(content_type, form[:slug].value)
+  # The canonical URL previewed under the slug field: a multi-segment path
+  # alias (#485) when one is typed, else the flat prefix + slug.
+  defp live_public_path(form, content_type) do
+    case form[:path_alias].value do
+      alias_path when is_binary(alias_path) and alias_path != "" -> alias_path
+      _blank -> KilnCMS.CMS.Slugs.public_path(content_type, form[:slug].value)
+    end
+  end
 
   # Yoast-style advisory hints under the slug field (#456) — pure checks over
   # the live form state, never blocking a save.
@@ -2718,6 +2724,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   </li>
                 </ul>
                 <.field_cursors field="slug" cursors={@cursors} />
+              </div>
+              <div class={["relative sm:col-span-2", lock_ring(@locked_fields, "path_alias")]}>
+                <.input
+                  field={@form[:path_alias]}
+                  label={gettext("Path alias (optional)")}
+                  placeholder="/acupuncture/needle/size/14mm"
+                  readonly={field_locked?(@locked_fields, "path_alias")}
+                  {field_attrs("path_alias")}
+                />
+                <p class="mt-1 text-xs text-base-content/60">
+                  {gettext(
+                    "A multi-segment canonical URL. When set, the flat slug URL 301s here; changing it leaves a redirect behind on published content."
+                  )}
+                </p>
+                <.field_cursors field="path_alias" cursors={@cursors} />
               </div>
             </div>
 

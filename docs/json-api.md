@@ -290,6 +290,12 @@ front end handle URLs without mirroring Kiln's scheme:
 - **`path` field** — every content read exposes a `path` calculation, the full
   public path (`/blog/my-post`, `/about`, `/<path_segment>/<slug>` for dynamic
   types). Request it explicitly: `?fields[post]=title,slug,path`.
+- **`path_alias`** — an optional multi-segment canonical URL
+  (`/acupuncture/needle/size/14mm`), settable over the write API. When set it
+  becomes the record's `path`; the flat `/<prefix>/<slug>` URL 301s to it, and
+  changing or removing it on published content leaves a 301 behind like any
+  slug rename. `GET /api/resolve` reports the flat path as `moved` and the
+  alias as `ok`.
 - **`GET /api/resolve?path=/blog/old-slug&locale=en`** — one call answers
   "what lives at this URL?", for catch-all routes in live (SSR) front ends:
   `{"status":"ok","type":"post","slug":…,"id":…}` renders,

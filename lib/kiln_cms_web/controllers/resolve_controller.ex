@@ -25,6 +25,35 @@ defmodule KilnCMSWeb.ResolveController do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
     case lookup_content(path, locale, org_id) do
+      # A record found at its flat URL that carries a path alias (#485) is
+      # canonically elsewhere — mirror delivery's 301.
+      {ct, %{path_alias: alias_path} = record} when is_binary(alias_path) and alias_path != path ->
+        moved(conn, alias_path, ct, record.slug, record.id)
+
+      {ct, record} ->
+        conn
+        |> put_resp_header("cache-control", "public, max-age=60")
+        |> json(%{
+          status: "ok",
+          type: to_string(ct.type),
+          slug: record.slug,
+          id: record.id,
+          path: path
+        })
+
+      nil ->
+        resolve_alias_or_redirect(conn, path, locale, org_id)
+    end
+  end
+
+  def show(conn, _params) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: "pass ?path=/... (leading slash required)"})
+  end
+
+  defp resolve_alias_or_redirect(conn, path, locale, org_id) do
+    case KilnCMS.CMS.Slugs.find_published_by_alias(path, locale, org_id) do
       {ct, record} ->
         conn
         |> put_resp_header("cache-control", "public, max-age=60")
@@ -54,10 +83,10 @@ defmodule KilnCMSWeb.ResolveController do
     end
   end
 
-  def show(conn, _params) do
+  defp moved(conn, to, ct, slug, id) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{error: "pass ?path=/... (leading slash required)"})
+    |> put_resp_header("cache-control", "public, max-age=60")
+    |> json(%{status: "moved", to: to, type: to_string(ct.type), slug: slug, id: id})
   end
 
   # The delivery URL scheme: one segment is a root-served page, two segments
