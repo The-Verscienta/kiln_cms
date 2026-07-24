@@ -215,7 +215,12 @@ are cheap here and hard for live-render CMSs.
 
 ---
 
-**Sequencing take:** #3 and #6 are the cheapest (mostly expose what exists).
-#1 and #2 are the biggest strategic differentiators (especially for
-health/regulated content). #4 and #5 are the best "put it on the box"
-trust/reliability stories.
+**Sequencing take (updated):** most of this list has shipped; what remains is
+the tail. Paid memberships (#337 Phase 2, specced in the issue) is the
+strategic priority — it completes the Ghost play, the one differentiator with a
+direct revenue story. #356 (tamper-evident audit + consent linking) is next for
+the health/regulated positioning, building on the shipped governance dashboard
+(#352) and provenance signing (#340). The RAG Phase 2 items (#339:
+related-content, auto-tagging, gap analysis) and later point-in-time phases
+(#338) are cheap incremental wins on already-shipped foundations, in no
+particular hurry.
