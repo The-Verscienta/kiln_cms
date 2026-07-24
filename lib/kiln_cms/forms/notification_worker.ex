@@ -20,9 +20,13 @@ defmodule KilnCMS.Forms.NotificationWorker do
            tenant: args["org_id"] || KilnCMS.Accounts.default_org_id()
          ) do
       {:ok, %{notify_email: to} = form} when is_binary(to) and to != "" ->
+        # notify_email may hold several comma-separated recipients (phase 6).
+        recipients =
+          to |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
         new()
         |> from(Application.fetch_env!(:kiln_cms, :email_from))
-        |> to(to)
+        |> to(recipients)
         |> subject("New submission: #{form.name}")
         |> html_body(body(form, data))
         |> Mail.ensure_message_id("form-#{id}")

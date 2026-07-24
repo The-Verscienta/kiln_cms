@@ -113,15 +113,21 @@ defmodule KilnCMSWeb.FormController do
         |> put_status(404)
         |> html(page(gettext_msg("Form not found."), nil, embed: embedded?))
 
-      {:ok, form} ->
-        html(
-          conn,
-          page(
-            form.success_message || gettext_msg("Thanks — we got your message."),
-            back_href,
-            embed: embedded?
-          )
-        )
+      {:ok, form, data} ->
+        case Forms.confirmation(form, data, embedded?) do
+          {:redirect, url} ->
+            confirmation_redirect(conn, url)
+
+          {:message, message} ->
+            html(
+              conn,
+              page(
+                message || gettext_msg("Thanks — we got your message."),
+                back_href,
+                embed: embedded?
+              )
+            )
+        end
 
       {:error, form, errors} ->
         conn
@@ -130,14 +136,23 @@ defmodule KilnCMSWeb.FormController do
     end
   end
 
-  # Headless (JSON) submission.
+  # redirect_url is validated at write time (site path or http(s) URL);
+  # external targets need `external:`.
+  defp confirmation_redirect(conn, "/" <> _rest = path), do: redirect(conn, to: path)
+  defp confirmation_redirect(conn, url), do: redirect(conn, external: url)
+
+  # Headless (JSON) submission. A redirect confirmation is the client's to
+  # perform — the response carries the target instead of a 3xx.
   def submit_json(conn, %{"slug" => slug} = params) do
     case run(conn, slug, params) do
       :not_found ->
         error(conn, 404, "not_found", "Form not found.")
 
-      {:ok, form} ->
-        json(conn, %{ok: true, message: form.success_message})
+      {:ok, form, data} ->
+        case Forms.confirmation(form, data) do
+          {:redirect, url} -> json(conn, %{ok: true, message: nil, redirect: url})
+          {:message, message} -> json(conn, %{ok: true, message: message})
+        end
 
       {:error, _form, errors} ->
         conn |> put_status(422) |> json(%{ok: false, errors: errors})
@@ -151,8 +166,10 @@ defmodule KilnCMSWeb.FormController do
 
       form ->
         case Forms.submit(form, params, locale: params["locale"]) do
-          # A tripped honeypot reports success too — bots learn nothing.
-          {:ok, _submission_or_discarded} -> {:ok, form}
+          # A tripped honeypot reports success too — bots learn nothing
+          # (the empty data still resolves a confirmation).
+          {:ok, :discarded} -> {:ok, form, %{}}
+          {:ok, %{data: data}} -> {:ok, form, data}
           {:error, errors} -> {:error, form, errors}
         end
     end

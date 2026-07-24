@@ -260,6 +260,136 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert html =~ "hero-scissors"
   end
 
+  test "the confirmations tab manages type, redirect and conditional messages", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    {form, [_plan], lv, _html} =
+      builder(conn, admin, %{}, [
+        %{name: "plan", label: "Plan", field_type: :radio, options: ["basic", "pro"]}
+      ])
+
+    lv |> element(~s(nav button[phx-value-tab="confirmations"])) |> render_click()
+
+    # Set the redirect URL first, then flip the type (auto-save on change).
+    lv
+    |> form("section form[phx-change=save_form_settings]", %{
+      form: %{confirmation_type: "message", redirect_url: "/thanks", success_message: "Merci!"}
+    })
+    |> render_change()
+
+    lv
+    |> form("section form[phx-change=save_form_settings]", %{
+      form: %{confirmation_type: "redirect", redirect_url: "/thanks", success_message: "Merci!"}
+    })
+    |> render_change()
+
+    updated = CMS.get_form!(form.id, authorize?: false)
+    assert updated.confirmation_type == :redirect
+    assert updated.redirect_url == "/thanks"
+
+    # Add a conditional message and fill in its rule.
+    lv |> element(~s(button[phx-click="conf_add_variant"])) |> render_click()
+
+    lv
+    |> form("section form[phx-change=save_form_settings]", %{
+      form: %{
+        confirmation_type: "redirect",
+        redirect_url: "/thanks",
+        success_message: "Merci!",
+        variants: %{
+          "0" => %{
+            message: "We'll call you.",
+            logic: "all",
+            rules: %{"0" => %{field: "plan", operator: "eq", value: "pro"}}
+          }
+        }
+      }
+    })
+    |> render_change()
+
+    updated = CMS.get_form!(form.id, authorize?: false)
+
+    assert updated.confirmation_variants == [
+             %{
+               "message" => "We'll call you.",
+               "conditions" => %{
+                 "logic" => "all",
+                 "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+               }
+             }
+           ]
+  end
+
+  test "the notifications tab manages recipients, rules and the autoresponder", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    {form, [_guests], lv, _html} =
+      builder(conn, admin, %{}, [
+        %{name: "guests", label: "Guests", field_type: :integer}
+      ])
+
+    lv |> element(~s(nav button[phx-value-tab="notifications"])) |> render_click()
+
+    # Enable conditional notification — a blank rule row is seeded.
+    lv
+    |> form("section form[phx-change=save_form_settings]", %{
+      form: %{notify_email: "a@x.co, b@x.co", notify_logic_enabled: "true"}
+    })
+    |> render_change()
+
+    seeded = CMS.get_form!(form.id, authorize?: false)
+    assert seeded.notify_email == "a@x.co, b@x.co"
+    assert seeded.notify_conditions["rules"] != []
+
+    # Enable the autoresponder and fill its templates.
+    lv
+    |> form("section form[phx-change=save_form_settings]", %{
+      form: %{
+        notify_email: "a@x.co, b@x.co",
+        notify_logic_enabled: "true",
+        notify_conditions: %{
+          logic: "any",
+          rules: %{"0" => %{field: "guests", operator: "gt", value: "5"}}
+        },
+        autoresponder_enabled: "true"
+      }
+    })
+    |> render_change()
+
+    lv
+    |> form("section form[phx-change=save_form_settings]", %{
+      form: %{
+        notify_email: "a@x.co, b@x.co",
+        notify_logic_enabled: "true",
+        notify_conditions: %{
+          logic: "any",
+          rules: %{"0" => %{field: "guests", operator: "gt", value: "5"}}
+        },
+        autoresponder_enabled: "true",
+        autoresponder_subject: "Thanks {{guests}}",
+        autoresponder_body: "See you soon."
+      }
+    })
+    |> render_change()
+
+    updated = CMS.get_form!(form.id, authorize?: false)
+    assert updated.autoresponder_enabled
+    assert updated.autoresponder_subject == "Thanks {{guests}}"
+
+    assert updated.notify_conditions == %{
+             "logic" => "any",
+             "rules" => [%{"field" => "guests", "operator" => "gt", "value" => "5"}]
+           }
+  end
+
+  test "the entries tab links the CSV export", %{conn: conn} do
+    {form, [], lv, _html} = builder(conn, authed_user(:admin))
+
+    html = lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+    assert html =~ "/editor/forms/#{form.id}/export.csv"
+    assert html =~ "Export CSV"
+  end
+
   test "the embed tab shows a copyable snippet", %{conn: conn} do
     {form, [], lv, _html} = builder(conn, authed_user(:admin))
 

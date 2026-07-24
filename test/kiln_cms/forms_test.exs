@@ -457,6 +457,177 @@ defmodule KilnCMS.FormsTest do
     end
   end
 
+  # --- confirmations (phase 6) ----------------------------------------------------
+
+  test "confirmation resolution: variants first, then redirect, embeds never redirect" do
+    form =
+      form!(
+        %{
+          success_message: "Thanks!",
+          confirmation_type: :redirect,
+          redirect_url: "/thank-you",
+          confirmation_variants: [
+            %{
+              "message" => "",
+              "conditions" => %{
+                "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+              }
+            },
+            %{
+              "message" => "A human will call you.",
+              "conditions" => %{
+                "rules" => [%{"field" => "plan", "operator" => "eq", "value" => "pro"}]
+              }
+            }
+          ]
+        },
+        [%{name: "plan", label: "Plan", field_type: :radio, options: ["basic", "pro"]}]
+      )
+
+    # Matching variant wins (the blank-message one is skipped).
+    assert Forms.confirmation(form, %{"plan" => "pro"}) == {:message, "A human will call you."}
+
+    # No variant match → the base redirect...
+    assert Forms.confirmation(form, %{"plan" => "basic"}) == {:redirect, "/thank-you"}
+
+    # ...except inside an embed, which always shows the message.
+    assert Forms.confirmation(form, %{"plan" => "basic"}, true) == {:message, "Thanks!"}
+  end
+
+  test "a conditional notification only fires when its rules match" do
+    form =
+      form!(
+        %{
+          notify_email: "sales@example.com",
+          notify_conditions: %{
+            "logic" => "all",
+            "rules" => [%{"field" => "guests", "operator" => "gt", "value" => "5"}]
+          }
+        },
+        [%{name: "guests", label: "Guests", field_type: :integer}]
+      )
+
+    assert {:ok, _} = Forms.submit(form, %{"guests" => "2"})
+    refute_enqueued(worker: KilnCMS.Forms.NotificationWorker)
+
+    assert {:ok, _} = Forms.submit(form, %{"guests" => "9"})
+    assert_enqueued(worker: KilnCMS.Forms.NotificationWorker)
+  end
+
+  test "the notification mails every comma-separated recipient" do
+    form =
+      form!(%{notify_email: "a@example.com, b@example.com"}, [
+        %{name: "message", label: "Message", field_type: :text}
+      ])
+
+    assert {:ok, _} = Forms.submit(form, %{"message" => "hi"})
+    assert [job] = all_enqueued(worker: KilnCMS.Forms.NotificationWorker)
+    perform_job(KilnCMS.Forms.NotificationWorker, job.args)
+
+    Swoosh.TestAssertions.assert_email_sent(fn sent ->
+      Enum.map(sent.to, &elem(&1, 1)) == ["a@example.com", "b@example.com"]
+    end)
+  end
+
+  # --- autoresponder (phase 6) ------------------------------------------------------
+
+  test "the autoresponder mails the submitter with interpolated, escaped values" do
+    form =
+      form!(
+        %{
+          notify_email: "team@example.com",
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, {{full_name}}!",
+          autoresponder_body: "Hi {{full_name}},\nwe got: {{message}}"
+        },
+        [
+          %{name: "full_name", label: "Name", field_type: :string},
+          %{name: "email", label: "Email", field_type: :email, required: true},
+          %{name: "message", label: "Message", field_type: :text}
+        ]
+      )
+
+    assert {:ok, _} =
+             Forms.submit(form, %{
+               "full_name" => "Ada",
+               "email" => "ada@example.com",
+               "message" => "<b>bold</b> claim"
+             })
+
+    assert [job] = all_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
+    assert job.args["to"] == "ada@example.com"
+
+    perform_job(KilnCMS.Forms.AutoresponderWorker, job.args)
+
+    Swoosh.TestAssertions.assert_email_sent(fn sent ->
+      assert sent.to == [{"", "ada@example.com"}]
+      assert sent.subject == "Thanks, Ada!"
+      assert sent.html_body =~ "Hi Ada,<br>"
+      # Visitor HTML arrives escaped, never raw.
+      assert sent.html_body =~ "&lt;b&gt;bold&lt;/b&gt; claim"
+      refute sent.html_body =~ "<b>bold</b>"
+      # Replies route to the notify address.
+      assert sent.reply_to == {"", "team@example.com"}
+      true
+    end)
+  end
+
+  test "no autoresponder without an email answer or without subject/body" do
+    no_email =
+      form!(
+        %{autoresponder_enabled: true, autoresponder_subject: "s", autoresponder_body: "b"},
+        [%{name: "message", label: "Message", field_type: :text}]
+      )
+
+    assert {:ok, _} = Forms.submit(no_email, %{"message" => "hi"})
+    refute_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
+
+    no_body =
+      form!(
+        %{autoresponder_enabled: true, autoresponder_subject: "s"},
+        [%{name: "email", label: "Email", field_type: :email}]
+      )
+
+    assert {:ok, _} = Forms.submit(no_body, %{"email" => "a@b.co"})
+    refute_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
+  end
+
+  test "phase-6 settings are validated at write time" do
+    actor = admin()
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             CMS.create_form(%{name: "F", slug: slug(), notify_email: "not-an-email, b@x.co"},
+               actor: actor
+             )
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             CMS.create_form(%{name: "F", slug: slug(), confirmation_type: :redirect},
+               actor: actor
+             )
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             CMS.create_form(
+               %{
+                 name: "F",
+                 slug: slug(),
+                 confirmation_variants: [%{"message" => "x", "conditions" => %{"logic" => "meh"}}]
+               },
+               actor: actor
+             )
+
+    assert {:ok, _form} =
+             CMS.create_form(
+               %{
+                 name: "F",
+                 slug: slug(),
+                 notify_email: "a@x.co, b@x.co",
+                 confirmation_type: :redirect,
+                 redirect_url: "https://example.com/thanks"
+               },
+               actor: actor
+             )
+  end
+
   test "checkbox list values render joined in the notification email" do
     form =
       form!(%{notify_email: "team@example.com"}, [

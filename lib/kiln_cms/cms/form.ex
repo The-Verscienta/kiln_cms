@@ -41,7 +41,14 @@ defmodule KilnCMS.CMS.Form do
       :success_message,
       :notify_email,
       :submit_label,
-      :progress_indicator
+      :progress_indicator,
+      :confirmation_type,
+      :redirect_url,
+      :confirmation_variants,
+      :notify_conditions,
+      :autoresponder_enabled,
+      :autoresponder_subject,
+      :autoresponder_body
     ]
 
     create :create, primary?: true
@@ -92,10 +99,9 @@ defmodule KilnCMS.CMS.Form do
       message "must be lowercase letters, digits and dashes"
     end
 
-    validate match(:notify_email, ~r/\A[^\s@]+@[^\s@]+\z/) do
-      where present(:notify_email)
-      message "must be an email address"
-    end
+    # notify_email (now a comma-separated list), redirect_url shape,
+    # notify_conditions and confirmation_variants — see the module.
+    validate KilnCMS.CMS.Validations.FormConfirmations
   end
 
   # Multi-tenancy (epic #336): a form belongs to one site, so its slug is unique
@@ -131,11 +137,50 @@ defmodule KilnCMS.CMS.Form do
     # Inactive forms 404 publicly and reject submissions.
     attribute :active, :boolean, allow_nil?: false, default: true, public?: true
 
-    # Shown (or returned) after a successful submission.
+    # Shown (or returned) after a successful submission — the default
+    # confirmation when no variant matches and confirmation_type is :message.
     attribute :success_message, :string, public?: true
 
+    # What a successful submission resolves to: the thank-you message, or a
+    # redirect to `redirect_url`. Embedded (iframe) submissions always show
+    # the message — navigating a small third-party frame elsewhere is hostile.
+    attribute :confirmation_type, :atom do
+      constraints one_of: [:message, :redirect]
+      default :message
+      allow_nil? false
+      public? true
+    end
+
+    # Site-relative path (/thanks) or absolute http(s) URL (validated).
+    attribute :redirect_url, :string, public?: true
+
+    # Conditional confirmations (phase 6): ordered variants, first whose
+    # conditions match the submitted data wins, else the base confirmation.
+    # Each: %{"message" => text, "conditions" => phase-4 conditions map}.
+    attribute :confirmation_variants, {:array, :map} do
+      default []
+      allow_nil? false
+      public? true
+    end
+
     # When set, each submission is mailed here (via the :mail queue).
+    # One or more addresses, comma-separated.
     attribute :notify_email, :string, public?: true
+
+    # Conditional notification (phase 6): when non-empty, the notify_email
+    # mail only goes out if these rules match the submitted data.
+    attribute :notify_conditions, :map do
+      default %{}
+      allow_nil? false
+      public? false
+    end
+
+    # Autoresponder (phase 6): a confirmation email to the submitter (the
+    # form's first email-type answer). Subject/body support {{field_name}}
+    # placeholders, interpolated from the submitted data.
+    attribute :autoresponder_enabled, :boolean, allow_nil?: false, default: false, public?: true
+    attribute :autoresponder_subject, :string, public?: true
+    attribute :autoresponder_body, :string, public?: true
 
     # Submit-button text; nil falls back to the translated "Submit".
     attribute :submit_label, :string, public?: true

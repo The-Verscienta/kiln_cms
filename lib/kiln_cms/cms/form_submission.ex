@@ -42,6 +42,13 @@ defmodule KilnCMS.CMS.FormSubmission do
       filter expr(form_id == ^arg(:form_id))
       prepare build(sort: [inserted_at: :desc], limit: 100)
     end
+
+    # Every submission of one form, newest first (CSV export — no limit).
+    read :all_for_form do
+      argument :form_id, :uuid, allow_nil?: false
+      filter expr(form_id == ^arg(:form_id))
+      prepare build(sort: [inserted_at: :desc])
+    end
   end
 
   policies do

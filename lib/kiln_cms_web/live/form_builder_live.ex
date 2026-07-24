@@ -229,6 +229,61 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
+  # Confirmations/Notifications tabs auto-save on change (like the field
+  # panel) — no flash on success, only on error.
+  def handle_event("save_form_settings", %{"form" => params}, socket) do
+    params = form_settings_params(params, socket.assigns.form)
+
+    case CMS.update_form(socket.assigns.form, params, actor_opts(socket)) do
+      {:ok, form} -> {:noreply, assign(socket, :form, form)}
+      {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error))}
+    end
+  end
+
+  # Conditional-notification rule rows.
+  def handle_event("notify_add_rule", _params, socket) do
+    update_form_direct(socket, fn form ->
+      %{notify_conditions: add_rule(form.notify_conditions)}
+    end)
+  end
+
+  def handle_event("notify_remove_rule", %{"index" => index}, socket) do
+    index = String.to_integer(index)
+
+    update_form_direct(socket, fn form ->
+      %{notify_conditions: remove_rule(form.notify_conditions, index)}
+    end)
+  end
+
+  # Conditional-confirmation (variant) rows.
+  def handle_event("conf_add_variant", _params, socket) do
+    update_form_direct(socket, fn form ->
+      variant = %{
+        "message" => "",
+        "conditions" => %{"logic" => "all", "rules" => [blank_rule()]}
+      }
+
+      %{confirmation_variants: form.confirmation_variants ++ [variant]}
+    end)
+  end
+
+  def handle_event("conf_remove_variant", %{"index" => index}, socket) do
+    index = String.to_integer(index)
+
+    update_form_direct(socket, fn form ->
+      %{confirmation_variants: List.delete_at(form.confirmation_variants, index)}
+    end)
+  end
+
+  def handle_event("conf_add_rule", %{"variant" => variant_index}, socket) do
+    update_variant(socket, String.to_integer(variant_index), &add_rule/1)
+  end
+
+  def handle_event("conf_remove_rule", %{"variant" => variant_index, "index" => index}, socket) do
+    index = String.to_integer(index)
+    update_variant(socket, String.to_integer(variant_index), &remove_rule(&1, index))
+  end
+
   # --- submissions -------------------------------------------------------------
 
   def handle_event("delete_submission", %{"id" => id}, socket) do
@@ -434,6 +489,106 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp normalize_rule_rows(_other), do: %{}
 
   defp blank_rule, do: %{"field" => "", "operator" => "eq", "value" => ""}
+
+  defp add_rule(conditions) do
+    conditions
+    |> Map.put_new("logic", "all")
+    |> Map.update("rules", [blank_rule()], &(&1 ++ [blank_rule()]))
+  end
+
+  defp remove_rule(conditions, index) do
+    Map.update(conditions, "rules", [], &List.delete_at(&1, index))
+  end
+
+  defp update_form_direct(socket, fun) do
+    case CMS.update_form(socket.assigns.form, fun.(socket.assigns.form), actor_opts(socket)) do
+      {:ok, form} -> {:noreply, assign(socket, :form, form)}
+      {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error))}
+    end
+  end
+
+  defp update_variant(socket, variant_index, fun) do
+    update_form_direct(socket, fn form ->
+      variants =
+        List.update_at(form.confirmation_variants, variant_index, fn variant ->
+          Map.update(variant, "conditions", %{}, fun)
+        end)
+
+      %{confirmation_variants: variants}
+    end)
+  end
+
+  # Settings-tab params → update attrs: checkbox toggles, the conditional-
+  # notification map, and the confirmation variants (index-keyed → list).
+  defp form_settings_params(params, form) do
+    params
+    |> Map.drop(["_target"])
+    |> normalize_notify(form)
+    |> normalize_variants()
+  end
+
+  defp normalize_notify(%{"notify_logic_enabled" => enabled} = params, form) do
+    params = Map.delete(params, "notify_logic_enabled")
+
+    cond do
+      enabled == "false" ->
+        Map.put(params, "notify_conditions", %{})
+
+      form.notify_conditions == %{} and params["notify_conditions"] == nil ->
+        Map.put(params, "notify_conditions", %{"logic" => "all", "rules" => [blank_rule()]})
+
+      true ->
+        Map.update(params, "notify_conditions", form.notify_conditions, &normalize_rule_rows/1)
+    end
+  end
+
+  defp normalize_notify(params, _form), do: params
+
+  defp normalize_variants(%{"variants" => variants} = params) when is_map(variants) do
+    normalized =
+      variants
+      |> Enum.sort_by(fn {index, _variant} -> String.to_integer(index) end)
+      |> Enum.map(fn {_index, variant} ->
+        %{
+          "message" => variant["message"] || "",
+          "conditions" =>
+            normalize_rule_rows(%{
+              "logic" => variant["logic"],
+              "rules" => variant["rules"] || %{}
+            })
+        }
+      end)
+
+    params |> Map.delete("variants") |> Map.put("confirmation_variants", normalized)
+  end
+
+  defp normalize_variants(params), do: params
+
+  # Form-level rules (notifications/confirmations) run AFTER full coercion,
+  # so they may reference any value-producing field.
+  defp form_rule_sources(fields) do
+    Enum.reject(fields, &(&1.field_type in FormField.display_types()))
+  end
+
+  # Submissions per day over the last two weeks (of the loaded, most recent
+  # 100) — the entries tab's sparkline. Returns {[{date, count}], max}.
+  defp sparkline(submissions) do
+    counts =
+      Enum.frequencies_by(
+        submissions,
+        &(&1.inserted_at |> DateTime.to_date() |> Date.to_iso8601())
+      )
+
+    today = Date.utc_today()
+
+    days =
+      for offset <- 13..0//-1 do
+        date = Date.add(today, -offset)
+        {date, Map.get(counts, Date.to_iso8601(date), 0)}
+      end
+
+    {days, days |> Enum.map(&elem(&1, 1)) |> Enum.max()}
+  end
 
   defp update_selected_conditions(socket, fun) do
     with %FormField{} = field <-
@@ -1112,39 +1267,322 @@ defmodule KilnCMSWeb.FormBuilderLive do
         </section>
 
         <section :if={@tab == :notifications} class="card card-pad max-w-2xl">
-          <form phx-submit="save_form" class="space-y-3">
+          <form phx-change="save_form_settings" class="space-y-4 text-sm">
             <div>
-              <label for="nf-email" class="text-sm font-medium">{gettext("Notify email")}</label>
+              <label for="nf-email" class="font-medium">{gettext("Notify emails")}</label>
               <input
                 id="nf-email"
                 name="form[notify_email]"
                 value={@form.notify_email}
-                placeholder="team@example.com"
+                placeholder="team@example.com, sales@example.com"
+                phx-debounce="500"
                 class="field-input mt-1"
               />
               <p class="mt-1 text-xs text-base-content/60">
-                {gettext("Each submission is mailed here. Leave blank for no notification.")}
+                {gettext(
+                  "Each submission is mailed here — comma-separate multiple recipients. Leave blank for no notification."
+                )}
               </p>
             </div>
-            <.button type="submit" variant="primary">{gettext("Save")}</.button>
+
+            <label class="flex items-center gap-2">
+              <input type="hidden" name="form[notify_logic_enabled]" value="false" />
+              <input
+                type="checkbox"
+                name="form[notify_logic_enabled]"
+                value="true"
+                checked={@form.notify_conditions != %{}}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {gettext("Only notify when rules match")}
+            </label>
+
+            <div :if={@form.notify_conditions != %{}} class="space-y-2">
+              <div class="flex items-center gap-2 text-xs">
+                {gettext("Notify when")}
+                <select
+                  name="form[notify_conditions][logic]"
+                  aria-label={gettext("Notification rule logic")}
+                  class="field-select w-auto"
+                >
+                  <option value="all" selected={@form.notify_conditions["logic"] != "any"}>
+                    {gettext("all")}
+                  </option>
+                  <option value="any" selected={@form.notify_conditions["logic"] == "any"}>
+                    {gettext("any")}
+                  </option>
+                </select>
+                {gettext("rules match:")}
+              </div>
+
+              <div
+                :for={{rule, index} <- Enum.with_index(@form.notify_conditions["rules"] || [])}
+                class="flex items-center gap-1"
+              >
+                <div class="grid flex-1 gap-1 sm:grid-cols-3">
+                  <select
+                    name={"form[notify_conditions][rules][#{index}][field]"}
+                    aria-label={gettext("Rule field")}
+                    class="field-select text-xs"
+                  >
+                    <option value="">{gettext("— pick a field —")}</option>
+                    <option
+                      :for={source <- form_rule_sources(@fields)}
+                      value={source.name}
+                      selected={rule["field"] == source.name}
+                    >
+                      {source.label}
+                    </option>
+                  </select>
+                  <select
+                    name={"form[notify_conditions][rules][#{index}][operator]"}
+                    aria-label={gettext("Rule operator")}
+                    class="field-select text-xs"
+                  >
+                    <option
+                      :for={{op, label} <- operators()}
+                      value={op}
+                      selected={(rule["operator"] || "eq") == op}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                  <input
+                    name={"form[notify_conditions][rules][#{index}][value]"}
+                    value={rule["value"]}
+                    phx-debounce="300"
+                    aria-label={gettext("Rule value")}
+                    class="field-input text-xs"
+                  />
+                </div>
+                <button
+                  type="button"
+                  phx-click="notify_remove_rule"
+                  phx-value-index={index}
+                  aria-label={gettext("Remove rule")}
+                  class="btn btn-sm btn-ghost shrink-0 hover:text-error"
+                >
+                  <.icon name="hero-x-mark" class="size-3.5" />
+                </button>
+              </div>
+
+              <button type="button" phx-click="notify_add_rule" class="btn btn-sm btn-default">
+                {gettext("Add rule")}
+              </button>
+            </div>
+
+            <div class="space-y-2 border-t border-base-content/10 pt-3">
+              <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                {gettext("Autoresponder")}
+              </h3>
+
+              <label class="flex items-center gap-2">
+                <input type="hidden" name="form[autoresponder_enabled]" value="false" />
+                <input
+                  type="checkbox"
+                  name="form[autoresponder_enabled]"
+                  value="true"
+                  checked={@form.autoresponder_enabled}
+                  class="size-4 rounded border border-base-content/30 accent-primary"
+                />
+                {gettext("Email the submitter a confirmation")}
+              </label>
+
+              <div :if={@form.autoresponder_enabled} class="space-y-2">
+                <div>
+                  <label for="nf-auto-subject" class="font-medium">{gettext("Subject")}</label>
+                  <input
+                    id="nf-auto-subject"
+                    name="form[autoresponder_subject]"
+                    value={@form.autoresponder_subject}
+                    placeholder={gettext("Thanks — we received your message")}
+                    phx-debounce="300"
+                    class="field-input mt-1"
+                  />
+                </div>
+                <div>
+                  <label for="nf-auto-body" class="font-medium">{gettext("Body")}</label>
+                  <textarea
+                    id="nf-auto-body"
+                    name="form[autoresponder_body]"
+                    rows="5"
+                    phx-debounce="300"
+                    class="field-input mt-1"
+                  >{@form.autoresponder_body}</textarea>
+                </div>
+                <p class="text-xs text-base-content/60">
+                  {gettext(
+                    "Sent to the form's first email field. Insert answers with {{machine_name}}. Both subject and body are required for the mail to go out."
+                  )}
+                </p>
+              </div>
+            </div>
           </form>
         </section>
 
         <section :if={@tab == :confirmations} class="card card-pad max-w-2xl">
-          <form phx-submit="save_form" class="space-y-3">
+          <form phx-change="save_form_settings" class="space-y-4 text-sm">
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label for="cf-type" class="font-medium">{gettext("Confirmation type")}</label>
+                <select id="cf-type" name="form[confirmation_type]" class="field-select mt-1">
+                  <option value="message" selected={@form.confirmation_type == :message}>
+                    {gettext("Show a message")}
+                  </option>
+                  <option value="redirect" selected={@form.confirmation_type == :redirect}>
+                    {gettext("Redirect to a URL")}
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label for="cf-redirect" class="font-medium">{gettext("Redirect URL")}</label>
+                <input
+                  id="cf-redirect"
+                  name="form[redirect_url]"
+                  value={@form.redirect_url}
+                  placeholder="/thank-you"
+                  phx-debounce="500"
+                  class="field-input mt-1"
+                />
+                <p class="mt-1 text-xs text-base-content/60">
+                  {gettext("Set the URL first, then switch the type to Redirect.")}
+                </p>
+              </div>
+            </div>
+
             <div>
-              <label for="cf-success" class="text-sm font-medium">{gettext("Success message")}</label>
+              <label for="cf-success" class="font-medium">{gettext("Success message")}</label>
               <input
                 id="cf-success"
                 name="form[success_message]"
                 value={@form.success_message}
+                phx-debounce="300"
                 class="field-input mt-1"
               />
               <p class="mt-1 text-xs text-base-content/60">
-                {gettext("Shown on the thank-you page after a successful submission.")}
+                {gettext(
+                  "Shown after a successful submission — embedded forms always use the message, never the redirect."
+                )}
               </p>
             </div>
-            <.button type="submit" variant="primary">{gettext("Save")}</.button>
+
+            <div class="space-y-3 border-t border-base-content/10 pt-3">
+              <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                {gettext("Conditional messages")}
+              </h3>
+              <p class="text-xs text-base-content/60">
+                {gettext(
+                  "The first message whose rules match the submission wins; otherwise the confirmation above applies."
+                )}
+              </p>
+
+              <div
+                :for={{variant, vindex} <- Enum.with_index(@form.confirmation_variants)}
+                class="space-y-2 rounded border border-base-content/10 p-2"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <input
+                    name={"form[variants][#{vindex}][message]"}
+                    value={variant["message"]}
+                    placeholder={gettext("Message when these rules match")}
+                    phx-debounce="300"
+                    aria-label={gettext("Conditional message")}
+                    class="field-input"
+                  />
+                  <button
+                    type="button"
+                    phx-click="conf_remove_variant"
+                    phx-value-index={vindex}
+                    aria-label={gettext("Remove conditional message")}
+                    class="btn btn-sm btn-ghost shrink-0 hover:text-error"
+                  >
+                    <.icon name="hero-trash" class="size-3.5" />
+                  </button>
+                </div>
+
+                <div class="flex items-center gap-2 text-xs">
+                  {gettext("Show when")}
+                  <select
+                    name={"form[variants][#{vindex}][logic]"}
+                    aria-label={gettext("Variant rule logic")}
+                    class="field-select w-auto"
+                  >
+                    <option value="all" selected={variant["conditions"]["logic"] != "any"}>
+                      {gettext("all")}
+                    </option>
+                    <option value="any" selected={variant["conditions"]["logic"] == "any"}>
+                      {gettext("any")}
+                    </option>
+                  </select>
+                  {gettext("rules match:")}
+                </div>
+
+                <div
+                  :for={{rule, rindex} <- Enum.with_index(variant["conditions"]["rules"] || [])}
+                  class="flex items-center gap-1"
+                >
+                  <div class="grid flex-1 gap-1 sm:grid-cols-3">
+                    <select
+                      name={"form[variants][#{vindex}][rules][#{rindex}][field]"}
+                      aria-label={gettext("Rule field")}
+                      class="field-select text-xs"
+                    >
+                      <option value="">{gettext("— pick a field —")}</option>
+                      <option
+                        :for={source <- form_rule_sources(@fields)}
+                        value={source.name}
+                        selected={rule["field"] == source.name}
+                      >
+                        {source.label}
+                      </option>
+                    </select>
+                    <select
+                      name={"form[variants][#{vindex}][rules][#{rindex}][operator]"}
+                      aria-label={gettext("Rule operator")}
+                      class="field-select text-xs"
+                    >
+                      <option
+                        :for={{op, label} <- operators()}
+                        value={op}
+                        selected={(rule["operator"] || "eq") == op}
+                      >
+                        {label}
+                      </option>
+                    </select>
+                    <input
+                      name={"form[variants][#{vindex}][rules][#{rindex}][value]"}
+                      value={rule["value"]}
+                      phx-debounce="300"
+                      aria-label={gettext("Rule value")}
+                      class="field-input text-xs"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    phx-click="conf_remove_rule"
+                    phx-value-variant={vindex}
+                    phx-value-index={rindex}
+                    aria-label={gettext("Remove rule")}
+                    class="btn btn-sm btn-ghost shrink-0 hover:text-error"
+                  >
+                    <.icon name="hero-x-mark" class="size-3.5" />
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  phx-click="conf_add_rule"
+                  phx-value-variant={vindex}
+                  class="btn btn-sm btn-default"
+                >
+                  {gettext("Add rule")}
+                </button>
+              </div>
+
+              <button type="button" phx-click="conf_add_variant" class="btn btn-sm btn-default">
+                {gettext("Add conditional message")}
+              </button>
+            </div>
           </form>
         </section>
 
@@ -1183,7 +1621,32 @@ defmodule KilnCMSWeb.FormBuilderLive do
           </p>
         </section>
 
-        <section :if={@tab == :entries} class="max-w-3xl">
+        <section :if={@tab == :entries} class="max-w-3xl space-y-3">
+          <div class="flex items-end justify-between gap-3">
+            <%!-- Per-day counts of the loaded (most recent 100) submissions. --%>
+            <div :if={@submissions != []}>
+              <% {days, max_count} = sparkline(@submissions) %>
+              <div
+                class="flex h-8 items-end gap-0.5"
+                title={gettext("Submissions per day — last 14 days (of the last 100 shown)")}
+              >
+                <div
+                  :for={{date, count} <- days}
+                  title={"#{date}: #{count}"}
+                  class={["w-2 rounded-t", count > 0 && "bg-primary/70", count == 0 && "bg-base-200"]}
+                  style={"height: #{if max_count > 0, do: max(round(count / max_count * 100), 8), else: 8}%"}
+                >
+                </div>
+              </div>
+            </div>
+            <a
+              href={~p"/editor/forms/#{@form.id}/export.csv"}
+              class="btn btn-sm btn-default shrink-0"
+            >
+              {gettext("Export CSV")}
+            </a>
+          </div>
+
           <p :if={@submissions == []} class="text-sm text-base-content/60">
             {gettext("None yet.")}
           </p>

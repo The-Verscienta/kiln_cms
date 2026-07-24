@@ -25,6 +25,29 @@ and review submissions in the same builder.
   no IP, no user agent** (rate limiting uses the IP transiently). Admin-only
   to read or delete; deleting a form removes its submissions.
 
+## Confirmations & notifications
+
+A successful submission resolves to a confirmation: the first
+**conditional message** (`confirmation_variants`, phase-4 rules evaluated
+against the submitted data) that matches wins; otherwise the base
+confirmation — a **redirect** (`confirmation_type: :redirect` +
+`redirect_url`, a site path or http(s) URL) or the success message.
+Embedded (iframe) submissions never redirect. JSON submissions get the
+redirect target in the response (`{"ok": true, "redirect": "..."}`) to
+perform client-side.
+
+`notify_email` takes one or more comma-separated recipients; when
+`notify_conditions` is set, the notification only fires for matching
+submissions. The **autoresponder** (when enabled, with subject + body)
+mails the submitter — the form's first email-type answer — with
+`{{machine_name}}` placeholders interpolated from the (HTML-escaped)
+submitted data and replies routed to the first notify address.
+
+Admins can export all of a form's submissions as CSV from the builder's
+Entries tab (`GET /editor/forms/:id/export.csv`) — field columns in form
+order plus orphaned keys from renamed fields, list answers joined,
+formula-leading cells prefixed against CSV injection.
+
 ## Multi-page forms
 
 A `page_break` field splits the form into steps; the form's

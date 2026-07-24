@@ -285,6 +285,9 @@ defmodule KilnCMSWeb.Router do
     # controller against the `:browser`-loaded user.
     get "/editor/governance/:type/:id/export.json", GovernanceController, :export
     get "/editor/governance/:type/:id/export.csv", GovernanceController, :export_csv
+
+    # Form submissions export (forms phase 6) — same download/gating pattern.
+    get "/editor/forms/:id/export.csv", FormExportController, :export_csv
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only

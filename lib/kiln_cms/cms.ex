@@ -280,6 +280,7 @@ defmodule KilnCMS.CMS do
       define :create_form_submission, action: :create
       define :get_form_submission, action: :read, get_by: [:id]
       define :recent_form_submissions, action: :recent_for_form, args: [:form_id]
+      define :all_form_submissions, action: :all_for_form, args: [:form_id]
       define :destroy_form_submission, action: :destroy
     end
 

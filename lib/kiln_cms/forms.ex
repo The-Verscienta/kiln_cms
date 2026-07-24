@@ -92,18 +92,83 @@ defmodule KilnCMS.Forms do
       )
 
     notify(form, data)
+    autorespond(form, data)
     KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
     submission
   end
 
+  # Admin notification — skipped when the form's notify_conditions don't
+  # match the submission (phase 6: "only mail sales when budget > X").
   defp notify(%{notify_email: email} = form, data) when is_binary(email) and email != "" do
-    # `org_id` scopes the worker's form re-fetch to the form's site (epic #336).
-    %{form_id: form.id, org_id: form.org_id, data: data}
-    |> KilnCMS.Forms.NotificationWorker.new()
-    |> Oban.insert!()
+    if conditions_met?(form.notify_conditions, data) do
+      # `org_id` scopes the worker's form re-fetch to the form's site (epic #336).
+      %{form_id: form.id, org_id: form.org_id, data: data}
+      |> KilnCMS.Forms.NotificationWorker.new()
+      |> Oban.insert!()
+    end
+
+    :ok
   end
 
   defp notify(_form, _data), do: :ok
+
+  # Autoresponder (phase 6): a confirmation mail to the submitter — the
+  # form's first email-type answer. Needs a subject and body to send.
+  defp autorespond(%{autoresponder_enabled: true} = form, data) do
+    to = autoresponder_recipient(form, data)
+
+    if is_binary(to) and present?(form.autoresponder_subject) and
+         present?(form.autoresponder_body) do
+      %{form_id: form.id, org_id: form.org_id, data: data, to: to}
+      |> KilnCMS.Forms.AutoresponderWorker.new()
+      |> Oban.insert!()
+    end
+
+    :ok
+  end
+
+  defp autorespond(_form, _data), do: :ok
+
+  defp autoresponder_recipient(form, data) do
+    form
+    |> fields()
+    |> Enum.find_value(fn field ->
+      if field.field_type == :email, do: Map.get(data, field.name)
+    end)
+  end
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
+
+  @doc """
+  What a successful submission resolves to (phase 6): the first
+  `confirmation_variants` entry whose conditions match the submitted data
+  wins; otherwise the base confirmation — a redirect when configured, else
+  the success message. Embedded (iframe) submissions never redirect:
+  navigating a small third-party frame elsewhere is hostile, so they fall
+  back to the message.
+  """
+  @spec confirmation(struct(), map(), boolean()) ::
+          {:message, String.t() | nil} | {:redirect, String.t()}
+  def confirmation(form, data, embedded? \\ false) do
+    cond do
+      variant = matching_variant(form, data) -> {:message, variant["message"]}
+      redirect_confirmation?(form, embedded?) -> {:redirect, form.redirect_url}
+      true -> {:message, form.success_message}
+    end
+  end
+
+  # A variant needs a message and real conditions — half-built builder rows
+  # (blank message, no rules) never hijack the confirmation.
+  defp matching_variant(form, data) do
+    Enum.find(form.confirmation_variants || [], fn variant ->
+      present?(variant["message"]) and (variant["conditions"] || %{}) != %{} and
+        conditions_met?(variant["conditions"], data)
+    end)
+  end
+
+  defp redirect_confirmation?(form, embedded?) do
+    form.confirmation_type == :redirect and not embedded? and is_binary(form.redirect_url)
+  end
 
   # --- coercion ---------------------------------------------------------------
 
@@ -137,7 +202,16 @@ defmodule KilnCMS.Forms do
   a half-built rule must never hide data collection.
   """
   @spec visible?(struct() | map(), map()) :: boolean()
-  def visible?(%{conditions: %{"rules" => rules} = conditions}, data) when is_list(rules) do
+  def visible?(%{conditions: conditions}, data), do: conditions_met?(conditions, data)
+  def visible?(_field, _data), do: true
+
+  @doc """
+  Evaluates one phase-4 conditions map against (coerced) submission data —
+  shared by field visibility, conditional notifications and confirmation
+  variants. An empty/absent map always matches.
+  """
+  @spec conditions_met?(map() | nil, map()) :: boolean()
+  def conditions_met?(%{"rules" => rules} = conditions, data) when is_list(rules) do
     results = Enum.map(rules, &rule_matches?(&1, data))
 
     case conditions["logic"] do
@@ -146,7 +220,7 @@ defmodule KilnCMS.Forms do
     end
   end
 
-  def visible?(_field, _data), do: true
+  def conditions_met?(_conditions, _data), do: true
 
   defp rule_matches?(%{"field" => name} = rule, data) when is_binary(name) and name != "" do
     matches?(rule["operator"] || "eq", Map.get(data, name), rule["value"])

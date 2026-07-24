@@ -1,5 +1,9 @@
 # Form Builder Redesign Plan
 
+> **Status: COMPLETE.** All six phases shipped on PR #447 (2026-07-23/24).
+> `docs/forms.md` is the living documentation; this plan is kept as the
+> design record.
+
 Goal: evolve Kiln's form editor from the current flat "add a field row" admin page into a
 visual form builder modeled on **WPForms** and **Formidable Forms** — the two strongest
 form-builder UX references in the WordPress ecosystem.
