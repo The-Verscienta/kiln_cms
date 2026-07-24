@@ -1686,6 +1686,40 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert child["text"] == "Nested heading"
     end
 
+    test "a featured-image change keeps columns children (T1.2 regression)", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      render_hook(lv, "col_update_child", %{
+        "id" => id,
+        "child" => child_id,
+        "field" => "text",
+        "value" => "Keep me"
+      })
+
+      # A featured-image change re-validates the form from its params. It must
+      # go through the child-injection path, or it wipes the socket-managed
+      # columns children before the save (docs/audit-content-editor.md T1.2).
+      render_hook(lv, "clear_featured", %{})
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
+      assert child["text"] == "Keep me"
+    end
+
     test "the nested block renders in the live preview", %{conn: conn} do
       page = draft_page(%{blocks: []})
 

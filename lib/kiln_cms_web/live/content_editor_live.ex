@@ -199,12 +199,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
-  defp assign_record(socket, record) do
+  # `reseed_children?: false` on a post-save reload keeps the LIVE socket-managed
+  # columns children instead of rebuilding them from the just-saved DB record —
+  # otherwise column edits typed during the save round-trip are clobbered by the
+  # reload (docs/audit-content-editor.md, T1.1). Mount, conflict-reload and
+  # version-restore reseed (they intentionally take the server's version).
+  defp assign_record(socket, record, opts \\ []) do
+    socket =
+      socket
+      |> assign(:record, record)
+      |> assign(:page_title, record.title)
+      |> assign(:form, build_form(record, socket.assigns.actor))
+
+    socket =
+      if Keyword.get(opts, :reseed_children?, true),
+        do: seed_block_children(socket, record),
+        else: socket
+
     socket
-    |> assign(:record, record)
-    |> assign(:page_title, record.title)
-    |> assign(:form, build_form(record, socket.assigns.actor))
-    |> seed_block_children(record)
     |> refresh_preview()
     |> load_versions()
     |> load_translations()
@@ -430,12 +442,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @impl true
   def handle_event("validate", %{"form" => params}, socket) do
-    # The columns children live in socket state (they aren't bound form inputs);
-    # re-inject them so a keystroke's partial params can't wipe the nested tree.
-    # GEO item rows (faq/how_to, #357) ARE bound inputs, but arrive as indexed
-    # maps — normalize them to the lists their {:array, :map} fields cast.
-    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
-    socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    socket = revalidate(socket, params)
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
   end
@@ -465,11 +472,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("clear_featured", _params, socket) do
     params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", nil)
-
-    {:noreply,
-     socket
-     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> mark_dirty()}
+    {:noreply, socket |> revalidate(params) |> mark_dirty()}
   end
 
   def handle_event("close_picker", _params, socket),
@@ -488,12 +491,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Set the featured image from the library (#154).
   def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
     params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
-
-    {:noreply,
-     socket
-     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> reset_picker()
-     |> mark_dirty()}
+    {:noreply, socket |> revalidate(params) |> reset_picker() |> mark_dirty()}
   end
 
   # Insert a library image as a brand-new image block (browser opened from the
@@ -517,11 +515,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> AshPhoenix.Form.params()
       |> put_block(index, %{"url" => url, "media_id" => media_id})
 
-    socket =
-      socket
-      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      |> reset_picker()
-
+    socket = socket |> revalidate(params) |> reset_picker()
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
   end
@@ -577,6 +571,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply,
      socket
      |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
+     |> prune_block_children()
      |> mark_dirty()}
   end
 
@@ -700,7 +695,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
         {:noreply,
          socket
-         |> assign_record(reloaded)
+         |> assign_record(reloaded, reseed_children?: false)
          |> assign(:save_state, :saved)
          |> put_flash(:info, gettext("Saved."))}
 
@@ -911,7 +906,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
         reloaded =
           fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
 
-        socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+        socket
+        |> assign_record(reloaded, reseed_children?: false)
+        |> assign(:save_state, :saved)
 
       {:error, form} ->
         handle_autosave_error(socket, form)
@@ -1050,7 +1047,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     current = params |> block_param_at(index) |> Map.get(field) |> List.wrap()
     params = put_block(params, to_string(index), %{field => fun.(current)})
 
-    socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    socket = revalidate(socket, params)
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
   end
@@ -1107,16 +1104,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # form's own params carry every other field, so injecting the children over
   # them is a lossless round-trip.
   defp apply_children(socket, block_children) do
-    params =
-      socket.assigns.form
-      |> AshPhoenix.Form.params()
-      |> inject_children(block_children)
-
     socket
     |> assign(:block_children, block_children)
-    |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    |> revalidate(AshPhoenix.Form.params(socket.assigns.form))
     |> broadcast_preview_and_refresh()
     |> mark_dirty()
+  end
+
+  # Re-validate the form against `params`, first re-injecting the socket-managed
+  # columns children and normalizing GEO item rows. EVERY path that rebuilds the
+  # form from params MUST go through here: a validate that skips the child
+  # injection wipes the nameless columns children (they live only in socket
+  # state), which is what let the featured-image / image-pick / GEO-row handlers
+  # silently empty columns blocks (see docs/audit-content-editor.md, T1.2).
+  defp revalidate(socket, params) do
+    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+    assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
   end
 
   defp broadcast_preview_and_refresh(socket) do
@@ -1151,6 +1154,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp inject_block(other, _block_children), do: other
+
+  # Drop socket-managed children for columns blocks no longer present in the form
+  # (e.g. a removed block), so the map can't grow unbounded across a session or
+  # resurrect a deleted block's children if an id ever reappears.
+  defp prune_block_children(socket) do
+    live_ids =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> Map.get("blocks")
+      |> block_param_ids()
+      |> MapSet.new()
+
+    pruned = Map.filter(socket.assigns.block_children, fn {id, _} -> id in live_ids end)
+    assign(socket, :block_children, pruned)
+  end
+
+  defp block_param_ids(blocks) when is_map(blocks),
+    do: blocks |> Map.values() |> block_param_ids()
+
+  defp block_param_ids(blocks) when is_list(blocks), do: Enum.flat_map(blocks, &block_param_id/1)
+  defp block_param_ids(_blocks), do: []
+
+  defp block_param_id(%{"id" => id}) when is_binary(id), do: [id]
+  defp block_param_id(_block), do: []
 
   # Apply `fun` to the child-block list of one column (by index) of a block.
   defp update_column(block_children, block_id, col_index, fun) do
