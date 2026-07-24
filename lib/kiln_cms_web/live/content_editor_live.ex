@@ -744,6 +744,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # One-click translation: duplicate this record's content into a new draft in
   # the target locale and jump to its editor.
   def handle_event("create_translation", %{"locale" => locale}, socket) do
+    # Flush any pending draft autosave first: this handler navigates away, which
+    # kills the debounced autosave timer, so unsaved edits on the source record
+    # — and the content the new translation copies from it — would otherwise be
+    # lost (docs/audit-content-editor.md, T2.4). A no-op when nothing is pending.
+    socket = perform_autosave(socket)
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
     translation =

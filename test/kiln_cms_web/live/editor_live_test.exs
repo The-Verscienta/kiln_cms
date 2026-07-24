@@ -455,6 +455,24 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute html =~ ~r/>\s*Saving…/
     end
 
+    # T2.4: creating a translation navigates away, killing the debounced autosave
+    # timer — it must flush the pending draft edit first so it isn't lost.
+    test "creating a translation flushes the source draft's pending edits", %{conn: conn} do
+      page = draft_page(%{title: "Original"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A dirty edit schedules (but hasn't fired) the debounced autosave.
+      lv |> form("#page-editor", form: %{title: "Edited before translating"}) |> render_change()
+      assert CMS.get_page!(page.id, authorize?: false).title == "Original"
+
+      # Creating a translation navigates away; the pending edit must be saved.
+      render_hook(lv, "create_translation", %{"locale" => "fr"})
+
+      assert CMS.get_page!(page.id, authorize?: false).title == "Edited before translating"
+    end
+
     # #136: a failing autosave (invalid form) surfaces an error state, not silence.
     test "an autosave that fails validation shows an error state", %{conn: conn} do
       page = draft_page(%{title: "Has title"})
