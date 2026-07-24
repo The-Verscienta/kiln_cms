@@ -16,10 +16,14 @@ defmodule KilnCMS.Slug.Pattern do
     * `[focus-keyphrase]` — the first `seo_keywords` entry, falling back to
       the title when unset
     * `[category]` — the record's category slug (blank without a category)
-    * `[yyyy]` / `[mm]` / `[dd]` — the published date, falling back to the
-      scheduled date, then today
+    * `[yyyy]` / `[mm]` / `[dd]` — the published date when set, else the
+      scheduled date, else the record's creation date (a stable anchor — never
+      re-read from the wall clock once the record exists)
 
-  `nil` pattern = the default derivation chain (focus keyphrase → title).
+  `nil` pattern = the default derivation chain (focus keyphrase → title). A
+  pattern that expands to nothing for a given record falls back to that same
+  default chain — see `KilnCMS.CMS.Slugs.derive_base/2`, the single entry
+  point both the resource change and the editor use.
   """
 
   alias KilnCMS.Slug
@@ -42,6 +46,10 @@ defmodule KilnCMS.Slug.Pattern do
   def uses?(nil, _token), do: false
   def uses?(pattern, token), do: String.contains?(pattern, "[#{token}]")
 
+  @doc "Whether `pattern` mentions any date token."
+  @spec uses_dates?(String.t() | nil) :: boolean()
+  def uses_dates?(pattern), do: Enum.any?(~w(yyyy mm dd), &uses?(pattern, &1))
+
   @doc ~S/Expand `pattern` against `context` into a slug ("" when nothing usable)./
   @spec expand(String.t(), context()) :: String.t()
   def expand(pattern, context) do
@@ -56,8 +64,10 @@ defmodule KilnCMS.Slug.Pattern do
   def validate(nil), do: :ok
 
   def validate(pattern) when is_binary(pattern) do
+    # `*` (not `+`) so the empty-bracket pattern "[]" is caught as an unknown
+    # token instead of slipping through and expanding to "" on every record.
     unknown =
-      ~r/\[([^\]]+)\]/
+      ~r/\[([^\]]*)\]/
       |> Regex.scan(pattern, capture: :all_but_first)
       |> List.flatten()
       |> Enum.reject(&(&1 in @tokens))

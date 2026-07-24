@@ -213,7 +213,8 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
               />
               <p class="mt-1 text-xs text-base-content/60">
                 {gettext(
-                  "Tokens: [title], [focus-keyphrase], [category], [yyyy], [mm], [dd]. Composes the last URL segment; blank = derive from the SEO keyphrase or title."
+                  "Tokens: %{tokens}. Composes the last URL segment; blank = derive from the SEO keyphrase or title.",
+                  tokens: Enum.map_join(KilnCMS.Slug.Pattern.tokens(), ", ", &"[#{&1}]")
                 )}
               </p>
             </div>

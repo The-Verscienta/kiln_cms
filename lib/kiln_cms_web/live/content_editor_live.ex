@@ -84,6 +84,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          socket
          |> assign(:kind, kind)
          |> assign(:content_type, content_type)
+         |> assign(:slug_targets, slug_targets(content_type))
          |> assign(:has_excerpt, content_type.excerpt?)
          |> assign(:actor, actor)
          |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
@@ -203,10 +204,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
   defp assign_record(socket, record) do
+    socket = assign(socket, :record, record)
+
     socket
-    |> assign(:record, record)
     |> assign(:page_title, record.title)
-    |> assign(:slug_customized?, slug_customized?(record, socket.assigns.content_type))
+    |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> seed_block_children(record)
     |> refresh_preview()
@@ -215,40 +217,55 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Whether the slug is the author's own (pinned) or still auto-derived — while
-  # not customized, editing the title re-derives the slug live (WordPress-style).
-  # Published/scheduled content is always treated as pinned: a title edit must
-  # never silently move a live URL. The `untitled-<n>` scaffold slug stamped by
-  # the list view's "New" button counts as underived.
-  defp slug_customized?(%{state: state}, _ct) when state != :draft, do: true
+  # not customized, editing a slug-source field re-derives the slug live
+  # (WordPress-style). Published/scheduled content is always treated as pinned:
+  # a title edit must never silently move a live URL. The `untitled-<n>`
+  # scaffold slug stamped by the list view's "New" button counts as underived.
+  defp slug_customized?(socket) do
+    record = socket.assigns.record
 
-  defp slug_customized?(record, ct) do
-    slug = record.slug || ""
+    if record.state != :draft do
+      true
+    else
+      slug = record.slug || ""
 
-    derived =
-      base_from(ct, %{
-        title: record.title,
-        seo_keywords: Map.get(record, :seo_keywords),
-        category_slug: category_slug_of(record),
-        date: record.published_at || record.scheduled_at
-      })
+      derived =
+        KilnCMS.CMS.Slugs.derive_base(
+          socket.assigns.content_type.slug_pattern,
+          slug_context(socket)
+        )
 
-    # A dedupe suffix (`guide-kiln-2`) still counts as underived, so the slug
-    # keeps tracking the title/keyphrase across autosaves.
-    not (Regex.match?(~r/\Auntitled-\d+\z/, slug) or slug == derived or
-           String.replace(slug, ~r/-\d+\z/, "") == derived)
+      not (Regex.match?(~r/\Auntitled-\d+\z/, slug) or slug == derived or
+             dedupe_variant?(slug, derived))
+    end
   end
 
-  # Keep the slug tracking the title until the author pins it by typing in the
-  # slug field themselves (see `slug_customized?/2`). Clearing the slug field
-  # unpins it — derivation resumes, and `DeriveSlug` fills any blank on save.
-  @slug_source_fields [["form", "title"], ["form", "seo_keywords"], ["form", "category_id"]]
+  # A dedupe suffix (`guide-kiln-2`) still counts as underived, so the slug
+  # keeps tracking its sources across autosaves. `ensure_unique` never mints
+  # `-1`, so a `-1` suffix (or any non-matching base) means the author chose
+  # it; `base-N` with N >= 2 stays ambiguous by construction and we side with
+  # tracking.
+  defp dedupe_variant?(_slug, ""), do: false
 
+  defp dedupe_variant?(slug, derived) do
+    case Regex.run(~r/\A#{Regex.escape(derived)}-(\d+)\z/, slug, capture: :all_but_first) do
+      [n] -> String.to_integer(n) >= 2
+      _ -> false
+    end
+  end
+
+  # Keep the slug tracking its source fields until the author pins it by
+  # typing in the slug field themselves (see `slug_customized?/1`). Clearing
+  # the slug field unpins it — derivation resumes, and `DeriveSlug` fills any
+  # blank on save. Which fields count as sources depends on the type's pattern
+  # (`slug_targets/1`, computed at mount): category/date edits only re-derive
+  # when the pattern actually uses those tokens.
   defp sync_slug(params, target, socket) do
     cond do
       target == ["form", "slug"] ->
         {params, assign(socket, :slug_customized?, String.trim(params["slug"] || "") != "")}
 
-      target in @slug_source_fields and not socket.assigns.slug_customized? ->
+      target in socket.assigns.slug_targets and not socket.assigns.slug_customized? ->
         {Map.put(params, "slug", derive_unique_slug(socket, params)), socket}
 
       true ->
@@ -256,44 +273,75 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  defp slug_targets(ct) do
+    [["form", "title"], ["form", "seo_keywords"]] ++
+      if(Slug.Pattern.uses?(ct.slug_pattern, "category"),
+        do: [["form", "category_id"]],
+        else: []
+      ) ++
+      if(Slug.Pattern.uses_dates?(ct.slug_pattern), do: [["form", "scheduled_at"]], else: [])
+  end
+
   # Derivation + pathauto-style dedupe, so the slug shown live is the one that
-  # will actually save ("guide-kiln-2" when "guide-kiln" is taken).
+  # will actually save ("guide-kiln-2" when "guide-kiln" is taken). Shares
+  # `Slugs.derive_base/2` with the resource-level `DeriveSlug` change.
   defp derive_unique_slug(socket, params) do
+    base =
+      KilnCMS.CMS.Slugs.derive_base(
+        socket.assigns.content_type.slug_pattern,
+        slug_context(socket, params)
+      )
+
+    if base == "",
+      do: "",
+      else: KilnCMS.CMS.Slugs.ensure_unique(base, slug_scope(socket))
+  end
+
+  # Token inputs for pattern expansion — from the live form params when given
+  # (a keystroke), else the record (mount/reload). The date anchor mirrors
+  # `DeriveSlug`: publish date, else the (live) scheduled date, else the
+  # record's creation date — stable across sessions, so reopening a draft
+  # tomorrow can't flip it to "pinned".
+  defp slug_context(socket, params \\ nil) do
     record = socket.assigns.record
 
-    base =
-      base_from(socket.assigns.content_type, %{
-        title: params["title"],
-        seo_keywords: params["seo_keywords"],
-        category_slug: category_slug(socket, params["category_id"]),
-        date: record.published_at || record.scheduled_at
-      })
+    %{
+      title: param_or(params, "title", record.title),
+      seo_keywords: param_or(params, "seo_keywords", Map.get(record, :seo_keywords)),
+      category_slug: category_slug(socket, param_or(params, "category_id", record.category_id)),
+      date: slug_date(record, params)
+    }
+  end
 
-    case base do
-      "" -> ""
-      base -> KilnCMS.CMS.Slugs.ensure_unique(base, slug_scope(socket))
+  defp param_or(nil, _key, fallback), do: fallback
+  defp param_or(params, key, fallback), do: params[key] || fallback
+
+  defp slug_date(record, params) do
+    record.published_at || form_scheduled_at(params) || record.scheduled_at ||
+      record.inserted_at
+  end
+
+  # The scheduling panel's (UTC) value as typed, so date tokens track it live.
+  defp form_scheduled_at(nil), do: nil
+
+  defp form_scheduled_at(params) do
+    with value when is_binary(value) and value != "" <- params["scheduled_at"],
+         {:ok, datetime, _offset} <- DateTime.from_iso8601(String.replace(value, " ", "T")) do
+      datetime
+    else
+      _ -> nil
     end
   end
 
-  # The derivation base for a type: its slug pattern (#454) when one is set,
-  # else the default chain (focus keyphrase → title) — mirroring `DeriveSlug`.
-  defp base_from(%{slug_pattern: nil}, context) do
-    case Slug.focus_keyphrase(context[:seo_keywords]) do
-      "" -> Slug.derive(context[:title] || "")
-      keyphrase -> Slug.derive(keyphrase)
-    end
-  end
-
-  defp base_from(%{slug_pattern: pattern}, context), do: Slug.Pattern.expand(pattern, context)
-
+  # Category slugs resolve from the mount-time list (the same one the select
+  # offers, so every pickable id is present). A rename by another user
+  # mid-session isn't reflected until reopen — consistent with the rest of the
+  # mount-scoped assigns.
   defp category_slug(socket, category_id) do
     Enum.find_value(socket.assigns.categories, fn category ->
       category.id == category_id && category.slug
     end)
   end
-
-  defp category_slug_of(%{category: %{slug: slug}}), do: slug
-  defp category_slug_of(_record), do: nil
 
   defp slug_scope(socket) do
     ct = socket.assigns.content_type

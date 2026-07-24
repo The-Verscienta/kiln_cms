@@ -24,6 +24,45 @@ defmodule KilnCMS.CMS.Slugs do
   @spec public_path(ContentTypes.t(), String.t() | nil) :: String.t()
   def public_path(ct, slug), do: ContentTypes.public_prefix(ct) <> "/" <> to_string(slug || "")
 
+  # The default derivation as a pattern: the focus keyphrase, which itself
+  # falls back to the title (see Pattern.token_value/2).
+  @default_pattern "[focus-keyphrase]"
+
+  @doc """
+  The derivation base for a record: its type's slug pattern (#454) when one is
+  set, else the default chain (focus keyphrase → title). The **single** entry
+  point for both `Changes.DeriveSlug` and the editor's live sync, so the slug
+  previewed live is always the slug that saves.
+
+  Two guard rails:
+
+    * no usable author text (title/keyphrase slugify to `""`) → `""`, so a
+      date-token pattern can't mint meaningless slugs like `2026-07` from an
+      unsluggable title — the caller leaves the slug blank and the required
+      validation speaks;
+    * a pattern that expands to `""` for this record (e.g. `[category]` on an
+      uncategorized entry) falls back to the default chain instead of failing
+      the write.
+  """
+  @spec derive_base(String.t() | nil, KilnCMS.Slug.Pattern.context()) :: String.t()
+  def derive_base(pattern, context) do
+    default = KilnCMS.Slug.Pattern.expand(@default_pattern, context)
+
+    cond do
+      default == "" ->
+        ""
+
+      is_nil(pattern) ->
+        default
+
+      true ->
+        case KilnCMS.Slug.Pattern.expand(pattern, context) do
+          "" -> default
+          base -> base
+        end
+    end
+  end
+
   @doc "The storage resource behind a registry descriptor (dynamic types → the entry tier)."
   @spec storage_resource(ContentTypes.t()) :: module()
   def storage_resource(%{source: :dynamic}), do: KilnCMS.CMS.Entry

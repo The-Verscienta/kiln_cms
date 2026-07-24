@@ -48,6 +48,34 @@ defmodule KilnCMS.Slug.PatternTest do
       assert message =~ "[titel]"
       assert {:error, _} = Pattern.validate("   ")
     end
+
+    test "rejects the empty-bracket pattern" do
+      assert {:error, _} = Pattern.validate("[]")
+    end
+  end
+
+  describe "Slugs.derive_base/2 (shared entry point)" do
+    alias KilnCMS.CMS.Slugs
+
+    test "nil pattern uses the default chain" do
+      assert Slugs.derive_base(nil, %{title: "A Guide to the Kiln"}) == "guide-kiln"
+      assert Slugs.derive_base(nil, %{title: "T", seo_keywords: "ceramic kiln"}) == "ceramic-kiln"
+    end
+
+    test "an empty expansion falls back to the default chain" do
+      # [category] with no category would expand to "" — the title still wins.
+      assert Slugs.derive_base("[category]", %{title: "Big Story"}) == "big-story"
+    end
+
+    test "no usable author text yields no slug, even with date tokens" do
+      assert Slugs.derive_base("[yyyy]-[mm]-[title]", %{title: "!!!", date: ~D[2026-07-23]}) ==
+               ""
+    end
+
+    test "a working pattern expands normally" do
+      context = %{title: "Big Story", category_slug: "news", date: ~D[2026-07-23]}
+      assert Slugs.derive_base("[category]-[title]", context) == "news-big-story"
+    end
   end
 
   test "validate!/1 raises for the compile-time macro option" do

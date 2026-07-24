@@ -190,6 +190,92 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
     assert slug_value(lv) == "#{Date.utc_today().year}-guide-kiln"
   end
 
+  test "date tokens anchor to the record's creation date, not today", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    type =
+      CMS.create_type_definition!(
+        %{
+          name: "dyn#{System.unique_integer([:positive])}",
+          label: "Dynamic",
+          slug_pattern: "[yyyy]-[title]"
+        },
+        actor: admin
+      )
+
+    n = System.unique_integer([:positive])
+
+    # A draft created long ago (simulating reopening it much later): the
+    # expected base must use inserted_at's year, so the slug neither flips to
+    # "pinned" nor re-derives with today's year.
+    entry =
+      Ash.Seed.seed!(KilnCMS.CMS.Entry, %{
+        title: "Untitled entry",
+        slug: "untitled-#{n}",
+        type_definition_id: type.id,
+        inserted_at: ~U[2020-03-01 12:00:00Z]
+      })
+
+    lv = open_editor(conn, admin, entry, type.name)
+
+    change(lv, "title", %{"title" => "A Guide to the Kiln", "slug" => "untitled-#{n}"})
+    assert slug_value(lv) == "2020-guide-kiln"
+  end
+
+  test "a live scheduled date reaches date tokens", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    type =
+      CMS.create_type_definition!(
+        %{
+          name: "dyn#{System.unique_integer([:positive])}",
+          label: "Dynamic",
+          slug_pattern: "[yyyy]-[mm]-[title]"
+        },
+        actor: admin
+      )
+
+    n = System.unique_integer([:positive])
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(
+        type.name,
+        %{title: "Untitled entry", slug: "untitled-#{n}"},
+        actor: admin
+      )
+
+    lv = open_editor(conn, admin, entry, type.name)
+
+    change(lv, "scheduled_at", %{
+      "title" => "A Guide to the Kiln",
+      "slug" => "untitled-#{n}",
+      "scheduled_at" => "2027-01-15T00:00:00Z"
+    })
+
+    assert slug_value(lv) == "2027-01-guide-kiln"
+  end
+
+  test "an author's -1 suffix is never mistaken for a dedupe variant", %{conn: conn} do
+    editor = authed_user(:editor)
+    # Derivation of "Pinned" is "pinned"; ensure_unique never mints "-1", so
+    # "pinned-1" must be treated as author-chosen and left alone.
+    page = CMS.create_page!(%{title: "Pinned", slug: "pinned-1"}, actor: editor)
+    lv = open_editor(conn, editor, page)
+
+    change(lv, "title", %{"title" => "Renamed Draft", "slug" => "pinned-1"})
+    assert slug_value(lv) == "pinned-1"
+  end
+
+  test "category edits don't re-derive on pattern-less types", %{conn: conn} do
+    editor = authed_user(:editor)
+    n = System.unique_integer([:positive])
+    page = CMS.create_page!(%{title: "Untitled page", slug: "untitled-#{n}"}, actor: editor)
+    lv = open_editor(conn, editor, page)
+
+    change(lv, "category_id", %{"title" => "Untitled page", "slug" => "untitled-#{n}"})
+    assert slug_value(lv) == "untitled-#{n}"
+  end
+
   test "a published record's slug never follows the title", %{conn: conn} do
     admin = authed_user(:admin)
     slug = "live-url-#{System.unique_integer([:positive])}"

@@ -280,7 +280,11 @@ also define a pathauto-style **slug pattern** (`TypeDefinition.slug_pattern`
 or the Content macro's `slug_pattern:` option) such as `[yyyy]-[mm]-[title]`,
 which then drives derivation for that type; tokens are `[title]`,
 `[focus-keyphrase]`, `[category]`, `[yyyy]`, `[mm]`, `[dd]`, composing the
-final URL segment (the type's path prefix stays in front). Three surfaces let a
+final URL segment (the type's path prefix stays in front). Date tokens anchor
+to the publish date, else the scheduled date, else the record's creation
+date; a pattern that expands to nothing for a record (e.g. `[category]` on an
+uncategorized entry) falls back to the default derivation, so a title alone
+is still always enough. Three surfaces let a
 front end handle URLs without mirroring Kiln's scheme:
 
 - **`path` field** — every content read exposes a `path` calculation, the full

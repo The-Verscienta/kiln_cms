@@ -29,25 +29,18 @@ defmodule KilnCMS.CMS.Changes.DeriveSlug do
     end
   end
 
-  # The type's slug pattern (#454) when one is set, else the default chain.
+  # The single derivation entry point shared with the editor (#454): the
+  # type's slug pattern when one is set, else the default chain, with the
+  # empty-expansion and no-usable-text guard rails in Slugs.derive_base/2.
   defp derived_base(changeset) do
-    case pattern_for(changeset) do
-      nil -> KilnCMS.Slug.derive(derivation_source(changeset))
-      pattern -> KilnCMS.Slug.Pattern.expand(pattern, pattern_context(changeset, pattern))
-    end
-  end
-
-  # SEO tie-in: the focus keyphrase (first entry of `seo_keywords`) beats the
-  # title as the derivation source — slug = focus keyphrase, Yoast-style.
-  defp derivation_source(changeset) do
-    case KilnCMS.Slug.focus_keyphrase(attribute_if_present(changeset, :seo_keywords)) do
-      "" -> Ash.Changeset.get_attribute(changeset, :title) || ""
-      keyphrase -> keyphrase
-    end
+    pattern = pattern_for(changeset)
+    Slugs.derive_base(pattern, pattern_context(changeset, pattern))
   end
 
   # Compiled types carry their pattern as a compile-time marker; dynamic
-  # entries resolve theirs from the TypeDefinition row (registry-cached).
+  # entries resolve theirs with one keyed read of their TypeDefinition row.
+  # The row id is globally unique, so this is tenant-correct even though the
+  # org_id attribute isn't materialized until after action changes run.
   defp pattern_for(changeset) do
     resource = changeset.resource
 
@@ -62,13 +55,12 @@ defmodule KilnCMS.CMS.Changes.DeriveSlug do
   defp dynamic_pattern(changeset) do
     with definition_id when not is_nil(definition_id) <-
            attribute_if_present(changeset, :type_definition_id),
-         org_id = attribute_if_present(changeset, :org_id) || KilnCMS.Accounts.default_org_id(),
-         ct when not is_nil(ct) <-
-           Enum.find(
-             ContentTypes.dynamic_all(org_id),
-             &(&1.definition && &1.definition.id == definition_id)
+         {:ok, definition} <-
+           KilnCMS.CMS.get_type_definition(definition_id,
+             authorize?: false,
+             tenant: changeset.tenant
            ) do
-      ct.slug_pattern
+      definition.slug_pattern
     else
       _ -> nil
     end
@@ -79,9 +71,13 @@ defmodule KilnCMS.CMS.Changes.DeriveSlug do
       title: Ash.Changeset.get_attribute(changeset, :title),
       seo_keywords: attribute_if_present(changeset, :seo_keywords),
       category_slug: pattern_category_slug(changeset, pattern),
+      # Stable date anchor: publish date when set, else the scheduled date,
+      # else the record's creation date (nil on create → today, which then IS
+      # the creation date). Never re-read from the wall clock afterwards.
       date:
         Ash.Changeset.get_attribute(changeset, :published_at) ||
-          Ash.Changeset.get_attribute(changeset, :scheduled_at)
+          Ash.Changeset.get_attribute(changeset, :scheduled_at) ||
+          Map.get(changeset.data, :inserted_at)
     }
   end
 

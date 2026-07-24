@@ -170,7 +170,13 @@ defmodule KilnCMS.CMS.ContentTypes do
       section: resource.__kiln_content_section__(),
       excerpt?: not is_nil(Ash.Resource.Info.attribute(resource, :excerpt)),
       path_segment: path_segment(type, plural),
-      slug_pattern: resource.__kiln_content_slug_pattern__(),
+      # Guarded like DeriveSlug's marker probe, so a resource compiled against
+      # the pre-#454 macro (stale beam, external :content_domains) degrades to
+      # "no pattern" instead of crashing the whole registry.
+      slug_pattern:
+        if(function_exported?(resource, :__kiln_content_slug_pattern__, 0),
+          do: resource.__kiln_content_slug_pattern__()
+        ),
       source: :compiled,
       definition: nil
     }

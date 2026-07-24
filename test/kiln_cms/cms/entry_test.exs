@@ -100,6 +100,24 @@ defmodule KilnCMS.CMS.EntryTest do
       end
     end
 
+    test "a pattern expanding empty falls back to the default derivation" do
+      admin = user(:admin)
+      type = define_type!(admin, %{slug_pattern: "[category]"})
+
+      # No category on the entry — the create still succeeds via the title.
+      entry = ContentTypes.create!(type.name, %{title: "Big Story"}, actor: admin)
+      assert entry.slug == "big-story"
+    end
+
+    test "a date pattern can't mint a date-only slug from an unsluggable title" do
+      admin = user(:admin)
+      type = define_type!(admin, %{slug_pattern: "[yyyy]-[mm]-[title]"})
+
+      assert_raise Ash.Error.Invalid, fn ->
+        ContentTypes.create!(type.name, %{title: "!!!"}, actor: admin)
+      end
+    end
+
     test "the path calculation resolves the dynamic type's URL prefix" do
       admin = user(:admin)
       recipes = define_type!(admin)
