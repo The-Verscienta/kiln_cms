@@ -302,7 +302,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> Enum.filter(&match?(%KilnCMS.Blocks.Columns{}, &1))
       |> Map.new(fn %KilnCMS.Blocks.Columns{} = c -> {c.id, normalize_columns(c.columns)} end)
 
-    assign(socket, :block_children, children)
+    socket
+    |> assign(:block_children, children)
+    # Pending rich-text bodies (Portable Text) pushed by the TipTap hook, keyed
+    # by block id (or "idx-N" for a not-yet-saved block). Injected into the
+    # form params on every validate/save — see inject_rich_bodies/2. Reset on
+    # every record (re)load: the stored body is now the source of truth.
+    |> assign(:rich_bodies, %{})
   end
 
   # Per-locale coverage for the Translations panel (only rendered when the
@@ -514,11 +520,55 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # re-inject them so a keystroke's partial params can't wipe the nested tree.
     # GEO item rows (faq/how_to, #357) ARE bound inputs, but arrive as indexed
     # maps — normalize them to the lists their {:array, :map} fields cast.
-    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+    params =
+      params
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(socket.assigns.rich_bodies)
+      |> normalize_geo_items()
+
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
+  end
+
+  # The TipTap hook pushes its document (debounced) instead of mirroring into a
+  # form input: AshPhoenix only applies params for fields the rendered form
+  # knows (_touched), so a hook-injected input is silently dropped. Convert to
+  # Portable Text here and re-validate with the body injected — the same
+  # server-held-state pattern as columns children (apply_children/2).
+  def handle_event("rich_text_body", %{"doc" => doc} = event, socket) do
+    key =
+      case event["id"] do
+        id when is_binary(id) and id != "" -> id
+        _ -> "idx-#{event["idx"]}"
+      end
+
+    body = KilnCMS.Blocks.PortableText.from_tiptap(doc)
+    rich_bodies = Map.put(socket.assigns.rich_bodies, key, body)
+
+    # A pristine form has no "blocks" params yet — synthesize them from the
+    # form's current values (full typed maps) so the injected body has a block
+    # list to land in.
+    base = AshPhoenix.Form.params(socket.assigns.form)
+
+    base =
+      case base["blocks"] do
+        nil -> Map.put(base, "blocks", preview_block_maps(socket.assigns.form))
+        _ -> base
+      end
+
+    params =
+      base
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(rich_bodies)
+
+    {:noreply,
+     socket
+     |> assign(:rich_bodies, rich_bodies)
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+     |> broadcast_preview_and_refresh()
+     |> mark_dirty()}
   end
 
   def handle_event("field_focus", %{"field" => field}, socket) do
@@ -765,7 +815,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("save", %{"form" => params}, socket) do
     socket = cancel_autosave_timer(socket)
-    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+
+    params =
+      params
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(socket.assigns.rich_bodies)
+      |> normalize_geo_items()
 
     result =
       EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
@@ -1223,6 +1278,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
         other
     end)
   end
+
+  # Overlay pending rich-text bodies (Portable Text lists, from the TipTap
+  # hook's rich_text_body pushes) onto the block params, matched by block id —
+  # falling back to the positional key for blocks that haven't been saved yet.
+  # legacy_html is cleared in the same stroke: body becomes this block's single
+  # source of truth (the cast enforces the same rule).
+  defp inject_rich_bodies(params, rich_bodies) when map_size(rich_bodies) == 0, do: params
+  defp inject_rich_bodies(%{"blocks" => nil} = params, _rich_bodies), do: params
+
+  defp inject_rich_bodies(%{"blocks" => _} = params, rich_bodies) do
+    Map.update(params, "blocks", params["blocks"], fn
+      blocks when is_map(blocks) ->
+        Map.new(blocks, fn {k, v} -> {k, inject_rich_body(v, k, rich_bodies)} end)
+
+      blocks when is_list(blocks) ->
+        blocks
+        |> Enum.with_index()
+        |> Enum.map(fn {v, i} -> inject_rich_body(v, to_string(i), rich_bodies) end)
+
+      other ->
+        other
+    end)
+  end
+
+  defp inject_rich_bodies(params, _rich_bodies), do: params
+
+  defp inject_rich_body(%{} = block, key, rich_bodies) do
+    case rich_bodies[block["id"]] || rich_bodies["idx-" <> key] do
+      nil -> block
+      body -> block |> Map.put("body", body) |> Map.put("legacy_html", "")
+    end
+  end
+
+  defp inject_rich_body(other, _key, _rich_bodies), do: other
 
   defp inject_block(%{} = block, block_children) do
     case block["id"] && Map.get(block_children, block["id"]) do
@@ -2014,6 +2103,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # every render path already prefers second — no data is lost, the storage
   # just downgrades from PT to sanitized HTML until a full TipTap<->PT
   # round-trip ships.
+  # Initial value for the editor's hidden input: the stored Portable Text as
+  # JSON (the RichText hook overwrites it with live TipTap JSON on mount). A
+  # legacy_html-only block posts [] until the hook mounts — and the hook always
+  # mounts before any save can happen, seeding TipTap from the rendered HTML.
   defp rich_text_editor_html(bf) do
     case bf[:body].value do
       [_ | _] = body -> KilnCMS.Blocks.PortableText.to_html(body)
@@ -2622,16 +2715,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           editor stays phx-update="ignore" (#140). --%>
                     <div
                       :if={block_type_string(bf) == "rich_text"}
-                      class={["relative", lock_ring(@locked_fields, bf[:legacy_html].name)]}
+                      class={["relative", lock_ring(@locked_fields, bf[:body].name)]}
                     >
-                      <.field_cursors field={bf[:legacy_html].name} cursors={@cursors} />
+                      <.field_cursors field={bf[:body].name} cursors={@cursors} />
                       <div
                         id={"rt-#{bf.index}-v#{@editor_version}"}
                         phx-hook="RichText"
                         phx-update="ignore"
                         data-content={rich_text_editor_html(bf)}
                         data-editor-label={gettext("Rich text editor")}
-                        data-lock-field={bf[:legacy_html].name}
+                        data-lock-field={bf[:body].name}
+                        data-block-id={bf[:id].value}
+                        data-block-index={bf.index}
                         data-collab-token={@collab_token}
                         data-collab-topic={@collab_token && @collab_topic}
                         data-collab-fragment={@collab_token && collab_fragment(bf)}
@@ -2654,6 +2749,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <p class="mt-1 text-xs text-base-content/70">
                           {gettext("Type / for text formatting within this block.")}
                         </p>
+                        <%!-- No-JS/JS-pending fallback: the server-rendered form
+                              round-trips legacy_html exactly as stored. The RichText
+                              hook injects a second hidden input for `body` (name
+                              below) carrying live TipTap JSON — the cast converts it
+                              to Portable Text and, body present, clears legacy_html. --%>
                         <input
                           type="hidden"
                           name={bf[:legacy_html].name}

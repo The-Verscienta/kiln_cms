@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.InlineEditing do
   @inline_fields %{
     "heading" => {"text", :text},
     "quote" => {"text", :text},
-    "rich_text" => {"legacy_html", :html}
+    "rich_text" => {"body", :html}
   }
 
   @doc "The inline-editable block types → `{field, mode}`."
@@ -59,10 +59,46 @@ defmodule KilnCMSWeb.InlineEditing do
   @doc "The current text/HTML for an inline field; `\"\"` when unset, nil for read-only."
   @spec inline_value(struct(), String.t() | nil) :: String.t() | nil
   def inline_value(_block, nil), do: nil
+
+  # Rich text seeds the editor with HTML: canonical Portable Text rendered, or
+  # legacy_html for un-migrated blocks. Writes flow back to `body` (the pushed
+  # TipTap JSON is converted by the block cast).
+  def inline_value(block, "body") do
+    case Map.get(block, :body) do
+      [_ | _] = body -> KilnCMS.Blocks.PortableText.to_html(body)
+      _ -> Map.get(block, :legacy_html) || ""
+    end
+  end
+
   def inline_value(block, field), do: Map.get(block, String.to_existing_atom(field)) || ""
 
   @doc "Set `field` of the block at `index` in the working set."
   @spec put_block_field([map()], non_neg_integer(), String.t(), term()) :: [map()]
+  def put_block_field(block_inputs, index, "body", value) do
+    # Compatibility shim: a pre-round-trip client (stale tab across a deploy)
+    # pushes rich text as an HTML string. Route it to legacy_html rather than
+    # letting the body cast degrade it to [] and drop the edit.
+    if is_binary(value) and String.starts_with?(String.trim_leading(value), "<") do
+      List.update_at(
+        block_inputs,
+        index,
+        &(&1 |> Map.put("legacy_html", value) |> Map.delete("body"))
+      )
+    else
+      # Normalize to Portable Text here: an existing block (id set) goes
+      # through the embedded-resource update cast, where body must already
+      # be the {:array, :map} shape. Clear legacy_html — body is now the
+      # single source of truth for this block.
+      body = KilnCMS.Blocks.PortableText.from_tiptap(value)
+
+      List.update_at(
+        block_inputs,
+        index,
+        &(&1 |> Map.put("body", body) |> Map.put("legacy_html", nil))
+      )
+    end
+  end
+
   def put_block_field(block_inputs, index, field, value) do
     List.update_at(block_inputs, index, &Map.put(&1, field, value))
   end

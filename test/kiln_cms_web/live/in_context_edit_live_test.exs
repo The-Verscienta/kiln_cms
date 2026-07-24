@@ -191,7 +191,27 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       assert block_value(page.id, ids.quote, :text) == "Original quote"
     end
 
-    test "editing rich text stores the new HTML", %{conn: conn} do
+    test "editing rich text stores Portable Text from the pushed TipTap doc", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      import KilnCMS.TipTapFixtures
+
+      tiptap = doc(para("Rewritten prose."))
+
+      render_hook(lv, "update_block", %{"id" => ids.rich, "value" => tiptap})
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert [%{"_type" => "block", "children" => [%{"text" => "Rewritten prose."}]}] =
+               block_value(page.id, ids.rich, :body)
+
+      assert block_value(page.id, ids.rich, :legacy_html) in [nil, ""]
+    end
+
+    test "a stale client pushing rich text as HTML still lands (legacy shim)", %{conn: conn} do
       editor = authed_user(:editor)
       {page, ids} = page_with_blocks(editor)
 

@@ -83,6 +83,102 @@ defmodule KilnCMSWeb.ContentEditorRichTextHydrationTest do
     assert html =~ ~s(data-content="&lt;p&gt;Imported prose survives&lt;/p&gt;")
   end
 
+  test "a form-shaped save (TipTap JSON string body) stores Portable Text", %{conn: conn} do
+    admin = authed_admin()
+
+    import KilnCMS.TipTapFixtures
+
+    tiptap =
+      Jason.encode!(doc([para("Saved from TipTap"), bullet_list([list_item(para("item"))])]))
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "TipTap save",
+          slug: "tiptap-save-#{System.unique_integer([:positive])}",
+          blocks: [%{"_type" => "rich_text", "body" => tiptap}]
+        },
+        actor: admin
+      )
+
+    assert [%Ash.Union{value: block}] = page.blocks
+    assert [%{"_type" => "block"} = para, %{"listItem" => "bullet", "level" => 1}] = block.body
+    assert hd(para["children"])["text"] == "Saved from TipTap"
+    assert block.legacy_html in [nil, ""]
+
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
+
+    # And it hydrates back into the editor as rendered HTML.
+    assert html =~ "Saved from TipTap"
+    _ = html
+  end
+
+  test "updating an EXISTING block with a TipTap JSON string stores Portable Text", %{conn: conn} do
+    _ = conn
+    admin = authed_admin()
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Update path",
+          slug: "update-path-#{System.unique_integer([:positive])}",
+          blocks: [%{"_type" => "rich_text", "legacy_html" => "<p>old prose</p>"}]
+        },
+        actor: admin
+      )
+
+    [%Ash.Union{value: existing}] = page.blocks
+
+    import KilnCMS.TipTapFixtures
+
+    tiptap = Jason.encode!(doc(para("edited prose")))
+
+    # The block editor's form posts the existing id + the hook's body JSON.
+    updated =
+      CMS.update_page!(
+        page,
+        %{
+          blocks: [
+            %{"_type" => "rich_text", "id" => existing.id, "body" => tiptap, "legacy_html" => ""}
+          ]
+        },
+        actor: admin
+      )
+
+    assert [%Ash.Union{value: block}] = updated.blocks
+    assert [%{"children" => [%{"text" => "edited prose"}]}] = block.body
+    assert block.legacy_html in [nil, ""]
+  end
+
+  test "a rich_text_body push flows into the form and persists on save", %{conn: conn} do
+    admin = authed_admin()
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Push flow",
+          slug: "push-flow-#{System.unique_integer([:positive])}",
+          blocks: [%{"_type" => "rich_text", "legacy_html" => "<p>before</p>"}]
+        },
+        actor: admin
+      )
+
+    [%Ash.Union{value: existing}] = page.blocks
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
+
+    import KilnCMS.TipTapFixtures
+
+    doc = doc([para("typed live"), bullet_list([list_item(para("a list item"))])])
+
+    render_hook(lv, "rich_text_body", %{"id" => existing.id, "idx" => "0", "doc" => doc})
+    lv |> form("#page-editor") |> render_submit()
+
+    assert [%Ash.Union{value: block}] = CMS.get_page!(page.id, authorize?: false).blocks
+    assert [%{"children" => [%{"text" => "typed live"}]}, %{"listItem" => "bullet"}] = block.body
+    assert block.legacy_html in [nil, ""]
+  end
+
   test "legacy_html still hydrates when there is no body", %{conn: conn} do
     admin = authed_admin()
 

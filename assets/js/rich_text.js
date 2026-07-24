@@ -1,7 +1,8 @@
 // TipTap rich-text editor for `rich_text` blocks in the content editor.
 //
-// The editor's HTML is mirrored into a hidden input bound to the block's
-// `content` form field, so it saves through the normal form submit. On top of
+// The editor's live TipTap JSON is mirrored into a hidden input bound to the
+// block's `body` form field (converted to Portable Text by the server-side
+// block cast), so it saves through the normal form submit. On top of
 // the StarterKit defaults this module adds:
 //
 //   * an expanded toolbar with live active-state highlighting
@@ -340,10 +341,12 @@ export function mountInline(hook) {
 }
 
 function pushInline(hook) {
-  hook.pushEvent("update_block", {
-    id: hook.el.dataset.kilnBlockId,
-    value: hook.editor.getHTML(),
-  })
+  // Rich text pushes the TipTap document (converted to Portable Text by the
+  // block cast); plain-text regions keep pushing their HTML/text value.
+  const value = hook.el.dataset.kilnBlockMode === "html"
+    ? hook.editor.getJSON()
+    : hook.editor.getHTML()
+  hook.pushEvent("update_block", {id: hook.el.dataset.kilnBlockId, value})
 }
 
 // A toolbar floating above the focused region, rendered into document.body (so
@@ -394,8 +397,20 @@ function syncInlineToolbar(hook) {
 // `content` seeds the editor; omit it under collaboration, where the CRDT
 // owns the document (TipTap ignores the option there anyway — see mountCollab).
 function buildEditor(hook, extensions, content = null) {
-  const input = hook.el.querySelector("[data-input]")
   const toolbarEl = hook.el.querySelector("[data-toolbar]")
+
+  // Prose flows to the server as the TipTap document via a debounced
+  // rich_text_body push (converted to Portable Text there) — NOT through a
+  // form input: AshPhoenix drops params for fields the rendered form doesn't
+  // know. The server-rendered legacy_html input stays untouched as the no-JS
+  // fallback; the server clears it when a pushed body lands.
+  const pushBody = () => {
+    hook.pushEvent("rich_text_body", {
+      id: hook.el.dataset.blockId || null,
+      idx: hook.el.dataset.blockIndex,
+      doc: hook.editor.getJSON(),
+    })
+  }
 
   // Reflect the cursor's active marks/nodes on the toolbar buttons.
   const syncToolbar = () => {
@@ -422,15 +437,12 @@ function buildEditor(hook, extensions, content = null) {
         role: "textbox",
       },
     },
-    onUpdate: ({editor}) => {
-      input.value = editor.getHTML()
+    onUpdate: () => {
       hook.slash.update()
       syncToolbar()
-      // Debounced phx-change so the live preview reflects rich-text edits.
+      // Debounced push so the live preview reflects rich-text edits.
       clearTimeout(hook._debounce)
-      hook._debounce = setTimeout(() => {
-        input.dispatchEvent(new Event("input", {bubbles: true}))
-      }, 300)
+      hook._debounce = setTimeout(pushBody, 300)
     },
     onSelectionUpdate: () => {
       hook.slash.update()
@@ -449,7 +461,6 @@ function buildEditor(hook, extensions, content = null) {
   })
   hook.editor = editor
   hook.slash = new SlashMenu(editor)
-  input.value = editor.getHTML()
 
   hook.toolbarButtons = TOOLBAR.map(item => {
     const b = toolbarButton(editor, item)

@@ -46,7 +46,24 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_typed(_other), do: %Custom{_type: "custom", data: %{}}
 
   defp one_from_typed_or_legacy(map) do
+    map = normalize_rich_text_map(map)
     if typed_map?(map), do: struct_from_typed_map(map), else: one_from_legacy(map)
+  end
+
+  # The editor's form carries `body` as a JSON string of the live TipTap doc;
+  # normalize it here too (not only in the cast) so the in-editor preview —
+  # which routes unsaved form values through `to_typed/1` — renders the prose
+  # being typed rather than falling back to an empty legacy_html.
+  defp normalize_rich_text_map(%{} = map) do
+    if (map["_type"] || map[:_type]) in ["rich_text", :rich_text] do
+      cond do
+        Map.has_key?(map, "body") -> Map.update!(map, "body", &normalize_body/1)
+        Map.has_key?(map, :body) -> Map.update!(map, :body, &normalize_body/1)
+        true -> map
+      end
+    else
+      map
+    end
   end
 
   # ── BlockUnion cast normalization (legacy/stored-shape tolerance) ──────────
@@ -122,9 +139,22 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp stringify(_), do: %{}
 
   defp sanitize_attrs(%{"_type" => "rich_text"} = m) do
-    m
-    |> Map.update("legacy_html", nil, &HTMLSanitizer.sanitize_rich_text/1)
-    |> Map.update("body", nil, &KilnCMS.Blocks.PortableText.sanitize_body/1)
+    m = Map.update(m, "body", nil, &normalize_body/1)
+
+    case m["body"] do
+      [_ | _] ->
+        # Portable Text is authoritative once present: the editor writes body
+        # (TipTap JSON, converted above), so a stale legacy_html copy must not
+        # shadow it in render fallbacks or linger as a second source of truth.
+        m
+        |> Map.put("legacy_html", nil)
+        |> Map.update("body", nil, &KilnCMS.Blocks.PortableText.sanitize_body/1)
+
+      _ ->
+        m
+        |> Map.update("legacy_html", nil, &HTMLSanitizer.sanitize_rich_text/1)
+        |> Map.update("body", nil, &KilnCMS.Blocks.PortableText.sanitize_body/1)
+    end
   end
 
   defp sanitize_attrs(%{"_type" => "image"} = m),
@@ -138,6 +168,21 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp sanitize_attrs(%{"_type" => "columns"} = m), do: sanitize_columns_block(m, 1)
 
   defp sanitize_attrs(m), do: m
+
+  # The editor's hidden input posts body as a JSON string of the live TipTap
+  # document; the API/imports post decoded Portable Text. Normalize all input
+  # shapes to a PT list: JSON strings are decoded, a TipTap doc is converted
+  # (PortableText.from_tiptap/1), a PT list passes through.
+  defp normalize_body(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} -> normalize_body(decoded)
+      _ -> []
+    end
+  end
+
+  defp normalize_body(%{"type" => "doc"} = doc), do: KilnCMS.Blocks.PortableText.from_tiptap(doc)
+  defp normalize_body(body) when is_list(body), do: body
+  defp normalize_body(_), do: []
 
   defp sanitize_columns_block(m, depth) do
     Map.update(m, "columns", [], fn cols ->
