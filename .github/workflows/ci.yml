@@ -296,8 +296,81 @@ jobs:
       - name: Check for migration/snapshot drift (strict build)
         # Snapshots are generated from the strict build — the canonical prod
         # schema (org-composite FKs) — so the drift check lives here (#419).
+        # NOTE: this leg sees only the CORE. The overlay_drift job below
+        # re-runs the same check with each project overlay activated.
         run: mix ash.codegen --check
 
       - name: Run the strict smoke suite
         # test_helper includes only :strict_tenancy-tagged tests on this leg.
         run: mix test
+
+  # Overlay drift check (#504): the core drift check above can't see project
+  # overlays, so a core migration touching a `KilnCMS.CMS.Content`-macro
+  # attribute passes CI while every overlay table misses the new column and
+  # the deployed overlay 500s with undefined_column on all its content types.
+  # This bit prod twice: #452 → fixed by #459 (seo_keywords) and #488 → fixed
+  # by #504 (path_alias), each taking down api.verscienta.com's content API.
+  # Activate the overlay exactly the way the Dockerfile does (project.exs +
+  # priv merge), then require codegen to be clean.
+  overlay_drift:
+    name: Overlay drift (acupuncture)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Same strict compile as the strict_tenancy job — snapshots diff against
+      # the canonical prod schema. Own build root: the overlay's project.exs is
+      # compile-time config, so sharing a build dir with the core jobs would
+      # poison their caches.
+      KILN_STRICT_TEST: "1"
+      MIX_BUILD_ROOT: _build_overlay
+      MIX_TEST_PARTITION: overlay
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Cache deps and overlay build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build_overlay
+          key: overlay-v1-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Activate the acupuncture overlay
+        # Mirrors the Dockerfile's PROJECT=acupuncture activation: the
+        # subproject's project.exs becomes config/project.exs (compile-time
+        # domain registration) and its priv/ (migrations, snapshots) merges
+        # into the core priv/ so codegen sees the overlay schema.
+        run: |
+          cp projects/acupuncture/project.exs config/project.exs
+          cp -R projects/acupuncture/priv/. priv/
+
+      - name: Check for migration/snapshot drift (overlay build)
+        run: mix ash.codegen --check
