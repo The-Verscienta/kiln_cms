@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.SitemapController do
             # Only the three fields the XML uses — at the 50k ceiling, full
             # rows (blocks + embeddings) would be a large memory spike per
             # rebuild.
-            query: [select: [:slug, :locale, :updated_at], limit: remaining]
+            query: [select: [:slug, :path_alias, :locale, :updated_at], limit: remaining]
           )
           |> page_entries(ContentTypes.public_prefix(ct))
 
@@ -81,11 +81,17 @@ defmodule KilnCMSWeb.SitemapController do
   defp page_entries(records, prefix) do
     Enum.map(records, fn record ->
       %{
-        loc: "#{base_url()}#{locale_prefix(record.locale)}#{prefix}/#{record.slug}",
+        loc: "#{base_url()}#{locale_prefix(record.locale)}#{public_path(record, prefix)}",
         lastmod: DateTime.to_iso8601(record.updated_at)
       }
     end)
   end
+
+  # A record's canonical path: its multi-segment alias (#485) when set.
+  defp public_path(%{path_alias: alias_path}, _prefix) when is_binary(alias_path),
+    do: alias_path
+
+  defp public_path(record, prefix), do: "#{prefix}/#{record.slug}"
 
   # Non-default locales are served under a `/<locale>` URL prefix.
   defp locale_prefix(locale) do

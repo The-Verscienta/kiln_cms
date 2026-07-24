@@ -24,6 +24,64 @@ defmodule KilnCMS.CMS.Slugs do
   @spec public_path(ContentTypes.t(), String.t() | nil) :: String.t()
   def public_path(ct, slug), do: ContentTypes.public_prefix(ct) <> "/" <> to_string(slug || "")
 
+  @doc """
+  A record's **canonical** public path: its multi-segment `path_alias` (#485)
+  when set, else the flat type prefix + slug.
+  """
+  @spec public_path_for(ContentTypes.t(), struct()) :: String.t()
+  def public_path_for(ct, record),
+    do: Map.get(record, :path_alias) || public_path(ct, record.slug)
+
+  # The storage tables aliases live on: every compiled content resource plus
+  # the shared dynamic entry tier.
+  defp alias_resources do
+    Enum.uniq(Enum.map(ContentTypes.all(), & &1.resource) ++ [KilnCMS.CMS.Entry])
+  end
+
+  @doc "Whether another record (any type/state) already holds `alias_path` in `locale`."
+  @spec alias_taken?(String.t(), String.t() | nil, term(), Ash.UUID.t() | nil) :: boolean()
+  def alias_taken?(alias_path, locale, tenant, exclude_id) do
+    Enum.any?(alias_resources(), fn resource ->
+      resource
+      |> Ash.Query.select([:id])
+      |> Ash.Query.filter(path_alias == ^alias_path)
+      |> maybe_filter(:locale, locale)
+      |> exclude_record(exclude_id)
+      |> Ash.Query.limit(1)
+      |> Ash.read!(authorize?: false, tenant: tenant)
+      |> Kernel.!=([])
+    end)
+  end
+
+  @doc """
+  The published, public record canonically served at `alias_path` (#485), as
+  `{descriptor, record}` — the delivery fallback's alias lookup. Mirrors the
+  `:public_by_slug` boundary (`state == :published and audience == :public`).
+  """
+  @spec find_published_by_alias(String.t(), String.t(), Ash.UUID.t()) ::
+          {ContentTypes.t(), struct()} | nil
+  def find_published_by_alias(alias_path, locale, org_id) do
+    Enum.find_value(alias_resources(), fn resource ->
+      record =
+        resource
+        |> Ash.Query.filter(
+          path_alias == ^alias_path and locale == ^locale and state == :published and
+            audience == :public
+        )
+        |> Ash.Query.load([:author, :category])
+        |> Ash.Query.limit(1)
+        |> Ash.read!(authorize?: false, tenant: org_id)
+        |> List.first()
+
+      with %{} = record <- record,
+           ct when not is_nil(ct) <- descriptor_for_record(record) do
+        {ct, record}
+      else
+        _ -> nil
+      end
+    end)
+  end
+
   # The default derivation as a pattern: the focus keyphrase, which itself
   # falls back to the title (see Pattern.token_value/2).
   @default_pattern "[focus-keyphrase]"

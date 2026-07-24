@@ -1,9 +1,10 @@
 defmodule KilnCMS.CMS.Changes.RecordSlugRedirect do
   @moduledoc """
-  When a **published** record's slug changes, records a 301 redirect from the
-  vacated public path to the record (in the same transaction as the rename),
-  so inbound links and SEO equity survive URL changes. Draft renames record
-  nothing — their URLs were never public.
+  When a **published** record's canonical public path changes — a slug rename,
+  or a `path_alias` (#485) added, changed, or removed — records a 301 redirect
+  from the vacated path to the record (in the same transaction), so inbound
+  links and SEO equity survive URL changes. Draft changes record nothing —
+  their URLs were never public.
 
   Also drops any stale redirect occupying the record's *new* path: real
   content always wins over a redirect in delivery, but the row would
@@ -16,12 +17,9 @@ defmodule KilnCMS.CMS.Changes.RecordSlugRedirect do
 
   @impl true
   def change(changeset, _opts, _context) do
-    old_slug = changeset.data.slug
-
-    if changeset.data.state == :published and is_binary(old_slug) and old_slug != "" and
-         Ash.Changeset.changing_attribute?(changeset, :slug) do
+    if changeset.data.state == :published and path_changing?(changeset) do
       Ash.Changeset.after_action(changeset, fn _changeset, record ->
-        record_redirect(old_slug, record)
+        record_redirect(changeset.data, record)
         {:ok, record}
       end)
     else
@@ -29,10 +27,16 @@ defmodule KilnCMS.CMS.Changes.RecordSlugRedirect do
     end
   end
 
-  defp record_redirect(old_slug, record) do
+  defp path_changing?(changeset) do
+    is_binary(changeset.data.slug) and changeset.data.slug != "" and
+      (Ash.Changeset.changing_attribute?(changeset, :slug) or
+         Ash.Changeset.changing_attribute?(changeset, :path_alias))
+  end
+
+  defp record_redirect(data, record) do
     with ct when not is_nil(ct) <- Slugs.descriptor_for_record(record) do
-      old_path = Slugs.public_path(ct, old_slug)
-      new_path = Slugs.public_path(ct, record.slug)
+      old_path = Slugs.public_path_for(ct, data)
+      new_path = Slugs.public_path_for(ct, record)
       opts = [authorize?: false, tenant: Map.get(record, :org_id)]
 
       if old_path != new_path do

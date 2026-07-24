@@ -28,23 +28,20 @@ defmodule KilnCMS.CMS.Redirects do
              query: [filter: [path: path, locale: locale], limit: 1]
            ),
          ct when not is_nil(ct) <- ContentTypes.get(redirect.target_type, org_id),
-         slug when is_binary(slug) <- published_slug(ct, redirect.target_id, org_id),
-         to when to != path <- Slugs.public_path(ct, slug) do
-      %{to: to, type: to_string(ct.type), slug: slug, id: redirect.target_id}
+         %{} = target <- published_target(ct, redirect.target_id, org_id),
+         to when to != path <- Slugs.public_path_for(ct, target) do
+      %{to: to, type: to_string(ct.type), slug: target.slug, id: redirect.target_id}
     else
       _ -> nil
     end
   end
 
-  # The target's current slug, only while it is still published.
-  defp published_slug(ct, target_id, org_id) do
+  # The target's current URL fields, only while it is still published. The
+  # destination is its canonical path — a `path_alias` (#485) when set.
+  defp published_target(ct, target_id, org_id) do
     Slugs.storage_resource(ct)
     |> Ash.Query.filter(id == ^target_id and state == :published)
-    |> Ash.Query.select([:slug])
+    |> Ash.Query.select([:slug, :path_alias])
     |> Ash.read_one!(authorize?: false, tenant: org_id)
-    |> case do
-      nil -> nil
-      record -> record.slug
-    end
   end
 end

@@ -134,7 +134,7 @@ defmodule KilnCMS.CMS.Content do
     sweep_scheduler = Module.concat([resource, Schedulers, SweepUntitled])
 
     accept =
-      [:title, :slug] ++
+      [:title, :slug, :path_alias] ++
         if(excerpt?, do: [:excerpt], else: []) ++
         if(dynamic?, do: [:type_definition_id], else: []) ++
         [
@@ -1030,6 +1030,13 @@ defmodule KilnCMS.CMS.Content do
         # `add_locale_weighted_search` migration alongside the trigger, since the
         # column isn't an Ash-managed attribute.
         custom_indexes do
+          # Delivery lookup for multi-segment path aliases (#485) — hit on the
+          # URL-miss fallback, so it must seek. Partial: most rows have none.
+          index [:path_alias],
+            name: unquote("#{table}_path_alias_index"),
+            where: "path_alias IS NOT NULL",
+            all_tenants?: true
+
           # HNSW index for approximate nearest-neighbour search over embeddings,
           # using cosine distance (`<=>`). The `embedding vector_cosine_ops`
           # column string carries the opclass through to the generated DDL.
@@ -1130,6 +1137,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           validate KilnCMS.CMS.Validations.SlugAvailable
+          validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
@@ -1172,6 +1180,7 @@ defmodule KilnCMS.CMS.Content do
           # stale. `only_when: :published` keeps draft edits/autosaves silent.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
           validate KilnCMS.CMS.Validations.SlugAvailable
+          validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
@@ -1201,6 +1210,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
           validate KilnCMS.CMS.Validations.SlugAvailable
+          validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
         end
@@ -1493,6 +1503,12 @@ defmodule KilnCMS.CMS.Content do
         # Comma-separated keyphrases; the first is the focus keyphrase and
         # drives slug auto-derivation (Yoast-style: slug = focus keyphrase).
         attribute :seo_keywords, :string, public?: true
+
+        # Optional multi-segment path alias (#485): when set, the record's
+        # canonical public URL (`/acupuncture/needle/size/14mm`) — the flat
+        # `/<prefix>/<slug>` URL 301s to it. The slug stays the single-segment
+        # internal handle. Validated by `Validations.PathAliasValid`.
+        attribute :path_alias, :string, public?: true
         # og:image URL and rel=canonical for SEO/social.
         attribute :seo_image, :string, public?: true
         attribute :canonical_url, :string, public?: true

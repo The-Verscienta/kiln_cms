@@ -110,6 +110,10 @@ defmodule KilnCMSWeb.StructuredData do
   defp url(%{canonical_url: canonical}, _ct) when is_binary(canonical) and canonical != "",
     do: canonical
 
+  # A path alias (#485) is the record's canonical path when set.
+  defp url(%{path_alias: alias_path} = record, _ct) when is_binary(alias_path),
+    do: "#{base_url()}#{locale_prefix(record)}#{alias_path}"
+
   defp url(record, ct),
     do: "#{base_url()}#{locale_prefix(record)}#{ContentTypes.public_prefix(ct)}/#{record.slug}"
 
