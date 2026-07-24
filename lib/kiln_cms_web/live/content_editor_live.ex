@@ -227,30 +227,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     if record.state != :draft do
       true
     else
-      slug = record.slug || ""
-
       derived =
         KilnCMS.CMS.Slugs.derive_base(
           socket.assigns.content_type.slug_pattern,
           slug_context(socket)
         )
 
-      not (Regex.match?(~r/\Auntitled-\d+\z/, slug) or slug == derived or
-             dedupe_variant?(slug, derived))
-    end
-  end
-
-  # A dedupe suffix (`guide-kiln-2`) still counts as underived, so the slug
-  # keeps tracking its sources across autosaves. `ensure_unique` never mints
-  # `-1`, so a `-1` suffix (or any non-matching base) means the author chose
-  # it; `base-N` with N >= 2 stays ambiguous by construction and we side with
-  # tracking.
-  defp dedupe_variant?(_slug, ""), do: false
-
-  defp dedupe_variant?(slug, derived) do
-    case Regex.run(~r/\A#{Regex.escape(derived)}-(\d+)\z/, slug, capture: :all_but_first) do
-      [n] -> String.to_integer(n) >= 2
-      _ -> false
+      not KilnCMS.CMS.Slugs.underived?(record.slug, derived)
     end
   end
 
@@ -344,18 +327,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp slug_scope(socket) do
-    ct = socket.assigns.content_type
-    record = socket.assigns.record
-
-    [
-      resource: KilnCMS.CMS.Slugs.storage_resource(ct),
-      root?: is_nil(ct.path_segment),
-      type_definition_id: ct.definition && ct.definition.id,
-      locale: record.locale,
-      org_id: Map.get(record, :org_id),
-      tenant: socket.assigns.current_org,
-      exclude_id: record.id
-    ]
+    KilnCMS.CMS.Slugs.unique_scope(
+      socket.assigns.content_type,
+      socket.assigns.record,
+      socket.assigns.current_org
+    )
   end
 
   # The full public path previewed under the slug field, live from the form.

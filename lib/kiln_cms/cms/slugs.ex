@@ -93,6 +93,62 @@ defmodule KilnCMS.CMS.Slugs do
   end
 
   @doc """
+  Pattern-expansion context (`Pattern.context/0`) from a **stored** record
+  (category loaded or absent). The date anchor is the same chain everywhere:
+  publish date, else scheduled date, else the record's creation date.
+  """
+  @spec record_context(struct()) :: KilnCMS.Slug.Pattern.context()
+  def record_context(record) do
+    %{
+      title: record.title,
+      seo_keywords: Map.get(record, :seo_keywords),
+      category_slug: record_category_slug(record),
+      date: record.published_at || record.scheduled_at || Map.get(record, :inserted_at)
+    }
+  end
+
+  defp record_category_slug(%{category: %{slug: slug}}), do: slug
+  defp record_category_slug(_record), do: nil
+
+  @doc """
+  Whether `slug` is still auto-derived relative to `derived` (the current
+  `derive_base/2` output): the `untitled-<n>` scaffold, an exact match, or a
+  dedupe variant. `ensure_unique/2` never mints `-1`, so a `-1` suffix (or any
+  non-matching base) means the author chose the slug; `base-N` with N >= 2
+  stays ambiguous by construction and we side with "still derived".
+  """
+  @spec underived?(String.t() | nil, String.t()) :: boolean()
+  def underived?(slug, derived) do
+    slug = slug || ""
+
+    Regex.match?(~r/\Auntitled-\d+\z/, slug) or (derived != "" and slug == derived) or
+      dedupe_variant?(slug, derived)
+  end
+
+  defp dedupe_variant?(_slug, ""), do: false
+
+  defp dedupe_variant?(slug, derived) do
+    case Regex.run(~r/\A#{Regex.escape(derived)}-(\d+)\z/, slug, capture: :all_but_first) do
+      [n] -> String.to_integer(n) >= 2
+      _ -> false
+    end
+  end
+
+  @doc "`ensure_unique/2` options for a stored record of type `ct`."
+  @spec unique_scope(ContentTypes.t(), struct(), term()) :: keyword()
+  def unique_scope(ct, record, tenant) do
+    [
+      resource: storage_resource(ct),
+      root?: is_nil(ct.path_segment),
+      type_definition_id: ct.definition && ct.definition.id,
+      locale: record.locale,
+      org_id: Map.get(record, :org_id),
+      tenant: tenant,
+      exclude_id: record.id
+    ]
+  end
+
+  @doc """
   First URL segments a **root-served** slug may not use: segments the router
   owns plus every content type's public prefix (compiled + the org's dynamic
   types) — a root `/<slug>` equal to any of these is unreachable.
@@ -136,9 +192,26 @@ defmodule KilnCMS.CMS.Slugs do
   end
 
   # Every existing slug that could collide with `base` or its numbered
-  # variants, in one indexed read (rather than an exists?-query per candidate).
+  # variants, in one indexed read per tier (rather than an exists?-query per
+  # candidate). Trashed rows count as taken too: the `unique_slug` index spans
+  # them, so a slug held by a soft-deleted record would fail the write even
+  # though the default read can't see it.
   defp existing_variants(base, opts) do
-    Keyword.fetch!(opts, :resource)
+    resource = Keyword.fetch!(opts, :resource)
+
+    live = read_variants(Ash.Query.new(resource), base, opts)
+
+    trashed =
+      case Ash.Resource.Info.action(resource, :trashed) do
+        nil -> []
+        _action -> read_variants(Ash.Query.for_read(resource, :trashed), base, opts)
+      end
+
+    live ++ trashed
+  end
+
+  defp read_variants(query, base, opts) do
+    query
     |> Ash.Query.select([:slug])
     |> Ash.Query.filter(like(slug, ^(base <> "%")))
     |> maybe_filter(:locale, opts[:locale])
