@@ -14,9 +14,10 @@ Priority reflects value × cheapness-to-build. P1 = strongest / cheapest wins.
 
 ## 1. Publishing + newsletters + memberships (the "Ghost play") — [#337](https://github.com/The-Verscienta/kiln_cms/issues/337) `P1`
 
-- [ ] Subscriber segments (reuse the `audiences` read-axis)
-- [ ] "Send this post as a newsletter to segment X" via the built-in MTA
-- [ ] Optional paid-membership gating on content
+- [x] Subscriber segments (reuse the `audiences` read-axis) — shipped in #358
+- [x] "Send this post as a newsletter to segment X" via the built-in MTA —
+      shipped in #358; auto-send-on-publish via automation rules in #376
+- [ ] Optional paid-membership gating on content — Phase 2, specced in #337
 
 **The asymmetry:** Kiln already ships a **DKIM-signing, direct-to-MX MTA** — no
 other headless CMS has native outbound email. Content → audience → inbox in one
@@ -24,8 +25,11 @@ system. This is the single most differentiated product move available.
 
 ## 2. Point-in-time / "time-travel" content API — [#338](https://github.com/The-Verscienta/kiln_cms/issues/338) `P1`
 
-- [ ] Expose "content/site as it was on date/version X" over the read API
-- [ ] Leverage AshPaperTrail history + immutable fired artifacts
+- [x] Expose "content/site as it was on date/version X" over the read API —
+      Phase 1 shipped in #364 (`?as_of=<date>`); later phases in
+      [point-in-time.md](point-in-time.md)
+- [x] Leverage AshPaperTrail history + immutable fired artifacts — the #364
+      implementation replays the last publish ≤ date and re-fires in `:preview`
 
 **The asymmetry:** Full version history *and* immutable artifacts + a dependency
 graph already exist. For regulated/health content (Verscienta), "what did our
@@ -34,9 +38,11 @@ render live from a mutable DB and can't do this without heavy custom work.
 
 ## 3. RAG "ask your content" endpoint + AI content intelligence — [#339](https://github.com/The-Verscienta/kiln_cms/issues/339) `P1`
 
-- [ ] `/api/ask` — RAG over *published* content, policy-scoped (never leaks drafts)
-- [ ] Auto "related content", near-duplicate detection, AI auto-tagging
-- [ ] Content-gap analysis ("users search for X; you have nothing about it")
+- [x] `/api/ask` — RAG over *published* content, policy-scoped (never leaks
+      drafts) — Phase 1 shipped in #361: retrieval + cited sources, with a
+      config-gated generation seam ([rag.md](rag.md))
+- [ ] Auto "related content", near-duplicate detection, AI auto-tagging — Phase 2
+- [ ] Content-gap analysis ("users search for X; you have nothing about it") — Phase 2
 
 **The asymmetry:** Block-level embeddings (pgvector + Bumblebee) and ash_ai are
 already in-house. Exposing them is almost free. Most CMSs bolt this on via
@@ -44,8 +50,9 @@ Algolia/OpenAI.
 
 ## 4. Cryptographically signed / provenance-verified content — [#340](https://github.com/The-Verscienta/kiln_cms/issues/340) `P2`
 
-- [ ] Sign published artifacts (C2PA-style) using existing signing infra
-- [ ] Consumer-verifiable "came from us, unaltered, at version N"
+- [x] Sign published artifacts (C2PA-style) using existing signing infra —
+      shipped in #368 ([provenance.md](provenance.md))
+- [x] Consumer-verifiable "came from us, unaltered, at version N" — shipped in #368
 
 **The asymmetry:** Artifact immutability *and* a DKIM signing key already exist.
 In the AI-slop era and for medical/regulated content, verifiable provenance is
@@ -53,8 +60,9 @@ genuinely novel — no CMS ships it natively.
 
 ## 5. "Stays up when the database doesn't" delivery — [#341](https://github.com/The-Verscienta/kiln_cms/issues/341) `P2`
 
-- [ ] Serve valid cached artifacts through a Postgres outage
-- [ ] Make it an explicit, tested reliability guarantee
+- [x] Serve valid cached artifacts through a Postgres outage — shipped in #370
+      ([resilient-delivery.md](resilient-delivery.md))
+- [x] Make it an explicit, tested reliability guarantee — shipped in #370
 
 **The asymmetry:** Delivery already reads *immutable cached artifacts*, not the
 live tree, and BEAM supervision isolates failures. A reliability story Node/PHP
@@ -62,16 +70,19 @@ CMSs structurally cannot match.
 
 ## 6. Oban-backed editorial automation (a Directus Flows answer) — [#342](https://github.com/The-Verscienta/kiln_cms/issues/342) `P2`
 
-- [ ] No-code "when X happens, do Y" builder
-- [ ] e.g. on `in_review` → notify Slack; on `published` → fire newsletter + re-index
+- [x] No-code "when X happens, do Y" builder — shipped in #371
+      (`/editor/automation`, [automation.md](automation.md))
+- [x] e.g. on `in_review` → notify Slack; on `published` → fire newsletter +
+      re-index — newsletter auto-send is an automation rule as of #376
 
 **The asymmetry:** Oban + state machine + webhooks + PubSub + MTA already run in
 production. Answers Directus Flows without embedding a new JS automation runtime.
 
 ## 7. Multiplayer live preview with presence — [#343](https://github.com/The-Verscienta/kiln_cms/issues/343) `P2`
 
-- [ ] Shared live-preview sessions (editor + stakeholder, same preview)
-- [ ] Cursors / presence via Phoenix.Presence
+- [x] Shared live-preview sessions (editor + stakeholder, same preview) —
+      shipped in #372 ([multiplayer-preview.md](multiplayer-preview.md))
+- [x] Cursors / presence via Phoenix.Presence — shipped in #372
 
 **The asymmetry:** CRDT collab exists; Phoenix.Presence makes shared preview
 near-trivial. Even Sanity charges enterprise money for real-time collaboration
@@ -79,10 +90,13 @@ features.
 
 ## 8. Compliance & governance dashboard — [#352](https://github.com/The-Verscienta/kiln_cms/issues/352) `P1`
 
-- [ ] Editorial audit trail view (who created/edited/approved, when)
-- [ ] Side-by-side version diffs per content item
-- [ ] Provenance reports (ties into #4 / #340) and point-in-time export (ties into #2 / #338)
-- [ ] Exportable trails (CSV/PDF/JSON) for review/regulatory scrutiny
+- [x] Editorial audit trail view (who created/edited/approved, when)
+- [x] Side-by-side version diffs per content item
+- [x] Provenance reports (ties into #4 / #340) and point-in-time export (ties into #2 / #338)
+- [x] Exportable trails (CSV/PDF/JSON) for review/regulatory scrutiny
+
+All four shipped — #352 closed with the final phase in #427
+([governance-dashboard.md](governance-dashboard.md)).
 
 **The asymmetry:** AshPaperTrail history, the `history/` audit trail, and
 self-service export already exist — this *packages* them into one governance
@@ -95,9 +109,11 @@ to FTC health-claim scrutiny and medical-review workflows.
 
 ## 9. First-class static / edge export of fired artifacts — [#353](https://github.com/The-Verscienta/kiln_cms/issues/353) `P2`
 
-- [ ] Export immutable `:web`/`:json`/`:json_ld` artifacts to a static host / CDN
-- [ ] Support air-gapped / edge-cached deploys from the artifact store
-- [ ] Live CMS stays authoritative; static export is an *output surface*, not a fork
+- [x] Export immutable `:web`/`:json`/`:json_ld` artifacts to a static host /
+      CDN — shipped in #369
+- [x] Support air-gapped / edge-cached deploys from the artifact store — shipped in #369
+- [x] Live CMS stays authoritative; static export is an *output surface*, not a
+      fork — shipped in #369
 
 **The asymmetry:** The firing engine already produces immutable pre-rendered
 artifacts with precise dependency-graph invalidation — that *is* static
@@ -175,10 +191,13 @@ authorization record with a tamper-evident trail. Pairs with #2, #4, #8.
 
 Structure content so LLMs / answer engines cite it accurately.
 
-- [ ] `:llm` fired artifact surface (clean, chunked, extractable markdown)
-- [ ] `llms.txt` generation from the firing engine
-- [ ] Expanded schema.org/JSON-LD (`Article`, `FAQPage`, `HowTo`, `MedicalWebPage`, `ClaimReview`)
-- [ ] Citation/source metadata on claims (ties into #4 provenance)
+- [x] `:llm` fired artifact surface (clean, chunked, extractable markdown)
+- [x] `llms.txt` generation from the firing engine
+- [x] Expanded schema.org/JSON-LD (`Article`, `FAQPage`, `HowTo`, `MedicalWebPage`, `ClaimReview`)
+- [x] Citation/source metadata on claims (ties into #4 provenance)
+
+All four shipped — #357 closed with the schema expansion in #422
+([geo.md](geo.md)).
 
 **Honest caveat:** GEO is unsettled — this maximizes *citability* (structure,
 schema, clean surfaces, provenance); it does not guarantee an LLM cites you.
@@ -196,7 +215,12 @@ are cheap here and hard for live-render CMSs.
 
 ---
 
-**Sequencing take:** #3 and #6 are the cheapest (mostly expose what exists).
-#1 and #2 are the biggest strategic differentiators (especially for
-health/regulated content). #4 and #5 are the best "put it on the box"
-trust/reliability stories.
+**Sequencing take (updated):** most of this list has shipped; what remains is
+the tail. Paid memberships (#337 Phase 2, specced in the issue) is the
+strategic priority — it completes the Ghost play, the one differentiator with a
+direct revenue story. #356 (tamper-evident audit + consent linking) is next for
+the health/regulated positioning, building on the shipped governance dashboard
+(#352) and provenance signing (#340). The RAG Phase 2 items (#339:
+related-content, auto-tagging, gap analysis) and later point-in-time phases
+(#338) are cheap incremental wins on already-shipped foundations, in no
+particular hurry.
