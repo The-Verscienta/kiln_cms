@@ -44,6 +44,7 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:refresh_timer, nil)
      |> assign(:media, [])
      |> assign(:more?, false)
+     |> assign(:total, 0)
      |> assign(:unsplash_enabled?, Unsplash.enabled?())
      |> assign(:unsplash_query, "")
      |> assign(:unsplash_photos, [])
@@ -536,7 +537,11 @@ defmodule KilnCMSWeb.MediaLive do
   # First page under the current filter.
   defp load_media(socket) do
     {items, more?} = fetch_media(socket, nil, @page_size)
-    socket |> assign(:media, items) |> assign(:more?, more?)
+
+    socket
+    |> assign(:media, items)
+    |> assign(:more?, more?)
+    |> assign(:total, count_media(socket))
   end
 
   # Refresh the loaded items in place (after uploads, deletes, metadata edits,
@@ -544,7 +549,29 @@ defmodule KilnCMSWeb.MediaLive do
   defp reload_media(socket) do
     depth = max(@page_size, length(socket.assigns.media))
     {items, more?} = fetch_media(socket, nil, depth)
-    socket |> assign(:media, items) |> assign(:more?, more?)
+
+    socket
+    |> assign(:media, items)
+    |> assign(:more?, more?)
+    |> assign(:total, count_media(socket))
+  end
+
+  # Total items under the current filter, so the heading can say
+  # "Library (60 of 679)" rather than passing the loaded page off as the
+  # whole library.
+  defp count_media(socket) do
+    query =
+      case socket.assigns.query do
+        q when q in [nil, ""] -> []
+        q -> [filter: search_filter(q)]
+      end
+
+    CMS.list_media_items!(
+      actor: socket.assigns.actor,
+      tenant: socket.assigns.current_org,
+      query: query,
+      page: [limit: 1, count: true]
+    ).count
   end
 
   defp fetch_media(socket, cursor, limit) do
@@ -776,7 +803,13 @@ defmodule KilnCMSWeb.MediaLive do
         <div :if={@view == :library}>
           <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <h2 class="text-lg font-medium">
-              {gettext("Library (%{count})", count: length(@media))}
+              {if length(@media) < @total,
+                do:
+                  gettext("Library (%{count} of %{total})",
+                    count: length(@media),
+                    total: @total
+                  ),
+                else: gettext("Library (%{count})", count: length(@media))}
             </h2>
             <form
               :if={@media != [] or @filtering?}
