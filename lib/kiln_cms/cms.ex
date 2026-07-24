@@ -248,6 +248,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.Redirect do
       define :create_redirect, action: :create
       define :list_redirects, action: :read
+      define :get_redirect, action: :read, get_by: [:id]
       define :destroy_redirect, action: :destroy
     end
 

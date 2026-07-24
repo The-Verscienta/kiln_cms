@@ -56,10 +56,10 @@ defmodule KilnCMS.CMS.Redirect do
       authorize_if always()
     end
 
-    # Writes stay internal: the slug-change hook runs system-side
-    # (`authorize?: false`); only admins may prune rows.
+    # Writes are admin-only (per-org tier, like webhook config); the
+    # slug-change hook itself runs system-side (`authorize?: false`).
     policy action_type([:create, :update, :destroy]) do
-      authorize_if actor_attribute_equals(:role, :admin)
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end
 
