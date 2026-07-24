@@ -129,8 +129,13 @@ elements, where there's no text to encode), annotate elements yourself from the
   is documented in `KilnCMS.VisualEditing.Stega`; `bridge.js` has a matching JS
   decoder (verified cross-language).
 - **Annotated read:** `GET /api/visual-editing/:type/:slug` → the `:json`
-  artifact shape (`{id, type, title, slug, blocks}`) with editable strings
-  stega-encoded. `no-store`; draft visibility follows the caller's actor.
+  artifact shape plus the working copy's custom fields
+  (`{id, type, title, slug, blocks, custom_fields}`) with editable strings
+  stega-encoded. Plain-string custom-field values are encoded block-less
+  (`{type, id, slug, field}`); values consumers parse — JSON-encoded structures,
+  URLs — and non-strings are left untouched. `no-store`; draft visibility
+  follows the caller's actor. (The public fired artifact still omits
+  `custom_fields`.)
 - **Live push:** `WS /ws/bridge?type=&id=&api_key=` → JSON frames
   `{event: "update", type, id, title, excerpt}`. Connect refuses if the actor
   can't read the document.
@@ -141,6 +146,11 @@ elements, where there's no text to encode), annotate elements yourself from the
   or a core field (`title`, `slug`, `excerpt`, `seo_title`, …). Unknown fields
   are ignored. Useful when a front end's content lives in custom fields rather
   than blocks, where the in-context editor has nothing to show.
+- **Bridge click routing:** a payload with `block` opens the in-context editor
+  (`/editor/site/:type/:slug?focus=<block_id>`); a block-less payload other than
+  `title` opens the structured editor field-focused
+  (`/editor/content/:type/:id?focus=<field>`). `title` stays on the in-context
+  editor, which edits it inline natively.
 - **postMessage:** when `bridge.js` runs inside a parent frame, a click posts
   `{source: "kiln-bridge", event: "edit", payload, url}` to `window.parent`
   instead of opening a tab — the hook a future Kiln "Presentation" console (a
@@ -208,6 +218,9 @@ fields (SEO, custom fields) offer an "Open the full editor" link.
 
 - **Console scalar editing** is `title` only; `excerpt` works when the front end
   annotates it, and SEO/custom fields route to the full editor (they aren't
-  rendered as clickable body text).
+  rendered as clickable body text). Custom fields are stega-annotated on the
+  preview read, so a click on one lands the structured editor focused on that
+  field — in-place editing of custom fields on the front end itself remains a
+  follow-on.
 - **Rich-text editing granularity** is block-level, not per-span (spans lack
   stable keys); the whole block opens in the editor.
