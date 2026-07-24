@@ -87,6 +87,28 @@ defmodule KilnCMSWeb.MediaLiveTest do
       refute filtered =~ ">logo.svg<"
     end
 
+    # The heading reports the true library size, not just the loaded page —
+    # "Library (60 of 61)" until Load more exhausts it (then "Library (61)").
+    test "the heading shows loaded vs total across pages", %{conn: conn} do
+      for i <- 1..61, do: seed_media("bulk-#{i}.png")
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+      assert html =~ "Library (60 of 61)"
+
+      html = lv |> element(~s(button[phx-click="load_more"])) |> render_click()
+      assert html =~ "Library (61)"
+      refute html =~ "61 of"
+    end
+
+    test "the heading counts filter matches while filtering", %{conn: conn} do
+      seed_media("sunset.png")
+      seed_media("logo.svg")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      filtered = lv |> form("#media-filter", %{q: "sunset"}) |> render_change()
+      assert filtered =~ "Library (1)"
+    end
+
     # #160: the delete button isn't hover-only — visible on touch and on focus.
     test "the delete button is visible without hover", %{conn: conn} do
       seed_media("touchable.png")
