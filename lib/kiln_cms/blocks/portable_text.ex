@@ -252,27 +252,24 @@ defmodule KilnCMS.Blocks.PortableText do
   # Pair each level-N item with the deeper items that follow it (its sublist).
   defp chunk_items(items, level) do
     items
-    |> Enum.chunk_while(
-      nil,
-      fn item, acc ->
-        if (item["level"] || 1) <= level do
-          case acc do
-            nil -> {:cont, {item, []}}
-            {head, nested} -> {:cont, {head, Enum.reverse(nested)}, {item, []}}
-          end
-        else
-          case acc do
-            nil -> {:cont, {item, []}}
-            {head, nested} -> {:cont, {head, [item | nested]}}
-          end
-        end
-      end,
-      fn
-        nil -> {:cont, nil}
-        {head, nested} -> {:cont, {head, Enum.reverse(nested)}, nil}
-      end
-    )
+    |> Enum.chunk_while(nil, &chunk_item_step(&1, &2, level), &chunk_item_after/1)
   end
+
+  # First item (whatever its level) opens a pair; a later item at or above the
+  # chunk level closes the current pair and opens the next; deeper items join
+  # the current pair's sublist.
+  defp chunk_item_step(item, nil, _level), do: {:cont, {item, []}}
+
+  defp chunk_item_step(item, {head, nested}, level) do
+    if (item["level"] || 1) <= level do
+      {:cont, {head, Enum.reverse(nested)}, {item, []}}
+    else
+      {:cont, {head, [item | nested]}}
+    end
+  end
+
+  defp chunk_item_after(nil), do: {:cont, nil}
+  defp chunk_item_after({head, nested}), do: {:cont, {head, Enum.reverse(nested)}, nil}
 
   defp block_to_html(%{"_type" => "hr"}), do: "<hr/>"
 

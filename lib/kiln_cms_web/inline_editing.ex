@@ -75,29 +75,27 @@ defmodule KilnCMSWeb.InlineEditing do
   @doc "Set `field` of the block at `index` in the working set."
   @spec put_block_field([map()], non_neg_integer(), String.t(), term()) :: [map()]
   def put_block_field(block_inputs, index, "body", value) do
-    cond do
-      # Compatibility shim: a pre-round-trip client (stale tab across a deploy)
-      # pushes rich text as an HTML string. Route it to legacy_html rather than
-      # letting the body cast degrade it to [] and drop the edit.
-      is_binary(value) and String.starts_with?(String.trim_leading(value), "<") ->
-        List.update_at(
-          block_inputs,
-          index,
-          &(&1 |> Map.put("legacy_html", value) |> Map.delete("body"))
-        )
+    # Compatibility shim: a pre-round-trip client (stale tab across a deploy)
+    # pushes rich text as an HTML string. Route it to legacy_html rather than
+    # letting the body cast degrade it to [] and drop the edit.
+    if is_binary(value) and String.starts_with?(String.trim_leading(value), "<") do
+      List.update_at(
+        block_inputs,
+        index,
+        &(&1 |> Map.put("legacy_html", value) |> Map.delete("body"))
+      )
+    else
+      # Normalize to Portable Text here: an existing block (id set) goes
+      # through the embedded-resource update cast, where body must already
+      # be the {:array, :map} shape. Clear legacy_html — body is now the
+      # single source of truth for this block.
+      body = KilnCMS.Blocks.PortableText.from_tiptap(value)
 
-      true ->
-        # Normalize to Portable Text here: an existing block (id set) goes
-        # through the embedded-resource update cast, where body must already
-        # be the {:array, :map} shape. Clear legacy_html — body is now the
-        # single source of truth for this block.
-        body = KilnCMS.Blocks.PortableText.from_tiptap(value)
-
-        List.update_at(
-          block_inputs,
-          index,
-          &(&1 |> Map.put("body", body) |> Map.put("legacy_html", nil))
-        )
+      List.update_at(
+        block_inputs,
+        index,
+        &(&1 |> Map.put("body", body) |> Map.put("legacy_html", nil))
+      )
     end
   end
 
