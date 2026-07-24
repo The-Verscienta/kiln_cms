@@ -125,6 +125,83 @@ defmodule KilnCMS.Blocks.PortableTextTest do
     end
   end
 
+  describe "lists, code blocks and rules" do
+    test "bullet and ordered lists round-trip, including nesting" do
+      tiptap = %{
+        "type" => "doc",
+        "content" => [
+          %{"type" => "bulletList", "content" => [
+            %{"type" => "listItem", "content" => [
+              %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "one"}]},
+              %{"type" => "bulletList", "content" => [
+                %{"type" => "listItem", "content" => [
+                  %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "one-a"}]}
+                ]}
+              ]}
+            ]},
+            %{"type" => "listItem", "content" => [
+              %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "two"}]}
+            ]}
+          ]},
+          %{"type" => "orderedList", "content" => [
+            %{"type" => "listItem", "content" => [
+              %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "first"}]}
+            ]}
+          ]}
+        ]
+      }
+
+      pt = PortableText.from_tiptap(tiptap)
+
+      assert [%{"listItem" => "bullet", "level" => 1},
+              %{"listItem" => "bullet", "level" => 2},
+              %{"listItem" => "bullet", "level" => 1},
+              %{"listItem" => "number", "level" => 1}] =
+               Enum.map(pt, &Map.take(&1, ["listItem", "level"]))
+
+      assert PortableText.to_html(pt) ==
+               "<ul><li>one<ul><li>one-a</li></ul></li><li>two</li></ul><ol><li>first</li></ol>"
+    end
+
+    test "a nested list of a different kind stays inside its parent item" do
+      pt = [
+        %{"_type" => "block", "_key" => "a", "style" => "normal", "listItem" => "bullet",
+          "level" => 1, "markDefs" => [],
+          "children" => [%{"_type" => "span", "text" => "b1", "marks" => []}]},
+        %{"_type" => "block", "_key" => "b", "style" => "normal", "listItem" => "number",
+          "level" => 2, "markDefs" => [],
+          "children" => [%{"_type" => "span", "text" => "n1", "marks" => []}]},
+        %{"_type" => "block", "_key" => "c", "style" => "normal", "listItem" => "bullet",
+          "level" => 1, "markDefs" => [],
+          "children" => [%{"_type" => "span", "text" => "b2", "marks" => []}]}
+      ]
+
+      assert PortableText.to_html(pt) == "<ul><li>b1<ol><li>n1</li></ol></li><li>b2</li></ul>"
+    end
+
+    test "code blocks, horizontal rules and hard breaks convert" do
+      tiptap = %{
+        "type" => "doc",
+        "content" => [
+          %{"type" => "codeBlock", "content" => [%{"type" => "text", "text" => "IO.puts(1)"}]},
+          %{"type" => "horizontalRule"},
+          %{"type" => "paragraph", "content" => [
+            %{"type" => "text", "text" => "a"},
+            %{"type" => "hardBreak"},
+            %{"type" => "text", "text" => "b"}
+          ]}
+        ]
+      }
+
+      pt = PortableText.from_tiptap(tiptap)
+      html = PortableText.to_html(pt)
+
+      assert html =~ "<pre><code>IO.puts(1)</code></pre>"
+      assert html =~ "<hr/>"
+      assert html =~ "<p>a\nb</p>"
+    end
+  end
+
   describe "to_plain_text/1" do
     test "flattens prose for search/embeddings" do
       doc =

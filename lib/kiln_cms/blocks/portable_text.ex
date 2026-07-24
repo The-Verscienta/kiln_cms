@@ -11,11 +11,13 @@ defmodule KilnCMS.Blocks.PortableText do
   PT on save; `to_html/1` renders PT for the web surface; `to_plain_text/1` feeds
   search/embeddings.
 
-  ## v1 coverage
-  Block styles: paragraph (`normal`), `h1`–`h6`, `blockquote`. Marks: bold→strong,
-  italic→em, code, strike, underline, and link annotations (via `markDefs`).
-  **Follow-up:** ordered/bullet lists (PT `listItem`/`level`) and embedded typed
-  objects inside prose are not yet converted.
+  ## Coverage
+  Block styles: paragraph (`normal`), `h1`–`h6`, `blockquote`, `code`
+  (TipTap codeBlock). Lists: bullet/ordered, nested (PT `listItem` +
+  `level`). Marks: bold→strong, italic→em, code, strike, underline, and link
+  annotations (via `markDefs`). Hard breaks become `\n` inside a span;
+  horizontal rules become a standalone `%{"_type" => "hr"}` item.
+  **Follow-up:** embedded typed objects inside prose are not converted.
   """
 
   @typedoc "A Portable Text block map (string keys)."
@@ -28,28 +30,80 @@ defmodule KilnCMS.Blocks.PortableText do
   def from_tiptap(json) when is_binary(json), do: json |> Jason.decode!() |> from_tiptap()
 
   def from_tiptap(%{"content" => content}) when is_list(content) do
-    content
-    |> Enum.with_index()
-    |> Enum.map(fn {node, idx} -> block_from_node(node, idx) end)
+    {blocks, _next_key} =
+      Enum.reduce(content, {[], 0}, fn node, {acc, key} ->
+        {emitted, key} = blocks_from_node(node, key)
+        {acc ++ emitted, key}
+      end)
+
+    blocks
   end
 
   # Already Portable Text (idempotent).
   def from_tiptap(list) when is_list(list), do: list
   def from_tiptap(_), do: []
 
-  defp block_from_node(%{"type" => "blockquote"} = node, idx) do
+  # One TipTap node can emit several PT blocks (each list item is its own PT
+  # block), so nodes return {blocks, next_key}.
+  defp blocks_from_node(%{"type" => "blockquote"} = node, key) do
     # Blockquotes wrap paragraphs in TipTap; flatten their inline content.
     inline = node["content"] |> List.wrap() |> Enum.flat_map(&(&1["content"] || []))
     {children, defs} = spans_and_defs(inline)
-    pt_block("blockquote", idx, children, defs)
+    {[pt_block("blockquote", key, children, defs)], key + 1}
   end
 
-  defp block_from_node(%{"type" => type} = node, idx) do
+  defp blocks_from_node(%{"type" => list} = node, key) when list in ["bulletList", "orderedList"],
+    do: list_items(node, list_kind(list), 1, key)
+
+  defp blocks_from_node(%{"type" => "codeBlock"} = node, key) do
     {children, defs} = spans_and_defs(node["content"] || [])
-    pt_block(style_for(type, node), idx, children, defs)
+    {[pt_block("code", key, children, defs)], key + 1}
   end
 
-  defp block_from_node(_other, idx), do: pt_block("normal", idx, [], [])
+  defp blocks_from_node(%{"type" => "horizontalRule"}, key),
+    do: {[%{"_type" => "hr", "_key" => "b#{key}"}], key + 1}
+
+  defp blocks_from_node(%{"type" => type} = node, key) do
+    {children, defs} = spans_and_defs(node["content"] || [])
+    {[pt_block(style_for(type, node), key, children, defs)], key + 1}
+  end
+
+  defp blocks_from_node(_other, key), do: {[pt_block("normal", key, [], [])], key + 1}
+
+  defp list_kind("orderedList"), do: "number"
+  defp list_kind(_), do: "bullet"
+
+  # TipTap: bulletList > listItem[] > (paragraph + optional nested list).
+  # PT: one block per item with `listItem` + `level`; nesting via level.
+  defp list_items(%{"content" => items}, kind, level, key) do
+    Enum.reduce(List.wrap(items), {[], key}, fn item, {acc, key} ->
+      inline =
+        item["content"]
+        |> List.wrap()
+        |> Enum.filter(&(&1["type"] == "paragraph"))
+        |> Enum.flat_map(&(&1["content"] || []))
+
+      {children, defs} = spans_and_defs(inline)
+
+      item_block =
+        "normal"
+        |> pt_block(key, children, defs)
+        |> Map.merge(%{"listItem" => kind, "level" => level})
+
+      {nested, key} =
+        item["content"]
+        |> List.wrap()
+        |> Enum.filter(&(&1["type"] in ["bulletList", "orderedList"]))
+        |> Enum.reduce({[], key + 1}, fn sub, {sub_acc, key} ->
+          {emitted, key} = list_items(sub, list_kind(sub["type"]), level + 1, key)
+          {sub_acc ++ emitted, key}
+        end)
+
+      {acc ++ [item_block | nested], key}
+    end)
+  end
+
+  defp list_items(_node, _kind, _level, key), do: {[], key}
 
   defp pt_block(style, idx, children, defs) do
     %{
@@ -96,6 +150,9 @@ defmodule KilnCMS.Blocks.PortableText do
     {span, Enum.reverse(defs), key_idx}
   end
 
+  defp span_from(%{"type" => "hardBreak"}, key_idx),
+    do: {%{"_type" => "span", "text" => "\n", "marks" => []}, [], key_idx}
+
   defp span_from(_other, key_idx),
     do: {%{"_type" => "span", "text" => "", "marks" => []}, [], key_idx}
 
@@ -132,8 +189,92 @@ defmodule KilnCMS.Blocks.PortableText do
 
   @doc "Render PT blocks to an HTML string."
   @spec to_html([pt_block()] | nil) :: String.t()
-  def to_html(blocks) when is_list(blocks), do: Enum.map_join(blocks, &block_to_html/1)
+  def to_html(blocks) when is_list(blocks) do
+    blocks
+    |> chunk_list_runs()
+    |> Enum.map_join(fn
+      [%{"listItem" => _} | _] = items -> list_to_html(items, 1)
+      other -> Enum.map_join(other, &block_to_html/1)
+    end)
+  end
+
   def to_html(_), do: ""
+
+  # Group consecutive list items into runs: first chunk on the list/non-list
+  # boundary, then split each list chunk where a LEVEL-1 item changes kind (a
+  # bullet list followed by a numbered list stays two lists). Deeper items
+  # always follow their preceding level-1 item, whatever their kind.
+  defp chunk_list_runs(blocks) do
+    blocks
+    |> Enum.chunk_by(&match?(%{"listItem" => _}, &1))
+    |> Enum.flat_map(fn
+      [%{"listItem" => _} | _] = items -> split_kind_runs(items)
+      other -> [other]
+    end)
+  end
+
+  defp split_kind_runs(items) do
+    {runs, _kind} =
+      Enum.reduce(items, {[], nil}, fn item, {runs, kind} ->
+        level1? = (item["level"] || 1) == 1
+
+        cond do
+          runs == [] -> {[[item]], item["listItem"]}
+          not level1? -> {prepend_to_head_run(runs, item), kind}
+          item["listItem"] == kind -> {prepend_to_head_run(runs, item), kind}
+          true -> {[[item] | runs], item["listItem"]}
+        end
+      end)
+
+    runs |> Enum.map(&Enum.reverse/1) |> Enum.reverse()
+  end
+
+  defp prepend_to_head_run([run | rest], item), do: [[item | run] | rest]
+
+  defp list_to_html([], _level), do: ""
+
+  defp list_to_html([first | _] = items, level) do
+    kind = first["listItem"]
+    tag = if kind == "number", do: "ol", else: "ul"
+
+    inner =
+      items
+      |> chunk_items(level)
+      |> Enum.map_join(fn {item, nested} ->
+        defs = item["markDefs"] || []
+        text = Enum.map_join(item["children"] || [], &span_to_html(&1, defs))
+        "<li>#{text}#{list_to_html(nested, level + 1)}</li>"
+      end)
+
+    "<#{tag}>#{inner}</#{tag}>"
+  end
+
+  # Pair each level-N item with the deeper items that follow it (its sublist).
+  defp chunk_items(items, level) do
+    items
+    |> Enum.chunk_while(
+      nil,
+      fn item, acc ->
+        if (item["level"] || 1) <= level do
+          case acc do
+            nil -> {:cont, {item, []}}
+            {head, nested} -> {:cont, {head, Enum.reverse(nested)}, {item, []}}
+          end
+        else
+          case acc do
+            nil -> {:cont, {item, []}}
+            {head, nested} -> {:cont, {head, [item | nested]}}
+          end
+        end
+      end,
+      fn
+        nil -> {:cont, nil}
+        {head, nested} -> {:cont, {head, Enum.reverse(nested)}, nil}
+      end
+    )
+  end
+
+  defp block_to_html(%{"_type" => "hr"}), do: "<hr/>"
 
   defp block_to_html(%{} = block) do
     defs = block["markDefs"] || []
@@ -142,6 +283,8 @@ defmodule KilnCMS.Blocks.PortableText do
   end
 
   defp wrap("blockquote", inner), do: "<blockquote>#{inner}</blockquote>"
+
+  defp wrap("code", inner), do: "<pre><code>#{inner}</code></pre>"
 
   defp wrap("h" <> level, inner) when level in ["1", "2", "3", "4", "5", "6"],
     do: "<h#{level}>#{inner}</h#{level}>"

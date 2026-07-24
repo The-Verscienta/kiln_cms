@@ -39,6 +39,27 @@ defmodule KilnCMS.CMS.BlockUnion do
 
   def cast_input_array(other, constraints), do: super(other, constraints)
 
+  # Updating an EXISTING embedded block (id set) routes through the union's
+  # prepare_change/handle_change with the RAW input maps — cast_input's
+  # normalization never sees them — and the member resource's update cast then
+  # rejects e.g. a rich_text body posted as TipTap JSON. Normalize here too.
+  @impl Ash.Type
+  def prepare_change(old_value, new_value, constraints) when is_list(new_value),
+    do: super(old_value, Enum.map(new_value, &TypedBlocks.to_union_input/1), constraints)
+
+  def prepare_change(old_value, new_value, constraints),
+    do: super(old_value, TypedBlocks.to_union_input(new_value), constraints)
+
+  @impl Ash.Type
+  def handle_change_array?, do: true
+
+  @impl Ash.Type
+  def prepare_change_array(old_values, new_values, constraints) when is_list(new_values),
+    do: super(old_values, Enum.map(new_values, &TypedBlocks.to_union_input/1), constraints)
+
+  def prepare_change_array(old_values, new_values, constraints),
+    do: super(old_values, new_values, constraints)
+
   @impl Ash.Type
   def cast_stored(value, constraints),
     do: value |> TypedBlocks.to_union_stored() |> super(constraints)

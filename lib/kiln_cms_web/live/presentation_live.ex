@@ -385,6 +385,7 @@ defmodule KilnCMSWeb.PresentationLive do
       phx-hook="InlineRichText"
       phx-update="ignore"
       data-kiln-block-id={@block.id}
+      data-kiln-block-mode="html"
       data-content={@block.value}
       class="kiln-block min-h-24 rounded border border-base-300 p-2"
     >

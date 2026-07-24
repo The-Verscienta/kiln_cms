@@ -533,6 +533,7 @@ defmodule KilnCMSWeb.InContextEditLive do
         phx-hook="InlineRichText"
         phx-update="ignore"
         data-kiln-block-id={@block.id}
+        data-kiln-block-mode="html"
         data-content={@block.value}
         data-editor-label={gettext("Edit rich text")}
         class="rounded outline-none focus-within:ring-2 focus-within:ring-primary/40"
