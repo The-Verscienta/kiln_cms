@@ -99,9 +99,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:save_state, :saved)
          # Set when an optimistic-lock conflict blocks saving until reload.
          |> assign(:conflict, false)
-         # Slug auto-derives from the title while it's still a placeholder (a
-         # freshly-created "untitled-N" or blank); a manual slug edit locks it.
-         |> assign(:slug_auto, slug_auto_default(record.slug))
          # Bumped on server-driven form replacement (conflict reload, version
          # restore) so rich-text blocks remount and reload TipTap from the new
          # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
@@ -235,6 +232,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:record, record)
       |> assign(:page_title, record.title)
       |> assign(:form, build_form(record, socket.assigns.actor))
+      |> assign(:slug_auto, slug_auto_next(socket, record))
 
     socket =
       if Keyword.get(opts, :reseed_children?, true),
@@ -1421,12 +1419,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
   end
 
-  # "Slug follows title" is on for fresh content (blank slug, or the editor-list's
-  # `untitled-N` placeholder) and off once a real slug exists — changing an
-  # established slug would break its URLs.
-  defp slug_auto_default(slug) do
+  # Whether the slug should follow the title after a record (re)load.
+  #  * first load (mount): on for any not-yet-published record whose slug still
+  #    looks auto-generated — so a draft keeps following the title across re-opens,
+  #    not just in the session that created it;
+  #  * later loads: preserve the session's decision, but drop to off the moment the
+  #    record is published (its slug is now a live URL we mustn't rewrite).
+  defp slug_auto_next(socket, record) do
+    case socket.assigns[:slug_auto] do
+      nil -> slug_auto_default(record)
+      current -> current and never_published?(record)
+    end
+  end
+
+  defp slug_auto_default(record) do
+    never_published?(record) and auto_shaped_slug?(record.slug, record.title)
+  end
+
+  # `published_at` is stamped on the first publish and never cleared, so it doubles
+  # as a "has this ever been public?" flag.
+  defp never_published?(record), do: is_nil(record.published_at)
+
+  # The slug looks machine-generated (so following the title won't trample an
+  # editor's deliberate choice): blank, the new-content `untitled-N` placeholder,
+  # or exactly what the current title would derive to.
+  defp auto_shaped_slug?(slug, title) do
     slug = to_string(slug)
-    slug == "" or Regex.match?(~r/^untitled-\d+$/, slug)
+
+    slug == "" or Regex.match?(~r/^untitled-\d+$/, slug) or
+      slug == KilnCMS.Slugs.slugify(to_string(title))
   end
 
   # While in "auto" mode, keep the slug derived from the title on every validate.

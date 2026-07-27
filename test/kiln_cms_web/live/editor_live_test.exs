@@ -894,9 +894,28 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert after_title =~ ~s(value="chosen-slug")
     end
 
-    test "an established slug is not in auto mode and never auto-changes",
+    test "a never-published draft keeps following the title across re-opens",
          %{conn: conn} do
-      page = draft_page(%{title: "Real", slug: "real-post"})
+      # A draft whose slug was previously auto-derived (so it still matches the
+      # title) re-opens in auto mode — editing the title updates the slug, even
+      # though the slug is no longer the raw `untitled-N` placeholder.
+      page = draft_page(%{title: "Existing Draft", slug: "existing-draft"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "Auto from title"
+
+      changed =
+        lv
+        |> form("#page-editor", form: %{title: "Renamed Draft", slug: "existing-draft"})
+        |> render_change()
+
+      assert changed =~ ~s(value="renamed-draft")
+    end
+
+    test "a hand-picked slug (not matching the title) is left alone", %{conn: conn} do
+      page = draft_page(%{title: "Real", slug: "custom-permalink"})
 
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -905,20 +924,45 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       changed =
         lv
-        |> form("#page-editor", form: %{title: "Renamed Title", slug: "real-post"})
+        |> form("#page-editor", form: %{title: "Renamed Title", slug: "custom-permalink"})
         |> render_change()
 
-      assert changed =~ ~s(value="real-post")
+      assert changed =~ ~s(value="custom-permalink")
+    end
+
+    test "a published page never auto-changes its slug, even matching the title",
+         %{conn: conn} do
+      page =
+        draft_page(%{
+          title: "Live",
+          slug: "live",
+          state: :published,
+          published_at: DateTime.utc_now()
+        })
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Published content is off auto (the slug is a live URL); the field offers a
+      # manual re-sync instead.
+      refute html =~ "Auto from title"
+
+      changed =
+        lv
+        |> form("#page-editor", form: %{title: "Renamed Live", slug: "live"})
+        |> render_change()
+
+      assert changed =~ ~s(value="live")
     end
 
     test "'Sync from title' re-derives the slug on demand", %{conn: conn} do
-      page = draft_page(%{title: "Real", slug: "real-post"})
+      page = draft_page(%{title: "Real", slug: "custom-permalink"})
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
       lv
-      |> form("#page-editor", form: %{title: "Fresh Title", slug: "real-post"})
+      |> form("#page-editor", form: %{title: "Fresh Title", slug: "custom-permalink"})
       |> render_change()
 
       synced = lv |> element("button[phx-click='toggle_slug_auto']") |> render_click()
