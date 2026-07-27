@@ -1042,7 +1042,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute has_element?(lv, "button[phx-click='remove_block']")
 
       lv
-      |> element("button[data-inserter-item][phx-value-type='heading']")
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='heading']")
       |> render_click()
 
       assert has_element?(lv, "button[phx-click='remove_block']")
@@ -1056,13 +1056,117 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # `divider` has no required fields, so it round-trips through save unedited.
       lv
-      |> element("button[data-inserter-item][phx-value-type='divider']")
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='divider']")
       |> render_click()
 
       lv |> form("#page-editor") |> render_submit()
 
       assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert to_string(block.type) == "divider"
+    end
+  end
+
+  # Modernization B2: blocks can be inserted inline (at a gap), not only appended.
+  # The insert anchor is a stable block id, resolved to a live position at action
+  # time, so a divider lands in the right gap even after a reorder.
+  describe "inline block insertion (modernization B2)" do
+    setup %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "A", order: 0},
+            %{type: :heading, content: "B", order: 1}
+          ]
+        })
+
+      [a, b] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      %{lv: lv, page: page, a: a, b: b}
+    end
+
+    defp block_types_after_save(page) do
+      page.id
+      |> then(&CMS.get_page!(&1, authorize?: false))
+      |> blocks_legacy()
+      |> Enum.map(&to_string(&1.type))
+    end
+
+    test "inserting after a block lands it in that gap", %{lv: lv, page: page, a: a} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => a.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "divider", "heading"]
+    end
+
+    test "inserting at the start prepends", %{lv: lv, page: page} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => "start"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["divider", "heading", "heading"]
+    end
+
+    test "inserting after the last block appends", %{lv: lv, page: page, b: b} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => b.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "heading", "divider"]
+    end
+
+    test "with no anchor, appends (backward compatible)", %{lv: lv, page: page} do
+      render_hook(lv, "add_block", %{"type" => "divider"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "heading", "divider"]
+    end
+
+    test "insert-after-id lands correctly even after a reorder", %{lv: lv, page: page, a: a} do
+      # A co-editor reorders to [B, A]; inserting after A (by id) must still land
+      # right after A — now at index 1 — not at the stale position 0.
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => a.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      blocks =
+        CMS.get_page!(page.id, authorize?: false) |> blocks_legacy()
+
+      assert Enum.map(blocks, &to_string(&1.type)) == ["heading", "heading", "divider"]
+      assert Enum.map(blocks, & &1.content) == ["B", "A", nil]
+    end
+
+    test "an unknown anchor id falls back to appending, no crash", %{lv: lv, page: page} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => "no-such-id"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "heading", "divider"]
+    end
+
+    test "each block renders an inline inserter anchored to its id", %{lv: lv, a: a, b: b} do
+      # A compact inline inserter per block (anchor = that block's id) plus a
+      # top "insert at start" inserter; only the main inserter owns the / shortcut.
+      assert has_element?(lv, "##{"insert-after-#{a.id}"}")
+      assert has_element?(lv, "##{"insert-after-#{b.id}"}")
+      assert has_element?(lv, "#insert-start")
+
+      html = render(lv)
+      assert html =~ ~s(data-inserter-global="true")
+      # The inline option carries the anchor so add_block inserts at that gap.
+      assert has_element?(
+               lv,
+               "#insert-after-#{a.id} button[data-inserter-item][phx-value-after='#{a.id}']"
+             )
+    end
+
+    test "clicking an inline inserter option inserts at that gap", %{lv: lv, page: page, a: a} do
+      lv
+      |> element("#insert-after-#{a.id} button[data-inserter-item][phx-value-type='divider']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "divider", "heading"]
     end
   end
 
@@ -1882,7 +1986,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   describe "columns (nested-layout) block editor" do
     defp add_columns_block(lv) do
       lv
-      |> element("button[data-inserter-item][phx-value-type='columns']")
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='columns']")
       |> render_click()
     end
 
@@ -2020,7 +2124,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='faq']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='faq']")
+      |> render_click()
 
       # Add one Q&A row, then type into its bound inputs.
       lv
@@ -2054,7 +2160,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='faq']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='faq']")
+      |> render_click()
 
       lv
       |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
@@ -2077,7 +2185,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='claim']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='claim']")
+      |> render_click()
 
       lv
       |> form("#page-editor")
@@ -2109,7 +2219,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='how_to']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='how_to']")
+      |> render_click()
 
       lv
       |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
