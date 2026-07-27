@@ -686,8 +686,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Open the media browser to fill a specific image block.
-  def handle_event("open_picker", %{"index" => index}, socket),
-    do: {:noreply, assign(socket, :picking, String.to_integer(index))}
+  # Open the media browser to fill a specific existing image block, addressed by
+  # its stable id — the block is looked up again at pick time, so a reorder or
+  # removal in between can't redirect the image to the wrong block (audit T5.1).
+  def handle_event("open_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "",
+    do: {:noreply, assign(socket, :picking, {:block, bid})}
+
+  def handle_event("open_picker", _params, socket), do: {:noreply, socket}
 
   # Open the media browser from the editor chrome to insert a *new* image block.
   def handle_event("open_media_browser", _params, socket),
@@ -737,7 +742,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
-        params: %{"_union_type" => "image", "url" => url, "media_id" => media_id}
+        params: %{
+          "_union_type" => "image",
+          "id" => Ash.UUID.generate(),
+          "url" => url,
+          "media_id" => media_id
+        }
       )
 
     socket = socket |> assign(:form, form) |> reset_picker()
@@ -745,20 +755,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, mark_dirty(socket)}
   end
 
-  # Insert a library image into the existing image block at `index`.
-  def handle_event("pick_image", %{"index" => index, "id" => media_id, "url" => url}, socket) do
-    params =
-      socket.assigns.form
-      |> AshPhoenix.Form.params()
-      |> put_block(index, %{"url" => url, "media_id" => media_id})
+  # Fill the existing image block identified by `bid`. Its current position is
+  # resolved from the live form now, not captured when the picker opened, so a
+  # concurrent reorder/removal can't misdirect the image (audit T5.1).
+  def handle_event("pick_image", %{"index" => "block", "bid" => bid} = p, socket) do
+    %{"id" => media_id, "url" => url} = p
 
-    socket =
-      socket
-      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      |> reset_picker()
+    case block_index_by_id(socket.assigns.form, bid) do
+      nil ->
+        # The target block is gone (removed by a co-editor) — drop the pick.
+        {:noreply, reset_picker(socket)}
 
-    broadcast_preview(socket)
-    {:noreply, mark_dirty(socket)}
+      index ->
+        # Rebuild the FULL block set from the live form (each block as an input
+        # map keyed by its stable id), then merge the image into the target. A
+        # pristine form's `params` carries no blocks at all, so a partial update
+        # would drop every other block — this carries them all through, ids intact
+        # (the same full-set pattern the inline preview + in-context editor use).
+        blocks =
+          socket.assigns.form
+          |> full_blocks_input()
+          |> List.update_at(index, &Map.merge(&1, %{"url" => url, "media_id" => media_id}))
+
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> Map.put("blocks", blocks)
+
+        socket = socket |> revalidate(params) |> reset_picker()
+        broadcast_preview(socket)
+        {:noreply, mark_dirty(socket)}
+    end
   end
 
   # A columns block carries a socket-managed child tree, so it's inserted with a
@@ -781,9 +808,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   def handle_event("add_block", %{"type" => type}, socket) do
+    # Every block carries a stable id from the moment it's added, so the picker,
+    # delete, and keyboard-move can address it by identity rather than by a
+    # position that a concurrent reorder can invalidate (audit T5.1/T5.2).
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
-        params: %{"_union_type" => type}
+        params: %{"_union_type" => type, "id" => Ash.UUID.generate()}
       )
 
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
@@ -808,11 +838,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
     update_geo_items(socket, index, field, &List.delete_at(&1, to_int(item)))
   end
 
-  def handle_event("remove_block", %{"path" => path}, socket) do
-    {:noreply,
-     socket
-     |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
-     |> mark_dirty()}
+  # Remove the block with stable id `bid`. Resolving the id to a path now (rather
+  # than trusting a path captured at render) means an in-flight reorder can't turn
+  # a delete click into a delete of the wrong block (audit T5.2).
+  def handle_event("remove_block", %{"bid" => bid}, socket) do
+    case block_index_by_id(socket.assigns.form, bid) do
+      nil ->
+        {:noreply, socket}
+
+      index ->
+        path = "#{socket.assigns.form.name}[blocks][#{index}]"
+
+        {:noreply,
+         socket
+         |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
+         |> prune_block_children()
+         |> mark_dirty()}
+    end
   end
 
   def handle_event("reorder", %{"order" => order}, socket) do
@@ -822,17 +864,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Keyboard-accessible alternative to drag-and-drop reordering (#171): swap a
   # block with its neighbour and announce the new position to screen readers.
-  def handle_event("move_block", %{"index" => index, "dir" => dir}, socket) do
-    i = String.to_integer(index)
+  # The moved block is identified by its stable id and resolved to a live index
+  # here, so the swap can't act on the wrong block after a reorder (T4.3/T5.2).
+  def handle_event("move_block", %{"bid" => bid, "dir" => dir}, socket) do
     count = blocks_count(socket.assigns.form)
-    j = if dir == "up", do: i - 1, else: i + 1
 
-    if j >= 0 and j < count do
-      order =
-        0..(count - 1)
-        |> Enum.map(&to_string/1)
-        |> swap_at(i, j)
-
+    # Bounds-check BOTH ends: an unknown id no-ops, and a source at either edge
+    # can't wrap to the opposite end via Enum.at/-1 (audit T4.3).
+    with i when is_integer(i) <- block_index_by_id(socket.assigns.form, bid),
+         true <- i < count,
+         j when j >= 0 and j < count <- if(dir == "up", do: i - 1, else: i + 1) do
+      order = 0..(count - 1) |> Enum.map(&to_string/1) |> swap_at(i, j)
       form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
 
       {:noreply,
@@ -844,7 +886,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          gettext("Moved block to position %{pos} of %{count}", pos: j + 1, count: count)
        )}
     else
-      {:noreply, socket}
+      _ -> {:noreply, socket}
     end
   end
 
@@ -1224,6 +1266,50 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Current positional index of the block whose stable id is `bid`, or nil if no
+  # block carries it. Resolves against the live nested forms (which reflect the
+  # id from either loaded data or add-form params, and the current order after a
+  # reorder) rather than a position captured at render time — this is what makes
+  # the picker/delete/move resilient to a concurrent reorder (audit T5.1/T5.2).
+  defp block_index_by_id(form, bid) do
+    bid = to_string(bid)
+
+    form
+    |> ash_form()
+    |> Map.get(:forms, %{})
+    |> Map.get(:blocks, [])
+    |> List.wrap()
+    |> Enum.find_index(fn sub -> to_string(AshPhoenix.Form.value(sub, :id)) == bid end)
+  end
+
+  # `socket.assigns.form` is a Phoenix.HTML.Form wrapping the AshPhoenix.Form
+  # (nested forms live on the latter); unwrap so we can read the block sub-forms.
+  defp ash_form(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source}), do: source
+  defp ash_form(%AshPhoenix.Form{} = form), do: form
+
+  # The complete current block set as a list of union input maps (string keys,
+  # `_union_type` discriminator, stable `id`), read from the live sub-forms. This
+  # is the payload a caller merges a targeted edit into so that validating it
+  # preserves every other block and its identity — a form that hasn't been
+  # submitted has empty `params`, so a partial blocks param would drop the rest.
+  defp full_blocks_input(form) do
+    form
+    |> ash_form()
+    |> Map.get(:forms, %{})
+    |> Map.get(:blocks, [])
+    |> List.wrap()
+    |> Enum.map(&block_input_map/1)
+  end
+
+  defp block_input_map(%AshPhoenix.Form{} = sub) do
+    mod = block_member(sub)
+
+    Kiln.Block.Info.fields(mod)
+    |> Map.new(fn field -> {to_string(field.name), AshPhoenix.Form.value(sub, field.name)} end)
+    |> Map.put("_union_type", to_string(Kiln.Block.Info.name(mod)))
+    |> Map.put("id", AshPhoenix.Form.value(sub, :id))
+  end
+
   # Swap the two list elements at positions `i` and `j`.
   defp swap_at(list, i, j) do
     a = Enum.at(list, i)
@@ -1233,6 +1319,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> List.replace_at(i, b)
     |> List.replace_at(j, a)
   end
+
+  # Re-run form validation with the socket-held child blocks re-injected and GEO
+  # item rows normalized — the shared path for events that rebuild block params
+  # (e.g. an image pick) so a partial update can't drop the nested tree.
+  defp revalidate(socket, params) do
+    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+    assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+  end
+
+  # Drop any socket-held child state whose parent block no longer exists in the
+  # live form (e.g. after a block delete), so stale children can't resurface.
+  defp prune_block_children(socket) do
+    live_ids =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> Map.get("blocks")
+      |> block_param_ids()
+      |> MapSet.new()
+
+    pruned = Map.filter(socket.assigns.block_children, fn {id, _} -> id in live_ids end)
+    assign(socket, :block_children, pruned)
+  end
+
+  defp block_param_ids(blocks) when is_map(blocks),
+    do: blocks |> Map.values() |> block_param_ids()
+
+  defp block_param_ids(blocks) when is_list(blocks), do: Enum.flat_map(blocks, &block_param_id/1)
+  defp block_param_ids(_blocks), do: []
+
+  defp block_param_id(%{"id" => id}) when is_binary(id), do: [id]
+  defp block_param_id(_block), do: []
 
   # Push the current title + blocks to any open decoupled preview windows.
   # Skipped entirely while no window is watching (audit P-M2) — otherwise every
@@ -1870,7 +1987,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
   defp pick_index(:featured), do: "featured"
-  defp pick_index(index), do: index
+  defp pick_index({:block, _id}), do: "block"
+  defp pick_index(_), do: ""
+
+  # The target block's stable id for a per-block pick; nil for featured/new picks
+  # (so no `phx-value-bid` attribute is emitted for those).
+  defp pick_block_id({:block, id}), do: id
+  defp pick_block_id(_), do: nil
 
   attr :block_types, :list, required: true
 
@@ -2017,6 +2140,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             type="button"
             phx-click="pick_image"
             phx-value-index={pick_index(@index)}
+            phx-value-bid={pick_block_id(@index)}
             phx-value-id={item.id}
             phx-value-url={item.url}
             title={item.filename}
@@ -2764,6 +2888,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     data-sort-id={bf.index}
                     class="rounded border border-base-content/15 p-3"
                   >
+                    <%!-- Carries the block's stable id into save/validate params so
+                          it can be addressed by identity (columns render their own). --%>
+                    <input
+                      :if={block_type_string(bf) != "columns"}
+                      type="hidden"
+                      name={bf[:id].name}
+                      value={bf[:id].value}
+                    />
                     <div class="mb-2 flex items-center justify-between gap-3">
                       <div class="flex items-center gap-2">
                         <span
@@ -2778,7 +2910,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           <button
                             type="button"
                             phx-click="move_block"
-                            phx-value-index={bf.index}
+                            phx-value-bid={bf[:id].value}
                             phx-value-dir="up"
                             disabled={bf.index == 0}
                             aria-label={gettext("Move block up")}
@@ -2789,7 +2921,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           <button
                             type="button"
                             phx-click="move_block"
-                            phx-value-index={bf.index}
+                            phx-value-bid={bf[:id].value}
                             phx-value-dir="down"
                             disabled={bf.index == blocks_count(@form) - 1}
                             aria-label={gettext("Move block down")}
@@ -2805,7 +2937,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <button
                         type="button"
                         phx-click="remove_block"
-                        phx-value-path={bf.name}
+                        phx-value-bid={bf[:id].value}
                         data-confirm={gettext("Delete this block? This can't be undone.")}
                         aria-label={gettext("Remove block")}
                         class="text-base-content/70 hover:text-error"
@@ -2877,7 +3009,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <button
                           type="button"
                           phx-click="open_picker"
-                          phx-value-index={bf.index}
+                          phx-value-bid={bf[:id].value}
                           class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
                         >
                           <.icon name="hero-photo" class="mr-1 size-4" />{gettext(
@@ -2910,6 +3042,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     </div>
                   </div>
                 </.inputs_for>
+              </div>
+
+              <%!-- Inviting empty state when a page has no blocks yet (Theme A). --%>
+              <div
+                :if={blocks_count(@form) == 0}
+                class="rounded-lg border border-dashed border-base-content/20 px-6 py-10 text-center"
+              >
+                <.icon name="hero-squares-plus" class="mx-auto size-8 text-base-content/30" />
+                <p class="mt-2 text-sm font-medium">{gettext("No blocks yet")}</p>
+                <p class="mt-1 text-sm text-base-content/60">
+                  {gettext("Add your first block below to start building this page.")}
+                </p>
               </div>
 
               <.block_inserter block_types={@block_types} />
