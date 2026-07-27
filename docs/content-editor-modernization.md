@@ -107,9 +107,20 @@ perceived-modernity-per-effort. Do this first — it's the frame everything else
 > top "insert at start"; the main bottom inserter still appends and owns the global
 > `/` shortcut. Hook guards the `/` listener to the `data-inserter-global` instance
 > so inline copies don't all fire at once, and uses a scoped `data-inserter-list`.
-> Tests: "inline block insertion (modernization B2)". Remaining B slices: unified
-> slash menu (block inserter vs in-prose TipTap), hover block toolbar + duplicate,
-> drag between containers.
+> Tests: "inline block insertion (modernization B2)".
+>
+> **B3 (unified slash) DONE.** There were two `/` systems: the block inserter (adds
+> Kiln blocks) and the in-prose TipTap menu (formats text). They're now one coherent
+> command — the in-prose `/` still formats text but also offers "insert a block
+> below" for types prose can't represent (image/columns/faq/how_to/claim/embed),
+> which push the same anchored `add_block` (B2) using the block's stable id. The
+> RichText host carries `data-block-id`; the editor hint is one line; the prose
+> transform path is byte-unchanged (new behaviour is isolated behind the SlashMenu's
+> `onInsert`, wired only in the block editor, not the in-context page editor). The
+> JS (`assets/js/rich_text.js`) is not exercisable by the LiveView test suite and
+> the worktree can't build assets, so the menu behaviour is **unverified** — only
+> the server-rendered wiring (`data-block-id`, hint) is tested. Remaining B slices:
+> hover block toolbar + duplicate, drag between containers.
 
 - **Inline "+" insertion points** between every block and at the ends, so authors add
   where the cursor is, not only at the tail.

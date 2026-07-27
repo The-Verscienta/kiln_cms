@@ -5,7 +5,8 @@
 // the StarterKit defaults this module adds:
 //
 //   * an expanded toolbar with live active-state highlighting
-//   * a slash-command menu ("/") for common block transforms
+//   * a slash-command menu ("/") that both transforms the current text and, in
+//     the block editor, inserts a new Kiln block below (B3 — one "/" for both)
 //
 // Every command here produces only tags already on the server-side allowlist
 // (KilnCMS.HTMLSanitizer.RichText), so no sanitizer changes are needed.
@@ -44,6 +45,20 @@ const SLASH_COMMANDS = [
   {label: "Divider", hint: "Horizontal rule", keywords: "hr horizontal rule separator line", run: c => c.setHorizontalRule()},
 ]
 
+// Slash commands that insert a *new* Kiln block below the current one (B3). They
+// cover block types prose can't represent; choosing one clears the "/query" and
+// asks the server to add the block via the same anchored `add_block` path the
+// inline "+" uses. Offered only where `onInsert` is wired (the block editor), not
+// the in-context page editor, whose LiveView speaks a different event vocabulary.
+const SLASH_INSERTS = [
+  {label: "Image", hint: "Insert an image block", keywords: "photo picture media", insert: "image"},
+  {label: "Columns", hint: "Insert a columns block", keywords: "layout grid side by side", insert: "columns"},
+  {label: "FAQ", hint: "Insert an FAQ block", keywords: "faq questions answers", insert: "faq"},
+  {label: "How-to", hint: "Insert a how-to block", keywords: "howto steps guide", insert: "how_to"},
+  {label: "Claim", hint: "Insert a claim block", keywords: "claim citation source", insert: "claim"},
+  {label: "Embed", hint: "Insert an embed block", keywords: "embed iframe video external", insert: "embed"},
+]
+
 const toolbarButton = (editor, item) => {
   const b = document.createElement("button")
   b.type = "button"
@@ -71,8 +86,11 @@ let slashMenuCount = 0
 // controls/activedescendant), mirroring the BlockInserter pattern, so screen
 // readers hear the menu open and track the active option (audit U-M8).
 class SlashMenu {
-  constructor(editor) {
+  constructor(editor, {onInsert = null} = {}) {
     this.editor = editor
+    // Callback that inserts a new Kiln block below (B3). When absent, the menu
+    // offers only in-prose transforms.
+    this.onInsert = onInsert
     this.open = false
     this.items = []
     this.active = 0
@@ -111,7 +129,9 @@ class SlashMenu {
     if (!match) return this.hide()
 
     const query = match[1].toLowerCase()
-    const items = SLASH_COMMANDS.filter(cmd => {
+    // Text transforms always; block inserts too when this editor can add blocks.
+    const commands = this.onInsert ? SLASH_COMMANDS.concat(SLASH_INSERTS) : SLASH_COMMANDS
+    const items = commands.filter(cmd => {
       if (!query) return true
       return (cmd.label + " " + cmd.keywords).toLowerCase().includes(query)
     })
@@ -195,7 +215,14 @@ class SlashMenu {
     if (!cmd) return
     const range = this.range
     this.hide()
-    cmd.run(this.editor.chain().focus().deleteRange(range)).run()
+    if (cmd.insert) {
+      // Block insert (B3): drop the "/query" text, then ask the server to add the
+      // new block right after this one. The prose transform path is untouched.
+      this.editor.chain().focus().deleteRange(range).run()
+      this.onInsert(cmd.insert)
+    } else {
+      cmd.run(this.editor.chain().focus().deleteRange(range)).run()
+    }
   }
 
   onKeyDown(e) {
@@ -448,7 +475,13 @@ function buildEditor(hook, extensions, content = null) {
     },
   })
   hook.editor = editor
-  hook.slash = new SlashMenu(editor)
+  // The block editor can spawn new blocks from "/": choosing a block-insert
+  // command adds it right after this block (anchored by the block's stable id —
+  // the same B2 add_block path the inline "+" uses).
+  hook.slash = new SlashMenu(editor, {
+    onInsert: type =>
+      hook.pushEvent("add_block", {type, after: hook.el.dataset.blockId}),
+  })
   input.value = editor.getHTML()
 
   hook.toolbarButtons = TOOLBAR.map(item => {

@@ -2963,6 +2963,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         id={"rt-#{bf.index}-v#{@editor_version}"}
                         phx-hook="RichText"
                         phx-update="ignore"
+                        data-block-id={bf[:id].value}
                         data-content={bf[:legacy_html].value || ""}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:legacy_html].name}
@@ -2982,11 +2983,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         >
                         </div>
                         <div data-editor></div>
-                        <%!-- Distinguish this in-text slash menu from the block
-                              inserter's "Add block /" so the two / systems are
-                              clearly scoped (#150). --%>
+                        <%!-- One coherent slash command (#150, B3): inside a text
+                              block it formats the text and can drop a new block in
+                              below; on the empty canvas it opens the block palette. --%>
                         <p class="mt-1 text-xs text-base-content/70">
-                          {gettext("Type / for text formatting within this block.")}
+                          {gettext("Type / to format this text or insert a block below.")}
                         </p>
                         <input
                           type="hidden"
