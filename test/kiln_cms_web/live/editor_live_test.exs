@@ -1170,6 +1170,59 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Modernization B: the hover block toolbar's Duplicate action copies a block's
+  # content into a fresh block dropped right after it (by stable id, new ids).
+  describe "duplicate block (modernization B)" do
+    test "duplicating a block inserts a copy right after it with a new id",
+         %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "A", order: 0},
+            %{type: :heading, content: "B", order: 1}
+          ]
+        })
+
+      [a, _b] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "duplicate_block", %{"bid" => a.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+
+      # The copy lands between A and B with the same content...
+      assert Enum.map(blocks, & &1.content) == ["A", "A", "B"]
+      # ...but is a distinct block (three unique ids, the original A preserved).
+      ids = Enum.map(blocks, & &1.id)
+      assert length(Enum.uniq(ids)) == 3
+      assert a.id in ids
+    end
+
+    test "an unknown block id is a no-op", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :heading, content: "Solo", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "duplicate_block", %{"bid" => "no-such-id"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [%{content: "Solo"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
+
+    test "each block's chrome wires a Duplicate control", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :heading, content: "X", order: 0}]})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(phx-click="duplicate_block")
+    end
+  end
+
   describe "media library browser (editor chrome)" do
     test "opening from chrome and picking inserts a new image block", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg", url: "/uploads/hero"})

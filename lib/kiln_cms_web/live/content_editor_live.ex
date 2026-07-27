@@ -825,6 +825,41 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
 
+  # Duplicate the block with stable id `bid`: copy its full field set, give the
+  # copy (and, for a columns block, its nested children) fresh ids, and drop it in
+  # right after the original.
+  def handle_event("duplicate_block", %{"bid" => bid}, socket) do
+    case Enum.find(
+           full_blocks_input(socket.assigns.form),
+           &(to_string(&1["id"]) == to_string(bid))
+         ) do
+      nil ->
+        {:noreply, socket}
+
+      source ->
+        new_id = Ash.UUID.generate()
+        copy = Map.put(source, "id", new_id)
+        children = dup_children(socket.assigns.block_children[bid])
+
+        form =
+          socket.assigns.form
+          |> AshPhoenix.Form.add_form(socket.assigns.form.name <> "[blocks]", params: copy)
+          |> position_new_block(bid)
+
+        block_children =
+          if children,
+            do: Map.put(socket.assigns.block_children, new_id, children),
+            else: socket.assigns.block_children
+
+        {:noreply,
+         socket
+         |> assign(:form, form)
+         |> assign(:block_children, block_children)
+         |> refresh_preview()
+         |> mark_dirty()}
+    end
+  end
+
   # ── GEO item rows (faq items / how_to steps, #357) ──────────────────────────
   # Rows are bound form inputs; add/remove mutate the form params directly (the
   # same targeted-update pattern as `pick_image` at an index), so there's no
@@ -1312,6 +1347,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
     order = List.insert_at(existing, target, to_string(last))
     AshPhoenix.Form.sort_forms(form, [:blocks], order)
   end
+
+  # A copy of a columns block's socket-managed child tree with every nested child
+  # re-keyed, so a duplicated columns block's children stay independent of the
+  # original's (block duplication).
+  defp dup_children(columns) when is_list(columns) do
+    Enum.map(columns, fn column ->
+      blocks =
+        column
+        |> Map.get("blocks", [])
+        |> Enum.map(&Map.put(&1, "id", Ash.UUID.generate()))
+
+      Map.put(column, "blocks", blocks)
+    end)
+  end
+
+  defp dup_children(_), do: nil
 
   # `socket.assigns.form` is a Phoenix.HTML.Form wrapping the AshPhoenix.Form
   # (nested forms live on the latter); unwrap so we can read the block sub-forms.
@@ -2964,7 +3015,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <div
                     id={"block-#{bf.index}"}
                     data-sort-id={bf.index}
-                    class="rounded border border-base-content/15 p-3"
+                    class="group rounded border border-base-content/15 p-3"
                   >
                     <%!-- Carries the block's stable id into save/validate params so
                           it can be addressed by identity (columns render their own). --%>
@@ -2974,54 +3025,63 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       name={bf[:id].name}
                       value={bf[:id].value}
                     />
+                    <%!-- Block chrome: the type label stays put; the controls
+                          (drag / move / duplicate / delete) fade in on hover, and
+                          on keyboard focus too so they stay reachable (#171). --%>
                     <div class="mb-2 flex items-center justify-between gap-3">
-                      <div class="flex items-center gap-2">
+                      <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
+                        {dsl_label(block_type_string(bf))}
+                      </span>
+                      <div class="flex items-center gap-0.5 text-base-content/60 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
                         <span
                           data-drag-handle
                           aria-label={gettext("Drag to reorder")}
-                          class="cursor-grab text-base-content/70 hover:text-base-content/70"
+                          class="cursor-grab rounded p-1 hover:bg-base-200 hover:text-base-content"
                         >
-                          <.icon name="hero-bars-3" class="size-5" />
+                          <.icon name="hero-bars-3" class="size-4" />
                         </span>
-                        <%!-- Keyboard-accessible reorder, alongside the drag handle (#171). --%>
-                        <div class="flex flex-col">
-                          <button
-                            type="button"
-                            phx-click="move_block"
-                            phx-value-bid={bf[:id].value}
-                            phx-value-dir="up"
-                            disabled={bf.index == 0}
-                            aria-label={gettext("Move block up")}
-                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <.icon name="hero-chevron-up" class="size-4" />
-                          </button>
-                          <button
-                            type="button"
-                            phx-click="move_block"
-                            phx-value-bid={bf[:id].value}
-                            phx-value-dir="down"
-                            disabled={bf.index == blocks_count(@form) - 1}
-                            aria-label={gettext("Move block down")}
-                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <.icon name="hero-chevron-down" class="size-4" />
-                          </button>
-                        </div>
-                        <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
-                          {dsl_label(block_type_string(bf))}
-                        </span>
+                        <button
+                          type="button"
+                          phx-click="move_block"
+                          phx-value-bid={bf[:id].value}
+                          phx-value-dir="up"
+                          disabled={bf.index == 0}
+                          aria-label={gettext("Move block up")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <.icon name="hero-chevron-up" class="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="move_block"
+                          phx-value-bid={bf[:id].value}
+                          phx-value-dir="down"
+                          disabled={bf.index == blocks_count(@form) - 1}
+                          aria-label={gettext("Move block down")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <.icon name="hero-chevron-down" class="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="duplicate_block"
+                          phx-value-bid={bf[:id].value}
+                          aria-label={gettext("Duplicate block")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content"
+                        >
+                          <.icon name="hero-document-duplicate" class="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="remove_block"
+                          phx-value-bid={bf[:id].value}
+                          data-confirm={gettext("Delete this block? This can't be undone.")}
+                          aria-label={gettext("Remove block")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-error"
+                        >
+                          <.icon name="hero-trash" class="size-4" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        phx-click="remove_block"
-                        phx-value-bid={bf[:id].value}
-                        data-confirm={gettext("Delete this block? This can't be undone.")}
-                        aria-label={gettext("Remove block")}
-                        class="text-base-content/70 hover:text-error"
-                      >
-                        <.icon name="hero-trash" class="size-5" />
-                      </button>
                     </div>
                     <%!-- The collab lock UI (ring + "who's editing" badge) lives on
                           this non-ignored wrapper so it can update, while the inner
