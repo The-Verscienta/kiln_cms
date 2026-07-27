@@ -606,14 +606,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # A columns block carries a socket-managed child tree, so it's inserted with a
   # stable id (seeded into `block_children`) and a default two-column layout.
-  def handle_event("add_block", %{"type" => "columns"}, socket) do
+  # `after` (a block id, "start", or absent) positions the new block (B2).
+  def handle_event("add_block", %{"type" => "columns"} = p, socket) do
     id = Ash.UUID.generate()
     cols = [%{"blocks" => []}, %{"blocks" => []}]
 
     form =
-      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+      socket.assigns.form
+      |> AshPhoenix.Form.add_form(socket.assigns.form.name <> "[blocks]",
         params: %{"_union_type" => "columns", "id" => id, "columns" => cols}
       )
+      |> position_new_block(p["after"])
 
     {:noreply,
      socket
@@ -623,14 +626,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> mark_dirty()}
   end
 
-  def handle_event("add_block", %{"type" => type}, socket) do
+  def handle_event("add_block", %{"type" => type} = p, socket) do
     # Every block carries a stable id from the moment it's added, so the picker,
     # delete, and keyboard-move can address it by identity rather than by a
-    # position that a concurrent reorder can invalidate (audit T5.1/T5.2).
+    # position that a concurrent reorder can invalidate (audit T5.1/T5.2). The
+    # optional `after` anchor lets it land inline rather than only at the end (B2).
     form =
-      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+      socket.assigns.form
+      |> AshPhoenix.Form.add_form(socket.assigns.form.name <> "[blocks]",
         params: %{"_union_type" => type, "id" => Ash.UUID.generate()}
       )
+      |> position_new_block(p["after"])
 
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
   end
@@ -1184,6 +1190,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Map.get(:blocks, [])
     |> List.wrap()
     |> Enum.find_index(fn sub -> to_string(AshPhoenix.Form.value(sub, :id)) == bid end)
+  end
+
+  # Move a just-appended block (currently last) to the requested insert position
+  # (B2 inline insertion): `nil`/absent leaves it at the end (append), "start"
+  # moves it to the top, and a block id moves it directly after that block. The
+  # anchor id is resolved against the live forms, so insertion stays correct even
+  # if the list was reordered since the "+" was rendered.
+  defp position_new_block(form, anchor) when anchor in [nil, ""], do: form
+  defp position_new_block(form, "start"), do: reposition_last(form, 0)
+
+  defp position_new_block(form, anchor) do
+    case block_index_by_id(form, anchor) do
+      nil -> form
+      i -> reposition_last(form, i + 1)
+    end
+  end
+
+  # Reorder the block sub-forms so the last one (the newly added block) sits at
+  # `target`, preserving the order of the others.
+  defp reposition_last(form, target) do
+    last = blocks_count(form) - 1
+    target = target |> max(0) |> min(last)
+    existing = if last > 0, do: Enum.map(0..(last - 1), &to_string/1), else: []
+    order = List.insert_at(existing, target, to_string(last))
+    AshPhoenix.Form.sort_forms(form, [:blocks], order)
   end
 
   # `socket.assigns.form` is a Phoenix.HTML.Form wrapping the AshPhoenix.Form
@@ -1944,26 +1975,62 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp pick_block_id(_), do: nil
 
   attr :block_types, :list, required: true
+  attr :id, :string, default: "block-inserter"
+
+  attr :anchor, :string,
+    default: nil,
+    doc: "insert anchor: a block id, \"start\", or nil (append)"
+
+  attr :compact, :boolean, default: false, doc: "slim inline \"+\" trigger vs the full button"
+  attr :global_key, :boolean, default: false, doc: "this instance owns the global \"/\" shortcut"
 
   # Notion-style slash-command block inserter (#29). The trigger button (or the
   # `/` shortcut, handled by the `BlockInserter` JS hook) opens a filterable,
   # keyboard-navigable menu listing every registered block type. Each option is a
   # real `add_block` button, so it works without JS and is directly testable;
   # the hook layers on filtering, arrow-key navigation, and ARIA wiring.
+  #
+  # Rendered once as the main "Add block" trigger (append) and again inline in
+  # each block card as a compact "+" (B2 inline insertion). `after` rides along on
+  # every option so the same menu can append or insert at a gap; only the main
+  # instance owns the global "/" shortcut (`global_key`) so inline copies don't
+  # all fire at once.
   defp block_inserter(assigns) do
     ~H"""
-    <div id="block-inserter" phx-hook="BlockInserter" class="relative">
+    <div
+      id={@id}
+      phx-hook="BlockInserter"
+      data-inserter-global={@global_key && "true"}
+      class="relative"
+    >
       <button
+        :if={!@compact}
         type="button"
         data-inserter-trigger
         aria-haspopup="listbox"
         aria-expanded="false"
-        aria-controls="block-inserter-list"
+        aria-controls={"#{@id}-list"}
         class="inline-flex items-center gap-1.5 rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
       >
         <.icon name="hero-plus" class="size-4" />
         {gettext("Add block")}
         <kbd class="ml-1 rounded border border-base-content/20 px-1.5 text-xs opacity-60">/</kbd>
+      </button>
+      <button
+        :if={@compact}
+        type="button"
+        data-inserter-trigger
+        aria-haspopup="listbox"
+        aria-expanded="false"
+        aria-controls={"#{@id}-list"}
+        aria-label={gettext("Insert block here")}
+        class="group/ins flex w-full items-center gap-2 py-1 text-base-content/30 hover:text-base-content/70"
+      >
+        <span class="h-px flex-1 bg-current opacity-30 transition group-hover/ins:opacity-60"></span>
+        <span class="inline-flex items-center gap-1 text-xs">
+          <.icon name="hero-plus-circle" class="size-4" />{gettext("Insert")}
+        </span>
+        <span class="h-px flex-1 bg-current opacity-30 transition group-hover/ins:opacity-60"></span>
       </button>
 
       <div
@@ -1978,14 +2045,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
             role="combobox"
             aria-autocomplete="list"
             aria-expanded="true"
-            aria-controls="block-inserter-list"
+            aria-controls={"#{@id}-list"}
             placeholder={gettext("Filter blocks…")}
             class="w-full rounded border border-base-content/20 bg-base-100 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
 
         <ul
-          id="block-inserter-list"
+          id={"#{@id}-list"}
+          data-inserter-list
           role="listbox"
           aria-label={gettext("Insert block")}
           class="max-h-72 overflow-y-auto"
@@ -1993,12 +2061,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           <li :for={bt <- @block_types} role="presentation" data-inserter-option data-label={bt.label}>
             <button
               type="button"
-              id={"block-inserter-item-#{bt.type}"}
+              id={"#{@id}-item-#{bt.type}"}
               role="option"
               aria-selected="false"
               tabindex="-1"
               phx-click="add_block"
               phx-value-type={bt.type}
+              phx-value-after={@anchor}
               data-inserter-item
               class="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-200 aria-selected:bg-base-200"
             >
@@ -2809,6 +2878,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
               <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
 
+              <%!-- Insert a block before the first one (B2). --%>
+              <.block_inserter
+                :if={blocks_count(@form) > 0}
+                id="insert-start"
+                block_types={@block_types}
+                anchor="start"
+                compact
+              />
+
               <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
                 <.inputs_for :let={bf} field={@form[:blocks]}>
                   <div
@@ -2961,6 +3039,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       />
                       <.geo_items_editor :if={block_type_string(bf) in ["faq", "how_to"]} bf={bf} />
                     </div>
+                    <%!-- Inline "+" to insert a block right after this one (B2). --%>
+                    <.block_inserter
+                      id={"insert-after-#{bf[:id].value}"}
+                      block_types={@block_types}
+                      anchor={bf[:id].value}
+                      compact
+                    />
                   </div>
                 </.inputs_for>
               </div>
@@ -2977,7 +3062,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 </p>
               </div>
 
-              <.block_inserter block_types={@block_types} />
+              <.block_inserter block_types={@block_types} global_key={true} />
             </div>
           </div>
 

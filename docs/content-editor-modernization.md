@@ -96,8 +96,20 @@ perceived-modernity-per-effort. Do this first — it's the frame everything else
 > the **full block set** from the live sub-forms (fixing a latent bug where picking
 > into one of several blocks on a pristine form dropped the siblings). Also shipped
 > the block-canvas empty state. Tests: editor_live_test "stable block id addressing"
-> + "block id guards". Remaining B slices: inline "+" insertion, unified slash menu,
-> hover block toolbar + duplicate, drag between containers.
+> + "block id guards".
+>
+> **B2 (inline insertion) DONE.** `add_block` takes an optional `after` anchor (a
+> block id or `"start"`); `position_new_block`/`reposition_last` move the appended
+> block into the right gap via `sort_forms`, resolving the anchor id against the
+> live forms so insertion is reorder-safe. The `block_inserter` component is now
+> position-aware (`anchor`, `compact`, `id`, `global_key`): a compact inline "+"
+> renders at the bottom of every block card (anchor = that block's id) plus a
+> top "insert at start"; the main bottom inserter still appends and owns the global
+> `/` shortcut. Hook guards the `/` listener to the `data-inserter-global` instance
+> so inline copies don't all fire at once, and uses a scoped `data-inserter-list`.
+> Tests: "inline block insertion (modernization B2)". Remaining B slices: unified
+> slash menu (block inserter vs in-prose TipTap), hover block toolbar + duplicate,
+> drag between containers.
 
 - **Inline "+" insertion points** between every block and at the ends, so authors add
   where the cursor is, not only at the tail.
