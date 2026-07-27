@@ -186,13 +186,30 @@
 
   function openEditor(p) {
     if (!config.host) return;
-    var url =
-      config.host.replace(/\/$/, "") +
-      "/editor/site/" +
-      encodeURIComponent(p.type) +
-      "/" +
-      encodeURIComponent(p.slug);
-    if (p.block) url += "?focus=" + encodeURIComponent(p.block);
+    var base = config.host.replace(/\/$/, "");
+    var url;
+    if (!p.block && p.field && p.field !== "title" && p.id) {
+      // A non-block field (custom_fields / document scalar): the blocks-centric
+      // in-context editor has nothing to focus for these, so deep-link the
+      // structured editor's field-level ?focus= instead (#442). `title` stays
+      // on the in-context editor, which edits it inline natively.
+      url =
+        base +
+        "/editor/content/" +
+        encodeURIComponent(p.type) +
+        "/" +
+        encodeURIComponent(p.id) +
+        "?focus=" +
+        encodeURIComponent(p.field);
+    } else {
+      url =
+        base +
+        "/editor/site/" +
+        encodeURIComponent(p.type) +
+        "/" +
+        encodeURIComponent(p.slug);
+      if (p.block) url += "?focus=" + encodeURIComponent(p.block);
+    }
     // In a Kiln Presentation-style parent frame, hand off via postMessage;
     // otherwise open the editor directly. Target the Kiln host origin (the
     // console that frames us) so the message can't be read by an arbitrary

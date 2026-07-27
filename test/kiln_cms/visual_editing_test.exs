@@ -171,5 +171,52 @@ defmodule KilnCMS.VisualEditingTest do
       assert Stega.decode(s2["text"])["block"] == "r1"
       assert Stega.clean(s2["text"]) == "world"
     end
+
+    test "stega-encodes plain-string custom fields, skipping parsed values" do
+      json = %{
+        "type" => "herb",
+        "id" => "doc-4",
+        "title" => "Ren Shen",
+        "slug" => "ren-shen",
+        "blocks" => [],
+        "custom_fields" => %{
+          "scientific_name" => "Panax ginseng",
+          "dosages" => ~s([{"form":"decoction","amount":"3-9g"}]),
+          "profile" => ~s({"taste":"sweet"}),
+          "monograph_url" => "https://example.com/ren-shen.pdf",
+          "empty" => "",
+          "rating" => 5
+        }
+      }
+
+      out = VisualEditing.annotate(json)
+      cf = out["custom_fields"]
+
+      # A plain string is encoded with the doc address + field name, no block —
+      # the bridge deep-links these to the structured editor's ?focus= (#442).
+      assert Stega.decode(cf["scientific_name"]) ==
+               %{
+                 "type" => "herb",
+                 "id" => "doc-4",
+                 "slug" => "ren-shen",
+                 "field" => "scientific_name"
+               }
+
+      assert Stega.clean(cf["scientific_name"]) == "Panax ginseng"
+
+      # Values consumers parse are untouched: JSON-encoded structures and URLs
+      # (an invisible tail would corrupt JSON.parse or an src/href).
+      assert cf["dosages"] == ~s([{"form":"decoction","amount":"3-9g"}])
+      assert cf["profile"] == ~s({"taste":"sweet"})
+      assert cf["monograph_url"] == "https://example.com/ren-shen.pdf"
+      # Blank and non-string values pass through.
+      assert cf["empty"] == ""
+      assert cf["rating"] == 5
+    end
+
+    test "a document without custom_fields is unchanged by the custom-fields pass" do
+      json = %{"type" => "post", "id" => "doc-5", "title" => "T", "blocks" => []}
+      refute Map.has_key?(VisualEditing.annotate(json), "custom_fields")
+    end
   end
 end

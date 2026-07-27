@@ -90,6 +90,32 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
     assert get_resp_header(conn, "cache-control") == ["no-store"]
   end
 
+  test "custom fields ride the annotated preview, stega-encoded field-level", %{conn: conn} do
+    admin = user(:admin)
+
+    CMS.create_field_definition!(
+      %{content_type: :post, name: "byline", label: "Byline", field_type: :string},
+      actor: admin
+    )
+
+    post =
+      CMS.create_post!(
+        %{title: "CF post", slug: slug(), custom_fields: %{"byline" => "By A. Author"}},
+        actor: admin
+      )
+
+    conn = get_ve(conn, "post", post.slug, bearer: key(admin, :read))
+
+    assert %{"custom_fields" => %{"byline" => byline}} = json_response(conn, 200)
+
+    # The value cleans back to the visible text and decodes to a block-less
+    # address — the bridge routes it to /editor/content/:type/:id?focus=byline.
+    assert Stega.clean(byline) == "By A. Author"
+
+    assert Stega.decode(byline) ==
+             %{"type" => "post", "id" => post.id, "slug" => post.slug, "field" => "byline"}
+  end
+
   test "an anonymous caller cannot see a draft (404), only published", %{conn: conn} do
     admin = user(:admin)
     post = draft_post(admin)
