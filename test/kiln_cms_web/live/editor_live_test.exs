@@ -664,42 +664,119 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  # Audit theme 4: client-supplied index params must never crash the LiveView.
-  # A garbled or out-of-range "index" used to hit String.to_integer/Enum.at
-  # unguarded; now every such event is a no-op that keeps the session alive.
-  describe "block index guards (audit theme 4)" do
-    test "a non-numeric move_block index is a no-op, not a crash", %{conn: conn} do
+  # Audit theme 4 + modernization B1: block events address blocks by stable id.
+  # A garbled or unknown id must be a no-op that keeps the session alive, never a
+  # crash and never a wrong-target mutation.
+  describe "block id guards (audit theme 4 / modernization B1)" do
+    test "an unknown move_block id is a no-op, not a crash", %{conn: conn} do
       page = draft_page(%{title: "Guarded"})
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Garbage index — the LV survives and stays rendered.
-      render_hook(lv, "move_block", %{"index" => "nope", "dir" => "up"})
+      # Unknown / garbled id — the LV survives and stays rendered.
+      render_hook(lv, "move_block", %{"bid" => "no-such-id", "dir" => "up"})
+      render_hook(lv, "move_block", %{"bid" => "", "dir" => "down"})
       assert render(lv) =~ "Guarded"
     end
 
-    test "an out-of-range move_block index does not swap the wrong blocks", %{conn: conn} do
-      page = draft_page(%{title: "Bounds"})
+    test "an unknown remove_block id is a no-op, not a crash", %{conn: conn} do
+      page =
+        draft_page(%{title: "Bounds", blocks: [%{type: :heading, content: "Keep", order: 0}]})
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # A wildly out-of-range and a negative index both no-op rather than
-      # resolving to the last element via Enum.at/-1.
-      render_hook(lv, "move_block", %{"index" => "9999", "dir" => "down"})
-      render_hook(lv, "move_block", %{"index" => "-1", "dir" => "up"})
+      render_hook(lv, "remove_block", %{"bid" => "no-such-id"})
+      # The real block is untouched.
       assert render(lv) =~ "Bounds"
+      assert [%{content: "Keep"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
-    test "a non-numeric open_picker index is a no-op, not a crash", %{conn: conn} do
+    test "an unknown open_picker id is a no-op, not a crash", %{conn: conn} do
       page = draft_page(%{title: "Picker"})
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      render_hook(lv, "open_picker", %{"index" => "boom"})
+      render_hook(lv, "open_picker", %{"bid" => ""})
       assert render(lv) =~ "Picker"
+    end
+  end
+
+  # Modernization B1: blocks are addressed by their stable id, resolved to a live
+  # position at action time — so a concurrent reorder can't redirect a delete or
+  # an image pick to the wrong block (closes reliability residual T5.1/T5.2).
+  describe "stable block id addressing (modernization B1)" do
+    test "deleting by id removes the right block even after a reorder", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "Alpha", order: 0},
+            %{type: :heading, content: "Bravo", order: 1}
+          ]
+        })
+
+      [alpha, _bravo] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A co-editor reorders (Bravo first now) — Alpha slides to position 1, but
+      # its delete button still carries Alpha's stable id.
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      render_hook(lv, "remove_block", %{"bid" => alpha.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      # Positional addressing would have deleted whatever is at index 0 (Bravo);
+      # id addressing deletes Alpha, as intended.
+      assert [%{content: "Bravo"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
+
+    test "picking an image by id fills the right block even after a reorder", %{conn: conn} do
+      media = Ash.Seed.seed!(MediaItem, %{filename: "pic.jpg", url: "/uploads/pic"})
+
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :image, content: "", order: 0},
+            %{type: :image, content: "", order: 1}
+          ]
+        })
+
+      [img_a, img_b] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A co-editor reorders (img_a slides to position 1), then fill img_a by its
+      # stable id — positional addressing would have hit img_b.
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      render_hook(lv, "open_picker", %{"bid" => img_a.id})
+
+      render_hook(lv, "pick_image", %{
+        "index" => "block",
+        "bid" => img_a.id,
+        "id" => media.id,
+        "url" => "/uploads/pic"
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      # The image landed on img_a (by id); both blocks keep their identities and
+      # img_b is untouched — the full-set rebuild carries every block through.
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.find(blocks, &(&1.id == img_a.id)).content == "/uploads/pic"
+      assert Enum.find(blocks, &(&1.id == img_b.id)).content in [nil, ""]
+    end
+
+    test "a page with no blocks shows the empty state", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "No blocks yet"
     end
   end
 
@@ -911,8 +988,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Open the picker for block 0, then pick the seeded image.
-      lv |> element("button[phx-click='open_picker'][phx-value-index='0']") |> render_click()
+      # Open the picker for the single image block (addressed by its stable id),
+      # then pick the seeded image.
+      lv |> element("button[phx-click='open_picker']") |> render_click()
 
       lv
       |> element("button[phx-click='pick_image'][phx-value-id='#{media.id}']")
@@ -933,7 +1011,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
       picker =
-        lv |> element("button[phx-click='open_picker'][phx-value-index='0']") |> render_click()
+        lv |> element("button[phx-click='open_picker']") |> render_click()
 
       assert picker =~ ~s(role="dialog")
       assert picker =~ ~s(aria-modal="true")
@@ -1700,13 +1778,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Move-up on the first block is disabled; move-down is available.
-      assert html =~
-               ~r/phx-value-index="0"[^>]*phx-value-dir="up"[^>]*disabled|disabled[^>]*phx-value-index="0"[^>]*phx-value-dir="up"/
+      # Move-up on the first block is disabled; move-down is available. Blocks are
+      # addressed by their stable id now, so target the first block's card by its
+      # stable DOM id rather than a positional phx-value.
+      assert html =~ ~r/<button[^>]*phx-value-dir="up"[^>]*disabled/
 
       moved =
         lv
-        |> element(~s(button[phx-click="move_block"][phx-value-index="0"][phx-value-dir="down"]))
+        |> element(~s(#block-0 button[phx-click="move_block"][phx-value-dir="down"]))
         |> render_click()
 
       # The new position is announced to screen readers.

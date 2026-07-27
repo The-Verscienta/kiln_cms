@@ -86,6 +86,19 @@ Purely a re-layout + component extraction. No state-model changes. Highest
 perceived-modernity-per-effort. Do this first — it's the frame everything else sits in.
 
 ### Theme B — Block canvas & insertion *(Storyblok/Notion-class)* · **L · medium risk**
+
+> **Status: B1 (stable-id addressing) DONE.** Every block now carries a stable
+> `uuid_primary_key` from the moment it's added (a hidden id input round-trips it),
+> and the media picker, delete, and keyboard-move address blocks **by id, resolved
+> to a live position at action time** rather than a position captured at render —
+> so a concurrent reorder can no longer misdirect a delete or an image pick. This
+> closes the reliability audit's **T5.1/T5.2** residual. The picker also now rebuilds
+> the **full block set** from the live sub-forms (fixing a latent bug where picking
+> into one of several blocks on a pristine form dropped the siblings). Also shipped
+> the block-canvas empty state. Tests: editor_live_test "stable block id addressing"
+> + "block id guards". Remaining B slices: inline "+" insertion, unified slash menu,
+> hover block toolbar + duplicate, drag between containers.
+
 - **Inline "+" insertion points** between every block and at the ends, so authors add
   where the cursor is, not only at the tail.
 - **Unify the two `/` menus** — one slash affordance: `/` in an empty block position
