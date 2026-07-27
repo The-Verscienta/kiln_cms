@@ -383,13 +383,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> Enum.filter(&match?(%KilnCMS.Blocks.Columns{}, &1))
       |> Map.new(fn %KilnCMS.Blocks.Columns{} = c -> {c.id, normalize_columns(c.columns)} end)
 
+    # Rich-text bodies (Portable Text) held in socket state, keyed by block id
+    # (or "idx-N" for a not-yet-saved block) and injected into the form params
+    # on every validate/save/autosave — see inject_rich_bodies/2. Seeded from
+    # the stored blocks on every record (re)load: the rendered form only
+    # round-trips `legacy_html`, so without the seed a save that never touched
+    # a PT-backed block would replace its `body` with the empty default. The
+    # TipTap hook's pushes then overwrite the seeded entry as the author types.
+    rich_bodies =
+      record.blocks
+      |> KilnCMS.CMS.TypedBlocks.to_typed()
+      |> Enum.filter(&match?(%KilnCMS.Blocks.RichText{body: [_ | _]}, &1))
+      |> Map.new(fn %KilnCMS.Blocks.RichText{} = b -> {b.id, b.body} end)
+
     socket
     |> assign(:block_children, children)
-    # Pending rich-text bodies (Portable Text) pushed by the TipTap hook, keyed
-    # by block id (or "idx-N" for a not-yet-saved block). Injected into the
-    # form params on every validate/save — see inject_rich_bodies/2. Reset on
-    # every record (re)load: the stored body is now the source of truth.
-    |> assign(:rich_bodies, %{})
+    |> assign(:rich_bodies, rich_bodies)
   end
 
   # Per-locale coverage for the Translations panel (only rendered when the
@@ -1116,11 +1125,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
         forms: [auto?: true]
       )
 
+    # Form.params/1 only round-trips fields the rendered form knows (_touched),
+    # so the socket-held state — columns children and pushed rich-text bodies —
+    # must be re-injected here exactly as the explicit Save does; without this
+    # an autosave persisted rich_text blocks with `body: []`/`legacy_html: ""`
+    # and silently wiped the prose.
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(socket.assigns.rich_bodies)
+
     result =
       EditorTelemetry.span(:autosave, %{kind: socket.assigns.kind}, fn ->
-        AshPhoenix.Form.submit(autosave_form,
-          params: AshPhoenix.Form.params(socket.assigns.form)
-        )
+        AshPhoenix.Form.submit(autosave_form, params: params)
       end)
 
     case result do
