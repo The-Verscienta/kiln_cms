@@ -99,6 +99,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:save_state, :saved)
          # Set when an optimistic-lock conflict blocks saving until reload.
          |> assign(:conflict, false)
+         # Slug auto-derives from the title while it's still a placeholder (a
+         # freshly-created "untitled-N" or blank); a manual slug edit locks it.
+         |> assign(:slug_auto, slug_auto_default(record.slug))
          # Bumped on server-driven form replacement (conflict reload, version
          # restore) so rich-text blocks remount and reload TipTap from the new
          # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
@@ -485,6 +488,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @impl true
   def handle_event("validate", %{"form" => params}, socket) do
+    {params, socket} = apply_autoslug(params, socket)
     socket = revalidate(socket, params)
     broadcast_preview(socket)
     {:noreply, mark_dirty(socket)}
@@ -499,6 +503,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Unknown/garbled tab value — ignore it rather than crash the editor.
   def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
+
+  # Re-enable "slug follows title": derive the slug from the current title now and
+  # keep it in sync on subsequent edits until the slug is hand-edited again.
+  def handle_event("toggle_slug_auto", _params, socket) do
+    title = to_string(AshPhoenix.Form.value(socket.assigns.form, :title) || "")
+    derived = KilnCMS.Slugs.slugify(title)
+
+    socket = assign(socket, :slug_auto, true)
+
+    socket =
+      if derived == "" do
+        socket
+      else
+        params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put("slug", derived)
+        socket |> revalidate(params) |> mark_dirty()
+      end
+
+    {:noreply, socket}
+  end
 
   def handle_event("field_focus", %{"field" => field}, socket) do
     broadcast_cursor(socket, field)
@@ -1396,6 +1419,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp revalidate(socket, params) do
     params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
     assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+  end
+
+  # "Slug follows title" is on for fresh content (blank slug, or the editor-list's
+  # `untitled-N` placeholder) and off once a real slug exists — changing an
+  # established slug would break its URLs.
+  defp slug_auto_default(slug) do
+    slug = to_string(slug)
+    slug == "" or Regex.match?(~r/^untitled-\d+$/, slug)
+  end
+
+  # While in "auto" mode, keep the slug derived from the title on every validate.
+  # If the incoming slug differs from the one the form currently holds, the user
+  # hand-edited the slug field itself, so we lock it (auto off) and leave it alone.
+  defp apply_autoslug(params, %{assigns: %{slug_auto: false}} = socket), do: {params, socket}
+
+  defp apply_autoslug(params, socket) do
+    current = to_string(AshPhoenix.Form.value(socket.assigns.form, :slug) || "")
+    incoming = to_string(params["slug"] || "")
+
+    if incoming != current do
+      # A manual slug edit takes over — stop following the title.
+      {params, assign(socket, :slug_auto, false)}
+    else
+      # Title-only edit (slug unchanged by the user): re-derive from the title,
+      # but never clobber a non-empty slug with an empty one (blank title).
+      case KilnCMS.Slugs.slugify(to_string(params["title"] || "")) do
+        "" -> {params, socket}
+        derived -> {Map.put(params, "slug", derived), socket}
+      end
+    end
   end
 
   defp broadcast_preview_and_refresh(socket) do
@@ -2857,6 +2910,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   readonly={field_locked?(@locked_fields, "slug")}
                   {field_attrs("slug")}
                 />
+                <%!-- The slug follows the title until it's hand-edited; the badge
+                      says so, and once locked a button re-syncs it on demand. --%>
+                <span
+                  :if={@slug_auto}
+                  class="pointer-events-none absolute right-0 top-0 inline-flex items-center gap-1 text-xs text-base-content/50"
+                  title={gettext("The slug updates automatically as you type the title.")}
+                >
+                  <.icon name="hero-link" class="size-3" />{gettext("Auto from title")}
+                </span>
+                <button
+                  :if={!@slug_auto}
+                  type="button"
+                  phx-click="toggle_slug_auto"
+                  class="absolute right-0 top-0 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <.icon name="hero-arrow-path" class="size-3" />{gettext("Sync from title")}
+                </button>
                 <.field_cursors field="slug" cursors={@cursors} />
               </div>
             </div>

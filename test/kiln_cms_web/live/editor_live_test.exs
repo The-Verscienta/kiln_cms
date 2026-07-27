@@ -848,6 +848,84 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # The slug follows the title while it's still a placeholder ("untitled-N" from
+  # the new-content flow, or blank); a hand-edit locks it, and an established slug
+  # is never auto-changed (that would break its URLs).
+  describe "slug auto-follows the title" do
+    test "typing the title updates a placeholder slug, and the badge says so",
+         %{conn: conn} do
+      page = draft_page(%{title: "Draft", slug: "untitled-1"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "Auto from title"
+
+      # phx-change carries the whole form (title + the unchanged slug value).
+      changed =
+        lv
+        |> form("#page-editor", form: %{title: "My New Title", slug: "untitled-1"})
+        |> render_change()
+
+      assert changed =~ ~s(value="my-new-title")
+    end
+
+    test "hand-editing the slug locks it; later title edits leave it alone",
+         %{conn: conn} do
+      page = draft_page(%{title: "Draft", slug: "untitled-1"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      locked =
+        lv
+        |> form("#page-editor", form: %{title: "Draft", slug: "chosen-slug"})
+        |> render_change()
+
+      # Auto is off now — the badge flips to a manual re-sync affordance.
+      assert locked =~ "Sync from title"
+      assert locked =~ ~s(value="chosen-slug")
+
+      after_title =
+        lv
+        |> form("#page-editor", form: %{title: "Totally Different", slug: "chosen-slug"})
+        |> render_change()
+
+      assert after_title =~ ~s(value="chosen-slug")
+    end
+
+    test "an established slug is not in auto mode and never auto-changes",
+         %{conn: conn} do
+      page = draft_page(%{title: "Real", slug: "real-post"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      refute html =~ "Auto from title"
+
+      changed =
+        lv
+        |> form("#page-editor", form: %{title: "Renamed Title", slug: "real-post"})
+        |> render_change()
+
+      assert changed =~ ~s(value="real-post")
+    end
+
+    test "'Sync from title' re-derives the slug on demand", %{conn: conn} do
+      page = draft_page(%{title: "Real", slug: "real-post"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv
+      |> form("#page-editor", form: %{title: "Fresh Title", slug: "real-post"})
+      |> render_change()
+
+      synced = lv |> element("button[phx-click='toggle_slug_auto']") |> render_click()
+      assert synced =~ ~s(value="fresh-title")
+    end
+  end
+
   describe "/editor/trash" do
     test "editors are redirected away", %{conn: conn} do
       assert {:error,
