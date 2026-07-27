@@ -1510,6 +1510,23 @@ defmodule KilnCMSWeb.EditorLiveTest do
                blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
+    # Modernization B3: the in-prose "/" menu is now one coherent command that can
+    # both format text and insert a block below. The block-insert path needs the
+    # editor host to carry the block's stable id (so the JS can anchor add_block),
+    # and the hint reflects the single "/". (The menu behaviour itself is JS and
+    # browser-verified; here we assert the server-rendered wiring it depends on.)
+    test "the rich_text host carries its block id and the unified slash hint",
+         %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+      [block] = blocks_legacy(page)
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(data-block-id="#{block.id}")
+      assert html =~ "Type / to format this text or insert a block below."
+    end
+
     test "the live preview reflects block content and updates on change", %{conn: conn} do
       page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1824,8 +1841,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(data-editor-label="Rich text editor")
     end
 
-    # #150: the two slash systems have distinct hints (block inserter vs in-text).
-    test "distinguishes the block inserter from the rich-text slash menu", %{conn: conn} do
+    # #150 / B3: one coherent "/" — the in-prose hint reflects that it both formats
+    # text and inserts a block below, alongside the canvas "Add block" inserter.
+    test "the rich-text slash hint reflects the unified / command", %{conn: conn} do
       page =
         draft_page(%{
           title: "SlashPage",
@@ -1835,7 +1853,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
-      assert html =~ "Type / for text formatting within this block."
+      assert html =~ "Type / to format this text or insert a block below."
       assert html =~ "Add block"
     end
 
