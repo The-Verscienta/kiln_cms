@@ -231,7 +231,14 @@ defmodule KilnCMS.CMS.TypedBlocks do
         struct(mod, typed_struct_kv(mod, map))
 
       :error ->
-        %Custom{_type: "custom", content: get(map, :content), data: get(map, :data) || %{}}
+        # Carry the id so an unknown/plugin block keeps its identity across a
+        # typed round-trip (known blocks already keep it via typed_struct_kv).
+        %Custom{
+          _type: "custom",
+          id: get(map, :id),
+          content: get(map, :content),
+          data: get(map, :data) || %{}
+        }
     end
   end
 

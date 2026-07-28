@@ -692,6 +692,27 @@ defmodule KilnCMSWeb.EditorLiveTest do
       render_hook(lv, "open_picker", %{"bid" => ""})
       assert render(lv) =~ "Picker"
     end
+
+    test "block events with no bid at all hit the fallback clauses, not a crash",
+         %{conn: conn} do
+      page =
+        draft_page(%{title: "NoBid", blocks: [%{type: :heading, content: "Only", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Entirely missing params (a legacy block that reached the editor without a
+      # stable id) — the catch-all no-op clauses keep the session alive.
+      render_hook(lv, "move_block", %{})
+      render_hook(lv, "remove_block", %{})
+      render_hook(lv, "duplicate_block", %{})
+      # And an unknown-id duplicate is a no-op too.
+      render_hook(lv, "duplicate_block", %{"bid" => Ash.UUID.generate()})
+
+      assert render(lv) =~ "Only"
+      lv |> form("#page-editor") |> render_submit()
+      assert [%{content: "Only"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
   end
 
   # Modernization B1: blocks are addressed by their stable id, resolved to a live

@@ -448,6 +448,7 @@ defmodule KilnCMSWeb.CoreComponents do
             name={@name}
             value="true"
             checked={@checked}
+            required={@required}
             aria-invalid={@errors != [] && "true"}
             aria-describedby={@errors != [] && error_id(@id)}
             class={@class || "size-4 rounded border border-base-content/30 accent-primary"}
@@ -462,80 +463,65 @@ defmodule KilnCMSWeb.CoreComponents do
 
   def input(%{type: "select"} = assigns) do
     ~H"""
-    <div class="mb-2">
-      <label for={@id}>
-        <.field_label label={@label} required={@required} />
-        <select
-          id={@id}
-          name={@name}
-          required={@required}
-          aria-invalid={@errors != [] && "true"}
-          aria-describedby={@errors != [] && error_id(@id)}
-          class={[
-            @class || input_base() <> " cursor-pointer",
-            @errors != [] && (@error_class || input_error_class())
-          ]}
-          multiple={@multiple}
-          {@rest}
-        >
-          <option :if={@prompt} value="">{@prompt}</option>
-          {Phoenix.HTML.Form.options_for_select(@options, @value)}
-        </select>
-      </label>
-      <.field_errors id={error_id(@id)} errors={@errors} />
-      <.field_hint hint={@hint} />
-    </div>
+    <.field_wrapper id={@id} label={@label} required={@required} hint={@hint} errors={@errors}>
+      <select
+        id={@id}
+        name={@name}
+        required={@required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && error_id(@id)}
+        class={[
+          @class || input_base() <> " cursor-pointer",
+          @errors != [] && (@error_class || input_error_class())
+        ]}
+        multiple={@multiple}
+        {@rest}
+      >
+        <option :if={@prompt} value="">{@prompt}</option>
+        {Phoenix.HTML.Form.options_for_select(@options, @value)}
+      </select>
+    </.field_wrapper>
     """
   end
 
   def input(%{type: "textarea"} = assigns) do
     ~H"""
-    <div class="mb-2">
-      <label for={@id}>
-        <.field_label label={@label} required={@required} />
-        <textarea
-          id={@id}
-          name={@name}
-          required={@required}
-          aria-invalid={@errors != [] && "true"}
-          aria-describedby={@errors != [] && error_id(@id)}
-          class={[
-            @class || input_base() <> " min-h-24",
-            @errors != [] && (@error_class || input_error_class())
-          ]}
-          {@rest}
-        >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
-      </label>
-      <.field_errors id={error_id(@id)} errors={@errors} />
-      <.field_hint hint={@hint} />
-    </div>
+    <.field_wrapper id={@id} label={@label} required={@required} hint={@hint} errors={@errors}>
+      <textarea
+        id={@id}
+        name={@name}
+        required={@required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && error_id(@id)}
+        class={[
+          @class || input_base() <> " min-h-24",
+          @errors != [] && (@error_class || input_error_class())
+        ]}
+        {@rest}
+      >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
+    </.field_wrapper>
     """
   end
 
   # All other inputs text, datetime-local, url, password, etc. are handled here...
   def input(assigns) do
     ~H"""
-    <div class="mb-2">
-      <label for={@id}>
-        <.field_label label={@label} required={@required} />
-        <input
-          type={@type}
-          name={@name}
-          id={@id}
-          value={Phoenix.HTML.Form.normalize_value(@type, @value)}
-          required={@required}
-          aria-invalid={@errors != [] && "true"}
-          aria-describedby={@errors != [] && error_id(@id)}
-          class={[
-            @class || input_base(),
-            @errors != [] && (@error_class || input_error_class())
-          ]}
-          {@rest}
-        />
-      </label>
-      <.field_errors id={error_id(@id)} errors={@errors} />
-      <.field_hint hint={@hint} />
-    </div>
+    <.field_wrapper id={@id} label={@label} required={@required} hint={@hint} errors={@errors}>
+      <input
+        type={@type}
+        name={@name}
+        id={@id}
+        value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+        required={@required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && error_id(@id)}
+        class={[
+          @class || input_base(),
+          @errors != [] && (@error_class || input_error_class())
+        ]}
+        {@rest}
+      />
+    </.field_wrapper>
     """
   end
 
@@ -579,6 +565,29 @@ defmodule KilnCMSWeb.CoreComponents do
   defp field_hint(assigns) do
     ~H"""
     <p :if={@hint} class="mt-1 text-xs text-base-content/60">{@hint}</p>
+    """
+  end
+
+  # The shared label + control + errors + hint scaffold, so the select/textarea/
+  # text `input` clauses don't each re-implement it (and can't drift on the
+  # required-marker / help-text wiring). The control is the inner block.
+  attr :id, :any, default: nil
+  attr :label, :string, default: nil
+  attr :required, :boolean, default: false
+  attr :hint, :string, default: nil
+  attr :errors, :list, default: []
+  slot :inner_block, required: true
+
+  defp field_wrapper(assigns) do
+    ~H"""
+    <div class="mb-2">
+      <label for={@id}>
+        <.field_label label={@label} required={@required} />
+        {render_slot(@inner_block)}
+      </label>
+      <.field_errors id={error_id(@id)} errors={@errors} />
+      <.field_hint hint={@hint} />
+    </div>
     """
   end
 
