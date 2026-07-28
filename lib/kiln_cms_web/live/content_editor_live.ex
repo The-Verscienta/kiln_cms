@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   use KilnCMSWeb, :live_view
 
   import Ash.Expr, only: [expr: 1]
+  import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
@@ -362,32 +363,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Yoast-style advisory hints under the slug field (#456) — pure checks over
-  # the live form state, never blocking a save.
-  defp slug_lints(form) do
-    KilnCMS.Slug.Lint.lint(%{
-      slug: form[:slug].value,
-      title: form[:title].value,
-      seo_title: form[:seo_title].value,
-      seo_keywords: form[:seo_keywords].value
-    })
-  end
-
-  defp lint_message(:slug_long, _pinned?),
-    do: gettext("Long slug — search engines and shared links favor short URLs (≤ 6 words).")
-
-  # A pinned slug won't re-derive on its own, so tell the author how.
-  defp lint_message(:keyphrase_not_in_slug, true),
-    do:
-      gettext(
-        "The slug doesn't contain the focus keyphrase — clear the slug field to re-derive it."
-      )
-
-  defp lint_message(:keyphrase_not_in_slug, false),
-    do: gettext("The slug doesn't contain the focus keyphrase.")
-
-  defp lint_message(:keyphrase_not_in_title, _pinned?),
-    do: gettext("The focus keyphrase doesn't appear in the title or SEO title.")
+  # The slug-scoped slice of the SEO report (#456 is the inline slice of #476) —
+  # the same findings, filtered to the field the slug input is responsible for,
+  # so the hints stay next to the thing they describe.
+  defp slug_report(report),
+    do: %{report | findings: Enum.filter(report.findings, &(&1.field == :slug))}
 
   # Seed the socket-managed children of every stored `columns` block, keyed by the
   # block's stable id (#335). Children live in socket state (not bound form
@@ -436,18 +416,78 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # assign — it's rendered twice (mobile + desktop copies), and recomputing the
   # full sanitize-and-render pipeline in the template ran it on every render,
   # including presence diffs and collaborator cursor events.
+  #
+  # The SEO body stats (#476) ride along: they need the same typed block list,
+  # so deriving it once here serves both and keeps the analysis from ever going
+  # stale against the preview.
+  #
+  # Deriving the stats costs ~40ms on a 500-block document, and this runs on
+  # every keystroke — so it's gated on the body actually having changed. The
+  # guard is a hash rather than an `_target` check at each call site: it can't
+  # go stale when a new block-mutating event is added, and hashing is ~1ms
+  # against the 40ms it saves when the author is only editing scalar fields.
   defp refresh_preview(socket) do
-    # The in-editor preview is a full block render of every block. Only pay for
-    # it while the Preview tab is actually showing; otherwise mark it stale and
-    # let switch_inspector_tab re-render on the way back. (nil = pre-mount, when
-    # the Preview tab is the default, so render then too.)
+    typed =
+      socket.assigns.form
+      |> preview_block_maps()
+      |> KilnCMS.CMS.TypedBlocks.to_typed()
+
+    socket
+    |> refresh_preview_html(typed)
+    |> refresh_body_stats(typed)
+    |> refresh_seo_report()
+  end
+
+  # The in-editor preview is a full block render of every block. Only pay for
+  # it while the Preview tab is actually showing; otherwise mark it stale and
+  # let switch_inspector_tab re-render on the way back. (nil = pre-mount, when
+  # the Preview tab is the default, so render then too.)
+  #
+  # The SEO analysis above still runs either way — it feeds the grade badge in
+  # the sidebar, which is visible regardless of which inspector tab is open.
+  defp refresh_preview_html(socket, typed) do
     if socket.assigns[:inspector_tab] in [nil, :preview] do
       socket
-      |> assign(:preview_html, preview_html(socket.assigns.form))
+      |> assign(:preview_html, preview_html(typed))
       |> assign(:preview_stale, false)
     else
       assign(socket, :preview_stale, true)
     end
+  end
+
+  defp refresh_body_stats(socket, typed) do
+    digest = :erlang.phash2(typed)
+
+    if digest == socket.assigns[:seo_body_digest] do
+      socket
+    else
+      socket
+      |> assign(:seo_body_digest, digest)
+      |> assign(:seo_body_stats, KilnCMS.Seo.BodyStats.from_typed(typed))
+    end
+  end
+
+  # Cheap by comparison — string checks over a handful of short fields — so this
+  # runs on every keystroke while the body walk above only runs on a form change.
+  defp refresh_seo_report(socket) do
+    form = socket.assigns.form
+
+    fields = %{
+      title: form[:title].value,
+      slug: form[:slug].value,
+      seo_title: form[:seo_title].value,
+      seo_description: form[:seo_description].value,
+      seo_keywords: form[:seo_keywords].value,
+      seo_image: form[:seo_image].value,
+      featured_image_id: form[:featured_image_id].value,
+      locale: form[:locale].value
+    }
+
+    assign(
+      socket,
+      :seo_report,
+      KilnCMS.Seo.Analyzer.analyze(fields, socket.assigns.seo_body_stats)
+    )
   end
 
   defp load_versions(socket) do
@@ -2619,11 +2659,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # individually and offer a per-block "edit on the page" jump (Theme C). The id is
   # the block's stable uuid (B1) — the same one the in-context editor focuses via
   # `?focus=`.
-  defp preview_html(form) do
-    form
-    |> preview_block_maps()
-    |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> Enum.map(fn block ->
+  #
+  # Takes the already-typed block list: `refresh_preview/1` derives it once and
+  # shares it with the SEO body walk rather than each re-running `to_typed/1`.
+  defp preview_html(typed) do
+    Enum.map(typed, fn block ->
       {Map.get(block, :id), Phoenix.HTML.raw(KilnCMS.Blocks.render(block, :web))}
     end)
   end
@@ -3223,15 +3263,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {live_public_path(@form, @content_type)}
                   </span>
                 </p>
-                <ul :if={slug_lints(@form) != []} class="mt-1 space-y-0.5">
-                  <li
-                    :for={finding <- slug_lints(@form)}
-                    class="flex items-start gap-1 text-xs text-warning"
-                  >
-                    <.icon name="hero-light-bulb" class="mt-0.5 size-3 shrink-0" />
-                    <span>{lint_message(finding, @slug_customized?)}</span>
-                  </li>
-                </ul>
+                <%!-- Slug-scoped findings stay inline next to the field they
+                      concern (#456); the full set lives in the SEO panel. --%>
+                <.seo_findings
+                  report={slug_report(@seo_report)}
+                  slug_customized?={@slug_customized?}
+                  class="mt-1"
+                />
                 <.field_cursors field="slug" cursors={@cursors} />
               </div>
               <div class={["relative sm:col-span-2", lock_ring(@locked_fields, "path_alias")]}>
@@ -3569,6 +3607,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
               </.inspector_section>
 
               <.inspector_section title={gettext("SEO & scheduling")}>
+                <:aside>
+                  <.seo_grade_badge report={@seo_report} />
+                </:aside>
+                <%!-- Advisory only — nothing here ever blocks a save (#476). --%>
+                <.seo_findings
+                  :if={@seo_report.findings != []}
+                  report={@seo_report}
+                  slug_customized?={@slug_customized?}
+                  class="rounded border border-base-content/10 bg-base-200/40 p-2"
+                />
                 <div class={["relative", lock_ring(@locked_fields, "seo_title")]}>
                   <.input
                     field={@form[:seo_title]}
@@ -3919,14 +3967,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `<details>` accordions with an always-expanded, clearly-labelled section —
   # the panel's tab already gates visibility, so no per-section collapsing.
   attr :title, :string, required: true
+  # Optional trailing content on the heading row — a status pill or counter that
+  # belongs with the title rather than in the body.
+  slot :aside
   slot :inner_block, required: true
 
   defp inspector_section(assigns) do
     ~H"""
     <section class="rounded-lg border border-base-content/10 p-4">
-      <h3 class="mb-3 text-xs font-semibold uppercase tracking-wide text-base-content/50">
-        {@title}
-      </h3>
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+          {@title}
+        </h3>
+        <span :if={@aside != []}>{render_slot(@aside)}</span>
+      </div>
       <div class="space-y-3">
         {render_slot(@inner_block)}
       </div>

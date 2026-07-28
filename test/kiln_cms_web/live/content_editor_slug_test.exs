@@ -311,7 +311,12 @@ defmodule KilnCMSWeb.ContentEditorSlugTest do
     lv = open_editor(conn, editor, page)
 
     html = change(lv, "title", %{"title" => "Clean Kiln Guide", "slug" => "untitled-#{n}"})
-    refute html =~ "hero-light-bulb"
+
+    # Assert on the slug advisories themselves rather than the hint icon: since
+    # #476 the same icon also carries the SEO panel's findings, which a bare
+    # test page legitimately triggers.
+    refute html =~ "favor short URLs"
+    refute html =~ "doesn&#39;t contain the focus keyphrase"
   end
 
   test "a published record's slug never follows the title", %{conn: conn} do
