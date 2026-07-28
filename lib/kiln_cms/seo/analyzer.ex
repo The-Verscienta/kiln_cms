@@ -143,9 +143,12 @@ defmodule KilnCMS.Seo.Analyzer do
     end
   end
 
-  defp check_og_image(%{seo_image: "", featured_image_id: nil}),
-    do: {:info, :og_image_missing, %{}}
-
+  # Delivery emits `og:image` from `seo_image` alone — `ContentController`'s
+  # `render_content_body/6` does **not** fall back to the featured image — so a
+  # featured image does not satisfy this. Saying otherwise would promise a
+  # social preview that never ships. The editor offers a one-click "use
+  # featured image" to fix it.
+  defp check_og_image(%{seo_image: ""}), do: {:info, :og_image_missing, %{}}
   defp check_og_image(_fields), do: :ok
 
   # ── Keyphrase ─────────────────────────────────────────────────────────────

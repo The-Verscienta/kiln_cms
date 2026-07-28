@@ -806,6 +806,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> mark_dirty()}
   end
 
+  # Open the media browser to choose the social (og:image) card image (#476),
+  # replacing the bare URL box. The text input stays for off-site absolute URLs.
+  def handle_event("open_seo_image_picker", _params, socket),
+    do: {:noreply, assign(socket, :picking, :seo_image)}
+
+  def handle_event("clear_seo_image", _params, socket),
+    do: {:noreply, put_seo_image(socket, nil)}
+
+  # Copy the featured image across rather than making the author pick it twice —
+  # it is the fallback delivery would use anyway, made explicit and editable.
+  def handle_event("use_featured_image", _params, socket) do
+    case featured_image_url(socket) do
+      nil -> {:noreply, socket}
+      url -> {:noreply, put_seo_image(socket, url)}
+    end
+  end
+
   def handle_event("close_picker", _params, socket),
     do: {:noreply, reset_picker(socket)}
 
@@ -818,6 +835,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     {:noreply, socket |> assign(:media_query, q) |> assign(:picker_media, results)}
   end
+
+  # Set the social card image from the library (#476).
+  def handle_event("pick_image", %{"index" => "seo_image", "url" => url}, socket),
+    do: {:noreply, socket |> put_seo_image(url) |> reset_picker()}
 
   # Set the featured image from the library (#154).
   def handle_event("pick_image", %{"index" => "featured", "id" => media_id}, socket) do
@@ -1892,6 +1913,55 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp reset_picker(socket),
     do: socket |> assign(:picking, nil) |> assign(:media_query, "") |> assign(:picker_media, nil)
 
+  # Write `seo_image` from a server-side action (picker / featured-image copy).
+  #
+  # The advisory field lock is re-checked *here*, not just on the button: the
+  # lock makes the input readonly but readonly inputs still submit, so a write
+  # that bypassed this would silently clobber whatever a peer is typing. A
+  # stale DOM or replayed event beats the disabled attribute; it doesn't beat
+  # this.
+  defp put_seo_image(socket, url) do
+    if field_locked?(locked_fields(socket), "seo_image") do
+      put_flash(
+        socket,
+        :info,
+        gettext("Another editor is editing the social image right now.")
+      )
+    else
+      params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("seo_image", url)
+
+      socket
+      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+      |> mark_dirty()
+    end
+  end
+
+  # The featured image's URL, resolved through the picker window first and only
+  # then the database — the window holds the most recent items, so the common
+  # case costs no query, while an older featured image still resolves.
+  defp featured_image_url(socket) do
+    case AshPhoenix.Form.value(socket.assigns.form, :featured_image_id) do
+      nil -> nil
+      id -> media_url(socket, to_string(id))
+    end
+  end
+
+  defp media_url(socket, id) do
+    case Enum.find(socket.assigns.media, &(to_string(&1.id) == id)) do
+      %{url: url} ->
+        url
+
+      nil ->
+        case CMS.get_media_item(id,
+               actor: socket.assigns.actor,
+               tenant: socket.assigns.current_org
+             ) do
+          {:ok, %{url: url}} -> url
+          _ -> nil
+        end
+    end
+  end
+
   # Accessible tag picker (#153): a labeled checkbox group replacing the native
   # <select multiple> (no ⌘/Ctrl needed). Each tag is its own labeled control;
   # the array submits under the same `tag_ids[]` name the relationship expects.
@@ -2291,6 +2361,76 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :form, :any, required: true
   attr :media, :list, required: true
 
+  # How a shared link to this page will look (#476).
+  #
+  # The fallbacks here mirror `KilnCMSWeb.ContentController.render_content_body/6`
+  # exactly — title falls back to `title`, description and image do **not** fall
+  # back at all. A preview that flattered the record by inventing fallbacks
+  # delivery doesn't have would be worse than no preview.
+  defp social_card(assigns) do
+    image = AshPhoenix.Form.value(assigns.form, :seo_image)
+    title = AshPhoenix.Form.value(assigns.form, :seo_title)
+    fallback_title = AshPhoenix.Form.value(assigns.form, :title)
+
+    assigns =
+      assigns
+      |> assign(:card_image, blank_to_nil(image))
+      |> assign(:card_title, blank_to_nil(title) || blank_to_nil(fallback_title))
+      |> assign(
+        :card_description,
+        blank_to_nil(AshPhoenix.Form.value(assigns.form, :seo_description))
+      )
+      |> assign(:card_host, public_host())
+
+    ~H"""
+    <div>
+      <span class="mb-1 block text-sm font-medium text-base-content">
+        {gettext("Social preview")}
+      </span>
+      <div class="overflow-hidden rounded border border-base-content/15">
+        <img
+          :if={@card_image}
+          src={@card_image}
+          alt=""
+          class="aspect-[1.91/1] w-full bg-base-200 object-cover"
+        />
+        <div
+          :if={!@card_image}
+          class="flex aspect-[1.91/1] w-full items-center justify-center bg-base-200 text-xs text-base-content/50"
+        >
+          {gettext("No social image")}
+        </div>
+        <div class="space-y-0.5 border-t border-base-content/10 p-2">
+          <p class="text-xs uppercase text-base-content/50">{@card_host}</p>
+          <p class="truncate text-sm font-medium">
+            {@card_title || gettext("Untitled")}
+          </p>
+          <p class="line-clamp-2 text-xs text-base-content/70">
+            {@card_description || gettext("No description — search engines will write their own.")}
+          </p>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp blank_to_nil(value) do
+    case String.trim(to_string(value || "")) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp public_host do
+    case URI.parse(Application.get_env(:kiln_cms, :public_base_url, "")) do
+      %URI{host: host} when is_binary(host) -> host
+      _ -> ""
+    end
+  end
+
+  attr :form, :any, required: true
+  attr :media, :list, required: true
+
   defp featured_image_field(assigns) do
     id = AshPhoenix.Form.value(assigns.form, :featured_image_id)
 
@@ -2359,6 +2499,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
   defp pick_index(:featured), do: "featured"
+  defp pick_index(:seo_image), do: "seo_image"
   defp pick_index({:block, _id}), do: "block"
   defp pick_index(_), do: ""
 
@@ -2574,6 +2715,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Drawer heading, per open mode.
   defp picker_title(:new), do: gettext("Insert an image")
   defp picker_title(:featured), do: gettext("Featured image")
+  defp picker_title(:seo_image), do: gettext("Choose a social image")
   defp picker_title(_), do: gettext("Choose an image")
 
   defp color_for(id),
@@ -2626,6 +2768,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end)
     |> MapSet.new()
   end
+
+  # Same set, computed straight from the socket — for `handle_event` clauses
+  # that write a field on the author's behalf and must re-check the lock
+  # server-side (the rendered `readonly` attribute is not a boundary).
+  defp locked_fields(socket),
+    do:
+      locked_fields(
+        socket.assigns.cursors,
+        socket.assigns.self_field,
+        socket.assigns.actor.id
+      )
 
   defp field_locked?(locked, field), do: MapSet.member?(locked, field)
 
@@ -3661,13 +3814,45 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <div class={["relative", lock_ring(@locked_fields, "seo_image")]}>
                   <.input
                     field={@form[:seo_image]}
-                    label={gettext("OG image URL")}
+                    label={gettext("Social image")}
                     hint={gettext("Image shown when this page is shared on social media.")}
+                    placeholder="/uploads/cover.jpg"
                     readonly={field_locked?(@locked_fields, "seo_image")}
                     {field_attrs("seo_image")}
                   />
+                  <%!-- The URL box stays for off-site absolute URLs; these
+                        shortcuts cover the common cases (#476). --%>
+                  <div class="mt-1 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      phx-click="open_seo_image_picker"
+                      disabled={field_locked?(@locked_fields, "seo_image")}
+                      class="btn btn-sm btn-default"
+                    >
+                      {gettext("Choose from library")}
+                    </button>
+                    <button
+                      :if={@form[:featured_image_id].value not in [nil, ""]}
+                      type="button"
+                      phx-click="use_featured_image"
+                      disabled={field_locked?(@locked_fields, "seo_image")}
+                      class="btn btn-sm btn-default"
+                    >
+                      {gettext("Use featured image")}
+                    </button>
+                    <button
+                      :if={@form[:seo_image].value not in [nil, ""]}
+                      type="button"
+                      phx-click="clear_seo_image"
+                      disabled={field_locked?(@locked_fields, "seo_image")}
+                      class="text-sm text-base-content/70 hover:text-error"
+                    >
+                      {gettext("Remove")}
+                    </button>
+                  </div>
                   <.field_cursors field="seo_image" cursors={@cursors} />
                 </div>
+                <.social_card form={@form} media={@media} />
                 <div class={["relative", lock_ring(@locked_fields, "canonical_url")]}>
                   <.input
                     field={@form[:canonical_url]}

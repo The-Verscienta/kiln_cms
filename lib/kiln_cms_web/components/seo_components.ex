@@ -55,11 +55,30 @@ defmodule KilnCMSWeb.SeoComponents do
         class={["flex items-start gap-1.5 text-xs", severity_tone(finding.severity)]}
       >
         <.icon name={severity_icon(finding.severity)} class="mt-0.5 size-3.5 shrink-0" />
-        <span>{finding_message(finding, @slug_customized?)}</span>
+        <span>
+          {finding_message(finding, @slug_customized?)}
+          <%!-- Findings that name specific blocks link straight to them; the
+                editor gives every top-level block an `id="block-<index>"`. --%>
+          <a
+            :for={index <- block_indexes(finding)}
+            href={"#block-#{index}"}
+            class="ml-1 underline underline-offset-2"
+          >
+            {gettext("block %{position}", position: index + 1)}
+          </a>
+        </span>
       </li>
     </ul>
     """
   end
+
+  # Block positions a finding points at, if any. Capped so a document with
+  # fifty un-alt'd images doesn't render fifty links into a sidebar panel.
+  @max_jump_links 5
+  defp block_indexes(%{args: %{indexes: indexes}}) when is_list(indexes),
+    do: Enum.take(indexes, @max_jump_links)
+
+  defp block_indexes(_finding), do: []
 
   @doc """
   A single finding's translated message.

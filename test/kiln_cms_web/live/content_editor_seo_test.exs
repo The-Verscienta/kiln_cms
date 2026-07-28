@@ -51,6 +51,18 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
     render_change(lv, "validate", %{"form" => params, "_target" => ["form", field]})
   end
 
+  # The seo_image input's own value. Asserting against the whole page would be
+  # satisfied by the featured-image thumbnail, which renders the same URL.
+  # An empty field renders with no `value` attribute at all.
+  defp seo_image_value(lv) do
+    html = lv |> element(~s(input[name="form[seo_image]"])) |> render()
+
+    case Regex.run(~r/\bvalue="([^"]*)"/, html, capture: :all_but_first) do
+      [value] -> value
+      nil -> ""
+    end
+  end
+
   # Ten short, readable paragraphs — enough to clear the thin-content floor,
   # with the keyphrase only in the opening few so density stays in band.
   defp prose_blocks do
@@ -216,6 +228,170 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       refute html =~ "rarely rank well"
       refute html =~ "search engines will invent one"
       refute html =~ "focus keyphrase"
+    end
+  end
+
+  describe "social image" do
+    defp media(attrs \\ %{}) do
+      Ash.Seed.seed!(
+        KilnCMS.CMS.MediaItem,
+        Map.merge(
+          %{
+            filename: "card-#{System.unique_integer([:positive])}.jpg",
+            url: "/uploads/card-#{System.unique_integer([:positive])}.jpg",
+            alt: "A loaded kiln"
+          },
+          attrs
+        )
+      )
+    end
+
+    test "choosing from the library sets seo_image and clears the finding", %{conn: conn} do
+      editor = authed_user(:editor)
+      item = media()
+      page = CMS.create_page!(%{title: "Social", slug: "social-seo"}, actor: editor)
+      {lv, html} = open_editor(conn, editor, page)
+
+      assert html =~ "No social image"
+
+      render_click(lv, "open_seo_image_picker", %{})
+
+      html =
+        render_click(lv, "pick_image", %{
+          "index" => "seo_image",
+          "id" => item.id,
+          "url" => item.url
+        })
+
+      assert html =~ item.url
+      refute html =~ "links to this page will share without a preview picture"
+    end
+
+    test "\"use featured image\" copies the featured image url across", %{conn: conn} do
+      editor = authed_user(:editor)
+      item = media()
+
+      page =
+        CMS.create_page!(
+          %{title: "Feat", slug: "feat-seo", featured_image_id: item.id},
+          actor: editor
+        )
+
+      {lv, html} = open_editor(conn, editor, page)
+
+      # A featured image alone does NOT satisfy og:image — delivery reads
+      # seo_image only — so the advisory must still be showing.
+      assert html =~ "links to this page will share without a preview picture"
+
+      html = render_click(lv, "use_featured_image", %{})
+
+      assert html =~ item.url
+      refute html =~ "links to this page will share without a preview picture"
+    end
+
+    test "removing the social image brings the finding back", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      page =
+        CMS.create_page!(
+          %{title: "Rm", slug: "rm-seo", seo_image: "/uploads/existing.jpg"},
+          actor: editor
+        )
+
+      {lv, html} = open_editor(conn, editor, page)
+      refute html =~ "links to this page will share without a preview picture"
+
+      html = render_click(lv, "clear_seo_image", %{})
+      assert html =~ "links to this page will share without a preview picture"
+    end
+  end
+
+  describe "collaborative locking" do
+    alias KilnCMSWeb.Presence
+
+    test "a peer holding seo_image blocks the server-side write, not just the button",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      item = media()
+
+      page =
+        CMS.create_page!(
+          %{title: "Contended", slug: "lock-seo", featured_image_id: item.id},
+          actor: editor
+        )
+
+      {lv, _html} = open_editor(conn, editor, page)
+
+      topic = Presence.topic("page", page.id)
+      cursor = %{id: "other-editor", name: "bob", field: "seo_image"}
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, cursor})
+      assert render(lv) =~ "ring-warning"
+
+      # The lock is advisory — a readonly input still submits — so the write
+      # has to be refused in the handler. A replayed or stale-DOM event gets
+      # here with the button disabled.
+      html = render_click(lv, "use_featured_image", %{})
+
+      assert seo_image_value(lv) == ""
+      assert html =~ "Another editor is editing the social image"
+
+      # Released when they move away.
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
+      render_click(lv, "use_featured_image", %{})
+      assert seo_image_value(lv) == item.url
+    end
+  end
+
+  describe "social preview card" do
+    test "mirrors delivery's fallbacks: title falls back, description does not", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      page =
+        CMS.create_page!(
+          %{title: "Plain page title", slug: "card-seo"},
+          actor: editor
+        )
+
+      {lv, html} = open_editor(conn, editor, page)
+
+      assert html =~ "Social preview"
+      # No seo_title, so the card shows the page title (delivery does the same).
+      assert html =~ "Plain page title"
+      # No seo_description, and delivery has no excerpt fallback — say so
+      # rather than inventing one.
+      assert html =~ "search engines will write their own"
+
+      html =
+        change(lv, "seo_title", %{
+          "title" => "Plain page title",
+          "slug" => "card-seo",
+          "seo_title" => "A sharper social headline"
+        })
+
+      assert html =~ "A sharper social headline"
+    end
+  end
+
+  describe "findings link to the blocks they name" do
+    test "a missing-alt finding links to the offending block", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Gallery",
+            slug: "jump-seo",
+            blocks: prose_blocks() ++ [%{"_type" => "image", "url" => "/a.jpg", "alt" => ""}]
+          },
+          actor: editor
+        )
+
+      {_lv, html} = open_editor(conn, editor, page)
+
+      # The image is the third top-level block (index 2), shown 1-based.
+      assert html =~ "no alt text"
+      assert html =~ ~s(href="#block-2")
+      assert html =~ "block 3"
     end
   end
 

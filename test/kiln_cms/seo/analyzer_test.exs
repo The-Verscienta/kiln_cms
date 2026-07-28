@@ -355,12 +355,21 @@ defmodule KilnCMS.Seo.AnalyzerTest do
       refute :images_missing_alt in codes(report)
     end
 
-    test "a missing OG image is only an info, and a featured image satisfies it" do
+    test "a missing social image is an info" do
       report = analyze(%{seo_image: ""})
       assert Enum.find(report.findings, &(&1.code == :og_image_missing)).severity == :info
+    end
 
-      with_featured = analyze(%{seo_image: "", featured_image_id: Ecto.UUID.generate()})
-      refute :og_image_missing in codes(with_featured)
+    test "a featured image does NOT satisfy the social image" do
+      # Delivery emits og:image from seo_image alone (ContentController's
+      # render_content_body/6 has no featured-image fallback), so reporting
+      # this as satisfied would promise a preview that never ships.
+      report = analyze(%{seo_image: "", featured_image_id: Ecto.UUID.generate()})
+      assert :og_image_missing in codes(report)
+    end
+
+    test "an explicit social image satisfies it" do
+      refute :og_image_missing in codes(analyze(%{seo_image: "/uploads/card.jpg"}))
     end
   end
 
