@@ -1375,6 +1375,103 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert kept == tag.id
     end
 
+    # The rescue section is keyed on the record's PERSISTED tags, not on the
+    # live checkbox state. Keying it on the latter meant unchecking a tag there
+    # emptied the section, which the empty-section reject then deleted from the
+    # DOM — no control left to tick it back on, and the autosave committed the
+    # detach.
+    test "unchecking an out-of-scope attached tag leaves its checkbox in place",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "PagesOnly",
+          slug: "g-#{uniq()}",
+          content_types: ["page"]
+        })
+
+      orphan =
+        Ash.Seed.seed!(Tag, %{name: "orphantag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      # A second, in-scope tag so the submitted tag_ids stays a non-nil list.
+      keeper = Ash.Seed.seed!(Tag, %{name: "keepertag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [orphan.id, keeper.id]},
+          actor: editor
+        )
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # Untick the orphan, keeping the other tag ticked.
+      html =
+        lv
+        |> form("#post-editor", form: %{tag_ids: [keeper.id]})
+        |> render_change()
+
+      # Still rendered — and now unchecked, so the editor can undo.
+      assert html =~ "Also attached"
+      assert html =~ ~s(value="#{orphan.id}")
+
+      refute html =~
+               ~r/<input[^>]*value="#{orphan.id}"[^>]*checked|checked[^>]*value="#{orphan.id}"/
+    end
+
+    # `tags.tag_group_id` is a plain FK with no org component, so a tag can be
+    # pointed at a group in another tenant. That group never appears in this
+    # org's loaded list, and a tag the picker doesn't render is a tag
+    # append_and_remove detaches on the next save — so it has to fall back to
+    # Ungrouped rather than vanish.
+    test "a tag pointing at another org's group falls back to Ungrouped", %{conn: conn} do
+      post = draft_post()
+
+      other_org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "otherorg",
+          slug: "otherorg-#{uniq()}",
+          status: :active
+        })
+
+      foreign_group =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "ForeignGroup",
+          slug: "g-#{uniq()}",
+          org_id: other_org.id
+        })
+
+      stray =
+        Ash.Seed.seed!(Tag, %{
+          name: "straytag",
+          slug: "t-#{uniq()}",
+          tag_group_id: foreign_group.id
+        })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "Ungrouped"
+      assert html =~ "straytag"
+      assert html =~ ~s(value="#{stray.id}")
+    end
+
+    test "unchecking the last tag actually detaches it", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = Ash.Seed.seed!(Tag, %{name: "onlytag", slug: "t-#{uniq()}"})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # An all-unchecked group submits only the hidden sentinel. Without it the
+      # key would be absent and selected_ids would fall back to record.tags,
+      # re-checking the box and making the tag impossible to remove.
+      lv |> form("#post-editor", form: %{tag_ids: [""]}) |> render_submit()
+
+      assert CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags == []
+    end
+
     test "links a related post on save", %{conn: conn} do
       post = draft_post(%{title: "Main"})
       other = draft_post(%{title: "SiblingPost"})

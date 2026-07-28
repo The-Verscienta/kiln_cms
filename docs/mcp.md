@@ -50,12 +50,19 @@ Enforcement is layered, all before the admin policy bypass:
 
 Reads (all policy-scoped — drafts are visible only if the owner is an editor):
 `read_pages`, `read_posts`, `read_entries`, `read_type_definitions`,
-`read_field_definitions`, `read_tags`, `read_categories`.
+`read_field_definitions`, `read_tags`, `read_tag_groups`, `read_categories`.
 
 Authoring (require a write key + editor role): `create_page` / `update_page` /
 `submit_page_for_review`, the same trio for posts and dynamic-type entries
 (`create_entry` needs a `type_definition_id` — discover them with
 `read_type_definitions`), plus `create_tag` and `create_category`.
+`create_tag` takes an optional `tag_group_id` — discover the groups with
+`read_tag_groups`.
+
+> **Tag writes replace, they don't merge.** `update_page`/`update_post`/
+> `update_entry` take `tag_ids` as the content's *complete* tag set: sending one
+> id detaches every other tag. Read the current tags first and send the full
+> list.
 
 The tool set lives in the `tools` block on `KilnCMS.CMS` and the
 `config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile

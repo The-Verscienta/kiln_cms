@@ -95,6 +95,22 @@ defmodule KilnCMSWeb.McpTest do
     refute "update_page" in names
   end
 
+  # The `tools` block on the domain declares a tool; `config :kiln_cms,
+  # :mcp_tools` is what the `/mcp` forward actually serves. A tool present in
+  # only the first is dead code that no client can reach, and the inclusion
+  # assertions above can't catch it — they only check names someone remembered
+  # to list. This compares the two sets directly.
+  test "every tool declared on the domain is served by the /mcp forward" do
+    declared = KilnCMS.CMS |> AshAi.Info.tools() |> Enum.map(& &1.name) |> MapSet.new()
+    served = :kiln_cms |> Application.fetch_env!(:mcp_tools) |> MapSet.new()
+
+    assert MapSet.difference(declared, served) |> Enum.to_list() == [],
+           "declared on KilnCMS.CMS but missing from config :kiln_cms, :mcp_tools"
+
+    assert MapSet.difference(served, declared) |> Enum.to_list() == [],
+           "listed in config :kiln_cms, :mcp_tools but not declared on KilnCMS.CMS"
+  end
+
   test "a :read_write key on an editor account can create a draft page", %{conn: conn} do
     plaintext = mint(user(:editor), :read_write)
     slug = "mcp-#{System.unique_integer([:positive])}"

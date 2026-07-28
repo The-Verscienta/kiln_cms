@@ -338,8 +338,19 @@ const Hooks = {
       this.filtering = false
       if (!this.input) return
 
-      this.onInput = () => this.filter()
+      // stopPropagation is load-bearing, not tidiness: LiveView binds `change`
+      // on the *form* and gates only on "is this a form-associated element",
+      // never on `name`. Without this the filter box pushes `validate` on every
+      // keystroke, which marks the document dirty and schedules a real draft
+      // autosave — a DB write and a paper-trail version for a search box.
+      this.onInput = e => {
+        e.stopPropagation()
+        this.filter()
+      }
       this.input.addEventListener("input", this.onInput)
+      // Same reason, for the blur-time `change` event.
+      this.onChange = e => e.stopPropagation()
+      this.input.addEventListener("change", this.onChange)
       // Enter in a search field would otherwise submit the whole content form.
       this.onKey = e => {
         if (e.key === "Enter") e.preventDefault()
@@ -354,6 +365,7 @@ const Hooks = {
     destroyed() {
       if (!this.input) return
       this.input.removeEventListener("input", this.onInput)
+      this.input.removeEventListener("change", this.onChange)
       this.input.removeEventListener("keydown", this.onKey)
     },
 
