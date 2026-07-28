@@ -98,11 +98,28 @@ defmodule KilnCMS.Seo do
   end
 
   # An operator may override the endpoint either in our config or in req_llm's.
+  #
+  # Matched by comparing existing key names rather than interpolating an atom
+  # (`:"#{name}_base_url"`): the provider name comes from config, and minting
+  # atoms from configurable input is the pattern sobelow's DOS.BinToAtom check
+  # exists to stop.
   defp provider_base_url do
     case provider() do
       nil -> nil
-      name -> :req_llm |> Application.get_env(:"#{name}_base_url", nil) |> normalize_url()
+      name -> name |> configured_base_url() |> normalize_url()
     end
+  end
+
+  defp configured_base_url(name) do
+    wanted = name <> "_base_url"
+
+    :req_llm
+    |> Application.get_all_env()
+    |> Enum.find_value(&matching_env(&1, wanted))
+  end
+
+  defp matching_env({key, value}, wanted) do
+    if Atom.to_string(key) == wanted, do: value
   end
 
   defp normalize_url(url) when is_binary(url), do: url
