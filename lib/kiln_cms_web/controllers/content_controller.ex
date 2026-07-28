@@ -32,7 +32,7 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published(org_id, "page", slug, locale, fn ->
+    case Cache.fetch_published_payload(org_id, "page", slug, locale, fn ->
            payload(fetch, locale, ct, org_id)
          end) do
       nil ->
@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.ContentController do
         load: [:author]
       )
 
-    case Cache.fetch_published(org_id, "post", slug, locale, fn ->
+    case Cache.fetch_published_payload(org_id, "post", slug, locale, fn ->
            payload(fetch, locale, ct, org_id)
          end) do
       nil ->
@@ -82,7 +82,7 @@ defmodule KilnCMSWeb.ContentController do
              load: [:author]
            ),
          payload when not is_nil(payload) <-
-           Cache.fetch_published(org_id, to_string(ct.type), slug, locale, fn ->
+           Cache.fetch_published_payload(org_id, to_string(ct.type), slug, locale, fn ->
              payload(fetch, locale, ct, org_id)
            end) do
       serve(conn, :show, to_string(ct.type), payload, ct)

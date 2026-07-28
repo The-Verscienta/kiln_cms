@@ -86,6 +86,33 @@ defmodule KilnCMS.CacheTest do
     assert :keep = Cache.fetch_published(org, "page", other, "en", fn -> :ignored end)
   end
 
+  # Regression: the HTML controller caches an enriched payload map while
+  # headless delivery caches the bare record for the same {type, slug, locale}.
+  # They once shared one key, so whichever endpoint resolved a slug first
+  # poisoned the other with a shape it couldn't render (a 500).
+  test "record and payload shapes cache independently for the same coordinates", %{org: org} do
+    s = slug()
+
+    assert :record = Cache.fetch_published(org, "page", s, "en", fn -> :record end)
+    assert :payload = Cache.fetch_published_payload(org, "page", s, "en", fn -> :payload end)
+
+    # Each shape keeps serving its own cached value, never the other's.
+    assert :record = Cache.fetch_published(org, "page", s, "en", fn -> :ignored end)
+    assert :payload = Cache.fetch_published_payload(org, "page", s, "en", fn -> :ignored end)
+  end
+
+  test "bust/3 drops both cached shapes of a record", %{org: org} do
+    s = slug()
+
+    assert :record = Cache.fetch_published(org, "page", s, "en", fn -> :record end)
+    assert :payload = Cache.fetch_published_payload(org, "page", s, "en", fn -> :payload end)
+
+    Cache.bust(org, "page", s)
+
+    assert :record2 = Cache.fetch_published(org, "page", s, "en", fn -> :record2 end)
+    assert :payload2 = Cache.fetch_published_payload(org, "page", s, "en", fn -> :payload2 end)
+  end
+
   test "bust/2 is scoped by type", %{org: org} do
     s = slug()
 
