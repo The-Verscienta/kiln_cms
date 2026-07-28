@@ -360,6 +360,12 @@ defmodule KilnCMSWeb.Layouts do
           },
           %{key: :trash, label: gettext("Trash"), path: ~p"/editor/trash", icon: "hero-trash"},
           %{
+            key: :system,
+            label: gettext("System"),
+            path: ~p"/editor/system",
+            icon: "hero-server-stack"
+          },
+          %{
             key: :settings,
             label: gettext("Settings"),
             path: ~p"/editor/settings",

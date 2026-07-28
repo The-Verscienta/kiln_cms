@@ -42,3 +42,9 @@ config :swoosh, :api_client, false
 # Quiet, non-reloading server.
 config :logger, level: :warning
 config :phoenix, :plug_init_mode, :runtime
+
+# The browser suite drives a real server, so a Req.Test stub (which resolves
+# through the calling process) can't intercept the update check. Turn it off
+# outright: an e2e run must not depend on api.github.com being reachable, and
+# must not spend the instance's unauthenticated rate-limit budget.
+config :kiln_cms, Kiln.Updates, enabled: false

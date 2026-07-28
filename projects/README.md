@@ -46,6 +46,25 @@ COPY projects  projects                # the subproject
 COPY config/project.exs config/        # activation config
 ```
 
+## Staying up to date
+
+The pin is a submodule, so updating Kiln means moving it to a newer upstream
+release, rebuilding, and redeploying. From the project repo:
+
+```bash
+cd kiln/upstream
+mix kiln.update --check     # what's new, new migrations, upgrade notes
+mix kiln.update             # move the pin to the newest release
+```
+
+It targets tagged releases, refuses to move a dirty or locally-patched pin, and
+refuses a major jump (which by this repo's versioning means *your subproject
+needs code changes*) without `--allow-major`. It never runs migrations or
+deploys — it prints those steps. A deployed instance also reports its version
+and whether it's behind at `/editor/system`.
+
+Full release and upgrade process: [`docs/releasing.md`](../docs/releasing.md).
+
 ## Reference
 
 The first real subproject — Verscienta Health (`Verscienta.Catalog`, six

@@ -116,6 +116,30 @@ if preview_url = System.get_env("PRESENTATION_PREVIEW_URL") do
   config :kiln_cms, :presentation_preview_url, preview_url
 end
 
+# ## Upstream update check
+#
+# The admin update page asks GitHub whether a newer Kiln release exists. The
+# request carries a bare `KilnCMS` user-agent with no version and no instance
+# identifier, so it discloses nothing about this deployment beyond its IP. It
+# is made only when an admin opens the page, and results are cached (24h for a
+# comparison, 15 minutes for a failure), so an outage cannot turn page loads
+# into a request stream.
+#
+# This is the only outbound integration that is on by default — the others all
+# need a credential, so leaving it unset implicitly disables them. Set
+# KILN_UPDATE_CHECK=false for an instance that must make no third-party
+# requests at all; the page then reports the running version and the update
+# command without the comparison. See `Kiln.Updates`.
+#
+# Accepted spellings match VISUAL_EDITING_ENABLED above, and are trimmed and
+# downcased: an operator who set this because they need *no* egress must not be
+# defeated by `off` or `FALSE`.
+update_check = "KILN_UPDATE_CHECK" |> System.get_env("") |> String.trim() |> String.downcase()
+
+if update_check in ~w(false 0 no off) do
+  config :kiln_cms, Kiln.Updates, enabled: false
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

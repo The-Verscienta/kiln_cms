@@ -279,6 +279,9 @@ defmodule KilnCMSWeb.Router do
       live "/editor/forms", FormLive, :index
       live "/editor/forms/:id", FormBuilderLive, :edit
       live "/editor/api-keys", ApiKeyLive, :index
+      # Which Kiln core this instance runs, and whether upstream has a newer
+      # release. Reports only — updating is `mix kiln.update` (see SystemLive).
+      live "/editor/system", SystemLive, :index
 
       # Plugin admin panels (D18) — compiled in from each installed plugin's
       # `admin_routes/0`, admin-gated by this live_session like the rest.

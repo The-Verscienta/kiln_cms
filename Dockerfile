@@ -139,6 +139,23 @@ ENV MIX_ENV="prod"
 
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/kiln_cms ./
 
+# Build stamp — how a running instance knows which Kiln it is (Kiln.Version).
+# Both are optional: an image built without them still boots, it just can't
+# report a SHA or build date on the admin update page. The release version
+# itself comes from mix.exs and is already compiled in.
+#
+#   docker build --build-arg GIT_SHA="$(git rev-parse HEAD)" \
+#                --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
+ARG GIT_SHA=""
+ARG BUILD_DATE=""
+ENV KILN_GIT_SHA=${GIT_SHA}
+ENV KILN_BUILD_DATE=${BUILD_DATE}
+
+LABEL org.opencontainers.image.title="KilnCMS" \
+      org.opencontainers.image.source="https://github.com/The-Verscienta/kiln_cms" \
+      org.opencontainers.image.revision=${GIT_SHA} \
+      org.opencontainers.image.created=${BUILD_DATE}
+
 USER nobody
 
 # Healthcheck hits the Phoenix endpoint.

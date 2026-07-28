@@ -36,6 +36,11 @@ config :kiln_cms, KilnCMS.Storage.S3,
 # `:unsplash` app env.
 config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
 
+# Route the upstream update check through a Req.Test stub, so no test ever
+# reaches api.github.com. Left enabled so the enabled/disabled branches can
+# both be exercised by overriding this per-test.
+config :kiln_cms, Kiln.Updates, req_options: [plug: {Req.Test, Kiln.Updates}]
+
 # Extra locales so the locale-aware delivery tests have something to switch to.
 config :kiln_cms, :i18n, default_locale: "en", locales: ["en", "fr", "es"]
 

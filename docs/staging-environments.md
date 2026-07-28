@@ -192,7 +192,10 @@ the gaps the *data* carries — the *config* is already inert:
 - **No third-party scripts** on delivered pages — nothing to point away from prod.
 - **Mail is off unless `MAIL_MODE` is set**; Meilisearch and S3 are opt-in and default
   to `enabled: false` / local storage. A staging env that simply doesn't set them talks
-  to no subprocessor.
+  to no subprocessor — with one exception: the upstream **update check** is on by
+  default, so an admin opening `/editor/system` makes an anonymous request to
+  api.github.com (no instance data, see [data-flows.md](data-flows.md)). Set
+  `KILN_UPDATE_CHECK=false` on the staging env if that request is unwelcome.
 - **Secrets come from the environment** (`SECRET_KEY_BASE`, `DATABASE_URL`, provider
   keys via `KilnCMS.Keys`), not the database — so a fresh set of staging env vars is a
   clean break from production. The DKIM private key is the one secret that lives in the
