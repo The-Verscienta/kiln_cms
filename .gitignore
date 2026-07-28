@@ -37,7 +37,9 @@ kiln_cms-*.tar
 npm-debug.log
 err.log
 *.log
-/assets/node_modules/
+# No trailing slash: also matches a node_modules *symlink* (as worktrees use),
+# not just a real directory.
+/assets/node_modules
 
 
 # Local env files

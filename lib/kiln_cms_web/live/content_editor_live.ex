@@ -107,6 +107,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # mounted (form fields must survive submit) — the tab only toggles CSS
          # visibility, never `:if`.
          |> assign(:inspector_tab, :preview)
+         # Preview render is only refreshed while the Preview tab is showing;
+         # this tracks whether an off-tab edit left it needing a re-render.
+         |> assign(:preview_stale, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -284,7 +287,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # full sanitize-and-render pipeline in the template ran it on every render,
   # including presence diffs and collaborator cursor events.
   defp refresh_preview(socket) do
-    assign(socket, :preview_html, preview_html(socket.assigns.form))
+    # The in-editor preview is a full block render of every block. Only pay for
+    # it while the Preview tab is actually showing; otherwise mark it stale and
+    # let switch_inspector_tab re-render on the way back. (nil = pre-mount, when
+    # the Preview tab is the default, so render then too.)
+    if socket.assigns[:inspector_tab] in [nil, :preview] do
+      socket
+      |> assign(:preview_html, preview_html(socket.assigns.form))
+      |> assign(:preview_stale, false)
+    else
+      assign(socket, :preview_stale, true)
+    end
   end
 
   defp load_versions(socket) do
@@ -308,6 +321,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # bind straight to the typed attributes. The update is scoped to the record's
     # own org (epic #336) so a save stays in the site it was loaded from.
     record
+    |> ensure_block_ids()
     |> AshPhoenix.Form.for_update(:update,
       actor: actor,
       tenant: record.org_id,
@@ -315,6 +329,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
     |> to_form()
   end
+
+  # Every block the editor addresses by stable id (move/remove/duplicate/picker,
+  # the inline inserter DOM id, the rich-text host key). Legacy content can carry
+  # id-less blocks (see seed_block_children), so backfill a stable id on load —
+  # otherwise those controls have no `bid` (they'd crash or no-op) and the id-keyed
+  # DOM elements collide. The backfill is writable, so a save heals the block.
+  defp ensure_block_ids(%{blocks: blocks} = record) when is_list(blocks),
+    do: %{record | blocks: Enum.map(blocks, &ensure_block_id/1)}
+
+  defp ensure_block_ids(record), do: record
+
+  defp ensure_block_id(%Ash.Union{value: value} = union),
+    do: %{union | value: ensure_block_id(value)}
+
+  defp ensure_block_id(%{id: nil} = block), do: %{block | id: Ash.UUID.generate()}
+  defp ensure_block_id(block), do: block
 
   # The typed block module backing a block sub-form (its union member resource).
   # `inputs_for` yields a Phoenix.HTML.Form wrapping an AshPhoenix.Form; the
@@ -496,7 +526,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # every panel stays mounted, so no form data is touched.
   def handle_event("switch_inspector_tab", %{"tab" => tab}, socket)
       when tab in ~w(settings preview history) do
-    {:noreply, assign(socket, :inspector_tab, String.to_existing_atom(tab))}
+    socket = assign(socket, :inspector_tab, String.to_existing_atom(tab))
+
+    # Coming back to Preview after edits happened while it was hidden: catch it
+    # up now (refresh_preview short-circuits everywhere else while off-tab).
+    socket =
+      if socket.assigns.inspector_tab == :preview and socket.assigns[:preview_stale] do
+        refresh_preview(socket)
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   # Unknown/garbled tab value — ignore it rather than crash the editor.
@@ -519,6 +560,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       end
 
     {:noreply, socket}
+  end
+
+  # Explicitly stop the slug from following the title, without having to hand-edit
+  # it first — for the case where the current slug legitimately equals
+  # slugify(title) and the auto-follow heuristic can't tell it was deliberate.
+  def handle_event("lock_slug_auto", _params, socket) do
+    {:noreply, assign(socket, :slug_auto, false)}
   end
 
   def handle_event("field_focus", %{"field" => field}, socket) do
@@ -639,12 +687,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       )
       |> position_new_block(p["after"])
 
-    {:noreply,
-     socket
-     |> assign(:form, form)
-     |> assign(:block_children, Map.put(socket.assigns.block_children, id, cols))
-     |> refresh_preview()
-     |> mark_dirty()}
+    socket =
+      socket
+      |> assign(:form, form)
+      |> assign(:block_children, Map.put(socket.assigns.block_children, id, cols))
+
+    broadcast_preview(socket)
+    {:noreply, socket |> refresh_preview() |> mark_dirty()}
   end
 
   def handle_event("add_block", %{"type" => type} = p, socket) do
@@ -659,7 +708,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
       )
       |> position_new_block(p["after"])
 
-    {:noreply, socket |> assign(:form, form) |> mark_dirty()}
+    socket = assign(socket, :form, form)
+    broadcast_preview(socket)
+    {:noreply, mark_dirty(socket)}
   end
 
   # Duplicate the block with stable id `bid`: copy its full field set, give the
@@ -688,14 +739,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
             do: Map.put(socket.assigns.block_children, new_id, children),
             else: socket.assigns.block_children
 
-        {:noreply,
-         socket
-         |> assign(:form, form)
-         |> assign(:block_children, block_children)
-         |> refresh_preview()
-         |> mark_dirty()}
+        socket = socket |> assign(:form, form) |> assign(:block_children, block_children)
+
+        # Re-inject the copy's fresh-id children into the form params now, so a draft
+        # autosave firing before the next validate persists the duplicate's own
+        # children rather than the original's (do_autosave submits raw params).
+        socket = revalidate(socket, AshPhoenix.Form.params(socket.assigns.form))
+        broadcast_preview(socket)
+
+        {:noreply, socket |> refresh_preview() |> mark_dirty()}
     end
   end
+
+  # No `bid` (a block that reached the editor without a stable id) — no-op rather
+  # than crash the session (audit theme 4). ensure_block_ids/1 backfills on load,
+  # so this is defence in depth.
+  def handle_event("duplicate_block", _params, socket), do: {:noreply, socket}
 
   # ── GEO item rows (faq items / how_to steps, #357) ──────────────────────────
   # Rows are bound form inputs; add/remove mutate the form params directly (the
@@ -740,6 +799,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  def handle_event("remove_block", _params, socket), do: {:noreply, socket}
+
   def handle_event("reorder", %{"order" => order}, socket) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
     {:noreply, socket |> assign(:form, form) |> mark_dirty()}
@@ -773,6 +834,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  def handle_event("move_block", _params, socket), do: {:noreply, socket}
+
   # ── columns container editing (#335) ────────────────────────────────────────
   # These mutate the socket-managed child tree of a `columns` block, then re-sync
   # it into the form (so the live preview + save reflect it). Blocks and columns
@@ -781,14 +844,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("col_add_child", %{"id" => id, "col" => col, "type" => type}, socket)
       when type in @nested_child_types do
-    bc =
-      update_column(socket.assigns.block_children, id, to_int(col), fn blocks ->
-        if length(blocks) >= @max_children_per_column,
-          do: blocks,
-          else: blocks ++ [new_child(type)]
-      end)
+    # Address the target column by a real index; a garbled `col` no-ops rather
+    # than silently landing the child in column 0 (the old `to_int` fallback).
+    case parse_index(col) do
+      {:ok, ci} ->
+        bc = update_column(socket.assigns.block_children, id, ci, &append_child(&1, type))
+        {:noreply, apply_children(socket, bc)}
 
-    {:noreply, apply_children(socket, bc)}
+      :error ->
+        {:noreply, socket}
+    end
   end
 
   def handle_event("col_remove_child", %{"id" => id, "child" => child_id}, socket) do
@@ -833,13 +898,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   def handle_event("col_remove_column", %{"id" => id, "col" => col}, socket) do
-    bc =
-      Map.update(socket.assigns.block_children, id, [], fn cols ->
-        # Keep at least one column so the block stays a valid container.
-        if length(cols) <= 1, do: cols, else: List.delete_at(cols, to_int(col))
-      end)
+    case parse_index(col) do
+      {:ok, ci} ->
+        bc = Map.update(socket.assigns.block_children, id, [], &drop_column(&1, ci))
+        {:noreply, apply_children(socket, bc)}
 
-    {:noreply, apply_children(socket, bc)}
+      :error ->
+        {:noreply, socket}
+    end
   end
 
   def handle_event("save", %{"form" => params}, socket) do
@@ -1308,12 +1374,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Enum.map(&block_input_map/1)
   end
 
-  defp block_input_map(%AshPhoenix.Form{} = sub) do
+  defp block_input_map(%AshPhoenix.Form{} = sub), do: block_field_map(sub, "_union_type")
+
+  # The declared fields of a block sub-form as a string-keyed map, tagged with its
+  # block type under `type_key` and carrying the stable `id`. The only thing that
+  # varies between the union-input shape (`_union_type`) and the typed-preview
+  # shape (`_type`) is that key, so both go through here.
+  defp block_field_map(%AshPhoenix.Form{} = sub, type_key) do
     mod = block_member(sub)
 
     Kiln.Block.Info.fields(mod)
     |> Map.new(fn field -> {to_string(field.name), AshPhoenix.Form.value(sub, field.name)} end)
-    |> Map.put("_union_type", to_string(Kiln.Block.Info.name(mod)))
+    |> Map.put(type_key, to_string(Kiln.Block.Info.name(mod)))
     |> Map.put("id", AshPhoenix.Form.value(sub, :id))
   end
 
@@ -1631,6 +1703,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       List.update_at(cols, col_index, &update_col_blocks(&1, fun))
     end)
   end
+
+  defp append_child(blocks, _type) when length(blocks) >= @max_children_per_column, do: blocks
+  defp append_child(blocks, type), do: blocks ++ [new_child(type)]
+
+  # Keep at least one column so the block stays a valid container.
+  defp drop_column(cols, _ci) when length(cols) <= 1, do: cols
+  defp drop_column(cols, ci), do: List.delete_at(cols, ci)
 
   # Apply `fun` to every column's child-block list of a block.
   defp update_columns(block_children, block_id, fun) do
@@ -2410,18 +2489,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # A typed block map (string keys, `_type`) read from a union member sub-form,
   # for the inline typed preview. Rich-text HTML is sanitized (unsaved edits
   # aren't sanitized until save).
+  # Carries the stable id through (via block_field_map) so the preview can offer a
+  # per-block "edit on the page" jump (Theme C), then sanitizes unsaved rich text.
   defp block_full_map(%AshPhoenix.Form{} = subform) do
-    mod = block_member(subform)
-
-    mod
-    |> Kiln.Block.Info.fields()
-    |> Map.new(fn field ->
-      {to_string(field.name), AshPhoenix.Form.value(subform, field.name)}
-    end)
-    |> Map.put("_type", to_string(Kiln.Block.Info.name(mod)))
-    # Carry the stable id through so the preview can offer a per-block "edit on the
-    # page" jump (Theme C); `fields/1` covers the declared fields but not the pk.
-    |> Map.put("id", AshPhoenix.Form.value(subform, :id))
+    subform
+    |> block_field_map("_type")
     |> sanitize_preview_block()
   end
 
@@ -3000,14 +3072,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   {field_attrs("slug")}
                 />
                 <%!-- The slug follows the title until it's hand-edited; the badge
-                      says so, and once locked a button re-syncs it on demand. --%>
-                <span
+                      says so and lets you lock it on demand (for a deliberate slug
+                      that happens to match the title), and once locked a button
+                      re-syncs it. --%>
+                <button
                   :if={@slug_auto}
-                  class="pointer-events-none absolute right-0 top-0 inline-flex items-center gap-1 text-xs text-base-content/50"
-                  title={gettext("The slug updates automatically as you type the title.")}
+                  type="button"
+                  phx-click="lock_slug_auto"
+                  class="absolute right-0 top-0 inline-flex items-center gap-1 text-xs text-base-content/50 hover:text-base-content hover:underline"
+                  title={gettext("The slug follows the title. Click to lock it.")}
                 >
                   <.icon name="hero-link" class="size-3" />{gettext("Auto from title")}
-                </span>
+                </button>
                 <button
                   :if={!@slug_auto}
                   type="button"
@@ -3053,6 +3129,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
               <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
                 <.inputs_for :let={bf} field={@form[:blocks]}>
+                  <%!-- Keyed by bf.index, NOT the stable block id, and deliberately
+                        so: the rich-text mirror `<input name=…[legacy_html]>` lives
+                        inside the phx-update="ignore" editor host, and its name
+                        encodes the block's index. Index-keying re-keys the ignore
+                        region on a reorder, which refreshes that frozen name so the
+                        content saves at the right position. Stable-id keying would
+                        keep the editor mounted across a reorder (nicer for cursor/
+                        undo) but freezes the mirror name at its mount-time index →
+                        the reordered content saves to the WRONG block (data loss).
+                        Losing the index re-key here is the safe trade until the
+                        mirror input is redesigned to not carry the index. --%>
                   <div
                     id={"block-#{bf.index}"}
                     data-sort-id={bf.index}

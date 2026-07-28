@@ -968,6 +968,30 @@ defmodule KilnCMSWeb.EditorLiveTest do
       synced = lv |> element("button[phx-click='toggle_slug_auto']") |> render_click()
       assert synced =~ ~s(value="fresh-title")
     end
+
+    test "the 'Auto from title' badge locks the slug on demand", %{conn: conn} do
+      # A deliberate slug that happens to equal slugify(title) reads as auto; the
+      # badge is clickable so the user can lock it without a throwaway hand-edit.
+      page = draft_page(%{title: "Existing Draft", slug: "existing-draft"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "Auto from title"
+
+      locked = lv |> element("button[phx-click='lock_slug_auto']") |> render_click()
+      # Now off auto — the badge flips to the manual re-sync affordance.
+      assert locked =~ "Sync from title"
+      refute locked =~ "Auto from title"
+
+      # And a later title edit no longer moves the slug.
+      after_title =
+        lv
+        |> form("#page-editor", form: %{title: "Renamed Draft", slug: "existing-draft"})
+        |> render_change()
+
+      assert after_title =~ ~s(value="existing-draft")
+    end
   end
 
   # Theme D field chrome: required fields carry a marker, and key fields carry
@@ -2148,9 +2172,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Move-up on the first block is disabled; move-down is available. Blocks are
-      # addressed by their stable id now, so target the first block's card by its
-      # stable DOM id rather than a positional phx-value.
+      # Move-up on the first block is disabled; move-down is available. The move
+      # button carries the block's stable id as phx-value-bid; the card itself is
+      # keyed by index (see the block-canvas comment), so target #block-0.
       assert html =~ ~r/<button[^>]*phx-value-dir="up"[^>]*disabled/
 
       moved =
@@ -2165,6 +2189,33 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> form("#page-editor") |> render_submit()
       blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert Enum.map(blocks, & &1.content) == ["Second", "First"]
+    end
+
+    # Block actions carry a stable `bid`; a stale/garbled/absent one must no-op,
+    # never crash the editor process (audit theme 4 + the fallback clauses).
+    test "block actions no-op on an unknown or missing block id", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :heading, content: "Only", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      ghost = Ash.UUID.generate()
+
+      # Unknown id → the id→index resolve misses → each handler no-ops.
+      render_click(lv, "move_block", %{"bid" => ghost, "dir" => "down"})
+      render_click(lv, "remove_block", %{"bid" => ghost})
+      render_click(lv, "duplicate_block", %{"bid" => ghost})
+
+      # Entirely missing params → the catch-all fallback clauses (defence in depth
+      # for a legacy block that reached the editor without a stable id).
+      render_click(lv, "move_block", %{})
+      render_click(lv, "remove_block", %{})
+      render_click(lv, "duplicate_block", %{})
+
+      # The session survived and the block is untouched.
+      assert render(lv) =~ "Only"
+      lv |> form("#page-editor") |> render_submit()
+      assert [%{content: "Only"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
     # Regression for #174: the editor page must have exactly one h1 (the

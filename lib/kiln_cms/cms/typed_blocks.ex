@@ -181,25 +181,33 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp struct_from_typed_map(map) do
     map = map |> stringify() |> KilnCMS.Blocks.Upcaster.upcast_block_map()
     raw_type = to_string(get(map, :_type))
+    atom = block_type_atom(map)
 
     # An unknown/uninstalled block type (e.g. a plugin block whose module is no
     # longer loaded) collapses to `:custom` via `block_type_atom`. Blindly building
     # a Custom would drop the block's own fields, so preserve the original type tag
-    # + all foreign fields into `data` so nothing is lost (audit T5.5).
-    if block_type_atom(map) == :custom and raw_type not in ["custom", ""] do
+    # + all foreign fields into `data`, and its stable `id`, so nothing is lost on
+    # the round-trip (audit T5.5).
+    if atom == :custom and raw_type not in ["custom", ""] do
       %Custom{
         _type: "custom",
+        id: get(map, :id),
         legacy_type: raw_type,
         content: get(map, :content),
         data: foreign_data(map)
       }
     else
-      case KilnCMS.Blocks.fetch(block_type_atom(map)) do
+      case KilnCMS.Blocks.fetch(atom) do
         {:ok, mod} ->
           struct(mod, typed_struct_kv(mod, map))
 
         :error ->
-          %Custom{_type: "custom", content: get(map, :content), data: get(map, :data) || %{}}
+          %Custom{
+            _type: "custom",
+            id: get(map, :id),
+            content: get(map, :content),
+            data: get(map, :data) || %{}
+          }
       end
     end
   end
