@@ -40,6 +40,7 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 | `ECTO_IPV6` | unset | Set to `true`/`1` to connect to Postgres over IPv6. | [`config/runtime.exs:81`](../config/runtime.exs#L81) |
 | `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset when internet-facing directly. | [`config/runtime.exs:176`](../config/runtime.exs#L176) |
 | `DNS_CLUSTER_QUERY` | unset | DNS query for libcluster-style node discovery. | [`config/runtime.exs:168`](../config/runtime.exs#L168) |
+| `CSP_IMG_SRC` | unset | Space-separated **extra** origins allowed in the browser CSP's `img-src` — needed when media serves from a CDN or image host on a different hostname than the site (e.g. `https://media.example.com`). See [media-pipeline.md](media-pipeline.md#production-storage--cdn). | [`config/runtime.exs:30`](../config/runtime.exs#L30) |
 
 > **Note on ports.** The public URL is hardcoded to port `443`/`https`
 > ([`config/runtime.exs:179`](../config/runtime.exs#L179)); the app itself listens
@@ -58,19 +59,26 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 Opt into the S3 storage adapter by setting `S3_BUCKET`. When it is set,
 `S3_PUBLIC_BASE_URL`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` become
 required (the latter two raise via `System.fetch_env!`). See
-[`KilnCMS.Storage.S3`](../lib/kiln_cms/storage/s3.ex) for per-provider hosts.
+[`KilnCMS.Storage.S3`](../lib/kiln_cms/storage/s3.ex) for per-provider hosts,
+and [`media-pipeline.md`](media-pipeline.md#production-storage--cdn) for the
+CDN deployment guide.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:200`](../config/runtime.exs#L200) |
-| `S3_PUBLIC_BASE_URL` | — | Public base URL for stored objects. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:207`](../config/runtime.exs#L207) |
-| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:222`](../config/runtime.exs#L222) |
-| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:223`](../config/runtime.exs#L223) |
-| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:225`](../config/runtime.exs#L225) |
-| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:214`](../config/runtime.exs#L214) |
-| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:229`](../config/runtime.exs#L229) |
-| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:231`](../config/runtime.exs#L231) |
-| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:233`](../config/runtime.exs#L233) |
+| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:290`](../config/runtime.exs#L290) |
+| `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:297`](../config/runtime.exs#L297) |
+| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:312`](../config/runtime.exs#L312) |
+| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:313`](../config/runtime.exs#L313) |
+| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:315`](../config/runtime.exs#L315) |
+| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:304`](../config/runtime.exs#L304) |
+| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:319`](../config/runtime.exs#L319) |
+| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:321`](../config/runtime.exs#L321) |
+| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:323`](../config/runtime.exs#L323) |
+
+Media objects are uploaded with `Cache-Control: public, max-age=31536000,
+immutable` — there is no env var for it, because storage keys are write-once
+UUIDs so a URL's bytes never change. If the CDN hostname differs from the
+site's origin, add it to `CSP_IMG_SRC` or the browser will block the images.
 
 ## Optional — SSO (OpenID Connect, #331)
 

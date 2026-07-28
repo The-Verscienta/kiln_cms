@@ -41,6 +41,15 @@ defmodule KilnCMS.Storage.S3Test do
     refute Map.has_key?(headers, "x-amz-acl")
   end
 
+  test "store sends an immutable Cache-Control so a CDN can cache forever (#42)" do
+    stub(200)
+
+    assert {:ok, "cached.png"} = S3.store("cached.png", tmp_source("x"))
+
+    assert_received {:s3, "PUT", _path, _body, headers}
+    assert headers["cache-control"] == "public, max-age=31536000, immutable"
+  end
+
   test "store sends a canned ACL only when configured" do
     original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)
