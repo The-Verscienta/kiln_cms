@@ -154,10 +154,13 @@ defmodule KilnCMSWeb.CoreComponents do
 
       <.badge>draft</.badge>
       <.badge variant="success">published</.badge>
+
+  `outline` is the quieter tone: use it for a badge that qualifies another
+  badge next to it, so the pair reads as primary-then-refinement.
   """
   attr :variant, :string,
     default: "neutral",
-    values: ~w(neutral primary success warning error info)
+    values: ~w(neutral outline primary success warning error info)
 
   attr :class, :any, default: nil
   slot :inner_block, required: true
@@ -165,6 +168,7 @@ defmodule KilnCMSWeb.CoreComponents do
   def badge(assigns) do
     tones = %{
       "neutral" => "bg-base-200 text-base-content/70",
+      "outline" => "border border-base-content/25 text-base-content/70",
       "primary" => "bg-primary/12 text-primary",
       "success" => "bg-success/15 text-success",
       "warning" => "bg-warning/20 text-warning-content",
