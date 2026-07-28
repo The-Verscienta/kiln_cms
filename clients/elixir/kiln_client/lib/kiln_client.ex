@@ -22,6 +22,19 @@ defmodule KilnClient do
 
       config :kiln_client, req_options: [plug: {Req.Test, KilnClient}]
 
+  Every read also accepts a per-call `:req` option — `Req` options merged
+  into that one request last (via `Req.merge/2`), after the defaults and the
+  configured `req_options`. Use it to bound a call that must not hang:
+
+      KilnClient.semantic_search("posts", q, req: [receive_timeout: 1_500, retry: false])
+
+  A degraded embedding backend stalls the semantic routes without failing
+  them (measured at ~70s per call on a production instance that still
+  answered 200 — far too late to be useful). Callers with a keyword fallback
+  should bound `semantic_search/3` and `search/2` well above their healthy
+  latency and skip retries: retrying a timeout only multiplies load on a
+  backend that is already struggling.
+
   ## Published-only by default
 
   Reads are published-only by default. Do not rely on the credential for
@@ -79,6 +92,7 @@ defmodule KilnClient do
     * `:published` — read the server-side state-filtered `/published` feed
       (default `true`; newest first). Pass `false` for an editor-facing
       caller that must see drafts through the plain index.
+    * `:req` — per-call `Req` overrides, applied last (see the module doc).
 
   Returns `{:ok, %{items:, included:, total:}}`.
   """
@@ -89,7 +103,7 @@ defmodule KilnClient do
         do: "/api/json/#{plural}/published",
         else: "/api/json/#{plural}"
 
-    case request(:get, path, params: query_params(opts)) do
+    case request(:get, path, params: query_params(opts), req: opts[:req]) do
       {:ok, doc} -> {:ok, flatten_doc(doc)}
       {:error, reason} -> {:error, reason}
     end
@@ -150,7 +164,10 @@ defmodule KilnClient do
   so `:total` is always `nil`.
 
   Options: `:locale`, `:custom_filter` (facets compose with the search),
-  `:include`, `:fields`, `:published`.
+  `:sort` (an explicit sort overrides relevance, which degrades to the
+  tiebreaker — the contract kiln_cms#310 pinned), `:limit` (`page[limit]`;
+  the action caps its own maximum), `:include`, `:fields`, `:published`,
+  `:req`.
   """
   @spec text_search(String.t(), String.t(), keyword()) ::
           {:ok, list_result()} | {:error, term()}
@@ -164,6 +181,9 @@ defmodule KilnClient do
 
   Same surface and options as `text_search/3`, ordered by cosine distance.
   Degrades to an empty result set when the server has no embeddings.
+
+  If you have a keyword fallback, bound this call with `:req` (see the module
+  doc) — a degraded embedding backend stalls rather than fails.
   """
   @spec semantic_search(String.t(), String.t(), keyword()) ::
           {:ok, list_result()} | {:error, term()}
@@ -195,10 +215,12 @@ defmodule KilnClient do
       base_params
       |> put_param(:locale, opts[:locale])
       |> filter_params("custom_filter", opts[:custom_filter])
+      |> put_param(:sort, join_sort(opts[:sort]))
+      |> put_param("page[limit]", opts[:limit])
       |> put_param(:include, join_list(opts[:include]))
       |> sparse_fields(opts[:fields])
 
-    case request(:get, path, params: params) do
+    case request(:get, path, params: params, req: opts[:req]) do
       {:ok, doc} -> {:ok, flatten_doc(doc)}
       {:error, reason} -> {:error, reason}
     end
@@ -210,7 +232,9 @@ defmodule KilnClient do
   Hybrid (keyword + semantic) search at `/api/search`.
 
   Options: `:limit` (server caps at 25), `:locale`, `:category` (slug),
-  `:facets` (boolean). Returns the raw response map — sections under
+  `:facets` (boolean), `:req` (worth a bound + `retry: false` here too — the
+  semantic leg stalls when the embedding backend degrades, see the module
+  doc). Returns the raw response map — sections under
   `"results"` (`"pages"`, `"posts"`, `"entries"`, `"categories"`, `"tags"`),
   plus `"facets"` when requested, and a `"suggestion"` ("did you mean") on
   sparse results.
@@ -231,7 +255,7 @@ defmodule KilnClient do
       |> put_param(:category, opts[:category])
       |> put_param(:facets, if(opts[:facets], do: "true"))
 
-    request(:get, "/api/search", params: params)
+    request(:get, "/api/search", params: params, req: opts[:req])
   end
 
   @doc """
@@ -251,13 +275,13 @@ defmodule KilnClient do
 
     path = "/api/content/#{plural}/#{slug}"
 
-    case request(:get, path, params: params) do
+    case request(:get, path, params: params, req: opts[:req]) do
       {:error, {:http_status, 503, _}} = error ->
         if opts[:retry] == false do
           error
         else
           Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
-          request(:get, path, params: params)
+          request(:get, path, params: params, req: opts[:req])
         end
 
       other ->
@@ -383,6 +407,11 @@ defmodule KilnClient do
   defp request(method, path, opts) do
     base_url = Application.get_env(:kiln_client, :base_url, "http://localhost:4000")
 
+    # Per-call `:req` overrides apply LAST, via `Req.merge/2` — so they win
+    # over the defaults and the configured `req_options`, and composite
+    # options like `:headers` merge instead of clobbering.
+    {overrides, opts} = Keyword.pop(opts, :req)
+
     req =
       [
         method: method,
@@ -394,6 +423,7 @@ defmodule KilnClient do
       |> maybe_auth(Application.get_env(:kiln_client, :api_key))
       |> Keyword.merge(Application.get_env(:kiln_client, :req_options, []))
       |> Req.new()
+      |> Req.merge(overrides || [])
 
     case Req.request(req) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
