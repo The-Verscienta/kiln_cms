@@ -838,6 +838,37 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Theme D field chrome: required fields carry a marker, and key fields carry
+  # help text under them (Contentful-style).
+  describe "field chrome (modernization D)" do
+    test "title and slug are marked required, and SEO fields have help text",
+         %{conn: conn} do
+      page = draft_page(%{title: "Chrome"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # The required marker (an aria-hidden "*") carries a "Required" tooltip.
+      assert html =~ ~s(title="Required")
+      # The required attribute is on the title input itself.
+      assert html =~ ~r/name="form\[title\]"[^>]*\srequired|\srequired[^>]*name="form\[title\]"/
+
+      # Settings-tab fields (present in the DOM even under the Preview tab) carry
+      # their help text.
+      assert html =~ "The snippet shown under the title in search results"
+      assert html =~ "The preferred URL"
+    end
+
+    test "a post's excerpt carries help text", %{conn: conn} do
+      post = draft_post(%{title: "Excerpted"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "A short summary shown in listings"
+    end
+  end
+
   describe "/editor/trash" do
     test "editors are redirected away", %{conn: conn} do
       assert {:error,

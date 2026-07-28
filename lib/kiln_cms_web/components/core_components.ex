@@ -384,6 +384,8 @@ defmodule KilnCMSWeb.CoreComponents do
   attr :id, :any, default: nil
   attr :name, :any
   attr :label, :string, default: nil
+  attr :hint, :string, default: nil, doc: "help text shown under the field"
+  attr :required, :boolean, default: false, doc: "marks the label and the input required"
   attr :value, :any
 
   attr :type, :string,
@@ -462,10 +464,11 @@ defmodule KilnCMSWeb.CoreComponents do
     ~H"""
     <div class="mb-2">
       <label for={@id}>
-        <span :if={@label} class={field_label_class()}>{@label}</span>
+        <.field_label label={@label} required={@required} />
         <select
           id={@id}
           name={@name}
+          required={@required}
           aria-invalid={@errors != [] && "true"}
           aria-describedby={@errors != [] && error_id(@id)}
           class={[
@@ -480,6 +483,7 @@ defmodule KilnCMSWeb.CoreComponents do
         </select>
       </label>
       <.field_errors id={error_id(@id)} errors={@errors} />
+      <.field_hint hint={@hint} />
     </div>
     """
   end
@@ -488,10 +492,11 @@ defmodule KilnCMSWeb.CoreComponents do
     ~H"""
     <div class="mb-2">
       <label for={@id}>
-        <span :if={@label} class={field_label_class()}>{@label}</span>
+        <.field_label label={@label} required={@required} />
         <textarea
           id={@id}
           name={@name}
+          required={@required}
           aria-invalid={@errors != [] && "true"}
           aria-describedby={@errors != [] && error_id(@id)}
           class={[
@@ -502,6 +507,7 @@ defmodule KilnCMSWeb.CoreComponents do
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
       </label>
       <.field_errors id={error_id(@id)} errors={@errors} />
+      <.field_hint hint={@hint} />
     </div>
     """
   end
@@ -511,12 +517,13 @@ defmodule KilnCMSWeb.CoreComponents do
     ~H"""
     <div class="mb-2">
       <label for={@id}>
-        <span :if={@label} class={field_label_class()}>{@label}</span>
+        <.field_label label={@label} required={@required} />
         <input
           type={@type}
           name={@name}
           id={@id}
           value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+          required={@required}
           aria-invalid={@errors != [] && "true"}
           aria-describedby={@errors != [] && error_id(@id)}
           class={[
@@ -527,6 +534,7 @@ defmodule KilnCMSWeb.CoreComponents do
         />
       </label>
       <.field_errors id={error_id(@id)} errors={@errors} />
+      <.field_hint hint={@hint} />
     </div>
     """
   end
@@ -545,6 +553,32 @@ defmodule KilnCMSWeb.CoreComponents do
     <div :if={@errors != []} id={@id}>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
+    """
+  end
+
+  # A field label with an optional required marker (Theme D field chrome).
+  attr :label, :string, default: nil
+  attr :required, :boolean, default: false
+
+  defp field_label(assigns) do
+    ~H"""
+    <span :if={@label} class={field_label_class()}>
+      {@label}<span
+        :if={@required}
+        class="ml-0.5 text-error"
+        title={gettext("Required")}
+        aria-hidden="true"
+      >*</span>
+    </span>
+    """
+  end
+
+  # Help text under a field (Theme D field chrome).
+  attr :hint, :string, default: nil
+
+  defp field_hint(assigns) do
+    ~H"""
+    <p :if={@hint} class="mt-1 text-xs text-base-content/60">{@hint}</p>
     """
   end
 

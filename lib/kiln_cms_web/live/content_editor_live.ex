@@ -2936,6 +2936,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <.input
                   field={@form[:title]}
                   label={gettext("Title")}
+                  required
                   readonly={field_locked?(@locked_fields, "title")}
                   {field_attrs("title")}
                 />
@@ -2945,6 +2946,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <.input
                   field={@form[:slug]}
                   label={gettext("Slug")}
+                  required
                   readonly={field_locked?(@locked_fields, "slug")}
                   {field_attrs("slug")}
                 />
@@ -2996,6 +2998,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 field={@form[:excerpt]}
                 type="textarea"
                 label={gettext("Excerpt")}
+                hint={
+                  gettext(
+                    "A short summary shown in listings and used as a fallback for social shares."
+                  )
+                }
                 readonly={field_locked?(@locked_fields, "excerpt")}
                 {field_attrs("excerpt")}
               />
@@ -3278,6 +3285,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.input
                     field={@form[:seo_title]}
                     label={gettext("SEO title")}
+                    hint={
+                      gettext(
+                        "Overrides the title in search results and browser tabs. Falls back to the title."
+                      )
+                    }
                     readonly={field_locked?(@locked_fields, "seo_title")}
                     {field_attrs("seo_title")}
                   />
@@ -3288,6 +3300,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     field={@form[:seo_description]}
                     type="textarea"
                     label={gettext("SEO description")}
+                    hint={
+                      gettext(
+                        "The snippet shown under the title in search results (aim for ~155 characters)."
+                      )
+                    }
                     readonly={field_locked?(@locked_fields, "seo_description")}
                     {field_attrs("seo_description")}
                   />
@@ -3309,6 +3326,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.input
                     field={@form[:seo_image]}
                     label={gettext("OG image URL")}
+                    hint={gettext("Image shown when this page is shared on social media.")}
                     readonly={field_locked?(@locked_fields, "seo_image")}
                     {field_attrs("seo_image")}
                   />
@@ -3318,6 +3336,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.input
                     field={@form[:canonical_url]}
                     label={gettext("Canonical URL")}
+                    hint={
+                      gettext(
+                        "The preferred URL, if this content is reachable at more than one address."
+                      )
+                    }
                     readonly={field_locked?(@locked_fields, "canonical_url")}
                     {field_attrs("canonical_url")}
                   />
