@@ -159,6 +159,32 @@ Enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which flips the
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol. | [`config/runtime.exs:58`](../config/runtime.exs#L58) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | unset | Standard OTLP headers (honored by the exporter library). | OpenTelemetry exporter (standard `OTEL_*`) |
 
+## Optional — upstream update check
+
+The admin system page (`/editor/system`) reports whether a newer Kiln release
+exists. The check is a single unauthenticated GET to the GitHub releases API,
+made only when an admin opens the page. The request carries a bare `KilnCMS`
+user-agent — no version, no instance identifier, no content — so it discloses
+nothing about this deployment beyond its IP address. Results are cached for 24
+hours (15 minutes for a failure) and manual re-checks are floored at one per
+minute. See [`docs/releasing.md`](releasing.md).
+
+**This is the only outbound integration that is on by default.** Unlike
+Meilisearch, S3, Unsplash and mail, it needs no credential to work, so there is
+no unset-secret that implicitly disables it — set `KILN_UPDATE_CHECK=false` if
+your deployment must make no third-party requests at all.
+
+`GIT_SHA` and `BUILD_DATE` are Docker **build args**, not runtime variables —
+the Dockerfile records them as `KILN_GIT_SHA` / `KILN_BUILD_DATE` so a running
+instance can name the commit it was built from. Omitting them is harmless; the
+page then reports the version alone.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_UPDATE_CHECK` | enabled | Set to `false`/`0`/`no`/`off` (case-insensitive) for an instance that must make no outbound requests. | [`config/runtime.exs:127`](../config/runtime.exs#L127) |
+| `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`. | [`Kiln.Version`](../lib/kiln/version.ex) |
+| `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
+
 ## Test / CI only
 
 These are read by `config/test.exs` and `config/e2e.exs` and are not relevant to
