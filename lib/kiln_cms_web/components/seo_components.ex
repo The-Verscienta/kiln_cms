@@ -1,84 +1,45 @@
 defmodule KilnCMSWeb.SeoComponents do
   @moduledoc """
-  The editor-facing half of SEO analysis (#476): a traffic-light badge and a
-  non-blocking findings checklist.
+  The SEO half of the editor's advisory panel: the sentences for each SEO
+  finding code, plus thin wrappers over `KilnCMSWeb.AdvisoryComponents`.
 
-  `KilnCMS.Seo.Analyzer` deliberately emits codes and interpolation args rather
-  than sentences, so it stays free of any web or Gettext dependency. This module
-  is where those codes become translated prose, via `finding_message/2` — the
-  same split `KilnCMS.Slug.Lint` and the editor's old `lint_message/2` already
-  used.
-
-  Nothing here ever blocks a save. Findings are advice.
+  Rendering itself is shared — severity vocabulary, icons, jump links, the
+  grade pill — so an accessibility panel (#495) reuses it by supplying its own
+  message table rather than copying this module. All that lives here is the
+  translation of a code into prose, which is exactly the part that differs.
   """
   use Phoenix.Component
   use Gettext, backend: KilnCMSWeb.Gettext
 
-  import KilnCMSWeb.CoreComponents, only: [icon: 1]
+  import KilnCMSWeb.AdvisoryComponents, only: [advisory_findings: 1, advisory_grade: 1]
 
-  @doc """
-  Traffic-light summary for the SEO panel's `<summary>` row: a coloured grade
-  pill plus an "n of m checks passing" counter.
-  """
+  @doc "Traffic-light summary for the SEO panel's heading row."
   attr :report, :map, required: true
   attr :class, :any, default: nil
 
   def seo_grade_badge(assigns) do
     ~H"""
-    <span class={["inline-flex items-center gap-1.5", @class]}>
-      <span class={[
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        grade_tone(@report.grade)
-      ]}>
-        {grade_label(@report.grade)}
-      </span>
-      <span :if={@report.total > 0} class="text-xs font-normal text-base-content/60">
-        {gettext("%{passed}/%{total}", passed: @report.passed, total: @report.total)}
-      </span>
-    </span>
+    <.advisory_grade report={@report} class={@class} />
     """
   end
 
   @doc """
-  The findings checklist. Renders nothing when the document is clean, so a
-  well-formed page shows no noise at all.
+  The SEO findings checklist.
+
+  `slug_customized?` only affects the keyphrase-in-slug advice: a pinned slug
+  won't re-derive on its own, so the author is told how to unpin it.
   """
   attr :report, :map, required: true
   attr :slug_customized?, :boolean, default: false
   attr :class, :any, default: nil
 
   def seo_findings(assigns) do
+    assigns = assign(assigns, :message_fn, &finding_message(&1, assigns.slug_customized?))
+
     ~H"""
-    <ul :if={@report.findings != []} class={["space-y-1", @class]}>
-      <li
-        :for={finding <- @report.findings}
-        class={["flex items-start gap-1.5 text-xs", severity_tone(finding.severity)]}
-      >
-        <.icon name={severity_icon(finding.severity)} class="mt-0.5 size-3.5 shrink-0" />
-        <span>
-          {finding_message(finding, @slug_customized?)}
-          <%!-- Findings that name specific blocks link straight to them; the
-                editor gives every top-level block an `id="block-<index>"`. --%>
-          <a
-            :for={index <- block_indexes(finding)}
-            href={"#block-#{index}"}
-            class="ml-1 underline underline-offset-2"
-          >
-            {gettext("block %{position}", position: index + 1)}
-          </a>
-        </span>
-      </li>
-    </ul>
+    <.advisory_findings findings={@report.findings} message_fn={@message_fn} class={@class} />
     """
   end
-
-  # Block positions a finding points at, if any. Capped so a document with
-  # fifty un-alt'd images doesn't render fifty links into a sidebar panel.
-  @max_jump_links 5
-  defp block_indexes(%{args: %{indexes: indexes}}) when is_list(indexes),
-    do: Enum.take(indexes, @max_jump_links)
-
-  defp block_indexes(_finding), do: []
 
   @doc """
   A single finding's translated message.
@@ -241,22 +202,4 @@ defmodule KilnCMSWeb.SeoComponents do
 
   # An unknown code (a future check, or a plugin's) must never crash the editor.
   def finding_message(%{code: code}, _pinned?), do: to_string(code)
-
-  # ── Presentation helpers ──────────────────────────────────────────────────
-
-  defp grade_label(:good), do: gettext("Good")
-  defp grade_label(:ok), do: gettext("Needs work")
-  defp grade_label(:poor), do: gettext("Poor")
-
-  defp grade_tone(:good), do: "bg-success/15 text-success"
-  defp grade_tone(:ok), do: "bg-warning/20 text-warning-content"
-  defp grade_tone(:poor), do: "bg-error/12 text-error"
-
-  defp severity_tone(:error), do: "text-error"
-  defp severity_tone(:warning), do: "text-warning"
-  defp severity_tone(:info), do: "text-base-content/60"
-
-  defp severity_icon(:error), do: "hero-exclamation-triangle"
-  defp severity_icon(:warning), do: "hero-light-bulb"
-  defp severity_icon(:info), do: "hero-information-circle"
 end

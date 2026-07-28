@@ -1,7 +1,7 @@
-defmodule KilnCMS.Seo.BodyStatsTest do
+defmodule Kiln.Advisory.BodyTest do
   use ExUnit.Case, async: true
 
-  alias KilnCMS.Seo.BodyStats
+  alias Kiln.Advisory.Body
 
   defp para(text),
     do: %{"_type" => "block", "style" => "normal", "children" => [%{"text" => text}]}
@@ -11,7 +11,7 @@ defmodule KilnCMS.Seo.BodyStatsTest do
   describe "compute/1 is total" do
     test "handles nil, an empty list, and unknown blocks without raising" do
       for input <- [nil, [], [%{"_type" => "who_knows", "wat" => 1}], "not a list"] do
-        assert %BodyStats{} = BodyStats.compute(input)
+        assert %Body{} = Body.compute(input)
       end
     end
   end
@@ -22,7 +22,7 @@ defmodule KilnCMS.Seo.BodyStatsTest do
         rich([para("Alpha comes first."), para("Beta is second."), para("Gamma is last here.")])
       ]
 
-      stats = BodyStats.compute(blocks)
+      stats = Body.compute(blocks)
 
       assert stats.first_paragraph == "Alpha comes first."
       # Per-paragraph word counts stay in document order too — 3, 3, 4.
@@ -36,7 +36,7 @@ defmodule KilnCMS.Seo.BodyStatsTest do
         %{"_type" => "heading", "text" => "Second", "level" => 2}
       ]
 
-      assert BodyStats.compute(blocks).headings == [
+      assert Body.compute(blocks).headings == [
                %{level: 1, text: "Top"},
                %{level: 3, text: "Nested"},
                %{level: 2, text: "Second"}
@@ -53,7 +53,7 @@ defmodule KilnCMS.Seo.BodyStatsTest do
         %{"_type" => "image", "url" => "/c.jpg", "alt" => "   "}
       ]
 
-      stats = BodyStats.compute(blocks)
+      stats = Body.compute(blocks)
 
       assert stats.image_count == 3
       assert stats.images_missing_alt == [2, 3]
@@ -74,7 +74,7 @@ defmodule KilnCMS.Seo.BodyStatsTest do
         }
       ]
 
-      stats = BodyStats.compute(blocks)
+      stats = Body.compute(blocks)
 
       assert stats.headings == [%{level: 2, text: "In a column"}]
       assert stats.image_count == 1
@@ -107,7 +107,7 @@ defmodule KilnCMS.Seo.BodyStatsTest do
         ])
       ]
 
-      assert BodyStats.compute(blocks).internal_link_paths == ["/guides/firing"]
+      assert Body.compute(blocks).internal_link_paths == ["/guides/firing"]
     end
 
     test "finds links nested inside table cells" do
@@ -129,7 +129,7 @@ defmodule KilnCMS.Seo.BodyStatsTest do
         ])
       ]
 
-      assert BodyStats.compute(blocks).internal_link_paths == ["/in/a/table"]
+      assert Body.compute(blocks).internal_link_paths == ["/in/a/table"]
     end
   end
 
@@ -139,30 +139,30 @@ defmodule KilnCMS.Seo.BodyStatsTest do
       # (whose only vowel is a silent trailing e) as ZERO — which inflated
       # Flesch ~17 points and silenced the readability warning entirely.
       for word <- ~w(the he she be we me) do
-        assert BodyStats.syllable_count(word) == 1, "#{word} should be 1 syllable"
+        assert Body.syllable_count(word) == 1, "#{word} should be 1 syllable"
       end
     end
 
     test "counts vowel groups and drops a silent trailing e" do
-      assert BodyStats.syllable_count("kiln") == 1
-      assert BodyStats.syllable_count("firing") == 2
-      assert BodyStats.syllable_count("make") == 1
-      assert BodyStats.syllable_count("pottery") == 3
+      assert Body.syllable_count("kiln") == 1
+      assert Body.syllable_count("firing") == 2
+      assert Body.syllable_count("make") == 1
+      assert Body.syllable_count("pottery") == 3
     end
   end
 
   describe "tokenize/1" do
     test "splits on punctuation so firing. matches firing" do
-      assert BodyStats.tokenize(BodyStats.fold("The kiln firing. Done!")) ==
+      assert Body.tokenize(Body.fold("The kiln firing. Done!")) ==
                ~w(the kiln firing done)
     end
   end
 
   describe "sentences and words" do
     test "splits on terminators and counts words" do
-      assert BodyStats.sentences("One. Two! Three? Four") == ["One.", "Two!", "Three?", "Four"]
-      assert BodyStats.count_words("  a  b \n c ") == 3
-      assert BodyStats.count_words("") == 0
+      assert Body.sentences("One. Two! Three? Four") == ["One.", "Two!", "Three?", "Four"]
+      assert Body.count_words("  a  b \n c ") == 3
+      assert Body.count_words("") == 0
     end
   end
 end

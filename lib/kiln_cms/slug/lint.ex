@@ -52,13 +52,12 @@ defmodule KilnCMS.Slug.Lint do
   defp long?(slug),
     do: String.length(slug) > @max_chars or length(String.split(slug, "-")) > @max_words
 
-  # Content words: slugified with stop words stripped, so "Guide to the Kiln"
-  # and "guide-kiln" compare equal.
-  defp words(text), do: text |> Slug.derive() |> String.split("-", trim: true)
+  # Shared with the SEO advisories so the two can't drift on what "matches".
+  defp words(text), do: Slug.content_words(text)
 
   defp title_words(fields) do
     words(to_string(fields[:title] || "")) ++ words(to_string(fields[:seo_title] || ""))
   end
 
-  defp subset?(needles, haystack), do: Enum.all?(needles, &(&1 in haystack))
+  defp subset?(needles, haystack), do: Slug.subset?(needles, haystack)
 end

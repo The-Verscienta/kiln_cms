@@ -3932,7 +3932,7 @@ msgstr "Bibliothèque (%{count} sur %{total})"
 msgid "Link not recognized"
 msgstr "Lien non reconnu"
 
-#: lib/kiln_cms_web/components/seo_components.ex:182
+#: lib/kiln_cms_web/components/seo_components.ex:143
 #, elixir-autogen, elixir-format
 msgid "Long slug — search engines and shared links favor short URLs (≤ 6 words)."
 msgstr "Slug long — les moteurs de recherche et les liens partagés privilégient les URL courtes (≤ 6 mots)."
@@ -4950,7 +4950,7 @@ msgstr "Le compte doit déjà exister — invitez d'abord les personnes via l'in
 msgid "The campaign couldn't be recorded — check the details."
 msgstr "La campagne n'a pas pu être enregistrée — vérifiez les détails."
 
-#: lib/kiln_cms_web/components/seo_components.ex:146
+#: lib/kiln_cms_web/components/seo_components.ex:107
 #, elixir-autogen, elixir-format
 msgid "The focus keyphrase doesn't appear in the title or SEO title."
 msgstr "L'expression clé cible n'apparaît ni dans le titre ni dans le titre SEO."
@@ -4975,12 +4975,12 @@ msgstr "Le site en un coup d'œil — huit domaines disposés autour de votre co
 msgid "The site tier governs this member's capability on THIS site (platform admins always retain access); custom roles and scopes refine it."
 msgstr "Le niveau du site détermine les capacités de ce membre sur CE site (les administrateurs de la plateforme conservent toujours leur accès) ; les rôles personnalisés et les portées l'affinent."
 
-#: lib/kiln_cms_web/components/seo_components.ex:151
+#: lib/kiln_cms_web/components/seo_components.ex:112
 #, elixir-autogen, elixir-format
 msgid "The slug doesn't contain the focus keyphrase — clear the slug field to re-derive it."
 msgstr "Le slug ne contient pas l'expression clé cible — videz le champ slug pour le redériver."
 
-#: lib/kiln_cms_web/components/seo_components.ex:156
+#: lib/kiln_cms_web/components/seo_components.ex:117
 #, elixir-autogen, elixir-format
 msgid "The slug doesn't contain the focus keyphrase."
 msgstr "Le slug ne contient pas l'expression clé cible."
@@ -5683,24 +5683,19 @@ msgstr "Merci — nous avons bien reçu votre message."
 msgid "Your submission couldn't be saved: %{detail}"
 msgstr "Votre envoi n'a pas pu être enregistré : %{detail}"
 
-#: lib/kiln_cms_web/components/seo_components.ex:36
-#, elixir-autogen, elixir-format
-msgid "%{passed}/%{total}"
-msgstr "%{passed}/%{total}"
-
-#: lib/kiln_cms_web/components/seo_components.ex:221
+#: lib/kiln_cms_web/components/seo_components.ex:182
 #, elixir-autogen, elixir-format
 msgid "%{percent}% of sentences run over %{max} words — try breaking some up."
 msgstr "%{percent}% des phrases dépassent %{max} mots — essayez d'en découper quelques-unes."
 
-#: lib/kiln_cms_web/components/seo_components.ex:206
+#: lib/kiln_cms_web/components/seo_components.ex:167
 #, elixir-autogen, elixir-format
 msgid "1 image has no alt text — screen readers can't describe it."
 msgid_plural "%{count} images have no alt text — screen readers can't describe them."
 msgstr[0] "1 image n'a pas de texte alternatif — les lecteurs d'écran ne peuvent pas la décrire."
 msgstr[1] "%{count} images n'ont pas de texte alternatif — les lecteurs d'écran ne peuvent pas les décrire."
 
-#: lib/kiln_cms_web/components/seo_components.ex:227
+#: lib/kiln_cms_web/components/seo_components.ex:188
 #, elixir-autogen, elixir-format
 msgid "1 paragraph runs over %{max} words — consider splitting it."
 msgid_plural "%{count} paragraphs run over %{max} words — consider splitting them."
@@ -5745,22 +5740,22 @@ msgstr "Impossible de générer des suggestions. Veuillez réessayer."
 msgid "Find related pages"
 msgstr "Trouver des pages connexes"
 
-#: lib/kiln_cms_web/components/seo_components.ex:173
+#: lib/kiln_cms_web/components/seo_components.ex:134
 #, elixir-autogen, elixir-format
 msgid "Focus keyphrase density is %{density}% — above %{max}% reads as keyword stuffing."
 msgstr "La densité de l'expression clé cible est de %{density}% — au-delà de %{max}%, cela ressemble à du bourrage de mots-clés."
 
-#: lib/kiln_cms_web/components/seo_components.ex:166
+#: lib/kiln_cms_web/components/seo_components.ex:127
 #, elixir-autogen, elixir-format
 msgid "Focus keyphrase density is %{density}% — below the %{min}% guideline."
 msgstr "La densité de l'expression clé cible est de %{density}% — en dessous du seuil recommandé de %{min}%."
 
-#: lib/kiln_cms_web/components/seo_components.ex:247
+#: lib/kiln_cms_web/components/advisory_components.ex:95
 #, elixir-autogen, elixir-format
 msgid "Good"
 msgstr "Bon"
 
-#: lib/kiln_cms_web/components/seo_components.ex:198
+#: lib/kiln_cms_web/components/seo_components.ex:159
 #, elixir-autogen, elixir-format
 msgid "Heading levels jump from H%{from} to H%{to} — don't skip levels."
 msgstr "Les niveaux de titre passent de H%{from} à H%{to} — ne sautez pas de niveaux."
@@ -5775,17 +5770,17 @@ msgstr "Liens internes"
 msgid "Keywords applied. The slug was left unchanged because this content is live."
 msgstr "Mots-clés appliqués. Le slug n'a pas été modifié car ce contenu est en ligne."
 
-#: lib/kiln_cms_web/components/seo_components.ex:248
+#: lib/kiln_cms_web/components/advisory_components.ex:96
 #, elixir-autogen, elixir-format
 msgid "Needs work"
 msgstr "À améliorer"
 
-#: lib/kiln_cms_web/components/seo_components.ex:122
+#: lib/kiln_cms_web/components/seo_components.ex:83
 #, elixir-autogen, elixir-format
 msgid "No SEO description — search engines will invent one from the page text."
 msgstr "Aucune méta-description — les moteurs de recherche en inventeront une à partir du texte de la page."
 
-#: lib/kiln_cms_web/components/seo_components.ex:95
+#: lib/kiln_cms_web/components/seo_components.ex:56
 #, elixir-autogen, elixir-format
 msgid "No SEO title — the page title will be used instead."
 msgstr "Aucun titre SEO — le titre de la page sera utilisé à la place."
@@ -5795,12 +5790,12 @@ msgstr "Aucun titre SEO — le titre de la page sera utilisé à la place."
 msgid "No description — search engines will write their own."
 msgstr "Aucune description — les moteurs de recherche rédigeront la leur."
 
-#: lib/kiln_cms_web/components/seo_components.ex:143
+#: lib/kiln_cms_web/components/seo_components.ex:104
 #, elixir-autogen, elixir-format
 msgid "No focus keyphrase set — the first SEO keyword becomes the focus keyphrase."
 msgstr "Aucune expression clé cible définie — le premier mot-clé SEO devient l'expression clé cible."
 
-#: lib/kiln_cms_web/components/seo_components.ex:194
+#: lib/kiln_cms_web/components/seo_components.ex:155
 #, elixir-autogen, elixir-format
 msgid "No headings — long pages are easier to scan when broken into sections."
 msgstr "Aucun titre — les pages longues se parcourent plus facilement lorsqu'elles sont découpées en sections."
@@ -5820,17 +5815,17 @@ msgstr "Aucune page connexe ne correspond. Activer la recherche sémantique amé
 msgid "No social image"
 msgstr "Aucune image sociale"
 
-#: lib/kiln_cms_web/components/seo_components.ex:215
+#: lib/kiln_cms_web/components/seo_components.ex:176
 #, elixir-autogen, elixir-format
 msgid "No social image — links to this page will share without a preview picture."
 msgstr "Aucune image sociale — les liens vers cette page seront partagés sans image d'aperçu."
 
-#: lib/kiln_cms_web/components/seo_components.ex:188
+#: lib/kiln_cms_web/components/seo_components.ex:149
 #, elixir-autogen, elixir-format
 msgid "Only %{count} words — pages under %{min} rarely rank well."
 msgstr "Seulement %{count} mots — les pages de moins de %{min} mots se classent rarement bien."
 
-#: lib/kiln_cms_web/components/seo_components.ex:249
+#: lib/kiln_cms_web/components/advisory_components.ex:97
 #, elixir-autogen, elixir-format
 msgid "Poor"
 msgstr "Insuffisant"
@@ -5840,7 +5835,7 @@ msgstr "Insuffisant"
 msgid "Publish this page to index it — suggestions come from indexed content."
 msgstr "Publiez cette page pour l'indexer — les suggestions proviennent du contenu indexé."
 
-#: lib/kiln_cms_web/components/seo_components.ex:238
+#: lib/kiln_cms_web/components/seo_components.ex:199
 #, elixir-autogen, elixir-format
 msgid "Reading ease is %{score}/100 — shorter words and sentences would help."
 msgstr "La lisibilité est de %{score}/100 — des mots et des phrases plus courts aideraient."
@@ -5860,22 +5855,22 @@ msgstr "Pages connexes vers lesquelles il vaut la peine de créer un lien depuis
 msgid "Reload to resolve the editing conflict before applying suggestions."
 msgstr "Rechargez pour résoudre le conflit d'édition avant d'appliquer des suggestions."
 
-#: lib/kiln_cms_web/components/seo_components.ex:135
+#: lib/kiln_cms_web/components/seo_components.ex:96
 #, elixir-autogen, elixir-format
 msgid "SEO description is %{length} characters — search results truncate past %{max}."
 msgstr "La méta-description fait %{length} caractères — les résultats de recherche la tronquent au-delà de %{max}."
 
-#: lib/kiln_cms_web/components/seo_components.ex:126
+#: lib/kiln_cms_web/components/seo_components.ex:87
 #, elixir-autogen, elixir-format
 msgid "SEO description is short — %{length} of the %{min}–%{max} characters search results show."
 msgstr "La méta-description est courte — %{length} des %{min}–%{max} caractères affichés dans les résultats de recherche."
 
-#: lib/kiln_cms_web/components/seo_components.ex:110
+#: lib/kiln_cms_web/components/seo_components.ex:71
 #, elixir-autogen, elixir-format
 msgid "SEO title is %{length} characters — search results truncate past %{max}."
 msgstr "Le titre SEO fait %{length} caractères — les résultats de recherche le tronquent au-delà de %{max}."
 
-#: lib/kiln_cms_web/components/seo_components.ex:101
+#: lib/kiln_cms_web/components/seo_components.ex:62
 #, elixir-autogen, elixir-format
 msgid "SEO title is short — %{length} of the %{min}–%{max} characters search results show."
 msgstr "Le titre SEO est court — %{length} des %{min}–%{max} caractères affichés dans les résultats de recherche."
@@ -5905,17 +5900,17 @@ msgstr "Suggestions"
 msgid "Suggestions are generated by %{provider}. This page's title, excerpt and text are sent to that provider."
 msgstr "Les suggestions sont générées par %{provider}. Le titre, l'extrait et le texte de cette page sont envoyés à ce fournisseur."
 
-#: lib/kiln_cms_web/components/seo_components.ex:117
+#: lib/kiln_cms_web/components/seo_components.ex:78
 #, elixir-autogen, elixir-format
 msgid "The SEO title just repeats the page title — a distinct one usually reads better."
 msgstr "Le titre SEO ne fait que répéter le titre de la page — un titre distinct se lit généralement mieux."
 
-#: lib/kiln_cms_web/components/seo_components.ex:159
+#: lib/kiln_cms_web/components/seo_components.ex:120
 #, elixir-autogen, elixir-format
 msgid "The focus keyphrase doesn't appear in the SEO description."
 msgstr "L'expression clé cible n'apparaît pas dans la méta-description."
 
-#: lib/kiln_cms_web/components/seo_components.ex:162
+#: lib/kiln_cms_web/components/seo_components.ex:123
 #, elixir-autogen, elixir-format
 msgid "The focus keyphrase doesn't appear in the opening paragraph."
 msgstr "L'expression clé cible n'apparaît pas dans le paragraphe d'introduction."
@@ -5950,7 +5945,12 @@ msgstr "Tout utiliser"
 msgid "Use featured image"
 msgstr "Utiliser l'image à la une"
 
-#: lib/kiln_cms_web/components/seo_components.ex:67
+#: lib/kiln_cms_web/components/advisory_components.ex:85
 #, elixir-autogen, elixir-format
 msgid "block %{position}"
 msgstr "bloc %{position}"
+
+#: lib/kiln_cms_web/components/advisory_components.ex:46
+#, elixir-autogen, elixir-format
+msgid "%{passed} of %{total} checks passing"
+msgstr "%{passed} vérifications sur %{total} réussies"

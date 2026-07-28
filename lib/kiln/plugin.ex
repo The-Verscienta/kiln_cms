@@ -69,6 +69,7 @@ defmodule Kiln.Plugin do
   @callback domains() :: [module()]
   @callback blocks() :: [module()]
   @callback field_types() :: [module()]
+  @callback advisories() :: [module()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
   @callback editor_routes() :: [admin_route()]
@@ -109,6 +110,9 @@ defmodule Kiln.Plugin do
       def field_types, do: []
 
       @impl Kiln.Plugin
+      def advisories, do: []
+
+      @impl Kiln.Plugin
       def nav_items, do: []
 
       @impl Kiln.Plugin
@@ -133,6 +137,7 @@ defmodule Kiln.Plugin do
                      domains: 0,
                      blocks: 0,
                      field_types: 0,
+                     advisories: 0,
                      nav_items: 0,
                      admin_routes: 0,
                      editor_routes: 0,

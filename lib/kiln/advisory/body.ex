@@ -1,13 +1,18 @@
-defmodule KilnCMS.Seo.BodyStats do
+defmodule Kiln.Advisory.Body do
   @moduledoc """
-  The expensive half of SEO analysis (#476): everything that requires walking
-  the block tree.
+  The expensive half of content analysis: everything that requires walking the
+  block tree.
 
-  `KilnCMS.Seo.Analyzer` is cheap — it compares a handful of short strings — but
-  the facts it compares *against* (word count, headings, first paragraph, images
+  Advisory checks are cheap — they compare a handful of short strings — but the
+  facts they compare *against* (word count, headings, first paragraph, images
   missing alt text) mean touching every block. Splitting them lets the editor
-  recompute the analysis on every keystroke while recomputing these stats only
+  recompute the checks on every keystroke while recomputing these facts only
   when the body actually changes.
+
+  Deliberately feature-neutral, and part of `Kiln.Advisory` rather than the SEO
+  namespace: nothing here is SEO-specific, and the heading and image facts are
+  exactly what an accessibility checker (#495) needs. One walk feeds every
+  registered check.
 
   `compute/1` accepts whatever the caller has: the stored `{:array, BlockUnion}`
   value, typed block structs, or the raw string-keyed maps the content editor
