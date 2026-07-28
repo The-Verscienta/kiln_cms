@@ -414,10 +414,10 @@ defmodule KilnCMSWeb.TeamLive do
                 <div class="min-w-0 space-y-1">
                   <span class="font-medium">{membership.user.email}</span>
                   <p class="text-sm text-base-content/70">
-                    <span class="badge badge-sm">{membership.role}</span>
-                    <span :if={membership.custom_role} class="badge badge-sm badge-outline ml-1">
+                    <.badge>{membership.role}</.badge>
+                    <.badge :if={membership.custom_role} variant="outline" class="ml-1">
                       {membership.custom_role.name}
-                    </span>
+                    </.badge>
                   </p>
                   <p :if={scope_summary(membership) != ""} class="text-xs text-base-content/60">
                     {scope_summary(membership)}

@@ -11,7 +11,7 @@ msgstr ""
 "Language: fr\n"
 "Plural-Forms: nplurals=2; plural=(n>1);\n"
 
-#: lib/kiln_cms_web/components/core_components.ex:664
+#: lib/kiln_cms_web/components/core_components.ex:668
 #, elixir-autogen, elixir-format
 msgid "Actions"
 msgstr "Actions"
@@ -1418,7 +1418,7 @@ msgstr "Ajoutez des champs typés à un type de contenu sans modifier le code. L
 msgid "All"
 msgstr "Tout"
 
-#: lib/kiln_cms_web/components/core_components.ex:225
+#: lib/kiln_cms_web/components/core_components.ex:229
 #: lib/kiln_cms_web/live/editor_live.ex:801
 #, elixir-autogen, elixir-format
 msgid "Archived"
@@ -1526,7 +1526,7 @@ msgstr "Supprimer ce champ ? Les valeurs existantes ne seront plus diffusées."
 msgid "Display name"
 msgstr "Nom d'affichage"
 
-#: lib/kiln_cms_web/components/core_components.ex:222
+#: lib/kiln_cms_web/components/core_components.ex:226
 #: lib/kiln_cms_web/live/editor_live.ex:798
 #, elixir-autogen, elixir-format
 msgid "Draft"
@@ -1601,7 +1601,7 @@ msgstr "API GraphQL"
 msgid "Help text"
 msgstr "Texte d'aide"
 
-#: lib/kiln_cms_web/components/core_components.ex:223
+#: lib/kiln_cms_web/components/core_components.ex:227
 #: lib/kiln_cms_web/live/editor_live.ex:799
 #, elixir-autogen, elixir-format
 msgid "In review"
@@ -1761,7 +1761,7 @@ msgstr "Profil"
 msgid "Profile updated."
 msgstr "Profil mis à jour."
 
-#: lib/kiln_cms_web/components/core_components.ex:224
+#: lib/kiln_cms_web/components/core_components.ex:228
 #: lib/kiln_cms_web/live/editor_live.ex:800
 #, elixir-autogen, elixir-format
 msgid "Published"
@@ -1783,7 +1783,7 @@ msgstr "Rechargez pour résoudre le conflit d'édition avant d'enregistrer."
 msgid "Remove"
 msgstr "Retirer"
 
-#: lib/kiln_cms_web/components/core_components.ex:555
+#: lib/kiln_cms_web/components/core_components.ex:559
 #: lib/kiln_cms_web/live/field_definition_live.ex:359
 #: lib/kiln_cms_web/live/field_definition_live.ex:481
 #: lib/kiln_cms_web/live/form_builder_live.ex:569
@@ -5333,12 +5333,12 @@ msgstr "découverte des langues pour construire des sélecteurs de langue."
 msgid "missing"
 msgstr "manquant"
 
-#: lib/kiln_cms_web/components/core_components.ex:287
+#: lib/kiln_cms_web/components/core_components.ex:291
 #, elixir-autogen, elixir-format
 msgid "no schedule"
 msgstr "aucune planification"
 
-#: lib/kiln_cms_web/components/core_components.ex:285
+#: lib/kiln_cms_web/components/core_components.ex:289
 #, elixir-autogen, elixir-format
 msgid "not published"
 msgstr "non publié"
@@ -5353,7 +5353,7 @@ msgstr "article — vide = tous"
 msgid "post, page — empty = all"
 msgstr "article, page — vide = tous"
 
-#: lib/kiln_cms_web/components/core_components.ex:285
+#: lib/kiln_cms_web/components/core_components.ex:289
 #: lib/kiln_cms_web/live/translations_live.ex:120
 #, elixir-autogen, elixir-format
 msgid "published"
@@ -5374,7 +5374,7 @@ msgstr "lecture"
 msgid "recorded content views"
 msgstr "vues de contenu enregistrées"
 
-#: lib/kiln_cms_web/components/core_components.ex:287
+#: lib/kiln_cms_web/components/core_components.ex:291
 #, elixir-autogen, elixir-format
 msgid "scheduled"
 msgstr "planifié"
@@ -5429,12 +5429,12 @@ msgstr "pour ajouter des blocs."
 msgid "transitions in the next 7 days"
 msgstr "transitions dans les 7 prochains jours"
 
-#: lib/kiln_cms_web/components/core_components.ex:286
+#: lib/kiln_cms_web/components/core_components.ex:290
 #, elixir-autogen, elixir-format
 msgid "translated"
 msgstr "traduit"
 
-#: lib/kiln_cms_web/components/core_components.ex:286
+#: lib/kiln_cms_web/components/core_components.ex:290
 #, elixir-autogen, elixir-format
 msgid "translation gaps"
 msgstr "lacunes de traduction"

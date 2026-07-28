@@ -254,7 +254,7 @@ defmodule KilnCMSWeb.PresentationLive do
             {gettext("Full editor")}
           </.link>
           <span class="text-sm font-medium">{@record.title}</span>
-          <span class="badge badge-sm">{@record.state}</span>
+          <.state_badge state={@record.state} />
         </div>
         <span class="text-xs text-base-content/60">{save_label(@save_state)}</span>
       </div>
