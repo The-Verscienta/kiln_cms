@@ -88,6 +88,21 @@ defmodule KilnCMS.Seo.LinksTest do
       refute Enum.any?(Links.suggest(anchor), &(&1.id == draft.id))
     end
 
+    test "never suggests an audience-gated page" do
+      # Delivery serves published AND public (Slugs.find_published_by_alias/3),
+      # so a member-only page is a link a reader cannot follow.
+      actor = admin()
+      anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)
+
+      gated =
+        post(actor, "brewing herbal tea slowly",
+          title: @twin_title,
+          attrs: %{audience: :member}
+        )
+
+      refute Enum.any?(Links.suggest(anchor), &(&1.id == gated.id))
+    end
+
     test "every suggestion carries a usable public path" do
       actor = admin()
       anchor = post(actor, "brewing herbal tea slowly", title: @twin_title)

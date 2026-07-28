@@ -396,18 +396,18 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
   end
 
   describe "internal links panel" do
-    test "does not load until the panel is opened", %{conn: conn} do
+    test "does not load until explicitly asked", %{conn: conn} do
       editor = authed_user(:editor)
       page = CMS.create_page!(%{title: "Links", slug: "links-lazy"}, actor: editor)
       {lv, html} = open_editor(conn, editor, page)
 
       # Never on mount: it costs a vector query plus a read per neighbour, and
-      # most page-loads never open this panel.
+      # most editing sessions never look at this panel.
       assert html =~ "Internal links"
+      assert html =~ "Find related pages"
       refute html =~ "No related pages"
-      refute html =~ "Refresh"
 
-      render_click(lv, "seo_links", %{})
+      render_click(lv, "seo_links_refresh", %{})
       loaded = render_async(lv)
 
       assert loaded =~ "Refresh"
@@ -418,7 +418,7 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       page = CMS.create_page!(%{title: "Links", slug: "links-empty"}, actor: editor)
       {lv, _html} = open_editor(conn, editor, page)
 
-      render_click(lv, "seo_links", %{})
+      render_click(lv, "seo_links_refresh", %{})
       html = render_async(lv)
 
       # This draft was never published, so it was never indexed — say so

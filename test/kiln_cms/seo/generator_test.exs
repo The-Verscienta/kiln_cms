@@ -40,12 +40,37 @@ defmodule KilnCMS.Seo.GeneratorTest do
   end
 
   describe "egress classification" do
-    test "on-prem providers are not egress" do
+    test "on-prem providers at their default local daemon are not egress" do
       for spec <- ["ollama:llama3.1", "vllm:mistral-7b"] do
-        put_seo(generator: KilnCMS.StubSeoGenerator, model: spec)
+        put_seo(generator: KilnCMS.StubSeoGenerator, model: spec, base_url: nil)
         assert Seo.enabled?()
         refute Seo.egress?()
       end
+    end
+
+    test "an on-prem provider pointed at a REMOTE host is egress" do
+      # The whole point: `base_url` is overridable — the mechanism docs/seo.md
+      # recommends for on-prem — so classifying by provider name alone reported
+      # "no egress" while every page body left the deployment, silencing both
+      # the boot warning and the editor notice.
+      put_seo(
+        generator: KilnCMS.StubSeoGenerator,
+        model: "ollama:llama3.1",
+        base_url: "https://llm.vendor.example"
+      )
+
+      assert Seo.egress?()
+      assert Seo.endpoint_host() == "llm.vendor.example"
+    end
+
+    test "an on-prem provider on a private network host is not egress" do
+      put_seo(
+        generator: KilnCMS.StubSeoGenerator,
+        model: "ollama:llama3.1",
+        base_url: "http://10.0.0.5:11434"
+      )
+
+      refute Seo.egress?()
     end
 
     test "hosted providers are egress" do

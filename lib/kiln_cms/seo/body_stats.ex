@@ -30,6 +30,7 @@ defmodule KilnCMS.Seo.BodyStats do
   @type t :: %__MODULE__{
           text: String.t(),
           folded_text: String.t(),
+          folded_words: [String.t()],
           word_count: non_neg_integer(),
           syllable_count: non_neg_integer(),
           first_paragraph: String.t(),
@@ -44,6 +45,7 @@ defmodule KilnCMS.Seo.BodyStats do
 
   defstruct text: "",
             folded_text: "",
+            folded_words: [],
             word_count: 0,
             syllable_count: 0,
             first_paragraph: "",
@@ -84,6 +86,7 @@ defmodule KilnCMS.Seo.BodyStats do
     %__MODULE__{
       text: text,
       folded_text: folded,
+      folded_words: tokenize(folded),
       word_count: length(words),
       syllable_count: syllable_count(folded),
       first_paragraph: List.first(paragraphs) || "",
@@ -111,23 +114,58 @@ defmodule KilnCMS.Seo.BodyStats do
     do: text |> to_string() |> String.downcase() |> String.replace(~r/\s+/u, " ")
 
   @doc """
+  Folded text as clean word tokens — punctuation dropped, so `firing.` and
+  `firing` compare equal.
+
+  Keyphrase density matches against these rather than doing a substring scan of
+  `folded_text`: a substring scan reports keyphrase `art` as present in `part`,
+  `start`, `heart` and `chart`, which produced spurious "keyword stuffing"
+  warnings for a keyphrase used correctly.
+  """
+  @spec tokenize(String.t()) :: [String.t()]
+  def tokenize(folded_text),
+    do: String.split(folded_text, ~r/[^\p{L}\p{N}]+/u, trim: true)
+
+  @doc """
   Approximate English syllable count for the whole text, for Flesch scoring.
 
-  Vowel groups minus silent trailing "e"s — the standard cheap approximation,
-  but counted in **two whole-text scans** rather than per word. Running the
-  per-word version over a long document cost ~140ms, and this sits in the
-  editor's keystroke path.
+  Vowel groups minus a silent trailing "e", floored at **one syllable per
+  word** — the standard cheap approximation.
 
-  The trade-off is that vowel-less tokens ("1997", "—") contribute 0 rather
-  than the 1 a per-word count would give them. Flesch is a heuristic reported
-  to one decimal place; the difference is not observable in the advice.
+  That per-word floor is load-bearing and was lost in an earlier version that
+  counted with two whole-text regex scans: any word whose only vowel is a
+  silent final `e` (`the`, `he`, `she`, `be`, `we`, `me`) netted out to zero,
+  inflating Flesch by ~17 points and silencing the readability warning on
+  exactly the prose it exists to flag. Keep the counting per word.
+
+  Still cheap: one regex to tokenize, then a plain charlist reduce per word
+  rather than two regex executions each.
   """
   @spec syllable_count(String.t()) :: non_neg_integer()
   def syllable_count(folded_text) do
-    groups = length(Regex.scan(~r/[aeiouy]+/u, folded_text))
-    silent_e = length(Regex.scan(~r/[^aeiouy\s][e](?![a-z])/u, folded_text))
+    folded_text
+    |> String.split(~r/[^a-z]+/u, trim: true)
+    |> Enum.reduce(0, &(&2 + word_syllables(&1)))
+  end
 
-    max(groups - silent_e, 0)
+  defp word_syllables(word) do
+    groups = vowel_groups(word)
+    silent_e = if groups > 1 and String.ends_with?(word, "e"), do: 1, else: 0
+
+    max(groups - silent_e, 1)
+  end
+
+  defp vowel_groups(word) do
+    word
+    |> String.to_charlist()
+    |> Enum.reduce({0, false}, fn char, {count, in_group?} ->
+      case {char in ~c"aeiouy", in_group?} do
+        {true, false} -> {count + 1, true}
+        {true, true} -> {count, true}
+        {false, _} -> {count, false}
+      end
+    end)
+    |> elem(0)
   end
 
   @doc "Split text into sentences. Language-neutral: terminators plus whitespace."

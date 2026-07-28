@@ -165,7 +165,13 @@ defmodule KilnCMS.Search.Related do
     end)
   end
 
+  # `published_only?` serves the reader-facing surfaces — `/api/related` and the
+  # editor's internal-link suggestions — so it means "a page a reader can
+  # actually open", i.e. published AND public. Delivery draws the same line in
+  # `Slugs.find_published_by_alias/3`; without the audience half, both surfaces
+  # advertise member-gated pages to anonymous callers.
   defp neighbour_entry(doc, _distance, true) when doc.state != :published, do: []
+  defp neighbour_entry(doc, _distance, true) when doc.audience != :public, do: []
 
   defp neighbour_entry(doc, distance, _published_only?) do
     type = KilnCMS.Firing.Engine.public_type(doc)

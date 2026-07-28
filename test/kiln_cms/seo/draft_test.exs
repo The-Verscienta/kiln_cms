@@ -122,6 +122,46 @@ defmodule KilnCMS.Seo.DraftTest do
       assert d.seo_title == "Title alert(1) here"
     end
 
+    test "control and bidi characters are stripped" do
+      # A NUL reaching Postgres raises rather than returning a changeset error,
+      # which kills the LiveView and the author's unsaved work. U+202E renders
+      # the snippet reversed.
+      d = normalized(seo_title: "A\u{202E}B\u{0000}C")
+
+      assert d.seo_title == "ABC"
+      refute String.contains?(d.seo_title, <<0>>)
+    end
+
+    test "stripping control characters still collapses newlines to spaces" do
+      # `\p{Cc}` covers newline, so stripping before the whitespace collapse
+      # would join the sentences without a space.
+      assert normalized(seo_description: "One.\n\nTwo.").seo_description == "One. Two."
+    end
+
+    test "link detection covers the forms a naive https?:// check misses" do
+      for payload <- [
+            "Great deals at //evil.example",
+            "Visit evil.example/path now",
+            "See WWW.EVIL.EXAMPLE today",
+            "Try javascript:alert(1) here",
+            "Read data:text/html;base64,PHNjcmlwdD4=",
+            "Go to evil\u{3002}example now"
+          ] do
+        assert normalized(seo_title: payload).seo_title == nil,
+               "expected #{inspect(payload)} to be dropped"
+      end
+    end
+
+    test "ordinary prose is not mistaken for a link" do
+      for ok <- [
+            "Understanding kiln firing schedules",
+            "Glazing: a practical guide",
+            "Cone 6 vs cone 10 — what changes"
+          ] do
+        assert normalized(seo_title: ok).seo_title == ok
+      end
+    end
+
     test "a value carrying a link is dropped entirely, not merely trimmed" do
       # These render into <meta> tags on the public site, so a smuggled URL is
       # the payoff an injection is actually after. Offering no suggestion beats
@@ -165,6 +205,14 @@ defmodule KilnCMS.Seo.DraftTest do
       assert "glaze" in d.seo_keywords
       assert "cone packs" in d.seo_keywords
       refute Enum.any?(d.seo_keywords, &(&1 =~ ~r/[A-Z]/))
+    end
+
+    test "each keyword is length-clamped, not just the count" do
+      # keyword_max bounds the count; without a per-keyword ceiling a single
+      # multi-thousand-character "keyword" reaches meta/JSON-LD and the slug.
+      d = normalized(seo_keywords: [String.duplicate("a", 1999)])
+
+      assert String.length(hd(d.seo_keywords)) <= 60
     end
 
     test "keywords_string/1 renders the comma-separated form the field stores" do

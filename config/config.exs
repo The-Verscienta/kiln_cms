@@ -141,6 +141,15 @@ config :kiln_cms, KilnCMS.Search,
 # (`model: "ollama:llama3.1"`); a hosted provider works too, and is announced at
 # boot and in the editor. API keys are resolved by `req_llm` from its own
 # environment, never read or stored by Kiln. See docs/seo.md.
+# `req_llm` (and its `llm_db` catalog) source a `.env` from the working
+# directory into the OS environment at application start, unconditionally —
+# including on a default install with drafting off. That would let a stray
+# `.env` beside a release quietly populate the production environment, and a
+# developer's local one bleed into `mix test`. Kiln reads no provider secrets
+# itself, so nothing here needs it.
+config :req_llm, load_dotenv: false
+config :llm_db, load_dotenv: false
+
 config :kiln_cms, KilnCMS.Seo,
   generator: nil,
   model: nil,

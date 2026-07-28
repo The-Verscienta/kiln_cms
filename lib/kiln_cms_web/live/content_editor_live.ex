@@ -910,7 +910,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply,
        socket
        |> assign(:seo_drafting?, true)
-       |> assign(:seo_dismissed, MapSet.new())
+       # Clear the previous proposal, not just the dismissed set: emptying
+       # `seo_dismissed` alone would re-render the *old* cards for the length of
+       # the call (and permanently if it fails), letting "Use all" clobber
+       # fields the author has since accepted and hand-edited.
+       |> clear_seo_suggestions()
        |> start_async(:seo_draft, fn ->
          # Captures plain data only — never the socket or the form struct,
          # both of which are stale the moment an autosave rebuilds the form.
@@ -940,16 +944,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("seo_dismiss_all", _params, socket),
     do: {:noreply, socket |> assign(:seo_drafts, nil) |> assign(:seo_dismissed, MapSet.new())}
 
-  def handle_event("seo_accept", %{"field" => field}, socket),
-    do: {:noreply, accept_suggestion(socket, field)}
+  def handle_event("seo_accept", %{"field" => field}, socket) do
+    {socket, outcome} = apply_suggestion(socket, field)
+    {:noreply, flash_outcomes(socket, [{field, outcome}])}
+  end
 
   def handle_event("seo_accept_all", _params, socket) do
-    socket =
-      socket.assigns.seo_drafts
-      |> suggested_fields()
-      |> Enum.reduce(socket, &accept_suggestion(&2, &1))
+    # Only the cards still on screen. `suggested_fields/1` alone would also
+    # re-apply fields the author already accepted (and possibly hand-edited)
+    # or explicitly dismissed.
+    {socket, outcomes} =
+      socket
+      |> pending_suggestions()
+      |> Enum.reduce({socket, []}, fn field, {acc, outcomes} ->
+        {acc, outcome} = apply_suggestion(acc, field)
+        {acc, [{field, outcome} | outcomes]}
+      end)
 
-    {:noreply, socket}
+    {:noreply, flash_outcomes(socket, Enum.reverse(outcomes))}
   end
 
   def handle_event("close_picker", _params, socket),
@@ -1371,7 +1383,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Force rich-text blocks to remount (new element id) so TipTap reloads from the
   # replaced form rather than keeping its `phx-update="ignore"` content (#135).
-  defp reset_editors(socket), do: update(socket, :editor_version, &(&1 + 1))
+  # Bump the editor generation (remounts rich-text hooks) and drop everything
+  # derived from the content the author is walking away from.
+  #
+  # AI suggestions must go with it: both callers — a conflict reload and a
+  # version restore — replace the form wholesale, and `reload_conflict` also
+  # clears `:conflict`, which is what `accept_suggestion/2` guards on. Left in
+  # place, a proposal generated from the *discarded* content stays clickable
+  # and would overwrite the record that was just reloaded.
+  defp reset_editors(socket) do
+    socket
+    |> update(:editor_version, &(&1 + 1))
+    |> clear_seo_suggestions()
+    |> assign(:seo_links, nil)
+  end
+
+  defp clear_seo_suggestions(socket) do
+    socket
+    |> assign(:seo_drafts, nil)
+    |> assign(:seo_dismissed, MapSet.new())
+  end
 
   defp run_workflow(socket, action)
        when action in ~w(submit return publish unpublish archive unarchive) do
@@ -2125,31 +2156,86 @@ defmodule KilnCMSWeb.ContentEditorLive do
   #   * params are recomputed from the form *now*, never snapshotted when the
   #     generation started — a 5s call spans two debounced autosaves, after
   #     which the form has been rebuilt with a bumped `lock_version`.
-  defp accept_suggestion(socket, field) do
+  # Returns `{socket, outcome}` rather than flashing inline: "Use all" applies
+  # several fields in one click, and letting each one `put_flash` meant the last
+  # write silently overwrote the message about a field that was *skipped* — the
+  # author was told keywords applied while a locked title had been dropped.
+  defp apply_suggestion(socket, field) do
     value = suggested_value(socket.assigns.seo_drafts, field)
 
     cond do
       is_nil(value) or value == "" ->
-        socket
+        {socket, :nothing_to_apply}
 
       socket.assigns.conflict ->
+        {socket, :conflict}
+
+      field_locked?(locked_fields(socket), field) ->
+        {socket, :locked}
+
+      true ->
+        params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put(field, value)
+        {params, socket, outcome} = maybe_sync_slug(field, params, socket)
+
+        socket =
+          socket
+          |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+          |> assign(:seo_dismissed, MapSet.put(socket.assigns.seo_dismissed, field))
+          |> mark_dirty()
+
+        {socket, outcome}
+    end
+  end
+
+  # The suggestion cards still on screen, in display order.
+  defp pending_suggestions(socket) do
+    socket.assigns.seo_drafts
+    |> suggested_fields()
+    |> Enum.reject(&(&1 in socket.assigns.seo_dismissed))
+  end
+
+  # One message for the whole click, naming what was skipped and why.
+  defp flash_outcomes(socket, outcomes) do
+    cond do
+      Enum.any?(outcomes, &(elem(&1, 1) == :conflict)) ->
         put_flash(
           socket,
           :error,
           gettext("Reload to resolve the editing conflict before applying suggestions.")
         )
 
-      field_locked?(locked_fields(socket), field) ->
-        put_flash(socket, :info, gettext("Another editor is editing that field right now."))
+      locked = Enum.filter(outcomes, &(elem(&1, 1) == :locked)) ->
+        flash_locked(socket, locked, outcomes)
 
       true ->
-        params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put(field, value)
-        {params, socket} = maybe_sync_slug(field, params, socket)
-
         socket
-        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-        |> assign(:seo_dismissed, MapSet.put(socket.assigns.seo_dismissed, field))
-        |> mark_dirty()
+    end
+  end
+
+  defp flash_locked(socket, [], outcomes), do: flash_slug(socket, outcomes)
+
+  defp flash_locked(socket, locked, _outcomes) do
+    put_flash(
+      socket,
+      :info,
+      ngettext(
+        "Another editor is editing %{fields} right now, so it wasn't applied.",
+        "Another editor is editing %{fields} right now, so they weren't applied.",
+        length(locked),
+        fields: Enum.map_join(locked, ", ", &seo_field_label(elem(&1, 0)))
+      )
+    )
+  end
+
+  defp flash_slug(socket, outcomes) do
+    if Enum.any?(outcomes, &(elem(&1, 1) == :slug_pinned)) do
+      put_flash(
+        socket,
+        :info,
+        gettext("Keywords applied. The slug was left unchanged because this content is live.")
+      )
+    else
+      socket
     end
   end
 
@@ -2169,18 +2255,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     record = socket.assigns.record
 
     if record.state == :draft and is_nil(record.published_at) do
-      sync_slug(params, ["form", "seo_keywords"], socket)
+      # Keep `sync_slug/3`'s socket — it carries the `slug_customized?` flag.
+      {params, socket} = sync_slug(params, ["form", "seo_keywords"], socket)
+      {params, socket, :applied}
     else
-      {params,
-       put_flash(
-         socket,
-         :info,
-         gettext("Keywords applied. The slug was left unchanged because this content is live.")
-       )}
+      {params, socket, :slug_pinned}
     end
   end
 
-  defp maybe_sync_slug(_field, params, socket), do: {params, socket}
+  defp maybe_sync_slug(_field, params, socket), do: {params, socket, :applied}
 
   defp seo_error_message(:too_short),
     do: gettext("There isn't enough content yet to suggest metadata from.")

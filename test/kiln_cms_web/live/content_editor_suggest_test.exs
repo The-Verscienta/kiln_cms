@@ -95,6 +95,10 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
     )
   end
 
+  defp change(lv, field, params) do
+    render_change(lv, "validate", %{"form" => params, "_target" => ["form", field]})
+  end
+
   # How many suggestion cards are currently offered.
   defp cards(html),
     do: html |> String.split(~s(phx-click="seo_accept")) |> length() |> Kernel.-(1)
@@ -293,6 +297,110 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
     end
   end
 
+  describe "suggestions are discarded when the content underneath them is" do
+    setup do
+      enable_stub()
+      :ok
+    end
+
+    test "a conflict reload drops the cards it just invalidated", %{conn: conn} do
+      # "Reload and discard your unsaved changes" must discard the AI proposal
+      # too — it was generated from the content being thrown away, and the
+      # reload clears :conflict, which is the guard accept/2 relies on.
+      editor = authed_user(:editor)
+      record = page(editor)
+      lv = suggest(conn, editor, record)
+
+      assert cards(render(lv)) > 0
+
+      render_click(lv, "reload_conflict", %{})
+
+      assert cards(render(lv)) == 0
+      render_click(lv, "seo_accept_all", %{})
+      assert field_value(lv, "seo_title") == ""
+    end
+
+    test "re-running Suggest does not resurrect the previous run's cards", %{conn: conn} do
+      editor = authed_user(:editor)
+      lv = suggest(conn, editor, page(editor))
+
+      render_click(lv, "seo_accept", %{"field" => "seo_title"})
+      # Hand-edit what was just accepted.
+      change(lv, "seo_title", %{"seo_title" => "My own headline"})
+
+      # Swap in the slow stub so the second run is genuinely in flight while we
+      # look: with an instant stub the new proposal lands before we can observe
+      # the window this regression lived in.
+      put_seo(generator: KilnCMS.StubSeoGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubSeoGenerator.Counting.start_link()
+      KilnCMS.StubSeoGenerator.Counting.reset()
+
+      render_click(lv, "seo_suggest", %{})
+
+      # Mid-generation there is nothing to apply — previously the *old* cards
+      # were still rendered here, so this click clobbered the hand edit.
+      assert cards(render(lv)) == 0
+      render_click(lv, "seo_accept_all", %{})
+      assert field_value(lv, "seo_title") == "My own headline"
+
+      render_async(lv, 5_000)
+      assert field_value(lv, "seo_title") == "My own headline"
+    end
+  end
+
+  describe "Use all" do
+    setup do
+      enable_stub()
+      :ok
+    end
+
+    test "leaves accepted and hand-edited fields alone", %{conn: conn} do
+      editor = authed_user(:editor)
+      lv = suggest(conn, editor, page(editor))
+
+      render_click(lv, "seo_accept", %{"field" => "seo_title"})
+      change(lv, "seo_title", %{"seo_title" => "My own headline"})
+
+      render_click(lv, "seo_accept_all", %{})
+
+      assert field_value(lv, "seo_title") == "My own headline"
+      assert field_value(lv, "seo_description") =~ "A summary of"
+    end
+
+    test "skips a dismissed field", %{conn: conn} do
+      editor = authed_user(:editor)
+      lv = suggest(conn, editor, page(editor))
+
+      render_click(lv, "seo_dismiss", %{"field" => "seo_title"})
+      render_click(lv, "seo_accept_all", %{})
+
+      assert field_value(lv, "seo_title") == ""
+      assert field_value(lv, "seo_description") =~ "A summary of"
+    end
+
+    test "reports a locked field instead of letting a later flash hide it", %{conn: conn} do
+      editor = authed_user(:editor)
+      record = page(editor)
+      lv = suggest(conn, editor, record)
+
+      topic = Presence.topic("page", record.id)
+
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        topic,
+        {:cursor, %{id: "other", name: "bob", field: "seo_title"}}
+      )
+
+      html = render_click(lv, "seo_accept_all", %{})
+
+      # The skipped field is named, and the keywords/slug message doesn't
+      # overwrite it.
+      assert html =~ "Another editor is editing SEO title"
+      assert field_value(lv, "seo_title") == ""
+      assert field_value(lv, "seo_description") =~ "A summary of"
+    end
+  end
+
   describe "the slug decision" do
     setup do
       enable_stub()
@@ -355,7 +463,9 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       html = render_click(lv, "seo_accept", %{"field" => "seo_title"})
 
       assert field_value(lv, "seo_title") == ""
-      assert html =~ "Another editor is editing that field"
+      # The message names the field, so a multi-field "Use all" can report
+      # exactly which ones were skipped rather than a generic notice.
+      assert html =~ "Another editor is editing SEO title"
 
       Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:cursor, %{cursor | field: nil}})
       render_click(lv, "seo_accept", %{"field" => "seo_title"})

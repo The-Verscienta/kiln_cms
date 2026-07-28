@@ -133,6 +133,31 @@ defmodule KilnCMS.Seo.BodyStatsTest do
     end
   end
 
+  describe "syllable counting" do
+    test "every word scores at least one syllable" do
+      # An earlier whole-text version lost the per-word floor, scoring these
+      # (whose only vowel is a silent trailing e) as ZERO — which inflated
+      # Flesch ~17 points and silenced the readability warning entirely.
+      for word <- ~w(the he she be we me) do
+        assert BodyStats.syllable_count(word) == 1, "#{word} should be 1 syllable"
+      end
+    end
+
+    test "counts vowel groups and drops a silent trailing e" do
+      assert BodyStats.syllable_count("kiln") == 1
+      assert BodyStats.syllable_count("firing") == 2
+      assert BodyStats.syllable_count("make") == 1
+      assert BodyStats.syllable_count("pottery") == 3
+    end
+  end
+
+  describe "tokenize/1" do
+    test "splits on punctuation so firing. matches firing" do
+      assert BodyStats.tokenize(BodyStats.fold("The kiln firing. Done!")) ==
+               ~w(the kiln firing done)
+    end
+  end
+
   describe "sentences and words" do
     test "splits on terminators and counts words" do
       assert BodyStats.sentences("One. Two! Three? Four") == ["One.", "Two!", "Three?", "Four"]

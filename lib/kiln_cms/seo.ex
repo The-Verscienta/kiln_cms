@@ -62,16 +62,75 @@ defmodule KilnCMS.Seo do
   @doc """
   Whether the configured provider sends content outside the deployment.
 
-  `false` for on-prem runtimes (`ollama`, `vllm`) and when drafting is off.
-  Errs toward `true` for anything unrecognized — an unknown provider should
-  read as egress until an operator says otherwise, not the reverse.
+  Resolved from the endpoint's **host**, not the provider's name. Keying on the
+  name alone was wrong in the one direction that matters: `req_llm` lets any
+  provider's `base_url` be overridden — the very mechanism this module
+  recommends for on-prem — so `ollama:` pointed at a remote host reported "no
+  egress" while every page body left the deployment, silencing both the boot
+  warning and the editor's standing notice.
+
+  `false` only when the resolved host is loopback or a private address.
+  Anything unrecognized reads as egress: over-warning is cheap, and quietly
+  promising an operator their content stayed home is not.
   """
   @spec egress?() :: boolean()
   def egress? do
-    cond do
-      not enabled?() -> false
-      provider() in @local_providers -> false
-      true -> true
+    enabled?() and not local_endpoint?()
+  end
+
+  @doc """
+  The endpoint host drafting would talk to, as configured. `nil` when the
+  provider's default is in use and we can't see it from here.
+  """
+  @spec endpoint_host() :: String.t() | nil
+  def endpoint_host do
+    with nil <- host_from(cfg(:base_url, nil)),
+         nil <- host_from(provider_base_url()) do
+      default_host_for(provider())
+    end
+  end
+
+  defp local_endpoint? do
+    case endpoint_host() do
+      nil -> false
+      host -> loopback?(host) or private?(host)
+    end
+  end
+
+  # An operator may override the endpoint either in our config or in req_llm's.
+  defp provider_base_url do
+    case provider() do
+      nil -> nil
+      name -> :req_llm |> Application.get_env(:"#{name}_base_url", nil) |> normalize_url()
+    end
+  end
+
+  defp normalize_url(url) when is_binary(url), do: url
+  defp normalize_url(_url), do: nil
+
+  defp host_from(nil), do: nil
+
+  defp host_from(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" -> host
+      _ -> nil
+    end
+  end
+
+  # With no override, the on-prem providers default to a local daemon; every
+  # other provider defaults to its own cloud API.
+  defp default_host_for(name) when name in @local_providers, do: "localhost"
+  defp default_host_for(_name), do: nil
+
+  defp loopback?(host), do: host in ~w(localhost 127.0.0.1 ::1 0.0.0.0)
+
+  defp private?(host) do
+    case :inet.parse_address(String.to_charlist(host)) do
+      {:ok, {10, _, _, _}} -> true
+      {:ok, {192, 168, _, _}} -> true
+      {:ok, {172, b, _, _}} when b >= 16 and b <= 31 -> true
+      {:ok, {127, _, _, _}} -> true
+      _ -> String.ends_with?(host, ".local") or String.ends_with?(host, ".internal")
     end
   end
 

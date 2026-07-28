@@ -129,10 +129,13 @@ defmodule KilnCMS.Seo.Links do
     |> Enum.flat_map(fn {_section, hits} -> hits end)
   end
 
-  # Published only, matching the semantic leg. `Search.global/2` runs with
-  # `authorize?: false` and happily returns drafts; suggesting one would invite
-  # the author to link a public page at a URL that 404s.
+  # Only pages a reader can actually open. `Search.global/2` runs with
+  # `authorize?: false` and happily returns drafts and audience-gated records;
+  # both would invite the author to link a public page at a URL the reader
+  # can't follow. This mirrors the delivery boundary in
+  # `Slugs.find_published_by_alias/3` — published AND public.
   defp entry(%{state: state}, _org_id) when state != :published, do: []
+  defp entry(%{audience: audience}, _org_id) when audience != :public, do: []
 
   defp entry(doc, org_id) do
     type = KilnCMS.Firing.Engine.public_type(doc)

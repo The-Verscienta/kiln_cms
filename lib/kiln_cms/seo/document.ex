@@ -119,8 +119,13 @@ defmodule KilnCMS.Seo.Document do
     end
   end
 
-  defp string(nil), do: ""
-  defp string(value), do: value |> to_string() |> String.trim()
+  # Text only. `to_string/1` on a non-binary quietly manufactures content: the
+  # editor's `has_excerpt && value` idiom yields the atom `false` for a type
+  # with no excerpt field, which became the literal string "false" and was sent
+  # to the provider as the page's excerpt. Anything that isn't already a string
+  # is treated as absent.
+  defp string(value) when is_binary(value), do: String.trim(value)
+  defp string(_value), do: ""
 
   defp presence(value) do
     case string(value) do

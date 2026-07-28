@@ -46,10 +46,13 @@ defmodule KilnCMS.Seo.Analyzer do
           stats: BodyStats.t()
         }
 
+  # The upper bounds are read from config at runtime, not baked in as module
+  # attributes: `Draft.normalize/1`, the prompt and the suggestion card's
+  # character counter all read `KilnCMS.Seo.title_max/0`, so an operator who
+  # raises the limit would otherwise get a card reading "70/75" immediately
+  # contradicted by a warning that 70 is over 60.
   @title_min 30
-  @title_max 60
   @description_min 70
-  @description_max 160
   @thin_content 300
   @density_min 0.5
   @density_max 2.5
@@ -97,7 +100,9 @@ defmodule KilnCMS.Seo.Analyzer do
       {:seo_description, check_description(f)},
       {:keyphrase_set, check_keyphrase_set(keyphrase)},
       {:keyphrase_in_title, from_lint(lints, :keyphrase_not_in_title, key_words, :warning)},
-      {:keyphrase_in_slug, from_lint(lints, :keyphrase_not_in_slug, key_words, :warning)},
+      # `Slug.Lint` also guards this one on a non-empty slug, so a blank slug
+      # produces no lint — which must read as "nothing to judge", not a pass.
+      {:keyphrase_in_slug, keyphrase_in_slug(f, lints, key_words)},
       {:slug_length, check_slug_length(f, lints)},
       {:keyphrase_in_description, check_keyphrase_in_description(f, key_words)},
       {:keyphrase_in_first_paragraph, check_keyphrase_in_first_paragraph(stats, key_words)},
@@ -121,10 +126,11 @@ defmodule KilnCMS.Seo.Analyzer do
 
   defp check_title(%{seo_title: seo_title, title: title}) do
     length = String.length(seo_title)
+    title_max = KilnCMS.Seo.title_max()
 
     cond do
-      length < @title_min -> {:warning, :seo_title_short, len(length, @title_min, @title_max)}
-      length > @title_max -> {:warning, :seo_title_long, len(length, @title_min, @title_max)}
+      length < @title_min -> {:warning, :seo_title_short, len(length, @title_min, title_max)}
+      length > title_max -> {:warning, :seo_title_long, len(length, @title_min, title_max)}
       same?(seo_title, title) -> {:info, :seo_title_duplicates_title, %{}}
       true -> :ok
     end
@@ -134,11 +140,12 @@ defmodule KilnCMS.Seo.Analyzer do
 
   defp check_description(%{seo_description: description}) do
     length = String.length(description)
-    args = len(length, @description_min, @description_max)
+    description_max = KilnCMS.Seo.description_max()
+    args = len(length, @description_min, description_max)
 
     cond do
       length < @description_min -> {:warning, :seo_description_short, args}
-      length > @description_max -> {:warning, :seo_description_long, args}
+      length > description_max -> {:warning, :seo_description_long, args}
       true -> :ok
     end
   end
@@ -163,6 +170,11 @@ defmodule KilnCMS.Seo.Analyzer do
   defp from_lint(lints, code, _key_words, severity) do
     if MapSet.member?(lints, code), do: {severity, code, %{}}, else: :ok
   end
+
+  defp keyphrase_in_slug(%{slug: ""}, _lints, _key_words), do: :n_a
+
+  defp keyphrase_in_slug(_fields, lints, key_words),
+    do: from_lint(lints, :keyphrase_not_in_slug, key_words, :warning)
 
   defp check_slug_length(%{slug: ""}, _lints), do: :n_a
 
@@ -202,16 +214,26 @@ defmodule KilnCMS.Seo.Analyzer do
     end
   end
 
-  # Occurrences of the keyphrase over the body's total word count. Matched as a
-  # literal substring against the folded body: `:binary.matches/2` is fast
-  # enough for the keystroke path, and matching "kiln firing" literally is truer
-  # to what density means than comparing stop-word-stripped token runs.
+  # Occurrences of the keyphrase over the body's total word count, matched as a
+  # contiguous run of **whole words** against the body's precomputed tokens.
+  #
+  # Not a substring scan: `:binary.matches(folded_text, "art")` also fires
+  # inside `part`, `start`, `heart` and `chart`, which reported a correctly-used
+  # keyphrase as keyword stuffing. Not stop-word-stripped either — density is
+  # about the literal phrase, so `fold`-level tokens are the right granularity.
   defp density(%{word_count: 0}, _keyphrase), do: 0.0
 
   defp density(stats, keyphrase) do
-    case BodyStats.fold(keyphrase) do
-      "" -> 0.0
-      needle -> length(:binary.matches(stats.folded_text, needle)) * 100 / stats.word_count
+    case keyphrase |> BodyStats.fold() |> BodyStats.tokenize() do
+      [] ->
+        0.0
+
+      needle ->
+        stats.folded_words
+        |> Enum.chunk_every(length(needle), 1, :discard)
+        |> Enum.count(&(&1 == needle))
+        |> Kernel.*(100)
+        |> Kernel./(stats.word_count)
     end
   end
 

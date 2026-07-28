@@ -99,7 +99,7 @@ defmodule KilnCMS.Seo.AnalyzerTest do
   end
 
   describe "empty documents" do
-    test "an untouched draft reports no failures — every check is :n_a" do
+    test "an untouched draft raises no warnings or errors" do
       report =
         Analyzer.analyze_blocks(
           %{
@@ -113,12 +113,18 @@ defmodule KilnCMS.Seo.AnalyzerTest do
           []
         )
 
-      # The description and OG image are the only things judgeable with no
-      # input at all; nothing else may fire.
+      # Body-derived checks have nothing to judge and must stay silent.
       refute :thin_content in codes(report)
       refute :no_headings in codes(report)
-      refute :keyphrase_missing in codes(report) and :images_missing_alt in codes(report)
       refute :images_missing_alt in codes(report)
+      refute :hard_to_read in codes(report)
+      refute :seo_title_missing in codes(report)
+
+      # A missing description is the one real warning; the rest are advisory
+      # nudges, so the badge must not read :poor for an empty draft.
+      assert Enum.filter(report.findings, &(&1.severity == :error)) == []
+      assert Enum.count(report.findings, &(&1.severity == :warning)) <= 1
+      assert report.grade in [:good, :ok]
     end
 
     test "a blank title and blank seo_title is :n_a, not a failure" do
@@ -266,6 +272,44 @@ defmodule KilnCMS.Seo.AnalyzerTest do
 
       assert finding
       assert finding.args.density > 2.5
+    end
+
+    test "matches whole words, not substrings" do
+      # "art" inside part/start/heart/chart used to be counted, reporting a
+      # correctly-used keyphrase as keyword stuffing.
+      blocks = [
+        %{
+          "_type" => "rich_text",
+          "body" => [
+            %{
+              "_type" => "block",
+              "style" => "normal",
+              "children" => [
+                %{"text" => String.duplicate("part start heart apart chart smart depart ", 20)}
+              ]
+            }
+          ]
+        }
+      ]
+
+      refute :keyphrase_density_high in codes(analyze(%{seo_keywords: "art"}, blocks))
+    end
+
+    test "still catches genuine stuffing" do
+      blocks = [
+        %{
+          "_type" => "rich_text",
+          "body" => [
+            %{
+              "_type" => "block",
+              "style" => "normal",
+              "children" => [%{"text" => String.duplicate("kiln firing ", 80)}]
+            }
+          ]
+        }
+      ]
+
+      assert :keyphrase_density_high in codes(analyze(%{}, blocks))
     end
 
     test "density is :n_a below the 50-word floor" do

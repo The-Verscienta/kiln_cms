@@ -163,7 +163,7 @@ defmodule KilnCMSWeb.SeoComponents do
 
   def finding_message(%{code: :keyphrase_density_low, args: a}, _pinned?),
     do:
-      gettext("Focus keyphrase density is %{density}%% — below the %{min}%% guideline.",
+      gettext("Focus keyphrase density is %{density}% — below the %{min}% guideline.",
         density: a.density,
         min: a.min
       )
@@ -171,7 +171,7 @@ defmodule KilnCMSWeb.SeoComponents do
   def finding_message(%{code: :keyphrase_density_high, args: a}, _pinned?),
     do:
       gettext(
-        "Focus keyphrase density is %{density}%% — above %{max}%% reads as keyword stuffing.",
+        "Focus keyphrase density is %{density}% — above %{max}% reads as keyword stuffing.",
         density: a.density,
         max: a.max
       )
@@ -218,7 +218,7 @@ defmodule KilnCMSWeb.SeoComponents do
 
   def finding_message(%{code: :long_sentences, args: a}, _pinned?),
     do:
-      gettext("%{percent}%% of sentences run over %{max} words — try breaking some up.",
+      gettext("%{percent}% of sentences run over %{max} words — try breaking some up.",
         percent: a.percent,
         max: a.max
       )

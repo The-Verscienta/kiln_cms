@@ -127,7 +127,16 @@ defmodule KilnCMS.Seo.Draft do
       value
       |> to_string()
       |> String.replace(~r/<[^>]*>/u, " ")
+      # Whitespace first: `\p{Cc}` below covers newline and tab, so stripping
+      # before this would join "Line one.\n\nLine two." into "Line one.Line
+      # two." rather than collapsing to a space.
       |> String.replace(~r/\s+/u, " ")
+      # Remaining control (Cc) and format (Cf) characters. A NUL arriving via
+      # the free-text JSON tier reaches Postgres, which rejects 0x00 in a text
+      # column by *raising* — killing the LiveView and the author's unsaved
+      # work rather than returning a changeset error. U+202E and friends are
+      # here too: they render the snippet reversed (Trojan-Source style).
+      |> String.replace(~r/[\p{Cc}\p{Cf}]/u, "")
       |> String.trim()
       |> String.trim(~s("))
       |> String.trim("`")
@@ -140,7 +149,28 @@ defmodule KilnCMS.Seo.Draft do
     end
   end
 
-  defp link?(value), do: Regex.match?(~r{(https?://|www\.|\[[^\]]*\]\()}iu, value)
+  # Anything that could function as a link once it lands in a `<meta>` tag or in
+  # `/llms.txt`. Deliberately broad, because the cost of a false positive is one
+  # unoffered suggestion while the cost of a miss is SEO cloaking on the
+  # operator's domain:
+  #
+  #   * any scheme (`javascript:`, `data:`, `mailto:`) — not just http(s)
+  #   * scheme-relative `//host`
+  #   * a bare host-like token (`evil.example`, `kiln-support.example/verify`),
+  #     which is what a phishing snippet actually uses
+  #   * markdown links, and the unicode full stop U+3002 homograph
+  @link_patterns [
+    # any scheme with an authority, plus the schemeless form
+    ~r|[a-z][a-z0-9+.-]*://|iu,
+    ~r|//|u,
+    # schemes that need no authority to be dangerous
+    ~r/\b(javascript|data|vbscript|file|mailto)\s*:/iu,
+    ~r/\[[^\]]*\]\(/u,
+    # a bare host-like token — what a phishing snippet actually uses
+    ~r/\b[\p{L}\p{N}][\p{L}\p{N}-]*(\.|\x{3002})[a-z]{2,}\b/iu
+  ]
+
+  defp link?(value), do: Enum.any?(@link_patterns, &Regex.match?(&1, value))
 
   defp clamp(nil, _max), do: nil
   defp clamp(value, max), do: String.slice(value, 0, max)
@@ -149,13 +179,19 @@ defmodule KilnCMS.Seo.Draft do
   defp strip_period(nil), do: nil
   defp strip_period(value), do: String.replace(value, ~r/\.\s*$/u, "")
 
+  # `keyword_max` bounds the COUNT; each keyword also needs a length ceiling.
+  # Without one a single multi-thousand-character "keyword" survives into
+  # `<meta name="keywords">`, JSON-LD, and — since `seo_keywords` is a slug
+  # source — into a public URL.
+  @keyword_chars 60
+
   defp normalize_keywords(keywords) do
     keywords
     |> List.wrap()
     |> Enum.flat_map(&split_keyword/1)
     |> Enum.map(&clean/1)
     |> Enum.reject(&is_nil/1)
-    |> Enum.map(&String.downcase/1)
+    |> Enum.map(&(&1 |> String.downcase() |> clamp(@keyword_chars)))
     |> Enum.uniq()
     |> Enum.take(KilnCMS.Seo.keyword_max())
   end
