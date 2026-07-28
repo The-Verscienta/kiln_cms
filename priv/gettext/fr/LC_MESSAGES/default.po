@@ -3564,7 +3564,7 @@ msgstr "E-mail"
 #: lib/kiln_cms_web/live/form_builder_live.ex:318
 #, elixir-autogen, elixir-format
 msgid "Embed"
-msgstr "Intégrer"
+msgstr "Intégration"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:2563
 #, elixir-autogen, elixir-format
@@ -3624,7 +3624,7 @@ msgstr "Saisissez le code à 6 chiffres de votre application d'authentification,
 #: lib/kiln_cms_web/live/form_builder_live.ex:319
 #, elixir-autogen, elixir-format
 msgid "Entries"
-msgstr "Entrées"
+msgstr "Envois"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:2397
 #, elixir-autogen, elixir-format
