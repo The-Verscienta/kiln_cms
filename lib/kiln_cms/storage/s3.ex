@@ -37,8 +37,22 @@ defmodule KilnCMS.Storage.S3 do
   bucket's public base / CDN. If your bucket instead relies on per-object canned
   ACLs, set `config :kiln_cms, KilnCMS.Storage.S3, acl: :public_read` (or
   `S3_ACL=public_read`).
+
+  ## Caching
+
+  Every object is uploaded with `Cache-Control: public, max-age=31536000,
+  immutable`, so a CDN in front of the bucket (and the browser) can cache it
+  indefinitely without revalidating. This is safe because storage keys are
+  UUIDs written once: edits and variant regeneration always mint a *new* key
+  rather than overwrite an existing one, so a blob never changes under its URL.
+  The `Plug.Static` mount serving the Local adapter uses the same value. See
+  `docs/media-pipeline.md` for the CDN deployment guide.
   """
   @behaviour KilnCMS.Storage
+
+  # Keys are write-once UUIDs (see "Caching" above), so responses never need
+  # revalidation. Mirrors the /uploads Plug.Static config in KilnCMSWeb.Endpoint.
+  @cache_control "public, max-age=31536000, immutable"
 
   @impl true
   # source_path is a server-side upload temp file (from MediaLive), not user input.
@@ -73,7 +87,7 @@ defmodule KilnCMS.Storage.S3 do
   def url(key), do: "#{public_base_url()}/#{key}"
 
   defp put_object(key, body) do
-    opts = [content_type: content_type(key)] ++ acl_opt()
+    opts = [content_type: content_type(key), cache_control: @cache_control] ++ acl_opt()
 
     bucket()
     |> ExAws.S3.put_object(key, body, opts)

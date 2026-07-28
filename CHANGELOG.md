@@ -38,6 +38,12 @@ migration, a rewritten column, a dropped config key).
   migrations first. `--check` reports without changing anything.
 - An admin-only update notice showing the running version against the latest
   upstream release, plus the command to apply it.
+- Media stored on S3/MinIO is now uploaded with `Cache-Control: public,
+  max-age=31536000, immutable`, so a CDN in front of the bucket can cache
+  originals and variants indefinitely. Safe because storage keys are write-once
+  UUIDs. Local-adapter media already sent this header. Existing objects keep
+  whatever metadata they were uploaded with — re-upload or set it bucket-side
+  if you want them covered. New CDN deployment guide in `docs/media-pipeline.md`.
 
 ## [0.1.0]
 
