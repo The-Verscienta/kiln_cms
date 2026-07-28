@@ -39,7 +39,7 @@ defmodule KilnCMSWeb.FormController do
 
     case Forms.get_active(slug, Tenant.current_org_id(conn)) do
       nil ->
-        conn |> put_status(404) |> html(page(gettext_msg("Form not found."), nil, embed: true))
+        conn |> put_status(404) |> html(page(gettext("Form not found."), nil, embed: true))
 
       form ->
         conn
@@ -108,13 +108,13 @@ defmodule KilnCMSWeb.FormController do
       :not_found ->
         conn
         |> put_status(404)
-        |> html(page(gettext_msg("Form not found."), nil, embed: embedded?))
+        |> html(page(gettext("Form not found."), nil, embed: embedded?))
 
       {:ok, form} ->
         html(
           conn,
           page(
-            form.success_message || gettext_msg("Thanks — we got your message."),
+            form.success_message || gettext("Thanks — we got your message."),
             back_href,
             embed: embedded?
           )
@@ -167,7 +167,7 @@ defmodule KilnCMSWeb.FormController do
     back =
       if back_href,
         do:
-          ~s(<p><a href="#{Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()}">&larr; Back</a></p>),
+          ~s(<p><a href="#{Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()}">&larr; #{h(gettext("Back"))}</a></p>),
         else: ""
 
     resizer = if embed?, do: ~s(<script defer src="/embed-frame.js"></script>), else: ""
@@ -190,7 +190,9 @@ defmodule KilnCMSWeb.FormController do
 
   defp error_text(_form, errors) do
     detail = Enum.map_join(errors, "; ", fn {field, message} -> "#{field} #{message}" end)
-    gettext_msg("Your submission couldn't be saved: ") <> detail
+    # Interpolated rather than concatenated: a trailing-space msgid is a trap for
+    # translators, and some locales need the detail somewhere other than the end.
+    gettext("Your submission couldn't be saved: %{detail}", detail: detail)
   end
 
   # Only same-origin referers are offered as a back link (an open redirect
@@ -214,8 +216,4 @@ defmodule KilnCMSWeb.FormController do
   defp h(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end
-
-  # Static user-facing strings; gettext needs a compile-time binding here so
-  # keep the indirection minimal.
-  defp gettext_msg(msg), do: Gettext.gettext(KilnCMSWeb.Gettext, msg)
 end

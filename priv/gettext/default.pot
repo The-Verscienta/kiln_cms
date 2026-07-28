@@ -5657,3 +5657,24 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."
 msgstr ""
+
+#: lib/kiln_cms_web/controllers/form_controller.ex:170
+#, elixir-autogen, elixir-format
+msgid "Back"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/form_controller.ex:42
+#: lib/kiln_cms_web/controllers/form_controller.ex:111
+#, elixir-autogen, elixir-format
+msgid "Form not found."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/form_controller.ex:117
+#, elixir-autogen, elixir-format
+msgid "Thanks — we got your message."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/form_controller.ex:195
+#, elixir-autogen, elixir-format
+msgid "Your submission couldn't be saved: %{detail}"
+msgstr ""
