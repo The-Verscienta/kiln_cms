@@ -256,6 +256,125 @@ defmodule KilnCMS.Blocks.PortableTextTest do
     end
   end
 
+  describe "tables (#475)" do
+    import KilnCMS.TipTapFixtures
+
+    defp tt_cell(type, content, attrs \\ nil) do
+      cell = tt_node(type, [para(content)])
+      if attrs, do: Map.put(cell, "attrs", attrs), else: cell
+    end
+
+    test "a table with a header row round-trips and renders accessible markup" do
+      tiptap =
+        doc([
+          tt_node("table", [
+            tt_node("tableRow", [tt_cell("tableHeader", "Name"), tt_cell("tableHeader", "Dose")]),
+            tt_node("tableRow", [tt_cell("tableCell", "Ginger"), tt_cell("tableCell", "3g")])
+          ])
+        ])
+
+      assert [item] = PortableText.from_tiptap(tiptap)
+      assert item["_type"] == "table"
+
+      assert [
+               %{"cells" => [%{"header" => true}, %{"header" => true}]},
+               %{"cells" => [%{"header" => false}, %{"header" => false}]}
+             ] = item["rows"]
+
+      assert PortableText.to_html([item]) ==
+               "<table><thead><tr>" <>
+                 ~s(<th scope="col">Name</th><th scope="col">Dose</th>) <>
+                 "</tr></thead><tbody><tr><td>Ginger</td><td>3g</td></tr></tbody></table>"
+    end
+
+    test "row-header cells outside the first row get scope=row; no thead without one" do
+      tiptap =
+        doc([
+          tt_node("table", [
+            tt_node("tableRow", [tt_cell("tableHeader", "Yin"), tt_cell("tableCell", "cool")]),
+            tt_node("tableRow", [tt_cell("tableHeader", "Yang"), tt_cell("tableCell", "warm")])
+          ])
+        ])
+
+      html = tiptap |> PortableText.from_tiptap() |> PortableText.to_html()
+
+      refute html =~ "<thead>"
+      assert html =~ ~s(<th scope="row">Yin</th><td>cool</td>)
+      assert html =~ ~s(<th scope="row">Yang</th><td>warm</td>)
+    end
+
+    test "colspan/rowspan survive when >1 and cell text is escaped" do
+      tiptap =
+        doc([
+          tt_node("table", [
+            tt_node("tableRow", [
+              tt_cell("tableCell", "a < b", %{"colspan" => 2, "rowspan" => 1})
+            ])
+          ])
+        ])
+
+      assert [item] = PortableText.from_tiptap(tiptap)
+      assert [%{"cells" => [cell]}] = item["rows"]
+      assert cell["colspan"] == 2
+      refute Map.has_key?(cell, "rowspan")
+
+      assert PortableText.to_html([item]) ==
+               ~s(<table><tbody><tr><td colspan="2">a &lt; b</td></tr></tbody></table>)
+    end
+
+    test "cell marks and links render; unsafe link hrefs are dropped at both layers" do
+      link = %{"type" => "link", "attrs" => %{"href" => "https://x.test"}}
+      bad = %{"type" => "link", "attrs" => %{"href" => "javascript:alert(1)"}}
+
+      tiptap =
+        doc([
+          tt_node("table", [
+            tt_node("tableRow", [
+              tt_node("tableCell", [para([text("ok", [link])])]),
+              tt_node("tableCell", [para([text("bad", [bad])])])
+            ])
+          ])
+        ])
+
+      pt = PortableText.from_tiptap(tiptap)
+      html = PortableText.to_html(pt)
+
+      assert html =~ ~s(<a href="https://x.test">ok</a>)
+      refute html =~ "javascript:"
+      assert html =~ "bad"
+
+      # Cast-time defense-in-depth reaches cell markDefs too.
+      [%{"rows" => [%{"cells" => [_ok, bad_cell]}]}] = PortableText.sanitize_body(pt)
+      assert [%{"_type" => "link", "href" => ""}] = bad_cell["markDefs"]
+    end
+
+    test "multi-paragraph cells keep a break between paragraphs" do
+      tiptap =
+        doc([
+          tt_node("table", [
+            tt_node("tableRow", [tt_node("tableCell", [para("one"), para("two")])])
+          ])
+        ])
+
+      assert [item] = PortableText.from_tiptap(tiptap)
+      assert [%{"cells" => [%{"children" => children}]}] = item["rows"]
+      assert Enum.map(children, & &1["text"]) == ["one", "\n", "two"]
+    end
+
+    test "to_plain_text flattens table cells for search" do
+      tiptap =
+        doc([
+          tt_node("table", [
+            tt_node("tableRow", [tt_cell("tableHeader", "Herb"), tt_cell("tableHeader", "Use")]),
+            tt_node("tableRow", [tt_cell("tableCell", "Ginger"), tt_cell("tableCell", "warmth")])
+          ])
+        ])
+
+      assert tiptap |> PortableText.from_tiptap() |> PortableText.to_plain_text() ==
+               "Herb Use\nGinger warmth"
+    end
+  end
+
   describe "to_plain_text/1" do
     test "flattens prose for search/embeddings" do
       doc =

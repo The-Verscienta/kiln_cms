@@ -16,7 +16,9 @@ defmodule KilnCMS.Blocks.PortableText do
   (TipTap codeBlock). Lists: bullet/ordered, nested (PT `listItem` +
   `level`). Marks: bold→strong, italic→em, code, strike, underline, and link
   annotations (via `markDefs`). Hard breaks become `\n` inside a span;
-  horizontal rules become a standalone `%{"_type" => "hr"}` item.
+  horizontal rules become a standalone `%{"_type" => "hr"}` item. Tables
+  (#475) become `%{"_type" => "table", "rows" => [%{"cells" => [...]}]}` items
+  whose cells carry their own spans/markDefs plus `header`/`colspan`/`rowspan`.
   **Follow-up:** embedded typed objects inside prose are not converted.
   """
 
@@ -64,6 +66,20 @@ defmodule KilnCMS.Blocks.PortableText do
   defp blocks_from_node(%{"type" => "horizontalRule"}, key),
     do: {[%{"_type" => "hr", "_key" => "b#{key}"}], key + 1}
 
+  # Tables (#475): one PT item per table — rows of cells, each cell carrying
+  # its own spans + markDefs (and `header`/`colspan`/`rowspan` where they
+  # differ from the default). Not a PT text block: no `style`, no top-level
+  # `children`.
+  defp blocks_from_node(%{"type" => "table"} = node, key) do
+    rows =
+      node["content"]
+      |> List.wrap()
+      |> Enum.filter(&(&1["type"] == "tableRow"))
+      |> Enum.map(&table_row_from/1)
+
+    {[%{"_type" => "table", "_key" => "b#{key}", "rows" => rows}], key + 1}
+  end
+
   defp blocks_from_node(%{"type" => type} = node, key) do
     {children, defs} = spans_and_defs(node["content"] || [])
     {[pt_block(style_for(type, node), key, children, defs)], key + 1}
@@ -105,6 +121,45 @@ defmodule KilnCMS.Blocks.PortableText do
   end
 
   defp list_items(_node, _kind, _level, key), do: {[], key}
+
+  defp table_row_from(row) do
+    cells =
+      row["content"]
+      |> List.wrap()
+      |> Enum.filter(&(&1["type"] in ["tableCell", "tableHeader"]))
+      |> Enum.map(&table_cell_from/1)
+
+    %{"cells" => cells}
+  end
+
+  # Cell content is block-level in TipTap (paragraphs); flatten to spans with a
+  # newline span between paragraphs so multi-paragraph cells keep a word break
+  # (mirrors how blockquotes flatten their wrapped paragraphs).
+  defp table_cell_from(cell) do
+    inline =
+      cell["content"]
+      |> List.wrap()
+      |> Enum.filter(&(&1["type"] == "paragraph"))
+      |> Enum.map(&(&1["content"] || []))
+      |> Enum.intersperse([%{"type" => "hardBreak"}])
+      |> List.flatten()
+
+    {children, defs} = spans_and_defs(inline)
+
+    %{"header" => cell["type"] == "tableHeader", "children" => children, "markDefs" => defs}
+    |> put_cell_span(cell, "colspan")
+    |> put_cell_span(cell, "rowspan")
+  end
+
+  # Only store col/rowspan when they differ from the default 1.
+  defp put_cell_span(pt_cell, %{"attrs" => attrs}, key) when is_map(attrs) do
+    case attrs[key] do
+      n when is_integer(n) and n > 1 -> Map.put(pt_cell, key, n)
+      _ -> pt_cell
+    end
+  end
+
+  defp put_cell_span(pt_cell, _cell, _key), do: pt_cell
 
   # TipTap's codeBlock carries its language tag as a node attr (#503); keep it
   # on the PT block (normalized) so it round-trips to `:json` and fire-time
@@ -187,6 +242,17 @@ defmodule KilnCMS.Blocks.PortableText do
   @spec sanitize_body([pt_block()] | term()) :: [pt_block()] | term()
   def sanitize_body(blocks) when is_list(blocks), do: Enum.map(blocks, &sanitize_block/1)
   def sanitize_body(other), do: other
+
+  # Table cells carry their own markDefs a level deeper (#475).
+  defp sanitize_block(%{"_type" => "table", "rows" => rows} = block) when is_list(rows) do
+    Map.put(
+      block,
+      "rows",
+      Enum.map(rows, fn row ->
+        Map.update(row, "cells", [], fn cells -> Enum.map(cells, &sanitize_block/1) end)
+      end)
+    )
+  end
 
   defp sanitize_block(%{"markDefs" => defs} = block) when is_list(defs),
     do: Map.put(block, "markDefs", Enum.map(defs, &sanitize_def/1))
@@ -286,6 +352,22 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp block_to_html(%{"_type" => "hr"}), do: "<hr/>"
 
+  # Tables (#475): a leading all-header row becomes <thead> with `scope="col"`;
+  # header cells in later rows are row headers (`scope="row"`).
+  defp block_to_html(%{"_type" => "table"} = block) do
+    {head, body} =
+      case List.wrap(block["rows"]) do
+        [first | rest] = rows ->
+          if header_row?(first), do: {[first], rest}, else: {[], rows}
+
+        [] ->
+          {[], []}
+      end
+
+    head_html = if head == [], do: "", else: "<thead>#{table_rows_to_html(head, true)}</thead>"
+    "<table>#{head_html}<tbody>#{table_rows_to_html(body, false)}</tbody></table>"
+  end
+
   # Code blocks (#503): a known language renders through Makeup at fire time;
   # a tagged-but-unknown language keeps today's escaped plain <pre> but carries
   # the `language-…` class so client-side highlighters (and the editor's HTML
@@ -309,6 +391,34 @@ defmodule KilnCMS.Blocks.PortableText do
   # `language` is nil or already normalized (safe charset), never raw input.
   defp language_class(nil), do: ""
   defp language_class(language), do: ~s( class="language-#{language}")
+
+  defp header_row?(%{"cells" => [_ | _] = cells}), do: Enum.all?(cells, & &1["header"])
+  defp header_row?(_row), do: false
+
+  defp table_rows_to_html(rows, head_row?) do
+    Enum.map_join(rows, fn row ->
+      "<tr>#{Enum.map_join(List.wrap(row["cells"]), &cell_to_html(&1, head_row?))}</tr>"
+    end)
+  end
+
+  defp cell_to_html(cell, head_row?) do
+    defs = cell["markDefs"] || []
+    inner = Enum.map_join(cell["children"] || [], &span_to_html(&1, defs))
+    spans = span_attrs(cell)
+
+    if cell["header"] do
+      scope = if head_row?, do: "col", else: "row"
+      ~s(<th scope="#{scope}"#{spans}>#{inner}</th>)
+    else
+      "<td#{spans}>#{inner}</td>"
+    end
+  end
+
+  defp span_attrs(cell) do
+    for key <- ["colspan", "rowspan"], n = cell[key], is_integer(n) and n > 1, into: "" do
+      ~s( #{key}="#{n}")
+    end
+  end
 
   defp wrap("blockquote", inner), do: "<blockquote>#{inner}</blockquote>"
 
@@ -356,6 +466,20 @@ defmodule KilnCMS.Blocks.PortableText do
   end
 
   def to_plain_text(_), do: ""
+
+  # Table text: cells joined by spaces, rows by newlines (#475).
+  defp block_text(%{"_type" => "table"} = block) do
+    block["rows"]
+    |> List.wrap()
+    |> Enum.map_join("\n", fn row ->
+      row["cells"]
+      |> List.wrap()
+      |> Enum.map_join(" ", fn cell ->
+        Enum.map_join(cell["children"] || [], &(&1["text"] || ""))
+      end)
+    end)
+    |> String.trim()
+  end
 
   defp block_text(%{} = block) do
     (block["children"] || [])

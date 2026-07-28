@@ -58,4 +58,25 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   allow_tag_with_these_attributes("ol", [])
   allow_tag_with_these_attributes("li", [])
   allow_tag_with_these_attributes("blockquote", [])
+
+  # Tables (#475): the accessible markup the PT renderer emits — th scope
+  # col/row, and digit-only col/rowspan (capped length; "0" is invalid HTML
+  # anyway and 4 digits is beyond any real table).
+  allow_tag_with_these_attributes("table", [])
+  allow_tag_with_these_attributes("thead", [])
+  allow_tag_with_these_attributes("tbody", [])
+  allow_tag_with_these_attributes("tr", [])
+
+  allow_tag_with_these_attributes "th", [] do
+    {"scope", scope} when scope in ["col", "row"] -> {"scope", scope}
+    {attr, value} when attr in ["colspan", "rowspan"] -> valid_span(attr, value)
+  end
+
+  allow_tag_with_these_attributes "td", [] do
+    {attr, value} when attr in ["colspan", "rowspan"] -> valid_span(attr, value)
+  end
+
+  defp valid_span(attr, value) do
+    if value =~ ~r/^[1-9][0-9]{0,3}$/, do: {attr, value}
+  end
 end

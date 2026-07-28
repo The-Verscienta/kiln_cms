@@ -13,6 +13,20 @@
 // which the allowlist admits as `language-<tag>` (#503).
 import {Editor} from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
+import Table from "@tiptap/extension-table"
+import TableRow from "@tiptap/extension-table-row"
+import TableHeader from "@tiptap/extension-table-header"
+import TableCell from "@tiptap/extension-table-cell"
+
+// Tables (#475): StarterKit doesn't include them, so every editor mount adds
+// this set. Column resizing stays off in v1 — colwidths wouldn't survive the
+// Portable Text round-trip, so offering the drag handle would lie to editors.
+const TABLE_EXTENSIONS = [
+  Table.configure({resizable: false}),
+  TableRow,
+  TableHeader,
+  TableCell,
+]
 
 // Code-block language choices (#503). The value is the tag stored on the
 // Portable Text block and delivered raw on the `:json` surface; the server
@@ -69,7 +83,50 @@ const SLASH_COMMANDS = [
   {label: "Quote", hint: "Blockquote", keywords: "blockquote citation", run: c => c.toggleBlockquote()},
   {label: "Code block", hint: "Preformatted code", keywords: "code pre snippet", run: c => c.toggleCodeBlock()},
   {label: "Divider", hint: "Horizontal rule", keywords: "hr horizontal rule separator line", run: c => c.setHorizontalRule()},
+  {label: "Table", hint: "3×3 table with header row", keywords: "table grid rows columns cells", run: c => c.insertTable({rows: 3, cols: 3, withHeaderRow: true})},
 ]
+
+// Row/column controls for the caret's table (#475). Shown only while the
+// selection is inside a table — same show-on-context pattern as the code-block
+// language select. Each entry is a plain TipTap chain command.
+const TABLE_CONTROLS = [
+  {label: "+Row", title: "Add row below", run: c => c.addRowAfter()},
+  {label: "−Row", title: "Delete row", run: c => c.deleteRow()},
+  {label: "+Col", title: "Add column right", run: c => c.addColumnAfter()},
+  {label: "−Col", title: "Delete column", run: c => c.deleteColumn()},
+  {label: "Hdr", title: "Toggle header row", run: c => c.toggleHeaderRow()},
+  {label: "✕ Table", title: "Delete table", run: c => c.deleteTable()},
+]
+
+// Returns {el, sync}: a hidden button group appended to a toolbar, revealed
+// while the caret is inside a table.
+function tableControls(editor) {
+  const group = document.createElement("span")
+  group.setAttribute("role", "group")
+  group.setAttribute("aria-label", "Table controls")
+  group.className = "inline-flex gap-1"
+  group.hidden = true
+
+  TABLE_CONTROLS.forEach(item => {
+    const b = document.createElement("button")
+    b.type = "button"
+    b.textContent = item.label
+    b.title = item.title
+    b.setAttribute("aria-label", item.title)
+    b.className = "rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+    b.addEventListener("click", e => {
+      e.preventDefault()
+      item.run(editor.chain().focus()).run()
+    })
+    group.appendChild(b)
+  })
+
+  const sync = () => {
+    group.hidden = !editor.isActive("table")
+  }
+
+  return {el: group, sync}
+}
 
 const toolbarButton = (editor, item) => {
   const b = document.createElement("button")
@@ -315,7 +372,7 @@ export function mount(hook) {
   if (collabToken && collabTopic && collabFragment) {
     mountCollab(hook, {token: collabToken, topic: collabTopic, fragment: collabFragment})
   } else {
-    buildEditor(hook, [StarterKit], hook.el.dataset.content || "")
+    buildEditor(hook, [StarterKit, ...TABLE_EXTENSIONS], hook.el.dataset.content || "")
   }
 }
 
@@ -342,6 +399,7 @@ async function mountCollab(hook, {token, topic, fragment}) {
   buildEditor(hook, [
     // Yjs owns undo/redo semantics under collaboration.
     StarterKit.configure({history: false}),
+    ...TABLE_EXTENSIONS,
     Collaboration.configure({document: handle.doc, field: fragment}),
     // Remote carets labeled with each collaborator's initials, in the same
     // color as their roster chip / lock badges.
@@ -376,7 +434,7 @@ export function mountInline(hook) {
 
   const editor = new Editor({
     element: hook.el,
-    extensions: [StarterKit],
+    extensions: [StarterKit, ...TABLE_EXTENSIONS],
     content: seed,
     editorProps: {
       attributes: {
@@ -440,6 +498,9 @@ function buildInlineToolbar(hook) {
   hook.langSelect = languageSelect(hook.editor)
   bar.appendChild(hook.langSelect.sel)
 
+  hook.tableControls = tableControls(hook.editor)
+  bar.appendChild(hook.tableControls.el)
+
   document.body.appendChild(bar)
   hook.toolbar = bar
 }
@@ -467,6 +528,7 @@ function syncInlineToolbar(hook) {
     b.setAttribute("aria-pressed", on ? "true" : "false")
   })
   if (hook.langSelect) hook.langSelect.sync()
+  if (hook.tableControls) hook.tableControls.sync()
 }
 
 // `content` seeds the editor; omit it under collaboration, where the CRDT
@@ -497,6 +559,7 @@ function buildEditor(hook, extensions, content = null) {
       b.setAttribute("aria-pressed", on ? "true" : "false")
     })
     if (hook.langSelect) hook.langSelect.sync()
+    if (hook.tableControls) hook.tableControls.sync()
   }
 
   const editor = new Editor({
@@ -545,5 +608,7 @@ function buildEditor(hook, extensions, content = null) {
   })
   hook.langSelect = languageSelect(editor)
   toolbarEl.appendChild(hook.langSelect.sel)
+  hook.tableControls = tableControls(editor)
+  toolbarEl.appendChild(hook.tableControls.el)
   syncToolbar()
 }

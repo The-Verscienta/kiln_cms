@@ -415,6 +415,35 @@
   border: none;
   border-top: 1px solid var(--color-base-300);
 }
+/* Tables in the editor (#475). TipTap wraps each table in .tableWrapper and
+   marks multi-cell selections with .selectedCell. */
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+}
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid var(--color-base-300);
+  padding: 0.35rem 0.5rem;
+  vertical-align: top;
+  position: relative;
+}
+.ProseMirror th {
+  background: var(--color-base-200);
+  font-weight: 600;
+  text-align: left;
+}
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in oklch, var(--color-primary) 14%, transparent);
+}
 
 /* Deep-link focus pulse (#355): when the visual-editing bridge opens the
    in-context editor at `?focus=<block_id>`, the FocusBlock hook briefly adds
@@ -575,6 +604,25 @@ pre.highlight .ge {
   font-style: italic;
 }
 pre.highlight .gs {
+  font-weight: 600;
+}
+/* Delivered tables (#475): bordered, readable, and horizontally scrollable on
+   narrow screens without breaking the page (the table itself scrolls). */
+.kiln-block table {
+  border-collapse: collapse;
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+.kiln-block th,
+.kiln-block td {
+  border: 1px solid var(--color-base-300);
+  padding: 0.4rem 0.6rem;
+  vertical-align: top;
+  text-align: left;
+}
+.kiln-block th {
+  background: var(--color-base-200);
   font-weight: 600;
 }
 .kiln-block hr {
