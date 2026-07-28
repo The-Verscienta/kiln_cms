@@ -163,12 +163,25 @@ defmodule KilnClientTest do
       assert_received {:request, "/api/json/posts/search", _params}
     end
 
+    # An explicit sort overrides relevance server-side (relevance degrades to
+    # the tiebreaker — the contract kiln_cms#310 pinned).
+    test "text_search/3 passes an explicit sort through" do
+      stub_doc(empty_doc())
+
+      assert {:ok, _} =
+               KilnClient.text_search("posts", "elixir", sort: ["-published_at", "title"])
+
+      assert_received {:request, "/api/json/posts/search/published", params}
+      assert params["sort"] == "-published_at,title"
+    end
+
     test "semantic_search/3 and autocomplete/3 hit their published twins" do
       stub_doc(empty_doc())
 
-      assert {:ok, _} = KilnClient.semantic_search("posts", "functional")
+      assert {:ok, _} = KilnClient.semantic_search("posts", "functional", limit: 6)
       assert_received {:request, "/api/json/posts/semantic-search/published", params}
       assert params["query"] == "functional"
+      assert params["page"] == %{"limit" => "6"}
 
       assert {:ok, _} = KilnClient.autocomplete("posts", "eli", locale: "en")
       assert_received {:request, "/api/json/posts/autocomplete/published", params}
@@ -279,6 +292,29 @@ defmodule KilnClientTest do
       end)
 
       assert {:error, {:http_status, 404, _}} = KilnClient.artifact("posts", "gone")
+    end
+
+    # Per-call :req rides Req.merge/2 AFTER the configured req_options, so it
+    # can bound one call without dislodging the config seam: the stub plug
+    # (from test_helper's req_options) still answers, headers merge additively
+    # (the JSON:API accept survives), and the override header arrives.
+    test ":req overrides apply per call without clobbering config or defaults" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(
+          self(),
+          {:headers, Plug.Conn.get_req_header(conn, "accept"),
+           Plug.Conn.get_req_header(conn, "x-probe")}
+        )
+
+        Req.Test.json(conn, empty_doc())
+      end)
+
+      assert {:ok, _} =
+               KilnClient.semantic_search("posts", "q",
+                 req: [headers: [{"x-probe", "1"}], receive_timeout: 1_500, retry: false]
+               )
+
+      assert_received {:headers, ["application/vnd.api+json"], ["1"]}
     end
   end
 
