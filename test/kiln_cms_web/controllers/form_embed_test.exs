@@ -91,6 +91,18 @@ defmodule KilnCMSWeb.FormEmbedTest do
       conn = conn |> unique_ip() |> get("/forms/#{form.slug}/embed")
       assert html_response(conn, 404) =~ "Form not found"
     end
+
+    # Regression: the 404 text used to be built through a `Gettext.gettext/2`
+    # helper taking a runtime variable, so the extractor never saw the msgid, it
+    # never entered the catalogs, and the page rendered English in every locale.
+    # The SetLocale endpoint plug strips the `/fr` prefix and sets the locale.
+    test "the 404 page is localised from the request's locale prefix", %{conn: conn} do
+      conn = conn |> unique_ip() |> get("/fr/forms/does-not-exist/embed")
+
+      assert html_response(conn, 404) =~ "Formulaire introuvable."
+    after
+      Gettext.put_locale(KilnCMSWeb.Gettext, "en")
+    end
   end
 
   describe "embedded submission" do
