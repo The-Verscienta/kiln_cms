@@ -64,6 +64,24 @@ defmodule KilnCMS.HTMLSanitizerTest do
       assert HTMLSanitizer.sanitize_rich_text(html) == html
     end
 
+    test "keeps accessible table markup, strips out-of-range spans (#475)" do
+      html =
+        "<table><thead><tr>" <>
+          ~s(<th scope="col">H</th>) <>
+          "</tr></thead><tbody><tr>" <>
+          ~s(<td colspan="2" rowspan="3">a</td>) <>
+          "</tr></tbody></table>"
+
+      assert HTMLSanitizer.sanitize_rich_text(html) == html
+
+      hostile =
+        ~s(<table onclick="x"><tr><th scope="evil">H</th>) <>
+          ~s(<td colspan="0" rowspan="99999">a</td></tr></table>)
+
+      assert HTMLSanitizer.sanitize_rich_text(hostile) ==
+               "<table><tr><th>H</th><td>a</td></tr></table>"
+    end
+
     test "strips class values outside the highlight allowlists (#503)" do
       html =
         ~s(<pre class="fixed inset-0"><code class="language-x y">a</code>) <>
