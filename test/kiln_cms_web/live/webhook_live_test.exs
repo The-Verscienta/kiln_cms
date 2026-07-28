@@ -58,6 +58,28 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       assert html =~ "page.updated"
       assert html =~ "post.published"
     end
+
+    test "the selectable events are THIS site's dynamic types (#336)", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Org Webhooks",
+          slug: "wh-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      mine = "gadget#{System.unique_integer([:positive])}"
+      theirs = "widget#{System.unique_integer([:positive])}"
+      CMS.create_type_definition!(%{name: mine, label: "Gadget"}, actor: admin, tenant: org)
+      CMS.create_type_definition!(%{name: theirs, label: "Widget"}, actor: admin)
+
+      org_conn = %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
+      {:ok, _lv, html} = org_conn |> log_in(admin) |> live(~p"/editor/webhooks")
+
+      assert html =~ "#{mine}.published"
+      refute html =~ "#{theirs}.published"
+    end
   end
 
   describe "create" do

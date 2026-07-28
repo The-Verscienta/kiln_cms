@@ -9,8 +9,12 @@ defmodule KilnCMSWeb.OverviewLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias KilnCMS.Accounts.Organization
   alias KilnCMS.Accounts.User
+  alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Page
+  alias KilnCMSWeb.Tenant
 
   @password "password123456"
 
@@ -121,5 +125,41 @@ defmodule KilnCMSWeb.OverviewLiveTest do
     assert html =~ "qian · heaven"
     assert html =~ "kun · earth"
     assert html =~ "taiji · centre"
+  end
+
+  describe "tenant scoping (#336)" do
+    test "the gen tile counts THIS site's dynamic content types", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      org =
+        Ash.Seed.seed!(Organization, %{
+          name: "Org Overview",
+          slug: "ov-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      # One admin-defined type on this site…
+      CMS.create_type_definition!(
+        %{name: "gadget#{System.unique_integer([:positive])}", label: "Gadget"},
+        actor: admin,
+        tenant: org
+      )
+
+      # …and two on the DEFAULT site, which this site must not count: before
+      # the fix the registry resolved for the default org, so the tile counted
+      # the wrong site's custom types.
+      for _ <- 1..2 do
+        CMS.create_type_definition!(
+          %{name: "widget#{System.unique_integer([:positive])}", label: "Widget"},
+          actor: admin
+        )
+      end
+
+      org_conn = %{conn | host: "#{org.slug}.#{Tenant.base_host()}"}
+      {:ok, lv, _html} = org_conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      # Compiled types are install-wide; only the one dynamic type is ours.
+      assert lv |> element("#bagua-gen") |> render() =~ ">#{length(ContentTypes.all()) + 1}<"
+    end
   end
 end

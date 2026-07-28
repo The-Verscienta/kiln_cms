@@ -134,10 +134,11 @@ defmodule KilnCMSWeb.SearchApiController do
     }
   end
 
-  # A dynamic hit resolves its type through the registry for URL + label;
-  # hits whose type no longer resolves (archived mid-flight) are dropped.
+  # A dynamic hit resolves its type through the per-org registry (#336) for
+  # URL + label; hits whose type no longer resolves (archived mid-flight) are
+  # dropped.
   defp entry_item(record, locale) do
-    case ContentTypes.get_dynamic(record.type_name) do
+    case ContentTypes.get_dynamic(record.type_name, record.org_id) do
       nil -> []
       ct -> [item(record, record.type_name, ct, locale)]
     end
