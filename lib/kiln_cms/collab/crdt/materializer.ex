@@ -90,11 +90,7 @@ defmodule KilnCMS.Collab.Crdt.Materializer do
   end
 
   defp cell_span_attrs(el) do
-    attrs =
-      case Yex.XmlElement.get_attributes(el) do
-        %{} = map -> map
-        _other -> %{}
-      end
+    attrs = Yex.XmlElement.get_attributes(el)
 
     Enum.flat_map(["colspan", "rowspan"], fn key ->
       case attrs[key] |> to_string() |> Integer.parse() do
