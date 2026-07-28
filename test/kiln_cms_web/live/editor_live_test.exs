@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Category
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.MediaItem
   alias KilnCMS.CMS.Page
   alias KilnCMS.CMS.Post
@@ -134,6 +135,58 @@ defmodule KilnCMSWeb.EditorLiveTest do
       filtered = lv |> form("form[phx-change=filter]", %{status: "published"}) |> render_change()
       assert filtered =~ "BetaPub"
       refute filtered =~ "AlphaDraft"
+    end
+
+    test "filters the list by content type", %{conn: conn} do
+      draft_page(%{title: "APageOnly"})
+      draft_post(%{title: "APostOnly"})
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      assert html =~ "APageOnly"
+      assert html =~ "APostOnly"
+
+      filtered = lv |> form("#content-filter", %{type: "post"}) |> render_change()
+      assert filtered =~ "APostOnly"
+      refute filtered =~ "APageOnly"
+    end
+
+    test "the type filter groups built-in and admin-defined types", %{conn: conn} do
+      admin = authed_user(:admin)
+      # The filter bar only renders once there's something to filter.
+      draft_page()
+
+      CMS.create_type_definition!(
+        %{name: "recipe#{System.unique_integer([:positive])}", label: "Recipe"},
+        actor: admin
+      )
+
+      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor")
+
+      assert html =~ ~s(aria-label="Filter by type")
+      assert html =~ ~s(<optgroup label="Built-in">)
+      assert html =~ ~s(<optgroup label="Custom">)
+      assert html =~ "All types"
+      # The human label, not the raw type name.
+      assert html =~ ~r/<option[^>]*>\s*Recipe\s*</
+    end
+
+    test "the type filter narrows to a dynamic type's entries", %{conn: conn} do
+      admin = authed_user(:admin)
+      name = "recipe#{System.unique_integer([:positive])}"
+      definition = CMS.create_type_definition!(%{name: name, label: "Recipe"}, actor: admin)
+
+      ContentTypes.create!(
+        ContentTypes.get_dynamic(name),
+        %{title: "ARecipeEntry", slug: "recipe-entry-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+      draft_page(%{title: "APageOnly"})
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor")
+
+      filtered = lv |> form("#content-filter", %{type: definition.name}) |> render_change()
+      assert filtered =~ "ARecipeEntry"
+      refute filtered =~ "APageOnly"
     end
 
     test "searches the list by title", %{conn: conn} do
@@ -375,6 +428,46 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       lv |> form("#content-filter", %{status: "draft"}) |> render_change()
       assert_patch(lv, ~p"/editor?status=draft")
+    end
+
+    test "changing the type filter patches the URL and survives a remount", %{conn: conn} do
+      draft_page(%{title: "OnlyPage"})
+      draft_post(%{title: "OnlyPost"})
+      conn = log_in(conn, authed_user(:editor))
+
+      {:ok, lv, _html} = live(conn, ~p"/editor")
+
+      lv |> form("#content-filter", %{type: "post"}) |> render_change()
+      assert_patch(lv, ~p"/editor?type=post")
+
+      # A shared link restores the filter, and the select shows it as selected.
+      {:ok, _lv, html} = live(conn, ~p"/editor?type=post")
+      assert html =~ "OnlyPost"
+      refute html =~ "OnlyPage"
+      assert html =~ ~s(<option value="post" selected)
+    end
+
+    test "the status and type filters compose", %{conn: conn} do
+      draft_page(%{title: "DraftPage"})
+      draft_post(%{title: "DraftPost"})
+      draft_post(%{title: "LivePost", state: :published})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor?type=post&status=published")
+
+      assert html =~ "LivePost"
+      refute html =~ "DraftPost"
+      refute html =~ "DraftPage"
+    end
+
+    test "an unknown type falls back to listing everything", %{conn: conn} do
+      draft_page(%{title: "StillListed"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor?type=nope-not-a-type")
+
+      assert html =~ "StillListed"
+      assert html =~ ~s(<option value="all" selected)
     end
   end
 

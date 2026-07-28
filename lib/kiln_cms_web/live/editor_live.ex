@@ -2,7 +2,8 @@ defmodule KilnCMSWeb.EditorLive do
   @moduledoc """
   Content list / editor home (`/editor`) — browse pages and posts with their
   workflow state, create new content, jump into the block editor, and
-  publish/unpublish inline, with status + title filtering. Editor/admin only.
+  publish/unpublish inline, with status + content-type + title filtering.
+  Editor/admin only.
   """
   use KilnCMSWeb, :live_view
 
@@ -29,7 +30,9 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
      |> assign(:page_title, gettext("Content"))
-     |> assign(:content_types, editable_types())
+     # `:content_types` is owned by handle_params (which always runs after
+     # mount) so the type filter, the "New …" buttons and the listing query all
+     # read one freshly-loaded registry per navigation.
      |> assign(:max_inline_new_buttons, @max_inline_new_buttons)
      |> assign(:statuses, @statuses)
      |> assign(:selected, MapSet.new())
@@ -61,7 +64,7 @@ defmodule KilnCMSWeb.EditorLive do
     query = page_query(socket.assigns.status, socket.assigns.query, cursor)
 
     per_type =
-      Enum.map(editable_types(), fn ct ->
+      Enum.map(filtered_types(socket), fn ct ->
         # Dispatch on the descriptor itself so a type archived between listing
         # and dispatch can't turn into a registry-lookup miss. Scoped to the
         # current site's org (epic #336) so the index only lists this org's content.
@@ -101,7 +104,23 @@ defmodule KilnCMSWeb.EditorLive do
   # Everything editable here: compiled content types plus admin-defined dynamic
   # ones (D17) — the descriptors share a shape, and `ContentTypes` dispatch
   # routes dynamic kinds (name strings) to the generic entry tier.
-  defp editable_types, do: ContentTypes.all() ++ ContentTypes.dynamic_all()
+  # Scoped to the current site's org (epic #336), like every sibling page
+  # (`trash_live`, `calendar_live`, …): the dynamic registry is per-org, so the
+  # type filter and the "New …" buttons must offer *this* site's types.
+  defp editable_types(org_id), do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id)
+
+  # The types this page pulls rows from: every editable type, or just the one
+  # the `type` filter names. Filtering here rather than after the merge keeps
+  # the DB from reading rows we'd only throw away, and keeps the per-type
+  # `@page_size` window (so "Load more" still reaches every match).
+  defp filtered_types(%{assigns: %{type: "all", content_types: types}}), do: types
+
+  defp filtered_types(%{assigns: %{type: type, content_types: types}}),
+    do: Enum.filter(types, &(type_value(&1) == type))
+
+  # A descriptor's filter/URL value. Compiled types carry an atom `type`,
+  # dynamic ones (D17) a name string — the URL only ever speaks strings.
+  defp type_value(%{type: type}), do: to_string(type)
 
   @impl true
   def handle_event("new", %{"kind" => kind}, socket) do
@@ -117,11 +136,18 @@ defmodule KilnCMSWeb.EditorLive do
   # Filter state lives in the URL (audit U-M3): refresh, back button, and
   # shared links keep the active status/search. Typing replaces the history
   # entry so a search doesn't leave one entry per debounced keystroke.
-  def handle_event("filter", %{"status" => status}, socket),
-    do: {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query))}
+  # One form drives both selects, so a change to either arrives with the full
+  # filter state. The `type` select isn't rendered on a single-type site, hence
+  # the fallback to the active assign rather than a bare fetch.
+  def handle_event("filter", %{"status" => status} = params, socket) do
+    type = Map.get(params, "type", socket.assigns.type)
+    {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query, type))}
+  end
 
-  def handle_event("search", %{"q" => q}, socket),
-    do: {:noreply, push_patch(socket, to: list_path(socket.assigns.status, q), replace: true)}
+  def handle_event("search", %{"q" => q}, socket) do
+    path = list_path(socket.assigns.status, q, socket.assigns.type)
+    {:noreply, push_patch(socket, to: path, replace: true)}
+  end
 
   def handle_event("toggle_select", %{"key" => key}, socket) do
     selected = socket.assigns.selected
@@ -269,18 +295,25 @@ defmodule KilnCMSWeb.EditorLive do
   @impl true
   def handle_params(params, _uri, socket) do
     status = if params["status"] in @statuses, do: params["status"], else: "all"
+    types = editable_types(socket.assigns.current_org.id)
+
+    # An unknown `type` (hand-edited URL, or a type deleted/archived since the
+    # link was shared) falls back to "all" rather than listing nothing.
+    type = if params["type"] in Enum.map(types, &type_value/1), do: params["type"], else: "all"
 
     {:noreply,
      socket
+     |> assign(:content_types, types)
      |> assign(:status, status)
+     |> assign(:type, type)
      |> assign(:query, params["q"] || "")
      |> load_items()}
   end
 
-  defp list_path(status, q) do
+  defp list_path(status, q, type) do
     params =
-      [status: status, q: q]
-      |> Enum.reject(fn {k, v} -> v == "" or (k == :status and v == "all") end)
+      [status: status, type: type, q: q]
+      |> Enum.reject(fn {k, v} -> v == "" or (k in [:status, :type] and v == "all") end)
       |> Map.new()
 
     ~p"/editor?#{params}"
@@ -406,8 +439,13 @@ defmodule KilnCMSWeb.EditorLive do
 
     assigns =
       assigns
-      |> assign(:filtering?, assigns.status != "all" or assigns.query != "")
+      |> assign(
+        :filtering?,
+        assigns.status != "all" or assigns.type != "all" or assigns.query != ""
+      )
       |> assign(:selected_count, MapSet.size(assigns.selected))
+      |> assign(:compiled_types, Enum.filter(assigns.content_types, &(&1.source == :compiled)))
+      |> assign(:dynamic_types, Enum.filter(assigns.content_types, &(&1.source == :dynamic)))
       |> assign(
         :all_selected?,
         MapSet.size(visible_keys) > 0 and MapSet.subset?(visible_keys, assigns.selected)
@@ -470,7 +508,7 @@ defmodule KilnCMSWeb.EditorLive do
         </div>
 
         <div :if={@items != [] or @filtering?} class="flex flex-wrap items-center gap-3">
-          <form id="content-filter" phx-change="filter">
+          <form id="content-filter" phx-change="filter" class="flex flex-wrap items-center gap-3">
             <label for="content-status-filter" class="sr-only">{gettext("Filter by status")}</label>
             <select
               id="content-status-filter"
@@ -481,6 +519,45 @@ defmodule KilnCMSWeb.EditorLive do
               <option :for={status <- @statuses} value={status} selected={status == @status}>
                 {status_filter_label(status)}
               </option>
+            </select>
+            <%!-- Nothing to choose between on a single-type site, so the select
+                  only appears once there are at least two types. --%>
+            <label
+              :if={length(@content_types) > 1}
+              for="content-type-filter"
+              class="sr-only"
+            >
+              {gettext("Filter by type")}
+            </label>
+            <select
+              :if={length(@content_types) > 1}
+              id="content-type-filter"
+              name="type"
+              aria-label={gettext("Filter by type")}
+              class="field-select w-auto"
+            >
+              <option value="all" selected={@type == "all"}>{gettext("All types")}</option>
+              <%!-- Built-in vs admin-defined, same grouping the field-definition
+                    type picker uses. Only the "Custom" group is conditional —
+                    a site with no dynamic types shouldn't show an empty group. --%>
+              <optgroup :if={@compiled_types != []} label={gettext("Built-in")}>
+                <option
+                  :for={ct <- @compiled_types}
+                  value={type_value(ct)}
+                  selected={type_value(ct) == @type}
+                >
+                  {ct.label}
+                </option>
+              </optgroup>
+              <optgroup :if={@dynamic_types != []} label={gettext("Custom")}>
+                <option
+                  :for={ct <- @dynamic_types}
+                  value={type_value(ct)}
+                  selected={type_value(ct) == @type}
+                >
+                  {ct.label}
+                </option>
+              </optgroup>
             </select>
           </form>
           <form id="content-search" phx-change="search" class="flex-1">
