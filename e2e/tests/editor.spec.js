@@ -35,9 +35,18 @@ async function newDraftPage(page) {
 // BlockInserter JS hook toggles `data-inserter-menu`'s `hidden` attribute).
 // Selecting an option closes the menu again, so each insert needs its own
 // trigger click.
+//
+// Once a block exists there are several inserters (the inline "+" between-block
+// inserters from themes B2/C/D), each rendering a hidden add_block option per
+// type — so a bare phx-value-type match resolves to multiple elements and can
+// click a hidden one. Open the unique main "Add block" menu and click the
+// *visible* option instead.
 async function addBlock(page, type) {
-  await page.click("button[data-inserter-trigger]");
-  await page.click(`button[phx-click="add_block"][phx-value-type="${type}"]`);
+  await page.getByRole("button", { name: /add block/i }).click();
+  await page
+    .locator(`button[data-inserter-item][phx-value-type="${type}"]:visible`)
+    .first()
+    .click();
 }
 
 test.describe("editor journey", () => {
@@ -149,34 +158,49 @@ test.describe("editor journey", () => {
     await expect(previewHeadings).toHaveText(["Second", "First"]);
   });
 
-  test("accordions keep their toggle state while typing", async ({ page }) => {
+  test("the inspector Settings tab and its fields survive per-keystroke validate patches", async ({ page }) => {
     await newDraftPage(page);
 
-    // The user's <details> open/closed state is client-side only; without the
-    // LiveSocket onBeforeElUpdated guard in app.js, the per-keystroke validate
-    // patch resets every accordion to its server-rendered default (SEO closed,
-    // Organization open) — the bug where typing collapsed the section.
-    const seo = page.locator("details").filter({ hasText: "SEO & scheduling" });
-    const org = page.locator("details").filter({ hasText: "Organization & relationships" });
-    await expect(seo).toHaveJSProperty("open", false);
-    await expect(org).toHaveJSProperty("open", true);
-
-    await seo.locator("summary").click();
+    // Theme A retired the buried SEO/Organization <details> accordions in favour
+    // of a tabbed inspector rail: the SEO & scheduling and Organization sections
+    // are now always-expanded <section>s inside the "Settings" panel, and which
+    // panel is visible is *server* view state (@inspector_tab), toggled by CSS.
+    // The regression this guards is the tabbed equivalent of the old "typing
+    // must not collapse the section" bug: switching to Settings and typing in a
+    // field must not bounce the rail back to its default (Preview) panel or drop
+    // the field — the per-keystroke validate patch has to preserve the tab.
+    const settingsTab = page.getByRole("tab", { name: /settings/i });
     const seoTitle = page.locator('input[name$="[seo_title]"]');
+    const category = page.locator('select[name$="[category_id]"]');
+
+    // Default tab is Preview, so both the Organization (category) and SEO fields
+    // start hidden behind the CSS-toggled Settings panel.
+    await expect(seoTitle).toBeHidden();
+    await expect(category).toBeHidden();
+
+    await settingsTab.click();
+    await expect(settingsTab).toHaveAttribute("aria-selected", "true");
+    // Both sections live in the one Settings panel, so both reveal together.
+    await expect(category).toBeVisible();
+    await expect(seoTitle).toBeVisible();
+
     await seoTitle.click();
     await seoTitle.pressSequentially("E2E SEO title", { delay: 30 });
     // Let the 300ms validate debounce fire and the patch come back.
     await page.waitForTimeout(700);
-    await expect(seo).toHaveJSProperty("open", true);
+
+    // The validate patch must keep us on Settings with the fields still shown
+    // and the typed value intact.
+    await expect(settingsTab).toHaveAttribute("aria-selected", "true");
+    await expect(seoTitle).toBeVisible();
+    await expect(category).toBeVisible();
     await expect(seoTitle).toHaveValue("E2E SEO title");
 
-    // Mirror direction: a section the server renders open stays closed once
-    // the user closes it.
-    await org.locator("summary").click();
-    await expect(org).toHaveJSProperty("open", false);
+    // A second edit keeps the tab put too (mirror of the old both-directions
+    // assertion — the panel never flips back to Preview mid-typing).
     await seoTitle.pressSequentially(" more", { delay: 30 });
     await page.waitForTimeout(700);
-    await expect(org).toHaveJSProperty("open", false);
-    await expect(seo).toHaveJSProperty("open", true);
+    await expect(settingsTab).toHaveAttribute("aria-selected", "true");
+    await expect(seoTitle).toHaveValue("E2E SEO title more");
   });
 });
