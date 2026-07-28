@@ -438,9 +438,9 @@ defmodule KilnCMSWeb.WebhookLive do
                   <td>
                     <span class={[
                       "rounded px-1.5 py-0.5 text-xs font-medium",
-                      delivery.status == :succeeded && "bg-success/15 text-success",
-                      delivery.status == :failed && "bg-error/15 text-error",
-                      delivery.status == :pending && "bg-warning/15 text-warning"
+                      delivery.status == :succeeded && "bg-success/15 text-success-ink",
+                      delivery.status == :failed && "bg-error/15 text-error-ink",
+                      delivery.status == :pending && "bg-warning/15 text-warning-ink"
                     ]}>
                       {delivery_status_label(delivery.status)}
                     </span>

@@ -227,8 +227,8 @@ defmodule KilnCMSWeb.ApiKeyLive do
                   <td class="py-2 pr-3">
                     <span class={[
                       "rounded px-1.5 py-0.5 text-xs font-medium",
-                      key.access == :read_write && "bg-warning/15 text-warning",
-                      key.access == :read && "bg-base-200 text-base-content/60"
+                      key.access == :read_write && "bg-warning/15 text-warning-ink",
+                      key.access == :read && "bg-base-200 text-base-content/70"
                     ]}>
                       {if key.access == :read_write,
                         do: gettext("Read + write"),
@@ -239,9 +239,9 @@ defmodule KilnCMSWeb.ApiKeyLive do
                     <% {kind, label} = status(key) %>
                     <span class={[
                       "rounded px-1.5 py-0.5 text-xs font-medium",
-                      kind == :active && "bg-success/15 text-success",
-                      kind == :revoked && "bg-error/15 text-error",
-                      kind == :expired && "bg-base-200 text-base-content/60"
+                      kind == :active && "bg-success/15 text-success-ink",
+                      kind == :revoked && "bg-error/15 text-error-ink",
+                      kind == :expired && "bg-base-200 text-base-content/70"
                     ]}>
                       {label}
                     </span>

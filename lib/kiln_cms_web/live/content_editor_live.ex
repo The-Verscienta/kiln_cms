@@ -4710,11 +4710,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # Pill color for a content state in the action bar.
-  defp state_badge_class(:published), do: "bg-success/15 text-success"
-  defp state_badge_class(:in_review), do: "bg-warning/15 text-warning"
-  defp state_badge_class(:archived), do: "bg-base-content/10 text-base-content/60"
-  defp state_badge_class(_), do: "bg-info/15 text-info"
+  # Pill color for a content state in the action bar. Uses the `*-ink` tokens
+  # for the same reason CoreComponents.badge/1 does: the bare accent on its own
+  # pale tint only reaches ~2-4:1 in light mode.
+  defp state_badge_class(:published), do: "bg-success/15 text-success-ink"
+  defp state_badge_class(:in_review), do: "bg-warning/15 text-warning-ink"
+  # /70 rather than /60 to match badge/1's neutral tone — /60 lands at 3.8:1.
+  defp state_badge_class(:archived), do: "bg-base-content/10 text-base-content/70"
+  defp state_badge_class(_), do: "bg-info/15 text-info-ink"
 
   attr :editors, :list, required: true
   attr :current_id, :string, required: true
