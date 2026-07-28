@@ -116,11 +116,17 @@ perceived-modernity-per-effort. Do this first — it's the frame everything else
 > which push the same anchored `add_block` (B2) using the block's stable id. The
 > RichText host carries `data-block-id`; the editor hint is one line; the prose
 > transform path is byte-unchanged (new behaviour is isolated behind the SlashMenu's
-> `onInsert`, wired only in the block editor, not the in-context page editor). The
-> JS (`assets/js/rich_text.js`) is not exercisable by the LiveView test suite and
-> the worktree can't build assets, so the menu behaviour is **unverified** — only
-> the server-rendered wiring (`data-block-id`, hint) is tested. Remaining B slices:
-> hover block toolbar + duplicate, drag between containers.
+> `onInsert`, wired only in the block editor, not the in-context page editor). The JS
+> isn't exercisable by the LiveView test suite, but was **browser-verified** (typing
+> `/` in prose shows one menu with both text transforms and block inserts; picking
+> "Image" spawns a new Image block below).
+>
+> **Hover toolbar + duplicate DONE.** Block chrome controls (drag / move / duplicate /
+> delete) fade in on hover + `focus-within` (type label stays put); `duplicate_block`
+> copies a block's full field set by id → fresh id → drop right after (columns children
+> deep-copied with fresh ids). Browser-verified.
+>
+> **Remaining B slice:** drag between the top-level list ↔ columns.
 
 - **Inline "+" insertion points** between every block and at the ends, so authors add
   where the cursor is, not only at the tail.
@@ -148,6 +154,15 @@ deep-link hooks); this is about making it the default center of gravity rather t
 detour, and reconciling the two editing entry points into one coherent mode switch.
 
 ### Theme D — Field & media polish · **M · low risk**
+
+> **Status: media drawer + field chrome DONE.** D1 — the full-screen media modal is
+> now a right-side slide-over drawer (light scrim keeps the editor visible; mode-aware
+> title; `drawer-in` slide animation, reduced-motion-aware). D2 — the shared `.input`
+> gained `hint` (help text) + `required` (a `*` marker + the HTML attribute); Title/Slug
+> are required-marked and Excerpt + the SEO fields carry hints. Both browser-verified
+> (D2 also in dark mode). **Remaining (the big one):** replacing the nameless
+> socket-committed nested inputs below.
+
 - Replace nameless/socket-committed nested inputs (column children `:2471`, GEO rows
   `:2288`) with a **coherent bound field-component system** — consistent labels, help
   text, required markers, inline validation (Contentful field chrome).

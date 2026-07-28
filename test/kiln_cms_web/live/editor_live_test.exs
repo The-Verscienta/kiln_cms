@@ -1404,6 +1404,30 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Modernization C: the Preview tab is a launch point for visual editing — each
+  # rendered block offers an "Edit" jump into the in-context editor focused on it.
+  describe "click-to-edit preview (modernization C)" do
+    test "each preview block deep-links into the in-context editor focused on it",
+         %{conn: conn} do
+      page =
+        draft_page(%{
+          slug: "click-me",
+          blocks: [%{type: :heading, content: "Clickable", order: 0}]
+        })
+
+      [block] = blocks_legacy(page)
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # The block still renders in the preview, now with a per-block Edit link that
+      # focuses that block in the visual (in-context) editor.
+      assert html =~ "Clickable"
+      assert html =~ ~s(href="/editor/site/page/click-me?focus=#{block.id}")
+      assert html =~ "Hover a block and click Edit"
+    end
+  end
+
   describe "media library browser (editor chrome)" do
     test "opening from chrome and picking inserts a new image block", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg", url: "/uploads/hero"})
