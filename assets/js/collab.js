@@ -22,6 +22,13 @@ export {Y, Awareness, applyAwarenessUpdate, encodeAwarenessUpdate}
 
 const REMOTE_ORIGIN = "kiln-collab-remote"
 
+// The editor's ProseMirror node-set version, bumped whenever the schema grows
+// (2 = tables, #475). Sent on join so the server can refuse peers running an
+// older bundle: y-prosemirror DELETES nodes its schema doesn't know from the
+// shared doc, so one stale tab would silently destroy every peer's tables.
+// A refused join falls back to solo editing below — safe, just not live.
+export const SCHEMA_VSN = 2
+
 let socket = null
 const docs = {} // topic -> {doc, chan, whenReady, refs}
 
@@ -48,7 +55,7 @@ const collabSocket = token => {
 export function acquireDoc(topic, token) {
   if (!docs[topic]) {
     const doc = new Y.Doc()
-    const chan = collabSocket(token).channel(topic, {})
+    const chan = collabSocket(token).channel(topic, {vsn: SCHEMA_VSN})
 
     const pushLocal = (update, origin) => {
       if (origin === REMOTE_ORIGIN) return
@@ -91,7 +98,8 @@ export function acquireDoc(topic, token) {
           if (peers > 1) chan.push("awareness_request", {})
           resolve({firstPeer: peers === 1})
         })
-        // Join refused (flag off / stale token): behave like a lone editor.
+        // Join refused (flag off / stale token / stale-bundle schema vsn):
+        // behave like a lone editor — autosave still works, collab doesn't.
         .receive("error", () => resolve({firstPeer: true}))
     })
 

@@ -254,6 +254,49 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       refute Map.has_key?(block, "language")
       assert PortableText.to_html([block]) == "<pre><code>x</code></pre>"
     end
+
+    test "sanitize_body normalizes API-written language tags (from_tiptap isn't the only writer)" do
+      hostile = %{
+        "_type" => "block",
+        "style" => "code",
+        "language" => ~s(js" onload="),
+        "children" => [],
+        "markDefs" => []
+      }
+
+      cased = %{
+        "_type" => "block",
+        "style" => "code",
+        "language" => " Elixir ",
+        "children" => [],
+        "markDefs" => []
+      }
+
+      assert [clean, normalized] = PortableText.sanitize_body([hostile, cased])
+      refute Map.has_key?(clean, "language")
+      assert normalized["language"] == "elixir"
+    end
+
+    test "marked spans in code blocks keep their marks and links in the fallback render" do
+      block = %{
+        "_type" => "block",
+        "style" => "code",
+        "children" => [
+          %{"_type" => "span", "text" => "see docs", "marks" => ["strong", "lk0"]}
+        ],
+        "markDefs" => [%{"_key" => "lk0", "_type" => "link", "href" => "https://x.test"}]
+      }
+
+      html = PortableText.to_html([block])
+
+      assert html =~
+               ~s(<pre><code><a href="https://x.test"><strong>see docs</strong></a></code></pre>)
+
+      # A language tag can't be highlighted over marked spans — the marked
+      # fallback still carries the class for client-side highlighters.
+      tagged = Map.put(block, "language", "elixir")
+      assert PortableText.to_html([tagged]) =~ ~s(<code class="language-elixir"><a href=)
+    end
   end
 
   describe "tables (#475)" do
@@ -282,9 +325,9 @@ defmodule KilnCMS.Blocks.PortableTextTest do
              ] = item["rows"]
 
       assert PortableText.to_html([item]) ==
-               "<table><thead><tr>" <>
+               ~s(<div class="kiln-table-wrap"><table><thead><tr>) <>
                  ~s(<th scope="col">Name</th><th scope="col">Dose</th>) <>
-                 "</tr></thead><tbody><tr><td>Ginger</td><td>3g</td></tr></tbody></table>"
+                 "</tr></thead><tbody><tr><td>Ginger</td><td>3g</td></tr></tbody></table></div>"
     end
 
     test "row-header cells outside the first row get scope=row; no thead without one" do
@@ -319,7 +362,8 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       refute Map.has_key?(cell, "rowspan")
 
       assert PortableText.to_html([item]) ==
-               ~s(<table><tbody><tr><td colspan="2">a &lt; b</td></tr></tbody></table>)
+               ~s(<div class="kiln-table-wrap"><table><tbody>) <>
+                 ~s(<tr><td colspan="2">a &lt; b</td></tr></tbody></table></div>)
     end
 
     test "cell marks and links render; unsafe link hrefs are dropped at both layers" do
@@ -359,6 +403,90 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       assert [item] = PortableText.from_tiptap(tiptap)
       assert [%{"cells" => [%{"children" => children}]}] = item["rows"]
       assert Enum.map(children, & &1["text"]) == ["one", "\n", "two"]
+
+      # The break renders as <br/> — a literal newline would collapse to a
+      # space in HTML and merge the lines on the next editor hydration.
+      assert PortableText.to_html([item]) =~ "<td>one<br/>two</td>"
+    end
+
+    test "non-paragraph cell content flattens to lines instead of being dropped" do
+      tiptap =
+        doc([
+          tt_node("table", [
+            tt_node("tableRow", [
+              tt_node("tableCell", [
+                para("intro"),
+                tt_node("bulletList", [
+                  tt_node("listItem", [para("first")]),
+                  tt_node("listItem", [para("second")])
+                ])
+              ])
+            ])
+          ])
+        ])
+
+      assert [item] = PortableText.from_tiptap(tiptap)
+      assert [%{"cells" => [%{"children" => children}]}] = item["rows"]
+      assert Enum.map_join(children, & &1["text"]) == "intro\nfirst\nsecond"
+    end
+
+    test "sanitize_body canonicalizes malformed table shapes instead of crashing" do
+      # Every shape here 500'd the cast or persisted render-crashing poison
+      # before canonicalization: nil/binary rows, nil/binary cells lists,
+      # non-map cells.
+      body = [
+        %{
+          "_type" => "table",
+          "rows" => [
+            nil,
+            "junk",
+            %{"cells" => nil},
+            %{"cells" => "junk"},
+            %{"cells" => [%{"header" => false, "children" => [], "markDefs" => []}, "junk"]}
+          ]
+        }
+      ]
+
+      assert [%{"rows" => rows}] = PortableText.sanitize_body(body)
+      assert [%{"cells" => []}, %{"cells" => []}, %{"cells" => [_only_map]}] = rows
+
+      # A non-list rows value is normalized away, and rendering stays total
+      # even for pre-fix stored poison.
+      assert [%{"rows" => []}] =
+               PortableText.sanitize_body([%{"_type" => "table", "rows" => "x"}])
+
+      assert PortableText.to_html([%{"_type" => "table", "rows" => "x"}]) =~ "<table>"
+      assert PortableText.to_plain_text([%{"_type" => "table", "rows" => "x"}]) == ""
+    end
+
+    test "sanitize_body scrubs table-level markDefs and coerces string col/rowspans" do
+      body = [
+        %{
+          "_type" => "table",
+          "markDefs" => [%{"_key" => "a", "_type" => "link", "href" => "javascript:alert(1)"}],
+          "rows" => [
+            %{
+              "cells" => [
+                %{
+                  "header" => false,
+                  "children" => [],
+                  "markDefs" => [],
+                  "colspan" => "2",
+                  "rowspan" => true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+
+      assert [%{"markDefs" => [%{"href" => ""}], "rows" => [%{"cells" => [cell]}]}] =
+               PortableText.sanitize_body(body)
+
+      # Numeric strings become canonical integers (so :web and :json agree);
+      # anything else is dropped rather than silently diverging per surface.
+      assert cell["colspan"] == 2
+      refute Map.has_key?(cell, "rowspan")
     end
 
     test "to_plain_text flattens table cells for search" do

@@ -17,15 +17,30 @@ defmodule KilnCMSWeb.CollabChannelTest do
 
   defp topic, do: "collab:page:#{System.unique_integer([:positive])}"
 
+  # Must track SCHEMA_VSN in assets/js/collab.js / @schema_vsn in the channel.
+  @schema_vsn 2
+
   defp join!(topic) do
     {:ok, socket} = connect(CollabSocket, %{"token" => token()})
-    {:ok, reply, joined} = subscribe_and_join(socket, topic, %{})
+    {:ok, reply, joined} = subscribe_and_join(socket, topic, %{"vsn" => @schema_vsn})
     {reply, joined}
   end
 
   test "sockets demand a valid token" do
     assert :error = connect(CollabSocket, %{"token" => "forged"})
     assert :error = connect(CollabSocket, %{})
+  end
+
+  test "peers on a stale bundle (old or missing schema vsn) are refused" do
+    {:ok, socket} = connect(CollabSocket, %{"token" => token()})
+
+    # A pre-#475 bundle sends no vsn at all; a future mismatch is refused too.
+    # y-prosemirror deletes unknown nodes from the shared doc, so a stale peer
+    # must never enter the room (it degrades to solo editing client-side).
+    assert {:error, %{reason: "stale bundle"}} = subscribe_and_join(socket, topic(), %{})
+
+    assert {:error, %{reason: "stale bundle"}} =
+             subscribe_and_join(socket, topic(), %{"vsn" => @schema_vsn - 1})
   end
 
   test "clients converge through the channel; late joiners get full state" do

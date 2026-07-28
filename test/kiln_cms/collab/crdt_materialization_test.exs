@@ -221,4 +221,44 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     # Empty/absent fragments are nil — callers must not clobber stored HTML.
     assert Materializer.fragment_html(doc, "never-touched") == nil
   end
+
+  test "the materializer keeps table structure and the code-block language tag" do
+    doc = Yex.Doc.new()
+    frag = Yex.Doc.get_xml_fragment(doc, "f")
+
+    # A 1x2 table with a header cell and a spanning data cell — before the
+    # table clauses landed, checkpoint write-back flattened this to <p> soup.
+    Yex.XmlFragment.push(
+      frag,
+      Yex.XmlElementPrelim.new("table", [
+        Yex.XmlElementPrelim.new("tableRow", [
+          Yex.XmlElementPrelim.new("tableHeader", [
+            Yex.XmlElementPrelim.new("paragraph", [Yex.XmlTextPrelim.from("Name")])
+          ]),
+          Yex.XmlElementPrelim.new("tableCell", [
+            Yex.XmlElementPrelim.new("paragraph", [Yex.XmlTextPrelim.from("Ginger")])
+          ])
+        ])
+      ])
+    )
+
+    frag
+    |> Yex.XmlFragment.fetch!(0)
+    |> Yex.XmlElement.fetch!(0)
+    |> Yex.XmlElement.fetch!(1)
+    |> Yex.XmlElement.insert_attribute("colspan", "2")
+
+    Yex.XmlFragment.push(
+      frag,
+      Yex.XmlElementPrelim.new("codeBlock", [Yex.XmlTextPrelim.from("IO.puts(1)")])
+    )
+
+    Yex.XmlFragment.fetch!(frag, 1) |> Yex.XmlElement.insert_attribute("language", "elixir")
+
+    html = Materializer.fragment_html(doc, "f")
+
+    assert html =~ "<table><tr><th><p>Name</p></th>"
+    assert html =~ ~s(<td colspan="2"><p>Ginger</p></td>)
+    assert html =~ ~s|<pre><code class="language-elixir">IO.puts(1)</code></pre>|
+  end
 end

@@ -358,10 +358,16 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_legacy(%Heading{} = b),
     do: %{type: :heading, content: b.text, data: %{"level" => b.level}, id: b.id}
 
+  # The single sanitize boundary for delivered/previewed rich text: stored
+  # legacy_html is untrusted editor/API HTML and is scrubbed HERE, at
+  # payload/preview build time (cached on delivery), while PT-rendered HTML is
+  # trusted by construction (escaped text + allowlisted URLs + closed markup).
+  # BlockComponents renders `content` raw — it must never receive rich-text
+  # HTML that didn't come through this function.
   defp one_to_legacy(%RichText{} = b),
     do: %{
       type: :rich_text,
-      content: b.legacy_html || KilnCMS.Blocks.PortableText.to_html(b.body),
+      content: rich_text_content(b),
       data: %{},
       id: b.id
     }
@@ -422,6 +428,11 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}
+
+  defp rich_text_content(%RichText{legacy_html: html}) when is_binary(html) and html != "",
+    do: KilnCMS.HTMLSanitizer.sanitize_rich_text(html)
+
+  defp rich_text_content(%RichText{body: body}), do: KilnCMS.Blocks.PortableText.to_html(body)
 
   # ── accessors tolerant of struct (atom keys) and jsonb map (string keys) ──
   defp get(block, key), do: Map.get(block, key) || Map.get(block, to_string(key))

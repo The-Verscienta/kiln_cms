@@ -172,6 +172,58 @@ defmodule KilnCMS.VisualEditingTest do
       assert Stega.clean(s2["text"]) == "world"
     end
 
+    test "stega-encodes table cell spans and leaves code blocks clean" do
+      json = %{
+        "type" => "post",
+        "id" => "doc-4",
+        "slug" => "tc",
+        "title" => "T",
+        "blocks" => [
+          %{
+            "_type" => "rich_text",
+            "_id" => "r2",
+            "body" => [
+              %{
+                "_type" => "table",
+                "_key" => "b0",
+                "rows" => [
+                  %{
+                    "cells" => [
+                      %{
+                        "header" => true,
+                        "children" => [%{"_type" => "span", "text" => "Name", "marks" => []}],
+                        "markDefs" => []
+                      }
+                    ]
+                  }
+                ]
+              },
+              %{
+                "_type" => "block",
+                "_key" => "b1",
+                "style" => "code",
+                "language" => "elixir",
+                "children" => [%{"_type" => "span", "text" => "IO.puts(1)", "marks" => []}],
+                "markDefs" => []
+              }
+            ]
+          }
+        ]
+      }
+
+      out = VisualEditing.annotate(json)
+      [%{"body" => [table, code]}] = out["blocks"]
+
+      # Table text is clickable: the cell span carries the block address.
+      [%{"cells" => [%{"children" => [cell_span]}]}] = table["rows"]
+      assert Stega.decode(cell_span["text"])["block"] == "r2"
+      assert Stega.clean(cell_span["text"]) == "Name"
+
+      # Code stays byte-identical — invisible tag characters inside code would
+      # corrupt client-side highlighting and copy-paste.
+      assert [%{"text" => "IO.puts(1)"}] = code["children"]
+    end
+
     test "stega-encodes plain-string custom fields, skipping parsed values" do
       json = %{
         "type" => "herb",

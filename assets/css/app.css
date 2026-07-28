@@ -607,12 +607,15 @@ pre.highlight .gs {
   font-weight: 600;
 }
 /* Delivered tables (#475): bordered, readable, and horizontally scrollable on
-   narrow screens without breaking the page (the table itself scrolls). */
+   narrow screens. The PT renderer wraps each table in .kiln-table-wrap and the
+   WRAPPER scrolls — `display: block` on the table itself would strip its
+   implicit ARIA table semantics (Chrome/Safari) and shrink-wrap the grid. */
+.kiln-block .kiln-table-wrap {
+  overflow-x: auto;
+}
 .kiln-block table {
   border-collapse: collapse;
   width: 100%;
-  display: block;
-  overflow-x: auto;
 }
 .kiln-block th,
 .kiln-block td {

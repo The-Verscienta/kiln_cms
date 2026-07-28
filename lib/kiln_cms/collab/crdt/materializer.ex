@@ -59,11 +59,50 @@ defmodule KilnCMS.Collab.Crdt.Materializer do
   defp wrap("orderedList", el), do: ["<ol>", element_children_html(el), "</ol>"]
   defp wrap("listItem", el), do: ["<li>", element_children_html(el), "</li>"]
   defp wrap("blockquote", el), do: ["<blockquote>", element_children_html(el), "</blockquote>"]
-  defp wrap("codeBlock", el), do: ["<pre><code>", element_children_html(el), "</code></pre>"]
+
+  defp wrap("codeBlock", el),
+    do: ["<pre><code", code_language_attr(el), ">", element_children_html(el), "</code></pre>"]
+
   defp wrap("horizontalRule", _el), do: ["<hr>"]
   defp wrap("hardBreak", _el), do: ["<br>"]
+  # Tables (#475): keep the structural markup — the pre-table fallback
+  # flattened collaboratively-authored tables to a run of bare paragraphs the
+  # moment a crash-recovery checkpoint materialized them.
+  defp wrap("table", el), do: ["<table>", element_children_html(el), "</table>"]
+  defp wrap("tableRow", el), do: ["<tr>", element_children_html(el), "</tr>"]
+  defp wrap("tableHeader", el), do: table_cell(el, "th")
+  defp wrap("tableCell", el), do: table_cell(el, "td")
   # Total: unknown nodes contribute their children, not a crash.
   defp wrap(_unknown, el), do: element_children_html(el)
+
+  defp table_cell(el, tag),
+    do: ["<", tag, cell_span_attrs(el), ">", element_children_html(el), "</", tag, ">"]
+
+  # The language tag the #503 dropdown stores on the codeBlock node; carried as
+  # a `language-…` class so the checkpoint keeps what the editor chose.
+  defp code_language_attr(el) do
+    with %{"language" => language} <- Yex.XmlElement.get_attributes(el),
+         tag when is_binary(tag) <- KilnCMS.Highlight.normalize(to_string(language)) do
+      [~s( class="language-), tag, ~s(")]
+    else
+      _absent_or_implausible -> []
+    end
+  end
+
+  defp cell_span_attrs(el) do
+    attrs =
+      case Yex.XmlElement.get_attributes(el) do
+        %{} = map -> map
+        _other -> %{}
+      end
+
+    Enum.flat_map(["colspan", "rowspan"], fn key ->
+      case attrs[key] |> to_string() |> Integer.parse() do
+        {n, _rest} when n > 1 -> [~s( #{key}="#{n}")]
+        _default_or_invalid -> []
+      end
+    end)
+  end
 
   defp element_children_html(el) do
     el

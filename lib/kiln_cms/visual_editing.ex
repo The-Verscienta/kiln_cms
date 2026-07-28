@@ -120,9 +120,19 @@ defmodule KilnCMS.VisualEditing do
   # Walk a Portable Text body (`[%{"children" => [spans]}]`) and stega-encode each
   # span's text. Spans have no stable key, so the address is block-level (the edit
   # round-trip opens the whole rich-text block) — the per-span encoding just makes
-  # every rendered word clickable.
+  # every rendered word clickable. Two deliberate exceptions:
+  #   * code blocks stay clean — invisible tag characters inside code would
+  #     corrupt client-side highlighting and copy-paste;
+  #   * table items (#475) keep their spans two levels down (rows[].cells[]),
+  #     so they get their own walk instead of the top-level `children` match.
   defp annotate_portable_text(body, payload) do
     Enum.map(body, fn
+      %{"style" => "code"} = pt_block ->
+        pt_block
+
+      %{"_type" => "table"} = pt_block ->
+        annotate_table(pt_block, payload)
+
       %{"children" => children} = pt_block when is_list(children) ->
         %{pt_block | "children" => Enum.map(children, &annotate_span(&1, payload))}
 
@@ -130,6 +140,26 @@ defmodule KilnCMS.VisualEditing do
         other
     end)
   end
+
+  defp annotate_table(pt_block, payload) do
+    rows =
+      pt_block["rows"]
+      |> List.wrap()
+      |> Enum.map(fn
+        %{"cells" => cells} = row when is_list(cells) ->
+          %{row | "cells" => Enum.map(cells, &annotate_cell(&1, payload))}
+
+        row ->
+          row
+      end)
+
+    Map.put(pt_block, "rows", rows)
+  end
+
+  defp annotate_cell(%{"children" => children} = cell, payload) when is_list(children),
+    do: %{cell | "children" => Enum.map(children, &annotate_span(&1, payload))}
+
+  defp annotate_cell(cell, _payload), do: cell
 
   defp annotate_span(%{"_type" => "span", "text" => text} = span, payload)
        when is_binary(text) and text != "" do
