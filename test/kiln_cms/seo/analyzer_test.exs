@@ -156,7 +156,9 @@ defmodule KilnCMS.Seo.AnalyzerTest do
 
       assert finding.severity == :warning
       assert finding.field == :seo_title
-      assert finding.args == %{length: 61, min: 30, max: 60}
+      # Only what the message interpolates: "…is 61 characters — search results
+      # truncate past 60". The lower bound is irrelevant to an over-long value.
+      assert finding.args == %{length: 61, max: 60}
     end
 
     test "an seo_title identical to the title is flagged as duplicate" do

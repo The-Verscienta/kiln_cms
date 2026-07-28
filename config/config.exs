@@ -141,6 +141,22 @@ config :kiln_cms, KilnCMS.Search,
 # (`model: "ollama:llama3.1"`); a hosted provider works too, and is announced at
 # boot and in the editor. API keys are resolved by `req_llm` from its own
 # environment, never read or stored by Kiln. See docs/seo.md.
+# Editorial advisory checks (#476, #495) — the non-blocking advice panel in the
+# content editor. Order here is display order. Plugins append their own via the
+# `advisories/0` callback on `Kiln.Plugin`; a check that raises is dropped and
+# logged rather than taking the editor down. See `Kiln.Advisory`.
+#
+# `Kiln.Advisory.Checks.*` are feature-neutral (an accessibility panel wants
+# them verbatim); `KilnCMS.Seo.Checks.*` are search-specific.
+config :kiln_cms, Kiln.Advisory,
+  checks: [
+    KilnCMS.Seo.Checks.Meta,
+    KilnCMS.Seo.Checks.Keyphrase,
+    KilnCMS.Seo.Checks.Readability,
+    Kiln.Advisory.Checks.Headings,
+    Kiln.Advisory.Checks.ImageAlt
+  ]
+
 # `req_llm` (and its `llm_db` catalog) source a `.env` from the working
 # directory into the OS environment at application start, unconditionally —
 # including on a default install with drafting off. That would let a stray

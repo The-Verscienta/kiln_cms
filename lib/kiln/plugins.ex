@@ -22,6 +22,12 @@ defmodule Kiln.Plugins do
   @spec field_types() :: [module()]
   def field_types, do: Enum.flat_map(all(), & &1.field_types())
 
+  @doc """
+  Advisory checks contributed by plugins (`Kiln.Advisory`), appended after the
+  core ones so a plugin can add advice without reordering it.
+  """
+  def advisories, do: Enum.flat_map(all(), & &1.advisories())
+
   @doc "Every plugin-declared admin nav item."
   @spec nav_items() :: [Kiln.Plugin.nav_item()]
   def nav_items, do: Enum.flat_map(all(), & &1.nav_items())

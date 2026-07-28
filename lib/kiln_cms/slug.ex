@@ -36,6 +36,22 @@ defmodule KilnCMS.Slug do
 
   def focus_keyphrase(_keywords), do: ""
 
+  @doc """
+  A string's **content words**: slugified with stop words stripped, so
+  "Guide to the Kiln" and "guide-kiln" compare equal.
+
+  The one normalization every keyphrase comparison runs on *both* sides, so
+  that slug linting and the SEO advisories can never drift apart on what
+  counts as a match. Note it strips **English** stop words — callers must treat
+  keyphrase checks as en-biased.
+  """
+  @spec content_words(String.t() | nil) :: [String.t()]
+  def content_words(text), do: text |> to_string() |> derive() |> String.split("-", trim: true)
+
+  @doc "Whether every word in `needles` appears in `haystack`."
+  @spec subset?([String.t()], [String.t()]) :: boolean()
+  def subset?(needles, haystack), do: Enum.all?(needles, &(&1 in haystack))
+
   @doc "Plain slug transform (no stop-word stripping) — used for taxonomy names."
   def slugify(text) when is_binary(text) do
     text

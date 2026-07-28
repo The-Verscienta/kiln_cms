@@ -528,7 +528,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     else
       socket
       |> assign(:seo_body_digest, digest)
-      |> assign(:seo_body_stats, KilnCMS.Seo.BodyStats.from_typed(typed))
+      |> assign(:seo_body_stats, Kiln.Advisory.Body.from_typed(typed))
     end
   end
 

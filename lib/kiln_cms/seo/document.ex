@@ -8,7 +8,7 @@ defmodule KilnCMS.Seo.Document do
   audience, no internal state — can reach a third party by accident.
   """
 
-  alias KilnCMS.Seo.BodyStats
+  alias Kiln.Advisory.Body
 
   @type t :: %__MODULE__{
           title: String.t(),
@@ -103,11 +103,11 @@ defmodule KilnCMS.Seo.Document do
 
   def truncate(%__MODULE__{} = doc, _max_chars), do: doc
 
-  defp body_stats(nil, body_text), do: %BodyStats{text: string(body_text)}
+  defp body_stats(nil, body_text), do: %Body{text: string(body_text)}
 
   defp body_stats(blocks, body_text) do
-    case BodyStats.compute(blocks) do
-      %BodyStats{text: ""} = stats -> %{stats | text: string(body_text)}
+    case Body.compute(blocks) do
+      %Body{text: ""} = stats -> %{stats | text: string(body_text)}
       stats -> stats
     end
   end
