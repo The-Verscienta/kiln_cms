@@ -15,24 +15,44 @@ defmodule KilnCMS.ImageProcessor do
   # wider than the target (we never upscale).
   @targets [thumb: 400, medium: 1024]
 
+  # Upload allowlist, keyed by the libvips loader that actually parsed the
+  # bytes. Detection is content-based (the loader libvips chose), NOT the
+  # filename or client-supplied MIME — so a PNG renamed `evil.svg` is detected
+  # as PNG, and an SVG/TIFF/PDF/HEIC is rejected even when libvips can open it.
+  # The mapped extension + Content-Type are what callers persist.
+  @allowed_loaders %{
+    "jpegload" => {".jpg", "image/jpeg"},
+    "pngload" => {".png", "image/png"},
+    "webpload" => {".webp", "image/webp"},
+    "gifload" => {".gif", "image/gif"}
+  }
+
   @type variant :: %{label: String.t(), path: Path.t(), width: pos_integer, height: pos_integer}
+  @type format :: %{extension: String.t(), content_type: String.t()}
 
   @doc """
-  Returns `:ok` when `path` is a readable raster image with non-zero dimensions.
+  Validates an upload by its content and returns the detected format.
 
-  Used to reject uploads whose extension or MIME type does not match their
-  content before they are persisted.
+  Returns `{:ok, %{extension: ".png", content_type: "image/png"}}` when `path`
+  is a readable raster image with non-zero dimensions whose libvips-detected
+  format is in the allowlist (#{inspect(Map.keys(@allowed_loaders))}), and
+  `{:error, _}` otherwise.
+
+  Callers MUST derive the stored extension and persisted `content_type` from the
+  returned format — never from the upload's filename or client MIME type — so a
+  file whose bytes don't match its name can't be stored as active content.
   """
-  @spec validate_upload(Path.t()) :: :ok | {:error, term}
+  @spec validate_upload(Path.t()) :: {:ok, format} | {:error, term}
   def validate_upload(path) when is_binary(path) do
-    case Image.open(path) do
-      {:ok, image} ->
-        if Image.width(image) > 0 and Image.height(image) > 0,
-          do: :ok,
-          else: {:error, :invalid_image}
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, image} <- Image.open(path),
+         true <- Image.width(image) > 0 and Image.height(image) > 0,
+         {:ok, loader} <- Vix.Vips.Image.header_value(image, "vips-loader"),
+         {:ok, {ext, content_type}} <- Map.fetch(@allowed_loaders, loader) do
+      {:ok, %{extension: ext, content_type: content_type}}
+    else
+      false -> {:error, :invalid_image}
+      :error -> {:error, :unsupported_format}
+      {:error, reason} -> {:error, reason}
     end
   rescue
     e ->

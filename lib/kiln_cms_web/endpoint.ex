@@ -33,6 +33,12 @@ defmodule KilnCMSWeb.Endpoint do
   # User-uploaded media (KilnCMS.Storage.Local). Served from priv/uploads,
   # which the Local adapter writes to (the app-dir paths stay in sync). In
   # production a remote adapter (S3/MinIO) would serve these instead.
+  #
+  # UploadHeaders forces these files to download (never render inline) and
+  # disables MIME sniffing, so an uploaded file can't execute as active content
+  # in the app origin. Must run before the static plug that sends the response.
+  plug KilnCMSWeb.Plugs.UploadHeaders
+
   plug Plug.Static,
     at: "/uploads",
     from: {:kiln_cms, "priv/uploads"},

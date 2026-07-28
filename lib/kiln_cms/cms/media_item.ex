@@ -112,7 +112,11 @@ defmodule KilnCMS.CMS.MediaItem do
   attributes do
     uuid_primary_key :id
 
-    attribute :filename, :string, allow_nil?: false, public?: true
+    attribute :filename, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: 255]
+
     attribute :content_type, :string, public?: true
     attribute :byte_size, :integer, public?: true
 
@@ -124,8 +128,8 @@ defmodule KilnCMS.CMS.MediaItem do
     # %{"thumb" => %{"key" => ..., "url" => ..., "width" => ..., "height" => ...}}
     attribute :variants, :map, default: %{}, public?: true
 
-    attribute :alt, :string, public?: true
-    attribute :caption, :string, public?: true
+    attribute :alt, :string, public?: true, constraints: [max_length: 1_000]
+    attribute :caption, :string, public?: true, constraints: [max_length: 2_000]
 
     # Storage pointer + public/CDN url.
     attribute :storage_key, :string, public?: true

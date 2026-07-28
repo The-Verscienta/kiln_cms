@@ -189,6 +189,49 @@ defmodule KilnCMSWeb.MediaLiveTest do
       refute File.exists?(Path.join(root, "fake.png"))
     end
 
+    @svg ~S|<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>|
+
+    test "rejects an SVG disguised with an image extension", %{conn: conn, root: root} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      # Active content (SVG) named like a PNG so it passes the client accept
+      # filter — must still be rejected by content-based validation.
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "evil.png", content: @svg, type: "image/png"}
+        ])
+
+      assert render_upload(input, "evil.png")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "failed"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+      assert File.ls!(root) == []
+    end
+
+    test "persists the content-detected type, not the client-supplied MIME",
+         %{conn: conn, root: root} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      # Real PNG bytes, but the client lies about the MIME type.
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "pixel.png", content: @png, type: "image/svg+xml"}
+        ])
+
+      assert render_upload(input, "pixel.png")
+      lv |> element("#upload-form") |> render_submit()
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.content_type == "image/png"
+      assert String.ends_with?(item.storage_key, ".png")
+      assert String.ends_with?(item.url, ".png")
+      # Nothing was written with the attacker-chosen type/extension.
+      assert Enum.all?(File.ls!(root), &String.ends_with?(&1, ".png"))
+    end
+
     test "uploading an image stores it and adds it to the library", %{conn: conn, root: root} do
       editor = authed_user(:editor)
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")

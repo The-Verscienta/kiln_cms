@@ -152,22 +152,24 @@ defmodule KilnCMSWeb.MediaLive do
 
   # --- helpers ---------------------------------------------------------------
 
+  # The stored extension and persisted content_type come from the content the
+  # upload actually contains (ImageProcessor.validate_upload), never from the
+  # client-supplied filename/MIME — so a mislabelled file can't be stored or
+  # served as active content.
   defp store_entry(path, entry, actor) do
-    key = Storage.generate_key(entry.client_name)
-    ext = entry.client_name |> Path.extname() |> String.downcase()
-
-    with :ok <- ImageProcessor.validate_upload(path),
+    with {:ok, format} <- ImageProcessor.validate_upload(path),
+         key = Storage.generate_key("upload" <> format.extension),
          {:ok, ^key} <- Storage.store(key, path) do
-      create_from_upload(key, ext, path, entry, actor)
+      create_from_upload(key, format, path, entry, actor)
     else
       _ -> :error
     end
   end
 
-  defp create_from_upload(key, ext, path, entry, actor) do
+  defp create_from_upload(key, format, path, entry, actor) do
     attrs = %{
       filename: entry.client_name,
-      content_type: entry.client_type,
+      content_type: format.content_type,
       byte_size: entry.client_size,
       storage_key: key,
       url: Storage.url(key)
@@ -175,7 +177,7 @@ defmodule KilnCMSWeb.MediaLive do
 
     case CMS.create_media_item(attrs, actor: actor) do
       {:ok, item} ->
-        enqueue_processing(item, path, ext)
+        enqueue_processing(item, path, format.extension)
         :ok
 
       _ ->

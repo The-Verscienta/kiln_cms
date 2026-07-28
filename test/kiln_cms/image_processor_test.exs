@@ -30,8 +30,33 @@ defmodule KilnCMS.ImageProcessorTest do
     Enum.each(variants, &File.rm(&1.path))
   end
 
-  test "validate_upload/1 accepts a readable raster image", %{path: path} do
-    assert :ok = ImageProcessor.validate_upload(path)
+  test "validate_upload/1 accepts a readable raster image and returns its format", %{path: path} do
+    assert {:ok, %{extension: ".png", content_type: "image/png"}} =
+             ImageProcessor.validate_upload(path)
+  end
+
+  test "validate_upload/1 detects format from content, not the file extension", %{path: path} do
+    # PNG bytes copied to a path that claims to be an SVG: the detected format
+    # must be PNG, so the upload is stored/served as a (safe) PNG.
+    mislabeled = Path.join(System.tmp_dir!(), "evil-#{System.unique_integer([:positive])}.svg")
+    File.cp!(path, mislabeled)
+    on_exit(fn -> File.rm(mislabeled) end)
+
+    assert {:ok, %{extension: ".png", content_type: "image/png"}} =
+             ImageProcessor.validate_upload(mislabeled)
+  end
+
+  test "validate_upload/1 rejects an SVG even when libvips can open it" do
+    svg = Path.join(System.tmp_dir!(), "vector-#{System.unique_integer([:positive])}.svg")
+
+    File.write!(
+      svg,
+      ~S|<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>|
+    )
+
+    on_exit(fn -> File.rm(svg) end)
+
+    assert {:error, :unsupported_format} = ImageProcessor.validate_upload(svg)
   end
 
   test "validate_upload/1 rejects non-image content" do
