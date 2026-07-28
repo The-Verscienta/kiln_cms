@@ -50,6 +50,20 @@ defmodule KilnCMS.Storage.S3Test do
     assert headers["cache-control"] == "public, max-age=31536000, immutable"
   end
 
+  test "store sends Content-Disposition: attachment, matching the Local adapter" do
+    stub(200)
+
+    assert {:ok, "download.png"} = S3.store("download.png", tmp_source("x"))
+
+    assert_received {:s3, "PUT", _path, _body, headers}
+    # Same defense-in-depth header KilnCMSWeb.Endpoint puts on /uploads/*, so
+    # swapping Local -> S3 doesn't silently drop it. Ignored for <img> loads.
+    assert headers["content-disposition"] == "attachment"
+    # nosniff is deliberately absent: S3 would return an arbitrary header as
+    # x-amz-meta-*, so it has to come from the CDN/bucket (docs/media-pipeline.md).
+    refute Map.has_key?(headers, "x-content-type-options")
+  end
+
   test "store sends a canned ACL only when configured" do
     original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)

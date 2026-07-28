@@ -47,12 +47,41 @@ defmodule KilnCMS.Storage.S3 do
   rather than overwrite an existing one, so a blob never changes under its URL.
   The `Plug.Static` mount serving the Local adapter uses the same value. See
   `docs/media-pipeline.md` for the CDN deployment guide.
+
+  ## Security headers
+
+  Objects are also uploaded with `Content-Disposition: attachment`, matching
+  what `KilnCMSWeb.Endpoint` puts on every `/uploads/*` response for the Local
+  adapter — defense-in-depth against a stored file being interpreted as active
+  content. Disposition is ignored for `<img>`/subresource loads, and every
+  media URL Kiln emits is a subresource, so images render normally; it only
+  takes effect when someone navigates straight at the URL.
+
+  Two things differ from the Local adapter and are worth knowing before you
+  deploy:
+
+    * It is **object metadata written at `PUT` time**, not a per-request header.
+      Changing your mind later means rewriting the existing objects
+      (`aws s3 cp --recursive --metadata-directive REPLACE`), not just shipping
+      a deploy. `url/1` returns a plain public URL rather than a presigned one,
+      so there is no per-request `response-content-disposition` override either.
+
+    * The companion `X-Content-Type-Options: nosniff` **cannot** be carried
+      here — S3 stores a fixed set of system headers (`Content-Type`,
+      `Content-Disposition`, `Cache-Control`, …) and anything else comes back
+      prefixed as `x-amz-meta-*`. Serve it from the CDN or bucket instead; see
+      the "Production storage & CDN" section of `docs/media-pipeline.md`.
   """
   @behaviour KilnCMS.Storage
 
   # Keys are write-once UUIDs (see "Caching" above), so responses never need
   # revalidation. Mirrors the /uploads Plug.Static config in KilnCMSWeb.Endpoint.
   @cache_control "public, max-age=31536000, immutable"
+
+  # Mirrors the `content-disposition: attachment` that KilnCMSWeb.Endpoint's
+  # secure_upload_headers/2 puts on the Local adapter's responses, so swapping
+  # adapters doesn't silently drop the control. See "Security headers" above.
+  @content_disposition "attachment"
 
   @impl true
   # source_path is a server-side upload temp file (from MediaLive), not user input.
@@ -87,7 +116,12 @@ defmodule KilnCMS.Storage.S3 do
   def url(key), do: "#{public_base_url()}/#{key}"
 
   defp put_object(key, body) do
-    opts = [content_type: content_type(key), cache_control: @cache_control] ++ acl_opt()
+    opts =
+      [
+        content_type: content_type(key),
+        cache_control: @cache_control,
+        content_disposition: @content_disposition
+      ] ++ acl_opt()
 
     bucket()
     |> ExAws.S3.put_object(key, body, opts)
