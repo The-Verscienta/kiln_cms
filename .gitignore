@@ -60,3 +60,7 @@ err.log
 # Downstream project overlay config (never committed to the reusable core).
 /config/project.exs
 _build_strict/
+
+# Playwright output written when tests are run from the repo root instead of
+# e2e/ (e2e/.gitignore already covers e2e/test-results/).
+/test-results/
