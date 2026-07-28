@@ -395,6 +395,50 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
     end
   end
 
+  describe "internal links panel" do
+    test "does not load until the panel is opened", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = CMS.create_page!(%{title: "Links", slug: "links-lazy"}, actor: editor)
+      {lv, html} = open_editor(conn, editor, page)
+
+      # Never on mount: it costs a vector query plus a read per neighbour, and
+      # most page-loads never open this panel.
+      assert html =~ "Internal links"
+      refute html =~ "No related pages"
+      refute html =~ "Refresh"
+
+      render_click(lv, "seo_links", %{})
+      loaded = render_async(lv)
+
+      assert loaded =~ "Refresh"
+    end
+
+    test "an empty result explains why rather than showing a blank list", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = CMS.create_page!(%{title: "Links", slug: "links-empty"}, actor: editor)
+      {lv, _html} = open_editor(conn, editor, page)
+
+      render_click(lv, "seo_links", %{})
+      html = render_async(lv)
+
+      # This draft was never published, so it was never indexed — say so
+      # instead of leaving the author staring at nothing.
+      assert html =~ "Publish this page to index it"
+    end
+
+    test "the Clipboard hook's copied event is handled", %{conn: conn} do
+      # The hook (assets/js/app.js) pushes "copied" after writing to the
+      # clipboard. This LiveView had no clause for it, so the push would have
+      # crashed the whole editor the first time anyone used the copy button.
+      editor = authed_user(:editor)
+      page = CMS.create_page!(%{title: "Links", slug: "links-copy"}, actor: editor)
+      {lv, _html} = open_editor(conn, editor, page)
+
+      assert render_click(lv, "copied", %{}) =~ "Copied to clipboard"
+      assert render(lv) =~ "SEO &amp; scheduling"
+    end
+  end
+
   describe "body stats stay fresh" do
     # The editor caches the body walk behind a hash of the typed blocks, so a
     # bug there would show up as findings frozen at their mount-time values.

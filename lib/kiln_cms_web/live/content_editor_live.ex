@@ -128,6 +128,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:seo_drafting?, false)
          |> assign(:seo_drafts, nil)
          |> assign(:seo_dismissed, MapSet.new())
+         # Internal-link suggestions (#377). `nil` = never opened; loading is
+         # deferred to first open because it costs a pgvector query plus a
+         # record read per neighbour, which no page-load should pay.
+         |> assign(:seo_links, nil)
+         |> assign(:seo_links_loading?, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -256,6 +261,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:error, reason} = result
         {:noreply, put_flash(socket, :error, seo_error_message(reason))}
     end
+  end
+
+  def handle_async(:seo_links, {:ok, suggestions}, socket) do
+    {:noreply,
+     socket
+     |> assign(:seo_links_loading?, false)
+     |> assign(:seo_links, suggestions)}
+  end
+
+  def handle_async(:seo_links, {:exit, reason}, socket) do
+    Logger.warning("Internal-link suggestion task exited: #{inspect(reason)}")
+
+    # An empty list rather than nil: nil means "not loaded yet" and would make
+    # the panel try again on every open.
+    {:noreply, socket |> assign(:seo_links_loading?, false) |> assign(:seo_links, [])}
   end
 
   def handle_async(:seo_draft, {:exit, reason}, socket) do
@@ -898,6 +918,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
        end)}
     end
   end
+
+  # Load internal-link suggestions the first time the panel is opened. Repeat
+  # opens reuse what's already there — the author can refresh explicitly.
+  def handle_event("seo_links_refresh", _params, socket) do
+    if socket.assigns.seo_links_loading?,
+      do: {:noreply, socket},
+      else: {:noreply, load_link_suggestions(socket)}
+  end
+
+  # The `Clipboard` JS hook pushes this after a successful copy. Without a
+  # clause here the push would crash the LiveView — the hook predates this
+  # view, so it had no handler until now.
+  def handle_event("copied", _params, socket),
+    do: {:noreply, put_flash(socket, :info, gettext("Copied to clipboard."))}
 
   def handle_event("seo_dismiss", %{"field" => field}, socket),
     do:
@@ -2028,6 +2062,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
       seo_description: AshPhoenix.Form.value(form, :seo_description),
       seo_keywords: AshPhoenix.Form.value(form, :seo_keywords)
     })
+  end
+
+  defp load_link_suggestions(socket) do
+    record = socket.assigns.record
+    actor = socket.assigns.actor
+    # Paths the body already links to, so we don't suggest a link that's there.
+    linked = socket.assigns.seo_body_stats.internal_link_paths
+
+    socket
+    |> assign(:seo_links_loading?, true)
+    |> start_async(:seo_links, fn ->
+      KilnCMS.Seo.Links.suggest(record, actor: actor, exclude_paths: linked)
+    end)
+  end
+
+  # Why the suggestion list came back empty — an unexplained empty panel reads
+  # as broken, and the usual cause (a draft that has never been indexed) is
+  # both common and fixable.
+  defp link_empty_reason(record) do
+    cond do
+      record.state != :published and is_nil(record.published_at) ->
+        gettext("Publish this page to index it — suggestions come from indexed content.")
+
+      not KilnCMS.Search.semantic?() ->
+        gettext("No related pages matched. Enabling semantic search improves these results.")
+
+      true ->
+        gettext("No related pages found yet.")
+    end
   end
 
   # Which fields the current draft actually proposes, in display order.
@@ -4262,6 +4325,62 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {gettext("Published content is taken back to draft at this time.")}
                   </p>
                 </div>
+              </.inspector_section>
+
+              <%!-- Internal links (#377). Loaded on an explicit click, never on
+                    mount: it costs a vector query plus a read per neighbour, and
+                    inspector sections are always expanded, so there is no "first
+                    open" to hang lazy loading off. --%>
+              <.inspector_section title={gettext("Internal links")}>
+                <p class="text-xs text-base-content/60">
+                  {gettext("Related pages worth linking to from this one.")}
+                </p>
+
+                <p :if={@seo_links == []} class="text-xs text-base-content/60">
+                  {link_empty_reason(@record)}
+                </p>
+
+                <ul :if={@seo_links not in [nil, []]} class="space-y-1.5">
+                  <li
+                    :for={link <- @seo_links}
+                    class="rounded border border-base-content/10 bg-base-200/40 p-2"
+                  >
+                    <p class="text-xs font-medium">{link.title || link.slug}</p>
+                    <div class="mt-0.5 flex items-center gap-2">
+                      <code class="min-w-0 flex-1 truncate text-xs text-base-content/60">
+                        {link.path}
+                      </code>
+                      <%!-- Copy, not insert: mutating the block tree server-side
+                            would fight the TipTap/Y.Doc editor. --%>
+                      <button
+                        type="button"
+                        id={"seo-link-copy-#{link.id}"}
+                        phx-hook="Clipboard"
+                        data-clipboard-text={link.path}
+                        aria-label={gettext("Copy link to %{title}", title: link.title || link.slug)}
+                        class="shrink-0 text-xs underline"
+                      >
+                        {gettext("Copy")}
+                      </button>
+                    </div>
+                  </li>
+                </ul>
+
+                <button
+                  type="button"
+                  phx-click="seo_links_refresh"
+                  disabled={@seo_links_loading?}
+                  class="btn btn-sm btn-default"
+                >
+                  {if @seo_links == nil,
+                    do: gettext("Find related pages"),
+                    else: gettext("Refresh")}
+                  <.icon
+                    :if={@seo_links_loading?}
+                    name="hero-arrow-path"
+                    class="ml-1 size-3 motion-safe:animate-spin"
+                  />
+                </button>
               </.inspector_section>
             </div>
 
