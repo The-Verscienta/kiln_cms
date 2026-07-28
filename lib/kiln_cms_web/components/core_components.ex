@@ -166,14 +166,19 @@ defmodule KilnCMSWeb.CoreComponents do
   slot :inner_block, required: true
 
   def badge(assigns) do
+    # Pale accent tint + the matching `*-ink` token, which is the accent
+    # darkened for light surfaces and the raw accent in dark (see app.css).
+    # The bare accents only reach ~2.1-4.2:1 as text on their own tint in
+    # light mode, and `text-warning-content` — ink meant for a SOLID fill —
+    # inverts to 1.4:1 on the tint in dark.
     tones = %{
       "neutral" => "bg-base-200 text-base-content/70",
       "outline" => "border border-base-content/25 text-base-content/70",
-      "primary" => "bg-primary/12 text-primary",
-      "success" => "bg-success/15 text-success",
-      "warning" => "bg-warning/20 text-warning-content",
-      "error" => "bg-error/12 text-error",
-      "info" => "bg-info/12 text-info"
+      "primary" => "bg-primary/12 text-primary-ink",
+      "success" => "bg-success/15 text-success-ink",
+      "warning" => "bg-warning/20 text-warning-ink",
+      "error" => "bg-error/12 text-error-ink",
+      "info" => "bg-info/12 text-info-ink"
     }
 
     assigns = assign(assigns, :tone, Map.fetch!(tones, assigns.variant))
