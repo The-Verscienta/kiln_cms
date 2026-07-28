@@ -429,21 +429,25 @@ const Hooks = {
       document.addEventListener("click", this.onDocClick)
 
       // Global "/" opens the inserter — unless the user is typing in a field
-      // (mirrors the ⌘K palette guard so it never hijacks text entry).
-      this.onDocKey = e => {
-        if (e.key !== "/" || this.isOpen()) return
-        const t = e.target
-        const tag = (t.tagName || "").toLowerCase()
-        if (tag === "input" || tag === "textarea" || t.isContentEditable) return
-        e.preventDefault()
-        this.open()
+      // (mirrors the ⌘K palette guard so it never hijacks text entry). Only the
+      // instance flagged data-inserter-global owns the shortcut, so the inline
+      // per-block "+" copies (B2) don't all open at once on "/".
+      if (this.el.dataset.inserterGlobal === "true") {
+        this.onDocKey = e => {
+          if (e.key !== "/" || this.isOpen()) return
+          const t = e.target
+          const tag = (t.tagName || "").toLowerCase()
+          if (tag === "input" || tag === "textarea" || t.isContentEditable) return
+          e.preventDefault()
+          this.open()
+        }
+        document.addEventListener("keydown", this.onDocKey)
       }
-      document.addEventListener("keydown", this.onDocKey)
     },
 
     destroyed() {
       document.removeEventListener("click", this.onDocClick)
-      document.removeEventListener("keydown", this.onDocKey)
+      if (this.onDocKey) document.removeEventListener("keydown", this.onDocKey)
     },
 
     options() {

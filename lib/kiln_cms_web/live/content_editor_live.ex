@@ -107,6 +107,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # restore) so rich-text blocks remount and reload TipTap from the new
          # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
          |> assign(:editor_version, 0)
+         # Right inspector rail (Theme A): which panel is showing. All panels stay
+         # mounted (form fields must survive submit) — the tab only toggles CSS
+         # visibility, never `:if`.
+         |> assign(:inspector_tab, :preview)
+         # Preview render is only refreshed while the Preview tab is showing;
+         # this tracks whether an off-tab edit left it needing a re-render.
+         |> assign(:preview_stale, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -430,7 +437,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # full sanitize-and-render pipeline in the template ran it on every render,
   # including presence diffs and collaborator cursor events.
   defp refresh_preview(socket) do
-    assign(socket, :preview_html, preview_html(socket.assigns.form))
+    # The in-editor preview is a full block render of every block. Only pay for
+    # it while the Preview tab is actually showing; otherwise mark it stale and
+    # let switch_inspector_tab re-render on the way back. (nil = pre-mount, when
+    # the Preview tab is the default, so render then too.)
+    if socket.assigns[:inspector_tab] in [nil, :preview] do
+      socket
+      |> assign(:preview_html, preview_html(socket.assigns.form))
+      |> assign(:preview_stale, false)
+    else
+      assign(socket, :preview_stale, true)
+    end
   end
 
   defp load_versions(socket) do
@@ -454,6 +471,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # bind straight to the typed attributes. The update is scoped to the record's
     # own org (epic #336) so a save stays in the site it was loaded from.
     record
+    |> ensure_block_ids()
     |> AshPhoenix.Form.for_update(:update,
       actor: actor,
       tenant: record.org_id,
@@ -461,6 +479,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
     |> to_form()
   end
+
+  # Backfill a stable id onto any block that reached the editor without one
+  # (legacy content predating the uuid_primary_key), so every block can be
+  # addressed by identity (picker/move/remove/duplicate carry `bid`).
+  defp ensure_block_ids(%{blocks: blocks} = record) when is_list(blocks),
+    do: %{record | blocks: Enum.map(blocks, &ensure_block_id/1)}
+
+  defp ensure_block_ids(record), do: record
+
+  defp ensure_block_id(%Ash.Union{value: value} = union),
+    do: %{union | value: ensure_block_id(value)}
+
+  defp ensure_block_id(%{id: nil} = block), do: %{block | id: Ash.UUID.generate()}
+  defp ensure_block_id(block), do: block
 
   # The typed block module backing a block sub-form (its union member resource).
   # `inputs_for` yields a Phoenix.HTML.Form wrapping an AshPhoenix.Form; the
@@ -676,6 +708,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> mark_dirty()}
   end
 
+  # Right inspector rail (Theme A): switch the visible panel. Pure view state —
+  # every panel stays mounted, so no form data is touched.
+  def handle_event("switch_inspector_tab", %{"tab" => tab}, socket)
+      when tab in ~w(settings preview history) do
+    socket = assign(socket, :inspector_tab, String.to_existing_atom(tab))
+
+    # Coming back to Preview after edits happened while it was hidden: catch it
+    # up now (refresh_preview short-circuits everywhere else while off-tab).
+    socket =
+      if socket.assigns.inspector_tab == :preview and socket.assigns[:preview_stale] do
+        refresh_preview(socket)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  # Unknown/garbled tab value — ignore it rather than crash the editor.
+  def handle_event("switch_inspector_tab", _params, socket), do: {:noreply, socket}
+
   def handle_event("field_focus", %{"field" => field}, socket) do
     broadcast_cursor(socket, field)
     {:noreply, assign(socket, :self_field, field)}
@@ -687,8 +740,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # Open the media browser to fill a specific image block.
-  def handle_event("open_picker", %{"index" => index}, socket),
-    do: {:noreply, assign(socket, :picking, String.to_integer(index))}
+  # Open the media browser to fill a specific existing image block, addressed by
+  # its stable id — the block is looked up again at pick time, so a reorder or
+  # removal in between can't redirect the image to the wrong block (audit T5.1).
+  def handle_event("open_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "",
+    do: {:noreply, assign(socket, :picking, {:block, bid})}
+
+  def handle_event("open_picker", _params, socket), do: {:noreply, socket}
 
   # Open the media browser from the editor chrome to insert a *new* image block.
   def handle_event("open_media_browser", _params, socket),
@@ -738,7 +796,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("pick_image", %{"index" => "new", "id" => media_id, "url" => url}, socket) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
-        params: %{"_union_type" => "image", "url" => url, "media_id" => media_id}
+        params: %{
+          "_union_type" => "image",
+          "id" => Ash.UUID.generate(),
+          "url" => url,
+          "media_id" => media_id
+        }
       )
 
     socket = socket |> assign(:form, form) |> reset_picker()
@@ -746,49 +809,121 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, mark_dirty(socket)}
   end
 
-  # Insert a library image into the existing image block at `index`.
-  def handle_event("pick_image", %{"index" => index, "id" => media_id, "url" => url}, socket) do
-    params =
-      socket.assigns.form
-      |> AshPhoenix.Form.params()
-      |> put_block(index, %{"url" => url, "media_id" => media_id})
+  # Fill the existing image block identified by `bid`. Its current position is
+  # resolved from the live form now, not captured when the picker opened, so a
+  # concurrent reorder/removal can't misdirect the image (audit T5.1).
+  def handle_event("pick_image", %{"index" => "block", "bid" => bid} = p, socket) do
+    %{"id" => media_id, "url" => url} = p
 
-    socket =
-      socket
-      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      |> reset_picker()
+    case block_index_by_id(socket.assigns.form, bid) do
+      nil ->
+        # The target block is gone (removed by a co-editor) — drop the pick.
+        {:noreply, reset_picker(socket)}
 
-    broadcast_preview(socket)
-    {:noreply, mark_dirty(socket)}
+      index ->
+        # Rebuild the FULL block set from the live form (each block as an input
+        # map keyed by its stable id), then merge the image into the target. A
+        # pristine form's `params` carries no blocks at all, so a partial update
+        # would drop every other block — this carries them all through, ids intact
+        # (the same full-set pattern the inline preview + in-context editor use).
+        blocks =
+          socket.assigns.form
+          |> full_blocks_input()
+          |> List.update_at(index, &Map.merge(&1, %{"url" => url, "media_id" => media_id}))
+
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> Map.put("blocks", blocks)
+
+        socket = socket |> revalidate(params) |> reset_picker()
+        broadcast_preview(socket)
+        {:noreply, mark_dirty(socket)}
+    end
   end
 
   # A columns block carries a socket-managed child tree, so it's inserted with a
   # stable id (seeded into `block_children`) and a default two-column layout.
-  def handle_event("add_block", %{"type" => "columns"}, socket) do
+  # `after` (a block id, "start", or absent) positions the new block (B2).
+  def handle_event("add_block", %{"type" => "columns"} = p, socket) do
     id = Ash.UUID.generate()
     cols = [%{"blocks" => []}, %{"blocks" => []}]
 
     form =
-      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
+      socket.assigns.form
+      |> AshPhoenix.Form.add_form(socket.assigns.form.name <> "[blocks]",
         params: %{"_union_type" => "columns", "id" => id, "columns" => cols}
       )
+      |> position_new_block(p["after"])
 
-    {:noreply,
-     socket
-     |> assign(:form, form)
-     |> assign(:block_children, Map.put(socket.assigns.block_children, id, cols))
-     |> refresh_preview()
-     |> mark_dirty()}
+    socket =
+      socket
+      |> assign(:form, form)
+      |> assign(:block_children, Map.put(socket.assigns.block_children, id, cols))
+
+    broadcast_preview(socket)
+    {:noreply, socket |> refresh_preview() |> mark_dirty()}
   end
 
-  def handle_event("add_block", %{"type" => type}, socket) do
+  def handle_event("add_block", %{"type" => type} = p, socket) do
+    # Every block carries a stable id from the moment it's added, so the picker,
+    # delete, and keyboard-move can address it by identity rather than by a
+    # position that a concurrent reorder can invalidate (audit T5.1/T5.2). The
+    # optional `after` anchor lets it land inline rather than only at the end (B2).
     form =
-      AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
-        params: %{"_union_type" => type}
+      socket.assigns.form
+      |> AshPhoenix.Form.add_form(socket.assigns.form.name <> "[blocks]",
+        params: %{"_union_type" => type, "id" => Ash.UUID.generate()}
       )
+      |> position_new_block(p["after"])
 
-    {:noreply, socket |> assign(:form, form) |> mark_dirty()}
+    socket = assign(socket, :form, form)
+    broadcast_preview(socket)
+    {:noreply, socket |> refresh_preview() |> mark_dirty()}
   end
+
+  # Duplicate the block with stable id `bid`: copy its full field set, give the
+  # copy (and, for a columns block, its nested children) fresh ids, and drop it in
+  # right after the original.
+  def handle_event("duplicate_block", %{"bid" => bid}, socket) do
+    case Enum.find(
+           full_blocks_input(socket.assigns.form),
+           &(to_string(&1["id"]) == to_string(bid))
+         ) do
+      nil ->
+        {:noreply, socket}
+
+      source ->
+        new_id = Ash.UUID.generate()
+        copy = Map.put(source, "id", new_id)
+        children = dup_children(socket.assigns.block_children[bid])
+
+        form =
+          socket.assigns.form
+          |> AshPhoenix.Form.add_form(socket.assigns.form.name <> "[blocks]", params: copy)
+          |> position_new_block(bid)
+
+        block_children =
+          if children,
+            do: Map.put(socket.assigns.block_children, new_id, children),
+            else: socket.assigns.block_children
+
+        socket = socket |> assign(:form, form) |> assign(:block_children, block_children)
+
+        # Re-inject the copy's fresh-id children into the form params now, so a draft
+        # autosave firing before the next validate persists the duplicate's own
+        # children rather than the original's (do_autosave submits raw params).
+        socket = revalidate(socket, AshPhoenix.Form.params(socket.assigns.form))
+        broadcast_preview(socket)
+
+        {:noreply, socket |> refresh_preview() |> mark_dirty()}
+    end
+  end
+
+  # No `bid` (a block that reached the editor without a stable id) — no-op rather
+  # than crash the session (audit theme 4). ensure_block_ids/1 backfills on load,
+  # so this is defence in depth.
+  def handle_event("duplicate_block", _params, socket), do: {:noreply, socket}
 
   # ── GEO item rows (faq items / how_to steps, #357) ──────────────────────────
   # Rows are bound form inputs; add/remove mutate the form params directly (the
@@ -809,12 +944,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
     update_geo_items(socket, index, field, &List.delete_at(&1, to_int(item)))
   end
 
-  def handle_event("remove_block", %{"path" => path}, socket) do
-    {:noreply,
-     socket
-     |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
-     |> mark_dirty()}
+  # Remove the block with stable id `bid`. Resolving the id to a path now (rather
+  # than trusting a path captured at render) means an in-flight reorder can't turn
+  # a delete click into a delete of the wrong block (audit T5.2).
+  def handle_event("remove_block", %{"bid" => bid}, socket) do
+    case block_index_by_id(socket.assigns.form, bid) do
+      nil ->
+        {:noreply, socket}
+
+      index ->
+        path = "#{socket.assigns.form.name}[blocks][#{index}]"
+
+        {:noreply,
+         socket
+         |> assign(:form, AshPhoenix.Form.remove_form(socket.assigns.form, path))
+         |> prune_block_children()
+         |> mark_dirty()}
+    end
   end
+
+  def handle_event("remove_block", _params, socket), do: {:noreply, socket}
 
   def handle_event("reorder", %{"order" => order}, socket) do
     form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
@@ -823,17 +972,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Keyboard-accessible alternative to drag-and-drop reordering (#171): swap a
   # block with its neighbour and announce the new position to screen readers.
-  def handle_event("move_block", %{"index" => index, "dir" => dir}, socket) do
-    i = String.to_integer(index)
+  # The moved block is identified by its stable id and resolved to a live index
+  # here, so the swap can't act on the wrong block after a reorder (T4.3/T5.2).
+  def handle_event("move_block", %{"bid" => bid, "dir" => dir}, socket) do
     count = blocks_count(socket.assigns.form)
-    j = if dir == "up", do: i - 1, else: i + 1
 
-    if j >= 0 and j < count do
-      order =
-        0..(count - 1)
-        |> Enum.map(&to_string/1)
-        |> swap_at(i, j)
-
+    # Bounds-check BOTH ends: an unknown id no-ops, and a source at either edge
+    # can't wrap to the opposite end via Enum.at/-1 (audit T4.3).
+    with i when is_integer(i) <- block_index_by_id(socket.assigns.form, bid),
+         true <- i < count,
+         j when j >= 0 and j < count <- if(dir == "up", do: i - 1, else: i + 1) do
+      order = 0..(count - 1) |> Enum.map(&to_string/1) |> swap_at(i, j)
       form = AshPhoenix.Form.sort_forms(socket.assigns.form, [:blocks], order)
 
       {:noreply,
@@ -845,9 +994,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
          gettext("Moved block to position %{pos} of %{count}", pos: j + 1, count: count)
        )}
     else
-      {:noreply, socket}
+      _ -> {:noreply, socket}
     end
   end
+
+  def handle_event("move_block", _params, socket), do: {:noreply, socket}
 
   # ── columns container editing (#335) ────────────────────────────────────────
   # These mutate the socket-managed child tree of a `columns` block, then re-sync
@@ -857,14 +1008,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("col_add_child", %{"id" => id, "col" => col, "type" => type}, socket)
       when type in @nested_child_types do
-    bc =
-      update_column(socket.assigns.block_children, id, to_int(col), fn blocks ->
-        if length(blocks) >= @max_children_per_column,
-          do: blocks,
-          else: blocks ++ [new_child(type)]
-      end)
+    # Address the target column by a real index; a garbled `col` no-ops rather
+    # than silently landing the child in column 0 (the old `to_int` fallback).
+    case parse_index(col) do
+      {:ok, ci} ->
+        bc = update_column(socket.assigns.block_children, id, ci, &append_child(&1, type))
+        {:noreply, apply_children(socket, bc)}
 
-    {:noreply, apply_children(socket, bc)}
+      :error ->
+        {:noreply, socket}
+    end
   end
 
   def handle_event("col_remove_child", %{"id" => id, "child" => child_id}, socket) do
@@ -909,13 +1062,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   def handle_event("col_remove_column", %{"id" => id, "col" => col}, socket) do
-    bc =
-      Map.update(socket.assigns.block_children, id, [], fn cols ->
-        # Keep at least one column so the block stays a valid container.
-        if length(cols) <= 1, do: cols, else: List.delete_at(cols, to_int(col))
-      end)
+    case parse_index(col) do
+      {:ok, ci} ->
+        bc = Map.update(socket.assigns.block_children, id, [], &drop_column(&1, ci))
+        {:noreply, apply_children(socket, bc)}
 
-    {:noreply, apply_children(socket, bc)}
+      :error ->
+        {:noreply, socket}
+    end
   end
 
   def handle_event("save", %{"form" => params}, socket) do
@@ -1226,6 +1380,97 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Current positional index of the block whose stable id is `bid`, or nil if no
+  # block carries it. Resolves against the live nested forms (which reflect the
+  # id from either loaded data or add-form params, and the current order after a
+  # reorder) rather than a position captured at render time — this is what makes
+  # the picker/delete/move resilient to a concurrent reorder (audit T5.1/T5.2).
+  defp block_index_by_id(form, bid) do
+    bid = to_string(bid)
+
+    form
+    |> ash_form()
+    |> Map.get(:forms, %{})
+    |> Map.get(:blocks, [])
+    |> List.wrap()
+    |> Enum.find_index(fn sub -> to_string(AshPhoenix.Form.value(sub, :id)) == bid end)
+  end
+
+  # Move a just-appended block (currently last) to the requested insert position
+  # (B2 inline insertion): `nil`/absent leaves it at the end (append), "start"
+  # moves it to the top, and a block id moves it directly after that block. The
+  # anchor id is resolved against the live forms, so insertion stays correct even
+  # if the list was reordered since the "+" was rendered.
+  defp position_new_block(form, anchor) when anchor in [nil, ""], do: form
+  defp position_new_block(form, "start"), do: reposition_last(form, 0)
+
+  defp position_new_block(form, anchor) do
+    case block_index_by_id(form, anchor) do
+      nil -> form
+      i -> reposition_last(form, i + 1)
+    end
+  end
+
+  # Reorder the block sub-forms so the last one (the newly added block) sits at
+  # `target`, preserving the order of the others.
+  defp reposition_last(form, target) do
+    last = blocks_count(form) - 1
+    target = target |> max(0) |> min(last)
+    existing = if last > 0, do: Enum.map(0..(last - 1), &to_string/1), else: []
+    order = List.insert_at(existing, target, to_string(last))
+    AshPhoenix.Form.sort_forms(form, [:blocks], order)
+  end
+
+  # A copy of a columns block's socket-managed child tree with every nested child
+  # re-keyed, so a duplicated columns block's children stay independent of the
+  # original's (block duplication).
+  defp dup_children(columns) when is_list(columns) do
+    Enum.map(columns, fn column ->
+      blocks =
+        column
+        |> Map.get("blocks", [])
+        |> Enum.map(&Map.put(&1, "id", Ash.UUID.generate()))
+
+      Map.put(column, "blocks", blocks)
+    end)
+  end
+
+  defp dup_children(_), do: nil
+
+  # `socket.assigns.form` is a Phoenix.HTML.Form wrapping the AshPhoenix.Form
+  # (nested forms live on the latter); unwrap so we can read the block sub-forms.
+  defp ash_form(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source}), do: source
+  defp ash_form(%AshPhoenix.Form{} = form), do: form
+
+  # The complete current block set as a list of union input maps (string keys,
+  # `_union_type` discriminator, stable `id`), read from the live sub-forms. This
+  # is the payload a caller merges a targeted edit into so that validating it
+  # preserves every other block and its identity — a form that hasn't been
+  # submitted has empty `params`, so a partial blocks param would drop the rest.
+  defp full_blocks_input(form) do
+    form
+    |> ash_form()
+    |> Map.get(:forms, %{})
+    |> Map.get(:blocks, [])
+    |> List.wrap()
+    |> Enum.map(&block_input_map/1)
+  end
+
+  defp block_input_map(%AshPhoenix.Form{} = sub), do: block_field_map(sub, "_union_type")
+
+  # The declared fields of a block sub-form as a string-keyed map, tagged with its
+  # block type under `type_key` and carrying the stable `id`. The only thing that
+  # varies between the union-input shape (`_union_type`) and the typed-preview
+  # shape (`_type`) is that key, so both go through here.
+  defp block_field_map(%AshPhoenix.Form{} = sub, type_key) do
+    mod = block_member(sub)
+
+    Kiln.Block.Info.fields(mod)
+    |> Map.new(fn field -> {to_string(field.name), AshPhoenix.Form.value(sub, field.name)} end)
+    |> Map.put(type_key, to_string(Kiln.Block.Info.name(mod)))
+    |> Map.put("id", AshPhoenix.Form.value(sub, :id))
+  end
+
   # Swap the two list elements at positions `i` and `j`.
   defp swap_at(list, i, j) do
     a = Enum.at(list, i)
@@ -1235,6 +1480,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> List.replace_at(i, b)
     |> List.replace_at(j, a)
   end
+
+  # Re-run form validation with the socket-held child blocks re-injected and GEO
+  # item rows normalized — the shared path for events that rebuild block params
+  # (e.g. an image pick) so a partial update can't drop the nested tree.
+  defp revalidate(socket, params) do
+    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+    assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+  end
+
+  # Drop any socket-held child state whose parent block no longer exists in the
+  # live form (e.g. after a block delete), so stale children can't resurface.
+  defp prune_block_children(socket) do
+    live_ids =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> Map.get("blocks")
+      |> block_param_ids()
+      |> MapSet.new()
+
+    pruned = Map.filter(socket.assigns.block_children, fn {id, _} -> id in live_ids end)
+    assign(socket, :block_children, pruned)
+  end
+
+  defp block_param_ids(blocks) when is_map(blocks),
+    do: blocks |> Map.values() |> block_param_ids()
+
+  defp block_param_ids(blocks) when is_list(blocks), do: Enum.flat_map(blocks, &block_param_id/1)
+  defp block_param_ids(_blocks), do: []
+
+  defp block_param_id(%{"id" => id}) when is_binary(id), do: [id]
+  defp block_param_id(_block), do: []
 
   # Push the current title + blocks to any open decoupled preview windows.
   # Skipped entirely while no window is watching (audit P-M2) — otherwise every
@@ -1543,6 +1819,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp to_int(_), do: 0
+
+  # Parse a non-negative integer index from a client value, or :error — so a
+  # stale/garbled index no-ops instead of silently acting on position 0 (which
+  # `to_int/1` would do).
+  defp parse_index(value) when is_integer(value) and value >= 0, do: {:ok, value}
+
+  defp parse_index(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, ""} when int >= 0 -> {:ok, int}
+      _ -> :error
+    end
+  end
+
+  defp parse_index(_value), do: :error
+
+  defp append_child(blocks, _type) when length(blocks) >= @max_children_per_column, do: blocks
+  defp append_child(blocks, type), do: blocks ++ [new_child(type)]
+
+  # Keep at least one column so the block stays a valid container.
+  defp drop_column(cols, _ci) when length(cols) <= 1, do: cols
+  defp drop_column(cols, ci), do: List.delete_at(cols, ci)
 
   # The media id currently on an image block sub-form, if any.
   defp media_id_of(bf), do: bf[:media_id].value
@@ -2022,29 +2319,71 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
   defp pick_index(:featured), do: "featured"
-  defp pick_index(index), do: index
+  defp pick_index({:block, _id}), do: "block"
+  defp pick_index(_), do: ""
+
+  # The target block's stable id for a per-block pick; nil for featured/new picks
+  # (so no `phx-value-bid` attribute is emitted for those).
+  defp pick_block_id({:block, id}), do: id
+  defp pick_block_id(_), do: nil
 
   attr :block_types, :list, required: true
+  attr :id, :string, default: "block-inserter"
+
+  attr :anchor, :string,
+    default: nil,
+    doc: "insert anchor: a block id, \"start\", or nil (append)"
+
+  attr :compact, :boolean, default: false, doc: "slim inline \"+\" trigger vs the full button"
+  attr :global_key, :boolean, default: false, doc: "this instance owns the global \"/\" shortcut"
 
   # Notion-style slash-command block inserter (#29). The trigger button (or the
   # `/` shortcut, handled by the `BlockInserter` JS hook) opens a filterable,
   # keyboard-navigable menu listing every registered block type. Each option is a
   # real `add_block` button, so it works without JS and is directly testable;
   # the hook layers on filtering, arrow-key navigation, and ARIA wiring.
+  #
+  # Rendered once as the main "Add block" trigger (append) and again inline in
+  # each block card as a compact "+" (B2 inline insertion). `after` rides along on
+  # every option so the same menu can append or insert at a gap; only the main
+  # instance owns the global "/" shortcut (`global_key`) so inline copies don't
+  # all fire at once.
   defp block_inserter(assigns) do
     ~H"""
-    <div id="block-inserter" phx-hook="BlockInserter" class="relative">
+    <div
+      id={@id}
+      phx-hook="BlockInserter"
+      data-inserter-global={@global_key && "true"}
+      class="relative"
+    >
       <button
+        :if={!@compact}
         type="button"
         data-inserter-trigger
         aria-haspopup="listbox"
         aria-expanded="false"
-        aria-controls="block-inserter-list"
+        aria-controls={"#{@id}-list"}
         class="inline-flex items-center gap-1.5 rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
       >
         <.icon name="hero-plus" class="size-4" />
         {gettext("Add block")}
         <kbd class="ml-1 rounded border border-base-content/20 px-1.5 text-xs opacity-60">/</kbd>
+      </button>
+      <button
+        :if={@compact}
+        type="button"
+        data-inserter-trigger
+        aria-haspopup="listbox"
+        aria-expanded="false"
+        aria-controls={"#{@id}-list"}
+        aria-label={gettext("Insert block here")}
+        class="group/ins flex w-full items-center gap-2 py-1 text-base-content/30 hover:text-base-content/70"
+      >
+        <span class="h-px flex-1 bg-current opacity-30 transition group-hover/ins:opacity-60"></span>
+        <span class="inline-flex items-center gap-1 text-xs">
+          <.icon name="hero-plus-circle" class="size-4" />{gettext("Insert")}
+        </span>
+        <span class="h-px flex-1 bg-current opacity-30 transition group-hover/ins:opacity-60"></span>
       </button>
 
       <div
@@ -2059,14 +2398,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
             role="combobox"
             aria-autocomplete="list"
             aria-expanded="true"
-            aria-controls="block-inserter-list"
+            aria-controls={"#{@id}-list"}
             placeholder={gettext("Filter blocks…")}
             class="w-full rounded border border-base-content/20 bg-base-100 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
 
         <ul
-          id="block-inserter-list"
+          id={"#{@id}-list"}
+          data-inserter-list
           role="listbox"
           aria-label={gettext("Insert block")}
           class="max-h-72 overflow-y-auto"
@@ -2074,12 +2414,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           <li :for={bt <- @block_types} role="presentation" data-inserter-option data-label={bt.label}>
             <button
               type="button"
-              id={"block-inserter-item-#{bt.type}"}
+              id={"#{@id}-item-#{bt.type}"}
               role="option"
               aria-selected="false"
               tabindex="-1"
               phx-click="add_block"
               phx-value-type={bt.type}
+              phx-value-after={@anchor}
               data-inserter-item
               class="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-200 aria-selected:bg-base-200"
             >
@@ -2105,16 +2446,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :results, :list, default: nil
   attr :query, :string, required: true
 
-  # Full media-library browser modal. Reachable from the editor chrome (to
-  # insert a new image block, `index = :new`) and from each image block (to fill
-  # that block, `index` = its integer index). Browse + search + insert; while a
-  # query is active, `results` (a DB search) replaces the browse window.
+  # Media-library browser as a right-side drawer (Theme D). It slides in beside the
+  # editor rather than a full-screen modal that blanks the whole surface, so you
+  # keep your place while choosing. Reachable from the editor chrome (insert a new
+  # image block, `index = :new`), the featured-image field (`:featured`), or an
+  # image block (`{:block, id}`). Browse + search + insert; while a query is active
+  # `results` (a DB search) replaces the browse window.
   defp image_picker(assigns) do
     assigns = assign(assigns, :visible, assigns.results || assigns.media)
 
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
-      <div class="absolute inset-0 bg-black/40" phx-click="close_picker" aria-hidden="true"></div>
+      <%!-- A light scrim dims the editor without hiding it — the drawer is to the
+            side, not over everything — and clicking it closes the drawer. --%>
+      <div class="absolute inset-0 bg-black/20" phx-click="close_picker" aria-hidden="true"></div>
       <div
         id="image-picker-dialog"
         phx-hook="FocusTrap"
@@ -2122,70 +2467,74 @@ defmodule KilnCMSWeb.ContentEditorLive do
         aria-modal="true"
         aria-labelledby="image-picker-title"
         tabindex="-1"
-        class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl"
+        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
       >
-        <div class="mb-3 flex items-center justify-between gap-4">
-          <h2 id="image-picker-title" class="text-lg font-medium">
-            {if @index == :new,
-              do: gettext("Insert image from library"),
-              else: gettext("Choose an image")}
-          </h2>
+        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
+          <h2 id="image-picker-title" class="text-lg font-medium">{picker_title(@index)}</h2>
           <button
             type="button"
             phx-click="close_picker"
             aria-label={gettext("Close")}
-            class="text-base-content/70 hover:text-base-content"
+            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
         </div>
 
-        <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
-          <input
-            type="text"
-            name="q"
-            value={@query}
-            placeholder={gettext("Search by filename, alt or caption")}
-            aria-label={gettext("Search by filename, alt text or caption")}
-            phx-debounce="150"
-            autocomplete="off"
-            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-          />
-        </form>
-
-        <p :if={@media == []} class="text-sm text-base-content/60">
-          {gettext("No media yet — upload some in the")} <.link
-            navigate={~p"/media"}
-            class="underline"
-          >{gettext("media library")}</.link>.
-        </p>
-        <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
-          {gettext("No media matches “%{query}”.", query: @query)}
-        </p>
-
-        <div :if={@visible != []} class="grid grid-cols-3 gap-3 sm:grid-cols-4">
-          <button
-            :for={item <- @visible}
-            type="button"
-            phx-click="pick_image"
-            phx-value-index={pick_index(@index)}
-            phx-value-id={item.id}
-            phx-value-url={item.url}
-            title={item.filename}
-            class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
-          >
-            <img
-              src={item.url}
-              alt={item.alt || item.filename}
-              loading="lazy"
-              class="aspect-square w-full object-cover"
+        <div class="flex-1 overflow-y-auto p-4">
+          <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
+            <input
+              type="text"
+              name="q"
+              value={@query}
+              placeholder={gettext("Search by filename, alt or caption")}
+              aria-label={gettext("Search by filename, alt text or caption")}
+              phx-debounce="150"
+              autocomplete="off"
+              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
             />
-          </button>
+          </form>
+
+          <p :if={@media == []} class="text-sm text-base-content/60">
+            {gettext("No media yet — upload some in the")} <.link
+              navigate={~p"/media"}
+              class="underline"
+            >{gettext("media library")}</.link>.
+          </p>
+          <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+            {gettext("No media matches “%{query}”.", query: @query)}
+          </p>
+
+          <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <button
+              :for={item <- @visible}
+              type="button"
+              phx-click="pick_image"
+              phx-value-index={pick_index(@index)}
+              phx-value-bid={pick_block_id(@index)}
+              phx-value-id={item.id}
+              phx-value-url={item.url}
+              title={item.filename}
+              class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
+            >
+              <img
+                src={item.url}
+                alt={item.alt || item.filename}
+                loading="lazy"
+                class="aspect-square w-full object-cover"
+              />
+            </button>
+          </div>
         </div>
       </div>
     </div>
     """
   end
+
+  # Drawer heading, per open mode.
+  defp picker_title(:new), do: gettext("Insert an image")
+  defp picker_title(:featured), do: gettext("Featured image")
+  defp picker_title(_), do: gettext("Choose an image")
 
   defp color_for(id),
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
@@ -2266,12 +2615,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the per-block `render(:web)`. Rich-text HTML is sanitized first (mirroring the
   # save-time `SanitizeBlocks` change), so the rendered output is safe.
   # sobelow_skip ["XSS.Raw"]
+  # A `{block_id, safe_html}` per block, so the Preview tab can wrap each block
+  # individually and offer a per-block "edit on the page" jump (Theme C). The id is
+  # the block's stable uuid (B1) — the same one the in-context editor focuses via
+  # `?focus=`.
   defp preview_html(form) do
     form
     |> preview_block_maps()
     |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> Enum.map(&KilnCMS.Blocks.render(&1, :web))
-    |> Phoenix.HTML.raw()
+    |> Enum.map(fn block ->
+      {Map.get(block, :id), Phoenix.HTML.raw(KilnCMS.Blocks.render(block, :web))}
+    end)
   end
 
   defp preview_block_maps(form) do
@@ -2284,15 +2638,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # A typed block map (string keys, `_type`) read from a union member sub-form,
   # for the inline typed preview. Rich-text HTML is sanitized (unsaved edits
   # aren't sanitized until save).
+  # Carries the stable id through (via block_field_map) so the preview can offer a
+  # per-block "edit on the page" jump (Theme C), then sanitizes unsaved rich text.
   defp block_full_map(%AshPhoenix.Form{} = subform) do
-    mod = block_member(subform)
-
-    mod
-    |> Kiln.Block.Info.fields()
-    |> Map.new(fn field ->
-      {to_string(field.name), AshPhoenix.Form.value(subform, field.name)}
-    end)
-    |> Map.put("_type", to_string(Kiln.Block.Info.name(mod)))
+    subform
+    |> block_field_map("_type")
     |> sanitize_preview_block()
   end
 
@@ -2794,48 +3144,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
           data-kiln-focus={@focus_field}
           hidden
         ></span>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-          <div>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div class="min-w-0">
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
               &larr; {gettext("All content")}
             </.link>
-            <h1 class="mt-1 text-2xl font-semibold">{gettext("Edit %{kind}", kind: @kind)}</h1>
-            <p class="text-sm text-base-content/60">
-              {gettext("State:")} <span class="font-medium">{state_label(@record.state)}</span>
-            </p>
-            <%!-- After saving a schedule, nothing else says it exists (U-M4). --%>
-            <p
-              :if={@record.scheduled_at && @record.state in [:draft, :in_review]}
-              class="mt-0.5 flex items-center gap-1 text-sm text-base-content/60"
-            >
-              <.icon name="hero-clock" class="size-4" />
-              {gettext("Scheduled to publish")}
-              <time
-                id="scheduled-publish-badge"
-                phx-hook="LocalTime"
-                datetime={DateTime.to_iso8601(@record.scheduled_at)}
-              >{Calendar.strftime(@record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
-            </p>
-            <p
-              :if={@record.unpublish_at && @record.state == :published}
-              class="mt-0.5 flex items-center gap-1 text-sm text-base-content/60"
-            >
-              <.icon name="hero-clock" class="size-4" />
-              {gettext("Scheduled to unpublish")}
-              <time
-                id="scheduled-unpublish-badge"
-                phx-hook="LocalTime"
-                datetime={DateTime.to_iso8601(@record.unpublish_at)}
-              >{Calendar.strftime(@record.unpublish_at, "%Y-%m-%d %H:%M")} UTC</time>
-            </p>
-            <.presence_roster editors={@editors} current_id={@actor.id} />
+            <h1 class="mt-1 truncate text-2xl font-semibold">
+              {(@form[:title].value not in [nil, ""] && @form[:title].value) ||
+                gettext("Edit %{kind}", kind: @kind)}
+            </h1>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              phx-click="open_media_browser"
-              class="btn btn-sm btn-default"
-            >
+            <button type="button" phx-click="open_media_browser" class="btn btn-sm btn-default">
               <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Media library")}
             </button>
             <.link
@@ -2854,30 +3174,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
             >
               <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
             </.link>
-            <.autosave_status
-              :if={@record.state == :draft or @save_state != :saved}
-              state={@save_state}
-            />
-            <.workflow_buttons state={@record.state} tier={@tier} />
-            <.button
-              type="submit"
-              variant="primary"
-              disabled={@conflict}
-              phx-disable-with={gettext("Saving…")}
-              title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
-            >
-              {gettext("Save")}
-            </.button>
           </div>
         </div>
 
-        <div class="grid gap-6 lg:grid-cols-2">
-          <div class="space-y-6">
+        <.editor_action_bar
+          kind={@kind}
+          record={@record}
+          save_state={@save_state}
+          tier={@tier}
+          conflict={@conflict}
+          editors={@editors}
+          actor={@actor}
+        />
+
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div class="min-w-0 space-y-6">
             <div class="grid gap-4 sm:grid-cols-2">
               <div class={["relative", lock_ring(@locked_fields, "title")]}>
                 <.input
                   field={@form[:title]}
                   label={gettext("Title")}
+                  required
                   readonly={field_locked?(@locked_fields, "title")}
                   {field_attrs("title")}
                 />
@@ -2887,6 +3204,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <.input
                   field={@form[:slug]}
                   label={gettext("Slug")}
+                  required
                   readonly={field_locked?(@locked_fields, "slug")}
                   {field_attrs("slug")}
                 />
@@ -2938,6 +3256,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 field={@form[:excerpt]}
                 type="textarea"
                 label={gettext("Excerpt")}
+                hint={
+                  gettext(
+                    "A short summary shown in listings and used as a fallback for social shares."
+                  )
+                }
                 readonly={field_locked?(@locked_fields, "excerpt")}
                 {field_attrs("excerpt")}
               />
@@ -2950,61 +3273,87 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
               <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
 
+              <%!-- Insert a block before the first one (B2). --%>
+              <.block_inserter
+                :if={blocks_count(@form) > 0}
+                id="insert-start"
+                block_types={@block_types}
+                anchor="start"
+                compact
+              />
+
               <div id="blocks-sortable" phx-hook="Sortable" class="space-y-3">
                 <.inputs_for :let={bf} field={@form[:blocks]}>
                   <div
                     id={"block-#{bf.index}"}
                     data-sort-id={bf.index}
-                    class="rounded border border-base-content/15 p-3"
+                    class="group rounded border border-base-content/15 p-3"
                   >
+                    <%!-- Carries the block's stable id into save/validate params so
+                          it can be addressed by identity (columns render their own). --%>
+                    <input
+                      :if={block_type_string(bf) != "columns"}
+                      type="hidden"
+                      name={bf[:id].name}
+                      value={bf[:id].value}
+                    />
+                    <%!-- Block chrome: the type label stays put; the controls
+                          (drag / move / duplicate / delete) fade in on hover, and
+                          on keyboard focus too so they stay reachable (#171). --%>
                     <div class="mb-2 flex items-center justify-between gap-3">
-                      <div class="flex items-center gap-2">
+                      <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
+                        {dsl_label(block_type_string(bf))}
+                      </span>
+                      <div class="flex items-center gap-0.5 text-base-content/60 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
                         <span
                           data-drag-handle
                           aria-label={gettext("Drag to reorder")}
-                          class="cursor-grab text-base-content/70 hover:text-base-content/70"
+                          class="cursor-grab rounded p-1 hover:bg-base-200 hover:text-base-content"
                         >
-                          <.icon name="hero-bars-3" class="size-5" />
+                          <.icon name="hero-bars-3" class="size-4" />
                         </span>
-                        <%!-- Keyboard-accessible reorder, alongside the drag handle (#171). --%>
-                        <div class="flex flex-col">
-                          <button
-                            type="button"
-                            phx-click="move_block"
-                            phx-value-index={bf.index}
-                            phx-value-dir="up"
-                            disabled={bf.index == 0}
-                            aria-label={gettext("Move block up")}
-                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <.icon name="hero-chevron-up" class="size-4" />
-                          </button>
-                          <button
-                            type="button"
-                            phx-click="move_block"
-                            phx-value-index={bf.index}
-                            phx-value-dir="down"
-                            disabled={bf.index == blocks_count(@form) - 1}
-                            aria-label={gettext("Move block down")}
-                            class="text-base-content/70 hover:text-base-content/70 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <.icon name="hero-chevron-down" class="size-4" />
-                          </button>
-                        </div>
-                        <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
-                          {dsl_label(block_type_string(bf))}
-                        </span>
+                        <button
+                          type="button"
+                          phx-click="move_block"
+                          phx-value-bid={bf[:id].value}
+                          phx-value-dir="up"
+                          disabled={bf.index == 0}
+                          aria-label={gettext("Move block up")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <.icon name="hero-chevron-up" class="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="move_block"
+                          phx-value-bid={bf[:id].value}
+                          phx-value-dir="down"
+                          disabled={bf.index == blocks_count(@form) - 1}
+                          aria-label={gettext("Move block down")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <.icon name="hero-chevron-down" class="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="duplicate_block"
+                          phx-value-bid={bf[:id].value}
+                          aria-label={gettext("Duplicate block")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-base-content"
+                        >
+                          <.icon name="hero-document-duplicate" class="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="remove_block"
+                          phx-value-bid={bf[:id].value}
+                          data-confirm={gettext("Delete this block? This can't be undone.")}
+                          aria-label={gettext("Remove block")}
+                          class="rounded p-1 hover:bg-base-200 hover:text-error"
+                        >
+                          <.icon name="hero-trash" class="size-4" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        phx-click="remove_block"
-                        phx-value-path={bf.name}
-                        data-confirm={gettext("Delete this block? This can't be undone.")}
-                        aria-label={gettext("Remove block")}
-                        class="text-base-content/70 hover:text-error"
-                      >
-                        <.icon name="hero-trash" class="size-5" />
-                      </button>
                     </div>
                     <%!-- The collab lock UI (ring + "who's editing" badge) lives on
                           this non-ignored wrapper so it can update, while the inner
@@ -3033,10 +3382,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         id={"rt-#{rich_host_key(bf)}-v#{@editor_version}"}
                         phx-hook="RichText"
                         phx-update="ignore"
+                        data-block-id={bf[:id].value}
                         data-content={rich_text_editor_html(bf)}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:body].name}
-                        data-block-id={bf[:id].value}
                         data-block-index={bf.index}
                         data-collab-token={@collab_token}
                         data-collab-topic={@collab_token && @collab_topic}
@@ -3054,11 +3403,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         >
                         </div>
                         <div data-editor></div>
-                        <%!-- Distinguish this in-text slash menu from the block
-                              inserter's "Add block /" so the two / systems are
-                              clearly scoped (#150). --%>
+                        <%!-- One coherent slash command (#150, B3): inside a text
+                              block it formats the text and can drop a new block in
+                              below; on the empty canvas it opens the block palette. --%>
                         <p class="mt-1 text-xs text-base-content/70">
-                          {gettext("Type / for text formatting within this block.")}
+                          {gettext("Type / to format this text or insert a block below.")}
                         </p>
                       </div>
                       <%!-- No-JS/JS-pending fallback: the server-rendered form
@@ -3086,7 +3435,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <button
                           type="button"
                           phx-click="open_picker"
-                          phx-value-index={bf.index}
+                          phx-value-bid={bf[:id].value}
                           class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
                         >
                           <.icon name="hero-photo" class="mr-1 size-4" />{gettext(
@@ -3117,18 +3466,61 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       />
                       <.geo_items_editor :if={block_type_string(bf) in ["faq", "how_to"]} bf={bf} />
                     </div>
+                    <%!-- Inline "+" to insert a block right after this one (B2). --%>
+                    <.block_inserter
+                      id={"insert-after-#{bf[:id].value}"}
+                      block_types={@block_types}
+                      anchor={bf[:id].value}
+                      compact
+                    />
                   </div>
                 </.inputs_for>
               </div>
 
-              <.block_inserter block_types={@block_types} />
+              <%!-- Inviting empty state when a page has no blocks yet (Theme A). --%>
+              <div
+                :if={blocks_count(@form) == 0}
+                class="rounded-lg border border-dashed border-base-content/20 px-6 py-10 text-center"
+              >
+                <.icon name="hero-squares-plus" class="mx-auto size-8 text-base-content/30" />
+                <p class="mt-2 text-sm font-medium">{gettext("No blocks yet")}</p>
+                <p class="mt-1 text-sm text-base-content/60">
+                  {gettext("Add your first block below to start building this page.")}
+                </p>
+              </div>
+
+              <.block_inserter block_types={@block_types} global_key={true} />
+            </div>
+          </div>
+
+          <%!-- Right inspector rail (Theme A): Settings / Preview / History.
+                EVERY panel stays mounted so its form fields survive submit — the
+                tab toggles CSS visibility only, never `:if`. On mobile the rail
+                stacks below the content column; on desktop it's a sticky sidebar
+                that scrolls internally when the settings run long. --%>
+          <div class="space-y-3 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto lg:pr-0.5">
+            <.inspector_tabs
+              tab={@inspector_tab}
+              settings_alert={any_custom_field_errors?(@form, @field_definitions)}
+            />
+
+            <%!-- ── Preview ─────────────────────────────────────────────── --%>
+            <div class={[@inspector_tab != :preview && "hidden"]}>
+              <p class="mb-2 flex items-center gap-1.5 text-xs text-base-content/50">
+                <.icon name="hero-cursor-arrow-rays" class="size-3.5" />
+                {gettext("Hover a block and click Edit to change it on the page.")}
+              </p>
+              <.preview_article
+                form={@form}
+                html={@preview_html}
+                kind={@kind}
+                slug={@record.slug}
+              />
             </div>
 
-            <details class="rounded border border-base-content/15 p-3" open>
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Organization & relationships")}
-              </summary>
-              <div class="mt-3 space-y-3">
+            <%!-- ── Settings ────────────────────────────────────────────── --%>
+            <div class={["space-y-4", @inspector_tab != :settings && "hidden"]}>
+              <.inspector_section title={gettext("Organization & relationships")}>
                 <.input
                   field={@form[:category_id]}
                   type="select"
@@ -3163,18 +3555,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   value={selected_ids(@form, @related_field, current_ids(@related_current))}
                   options={Enum.map(@siblings, &{&1.title, &1.id})}
                 />
-              </div>
-            </details>
+              </.inspector_section>
 
-            <details
-              :if={@field_definitions != []}
-              class="rounded border border-base-content/15 p-3"
-              open={any_custom_field_errors?(@form, @field_definitions)}
-            >
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Custom fields")}
-              </summary>
-              <div class="mt-3 space-y-3">
+              <.inspector_section :if={@field_definitions != []} title={gettext("Custom fields")}>
                 <.custom_field_input
                   :for={definition <- @field_definitions}
                   definition={definition}
@@ -3183,18 +3566,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   errors={custom_field_errors(@form, definition.name)}
                   options={custom_field_options(definition, @media, @reference_options)}
                 />
-              </div>
-            </details>
+              </.inspector_section>
 
-            <details class="rounded border border-base-content/15 p-3">
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("SEO & scheduling")}
-              </summary>
-              <div class="mt-3 space-y-3">
+              <.inspector_section title={gettext("SEO & scheduling")}>
                 <div class={["relative", lock_ring(@locked_fields, "seo_title")]}>
                   <.input
                     field={@form[:seo_title]}
                     label={gettext("SEO title")}
+                    hint={
+                      gettext(
+                        "Overrides the title in search results and browser tabs. Falls back to the title."
+                      )
+                    }
                     readonly={field_locked?(@locked_fields, "seo_title")}
                     {field_attrs("seo_title")}
                   />
@@ -3205,6 +3588,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     field={@form[:seo_description]}
                     type="textarea"
                     label={gettext("SEO description")}
+                    hint={
+                      gettext(
+                        "The snippet shown under the title in search results (aim for ~155 characters)."
+                      )
+                    }
                     readonly={field_locked?(@locked_fields, "seo_description")}
                     {field_attrs("seo_description")}
                   />
@@ -3226,6 +3614,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.input
                     field={@form[:seo_image]}
                     label={gettext("OG image URL")}
+                    hint={gettext("Image shown when this page is shared on social media.")}
                     readonly={field_locked?(@locked_fields, "seo_image")}
                     {field_attrs("seo_image")}
                   />
@@ -3235,6 +3624,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   <.input
                     field={@form[:canonical_url]}
                     label={gettext("Canonical URL")}
+                    hint={
+                      gettext(
+                        "The preferred URL, if this content is reachable at more than one address."
+                      )
+                    }
                     readonly={field_locked?(@locked_fields, "canonical_url")}
                     {field_attrs("canonical_url")}
                   />
@@ -3300,116 +3694,94 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     {gettext("Published content is taken back to draft at this time.")}
                   </p>
                 </div>
-              </div>
-            </details>
+              </.inspector_section>
+            </div>
 
-            <details
-              :if={length(@translations) > 1}
-              class="rounded border border-base-content/15 p-3"
-              open
-            >
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Translations")}
-              </summary>
-              <ul class="mt-3 space-y-2">
-                <li
-                  :for={cov <- @translations}
-                  class="flex items-center justify-between gap-3 text-sm"
-                >
-                  <span class="flex items-center gap-2">
-                    <span class="font-mono text-xs font-semibold uppercase">{cov.locale}</span>
+            <%!-- ── History ─────────────────────────────────────────────── --%>
+            <div class={["space-y-4", @inspector_tab != :history && "hidden"]}>
+              <.inspector_section :if={length(@translations) > 1} title={gettext("Translations")}>
+                <ul class="space-y-2">
+                  <li
+                    :for={cov <- @translations}
+                    class="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <span class="flex items-center gap-2">
+                      <span class="font-mono text-xs font-semibold uppercase">{cov.locale}</span>
+                      <span
+                        :if={cov.record && cov.record.id == @record.id}
+                        class="text-xs text-base-content/50"
+                      >
+                        {gettext("(this one)")}
+                      </span>
+                      <span
+                        :if={cov.stale?}
+                        class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warning"
+                        title={gettext("The source locale was updated after this translation.")}
+                      >
+                        {gettext("Outdated")}
+                      </span>
+                    </span>
                     <span
                       :if={cov.record && cov.record.id == @record.id}
-                      class="text-xs text-base-content/50"
+                      class="text-xs text-base-content/70"
                     >
-                      {gettext("(this one)")}
+                      {state_label(cov.status)}
                     </span>
-                    <span
-                      :if={cov.stale?}
-                      class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warning"
-                      title={gettext("The source locale was updated after this translation.")}
+                    <.link
+                      :if={cov.record && cov.record.id != @record.id}
+                      navigate={~p"/editor/content/#{@kind}/#{cov.record.id}"}
+                      class="text-xs text-primary hover:underline"
                     >
-                      {gettext("Outdated")}
-                    </span>
-                  </span>
-                  <span
-                    :if={cov.record && cov.record.id == @record.id}
-                    class="text-xs text-base-content/70"
-                  >
-                    {state_label(cov.status)}
-                  </span>
-                  <.link
-                    :if={cov.record && cov.record.id != @record.id}
-                    navigate={~p"/editor/content/#{@kind}/#{cov.record.id}"}
-                    class="text-xs text-primary hover:underline"
-                  >
-                    {state_label(cov.status)} — {gettext("edit")}
-                  </.link>
-                  <button
-                    :if={is_nil(cov.record)}
-                    type="button"
-                    phx-click="create_translation"
-                    phx-value-locale={cov.locale}
-                    class="btn btn-sm btn-default"
-                  >
-                    {gettext("Create translation")}
-                  </button>
-                </li>
-              </ul>
-            </details>
-
-            <details class="rounded border border-base-content/15 p-3">
-              <summary class="cursor-pointer text-sm font-medium">
-                {gettext("Version history (%{count})", count: length(@versions))}
-              </summary>
-              <p :if={@versions == []} class="mt-3 text-sm text-base-content/60">
-                {gettext("No saved versions yet.")}
-              </p>
-              <ul :if={@versions != []} class="mt-3 space-y-2">
-                <li
-                  :for={version <- @versions}
-                  class="flex items-center justify-between gap-3 text-sm"
-                >
-                  <span class="text-base-content/70">
-                    {version.version_action_name} · {Calendar.strftime(
-                      version.version_inserted_at,
-                      "%Y-%m-%d %H:%M"
-                    )}
-                    <span
-                      :if={version.id == @record.published_version_id}
-                      class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
+                      {state_label(cov.status)} — {gettext("edit")}
+                    </.link>
+                    <button
+                      :if={is_nil(cov.record)}
+                      type="button"
+                      phx-click="create_translation"
+                      phx-value-locale={cov.locale}
+                      class="btn btn-sm btn-default"
                     >
-                      {gettext("Live published")}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    phx-click="restore"
-                    phx-value-version_id={version.id}
-                    data-confirm={gettext("Restore content to this version?")}
-                    class="btn btn-sm btn-default"
+                      {gettext("Create translation")}
+                    </button>
+                  </li>
+                </ul>
+              </.inspector_section>
+
+              <.inspector_section title={
+                gettext("Version history (%{count})", count: length(@versions))
+              }>
+                <p :if={@versions == []} class="text-sm text-base-content/60">
+                  {gettext("No saved versions yet.")}
+                </p>
+                <ul :if={@versions != []} class="space-y-2">
+                  <li
+                    :for={version <- @versions}
+                    class="flex items-center justify-between gap-3 text-sm"
                   >
-                    {gettext("Restore")}
-                  </button>
-                </li>
-              </ul>
-            </details>
-          </div>
-
-          <div class="lg:sticky lg:top-4 lg:self-start">
-            <%!-- Mobile (#138): a collapsed disclosure so the preview doesn't bury
-                  the form's Save/SEO/version sections below a full-height panel. --%>
-            <details class="rounded border border-base-content/15 p-3 lg:hidden">
-              <summary class="cursor-pointer text-lg font-medium">{gettext("Preview")}</summary>
-              <div class="mt-3">
-                <.preview_article form={@form} html={@preview_html} />
-              </div>
-            </details>
-
-            <%!-- Desktop: the preview sits inline as the sticky second column. --%>
-            <div class="hidden lg:block">
-              <h2 class="mb-2 text-lg font-medium">{gettext("Preview")}</h2>
-              <.preview_article form={@form} html={@preview_html} />
+                    <span class="text-base-content/70">
+                      {version.version_action_name} · {Calendar.strftime(
+                        version.version_inserted_at,
+                        "%Y-%m-%d %H:%M"
+                      )}
+                      <span
+                        :if={version.id == @record.published_version_id}
+                        class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
+                      >
+                        {gettext("Live published")}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      phx-click="restore"
+                      phx-value-version_id={version.id}
+                      data-confirm={gettext("Restore content to this version?")}
+                      class="btn btn-sm btn-default"
+                    >
+                      {gettext("Restore")}
+                    </button>
+                  </li>
+                </ul>
+              </.inspector_section>
             </div>
           </div>
         </div>
@@ -3425,6 +3797,148 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </Layouts.console>
     """
   end
+
+  # Sticky editor action bar (Theme A). Sits just under the console shell header
+  # (`sticky top-14`, below the shell's `top-0` z-20 bar) so Save, workflow, and
+  # the live save state are always reachable no matter how long the content runs.
+  attr :kind, :atom, required: true
+  attr :record, :any, required: true
+  attr :save_state, :atom, required: true
+  attr :tier, :atom, required: true
+  attr :conflict, :boolean, required: true
+  attr :editors, :list, required: true
+  attr :actor, :any, required: true
+
+  defp editor_action_bar(assigns) do
+    ~H"""
+    <div class="sticky top-14 z-10 rounded-lg border border-base-content/10 bg-base-100/90 px-3 py-2.5 shadow-sm backdrop-blur">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class={[
+            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+            state_badge_class(@record.state)
+          ]}>
+            <span class="size-1.5 rounded-full bg-current opacity-70"></span>
+            {state_label(@record.state)}
+          </span>
+          <%!-- After saving a schedule, nothing else says it exists (U-M4). --%>
+          <span
+            :if={@record.scheduled_at && @record.state in [:draft, :in_review]}
+            class="inline-flex items-center gap-1 text-xs text-base-content/60"
+          >
+            <.icon name="hero-clock" class="size-3.5" />
+            {gettext("Publishes")}
+            <time
+              id="scheduled-publish-badge"
+              phx-hook="LocalTime"
+              datetime={DateTime.to_iso8601(@record.scheduled_at)}
+            >{Calendar.strftime(@record.scheduled_at, "%b %-d, %H:%M")} UTC</time>
+          </span>
+          <span
+            :if={@record.unpublish_at && @record.state == :published}
+            class="inline-flex items-center gap-1 text-xs text-base-content/60"
+          >
+            <.icon name="hero-clock" class="size-3.5" />
+            {gettext("Unpublishes")}
+            <time
+              id="scheduled-unpublish-badge"
+              phx-hook="LocalTime"
+              datetime={DateTime.to_iso8601(@record.unpublish_at)}
+            >{Calendar.strftime(@record.unpublish_at, "%b %-d, %H:%M")} UTC</time>
+          </span>
+          <.presence_roster editors={@editors} current_id={@actor.id} />
+        </div>
+
+        <div class="ml-auto flex flex-wrap items-center gap-2">
+          <.autosave_status
+            :if={@record.state == :draft or @save_state != :saved}
+            state={@save_state}
+          />
+          <.workflow_buttons state={@record.state} tier={@tier} />
+          <.button
+            type="submit"
+            variant="primary"
+            disabled={@conflict}
+            phx-disable-with={gettext("Saving…")}
+            title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
+          >
+            {gettext("Save")}
+          </.button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Tab strip for the right inspector rail (Theme A). Switching is pure view
+  # state; the panels themselves stay mounted (toggled by CSS in render/1).
+  # `settings_alert` raises a dot on the Settings tab so validation errors in a
+  # hidden panel still get noticed.
+  attr :tab, :atom, required: true
+  attr :settings_alert, :boolean, default: false
+
+  defp inspector_tabs(assigns) do
+    ~H"""
+    <div
+      role="tablist"
+      aria-label={gettext("Inspector")}
+      class="flex items-center gap-1 rounded-lg bg-base-200/60 p-1 text-sm"
+    >
+      <button
+        :for={
+          {id, label, icon, alert} <- [
+            {:preview, gettext("Preview"), "hero-eye", false},
+            {:settings, gettext("Settings"), "hero-adjustments-horizontal", @settings_alert},
+            {:history, gettext("History"), "hero-clock", false}
+          ]
+        }
+        type="button"
+        role="tab"
+        aria-selected={to_string(@tab == id)}
+        phx-click="switch_inspector_tab"
+        phx-value-tab={id}
+        class={[
+          "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-medium transition",
+          (@tab == id && "bg-base-100 text-base-content shadow-sm") ||
+            "text-base-content/60 hover:text-base-content"
+        ]}
+      >
+        <.icon name={icon} class="size-4" />
+        <span>{label}</span>
+        <span
+          :if={alert}
+          class="size-1.5 rounded-full bg-error"
+          title={gettext("This panel has validation errors")}
+        ></span>
+      </button>
+    </div>
+    """
+  end
+
+  # A titled card inside an inspector panel (Theme A). Replaces the old buried
+  # `<details>` accordions with an always-expanded, clearly-labelled section —
+  # the panel's tab already gates visibility, so no per-section collapsing.
+  attr :title, :string, required: true
+  slot :inner_block, required: true
+
+  defp inspector_section(assigns) do
+    ~H"""
+    <section class="rounded-lg border border-base-content/10 p-4">
+      <h3 class="mb-3 text-xs font-semibold uppercase tracking-wide text-base-content/50">
+        {@title}
+      </h3>
+      <div class="space-y-3">
+        {render_slot(@inner_block)}
+      </div>
+    </section>
+    """
+  end
+
+  # Pill color for a content state in the action bar.
+  defp state_badge_class(:published), do: "bg-success/15 text-success"
+  defp state_badge_class(:in_review), do: "bg-warning/15 text-warning"
+  defp state_badge_class(:archived), do: "bg-base-content/10 text-base-content/60"
+  defp state_badge_class(_), do: "bg-info/15 text-info"
 
   attr :editors, :list, required: true
   attr :current_id, :string, required: true
@@ -3486,17 +4000,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # The live preview article (title + rendered blocks). Shared by the desktop
-  # sticky column and the mobile collapsible disclosure (#138). The previewed
-  # title is an h2 so the editor keeps a single logical h1 (#174).
+  # The live preview article (title + rendered blocks). The previewed title is an
+  # h2 so the editor keeps a single logical h1 (#174). Each block is a `{id, html}`
+  # pair: it renders inside a `.kiln-block` (so it picks up the delivered typography)
+  # wrapped in a hover target that reveals an "Edit" jump into the in-context editor
+  # focused on that block (Theme C — the preview is a launch point for visual
+  # editing). `@html` blocks with a nil id (legacy) render without the jump.
   attr :form, :any, required: true
   attr :html, :any, required: true
+  attr :kind, :atom, required: true
+  attr :slug, :string, required: true
 
   defp preview_article(assigns) do
     ~H"""
     <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
       <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
-      {@html}
+      <div
+        :for={{id, html} <- @html}
+        class="group relative -mx-2 rounded px-2 transition hover:bg-base-200/40"
+      >
+        <div class="kiln-block">{html}</div>
+        <.link
+          :if={id}
+          navigate={~p"/editor/site/#{@kind}/#{@slug}?#{[focus: id]}"}
+          class="absolute right-1 top-1 z-10 hidden items-center gap-1 rounded bg-base-100/95 px-1.5 py-0.5 text-xs font-medium text-base-content no-underline shadow ring-1 ring-base-content/10 group-hover:inline-flex"
+          title={gettext("Edit this block on the page")}
+        >
+          <.icon name="hero-pencil-square" class="size-3" />{gettext("Edit")}
+        </.link>
+      </div>
     </article>
     """
   end

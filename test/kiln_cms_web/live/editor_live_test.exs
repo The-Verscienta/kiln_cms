@@ -372,7 +372,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
 
-      assert html =~ "Edit post"
+      # The editor heading now shows the entry's own title (Theme A).
+      assert html =~ "Old post"
       # Excerpt is a post-only field.
       assert html =~ "Excerpt"
 
@@ -486,7 +487,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, editor_html} =
         build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      assert editor_html =~ "Scheduled to publish"
+      assert editor_html =~ "Publishes"
       assert editor_html =~ ~s(id="scheduled-publish-badge")
       # The schedule input is the local/UTC hook pair, labelled with the tz.
       assert editor_html =~ ~s(phx-hook="UtcDatetimeInput")
@@ -521,8 +522,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert invalid =~ "Level (level) must be a whole number"
       assert invalid =~ ~s(id="custom-field-level-errors")
       assert invalid =~ ~s(aria-invalid="true")
-      # The collapsed "Custom fields" details opens so the error is visible.
-      assert invalid =~ ~r/<details[^>]*open/
+      # The custom-field panel now lives in the Settings inspector tab; when it
+      # holds errors, the tab raises an alert dot so a hidden panel gets noticed
+      # (Theme A). The field itself is always mounted, so the inline error shows
+      # regardless of the active tab.
+      assert invalid =~ "This panel has validation errors"
     end
   end
 
@@ -648,6 +652,242 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       assert length(autosave_versions(page.id)) == 2
       assert Enum.any?(page_versions(page.id), &(&1.version_action_name == :update))
+    end
+  end
+
+  # Audit theme 4 + modernization B1: block events address blocks by stable id.
+  # A garbled or unknown id must be a no-op that keeps the session alive, never a
+  # crash and never a wrong-target mutation.
+  describe "block id guards (audit theme 4 / modernization B1)" do
+    test "an unknown move_block id is a no-op, not a crash", %{conn: conn} do
+      page = draft_page(%{title: "Guarded"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Unknown / garbled id — the LV survives and stays rendered.
+      render_hook(lv, "move_block", %{"bid" => "no-such-id", "dir" => "up"})
+      render_hook(lv, "move_block", %{"bid" => "", "dir" => "down"})
+      assert render(lv) =~ "Guarded"
+    end
+
+    test "an unknown remove_block id is a no-op, not a crash", %{conn: conn} do
+      page =
+        draft_page(%{title: "Bounds", blocks: [%{type: :heading, content: "Keep", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "remove_block", %{"bid" => "no-such-id"})
+      # The real block is untouched.
+      assert render(lv) =~ "Bounds"
+      assert [%{content: "Keep"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
+
+    test "an unknown open_picker id is a no-op, not a crash", %{conn: conn} do
+      page = draft_page(%{title: "Picker"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "open_picker", %{"bid" => ""})
+      assert render(lv) =~ "Picker"
+    end
+
+    test "block events with no bid at all hit the fallback clauses, not a crash",
+         %{conn: conn} do
+      page =
+        draft_page(%{title: "NoBid", blocks: [%{type: :heading, content: "Only", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Entirely missing params (a legacy block that reached the editor without a
+      # stable id) — the catch-all no-op clauses keep the session alive.
+      render_hook(lv, "move_block", %{})
+      render_hook(lv, "remove_block", %{})
+      render_hook(lv, "duplicate_block", %{})
+      # And an unknown-id duplicate is a no-op too.
+      render_hook(lv, "duplicate_block", %{"bid" => Ash.UUID.generate()})
+
+      assert render(lv) =~ "Only"
+      lv |> form("#page-editor") |> render_submit()
+      assert [%{content: "Only"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
+  end
+
+  # Modernization B1: blocks are addressed by their stable id, resolved to a live
+  # position at action time — so a concurrent reorder can't redirect a delete or
+  # an image pick to the wrong block (closes reliability residual T5.1/T5.2).
+  describe "stable block id addressing (modernization B1)" do
+    test "deleting by id removes the right block even after a reorder", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "Alpha", order: 0},
+            %{type: :heading, content: "Bravo", order: 1}
+          ]
+        })
+
+      [alpha, _bravo] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A co-editor reorders (Bravo first now) — Alpha slides to position 1, but
+      # its delete button still carries Alpha's stable id.
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      render_hook(lv, "remove_block", %{"bid" => alpha.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      # Positional addressing would have deleted whatever is at index 0 (Bravo);
+      # id addressing deletes Alpha, as intended.
+      assert [%{content: "Bravo"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
+
+    test "picking an image by id fills the right block even after a reorder", %{conn: conn} do
+      media = Ash.Seed.seed!(MediaItem, %{filename: "pic.jpg", url: "/uploads/pic"})
+
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :image, content: "", order: 0},
+            %{type: :image, content: "", order: 1}
+          ]
+        })
+
+      [img_a, img_b] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # A co-editor reorders (img_a slides to position 1), then fill img_a by its
+      # stable id — positional addressing would have hit img_b.
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      render_hook(lv, "open_picker", %{"bid" => img_a.id})
+
+      render_hook(lv, "pick_image", %{
+        "index" => "block",
+        "bid" => img_a.id,
+        "id" => media.id,
+        "url" => "/uploads/pic"
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      # The image landed on img_a (by id); both blocks keep their identities and
+      # img_b is untouched — the full-set rebuild carries every block through.
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.find(blocks, &(&1.id == img_a.id)).content == "/uploads/pic"
+      assert Enum.find(blocks, &(&1.id == img_b.id)).content in [nil, ""]
+    end
+
+    test "a page with no blocks shows the empty state", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ "No blocks yet"
+    end
+  end
+
+  # Modernization Theme A: the metadata that used to live in buried <details>
+  # accordions now sits in a persistent tabbed right inspector (Settings /
+  # Preview / History). The critical invariant: every panel stays mounted so
+  # form fields survive submit even when their tab isn't the active one.
+  describe "inspector rail (modernization theme A)" do
+    test "renders the tab strip with Preview active by default", %{conn: conn} do
+      page = draft_page(%{title: "Tabbed"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(role="tablist")
+      # Preview is the default panel.
+      assert html =~ ~s(phx-value-tab="preview")
+      assert html =~ ~s(phx-value-tab="settings")
+      assert html =~ ~s(phx-value-tab="history")
+    end
+
+    test "settings fields stay in the DOM while another tab is active (survive submit)",
+         %{conn: conn} do
+      page = draft_page(%{title: "Fields present"})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Default tab is Preview, yet the Settings panel's inputs must still be
+      # rendered (only CSS-hidden) — otherwise they'd drop from the form on save.
+      assert html =~ ~s(name="form[seo_title]")
+      assert html =~ ~s(name="form[category_id]")
+
+      # Switching tabs is pure view state and never removes those inputs.
+      switched = render_hook(lv, "switch_inspector_tab", %{"tab" => "settings"})
+      assert switched =~ ~s(name="form[seo_title]")
+    end
+
+    test "switching to the Settings tab marks it selected", %{conn: conn} do
+      page = draft_page(%{title: "Switch"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      html = render_hook(lv, "switch_inspector_tab", %{"tab" => "history"})
+      assert html =~ ~s(aria-selected="true")
+    end
+
+    test "an unknown tab value is a no-op, not a crash", %{conn: conn} do
+      page = draft_page(%{title: "Guarded tab"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "switch_inspector_tab", %{"tab" => "bogus"})
+      assert render(lv) =~ "Guarded tab"
+    end
+
+    test "a settings (SEO) field still saves after tab switching", %{conn: conn} do
+      page = draft_page(%{title: "SEO save"})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "switch_inspector_tab", %{"tab" => "settings"})
+      lv |> form("#page-editor", form: %{seo_title: "Findable"}) |> render_submit()
+
+      assert CMS.get_page!(page.id, authorize?: false).seo_title == "Findable"
+    end
+  end
+
+  # Theme D field chrome: required fields carry a marker, and key fields carry
+  # help text under them (Contentful-style).
+  describe "field chrome (modernization D)" do
+    test "title and slug are marked required, and SEO fields have help text",
+         %{conn: conn} do
+      page = draft_page(%{title: "Chrome"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # The required marker (an aria-hidden "*") carries a "Required" tooltip.
+      assert html =~ ~s(title="Required")
+      # The required attribute is on the title input itself.
+      assert html =~ ~r/name="form\[title\]"[^>]*\srequired|\srequired[^>]*name="form\[title\]"/
+
+      # Settings-tab fields (present in the DOM even under the Preview tab) carry
+      # their help text.
+      assert html =~ "The snippet shown under the title in search results"
+      assert html =~ "The preferred URL"
+    end
+
+    test "a post's excerpt carries help text", %{conn: conn} do
+      post = draft_post(%{title: "Excerpted"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "A short summary shown in listings"
     end
   end
 
@@ -791,8 +1031,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Open the picker for block 0, then pick the seeded image.
-      lv |> element("button[phx-click='open_picker'][phx-value-index='0']") |> render_click()
+      # Open the picker for the single image block (addressed by its stable id),
+      # then pick the seeded image.
+      lv |> element("button[phx-click='open_picker']") |> render_click()
 
       lv
       |> element("button[phx-click='pick_image'][phx-value-id='#{media.id}']")
@@ -813,13 +1054,31 @@ defmodule KilnCMSWeb.EditorLiveTest do
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
       picker =
-        lv |> element("button[phx-click='open_picker'][phx-value-index='0']") |> render_click()
+        lv |> element("button[phx-click='open_picker']") |> render_click()
 
       assert picker =~ ~s(role="dialog")
       assert picker =~ ~s(aria-modal="true")
       assert picker =~ ~s(aria-labelledby="image-picker-title")
       assert picker =~ ~s(id="image-picker-title")
       assert picker =~ ~s(phx-hook="FocusTrap")
+    end
+
+    test "opens as a right-side drawer with a mode-aware title (Theme D)", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Filling an existing image block → "Choose an image", anchored to the right.
+      picker = lv |> element("button[phx-click='open_picker']") |> render_click()
+      assert picker =~ "Choose an image"
+
+      assert picker =~
+               ~r/id="image-picker-dialog"[^>]*inset-y-0 right-0|inset-y-0 right-0[^>]*id="image-picker-dialog"/s
+
+      # Chrome "Media library" opens the drawer to insert a new image block.
+      inserting = lv |> element("button[phx-click='open_media_browser']") |> render_click()
+      assert inserting =~ "Insert an image"
     end
   end
 
@@ -854,7 +1113,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       refute has_element?(lv, "button[phx-click='remove_block']")
 
       lv
-      |> element("button[data-inserter-item][phx-value-type='heading']")
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='heading']")
       |> render_click()
 
       assert has_element?(lv, "button[phx-click='remove_block']")
@@ -868,13 +1127,194 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # `divider` has no required fields, so it round-trips through save unedited.
       lv
-      |> element("button[data-inserter-item][phx-value-type='divider']")
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='divider']")
       |> render_click()
 
       lv |> form("#page-editor") |> render_submit()
 
       assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert to_string(block.type) == "divider"
+    end
+  end
+
+  # Modernization B2: blocks can be inserted inline (at a gap), not only appended.
+  # The insert anchor is a stable block id, resolved to a live position at action
+  # time, so a divider lands in the right gap even after a reorder.
+  describe "inline block insertion (modernization B2)" do
+    setup %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "A", order: 0},
+            %{type: :heading, content: "B", order: 1}
+          ]
+        })
+
+      [a, b] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      %{lv: lv, page: page, a: a, b: b}
+    end
+
+    defp block_types_after_save(page) do
+      page.id
+      |> then(&CMS.get_page!(&1, authorize?: false))
+      |> blocks_legacy()
+      |> Enum.map(&to_string(&1.type))
+    end
+
+    test "inserting after a block lands it in that gap", %{lv: lv, page: page, a: a} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => a.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "divider", "heading"]
+    end
+
+    test "inserting at the start prepends", %{lv: lv, page: page} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => "start"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["divider", "heading", "heading"]
+    end
+
+    test "inserting after the last block appends", %{lv: lv, page: page, b: b} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => b.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "heading", "divider"]
+    end
+
+    test "with no anchor, appends (backward compatible)", %{lv: lv, page: page} do
+      render_hook(lv, "add_block", %{"type" => "divider"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "heading", "divider"]
+    end
+
+    test "insert-after-id lands correctly even after a reorder", %{lv: lv, page: page, a: a} do
+      # A co-editor reorders to [B, A]; inserting after A (by id) must still land
+      # right after A — now at index 1 — not at the stale position 0.
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => a.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      blocks =
+        CMS.get_page!(page.id, authorize?: false) |> blocks_legacy()
+
+      assert Enum.map(blocks, &to_string(&1.type)) == ["heading", "heading", "divider"]
+      assert Enum.map(blocks, & &1.content) == ["B", "A", nil]
+    end
+
+    test "an unknown anchor id falls back to appending, no crash", %{lv: lv, page: page} do
+      render_hook(lv, "add_block", %{"type" => "divider", "after" => "no-such-id"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "heading", "divider"]
+    end
+
+    test "each block renders an inline inserter anchored to its id", %{lv: lv, a: a, b: b} do
+      # A compact inline inserter per block (anchor = that block's id) plus a
+      # top "insert at start" inserter; only the main inserter owns the / shortcut.
+      assert has_element?(lv, "##{"insert-after-#{a.id}"}")
+      assert has_element?(lv, "##{"insert-after-#{b.id}"}")
+      assert has_element?(lv, "#insert-start")
+
+      html = render(lv)
+      assert html =~ ~s(data-inserter-global="true")
+      # The inline option carries the anchor so add_block inserts at that gap.
+      assert has_element?(
+               lv,
+               "#insert-after-#{a.id} button[data-inserter-item][phx-value-after='#{a.id}']"
+             )
+    end
+
+    test "clicking an inline inserter option inserts at that gap", %{lv: lv, page: page, a: a} do
+      lv
+      |> element("#insert-after-#{a.id} button[data-inserter-item][phx-value-type='divider']")
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert block_types_after_save(page) == ["heading", "divider", "heading"]
+    end
+  end
+
+  # Modernization B: the hover block toolbar's Duplicate action copies a block's
+  # content into a fresh block dropped right after it (by stable id, new ids).
+  describe "duplicate block (modernization B)" do
+    test "duplicating a block inserts a copy right after it with a new id",
+         %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "A", order: 0},
+            %{type: :heading, content: "B", order: 1}
+          ]
+        })
+
+      [a, _b] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "duplicate_block", %{"bid" => a.id})
+      lv |> form("#page-editor") |> render_submit()
+
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+
+      # The copy lands between A and B with the same content...
+      assert Enum.map(blocks, & &1.content) == ["A", "A", "B"]
+      # ...but is a distinct block (three unique ids, the original A preserved).
+      ids = Enum.map(blocks, & &1.id)
+      assert length(Enum.uniq(ids)) == 3
+      assert a.id in ids
+    end
+
+    test "an unknown block id is a no-op", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :heading, content: "Solo", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "duplicate_block", %{"bid" => "no-such-id"})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [%{content: "Solo"}] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
+
+    test "each block's chrome wires a Duplicate control", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :heading, content: "X", order: 0}]})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(phx-click="duplicate_block")
+    end
+  end
+
+  # Modernization C: the Preview tab is a launch point for visual editing — each
+  # rendered block offers an "Edit" jump into the in-context editor focused on it.
+  describe "click-to-edit preview (modernization C)" do
+    test "each preview block deep-links into the in-context editor focused on it",
+         %{conn: conn} do
+      page =
+        draft_page(%{
+          slug: "click-me",
+          blocks: [%{type: :heading, content: "Clickable", order: 0}]
+        })
+
+      [block] = blocks_legacy(page)
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # The block still renders in the preview, now with a per-block Edit link that
+      # focuses that block in the visual (in-context) editor.
+      assert html =~ "Clickable"
+      assert html =~ ~s(href="/editor/site/page/click-me?focus=#{block.id}")
+      assert html =~ "Hover a block and click Edit"
     end
   end
 
@@ -1290,6 +1730,23 @@ defmodule KilnCMSWeb.EditorLiveTest do
                blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
+    # Modernization B3: the in-prose "/" menu is now one coherent command that can
+    # both format text and insert a block below. The block-insert path needs the
+    # editor host to carry the block's stable id (so the JS can anchor add_block),
+    # and the hint reflects the single "/". (The menu behaviour itself is JS and
+    # browser-verified; here we assert the server-rendered wiring it depends on.)
+    test "the rich_text host carries its block id and the unified slash hint",
+         %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+      [block] = blocks_legacy(page)
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      assert html =~ ~s(data-block-id="#{block.id}")
+      assert html =~ "Type / to format this text or insert a block below."
+    end
+
     test "the live preview reflects block content and updates on change", %{conn: conn} do
       page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1692,7 +2149,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
-      assert html =~ "Edit page"
+      # The editor heading shows the entry's own title now (Theme A).
+      assert html =~ "Generic old"
 
       lv |> form("#page-editor", form: %{title: "Generic new"}) |> render_submit()
       assert CMS.get_page!(page.id, authorize?: false).title == "Generic new"
@@ -1704,7 +2162,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
-      assert html =~ "Edit post"
+      # The editor heading shows the entry's own title now (Theme A).
+      assert html =~ "A post"
       assert html =~ "Excerpt"
     end
 
@@ -1774,8 +2233,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(data-editor-label="Rich text editor")
     end
 
-    # #150: the two slash systems have distinct hints (block inserter vs in-text).
-    test "distinguishes the block inserter from the rich-text slash menu", %{conn: conn} do
+    # #150 / B3: one coherent "/" — the in-prose hint reflects that it both formats
+    # text and inserts a block below, alongside the canvas "Add block" inserter.
+    test "the rich-text slash hint reflects the unified / command", %{conn: conn} do
       page =
         draft_page(%{
           title: "SlashPage",
@@ -1785,7 +2245,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
-      assert html =~ "Type / for text formatting within this block."
+      assert html =~ "Type / to format this text or insert a block below."
       assert html =~ "Add block"
     end
 
@@ -1825,13 +2285,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      # Move-up on the first block is disabled; move-down is available.
-      assert html =~
-               ~r/phx-value-index="0"[^>]*phx-value-dir="up"[^>]*disabled|disabled[^>]*phx-value-index="0"[^>]*phx-value-dir="up"/
+      # Move-up on the first block is disabled; move-down is available. Blocks are
+      # addressed by their stable id now, so target the first block's card by its
+      # stable DOM id rather than a positional phx-value.
+      assert html =~ ~r/<button[^>]*phx-value-dir="up"[^>]*disabled/
 
       moved =
         lv
-        |> element(~s(button[phx-click="move_block"][phx-value-index="0"][phx-value-dir="down"]))
+        |> element(~s(#block-0 button[phx-click="move_block"][phx-value-dir="down"]))
         |> render_click()
 
       # The new position is announced to screen readers.
@@ -1877,9 +2338,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(phx-disable-with="Submitting…")
     end
 
-    # Regression for #138: on mobile the preview is a collapsible disclosure so it
-    # doesn't bury the form; on desktop it stays inline as the sticky column.
-    test "the preview is collapsible on mobile and inline on desktop", %{conn: conn} do
+    # The live preview now lives in the right inspector's Preview tab, which is
+    # the default panel (Theme A supersedes the #138 mobile-disclosure layout).
+    test "the preview renders in the default Preview inspector tab", %{conn: conn} do
       page =
         draft_page(%{
           title: "PrevPage",
@@ -1889,9 +2350,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
-      assert html =~ ~r/<details[^>]*lg:hidden/
-      assert html =~ "<summary"
-      assert html =~ "hidden lg:block"
+      # The Preview tab exists and is selected by default, and the block renders.
+      assert html =~ ~s(role="tablist")
+      assert html =~ ~s(phx-value-tab="preview")
       assert html =~ "PrevBlock"
       # #152: removing a block asks for confirmation first.
       assert html =~
@@ -1938,7 +2399,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   describe "columns (nested-layout) block editor" do
     defp add_columns_block(lv) do
       lv
-      |> element("button[data-inserter-item][phx-value-type='columns']")
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='columns']")
       |> render_click()
     end
 
@@ -2076,7 +2537,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='faq']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='faq']")
+      |> render_click()
 
       # Add one Q&A row, then type into its bound inputs.
       lv
@@ -2110,7 +2573,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='faq']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='faq']")
+      |> render_click()
 
       lv
       |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
@@ -2133,7 +2598,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='claim']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='claim']")
+      |> render_click()
 
       lv
       |> form("#page-editor")
@@ -2165,7 +2632,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button[data-inserter-item][phx-value-type='how_to']") |> render_click()
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='how_to']")
+      |> render_click()
 
       lv
       |> element("button[phx-click='geo_item_add'][phx-value-index='0']")

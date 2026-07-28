@@ -65,8 +65,8 @@ defmodule KilnCMSWeb.CollabFragmentTest do
     assert html =~ ~s(data-collab-fragment="block-#{id_b}")
     refute html =~ "block-idx-"
 
-    # Reordering must not re-key either fragment.
-    html = render_click(lv, "move_block", %{"index" => "0", "dir" => "down"})
+    # Reordering must not re-key either fragment (blocks move by stable id now).
+    html = render_click(lv, "move_block", %{"bid" => id_a, "dir" => "down"})
 
     assert html =~ ~s(data-collab-fragment="block-#{id_a}")
     assert html =~ ~s(data-collab-fragment="block-#{id_b}")
