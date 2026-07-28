@@ -2365,12 +2365,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the per-block `render(:web)`. Rich-text HTML is sanitized first (mirroring the
   # save-time `SanitizeBlocks` change), so the rendered output is safe.
   # sobelow_skip ["XSS.Raw"]
+  # A `{block_id, safe_html}` per block, so the Preview tab can wrap each block
+  # individually and offer a per-block "edit on the page" jump (Theme C). The id is
+  # the block's stable uuid (B1) — the same one the in-context editor focuses via
+  # `?focus=`.
   defp preview_html(form) do
     form
     |> preview_block_maps()
     |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> Enum.map(&KilnCMS.Blocks.render(&1, :web))
-    |> Phoenix.HTML.raw()
+    |> Enum.map(fn block ->
+      {Map.get(block, :id), Phoenix.HTML.raw(KilnCMS.Blocks.render(block, :web))}
+    end)
   end
 
   defp preview_block_maps(form) do
@@ -2392,6 +2397,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {to_string(field.name), AshPhoenix.Form.value(subform, field.name)}
     end)
     |> Map.put("_type", to_string(Kiln.Block.Info.name(mod)))
+    # Carry the stable id through so the preview can offer a per-block "edit on the
+    # page" jump (Theme C); `fields/1` covers the declared fields but not the pk.
+    |> Map.put("id", AshPhoenix.Form.value(subform, :id))
     |> sanitize_preview_block()
   end
 
@@ -3233,7 +3241,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
             <%!-- ── Preview ─────────────────────────────────────────────── --%>
             <div class={[@inspector_tab != :preview && "hidden"]}>
-              <.preview_article form={@form} html={@preview_html} />
+              <p class="mb-2 flex items-center gap-1.5 text-xs text-base-content/50">
+                <.icon name="hero-cursor-arrow-rays" class="size-3.5" />
+                {gettext("Hover a block and click Edit to change it on the page.")}
+              </p>
+              <.preview_article
+                form={@form}
+                html={@preview_html}
+                kind={@kind}
+                slug={@record.slug}
+              />
             </div>
 
             <%!-- ── Settings ────────────────────────────────────────────── --%>
@@ -3712,17 +3729,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # The live preview article (title + rendered blocks). Shared by the desktop
-  # sticky column and the mobile collapsible disclosure (#138). The previewed
-  # title is an h2 so the editor keeps a single logical h1 (#174).
+  # The live preview article (title + rendered blocks). The previewed title is an
+  # h2 so the editor keeps a single logical h1 (#174). Each block is a `{id, html}`
+  # pair: it renders inside a `.kiln-block` (so it picks up the delivered typography)
+  # wrapped in a hover target that reveals an "Edit" jump into the in-context editor
+  # focused on that block (Theme C — the preview is a launch point for visual
+  # editing). `@html` blocks with a nil id (legacy) render without the jump.
   attr :form, :any, required: true
   attr :html, :any, required: true
+  attr :kind, :atom, required: true
+  attr :slug, :string, required: true
 
   defp preview_article(assigns) do
     ~H"""
     <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
       <h2 class="text-2xl font-bold">{@form[:title].value}</h2>
-      {@html}
+      <div
+        :for={{id, html} <- @html}
+        class="group relative -mx-2 rounded px-2 transition hover:bg-base-200/40"
+      >
+        <div class="kiln-block">{html}</div>
+        <.link
+          :if={id}
+          navigate={~p"/editor/site/#{@kind}/#{@slug}?#{[focus: id]}"}
+          class="absolute right-1 top-1 z-10 hidden items-center gap-1 rounded bg-base-100/95 px-1.5 py-0.5 text-xs font-medium text-base-content no-underline shadow ring-1 ring-base-content/10 group-hover:inline-flex"
+          title={gettext("Edit this block on the page")}
+        >
+          <.icon name="hero-pencil-square" class="size-3" />{gettext("Edit")}
+        </.link>
+      </div>
     </article>
     """
   end
