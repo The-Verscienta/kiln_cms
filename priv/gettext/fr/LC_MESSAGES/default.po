@@ -2781,7 +2781,7 @@ msgstr "%{count} renommages ont échoué — relancez l'aperçu pour voir ce qu'
 #: lib/kiln_cms_web/live/overview_live.ex:228
 #, elixir-autogen, elixir-format
 msgid "%{count} scheduled this week"
-msgstr "%{count} programmé(s) cette semaine"
+msgstr "%{count} planifié(s) cette semaine"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex:195
 #, elixir-autogen, elixir-format
@@ -2812,7 +2812,7 @@ msgstr "%{count} en train de consulter"
 #: lib/kiln_cms_web/live/overview_live.ex:215
 #, elixir-autogen, elixir-format
 msgid "%{count} waiting for review"
-msgstr "%{count} en attente de relecture"
+msgstr "%{count} en attente de révision"
 
 #: lib/kiln_cms_web/live/overview_live.ex:233
 #, elixir-autogen, elixir-format
@@ -2877,7 +2877,7 @@ msgstr "Une campagne a déjà été envoyée pour cette révision publiée."
 #: lib/kiln_cms_web/live/team_live.ex:486
 #, elixir-autogen, elixir-format
 msgid "A custom role bundles granular scope — define \"Blog editor\" once, assign it to any member. A member's own scope overrides their role per axis."
-msgstr "Un rôle personnalisé regroupe une portée granulaire — définissez « Éditeur de blog » une fois, puis attribuez-le à n'importe quel membre. La portée propre d'un membre prime sur son rôle, axe par axe."
+msgstr "Un rôle personnalisé regroupe une portée granulaire — définissez « Éditeur de blogue » une fois, puis attribuez-le à n'importe quel membre. La portée propre d'un membre prime sur son rôle, axe par axe."
 
 #: lib/kiln_cms_web/live/redirect_live.ex:269
 #, elixir-autogen, elixir-format
@@ -3087,7 +3087,7 @@ msgstr "Authentification"
 #: lib/kiln_cms_web/live/webhook_live.ex:305
 #, elixir-autogen, elixir-format
 msgid "Auto-disabled after %{count} failed deliveries"
-msgstr "Désactivé automatiquement après %{count} livraisons en échec"
+msgstr "Désactivé automatiquement après %{count} envois en échec"
 
 #: lib/kiln_cms_web/live/type_definition_live.ex:228
 #, elixir-autogen, elixir-format
@@ -3334,7 +3334,7 @@ msgstr "Vérification de cette clé d'accès impossible — réessayez."
 #: lib/kiln_cms_web/live/translations_live.ex:144
 #, elixir-autogen, elixir-format
 msgid "Coverage per locale for every piece of content. Click a chip to edit; a missing chip creates the draft translation."
-msgstr "Couverture par langue pour chaque contenu. Cliquez sur une puce pour la modifier ; une puce manquante crée la traduction à l'état de brouillon."
+msgstr "Couverture par langue pour chaque contenu. Cliquez sur une pastille pour modifier la traduction ; une pastille manquante crée la traduction à l'état de brouillon."
 
 #: lib/kiln_cms_web/live/api_key_live.ex:151
 #, elixir-autogen, elixir-format
@@ -3450,7 +3450,7 @@ msgstr "Livré"
 #: lib/kiln_cms_web/live/mail_settings_live.ex:633
 #, elixir-autogen, elixir-format
 msgid "Delivery health"
-msgstr "Santé des livraisons"
+msgstr "État des envois"
 
 #: lib/kiln_cms_web/controllers/page_controller.ex:14
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex:18
@@ -3644,7 +3644,7 @@ msgstr "Événement"
 #: lib/kiln_cms_web/live/webhook_live.ex:404
 #, elixir-autogen, elixir-format
 msgid "Every delivery attempt is recorded; failures retry with backoff, and %{count} exhausted deliveries in a row disable an endpoint. History is kept for %{days} days."
-msgstr "Chaque tentative de livraison est enregistrée ; les échecs sont réessayés avec un délai croissant, et %{count} livraisons épuisées d'affilée désactivent un point de terminaison. L'historique est conservé %{days} jours."
+msgstr "Chaque tentative d'envoi est enregistrée ; les échecs sont réessayés avec un délai croissant, et %{count} envois ayant épuisé leurs tentatives d'affilée désactivent un point de terminaison. L'historique est conservé %{days} jours."
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex:218
 #, elixir-autogen, elixir-format
@@ -3765,7 +3765,7 @@ msgstr "ven."
 #: lib/kiln_cms_web/live/redirect_live.ex:302
 #, elixir-autogen, elixir-format
 msgid "From"
-msgstr "Depuis"
+msgstr "De"
 
 #: lib/kiln_cms_web/live/redirect_live.ex:249
 #, elixir-autogen, elixir-format
@@ -3780,7 +3780,7 @@ msgstr "Aperçu du site public"
 #: lib/kiln_cms_web/live/form_builder_live.ex:548
 #, elixir-autogen, elixir-format
 msgid "Full"
-msgstr "Pleine largeur"
+msgstr "Pleine"
 
 #: lib/kiln_cms_web/live/presentation_live.ex:254
 #, elixir-autogen, elixir-format
@@ -3908,7 +3908,7 @@ msgstr "Sert de clé à la valeur de ce champ dans les soumissions — le renomm
 #: lib/kiln_cms_web/live/governance_live.ex:268
 #, elixir-autogen, elixir-format
 msgid "Kind"
-msgstr "Genre"
+msgstr "Type"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:2422
 #, elixir-autogen, elixir-format
@@ -4008,7 +4008,7 @@ msgstr "Aucun %{type} avec ce slug et cette langue n'existe — vérifiez la cib
 #: lib/kiln_cms_web/live/api_key_live.ex:208
 #, elixir-autogen, elixir-format
 msgid "No API keys yet."
-msgstr "Aucune clé API pour l'instant."
+msgstr "Aucune clé API pour le moment."
 
 #: lib/kiln_cms_web/live/team_live.ex:68
 #, elixir-autogen, elixir-format
@@ -4018,12 +4018,12 @@ msgstr "Aucun compte n'existe avec cette adresse e-mail."
 #: lib/kiln_cms_web/live/automation_live.ex:249
 #, elixir-autogen, elixir-format
 msgid "No automation rules yet."
-msgstr "Aucune règle d'automatisation pour l'instant."
+msgstr "Aucune règle d'automatisation pour le moment."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex:402
 #, elixir-autogen, elixir-format
 msgid "No campaigns yet."
-msgstr "Aucune campagne pour l'instant."
+msgstr "Aucune campagne pour le moment."
 
 #: lib/kiln_cms_web/live/governance_live.ex:242
 #, elixir-autogen, elixir-format
@@ -4034,7 +4034,7 @@ msgstr "Aucun consentement enregistré pour ce contenu."
 #: lib/kiln_cms_web/live/translations_live.ex:155
 #, elixir-autogen, elixir-format
 msgid "No content yet."
-msgstr "Aucun contenu pour l'instant."
+msgstr "Aucun contenu pour le moment."
 
 #: lib/kiln_cms_web/live/team_live.ex:308
 #, elixir-autogen, elixir-format
@@ -4044,27 +4044,27 @@ msgstr "Aucun rôle personnalisé"
 #: lib/kiln_cms_web/live/team_live.ex:510
 #, elixir-autogen, elixir-format
 msgid "No custom roles yet — members use their tier and direct scope only."
-msgstr "Aucun rôle personnalisé pour l'instant — les membres n'utilisent que leur niveau et leur portée directe."
+msgstr "Aucun rôle personnalisé pour le moment — les membres n'utilisent que leur niveau et leur portée directe."
 
 #: lib/kiln_cms_web/live/webhook_live.ex:412
 #, elixir-autogen, elixir-format
 msgid "No deliveries yet."
-msgstr "Aucune livraison pour l'instant."
+msgstr "Aucun envoi pour le moment."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex:404
 #, elixir-autogen, elixir-format
 msgid "No fields yet — add one from the palette."
-msgstr "Aucun champ pour l'instant — ajoutez-en un depuis la palette."
+msgstr "Aucun champ pour le moment — ajoutez-en un depuis la palette."
 
 #: lib/kiln_cms_web/live/form_live.ex:196
 #, elixir-autogen, elixir-format
 msgid "No forms yet."
-msgstr "Aucun formulaire pour l'instant."
+msgstr "Aucun formulaire pour le moment."
 
 #: lib/kiln_cms_web/live/team_live.ex:405
 #, elixir-autogen, elixir-format
 msgid "No members on this site yet."
-msgstr "Aucun membre sur ce site pour l'instant."
+msgstr "Aucun membre sur ce site pour le moment."
 
 #: lib/kiln_cms_web/live/media_live.ex:958
 #, elixir-autogen, elixir-format
@@ -4084,7 +4084,7 @@ msgstr "Aucun article publié et public disponible à l'envoi."
 #: lib/kiln_cms_web/live/mail_settings_live.ex:646
 #, elixir-autogen, elixir-format
 msgid "No recent delivery failures."
-msgstr "Aucun échec de livraison récent."
+msgstr "Aucun échec d'envoi récent."
 
 #: lib/kiln_cms_web/live/redirect_live.ex:293
 #, elixir-autogen, elixir-format
@@ -4095,7 +4095,7 @@ msgstr "Aucune redirection"
 #: lib/kiln_cms_web/live/presentation_live.ex:55
 #, elixir-autogen, elixir-format
 msgid "No such content to edit."
-msgstr "Aucun contenu de ce type à modifier."
+msgstr "Aucun contenu correspondant à modifier."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex:687
 #, elixir-autogen, elixir-format
@@ -4110,7 +4110,7 @@ msgstr "Aucune version enregistrée."
 #: lib/kiln_cms_web/live/form_builder_live.ex:754
 #, elixir-autogen, elixir-format
 msgid "None yet."
-msgstr "Aucun pour l'instant."
+msgstr "Aucun pour le moment."
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex:120
 #, elixir-autogen, elixir-format
@@ -4370,7 +4370,7 @@ msgstr "Lecture + écriture"
 #: lib/kiln_cms_web/live/api_key_live.ex:195
 #, elixir-autogen, elixir-format
 msgid "Read + write (MCP authoring)"
-msgstr "Lecture + écriture (écriture MCP)"
+msgstr "Lecture + écriture (création MCP)"
 
 #: lib/kiln_cms_web/live/api_key_live.ex:235
 #, elixir-autogen, elixir-format
@@ -4395,7 +4395,7 @@ msgstr "Campagnes récentes"
 #: lib/kiln_cms_web/live/webhook_live.ex:402
 #, elixir-autogen, elixir-format
 msgid "Recent deliveries"
-msgstr "Livraisons récentes"
+msgstr "Envois récents"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex:643
 #, elixir-autogen, elixir-format
@@ -4527,7 +4527,7 @@ msgstr "Réordonner le champ %{label}"
 #: lib/kiln_cms_web/live/settings_live.ex:371
 #, elixir-autogen, elixir-format
 msgid "Require a time-based code from an authenticator app (Google Authenticator, 1Password, …) as a second factor when you sign in."
-msgstr "Exiger un code temporel issu d'une application d'authentification (Google Authenticator, 1Password, …) comme second facteur lors de la connexion."
+msgstr "Exiger un code temporaire issu d'une application d'authentification (Google Authenticator, 1Password, …) comme second facteur lors de la connexion."
 
 #: lib/kiln_cms_web/live/webhook_live.ex:476
 #, elixir-autogen, elixir-format
@@ -4613,23 +4613,23 @@ msgstr "Scannez le QR code (ou ajoutez la clé) dans votre application d'authent
 #: lib/kiln_cms_web/live/calendar_live.ex:162
 #, elixir-autogen, elixir-format
 msgid "Scheduled publish"
-msgstr "Publication programmée"
+msgstr "Publication planifiée"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:2651
 #: lib/kiln_cms_web/live/editor_live.ex:628
 #, elixir-autogen, elixir-format
 msgid "Scheduled to unpublish"
-msgstr "Dépublication programmée"
+msgstr "Dépublication planifiée"
 
 #: lib/kiln_cms_web/live/calendar_live.ex:166
 #, elixir-autogen, elixir-format
 msgid "Scheduled unpublish"
-msgstr "Dépublication programmée"
+msgstr "Dépublication planifiée"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:3090
 #, elixir-autogen, elixir-format
 msgid "Scheduled unpublish at"
-msgstr "Dépublication programmée le"
+msgstr "Dépublication planifiée le"
 
 #: lib/kiln_cms_web/live/media_live.ex:929
 #: lib/kiln_cms_web/live/media_live.ex:936
@@ -4892,7 +4892,7 @@ msgstr "Équipe"
 #: lib/kiln_cms_web/live/webhook_live.ex:126
 #, elixir-autogen, elixir-format
 msgid "Test ping queued — see deliveries below."
-msgstr "Test mis en file d'attente — voir les livraisons ci-dessous."
+msgstr "Test mis en file d'attente — voir les envois ci-dessous."
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex:85
 #, elixir-autogen, elixir-format
@@ -4902,7 +4902,7 @@ msgstr "Merci — votre abonnement pour %{email} est confirmé."
 #: lib/kiln_cms_web/live/settings_live.ex:181
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — 2FA is still on."
-msgstr "Ce code n'est pas valide — la double authentification reste activée."
+msgstr "Ce code n'est pas valide — l'authentification à deux facteurs reste activée."
 
 #: lib/kiln_cms_web/live/settings_live.ex:142
 #: lib/kiln_cms_web/live/settings_live.ex:161
@@ -5014,17 +5014,17 @@ msgstr "Ce contenu a été modifié ailleurs. Rechargez avant d'enregistrer."
 #: lib/kiln_cms_web/live/presentation_live.ex:297
 #, elixir-autogen, elixir-format
 msgid "This field isn't inline-editable here."
-msgstr "Ce champ n'est pas modifiable en ligne ici."
+msgstr "Ce champ n'est pas modifiable sur place ici."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex:721
 #, elixir-autogen, elixir-format
 msgid "This form is inactive — the embed shows “Form not found” until you activate it."
-msgstr "Ce formulaire est inactif — l'intégration affiche « Formulaire introuvable » tant que vous ne l'activez pas."
+msgstr "Ce formulaire est inactif — l'intégration affiche « Form not found » tant que vous ne l'activez pas."
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:353
 #, elixir-autogen, elixir-format
 msgid "This page has no text blocks to edit inline yet."
-msgstr "Cette page n'a pas encore de blocs de texte modifiables en ligne."
+msgstr "Cette page n'a pas encore de blocs de texte modifiables sur place."
 
 #: lib/kiln_cms_web/live/token_preview_live.ex:189
 #, elixir-autogen, elixir-format
@@ -5340,7 +5340,7 @@ msgstr "manquant"
 #: lib/kiln_cms_web/components/core_components.ex:287
 #, elixir-autogen, elixir-format
 msgid "no schedule"
-msgstr "aucune programmation"
+msgstr "aucune planification"
 
 #: lib/kiln_cms_web/components/core_components.ex:285
 #, elixir-autogen, elixir-format
@@ -5381,7 +5381,7 @@ msgstr "vues de contenu enregistrées"
 #: lib/kiln_cms_web/components/core_components.ex:287
 #, elixir-autogen, elixir-format
 msgid "scheduled"
-msgstr "programmé"
+msgstr "planifié"
 
 #: lib/kiln_cms_web/live/type_definition_live.ex:356
 #, elixir-autogen, elixir-format
@@ -5421,7 +5421,7 @@ msgstr "cible manquante"
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex:108
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
-msgstr "l'artefact rendu : corps de blocs complet, précompilé et cacheable par CDN."
+msgstr "l'artefact rendu : corps de blocs complet, précompilé et pouvant être mis en cache par un CDN."
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:357
 #, elixir-autogen, elixir-format
