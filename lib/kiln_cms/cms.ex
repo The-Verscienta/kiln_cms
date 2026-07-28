@@ -49,6 +49,10 @@ defmodule KilnCMS.CMS do
       description "List/filter categories (attach via category_id on content writes)."
     end
 
+    tool :read_tag_groups, KilnCMS.CMS.TagGroup, :read do
+      description "List the buckets tags are filed under (tag_group_id on a tag)."
+    end
+
     # Authoring — requires a read-write API key on an editor (or admin) account.
     tool :create_page, KilnCMS.CMS.Page, :create do
       description "Create a page as a draft."
@@ -311,6 +315,17 @@ defmodule KilnCMS.CMS do
       define :create_tag, action: :create
       define :update_tag, action: :update
       define :destroy_tag, action: :destroy
+    end
+
+    # The bucket tags are filed under in the editor's picker. Its `:read` is
+    # already sorted by `position` then name, so callers need no `sort:`.
+    resource KilnCMS.CMS.TagGroup do
+      define :list_tag_groups, action: :read
+      define :get_tag_group, action: :read, get_by: [:id]
+      define :get_tag_group_by_slug, action: :by_slug, args: [:slug]
+      define :create_tag_group, action: :create
+      define :update_tag_group, action: :update
+      define :destroy_tag_group, action: :destroy
     end
 
     # Polymorphic join resources backing the many-to-many relationships — one

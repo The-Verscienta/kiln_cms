@@ -31,6 +31,7 @@ defmodule KilnCMS.CMS.Tag do
 
   json_api do
     type "tag"
+    includes [:tag_group]
 
     # JSON:API parity with the GraphQL taxonomy surface (#185): list, fetch by
     # slug, and fetch by id. Taxonomy is world-readable (D7).
@@ -46,7 +47,7 @@ defmodule KilnCMS.CMS.Tag do
   # AshAdmin: group taxonomy together and label tags by name (issue #25).
   admin do
     resource_group :taxonomy
-    table_columns [:name, :slug, :inserted_at]
+    table_columns [:name, :slug, :tag_group_id, :inserted_at]
     relationship_display_fields [:name]
     label_field :name
   end
@@ -62,12 +63,24 @@ defmodule KilnCMS.CMS.Tag do
     # composite once every taxonomy read threads the tenant (mirrors content.ex).
     custom_indexes do
       index [:slug], name: "tags_slug_lookup_index", all_tenants?: true
+
+      # Postgres doesn't index FK columns for you, and the derived index under
+      # multitenancy would be `(org_id, tag_group_id)` — which the `ON DELETE
+      # SET NULL` cascade's `tag_group_id`-only scan can't seek. `all_tenants?`
+      # keeps a plain `(tag_group_id)` index for that and for `tag_count`.
+      index [:tag_group_id], name: "tags_tag_group_lookup_index", all_tenants?: true
+    end
+
+    # Deleting a group must never delete its tags — they fall back to
+    # "Ungrouped" in the picker.
+    references do
+      reference :tag_group, on_delete: :nilify
     end
   end
 
   actions do
     defaults [:read, :destroy]
-    default_accept [:name, :slug]
+    default_accept [:name, :slug, :tag_group_id]
 
     create :create, primary?: true
     update :update, primary?: true
@@ -167,6 +180,13 @@ defmodule KilnCMS.CMS.Tag do
       define_attribute? false
       attribute_writable? false
       public? false
+    end
+
+    # The bucket this tag is filed under in the editor's tag picker (see
+    # `KilnCMS.CMS.TagGroup`). Optional — a tag without one shows as "Ungrouped".
+    belongs_to :tag_group, KilnCMS.CMS.TagGroup do
+      allow_nil? true
+      public? true
     end
 
     # Many-to-many inverse of each content type's `tags`, through the shared

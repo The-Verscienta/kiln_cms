@@ -1,12 +1,12 @@
 defmodule KilnCMS.CMS.TaxonomyPoliciesTest do
   @moduledoc """
   RBAC policy coverage for the taxonomy + join resources (`Category`, `Tag`,
-  `Tagging`, `ContentLink`).
+  `TagGroup`, `Tagging`, `ContentLink`).
 
   Shared rule: read is world-open (published content references taxonomy on the
   public/headless frontends), authoring is editor+, and the only divergence is
-  `destroy` — hard deletes of `Category`/`Tag` are admin-only, while unlinking a
-  join row stays editor+. See `docs/policy-matrix.md`.
+  `destroy` — hard deletes of `Category`/`Tag`/`TagGroup` are admin-only, while
+  unlinking a join row stays editor+. See `docs/policy-matrix.md`.
   """
   use KilnCMS.DataCase, async: true
 
@@ -15,6 +15,7 @@ defmodule KilnCMS.CMS.TaxonomyPoliciesTest do
   alias KilnCMS.CMS.ContentLink
   alias KilnCMS.CMS.Tag
   alias KilnCMS.CMS.Tagging
+  alias KilnCMS.CMS.TagGroup
 
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -26,6 +27,10 @@ defmodule KilnCMS.CMS.TaxonomyPoliciesTest do
 
   defp category, do: Ash.Seed.seed!(Category, %{name: "News", slug: "news-#{uniq()}"})
   defp tag, do: Ash.Seed.seed!(Tag, %{name: "Elixir", slug: "elixir-#{uniq()}"})
+
+  defp tag_group,
+    do: Ash.Seed.seed!(TagGroup, %{name: "Topics", slug: "topics-#{uniq()}"})
+
   defp uniq, do: System.unique_integer([:positive])
 
   setup do
@@ -73,6 +78,28 @@ defmodule KilnCMS.CMS.TaxonomyPoliciesTest do
       assert CMS.can_destroy_tag?(admin, t)
       refute CMS.can_destroy_tag?(editor, t)
       refute CMS.can_destroy_tag?(viewer, t)
+    end
+  end
+
+  describe "TagGroup" do
+    test "read is world-open (incl. anonymous)", %{viewer: viewer} do
+      assert CMS.can_list_tag_groups?(viewer)
+      assert CMS.can_list_tag_groups?(nil)
+    end
+
+    test "create/update is editor+, not viewers", %{editor: editor, viewer: viewer} do
+      g = tag_group()
+      assert CMS.can_create_tag_group?(editor)
+      assert CMS.can_update_tag_group?(editor, g)
+      refute CMS.can_create_tag_group?(viewer)
+      refute CMS.can_update_tag_group?(viewer, g)
+    end
+
+    test "destroy is admin-only", %{admin: admin, editor: editor, viewer: viewer} do
+      g = tag_group()
+      assert CMS.can_destroy_tag_group?(admin, g)
+      refute CMS.can_destroy_tag_group?(editor, g)
+      refute CMS.can_destroy_tag_group?(viewer, g)
     end
   end
 

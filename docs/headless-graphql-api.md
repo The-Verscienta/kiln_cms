@@ -82,7 +82,7 @@ consumers never need the plain, credential-widened list.
 > operators, typing and validation as the JSON:API params — see
 > [json-api.md](json-api.md) → "Custom fields".
 
-### Taxonomy — categories & tags
+### Taxonomy — categories, tags & tag groups
 
 Taxonomy is world-readable and exposed as plain (unpaginated) lists plus a
 slug lookup:
@@ -93,9 +93,18 @@ slug lookup:
 | `categoryBySlug(slug: String!)` | one category |
 | `tags` | all tags |
 | `tagBySlug(slug: String!)` | one tag |
+| `tagGroups` | all tag groups, in picker order (`position`, then name) |
+| `tagGroupBySlug(slug: String!)` | one tag group |
 
 Each category/tag also carries `pageCount` / `postCount` aggregates and (for
 categories) `pages` / `posts` relationships.
+
+A **tag group** is the bucket a tag is filed under — the structure Kiln's own
+editor uses to keep a large tag vocabulary scannable. A `Tag` exposes its
+`tagGroup`; a `TagGroup` exposes `tags` and a `tagCount`. `contentTypes` is a
+list of content-type name strings (`["post"]`) scoping where the group applies,
+and **an empty list means every content type**; filter on it client-side to
+mirror the editor's sectioning.
 
 ### Health
 

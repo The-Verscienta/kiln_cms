@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   alias KilnCMS.CMS.Page
   alias KilnCMS.CMS.Post
   alias KilnCMS.CMS.Tag
+  alias KilnCMS.CMS.TagGroup
 
   @password "password123456"
 
@@ -1297,6 +1298,81 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # (so an untouched save won't wipe the link) — #153 replaced the <select>.
       assert html =~
                ~r/<input[^>]*value="#{tag.id}"[^>]*checked|checked[^>]*value="#{tag.id}"/
+    end
+
+    test "tags are sectioned by their group, and out-of-scope groups are hidden",
+         %{conn: conn} do
+      post = draft_post()
+
+      posty =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "PostThemes",
+          slug: "g-#{uniq()}",
+          content_types: ["post"]
+        })
+
+      pagey =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "PageThemes",
+          slug: "g-#{uniq()}",
+          content_types: ["page"]
+        })
+
+      Ash.Seed.seed!(Tag, %{name: "postonly", slug: "t-#{uniq()}", tag_group_id: posty.id})
+      Ash.Seed.seed!(Tag, %{name: "pageonly", slug: "t-#{uniq()}", tag_group_id: pagey.id})
+      Ash.Seed.seed!(Tag, %{name: "loosetag", slug: "t-#{uniq()}"})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "PostThemes"
+      assert html =~ "postonly"
+      assert html =~ "Ungrouped"
+      assert html =~ "loosetag"
+
+      # A group scoped to pages has no business on a post.
+      refute html =~ "PageThemes"
+      refute html =~ "pageonly"
+    end
+
+    # Regression guard for the picker's sharpest edge: tags save through
+    # `manage_relationship(..., type: :append_and_remove)`, so a checkbox the
+    # picker declines to render is a checkbox that isn't submitted — and the
+    # link is silently dropped. Narrowing a group's content types must never
+    # detach it from content that already carries it.
+    test "a tag from a now-out-of-scope group stays attached across a save", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "WasEverywhere",
+          slug: "g-#{uniq()}",
+          content_types: []
+        })
+
+      tag =
+        Ash.Seed.seed!(Tag, %{name: "stickytag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      # An admin later narrows the group to pages only.
+      CMS.update_tag_group!(group, %{content_types: ["page"]}, authorize?: false)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # Still rendered, still checked — under the "Also attached" fallback.
+      assert html =~ "Also attached"
+
+      assert html =~
+               ~r/<input[^>]*value="#{tag.id}"[^>]*checked|checked[^>]*value="#{tag.id}"/
+
+      # A save that never touches the tag field must leave the link intact.
+      lv |> form("#post-editor", form: %{title: "Retitled"}) |> render_submit()
+
+      saved = CMS.get_post!(post.id, authorize?: false, load: [:tags])
+      assert [%{id: kept}] = saved.tags
+      assert kept == tag.id
     end
 
     test "links a related post on save", %{conn: conn} do

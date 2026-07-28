@@ -71,7 +71,7 @@ role; the admin `bypass` technically permits it, but in practice versions are
 written only by AshPaperTrail as a side effect of content actions
 (`authorize?: false`).
 
-## Taxonomy — `Category`, `Tag`
+## Taxonomy — `Category`, `Tag`, `TagGroup`
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
@@ -81,6 +81,9 @@ written only by AshPaperTrail as a side effect of content actions
 
 Taxonomy is world-readable because published content references it on the public
 / headless frontends.
+
+Destroying a `TagGroup` does not destroy its tags — `tags.tag_group_id` is
+nilified, so they fall back to "Ungrouped" in the editor's picker.
 
 ## Join tables — `Tagging`, `ContentLink`
 

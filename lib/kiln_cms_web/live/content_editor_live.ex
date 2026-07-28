@@ -129,8 +129,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
              ]
            )
          )
-         |> assign(:categories, CMS.list_categories!(actor: actor, tenant: org))
-         |> assign(:tags, CMS.list_tags!(actor: actor, tenant: org))
+         # Taxonomy pick-lists are scanned by eye, so they load in alphabetical
+         # order rather than whatever Postgres hands back. Tags additionally
+         # carry their group, which sections the picker (see `tag_picker/1`).
+         |> assign(
+           :categories,
+           CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
+         )
+         |> assign(
+           :tags,
+           CMS.list_tags!(actor: actor, tenant: org, query: [sort: [name: :asc]])
+         )
+         # `TagGroup`'s primary read is already ordered by position then name.
+         |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
          |> assign(:audiences, audience_options())
          |> assign(:field_definitions, field_definitions)
          |> assign(:reference_options, reference_options(field_definitions, actor, org))
@@ -481,6 +492,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
       query: [select: [:id, :title], sort: [updated_at: :desc], limit: @max_media]
     )
     |> Enum.reject(&(&1.id == id))
+    # Recency picks *which* records make the capped window; title orders what
+    # the editor then has to scan through.
+    |> Enum.sort_by(& &1.title)
   end
 
   # `<select>` options for the consumer-facing audience (KilnCMS.CMS.Audiences):
@@ -1533,8 +1547,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Accessible tag picker (#153): a labeled checkbox group replacing the native
   # <select multiple> (no ⌘/Ctrl needed). Each tag is its own labeled control;
   # the array submits under the same `tag_ids[]` name the relationship expects.
+  #
+  # Tags are sectioned by their `TagGroup` — collapsible, alphabetical within a
+  # section, with a client-side filter box — so a large vocabulary stays
+  # scannable. Groups may be scoped to certain content types; groups that don't
+  # apply to `kind` are omitted.
   attr :form, :any, required: true
   attr :tags, :list, required: true
+  attr :tag_groups, :list, required: true
+  attr :kind, :any, required: true
   attr :record, :any, required: true
 
   defp tag_picker(assigns) do
@@ -1546,29 +1567,127 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assigns =
       assigns
       |> assign(:selected, selected)
+      |> assign(:sections, tag_sections(assigns.tags, assigns.tag_groups, assigns.kind, selected))
       |> assign(:name, assigns.form[:tag_ids].name <> "[]")
 
     ~H"""
-    <fieldset>
+    <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
       <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
       <p :if={@tags == []} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
-      <div :if={@tags != []} class="flex flex-wrap gap-2">
-        <label
-          :for={tag <- @tags}
-          class="inline-flex cursor-pointer items-center gap-1.5 rounded border border-base-content/20 px-2 py-1 text-sm hover:bg-base-200"
-        >
+
+      <div :if={@tags != []} class="space-y-2">
+        <%!-- Unnamed so it never serializes into the changeset, and wrapped in
+              phx-update="ignore" so a re-render can't clobber what's typed. --%>
+        <div phx-update="ignore" id="tag-picker-filter">
           <input
-            type="checkbox"
-            name={@name}
-            value={tag.id}
-            checked={to_string(tag.id) in @selected}
-            class="size-4 rounded border border-base-content/30 accent-primary"
+            type="search"
+            data-tag-filter-input
+            placeholder={gettext("Filter tags…")}
+            aria-label={gettext("Filter tags")}
+            autocomplete="off"
+            class="field-input w-full"
           />
-          {tag.name}
-        </label>
+        </div>
+
+        <%!-- `data-tag-open-default` is the server's own choice, re-rendered on
+              every patch — what the filter hook restores to when the box is
+              cleared (it can't stash that on the element itself; morphdom would
+              drop it). --%>
+        <details
+          :for={section <- @sections}
+          data-tag-section
+          data-tag-open-default={to_string(section.open?)}
+          open={section.open?}
+          class="rounded border border-base-content/15"
+        >
+          <summary class="cursor-pointer px-2 py-1.5 text-sm font-medium">
+            {section.label}
+            <span class="font-normal text-base-content/60">
+              ({gettext("%{selected} of %{total}",
+                selected: section.selected_count,
+                total: length(section.tags)
+              )})
+            </span>
+          </summary>
+          <p :if={section.note} class="px-2 pb-1 text-xs text-base-content/60">{section.note}</p>
+          <div class="flex flex-wrap gap-2 p-2 pt-1">
+            <label
+              :for={tag <- section.tags}
+              data-tag-item={String.downcase(tag.name)}
+              class="inline-flex cursor-pointer items-center gap-1.5 rounded border border-base-content/20 px-2 py-1 text-sm hover:bg-base-200"
+            >
+              <input
+                type="checkbox"
+                name={@name}
+                value={tag.id}
+                checked={to_string(tag.id) in @selected}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {tag.name}
+            </label>
+          </div>
+        </details>
+
+        <p data-tag-filter-empty hidden class="text-xs text-base-content/70">
+          {gettext("No tags match that filter.")}
+        </p>
       </div>
     </fieldset>
     """
+  end
+
+  # Bucket the org's tags into the picker's sections.
+  #
+  # A group applies to this content type when its `content_types` is empty
+  # ("every type") or names `kind`. Non-applicable groups are hidden — EXCEPT
+  # for tags already on the record, which are collected into a trailing
+  # "Also attached" section.
+  #
+  # That last part is load-bearing, not a nicety: tags are written with
+  # `manage_relationship(:tag_ids, :tags, type: :append_and_remove)`, so a
+  # checkbox that isn't rendered isn't submitted, and the link is *removed*.
+  # Narrowing a group's content types after the fact would otherwise silently
+  # strip tags off existing content the next time someone hit Save.
+  defp tag_sections(tags, groups, kind, selected) do
+    kind = to_string(kind)
+    applicable = Enum.filter(groups, &applies_to?(&1, kind))
+    applicable_ids = MapSet.new(applicable, & &1.id)
+    by_group = Enum.group_by(tags, & &1.tag_group_id)
+
+    grouped =
+      Enum.map(applicable, fn group ->
+        section(group.name, Map.get(by_group, group.id, []), selected, nil)
+      end)
+
+    ungrouped = section(gettext("Ungrouped"), Map.get(by_group, nil, []), selected, nil)
+
+    orphaned =
+      tags
+      |> Enum.filter(fn tag ->
+        to_string(tag.id) in selected and not is_nil(tag.tag_group_id) and
+          not MapSet.member?(applicable_ids, tag.tag_group_id)
+      end)
+      |> then(
+        &section(
+          gettext("Also attached"),
+          &1,
+          selected,
+          gettext("Already on this item, from a group scoped to other content types.")
+        )
+      )
+
+    Enum.reject(grouped ++ [ungrouped, orphaned], &(&1.tags == []))
+  end
+
+  defp applies_to?(%{content_types: []}, _kind), do: true
+  defp applies_to?(%{content_types: types}, kind), do: kind in types
+
+  # Sections holding a selection start expanded, so what's already on the item
+  # is visible without clicking through every group.
+  defp section(label, tags, selected, note) do
+    count = Enum.count(tags, &(to_string(&1.id) in selected))
+
+    %{label: label, tags: tags, selected_count: count, open?: count > 0, note: note}
   end
 
   # Featured-image chooser (#154): a thumbnail of the current selection plus a
@@ -2956,7 +3075,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   options={@audiences}
                 />
 
-                <.tag_picker form={@form} tags={@tags} record={@record} />
+                <.tag_picker
+                  form={@form}
+                  tags={@tags}
+                  tag_groups={@tag_groups}
+                  kind={@kind}
+                  record={@record}
+                />
 
                 <.featured_image_field form={@form} media={@media} />
 
