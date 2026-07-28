@@ -421,8 +421,20 @@ function syncInlineToolbar(hook) {
 // `content` seeds the editor; omit it under collaboration, where the CRDT
 // owns the document (TipTap ignores the option there anyway — see mountCollab).
 function buildEditor(hook, extensions, content = null) {
-  const input = hook.el.querySelector("[data-input]")
+  // The hidden mirror lives OUTSIDE this phx-update="ignore" host (a sibling in
+  // the block card) so its index-based `name` re-renders on a reorder; find it
+  // by the id the host advertises in `data-mirror`. Kept null-safe in case the
+  // markup ever changes.
+  const input = hook.el.dataset.mirror
+    ? document.getElementById(hook.el.dataset.mirror)
+    : hook.el.querySelector("[data-input]")
   const toolbarEl = hook.el.querySelector("[data-toolbar]")
+
+  // The RichTextMirror companion hook re-asserts the mirror's value from here
+  // after any LiveView patch, so a stale server render can't clobber keystrokes
+  // typed since the last validate. Reads `hook.editor` lazily so it always
+  // reflects the live editor (collab mode assigns it later).
+  hook.el.__rtCurrentHtml = () => (hook.editor ? hook.editor.getHTML() : null)
 
   // Reflect the cursor's active marks/nodes on the toolbar buttons.
   const syncToolbar = () => {
@@ -450,13 +462,13 @@ function buildEditor(hook, extensions, content = null) {
       },
     },
     onUpdate: ({editor}) => {
-      input.value = editor.getHTML()
+      if (input) input.value = editor.getHTML()
       hook.slash.update()
       syncToolbar()
       // Debounced phx-change so the live preview reflects rich-text edits.
       clearTimeout(hook._debounce)
       hook._debounce = setTimeout(() => {
-        input.dispatchEvent(new Event("input", {bubbles: true}))
+        if (input) input.dispatchEvent(new Event("input", {bubbles: true}))
       }, 300)
     },
     onSelectionUpdate: () => {
@@ -482,7 +494,7 @@ function buildEditor(hook, extensions, content = null) {
     onInsert: type =>
       hook.pushEvent("add_block", {type, after: hook.el.dataset.blockId}),
   })
-  input.value = editor.getHTML()
+  if (input) input.value = editor.getHTML()
 
   hook.toolbarButtons = TOOLBAR.map(item => {
     const b = toolbarButton(editor, item)

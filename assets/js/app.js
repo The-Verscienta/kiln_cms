@@ -266,9 +266,29 @@ const Hooks = {
       this._destroyed = true
       this.slash && this.slash.destroy()
       this.editor && this.editor.destroy()
+      delete this.el.__rtCurrentHtml
       // Collab prototype: drop this block's claim on the shared Y.Doc (the
       // channel is left once the last block releases it).
       this.collab && this.collab.release()
+    },
+  },
+  // Companion to the RichText hook. The rich-text content mirror is a hidden
+  // <input> that lives OUTSIDE the editor's phx-update="ignore" host so its
+  // index-based `name` re-renders correctly on a reorder (an ignored name would
+  // freeze at the mount-time index → reordered content saves to the wrong
+  // block). The price of being outside the ignore region: morphdom copies
+  // input.value on every patch, so a server re-render can reset this input to a
+  // value that lags keystrokes typed since the last validate (type "a" →
+  // validate in flight → type "b" → the echo of "a" clobbers "ab"). Whenever
+  // LiveView patches this input we re-assert its value from the live editor,
+  // which is the source of truth while mounted. On a version-bump reload the
+  // fresh editor hasn't mounted yet (async import) and this is a *new* element
+  // (mounted(), not updated()), so the server-rendered value stands.
+  RichTextMirror: {
+    updated() {
+      const host = document.getElementById(this.el.dataset.editorHost)
+      const html = host && host.__rtCurrentHtml && host.__rtCurrentHtml()
+      if (html != null && html !== this.el.value) this.el.value = html
     },
   },
   // In-context editing (#354): a plain-text `contenteditable` region (heading /

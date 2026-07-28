@@ -3214,17 +3214,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     <%!-- The collab lock UI (ring + "who's editing" badge) lives on
                           this non-ignored wrapper so it can update, while the inner
                           editor stays phx-update="ignore" (#140). --%>
+                    <%!-- Keyed by the block's STABLE id (not bf.index) so a reorder
+                          keeps the same DOM node → the mounted TipTap editor, and
+                          therefore the cursor position + undo stack, survives the
+                          move instead of remounting. The content mirror `<input>`
+                          below deliberately lives OUTSIDE this phx-update="ignore"
+                          host: an ignored element freezes every non-`data-*`
+                          attribute of its subtree, and the mirror's param name is
+                          index-based (`form[blocks][N][legacy_html]`) — freezing it
+                          would save reordered content to the wrong block (data loss,
+                          the reason a naive stable-id keying was reverted). Out here
+                          the name re-renders to the live index on every reorder. The
+                          flip side — a server re-render clobbering keystrokes typed
+                          since the last validate (morphdom copies input.value on each
+                          patch) — is handled by the RichTextMirror hook, which
+                          re-asserts the value from the live editor. --%>
                     <div
                       :if={block_type_string(bf) == "rich_text"}
                       class={["relative", lock_ring(@locked_fields, bf[:legacy_html].name)]}
                     >
                       <.field_cursors field={bf[:legacy_html].name} cursors={@cursors} />
                       <div
-                        id={"rt-#{bf.index}-v#{@editor_version}"}
+                        id={"rt-#{bf[:id].value}-v#{@editor_version}"}
                         phx-hook="RichText"
                         phx-update="ignore"
                         data-block-id={bf[:id].value}
                         data-content={bf[:legacy_html].value || ""}
+                        data-mirror={"rtm-#{bf[:id].value}-v#{@editor_version}"}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:legacy_html].name}
                         data-collab-token={@collab_token}
@@ -3249,13 +3265,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <p class="mt-1 text-xs text-base-content/70">
                           {gettext("Type / to format this text or insert a block below.")}
                         </p>
-                        <input
-                          type="hidden"
-                          name={bf[:legacy_html].name}
-                          value={bf[:legacy_html].value}
-                          data-input
-                        />
                       </div>
+                      <input
+                        type="hidden"
+                        id={"rtm-#{bf[:id].value}-v#{@editor_version}"}
+                        name={bf[:legacy_html].name}
+                        value={bf[:legacy_html].value}
+                        phx-hook="RichTextMirror"
+                        data-editor-host={"rt-#{bf[:id].value}-v#{@editor_version}"}
+                        data-input
+                      />
                     </div>
                     <div :if={block_type_string(bf) == "image"} class="space-y-2">
                       <img

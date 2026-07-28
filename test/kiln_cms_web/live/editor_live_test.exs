@@ -1773,6 +1773,49 @@ defmodule KilnCMSWeb.EditorLiveTest do
                blocks_legacy(CMS.get_page!(page.id, authorize?: false))
     end
 
+    # Regression for the rich-text mirror redesign: the editor host is now keyed
+    # by the block's stable id (so a reorder keeps the mounted TipTap editor —
+    # cursor + undo — alive), and the hidden content mirror moved OUT of the
+    # phx-update="ignore" host. That move is what keeps saves correct: the
+    # mirror's param name is index-based, so freshly typed HTML must follow the
+    # block to its NEW position. If the name were frozen (the reverted stable-id
+    # keying), the typed content would smear onto whatever block inherited the
+    # old index. Drives the type → reorder → save path at the param level.
+    test "typed rich_text content follows the block through a reorder on save",
+         %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{type: :heading, content: "Head", order: 0},
+            %{type: :rich_text, content: "<p>seed</p>", order: 1}
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # TipTap mirrors freshly typed HTML into the hidden input, which feeds this
+      # phx-change — the rich_text block is at index 1 here. (Driven with explicit
+      # params, the way the browser serializes the mirror, since LiveViewTest's
+      # form/3 won't "type" into a hidden input.)
+      lv
+      |> form("#page-editor")
+      |> render_change(%{
+        "form" => %{"blocks" => %{"1" => %{"legacy_html" => "<p>typed here</p>"}}}
+      })
+
+      # Move the rich_text block above the heading, then save.
+      render_hook(lv, "reorder", %{"order" => ["1", "0"]})
+      lv |> form("#page-editor") |> render_submit()
+
+      # The typed content lands on the rich_text block (now first), NOT on the
+      # heading that took its old index 1.
+      assert [
+               %{type: :rich_text, content: "<p>typed here</p>"},
+               %{type: :heading, content: "Head"}
+             ] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+    end
+
     test "a rich_text block's HTML content round-trips through save", %{conn: conn} do
       # TipTap mirrors its HTML into a hidden input (server-rendered value); a
       # save round-trips it. (The live editing itself is browser-verified.)
@@ -2141,13 +2184,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
     # Regression for #135: a server-driven form replacement (conflict reload)
     # remounts rich-text blocks (new element id) so TipTap reloads from the latest
-    # content instead of keeping its phx-update="ignore" editor.
+    # content instead of keeping its phx-update="ignore" editor. The host id is now
+    # keyed by the block's stable id + the editor version (a reorder keeps the id
+    # so the editor survives; a version bump changes it so it remounts).
     test "rich-text editors remount after a conflict reload", %{conn: conn} do
       editor = authed_user(:editor)
       page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+      [block] = blocks_legacy(page)
 
       {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
-      assert html =~ "rt-0-v0"
+      assert html =~ "rt-#{block.id}-v0"
 
       # Someone else saves first → this editor's save is stale → conflict.
       {:ok, _} = CMS.update_page(page, %{title: "Changed elsewhere"}, actor: editor)
@@ -2155,8 +2201,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # Reloading bumps the editor version so the rich-text block remounts.
       reloaded = lv |> element("#edit-conflict button", "Reload latest") |> render_click()
-      assert reloaded =~ "rt-0-v1"
-      refute reloaded =~ ~s(id="rt-0-v0")
+      assert reloaded =~ "rt-#{block.id}-v1"
+      refute reloaded =~ ~s(id="rt-#{block.id}-v0")
     end
 
     # Regression for #171: blocks are reorderable without a pointer device.

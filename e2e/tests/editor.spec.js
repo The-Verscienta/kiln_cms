@@ -149,6 +149,84 @@ test.describe("editor journey", () => {
     await expect(previewHeadings).toHaveText(["Second", "First"]);
   });
 
+  test("the rich-text editor survives a reorder with cursor + undo intact", async ({ page }) => {
+    // The editor host is keyed by the block's stable id and its content mirror
+    // lives outside the phx-update="ignore" region, so moving the block keeps
+    // the SAME ProseMirror node (no remount) — cursor position and the undo
+    // stack survive — while the reordered content still saves to the right block.
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Reorder Editor");
+    await page.fill('input[name$="[slug]"]', `e2e-reorder-editor-${Date.now()}`);
+
+    // Once a block exists there are several inserters, each rendering a hidden
+    // add_block option per type — so `addBlock`'s first-match click can land on a
+    // hidden one. Open the unique main "Add block" menu and click the *visible*
+    // option instead.
+    const addViaMainMenu = async (type) => {
+      await page.getByRole("button", { name: /add block/i }).click();
+      await page
+        .locator(`button[data-inserter-item][phx-value-type="${type}"]:visible`)
+        .first()
+        .click();
+    };
+
+    // A heading (with identifiable text) first, then a rich-text block below it.
+    await addViaMainMenu("heading");
+    await page.locator('#blocks-sortable textarea[name$="[text]"]').first().fill("HEADING");
+    await addViaMainMenu("rich_text");
+
+    const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
+    await expect(editor).toBeVisible();
+    await editor.click();
+    // Two edits separated by a pause longer than ProseMirror's history group
+    // delay (500ms), so a single undo pops only the second edit.
+    await page.keyboard.type("keep");
+    await page.waitForTimeout(700);
+    await page.keyboard.type("-dropme");
+    await expect(editor).toHaveText("keep-dropme");
+    // Let the 300ms mirror debounce validate flush so the server holds the text.
+    await page.waitForTimeout(500);
+
+    // Tag the live editor node; a remount would replace it and drop the tag.
+    await editor.evaluate((el) => (el.dataset.survived = "yes"));
+
+    // Move the rich-text block up above the heading via the deterministic
+    // keyboard move control (its card is the one holding the RichText host).
+    const richCard = page
+      .locator("#blocks-sortable > div")
+      .filter({ has: page.locator('[phx-hook="RichText"]') });
+    await richCard.locator('button[phx-value-dir="up"]').click({ force: true });
+
+    // Same DOM node survived the reorder (editor not remounted) …
+    await expect(editor).toHaveAttribute("data-survived", "yes");
+    // … content preserved live …
+    await expect(editor).toHaveText("keep-dropme");
+    // … and the undo history is intact: one undo drops only the second edit.
+    await editor.click();
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(editor).toHaveText("keep");
+    // Redo restores it, then save + reload proves it stored against the block in
+    // its new (first) position rather than smearing onto the heading.
+    await page.keyboard.press("ControlOrMeta+Shift+z");
+    await expect(editor).toHaveText("keep-dropme");
+    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /^save$/i }).click();
+    // The form flips data-dirty→false once the save round-trips; wait for that
+    // rather than a fixed delay so the reload sees the persisted state.
+    await expect(page.locator("#page-editor")).toHaveAttribute("data-dirty", "false");
+    await page.reload();
+
+    // After reload the first block is the rich-text one, and the saved HTML is
+    // server-rendered into its host's data-content (assert there so we don't race
+    // TipTap's async remount). The heading kept its own content, second.
+    const cards = page.locator("#blocks-sortable > div");
+    await expect(cards.first().locator('[phx-hook="RichText"]')).toHaveAttribute(
+      "data-content",
+      /keep-dropme/,
+    );
+    await expect(cards.nth(1).locator('textarea[name$="[text]"]')).toHaveValue("HEADING");
+  });
+
   test("accordions keep their toggle state while typing", async ({ page }) => {
     await newDraftPage(page);
 
