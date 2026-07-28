@@ -57,7 +57,8 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp blocks_from_node(%{"type" => "codeBlock"} = node, key) do
     {children, defs} = spans_and_defs(node["content"] || [])
-    {[pt_block("code", key, children, defs)], key + 1}
+    block = "code" |> pt_block(key, children, defs) |> put_language(node)
+    {[block], key + 1}
   end
 
   defp blocks_from_node(%{"type" => "horizontalRule"}, key),
@@ -104,6 +105,18 @@ defmodule KilnCMS.Blocks.PortableText do
   end
 
   defp list_items(_node, _kind, _level, key), do: {[], key}
+
+  # TipTap's codeBlock carries its language tag as a node attr (#503); keep it
+  # on the PT block (normalized) so it round-trips to `:json` and fire-time
+  # highlighting. Absent/implausible tags are dropped, not stored.
+  defp put_language(block, %{"attrs" => %{"language" => language}}) do
+    case KilnCMS.Highlight.normalize(language) do
+      nil -> block
+      tag -> Map.put(block, "language", tag)
+    end
+  end
+
+  defp put_language(block, _node), do: block
 
   defp pt_block(style, idx, children, defs) do
     %{
@@ -273,15 +286,31 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp block_to_html(%{"_type" => "hr"}), do: "<hr/>"
 
+  # Code blocks (#503): a known language renders through Makeup at fire time;
+  # a tagged-but-unknown language keeps today's escaped plain <pre> but carries
+  # the `language-…` class so client-side highlighters (and the editor's HTML
+  # hydration) still see the tag. Untagged blocks render exactly as before.
+  defp block_to_html(%{"style" => "code"} = block) do
+    language = KilnCMS.Highlight.normalize(block["language"])
+    code = Enum.map_join(block["children"] || [], &(&1["text"] || ""))
+
+    case language && KilnCMS.Highlight.highlight(code, language) do
+      {:ok, html} -> html
+      _unknown -> "<pre><code#{language_class(language)}>#{esc(code)}</code></pre>"
+    end
+  end
+
   defp block_to_html(%{} = block) do
     defs = block["markDefs"] || []
     inner = Enum.map_join(block["children"] || [], &span_to_html(&1, defs))
     wrap(block["style"] || "normal", inner)
   end
 
-  defp wrap("blockquote", inner), do: "<blockquote>#{inner}</blockquote>"
+  # `language` is nil or already normalized (safe charset), never raw input.
+  defp language_class(nil), do: ""
+  defp language_class(language), do: ~s( class="language-#{language}")
 
-  defp wrap("code", inner), do: "<pre><code>#{inner}</code></pre>"
+  defp wrap("blockquote", inner), do: "<blockquote>#{inner}</blockquote>"
 
   defp wrap("h" <> level, inner) when level in ["1", "2", "3", "4", "5", "6"],
     do: "<h#{level}>#{inner}</h#{level}>"

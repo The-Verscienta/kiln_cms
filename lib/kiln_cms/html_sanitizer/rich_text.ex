@@ -26,8 +26,28 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   allow_tag_with_these_attributes("i", [])
   allow_tag_with_these_attributes("s", [])
   allow_tag_with_these_attributes("strike", [])
-  allow_tag_with_these_attributes("code", [])
-  allow_tag_with_these_attributes("pre", [])
+  # Highlighted code blocks (#503): fired PT→HTML re-enters this allowlist on
+  # the first-party delivery path (BlockComponents), so the exact markup Makeup
+  # emits must survive — `<pre class="highlight">`, `<code class="language-…">`,
+  # and token `<span>`s whose class comes from Makeup's finite token-class set.
+  # Classes are matched against those closed sets; any other value is stripped,
+  # so arbitrary utility classes still can't be smuggled into rich text.
+  @makeup_span_classes KilnCMS.Highlight.span_classes()
+
+  allow_tag_with_these_attributes "code", [] do
+    {"class", "language-" <> language} ->
+      if KilnCMS.Highlight.normalize(language) == language,
+        do: {"class", "language-" <> language}
+  end
+
+  allow_tag_with_these_attributes "pre", [] do
+    {"class", "highlight"} -> {"class", "highlight"}
+  end
+
+  allow_tag_with_these_attributes "span", [] do
+    {"class", value} -> if value in @makeup_span_classes, do: {"class", value}
+  end
+
   allow_tag_with_these_attributes("h1", [])
   allow_tag_with_these_attributes("h2", [])
   allow_tag_with_these_attributes("h3", [])

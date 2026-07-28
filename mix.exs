@@ -91,6 +91,19 @@ defmodule KilnCMS.MixProject do
       {:phoenix_html, "~> 4.1"},
       {:corsica, "~> 2.1"},
       {:html_sanitize_ex, "~> 1.4"},
+      # Fire-time syntax highlighting for rich-text code blocks (#503). Each
+      # lexer is its own OTP app that registers language names with
+      # Makeup.Registry on boot — see KilnCMS.Highlight.
+      {:makeup, "~> 1.2"},
+      {:makeup_elixir, "~> 1.0"},
+      {:makeup_erlang, "~> 1.0"},
+      {:makeup_eex, "~> 2.0"},
+      # makeup_ts registers both the "js"/"javascript" and "ts"/"typescript"
+      # names, so a separate makeup_js would only fight it for the registry.
+      {:makeup_ts, "~> 0.2"},
+      {:makeup_html, "~> 0.2"},
+      {:makeup_json, "~> 1.0"},
+      {:makeup_css, "~> 0.2"},
       {:cachex, "~> 4.0"},
       {:image, "~> 0.69"},
       {:ex_aws, "~> 2.5"},

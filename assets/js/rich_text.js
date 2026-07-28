@@ -9,9 +9,35 @@
 //   * a slash-command menu ("/") for common block transforms
 //
 // Every command here produces only tags already on the server-side allowlist
-// (KilnCMS.HTMLSanitizer.RichText), so no sanitizer changes are needed.
+// (KilnCMS.HTMLSanitizer.RichText) — including the code-block language class,
+// which the allowlist admits as `language-<tag>` (#503).
 import {Editor} from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
+
+// Code-block language choices (#503). The value is the tag stored on the
+// Portable Text block and delivered raw on the `:json` surface; the server
+// highlights the ones Makeup has a lexer for (see KilnCMS.Highlight) and the
+// rest fall back to a plain <pre> that still carries the language class for
+// client-side highlighters. "" = untagged plain text.
+const LANGUAGES = [
+  ["", "Plain text"],
+  ["elixir", "Elixir"],
+  ["heex", "HEEx"],
+  ["eex", "EEx"],
+  ["erlang", "Erlang"],
+  ["js", "JavaScript"],
+  ["ts", "TypeScript"],
+  ["html", "HTML"],
+  ["css", "CSS"],
+  ["json", "JSON"],
+  ["bash", "Shell"],
+  ["sql", "SQL"],
+  ["python", "Python"],
+  ["ruby", "Ruby"],
+  ["go", "Go"],
+  ["rust", "Rust"],
+  ["yaml", "YAML"],
+]
 
 // Toolbar buttons. `active` (optional) lights the button when the mark/node is
 // applied at the cursor; `run` receives a focused command chain.
@@ -59,6 +85,51 @@ const toolbarButton = (editor, item) => {
     item.run(editor.chain().focus()).run()
   })
   return b
+}
+
+// A small language dropdown for code blocks (#503). Hidden until the caret is
+// inside a codeBlock; changing it writes the node's `language` attribute
+// (StarterKit's codeBlock already round-trips it as a `language-…` class).
+// Returns {sel, sync} — callers append `sel` to their toolbar and call
+// `sync()` from the editor's update/selection events.
+function languageSelect(editor) {
+  const sel = document.createElement("select")
+  sel.title = "Code block language"
+  sel.setAttribute("aria-label", "Code block language")
+  sel.className = "rounded border border-base-content/20 bg-base-100 px-1 py-0.5 text-xs"
+  sel.hidden = true
+
+  LANGUAGES.forEach(([value, label]) => {
+    const option = document.createElement("option")
+    option.value = value
+    option.textContent = label
+    sel.appendChild(option)
+  })
+
+  // The inline toolbar swallows mousedown (to keep the editor's selection);
+  // a native select needs its default mousedown to open, so fence it off.
+  sel.addEventListener("mousedown", e => e.stopPropagation())
+  sel.addEventListener("change", () => {
+    editor.chain().focus().updateAttributes("codeBlock", {language: sel.value || null}).run()
+  })
+
+  const sync = () => {
+    const active = editor.isActive("codeBlock")
+    sel.hidden = !active
+    if (!active) return
+    const language = editor.getAttributes("codeBlock").language || ""
+    // A tag from outside the preset list (API write, pasted content) still
+    // shows as itself instead of silently displaying "Plain text".
+    if (language && !Array.from(sel.options).some(o => o.value === language)) {
+      const option = document.createElement("option")
+      option.value = language
+      option.textContent = language
+      sel.appendChild(option)
+    }
+    sel.value = language
+  }
+
+  return {sel, sync}
 }
 
 // Unique per-instance menu ids so aria-controls/aria-activedescendant can
@@ -366,6 +437,9 @@ function buildInlineToolbar(hook) {
     return {item, b}
   })
 
+  hook.langSelect = languageSelect(hook.editor)
+  bar.appendChild(hook.langSelect.sel)
+
   document.body.appendChild(bar)
   hook.toolbar = bar
 }
@@ -392,6 +466,7 @@ function syncInlineToolbar(hook) {
     b.classList.toggle("bg-base-300", on)
     b.setAttribute("aria-pressed", on ? "true" : "false")
   })
+  if (hook.langSelect) hook.langSelect.sync()
 }
 
 // `content` seeds the editor; omit it under collaboration, where the CRDT
@@ -421,6 +496,7 @@ function buildEditor(hook, extensions, content = null) {
       b.classList.toggle("bg-base-300", on)
       b.setAttribute("aria-pressed", on ? "true" : "false")
     })
+    if (hook.langSelect) hook.langSelect.sync()
   }
 
   const editor = new Editor({
@@ -467,5 +543,7 @@ function buildEditor(hook, extensions, content = null) {
     toolbarEl.appendChild(b)
     return {item, b}
   })
+  hook.langSelect = languageSelect(editor)
+  toolbarEl.appendChild(hook.langSelect.sel)
   syncToolbar()
 }

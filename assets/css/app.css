@@ -507,6 +507,76 @@
   background: none;
   padding: 0;
 }
+/* Fire-time syntax highlighting (#503). Makeup renders tagged code blocks as
+   `<pre class="highlight"><code class="language-…">` full of short
+   Pygments-style token spans (.k, .s, .c, …); this maps those onto the theme
+   palette instead of shipping a canned Makeup stylesheet. Channel variables
+   darken on light surfaces (AA against the base-200 pre background) and fall
+   back to the raw theme tokens in dark mode — same approach as links above. */
+pre.highlight {
+  --hl-keyword: color-mix(in oklch, var(--color-primary) 62%, black);
+  --hl-string: color-mix(in oklch, var(--color-success) 55%, black);
+  --hl-number: color-mix(in oklch, var(--color-accent) 55%, black);
+  --hl-name: color-mix(in oklch, var(--color-info) 55%, black);
+  --hl-tag: color-mix(in oklch, var(--color-error) 65%, black);
+  --hl-comment: color-mix(in oklch, var(--color-base-content) 62%, transparent);
+  --hl-muted: color-mix(in oklch, var(--color-base-content) 80%, transparent);
+}
+[data-theme="dark"] pre.highlight {
+  --hl-keyword: var(--color-primary);
+  --hl-string: var(--color-success);
+  --hl-number: var(--color-accent);
+  --hl-name: var(--color-info);
+  --hl-tag: var(--color-error);
+}
+/* Keywords + operator-words. */
+pre.highlight :is(.k, .kc, .kd, .kn, .kp, .kr, .kt, .ow) {
+  color: var(--hl-keyword);
+}
+/* Strings, chars, docstrings, interpolation, regexes, symbols/sigils. */
+pre.highlight :is(.s, .sa, .sb, .sc, .dl, .sd, .s2, .se, .sh, .si, .sx, .sr, .s1, .ss) {
+  color: var(--hl-string);
+}
+/* Numbers. */
+pre.highlight :is(.m, .mb, .mf, .mh, .mi, .il, .mo) {
+  color: var(--hl-number);
+}
+/* Modules/classes, functions, decorators, constants, builtins. */
+pre.highlight :is(.nc, .nf, .fm, .nd, .no, .nb, .bp, .nn, .ne) {
+  color: var(--hl-name);
+}
+/* Markup tags, attribute names, variables. */
+pre.highlight :is(.nt, .na, .nl, .nv, .vc, .vg, .vi, .vm) {
+  color: var(--hl-tag);
+}
+/* Comments and preprocessor lines. */
+pre.highlight :is(.c, .ch, .cm, .cp, .cpf, .c1, .cs) {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+/* Operators and punctuation stay quiet. */
+pre.highlight :is(.o, .p, .pi) {
+  color: var(--hl-muted);
+}
+pre.highlight .err {
+  color: var(--color-error);
+}
+/* Generic diff/output tokens (rare outside diff-ish snippets). */
+pre.highlight .gi {
+  color: color-mix(in oklch, var(--color-success) 60%, black);
+}
+pre.highlight .gd {
+  color: var(--color-error);
+}
+[data-theme="dark"] pre.highlight .gi {
+  color: var(--color-success);
+}
+pre.highlight .ge {
+  font-style: italic;
+}
+pre.highlight .gs {
+  font-weight: 600;
+}
 .kiln-block hr {
   border: none;
   border-top: 1px solid var(--color-base-300);

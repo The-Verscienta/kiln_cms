@@ -50,6 +50,29 @@ defmodule KilnCMS.HTMLSanitizerTest do
       assert HTMLSanitizer.sanitize_rich_text("") == ""
     end
 
+    test "keeps Makeup highlight markup intact (#503)" do
+      # The first-party delivery path re-sanitizes fired PT→HTML, so the exact
+      # markup KilnCMS.Highlight emits must survive the allowlist.
+      {:ok, html} = KilnCMS.Highlight.highlight("IO.puts(1)", "elixir")
+
+      assert HTMLSanitizer.sanitize_rich_text(html) == html
+    end
+
+    test "keeps the language class on plain code blocks (#503)" do
+      html = ~s|<pre><code class="language-python">print(1)</code></pre>|
+
+      assert HTMLSanitizer.sanitize_rich_text(html) == html
+    end
+
+    test "strips class values outside the highlight allowlists (#503)" do
+      html =
+        ~s(<pre class="fixed inset-0"><code class="language-x y">a</code>) <>
+          ~s(<span class="btn btn-primary">b</span></pre>)
+
+      assert HTMLSanitizer.sanitize_rich_text(html) ==
+               "<pre><code>a</code><span>b</span></pre>"
+    end
+
     test "preserves safe https / mailto / relative hyperlinks (#148)" do
       https = "https" <> @colon <> "//example.com/read-more"
       mailto = "mailto" <> @colon <> "hi@example.com"

@@ -203,6 +203,57 @@ defmodule KilnCMS.Blocks.PortableTextTest do
       assert html =~ "<hr/>"
       assert html =~ "<p>a\nb</p>"
     end
+
+    test "code block language rides the PT block and highlights at render (#503)" do
+      import KilnCMS.TipTapFixtures
+
+      tiptap =
+        doc([
+          Map.put(tt_node("codeBlock", [text("IO.puts(1)")]), "attrs", %{"language" => "Elixir"})
+        ])
+
+      assert [block] = PortableText.from_tiptap(tiptap)
+      # Normalized at capture, so the :json surface carries the canonical tag.
+      assert block["language"] == "elixir"
+
+      html = PortableText.to_html([block])
+      assert html =~ ~s(<pre class="highlight"><code class="language-elixir">)
+      assert html =~ ~s(<span class="nc">IO</span>)
+    end
+
+    test "unknown language keeps the escaped plain <pre> but carries the tag (#503)" do
+      import KilnCMS.TipTapFixtures
+
+      tiptap =
+        doc([
+          Map.put(tt_node("codeBlock", [text("print('<hi>')")]), "attrs", %{
+            "language" => "python"
+          })
+        ])
+
+      assert [block] = PortableText.from_tiptap(tiptap)
+      assert block["language"] == "python"
+
+      html = PortableText.to_html([block])
+
+      assert html ==
+               "<pre><code class=\"language-python\">print(&#39;&lt;hi&gt;&#39;)</code></pre>"
+    end
+
+    test "implausible language attrs are dropped, not stored (#503)" do
+      import KilnCMS.TipTapFixtures
+
+      tiptap =
+        doc([
+          Map.put(tt_node("codeBlock", [text("x")]), "attrs", %{
+            "language" => ~s(js" onmouseover=")
+          })
+        ])
+
+      assert [block] = PortableText.from_tiptap(tiptap)
+      refute Map.has_key?(block, "language")
+      assert PortableText.to_html([block]) == "<pre><code>x</code></pre>"
+    end
   end
 
   describe "to_plain_text/1" do
