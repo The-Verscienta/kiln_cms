@@ -58,7 +58,12 @@ defmodule KilnCMSWeb.OverviewLive do
     admin? = socket.assigns.admin?
     now = DateTime.utc_now()
 
-    rows = content_rows(actor, org)
+    # The dynamic half of the registry is per-org (epic #336), so it has to be
+    # asked for THIS site's types — the arity-0 default resolves the default
+    # org, which on a multi-site install is the wrong site's custom types.
+    types = ContentTypes.all() ++ ContentTypes.dynamic_all(org.id)
+
+    rows = content_rows(types, actor, org)
     by_state = Enum.frequencies_by(rows, fn {_kind, r} -> r.state end)
 
     socket
@@ -70,7 +75,7 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:media_count, count(MediaItem, actor, org))
     |> assign(:views, total_views(actor, org))
     |> assign(:taxonomy_terms, count(Category, actor, org) + count(Tag, actor, org))
-    |> assign(:types_count, length(ContentTypes.all()) + length(ContentTypes.dynamic_all()))
+    |> assign(:types_count, length(types))
     |> assign(:plugins_count, length(Kiln.Plugins.all()))
     |> assign(:fields_count, if(admin?, do: count(FieldDefinition, actor, org)))
     |> assign(:webhooks, if(admin?, do: webhook_health(actor, org)))
@@ -81,8 +86,8 @@ defmodule KilnCMSWeb.OverviewLive do
   # One narrow-select fetch per content type; every content-shaped metric
   # (state counts, schedule window, staleness, translation coverage) is then
   # computed in memory from the same rows.
-  defp content_rows(actor, org) do
-    for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(),
+  defp content_rows(types, actor, org) do
+    for ct <- types,
         row <- ContentTypes.list!(ct, actor: actor, tenant: org, query: [select: @row_fields]) do
       {ct.type, row}
     end

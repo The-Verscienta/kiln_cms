@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.WebhookLive do
        socket
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Webhooks"))
-       |> assign(:available_events, WebhookEndpoint.events())
+       |> assign(:available_events, WebhookEndpoint.events(socket.assigns.current_org.id))
        |> assign(:edit, nil)
        |> assign(:form, create_form(actor, socket.assigns.current_org))
        |> load_endpoints()

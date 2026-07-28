@@ -30,9 +30,12 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   `"page.published"`, `"recipe.updated"`), plus `form.submitted` for
   admin-defined public forms. Derived at runtime so generated and
   admin-defined types get events for free.
+
+  Dynamic types are per-org (epic #336), so the console passes the request's
+  org — `org_id` defaults to the sole org for tenant-less callers.
   """
-  def events do
-    types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all()
+  def events(org_id \\ KilnCMS.Accounts.default_org_id()) do
+    types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all(org_id)
     content = for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
     content ++ ["form.submitted"]
   end
@@ -42,6 +45,12 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   plus form submissions. The review-transition events (`in_review` /
   `returned_to_draft`, #375) carry unpublished draft bodies and are therefore
   **opt-in only** — select them explicitly on the endpoint.
+
+  Arity 0 on purpose: this is an attribute `default`, which Ash evaluates with
+  no access to the changeset's tenant, so it can only resolve the default org's
+  dynamic types. The console never relies on it — its create form submits an
+  explicit `events` list built from `events/1` for the request's org — so this
+  only applies to tenant-less programmatic creates.
   """
   def default_events do
     types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all()
