@@ -43,23 +43,57 @@ defmodule KilnCMS.Cache do
     )
   end
 
+  # The two cached shapes of a published `{type, slug, locale}`. Both delivery
+  # paths resolve the same coordinates but cache *different* values — the bare
+  # record (headless/artifact delivery, `Firing.Delivery.published/4`) vs the
+  # media-enriched HTML payload map (`ContentController`). They must never share
+  # a key: whichever path seeded first would hand the other a shape it can't
+  # render (a FunctionClauseError 500), so each shape gets its own namespace and
+  # `bust/3` drops both.
+  @shapes ["record", "payload"]
+
   @doc """
-  Return the cached published record for `{type, slug, locale}`, or compute it
-  with `fun`, caching a non-nil result. Keyed by locale so each locale variant
-  (and the default-locale fallback served for a missing one) caches separately.
-  A `nil` (not found) is never cached, so newly published content appears
-  immediately. Falls back to `fun` if the cache is disabled or the backend errors.
+  Return the cached **bare published record** for `{type, slug, locale}`, or
+  compute it with `fun`, caching a non-nil result. Keyed by locale so each
+  locale variant (and the default-locale fallback served for a missing one)
+  caches separately. A `nil` (not found) is never cached, so newly published
+  content appears immediately. Falls back to `fun` if the cache is disabled or
+  the backend errors.
+
+  This is the headless-delivery shape (`KilnCMS.Firing.Delivery.published/4`);
+  the HTML controller's enriched payload lives under its own namespace via
+  `fetch_published_payload/5`.
   """
   @spec fetch_published(Ash.UUID.t(), String.t(), String.t(), String.t(), (-> any())) :: any()
   def fetch_published(org_id, type, slug, locale, fun) when is_function(fun, 0) do
-    if enabled?(), do: fetch_published_cached(org_id, type, slug, locale, fun), else: fun.()
+    fetch_shaped("record", org_id, type, slug, locale, fun)
+  end
+
+  @doc """
+  Like `fetch_published/5`, but for the HTML delivery **payload** shape
+  (`%{record, blocks, translations}`, see `KilnCMSWeb.ContentController`).
+  Cached under a separate key namespace so it can never collide with the bare
+  record cached by `fetch_published/5` for the same `{type, slug, locale}`.
+  """
+  @spec fetch_published_payload(Ash.UUID.t(), String.t(), String.t(), String.t(), (-> any())) ::
+          any()
+  def fetch_published_payload(org_id, type, slug, locale, fun) when is_function(fun, 0) do
+    fetch_shaped("payload", org_id, type, slug, locale, fun)
+  end
+
+  defp fetch_shaped(shape, org_id, type, slug, locale, fun) do
+    if enabled?(),
+      do: fetch_published_cached(shape, org_id, type, slug, locale, fun),
+      else: fun.()
   end
 
   # `Cachex.fetch` deduplicates concurrent fallback executions per key
   # (Courier), so a burst of requests for a hot page right after an
   # invalidation computes the value once instead of stampeding the DB.
-  defp fetch_published_cached(org_id, type, slug, locale, fun) do
-    case Cachex.fetch(@cache, key(org_id, type, slug, locale), fn _key -> commit(fun.(), @ttl) end) do
+  defp fetch_published_cached(shape, org_id, type, slug, locale, fun) do
+    case Cachex.fetch(@cache, key(shape, org_id, type, slug, locale), fn _key ->
+           commit(fun.(), @ttl)
+         end) do
       {:ok, value} -> emit(:hit, value)
       {:commit, value} -> emit(:miss, value)
       {:ignore, value} -> emit(:miss, value)
@@ -103,14 +137,15 @@ defmodule KilnCMS.Cache do
   keys for the affected record instead of clearing the whole cache. All locales
   are busted because a request for a missing locale caches the default-locale
   fallback under the *requested* locale's key (same slug), so a single slug can
-  live under several locale keys.
+  live under several locale keys. Both cached shapes (bare record + HTML
+  payload) are dropped.
   """
   @spec bust(Ash.UUID.t(), String.t(), String.t()) :: :ok
   def bust(org_id, type, slug) when is_binary(type) and is_binary(slug) do
     if enabled?() do
-      Enum.each(KilnCMS.I18n.locales(), fn locale ->
-        Cachex.del(@cache, key(org_id, type, slug, locale))
-      end)
+      for locale <- KilnCMS.I18n.locales(), shape <- @shapes do
+        Cachex.del(@cache, key(shape, org_id, type, slug, locale))
+      end
     end
 
     :ok
@@ -185,7 +220,8 @@ defmodule KilnCMS.Cache do
   defp commit(nil, _ttl), do: {:ignore, nil}
   defp commit(value, ttl), do: {:commit, value, expire: ttl}
 
-  defp key(org_id, type, slug, locale), do: "published:#{org_id}:#{type}:#{locale}:#{slug}"
+  defp key(shape, org_id, type, slug, locale) when shape in @shapes,
+    do: "published:#{shape}:#{org_id}:#{type}:#{locale}:#{slug}"
 
   defp enabled? do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:enabled, true)
