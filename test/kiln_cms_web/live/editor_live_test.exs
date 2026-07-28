@@ -1009,6 +1009,24 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert picker =~ ~s(id="image-picker-title")
       assert picker =~ ~s(phx-hook="FocusTrap")
     end
+
+    test "opens as a right-side drawer with a mode-aware title (Theme D)", %{conn: conn} do
+      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Filling an existing image block → "Choose an image", anchored to the right.
+      picker = lv |> element("button[phx-click='open_picker']") |> render_click()
+      assert picker =~ "Choose an image"
+
+      assert picker =~
+               ~r/id="image-picker-dialog"[^>]*inset-y-0 right-0|inset-y-0 right-0[^>]*id="image-picker-dialog"/s
+
+      # Chrome "Media library" opens the drawer to insert a new image block.
+      inserting = lv |> element("button[phx-click='open_media_browser']") |> render_click()
+      assert inserting =~ "Insert an image"
+    end
   end
 
   describe "block inserter (slash menu)" do

@@ -2196,16 +2196,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :results, :list, default: nil
   attr :query, :string, required: true
 
-  # Full media-library browser modal. Reachable from the editor chrome (to
-  # insert a new image block, `index = :new`) and from each image block (to fill
-  # that block, `index` = its integer index). Browse + search + insert; while a
-  # query is active, `results` (a DB search) replaces the browse window.
+  # Media-library browser as a right-side drawer (Theme D). It slides in beside the
+  # editor rather than a full-screen modal that blanks the whole surface, so you
+  # keep your place while choosing. Reachable from the editor chrome (insert a new
+  # image block, `index = :new`), the featured-image field (`:featured`), or an
+  # image block (`{:block, id}`). Browse + search + insert; while a query is active
+  # `results` (a DB search) replaces the browse window.
   defp image_picker(assigns) do
     assigns = assign(assigns, :visible, assigns.results || assigns.media)
 
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
-      <div class="absolute inset-0 bg-black/40" phx-click="close_picker" aria-hidden="true"></div>
+      <%!-- A light scrim dims the editor without hiding it — the drawer is to the
+            side, not over everything — and clicking it closes the drawer. --%>
+      <div class="absolute inset-0 bg-black/20" phx-click="close_picker" aria-hidden="true"></div>
       <div
         id="image-picker-dialog"
         phx-hook="FocusTrap"
@@ -2213,71 +2217,74 @@ defmodule KilnCMSWeb.ContentEditorLive do
         aria-modal="true"
         aria-labelledby="image-picker-title"
         tabindex="-1"
-        class="absolute left-1/2 top-1/2 max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-base-100 p-5 shadow-xl"
+        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
       >
-        <div class="mb-3 flex items-center justify-between gap-4">
-          <h2 id="image-picker-title" class="text-lg font-medium">
-            {if @index == :new,
-              do: gettext("Insert image from library"),
-              else: gettext("Choose an image")}
-          </h2>
+        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
+          <h2 id="image-picker-title" class="text-lg font-medium">{picker_title(@index)}</h2>
           <button
             type="button"
             phx-click="close_picker"
             aria-label={gettext("Close")}
-            class="text-base-content/70 hover:text-base-content"
+            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
         </div>
 
-        <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
-          <input
-            type="text"
-            name="q"
-            value={@query}
-            placeholder={gettext("Search by filename, alt or caption")}
-            aria-label={gettext("Search by filename, alt text or caption")}
-            phx-debounce="150"
-            autocomplete="off"
-            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-          />
-        </form>
-
-        <p :if={@media == []} class="text-sm text-base-content/60">
-          {gettext("No media yet — upload some in the")} <.link
-            navigate={~p"/media"}
-            class="underline"
-          >{gettext("media library")}</.link>.
-        </p>
-        <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
-          {gettext("No media matches “%{query}”.", query: @query)}
-        </p>
-
-        <div :if={@visible != []} class="grid grid-cols-3 gap-3 sm:grid-cols-4">
-          <button
-            :for={item <- @visible}
-            type="button"
-            phx-click="pick_image"
-            phx-value-index={pick_index(@index)}
-            phx-value-bid={pick_block_id(@index)}
-            phx-value-id={item.id}
-            phx-value-url={item.url}
-            title={item.filename}
-            class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
-          >
-            <img
-              src={item.url}
-              alt={item.alt || item.filename}
-              loading="lazy"
-              class="aspect-square w-full object-cover"
+        <div class="flex-1 overflow-y-auto p-4">
+          <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
+            <input
+              type="text"
+              name="q"
+              value={@query}
+              placeholder={gettext("Search by filename, alt or caption")}
+              aria-label={gettext("Search by filename, alt text or caption")}
+              phx-debounce="150"
+              autocomplete="off"
+              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
             />
-          </button>
+          </form>
+
+          <p :if={@media == []} class="text-sm text-base-content/60">
+            {gettext("No media yet — upload some in the")} <.link
+              navigate={~p"/media"}
+              class="underline"
+            >{gettext("media library")}</.link>.
+          </p>
+          <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+            {gettext("No media matches “%{query}”.", query: @query)}
+          </p>
+
+          <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <button
+              :for={item <- @visible}
+              type="button"
+              phx-click="pick_image"
+              phx-value-index={pick_index(@index)}
+              phx-value-bid={pick_block_id(@index)}
+              phx-value-id={item.id}
+              phx-value-url={item.url}
+              title={item.filename}
+              class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
+            >
+              <img
+                src={item.url}
+                alt={item.alt || item.filename}
+                loading="lazy"
+                class="aspect-square w-full object-cover"
+              />
+            </button>
+          </div>
         </div>
       </div>
     </div>
     """
   end
+
+  # Drawer heading, per open mode.
+  defp picker_title(:new), do: gettext("Insert an image")
+  defp picker_title(:featured), do: gettext("Featured image")
+  defp picker_title(_), do: gettext("Choose an image")
 
   defp color_for(id),
     do: Enum.at(@cursor_colors, rem(:erlang.phash2(id), length(@cursor_colors)))
