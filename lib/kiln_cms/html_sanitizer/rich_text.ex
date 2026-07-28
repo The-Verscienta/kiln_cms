@@ -26,13 +26,19 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   allow_tag_with_these_attributes("i", [])
   allow_tag_with_these_attributes("s", [])
   allow_tag_with_these_attributes("strike", [])
+  # The PT renderer emits <u> for underline marks (API-authored; StarterKit v2
+  # has no underline). Without this entry the first-party site silently
+  # stripped what fired :web artifacts kept.
+  allow_tag_with_these_attributes("u", [])
   # Highlighted code blocks (#503): fired PT→HTML re-enters this allowlist on
   # the first-party delivery path (BlockComponents), so the exact markup Makeup
   # emits must survive — `<pre class="highlight">`, `<code class="language-…">`,
   # and token `<span>`s whose class comes from Makeup's finite token-class set.
   # Classes are matched against those closed sets; any other value is stripped,
   # so arbitrary utility classes still can't be smuggled into rich text.
-  @makeup_span_classes KilnCMS.Highlight.span_classes()
+  # MapSet: this check runs once per <span class> and highlighted code carries
+  # one span per token, so membership must not be a linear scan.
+  @makeup_span_classes MapSet.new(KilnCMS.Highlight.span_classes())
 
   allow_tag_with_these_attributes "code", [] do
     {"class", "language-" <> language} ->
@@ -45,7 +51,7 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   end
 
   allow_tag_with_these_attributes "span", [] do
-    {"class", value} -> if value in @makeup_span_classes, do: {"class", value}
+    {"class", value} -> if MapSet.member?(@makeup_span_classes, value), do: {"class", value}
   end
 
   allow_tag_with_these_attributes("h1", [])
@@ -61,7 +67,13 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
 
   # Tables (#475): the accessible markup the PT renderer emits — th scope
   # col/row, and digit-only col/rowspan (capped length; "0" is invalid HTML
-  # anyway and 4 digits is beyond any real table).
+  # anyway and 4 digits is beyond any real table). The scroll wrapper keeps the
+  # table's native display (and so its implicit ARIA table semantics) while
+  # narrow screens scroll the wrapper; only that exact class survives.
+  allow_tag_with_these_attributes "div", [] do
+    {"class", "kiln-table-wrap"} -> {"class", "kiln-table-wrap"}
+  end
+
   allow_tag_with_these_attributes("table", [])
   allow_tag_with_these_attributes("thead", [])
   allow_tag_with_these_attributes("tbody", [])
@@ -77,6 +89,8 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   end
 
   defp valid_span(attr, value) do
-    if value =~ ~r/^[1-9][0-9]{0,3}$/, do: {attr, value}
+    # \z, not $: PCRE's $ also matches before a string-final newline, which
+    # would let an entity-encoded "2\n" through the digit-only contract.
+    if value =~ ~r/\A[1-9][0-9]{0,3}\z/, do: {attr, value}
   end
 end

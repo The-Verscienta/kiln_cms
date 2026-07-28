@@ -14,15 +14,14 @@ defmodule KilnCMS.Highlight do
   plain escaped `<pre>` the renderer always produced.
   """
 
-  # Collapse common editor spellings onto the names the bundled lexers
-  # register (elixir/iex, erlang/erl, eex/heex, js/ts, html, json, css).
-  @aliases %{
+  # Spellings the bundled lexers don't register under, resolved at LOOKUP time
+  # only — stored PT keeps the author's tag (a headless consumer's highlighter
+  # may distinguish jsx from js even though Makeup doesn't), and editing this
+  # map can never retroactively change what stored/fired content means.
+  @lookup_aliases %{
     "ex" => "elixir",
     "exs" => "elixir",
-    "erl" => "erlang",
-    "javascript" => "js",
     "jsx" => "js",
-    "typescript" => "ts",
     "tsx" => "ts",
     "htm" => "html",
     "html.eex" => "eex",
@@ -34,13 +33,13 @@ defmodule KilnCMS.Highlight do
   @language_format ~r/^[a-z0-9_.+#-]{1,32}$/
 
   @doc """
-  Normalize a user-supplied language tag to its canonical lowercase form, or
-  `nil` when absent or not a plausible language token.
+  Normalize a user-supplied language tag — trim, downcase, and validate the
+  format; `nil` when absent or not a plausible language token. Deliberately no
+  aliasing: what the author wrote is what gets stored.
   """
   @spec normalize(term()) :: String.t() | nil
   def normalize(language) when is_binary(language) do
     tag = language |> String.trim() |> String.downcase()
-    tag = Map.get(@aliases, tag, tag)
     if Regex.match?(@language_format, tag), do: tag
   end
 
@@ -56,7 +55,7 @@ defmodule KilnCMS.Highlight do
   """
   @spec highlight(String.t(), String.t()) :: {:ok, String.t()} | :error
   def highlight(code, language) when is_binary(code) and is_binary(language) do
-    case Makeup.Registry.fetch_lexer_by_name(language) do
+    case fetch_lexer(language) do
       {:ok, {lexer, options}} ->
         inner =
           code
@@ -65,6 +64,8 @@ defmodule KilnCMS.Highlight do
           # make fired artifacts nondeterministic (and needs JS to do anything).
           |> String.replace(~r/ data-group-id="[^"]*"/, "")
 
+        # The emitted class carries the author's tag, not the lexer's name, so
+        # fired markup always matches the stored PT block.
         {:ok, ~s(<pre class="highlight"><code class="language-#{language}">#{inner}</code></pre>)}
 
       :error ->
@@ -72,6 +73,19 @@ defmodule KilnCMS.Highlight do
     end
   rescue
     _lexer_crash -> :error
+  end
+
+  defp fetch_lexer(language) do
+    case Makeup.Registry.fetch_lexer_by_name(language) do
+      {:ok, _} = hit ->
+        hit
+
+      :error ->
+        case @lookup_aliases do
+          %{^language => canonical} -> Makeup.Registry.fetch_lexer_by_name(canonical)
+          _ -> :error
+        end
+    end
   end
 
   @doc """

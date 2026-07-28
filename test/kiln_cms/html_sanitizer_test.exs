@@ -64,6 +64,22 @@ defmodule KilnCMS.HTMLSanitizerTest do
       assert HTMLSanitizer.sanitize_rich_text(html) == html
     end
 
+    test "keeps <u> — the PT renderer emits it for underline marks" do
+      html = "<p><u>emphasized</u></p>"
+
+      assert HTMLSanitizer.sanitize_rich_text(html) == html
+    end
+
+    test "keeps the table scroll wrapper but strips every other div class (#475)" do
+      html =
+        ~s|<div class="kiln-table-wrap"><table><tbody><tr><td>a</td></tr></tbody></table></div>|
+
+      assert HTMLSanitizer.sanitize_rich_text(html) == html
+
+      assert HTMLSanitizer.sanitize_rich_text(~s|<div class="fixed inset-0">x</div>|) ==
+               "<div>x</div>"
+    end
+
     test "keeps accessible table markup, strips out-of-range spans (#475)" do
       html =
         "<table><thead><tr>" <>

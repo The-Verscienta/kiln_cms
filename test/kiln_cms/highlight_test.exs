@@ -5,11 +5,14 @@ defmodule KilnCMS.HighlightTest do
   alias KilnCMS.Highlight
 
   describe "normalize/1" do
-    test "lowercases, trims, and resolves aliases onto registered lexer names" do
+    test "lowercases, trims, and format-validates — but never rewrites the tag" do
       assert Highlight.normalize("Elixir") == "elixir"
-      assert Highlight.normalize(" ex ") == "elixir"
-      assert Highlight.normalize("JavaScript") == "js"
-      assert Highlight.normalize("TSX") == "ts"
+      # Aliases resolve at lexer lookup, not here: stored PT and the :json
+      # surface keep the author's spelling (jsx stays jsx for headless
+      # highlighters that distinguish it from js).
+      assert Highlight.normalize(" ex ") == "ex"
+      assert Highlight.normalize("JavaScript") == "javascript"
+      assert Highlight.normalize("TSX") == "tsx"
       assert Highlight.normalize("HEEx") == "heex"
     end
 
@@ -61,6 +64,20 @@ defmodule KilnCMS.HighlightTest do
 
     test "returns :error for unregistered languages" do
       assert Highlight.highlight("print(1)", "python") == :error
+    end
+
+    test "aliased spellings highlight via lookup fallback, keeping the author's tag" do
+      assert {:ok, html} = Highlight.highlight("IO.puts(1)", "ex")
+      assert html =~ ~s(<code class="language-ex">)
+      assert html =~ ~s(<span class="nc">IO</span>)
+
+      # Registered under its own name by makeup_ts — no alias needed, and the
+      # emitted class stays faithful to what the author wrote.
+      assert {:ok, html} = Highlight.highlight("const x = 1", "javascript")
+      assert html =~ ~s(<code class="language-javascript">)
+
+      assert {:ok, html} = Highlight.highlight("const x = 1", "tsx")
+      assert html =~ ~s(<code class="language-tsx">)
     end
   end
 

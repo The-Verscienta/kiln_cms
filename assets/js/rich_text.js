@@ -21,11 +21,18 @@ import TableCell from "@tiptap/extension-table-cell"
 // Tables (#475): StarterKit doesn't include them, so every editor mount adds
 // this set. Column resizing stays off in v1 — colwidths wouldn't survive the
 // Portable Text round-trip, so offering the drag handle would lie to editors.
+// Cells hold paragraphs only (not TipTap's default `block+`): Portable Text
+// stores cells as flat lines, so allowing lists/code blocks in a cell would
+// let editors author structure that flattens on save. Constraining the schema
+// makes what you see in a cell exactly what gets stored (pasted block content
+// coerces to paragraphs at parse time).
+const cellSchema = {content: "paragraph+"}
+
 const TABLE_EXTENSIONS = [
   Table.configure({resizable: false}),
   TableRow,
-  TableHeader,
-  TableCell,
+  TableHeader.extend(cellSchema),
+  TableCell.extend(cellSchema),
 ]
 
 // Code-block language choices (#503). The value is the tag stored on the
@@ -497,6 +504,17 @@ function buildInlineToolbar(hook) {
 
   hook.langSelect = languageSelect(hook.editor)
   bar.appendChild(hook.langSelect.sel)
+
+  // Opening the native select necessarily blurs the editor (its mousedown must
+  // run, unlike the buttons above), which arms the 200ms hide timer — and a
+  // hidden toolbar force-closes the open dropdown. Keep the toolbar alive
+  // while the select has focus; re-arm the hide when focus leaves it.
+  const sel = hook.langSelect.sel
+  sel.addEventListener("focus", () => clearTimeout(hook._blurTimer))
+  sel.addEventListener("blur", () => {
+    clearTimeout(hook._blurTimer)
+    hook._blurTimer = setTimeout(() => hideInlineToolbar(hook), 200)
+  })
 
   hook.tableControls = tableControls(hook.editor)
   bar.appendChild(hook.tableControls.el)

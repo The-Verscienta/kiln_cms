@@ -20,16 +20,28 @@ defmodule KilnCMSWeb.CollabChannel do
 
   alias KilnCMS.Collab.Crdt
 
-  @impl true
-  def join("collab:" <> _key = topic, _params, socket) do
-    if Crdt.enabled?() do
-      {:ok, server} = Crdt.ensure_server(topic)
-      {state, peers} = Crdt.attach(server)
+  # Must match SCHEMA_VSN in assets/js/collab.js. A peer whose bundle predates
+  # the current ProseMirror node set is refused: y-prosemirror deletes nodes
+  # its schema doesn't know from the shared doc, so one stale tab (e.g. open
+  # across a deploy) would silently destroy newer content — tables, at v2 —
+  # for every peer. Refused clients degrade to solo editing with autosave.
+  @schema_vsn 2
 
-      {:ok, %{"state" => Base.encode64(state), "peers" => peers},
-       assign(socket, :doc_server, server)}
-    else
-      {:error, %{reason: "collab disabled"}}
+  @impl true
+  def join("collab:" <> _key = topic, params, socket) do
+    cond do
+      not Crdt.enabled?() ->
+        {:error, %{reason: "collab disabled"}}
+
+      params["vsn"] != @schema_vsn ->
+        {:error, %{reason: "stale bundle"}}
+
+      true ->
+        {:ok, server} = Crdt.ensure_server(topic)
+        {state, peers} = Crdt.attach(server)
+
+        {:ok, %{"state" => Base.encode64(state), "peers" => peers},
+         assign(socket, :doc_server, server)}
     end
   end
 

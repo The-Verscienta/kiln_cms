@@ -23,7 +23,10 @@ defmodule KilnCMSWeb.BlockComponents do
         <% @type == "heading" -> %>
           <h2 class="text-xl font-bold">{@block.content}</h2>
         <% @type == "rich_text" -> %>
-          <div class="space-y-2">{HTMLSanitizer.rich_text_raw(@block.content)}</div>
+          <%!-- `content` is sanitized-or-trusted at build time (the single
+                boundary in TypedBlocks.one_to_legacy); rendering it raw avoids
+                re-parsing span-dense highlighted HTML on every request. --%>
+          <div class="space-y-2">{Phoenix.HTML.raw(@block.content)}</div>
         <% @type == "quote" -> %>
           <blockquote class="border-l-4 border-base-300 pl-3 italic">{@block.content}</blockquote>
         <% @type == "image" -> %>
