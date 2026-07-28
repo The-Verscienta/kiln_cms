@@ -37,11 +37,25 @@ Authorization: Bearer <token>
 | Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
 | Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search` |
+| Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id` | `/categories/by-slug/:slug` |
+| Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`    | `/tags/by-slug/:slug` |
+| TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id` | `/tag-groups/by-slug/:slug` |
 
 `GET /api/json/<plural>/published` returns published records only, ordered
 newest first (`-published_at`) — the delivery feed. It exists on **every**
 content type (incl. `/entries/published` for dynamic types); on posts it doubles
 as the headless blog feed.
+
+Taxonomy is world-readable and read-only over the API (D7). A **tag group** is
+the bucket a tag is filed under: `tag-groups` carries `name`, `slug`,
+`description`, `position`, a `tag_count` aggregate, and `content_types` — an
+array of content-type name strings (`["post"]`) that scopes where the group is
+offered, where **an empty array means every content type**. A tag exposes its
+group as `tag_group_id` plus an includable `tag_group` relationship
+(`/api/json/tags?include=tag_group`); `/api/json/tag-groups?include=tags` goes
+the other way. Frontends rebuilding Kiln's grouped tag UI filter
+`content_types` client-side — it is a short list, so there is no server-side
+`for_content_type` read.
 
 Every content-type search read also has a **published-only twin** at
 `…/search/published`, `…/semantic-search/published` and

@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Category
   alias KilnCMS.CMS.Tag
+  alias KilnCMS.CMS.TagGroup
 
   @password "password123456"
 
@@ -44,6 +45,13 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
     Ash.Seed.seed!(
       Category,
       Map.merge(%{name: "Cat", slug: "cat-#{System.unique_integer([:positive])}"}, attrs)
+    )
+  end
+
+  defp seed_tag_group(attrs) do
+    Ash.Seed.seed!(
+      TagGroup,
+      Map.merge(%{name: "Group", slug: "group-#{System.unique_integer([:positive])}"}, attrs)
     )
   end
 
@@ -105,6 +113,60 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
       assert length(
                Enum.filter(CMS.list_categories!(authorize?: false), &(&1.slug == "dupe-slug"))
              ) == 1
+    end
+  end
+
+  describe "tag groups" do
+    test "an editor adds a group scoped to one content type", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      lv
+      |> form("#new-tag_group-form",
+        tag_group: %{name: "Post themes", content_types: ["post"]}
+      )
+      |> render_submit()
+
+      assert [group] =
+               CMS.list_tag_groups!(authorize?: false)
+               |> Enum.filter(&(&1.name == "Post themes"))
+
+      assert group.slug == "post-themes"
+      assert group.content_types == ["post"]
+    end
+
+    test "a group with no content types checked applies everywhere", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      # The hidden sentinel input is what a browser submits when every checkbox
+      # in the group is unchecked; it must normalize to [] rather than [""].
+      lv
+      |> form("#new-tag_group-form", tag_group: %{name: "Topics", content_types: [""]})
+      |> render_submit()
+
+      assert [group] =
+               CMS.list_tag_groups!(authorize?: false)
+               |> Enum.filter(&(&1.name == "Topics"))
+
+      assert group.content_types == []
+    end
+
+    test "tags are listed under their group's heading", %{conn: conn} do
+      group = seed_tag_group(%{name: "Cuisines"})
+      seed_tag(%{name: "Thai", tag_group_id: group.id})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      assert html =~ "Cuisines"
+      assert html =~ "Thai"
+    end
+
+    test "the delete confirmation says tags survive the group", %{conn: _conn} do
+      group = seed_tag_group(%{name: "Doomed"})
+      seed_tag(%{name: "Kept", tag_group_id: group.id})
+
+      {:ok, _lv, html} = build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+
+      assert html =~ "become ungrouped"
     end
   end
 

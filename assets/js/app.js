@@ -319,6 +319,84 @@ const Hooks = {
       this.editor && this.editor.destroy()
     },
   },
+  // Type-to-filter over the sectioned tag picker. The server renders every tag
+  // it wants submittable (see `tag_picker/1` — an unrendered checkbox would be
+  // *detached* on save), so narrowing happens purely client-side: matching is
+  // hiding, never removing. Sections that end up empty collapse away too.
+  //
+  // The filter input is inside the content form, so it is deliberately unnamed
+  // and wrapped in phx-update="ignore"; `updated()` re-applies the current query
+  // after a LiveView patch re-renders the sections underneath it.
+  TagFilter: {
+    mounted() {
+      this.input = this.el.querySelector("[data-tag-filter-input]")
+      this.empty = this.el.querySelector("[data-tag-filter-empty]")
+      // Whether the *previous* pass was narrowing. Hook state, not a DOM
+      // attribute: morphdom strips client-set attributes on the next patch, so
+      // anything remembered on the element itself is gone the moment the
+      // editor autosaves.
+      this.filtering = false
+      if (!this.input) return
+
+      // stopPropagation is load-bearing, not tidiness: LiveView binds `change`
+      // on the *form* and gates only on "is this a form-associated element",
+      // never on `name`. Without this the filter box pushes `validate` on every
+      // keystroke, which marks the document dirty and schedules a real draft
+      // autosave — a DB write and a paper-trail version for a search box.
+      this.onInput = e => {
+        e.stopPropagation()
+        this.filter()
+      }
+      this.input.addEventListener("input", this.onInput)
+      // Same reason, for the blur-time `change` event.
+      this.onChange = e => e.stopPropagation()
+      this.input.addEventListener("change", this.onChange)
+      // Enter in a search field would otherwise submit the whole content form.
+      this.onKey = e => {
+        if (e.key === "Enter") e.preventDefault()
+      }
+      this.input.addEventListener("keydown", this.onKey)
+    },
+
+    updated() {
+      this.filter()
+    },
+
+    destroyed() {
+      if (!this.input) return
+      this.input.removeEventListener("input", this.onInput)
+      this.input.removeEventListener("change", this.onChange)
+      this.input.removeEventListener("keydown", this.onKey)
+    },
+
+    filter() {
+      if (!this.input) return
+      const q = this.input.value.trim().toLowerCase()
+      // Only the filtering→cleared transition restores the server's own
+      // open/closed choice. Re-applying it on every pass would slam shut any
+      // section the editor opened by hand, every time a patch lands.
+      const restoring = this.filtering && q === ""
+      let anyVisible = false
+
+      this.el.querySelectorAll("[data-tag-section]").forEach(section => {
+        let matches = 0
+        section.querySelectorAll("[data-tag-item]").forEach(item => {
+          const hit = q === "" || (item.dataset.tagItem || "").includes(q)
+          item.hidden = !hit
+          if (hit) matches++
+        })
+        section.hidden = matches === 0
+        // A search should surface hits wherever they live, so expand while
+        // filtering.
+        if (q !== "") section.open = true
+        else if (restoring) section.open = section.dataset.tagOpenDefault === "true"
+        anyVisible = anyVisible || matches > 0
+      })
+
+      this.filtering = q !== ""
+      if (this.empty) this.empty.hidden = anyVisible
+    },
+  },
   // Notion-style slash-command block inserter (#29). The server renders the
   // trigger button + a menu of real `add_block` buttons (one per registered
   // block type); this hook layers on open/close, type-to-filter, and full
