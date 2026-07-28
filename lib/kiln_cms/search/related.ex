@@ -19,12 +19,18 @@ defmodule KilnCMS.Search.Related do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Search
 
-  @typedoc "A scored neighbouring document."
+  @typedoc """
+  A scored neighbouring document. `path` is the canonical *public page* path
+  (alias-aware); note `KilnCMSWeb.RelatedController` deliberately emits an
+  `/api/content/...` href instead, which is a different address for a
+  different consumer.
+  """
   @type neighbour :: %{
           type: String.t(),
           id: Ash.UUID.t(),
           slug: String.t(),
           title: String.t() | nil,
+          path: String.t() | nil,
           distance: float()
         }
 
@@ -159,18 +165,38 @@ defmodule KilnCMS.Search.Related do
     end)
   end
 
+  # `published_only?` serves the reader-facing surfaces — `/api/related` and the
+  # editor's internal-link suggestions — so it means "a page a reader can
+  # actually open", i.e. published AND public. Delivery draws the same line in
+  # `Slugs.find_published_by_alias/3`; without the audience half, both surfaces
+  # advertise member-gated pages to anonymous callers.
   defp neighbour_entry(doc, _distance, true) when doc.state != :published, do: []
+  defp neighbour_entry(doc, _distance, true) when doc.audience != :public, do: []
 
   defp neighbour_entry(doc, distance, _published_only?) do
+    type = KilnCMS.Firing.Engine.public_type(doc)
+
     [
       %{
-        type: KilnCMS.Firing.Engine.public_type(doc),
+        type: type,
         id: doc.id,
         slug: doc.slug,
         title: doc.title,
+        # The canonical public path, resolved here because we hold the whole
+        # record: `public_path_for/2` honors a multi-segment `path_alias`
+        # (#485), which callers rebuilding "/#{type}/#{slug}" themselves
+        # silently get wrong. `nil` if the type no longer resolves.
+        path: public_path(type, doc),
         distance: distance
       }
     ]
+  end
+
+  defp public_path(type, doc) do
+    case ContentTypes.get(type, doc.org_id) do
+      nil -> nil
+      ct -> KilnCMS.CMS.Slugs.public_path_for(ct, doc)
+    end
   end
 
   # Tag-name vectors are pure functions of the (stable) name — memoized so a
