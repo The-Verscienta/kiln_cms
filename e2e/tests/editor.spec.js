@@ -158,6 +158,54 @@ test.describe("editor journey", () => {
     await expect(previewHeadings).toHaveText(["Second", "First"]);
   });
 
+  test("reordering a block doesn't remount its rich-text editor", async ({ page }) => {
+    // The editor host is keyed by the block's stable id, so moving the block
+    // relocates the SAME ProseMirror node instead of tearing it down and
+    // remounting it. Keeping the live editor instance is what preserves the
+    // cursor position and undo stack across a reorder; the content (pushed via
+    // the id-keyed rich_text_body event) still saves against the reordered block.
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Reorder Editor");
+    await page.fill('input[name$="[slug]"]', `e2e-reorder-editor-${Date.now()}`);
+
+    // A heading (with identifiable text) first, then a rich-text block below it.
+    await addBlock(page, "heading");
+    await page.locator('#blocks-sortable textarea[name$="[text]"]').first().fill("HEADING");
+    await addBlock(page, "rich_text");
+
+    const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.type("keep-dropme");
+    await expect(editor).toHaveText("keep-dropme");
+    // Let the 300ms rich_text_body push flush so the server holds the document.
+    await page.waitForTimeout(500);
+
+    // Tag the live editor node with a marker no re-render would reproduce; a
+    // remount would tear this node down and replace it, dropping the tag. The
+    // marker surviving the reorder is exactly what preserves the editor's live
+    // state (cursor + undo history) — those ride on this same instance.
+    await editor.evaluate((el) => (el.dataset.survived = "yes"));
+
+    // Move the rich-text block up above the heading (its card holds the host).
+    const richCard = page
+      .locator("#blocks-sortable > div")
+      .filter({ has: page.locator('[phx-hook="RichText"]') });
+    await richCard.locator('button[phx-value-dir="up"]').click();
+
+    // Same DOM node survived the reorder (editor not remounted) …
+    await expect(editor).toHaveAttribute("data-survived", "yes");
+    // … and its content is preserved live, now in the first card.
+    await expect(editor).toHaveText("keep-dropme");
+    const firstCard = page.locator("#blocks-sortable > div").first();
+    await expect(firstCard.locator('[phx-hook="RichText"]')).toHaveCount(1);
+
+    // Save-time correctness (the reordered content persists against the right
+    // block, matched by id) is covered exhaustively by the LiveView tests in
+    // test/kiln_cms_web/live/editor_live_test.exs — this journey's job is to prove
+    // in a real browser that the reorder does not remount the editor.
+  });
+
   test("the inspector Settings tab and its fields survive per-keystroke validate patches", async ({ page }) => {
     await newDraftPage(page);
 

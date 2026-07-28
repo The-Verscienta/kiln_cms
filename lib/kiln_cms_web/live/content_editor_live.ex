@@ -2563,6 +2563,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Stable DOM key for a rich-text editor host: the block's id, so a reorder
+  # relocates (rather than remounts) the mounted TipTap editor. A brand-new block
+  # has no id until it is saved, so fall back to its index — those still remount
+  # on reorder, which is harmless (a just-added editor has no cursor/undo state
+  # worth preserving) and can't collide with a real id.
+  defp rich_host_key(bf), do: bf[:id].value || "idx-#{bf.index}"
+
   # The first string/rich_text field — the block's primary text field.
   defp primary_field_name(nil), do: nil
 
@@ -3185,20 +3192,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     <%!-- The collab lock UI (ring + "who's editing" badge) lives on
                           this non-ignored wrapper so it can update, while the inner
                           editor stays phx-update="ignore" (#140). --%>
+                    <%!-- The editor host is keyed by the block's STABLE id (falling
+                          back to the index only for a brand-new, not-yet-saved block
+                          that has none), so reordering a saved block relocates the
+                          same DOM node — its mounted TipTap editor, cursor and undo
+                          stack survive instead of remounting. Content saves through
+                          the id-keyed `rich_text_body` push, so a stable host can't
+                          corrupt it; the `data-block-index` below is a `data-*`
+                          attribute (LiveView keeps those in sync even inside a
+                          `phx-update="ignore"` host), so the push still reports the
+                          block's live index. The legacy_html fallback <input> is
+                          deliberately OUTSIDE the ignore host: its param name is
+                          index-based, and only a re-rendered (non-ignored) name stays
+                          correct after a reorder — an ignored name would freeze at
+                          the mount-time index and swap neighbours' content on a
+                          form submit. --%>
                     <div
                       :if={block_type_string(bf) == "rich_text"}
                       class={["relative", lock_ring(@locked_fields, bf[:body].name)]}
                     >
                       <.field_cursors field={bf[:body].name} cursors={@cursors} />
                       <div
-                        id={"rt-#{bf.index}-v#{@editor_version}"}
+                        id={"rt-#{rich_host_key(bf)}-v#{@editor_version}"}
                         phx-hook="RichText"
                         phx-update="ignore"
                         data-block-id={bf[:id].value}
                         data-content={rich_text_editor_html(bf)}
                         data-editor-label={gettext("Rich text editor")}
                         data-lock-field={bf[:body].name}
-                        data-block-id={bf[:id].value}
                         data-block-index={bf.index}
                         data-collab-token={@collab_token}
                         data-collab-topic={@collab_token && @collab_topic}
@@ -3222,18 +3243,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         <p class="mt-1 text-xs text-base-content/70">
                           {gettext("Type / to format this text or insert a block below.")}
                         </p>
-                        <%!-- No-JS/JS-pending fallback: the server-rendered form
-                              round-trips legacy_html exactly as stored. The RichText
-                              hook injects a second hidden input for `body` (name
-                              below) carrying live TipTap JSON — the cast converts it
-                              to Portable Text and, body present, clears legacy_html. --%>
-                        <input
-                          type="hidden"
-                          name={bf[:legacy_html].name}
-                          value={bf[:legacy_html].value}
-                          data-input
-                        />
                       </div>
+                      <%!-- No-JS/JS-pending fallback: the server-rendered form
+                            round-trips legacy_html exactly as stored. Lives outside
+                            the ignore host so its index-based name re-renders on a
+                            reorder; the server (not JS) owns its value, so there is
+                            nothing for a patch to clobber. When a `rich_text_body`
+                            push lands, the cast writes `body` and clears legacy_html. --%>
+                      <input
+                        type="hidden"
+                        name={bf[:legacy_html].name}
+                        value={bf[:legacy_html].value}
+                        data-input
+                      />
                     </div>
                     <div :if={block_type_string(bf) == "image"} class="space-y-2">
                       <img

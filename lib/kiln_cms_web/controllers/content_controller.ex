@@ -270,10 +270,12 @@ defmodule KilnCMSWeb.ContentController do
 
   # Dynamic-entry hits as plain view maps: resolve each result's type through
   # the registry for its URL segment and label, dropping hits whose type no
-  # longer resolves (archived between indexing and render).
+  # longer resolves (archived between indexing and render). The registry is
+  # per-org (#336), so each hit resolves against its OWN org rather than
+  # `get_dynamic/1`'s default-org fallback.
   defp entry_results(entries) do
     Enum.flat_map(entries, fn entry ->
-      case ContentTypes.get_dynamic(entry.type_name) do
+      case ContentTypes.get_dynamic(entry.type_name, entry.org_id) do
         %{path_segment: segment, label: label} ->
           [
             %{

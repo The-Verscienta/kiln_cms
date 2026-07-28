@@ -64,4 +64,13 @@ defmodule KilnCMSWeb.StrictEditorMountTest do
     # a non-crashing mount.
     assert has_element?(view, "h1", "Content")
   end
+
+  test "the overview mounts under strict tenancy", %{conn: conn} do
+    # Every metric read here is tenant-scoped, including the per-org dynamic
+    # type registry the tiles are built from.
+    conn = log_in(conn, authed_admin())
+    {:ok, view, _html} = live(conn, ~p"/editor/overview")
+
+    assert has_element?(view, "#bagua-gen")
+  end
 end
