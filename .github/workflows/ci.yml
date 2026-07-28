@@ -97,6 +97,18 @@ jobs:
         # on the migrations the `test` alias applies.
         run: mix test test/kiln/core_agnostic_test.exs
 
+      - name: Check the gettext catalogs are up to date
+        # `--check-up-to-date` only guards default.pot, so it happily passes
+        # while the per-locale .po files rot — which is exactly how fr/es drifted
+        # 525 messages behind the source and silently fell back to English.
+        # Merging and diffing guards the .po files too, and prints the drift.
+        run: |
+          mix gettext.extract --merge
+          git diff --exit-code -- priv/gettext || {
+            echo "::error::Gettext catalogs are out of date. Run 'mix gettext.extract --merge' and commit priv/gettext, translating any new msgids."
+            exit 1
+          }
+
       - name: Check formatting
         run: mix format --check-formatted
 
