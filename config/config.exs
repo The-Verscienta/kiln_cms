@@ -133,6 +133,30 @@ config :kiln_cms, KilnCMS.Search,
   reranker: KilnCMS.Search.Reranker.Bumblebee,
   rerank_model: "BAAI/bge-reranker-base"
 
+# AI-assisted SEO drafting (#60). The deterministic analysis and score in the
+# editor are ALWAYS on and need none of this — the block below gates the
+# optional "propose a title/description/keywords" step only, and is off by
+# default: with `generator: nil` no module is called and no content leaves the
+# deployment. The intended production setup is an on-prem endpoint
+# (`model: "ollama:llama3.1"`); a hosted provider works too, and is announced at
+# boot and in the editor. API keys are resolved by `req_llm` from its own
+# environment, never read or stored by Kiln. See docs/seo.md.
+config :kiln_cms, KilnCMS.Seo,
+  generator: nil,
+  model: nil,
+  temperature: 0.3,
+  max_tokens: 700,
+  timeout_ms: 20_000,
+  max_input_chars: 12_000,
+  min_words: 50,
+  title_max: 60,
+  description_max: 160,
+  keyword_max: 5,
+  # Both buckets must pass: per-user stops a stuck button, per-org is the
+  # actual spend ceiling.
+  per_user_limit: {20, :timer.minutes(1)},
+  per_org_limit: {200, :timer.hours(1)}
+
 # Optional Meilisearch backend — typo-tolerant, faceted keyword search over
 # published content (Project Plan Phase 6). Disabled by default: with
 # `enabled: false` no content write or publish ever talks to Meilisearch, so the

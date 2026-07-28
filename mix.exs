@@ -71,6 +71,10 @@ defmodule KilnCMS.MixProject do
       {:ash_json_api, "~> 1.0"},
       # MCP server for LLM authoring (write-scoped API keys) — see docs/mcp.md.
       {:ash_ai, "~> 0.7"},
+      # Provider-agnostic LLM client behind the optional SEO drafting generator
+      # (docs/seo.md). Declared directly rather than leaned on as an `ash_ai`
+      # transitive: a minor bump there could make it optional and break us.
+      {:req_llm, "~> 1.17"},
       {:ash_admin, "~> 1.0"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:igniter, "~> 0.5", only: [:dev, :test]},

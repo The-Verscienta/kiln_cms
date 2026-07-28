@@ -313,6 +313,28 @@ if config_env() == :prod do
       index: System.get_env("MEILI_INDEX") || "kiln_content"
   end
 
+  # ## AI-assisted SEO drafting (optional)
+  #
+  # Opt in by setting SEO_MODEL to a `req_llm` model spec. Leave it unset and
+  # the editor's "Suggest" control never renders and nothing leaves the
+  # deployment; the deterministic SEO analysis is unaffected either way.
+  #
+  #     SEO_MODEL=ollama:llama3.1          # on-prem, no egress
+  #     SEO_MODEL=anthropic:claude-sonnet-5 # hosted; also needs ANTHROPIC_API_KEY
+  #
+  # Provider API keys are read by `req_llm` from its own environment variables
+  # (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) — Kiln never reads or stores them.
+  # SEO_GENERATOR overrides the adapter module for a bespoke implementation.
+  if seo_model = System.get_env("SEO_MODEL") do
+    seo_generator =
+      case System.get_env("SEO_GENERATOR") do
+        nil -> KilnCMS.Seo.Generator.ReqLLM
+        module -> Module.concat([module])
+      end
+
+    config :kiln_cms, KilnCMS.Seo, model: seo_model, generator: seo_generator
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

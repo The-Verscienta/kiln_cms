@@ -16,6 +16,7 @@ defmodule KilnCMS.Application do
     # show up in the logs, as the mailer config comment in runtime.exs assumes.
     _ = Oban.Telemetry.attach_default_logger(level: :info)
     warn_if_no_mailer_in_prod()
+    warn_if_seo_drafting_egresses()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -29,6 +30,10 @@ defmodule KilnCMS.Application do
       # Cooldown bucket for the aggregated "relay unreachable" mail alert — one
       # fixed key, so the table stays tiny; a periodic clean keeps it honest.
       {KilnCMS.Mail.RelayAlert, clean_period: :timer.minutes(5)},
+      # Per-user and per-org spend ceilings for SEO drafting. Started
+      # unconditionally: the table is empty until someone asks for a draft, and
+      # starting it lazily would mean the first request raced the supervisor.
+      {KilnCMS.Seo.Budget, clean_period: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
       # Small dedicated store for in-flight WebAuthn challenges (#331) —
@@ -152,6 +157,23 @@ defmodule KilnCMS.Application do
         "No mail delivery is configured (MAIL_MODE / SMTP_HOST unset). Outbound " <>
           "email — confirmations, password resets, notifications — will be queued " <>
           "but never delivered. Set MAIL_MODE=smtp (with SMTP_HOST) or MAIL_MODE=direct."
+      )
+    end
+  end
+
+  # Enabling SEO drafting against a hosted provider means page content leaves
+  # the deployment. That is a legitimate operator choice, but it should never be
+  # a silent one — an editor clicking "Suggest" didn't make it. Announced once
+  # at boot; the editor also carries a standing notice next to the button.
+  defp warn_if_seo_drafting_egresses do
+    if KilnCMS.Seo.enabled?() and KilnCMS.Seo.egress?() do
+      require Logger
+
+      Logger.warning(
+        "SEO drafting is enabled against #{KilnCMS.Seo.provider()} (#{KilnCMS.Seo.model()}). " <>
+          "Page title, excerpt and body text are sent to that provider when an editor asks " <>
+          "for suggestions. Add it to your DPA's subprocessor list, or point SEO_MODEL at a " <>
+          "local endpoint (e.g. ollama:llama3.1) to keep content in the deployment."
       )
     end
   end

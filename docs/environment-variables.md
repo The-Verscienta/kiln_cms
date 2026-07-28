@@ -119,6 +119,20 @@ after enabling. See [`docs/meilisearch.md`](meilisearch.md).
 | `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:246`](../config/runtime.exs#L246), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
 | `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:247`](../config/runtime.exs#L247) |
 
+## Optional — AI-assisted SEO drafting
+
+Opt in by setting `SEO_MODEL`. Unset, the editor's suggest control never
+renders and no content leaves the deployment — the deterministic SEO analysis
+and score are unaffected either way. Prefer an on-prem model
+(`ollama:`/`vllm:`); a hosted provider is announced at boot and in the editor,
+and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime.exs`](../config/runtime.exs) |
+| `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs`](../config/runtime.exs) |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | unset | Provider credentials. **Read by `req_llm`, never by Kiln** — they don't enter Kiln's config or database. | `req_llm` |
+
 ## Optional — error tracking (Sentry)
 
 Enabled in any environment only when `SENTRY_DSN` is set; otherwise every Sentry

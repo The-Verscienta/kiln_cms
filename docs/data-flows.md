@@ -74,6 +74,7 @@ Configure the sender and adapter in `config/runtime.exs`
 |--------------|-------|-----------|---------|
 | **Meilisearch** | Published content (title, blocks, SEO) for the search index | `config :kiln_cms, KilnCMS.Search.Meilisearch, enabled: true` | `enabled: false` (default) — no content write talks to it. |
 | **S3 / MinIO** | Uploaded media blobs | `config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.S3` | Default is `KilnCMS.Storage.Local` (no third party). |
+| **LLM provider** (SEO drafting) | On an editor's explicit request: the page title, excerpt, headings, existing SEO values and body text (truncated) | `config :kiln_cms, KilnCMS.Seo, generator: …, model: …` — or `SEO_MODEL` | `generator: nil` (default) — no module is called. Pointing `model:` at an on-prem endpoint (`ollama:`/`vllm:`) keeps content in the deployment; Kiln logs a warning at boot and shows an editor notice when the configured provider is third-party. See `docs/seo.md`. |
 
 If you enable either, add it to your DPA's subprocessor list.
 
