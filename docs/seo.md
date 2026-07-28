@@ -55,7 +55,9 @@ Run a model next to Kiln and no content crosses the network boundary:
 SEO_MODEL=ollama:llama3.1
 ```
 
-Or in config:
+The environment variables are read in the production/release branch of
+`config/runtime.exs`, alongside `MEILI_URL` and the rest — so for dev or test,
+configure it in a config file instead:
 
 ```elixir
 config :kiln_cms, KilnCMS.Seo,

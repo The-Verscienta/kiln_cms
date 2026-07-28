@@ -16,6 +16,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   """
   use KilnCMSWeb, :live_view
 
+  require Logger
+
   import Ash.Expr, only: [expr: 1]
   import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
 
@@ -115,6 +117,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # Preview render is only refreshed while the Preview tab is showing;
          # this tracks whether an off-tab edit left it needing a re-render.
          |> assign(:preview_stale, false)
+         # AI-assisted SEO drafting (#60). Read once at mount: this is global
+         # app config, so it can't change under a live session. `seo_drafts`
+         # holds the current proposal (never persisted, never broadcast — each
+         # editor's suggestions are their own); `seo_dismissed` tracks fields
+         # already accepted or waved away so their cards stop rendering.
+         |> assign(:seo_enabled?, KilnCMS.Seo.enabled?())
+         |> assign(:seo_egress?, KilnCMS.Seo.egress?())
+         |> assign(:seo_provider, KilnCMS.Seo.provider())
+         |> assign(:seo_drafting?, false)
+         |> assign(:seo_drafts, nil)
+         |> assign(:seo_dismissed, MapSet.new())
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -221,6 +234,38 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
+
+  # Drafting results. Note the double wrap: `start_async` wraps the function's
+  # own return, so a successful generation arrives as `{:ok, {_version, {:ok, _}}}`.
+  # All three arms must clear `seo_drafting?` or the button stays stuck forever.
+  @impl true
+  def handle_async(:seo_draft, {:ok, {version, result}}, socket) do
+    socket = assign(socket, :seo_drafting?, false)
+
+    cond do
+      # A conflict reload or version restore replaced the form while we waited;
+      # the suggestion describes content the author is no longer editing.
+      version != socket.assigns.editor_version ->
+        {:noreply, socket}
+
+      match?({:ok, _draft}, result) ->
+        {:ok, draft} = result
+        {:noreply, assign(socket, :seo_drafts, draft)}
+
+      true ->
+        {:error, reason} = result
+        {:noreply, put_flash(socket, :error, seo_error_message(reason))}
+    end
+  end
+
+  def handle_async(:seo_draft, {:exit, reason}, socket) do
+    Logger.warning("SEO drafting task exited: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:seo_drafting?, false)
+     |> put_flash(:error, gettext("Couldn't generate suggestions. Please try again."))}
+  end
 
   defp assign_record(socket, record) do
     socket = assign(socket, :record, record)
@@ -821,6 +866,56 @@ defmodule KilnCMSWeb.ContentEditorLive do
       nil -> {:noreply, socket}
       url -> {:noreply, put_seo_image(socket, url)}
     end
+  end
+
+  # Ask the configured generator for SEO suggestions (#60). Off unless an
+  # operator configured a model; the control isn't rendered otherwise.
+  def handle_event("seo_suggest", _params, socket) do
+    # Ignore a re-click while a run is in flight: the disabled attribute is
+    # client-side only, so a fast double-click (or a replayed event) would
+    # otherwise start a second generation and bill for it.
+    if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? do
+      {:noreply, socket}
+    else
+      document = seo_document(socket)
+      # The rate-limit bucket keys interpolate this, so it must be the id —
+      # `current_org` is the Organization struct (Ash takes it as a tenant, but
+      # a struct in a bucket key would blow up on String.Chars).
+      org_id = org_id(socket.assigns.current_org)
+      actor_id = socket.assigns.actor.id
+      # Stamped so a result that lands after a conflict reload or a version
+      # restore (both bump `editor_version`) can be recognized as stale.
+      version = socket.assigns.editor_version
+
+      {:noreply,
+       socket
+       |> assign(:seo_drafting?, true)
+       |> assign(:seo_dismissed, MapSet.new())
+       |> start_async(:seo_draft, fn ->
+         # Captures plain data only — never the socket or the form struct,
+         # both of which are stale the moment an autosave rebuilds the form.
+         {version, KilnCMS.Seo.draft(document, org_id: org_id, user_id: actor_id)}
+       end)}
+    end
+  end
+
+  def handle_event("seo_dismiss", %{"field" => field}, socket),
+    do:
+      {:noreply, assign(socket, :seo_dismissed, MapSet.put(socket.assigns.seo_dismissed, field))}
+
+  def handle_event("seo_dismiss_all", _params, socket),
+    do: {:noreply, socket |> assign(:seo_drafts, nil) |> assign(:seo_dismissed, MapSet.new())}
+
+  def handle_event("seo_accept", %{"field" => field}, socket),
+    do: {:noreply, accept_suggestion(socket, field)}
+
+  def handle_event("seo_accept_all", _params, socket) do
+    socket =
+      socket.assigns.seo_drafts
+      |> suggested_fields()
+      |> Enum.reduce(socket, &accept_suggestion(&2, &1))
+
+    {:noreply, socket}
   end
 
   def handle_event("close_picker", _params, socket),
@@ -1913,6 +2008,132 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp reset_picker(socket),
     do: socket |> assign(:picking, nil) |> assign(:media_query, "") |> assign(:picker_media, nil)
 
+  # ── AI-assisted SEO drafting (#60) ────────────────────────────────────────
+
+  # The projection handed to the generator, built from the *live* form so an
+  # unsaved draft can be described. `preview_block_maps/1` already gives the
+  # editor's current typed blocks, including unsaved rich-text bodies.
+  defp seo_document(socket) do
+    form = socket.assigns.form
+
+    KilnCMS.Seo.Document.new(%{
+      title: AshPhoenix.Form.value(form, :title),
+      excerpt: socket.assigns.has_excerpt && AshPhoenix.Form.value(form, :excerpt),
+      blocks: preview_block_maps(form),
+      # The *record's* locale, not the admin UI's — otherwise a French page
+      # gets English metadata because the editor was browsing in English.
+      locale: AshPhoenix.Form.value(form, :locale),
+      content_type: socket.assigns.content_type.label,
+      seo_title: AshPhoenix.Form.value(form, :seo_title),
+      seo_description: AshPhoenix.Form.value(form, :seo_description),
+      seo_keywords: AshPhoenix.Form.value(form, :seo_keywords)
+    })
+  end
+
+  # Which fields the current draft actually proposes, in display order.
+  defp suggested_fields(nil), do: []
+
+  defp suggested_fields(draft) do
+    Enum.filter(
+      ~w(seo_title seo_description seo_keywords),
+      &(suggested_value(draft, &1) not in [nil, ""])
+    )
+  end
+
+  defp suggested_value(nil, _field), do: nil
+  defp suggested_value(draft, "seo_title"), do: draft.seo_title
+  defp suggested_value(draft, "seo_description"), do: draft.seo_description
+
+  defp suggested_value(draft, "seo_keywords"),
+    do: KilnCMS.Seo.Draft.keywords_string(draft)
+
+  defp suggested_value(_draft, _field), do: nil
+
+  # Accept one proposed value into the form.
+  #
+  # Three guards, none of which the UI alone can provide:
+  #
+  #   * the collaborative field lock is advisory — a readonly input still
+  #     submits — so a disabled button is not a boundary. A replayed event or a
+  #     stale DOM reaches here, and without this check it would silently
+  #     overwrite whatever a peer is typing.
+  #   * a conflicted editor can't save at all, so writing into it would only
+  #     bury the suggestion behind a reload.
+  #   * params are recomputed from the form *now*, never snapshotted when the
+  #     generation started — a 5s call spans two debounced autosaves, after
+  #     which the form has been rebuilt with a bumped `lock_version`.
+  defp accept_suggestion(socket, field) do
+    value = suggested_value(socket.assigns.seo_drafts, field)
+
+    cond do
+      is_nil(value) or value == "" ->
+        socket
+
+      socket.assigns.conflict ->
+        put_flash(
+          socket,
+          :error,
+          gettext("Reload to resolve the editing conflict before applying suggestions.")
+        )
+
+      field_locked?(locked_fields(socket), field) ->
+        put_flash(socket, :info, gettext("Another editor is editing that field right now."))
+
+      true ->
+        params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put(field, value)
+        {params, socket} = maybe_sync_slug(field, params, socket)
+
+        socket
+        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+        |> assign(:seo_dismissed, MapSet.put(socket.assigns.seo_dismissed, field))
+        |> mark_dirty()
+    end
+  end
+
+  # `seo_keywords` is a slug source (`slug_targets/1`), so *typing* it
+  # re-derives the slug. Accepting a suggestion has to make a deliberate
+  # choice, because neither "always" nor "never" is right:
+  #
+  #   * on a draft that has never been published there is no live URL to break,
+  #     and not re-deriving would diverge from what typing the same value does;
+  #   * on anything published, silently moving a live URL because an AI
+  #     proposed a keyphrase would be indefensible — so it's left alone and
+  #     the author is told.
+  #
+  # `sync_slug/3` already no-ops when the author has pinned the slug, so a
+  # hand-written slug is safe in both branches.
+  defp maybe_sync_slug("seo_keywords", params, socket) do
+    record = socket.assigns.record
+
+    if record.state == :draft and is_nil(record.published_at) do
+      sync_slug(params, ["form", "seo_keywords"], socket)
+    else
+      {params,
+       put_flash(
+         socket,
+         :info,
+         gettext("Keywords applied. The slug was left unchanged because this content is live.")
+       )}
+    end
+  end
+
+  defp maybe_sync_slug(_field, params, socket), do: {params, socket}
+
+  defp seo_error_message(:too_short),
+    do: gettext("There isn't enough content yet to suggest metadata from.")
+
+  defp seo_error_message(:disabled),
+    do: gettext("AI suggestions aren't configured.")
+
+  defp seo_error_message({:rate_limited, retry_after_ms}),
+    do:
+      gettext("Too many suggestions requested. Try again in %{seconds}s.",
+        seconds: max(div(retry_after_ms, 1000), 1)
+      )
+
+  defp seo_error_message(_reason),
+    do: gettext("Couldn't generate suggestions. Please try again.")
+
   # Write `seo_image` from a server-side action (picker / featured-image copy).
   #
   # The advisory field lock is re-checked *here*, not just on the button: the
@@ -2357,6 +2578,89 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp any_custom_field_errors?(form, definitions),
     do: Enum.any?(definitions, &(custom_field_errors(form, &1.name) != []))
+
+  attr :draft, :any, required: true
+  attr :fields, :list, required: true
+  attr :dismissed, :any, required: true
+  attr :locked_fields, :any, required: true
+
+  # Proposed values, one card per field, each accepted or dismissed on its own.
+  # Nothing here writes anything — every value needs a human click, which is
+  # the primary control on a generated string reaching a public `<meta>` tag.
+  defp seo_suggestions(assigns) do
+    assigns = assign(assigns, :pending, Enum.reject(assigns.fields, &(&1 in assigns.dismissed)))
+
+    ~H"""
+    <div :if={@pending != []} class="mt-2 space-y-2">
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-xs font-medium text-base-content/70">
+          {gettext("Suggestions")}
+        </span>
+        <div class="flex items-center gap-2">
+          <button type="button" phx-click="seo_accept_all" class="text-xs underline">
+            {gettext("Use all")}
+          </button>
+          <button
+            type="button"
+            phx-click="seo_dismiss_all"
+            class="text-xs text-base-content/60 underline"
+          >
+            {gettext("Dismiss")}
+          </button>
+        </div>
+      </div>
+
+      <div
+        :for={field <- @pending}
+        class="rounded border border-base-content/15 bg-base-200/40 p-2"
+      >
+        <p class="text-xs font-medium text-base-content/60">{seo_field_label(field)}</p>
+        <p class="mt-0.5 text-xs break-words">{seo_suggestion_value(@draft, field)}</p>
+        <div class="mt-1.5 flex items-center gap-2">
+          <button
+            type="button"
+            phx-click="seo_accept"
+            phx-value-field={field}
+            disabled={field_locked?(@locked_fields, field)}
+            class="btn btn-sm btn-default"
+          >
+            {gettext("Use")}
+          </button>
+          <button
+            type="button"
+            phx-click="seo_dismiss"
+            phx-value-field={field}
+            class="text-xs text-base-content/60 hover:text-base-content"
+          >
+            {gettext("Dismiss")}
+          </button>
+          <span class="ml-auto text-xs text-base-content/50">
+            {seo_suggestion_length(@draft, field)}
+          </span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp seo_field_label("seo_title"), do: gettext("SEO title")
+  defp seo_field_label("seo_description"), do: gettext("SEO description")
+  defp seo_field_label("seo_keywords"), do: gettext("SEO keywords")
+  defp seo_field_label(field), do: field
+
+  defp seo_suggestion_value(draft, field), do: suggested_value(draft, field)
+
+  # Character count against the band the analyzer checks, so the author can see
+  # a proposal is in range before accepting it.
+  defp seo_suggestion_length(draft, field) do
+    length = draft |> suggested_value(field) |> to_string() |> String.length()
+
+    case field do
+      "seo_title" -> "#{length}/#{KilnCMS.Seo.title_max()}"
+      "seo_description" -> "#{length}/#{KilnCMS.Seo.description_max()}"
+      _ -> ""
+    end
+  end
 
   attr :form, :any, required: true
   attr :media, :list, required: true
@@ -3770,6 +4074,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   slug_customized?={@slug_customized?}
                   class="rounded border border-base-content/10 bg-base-200/40 p-2"
                 />
+                <div :if={@seo_enabled?}>
+                  <%!-- `type="button"` is mandatory: this sits inside the main
+                        <.form>, so the default type would submit it. --%>
+                  <button
+                    type="button"
+                    phx-click="seo_suggest"
+                    disabled={@seo_drafting? or @conflict}
+                    class="btn btn-sm btn-default"
+                  >
+                    {gettext("Suggest with AI")}
+                    <.icon
+                      :if={@seo_drafting?}
+                      name="hero-arrow-path"
+                      class="ml-1 size-3 motion-safe:animate-spin"
+                    />
+                  </button>
+                  <%!-- Standing, non-dismissible: the operator chose a
+                        third-party provider, the editor clicking didn't. --%>
+                  <p :if={@seo_egress?} class="mt-1 text-xs text-warning">
+                    {gettext(
+                      "Suggestions are generated by %{provider}. This page's title, excerpt and text are sent to that provider.",
+                      provider: @seo_provider
+                    )}
+                  </p>
+                  <.seo_suggestions
+                    draft={@seo_drafts}
+                    fields={suggested_fields(@seo_drafts)}
+                    dismissed={@seo_dismissed}
+                    locked_fields={@locked_fields}
+                  />
+                </div>
                 <div class={["relative", lock_ring(@locked_fields, "seo_title")]}>
                   <.input
                     field={@form[:seo_title]}

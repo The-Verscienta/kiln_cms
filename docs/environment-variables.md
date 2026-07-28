@@ -123,7 +123,9 @@ after enabling. See [`docs/meilisearch.md`](meilisearch.md).
 
 Opt in by setting `SEO_MODEL`. Unset, the editor's suggest control never
 renders and no content leaves the deployment — the deterministic SEO analysis
-and score are unaffected either way. Prefer an on-prem model
+and score are unaffected either way. Like the other variables on this page these
+are read in the production branch of `runtime.exs`; for dev or test, set
+`config :kiln_cms, KilnCMS.Seo, …` in a config file. Prefer an on-prem model
 (`ollama:`/`vllm:`); a hosted provider is announced at boot and in the editor,
 and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md).
 

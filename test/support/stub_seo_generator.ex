@@ -73,9 +73,14 @@ defmodule KilnCMS.StubSeoGenerator.Counting do
 
   def reset, do: Agent.update(__MODULE__, fn _ -> 0 end)
 
+  # Deliberately slow: the re-entrancy guard can only be exercised while a run
+  # is genuinely in flight. An instant stub completes before a test's second
+  # click is processed, so the guard would never be reached and the test would
+  # pass for the wrong reason.
   @impl KilnCMS.Seo.Generator
   def draft(document, _opts \\ []) do
     Agent.update(__MODULE__, &(&1 + 1))
+    Process.sleep(150)
     {:ok, %Draft{seo_title: "Draft #{count()} for #{document.title}"}}
   end
 end
