@@ -54,6 +54,11 @@ defmodule KilnCMS.StubSeoGenerator.Raising do
   @moduledoc "A generator that raises, proving the facade degrades instead of crashing its caller."
   @behaviour KilnCMS.Seo.Generator
 
+  # Raising unconditionally is the whole point, so dialyzer is right that there
+  # is no local return — that's the behaviour under test, not a defect.
+  @dialyzer {:nowarn_function, draft: 1}
+  @dialyzer {:nowarn_function, draft: 2}
+
   @impl KilnCMS.Seo.Generator
   def draft(_document, _opts \\ []), do: raise("provider exploded")
 end
