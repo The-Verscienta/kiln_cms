@@ -12,6 +12,21 @@ defmodule KilnCMS.MixProject do
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
+      # Never let `gettext.merge` copy a translation between non-identical
+      # msgids. Its fuzzy matcher is Jaro distance on the msgid, and at the
+      # 0.8 default our short UI strings collide constantly — "Site name" was
+      # matched to "Set name" and inherited its Spanish ("Establecer nombre"),
+      # "Powered by %{name}." inherited "Se restauró %{name}." ("It was
+      # restored"). Those land as *confident, wrong* translations that read as
+      # already-done work, which is worse than no translation at all.
+      #
+      # 1.0 means "only match identical msgids", and identical msgids are
+      # already handled as exact matches before fuzzy is tried — so this
+      # effectively turns fuzzy off. A new msgid now gets an empty msgstr and
+      # falls back to English, which the untranslated-msgid CI check catches.
+      # (`--no-fuzzy` does the same but is CLI-only; this applies to every
+      # invocation, including someone running the bare command locally.)
+      gettext: [fuzzy_threshold: 1.0],
       consolidate_protocols: Mix.env() != :dev,
       dialyzer: [
         plt_add_apps: [:mix, :ex_unit],
@@ -221,6 +236,11 @@ defmodule KilnCMS.MixProject do
         "sobelow --config",
         "deps.audit",
         "kiln.plugins.doctor",
+        # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
+        # keeps its non-destructive contract — the *drift* half of the gate
+        # still lives in CI only, because `gettext.extract --merge` rewrites
+        # priv/gettext. Run that yourself before pushing.
+        "kiln.gettext.check",
         "test"
       ]
     ]

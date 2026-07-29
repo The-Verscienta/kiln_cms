@@ -109,6 +109,13 @@ jobs:
             exit 1
           }
 
+      - name: Check the gettext catalogs are actually translated
+        # The drift check above only proves the catalogs match the source — it
+        # passes just as happily on an empty msgstr (silently renders English)
+        # or a bogus fuzzy (renders a *wrong* translation, which is worse).
+        # Both shipped past it repeatedly; see the task's moduledoc.
+        run: mix kiln.gettext.check
+
       - name: Check formatting
         run: mix format --check-formatted
 
