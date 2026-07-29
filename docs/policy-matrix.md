@@ -41,7 +41,11 @@ Two non-role actors also appear below:
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
 
-## Content — `Page`, `Post` (`KilnCMS.CMS.Content` macro)
+## Content — `Page`, `Post`, `Entry` (`KilnCMS.CMS.Content` macro)
+
+`Entry` is the dynamic-content-type resource; it is generated from the same
+macro and so carries an identical policy stack. Everything below applies to all
+three, and to any content type a downstream project defines.
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
@@ -59,7 +63,7 @@ Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads ret
 `publish_scheduled` is additionally allowed for the **system** AshOban scheduler
 via `bypass AshOban.Checks.AshObanInteraction`.
 
-## Version history — `Page.Version`, `Post.Version` (`KilnCMS.CMS.VersionPolicies`)
+## Version history — `Page.Version`, `Post.Version`, `Entry.Version` (`KilnCMS.CMS.VersionPolicies`)
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
@@ -177,3 +181,236 @@ themselves**; other readers see the record without `role`.
 
 `Token` — every action is gated to the AshAuthentication interaction bypass; there
 are no caller-facing token actions.
+
+## Platform accounts — `Organization`, `OrgMembership`, `Role`, `ApiKey`, `Passkey`, `UserIdentity`
+
+These five resources gate on the **platform** role
+(`actor_attribute_equals(:role, :admin)`), not on `OrgAdmin` — they are the
+tenant registry and the credentials that sit above any one tenant, so "admin"
+here means platform admin.
+
+`Organization` — no `destroy` action exists; organizations are deliberately not
+deletable.
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `by_slug`, `by_custom_domain`) | ✅ all | 🔎 own memberships | 🔎 own memberships | ❌ |
+| `create`, `update` | ✅ | ❌ | ❌ | ❌ |
+
+`OrgMembership`:
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `for_user`, `for_org`) | ✅ all | 🔎 own rows | 🔎 own rows | ❌ |
+| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+The read grants above are why both resources scope their deny to write actions
+only: Ash AND-combines every applicable policy, so a bare `policy always()`
+would hard-forbid the self-read rather than filter it.
+
+`Role` (per-org role definitions):
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `for_org`), `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Scoping resolution itself reads roles as the **system** (`authorize?: false`).
+
+`ApiKey`:
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `for_user`), `create`, `revoke`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Minting returns the plaintext key exactly once; only the SHA-256 hash is stored.
+Sign-in looks the key up through the AshAuthentication interaction bypass.
+
+`Passkey`:
+
+| Action | admin | editor / viewer (own) | editor / viewer (other) | anonymous |
+|--------|:-----:|:---------------------:|:-----------------------:|:---------:|
+| read (`read`, `for_user`) | ✅ all | 🔎 own credentials | 🔎 filtered out | ❌ |
+| `destroy` | ✅ | ✅ (own) | ❌ | ❌ |
+| `register`, `bump_usage` | ⚙️ | ⚙️ | ⚙️ | ⚙️ |
+
+`register` and `bump_usage` are `forbid_if always()` — the WebAuthn ceremony
+code writes them as the system.
+
+`UserIdentity` — every action is forbidden to every role; only
+AshAuthentication's own OAuth machinery passes, via its interaction bypass.
+
+## Forms — `Form`, `FormField`, `FormSubmission`
+
+`Form`:
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| `active_by_slug` (read) | ✅ | ✅ | ✅ | ✅ |
+| read (`read`) | ✅ | ✅ | ❌ | ❌ |
+| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+`active_by_slug` is the public render path — it is what lets an anonymous
+visitor load a form. Building forms is an admin concern, like webhooks and field
+definitions.
+
+`FormField`:
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `for_form`) | ✅ | ✅ | ✅ | ✅ |
+| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Reads are world-open because fields render on public forms. Note the asymmetry
+with `Form`: the parent's `active` flag is the visibility gate and it is
+enforced *where forms are fetched*, not on this resource — so the fields of an
+inactive form are readable directly. Recorded as residual risk 6 in
+[`threat-model.md`](threat-model.md).
+
+`FormSubmission`:
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `recent_for_form`), `create`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Submission contents are visitor-provided data, frequently PII — admin eyes only.
+The public submit path validates and then writes as the **system**.
+
+## Redirects & branding — `Redirect`, `SiteBranding`
+
+| Resource | read | writes |
+|---|---|---|
+| `Redirect` (`read`) | ✅ everyone incl. anonymous | admin only (`create`, `destroy`) |
+| `SiteBranding` (`read`) | ✅ everyone incl. anonymous | admin only (`save`, `update`, `destroy`) |
+
+Both are public information by design — delivery serves the same redirect map to
+anyone who hits an old URL, and branding tokens render on every public page.
+Both reads are tenant-scoped, so a request sees only its own site's rows. The
+slug-change hook that writes redirects runs as the **system**.
+
+## Content types — `TypeDefinition`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `by_name`, `archived`) | ✅ | ✅ | ❌ | ❌ |
+| `create`, `update`, `destroy` (soft), `restore` | ✅ | ❌ | ❌ | ❌ |
+
+Admins own the schema; editors read definitions so the editor UI can list
+dynamic types. Mirrors `FieldDefinition`.
+
+## Compliance — `Consent`, `HistoryAnchor`, `DocumentEvent`
+
+`Consent`:
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `for_content`), `record` | ✅ | ✅ | ❌ | ❌ |
+| `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+There is no `update` action — consent records are corrected by recording a new
+one, not by editing history.
+
+`HistoryAnchor` — every action (`read`, `for_content`, `create`) is admin-only;
+there is deliberately no destroy. The publish pipeline writes anchors as the
+**system**.
+
+`History.DocumentEvent`:
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `for_document`) | ✅ | ✅ | ❌ | ❌ |
+| `append`, `anonymize_actor` | ⚙️ | ⚙️ | ⚙️ | ⚙️ |
+
+Writes are `forbid_if always()` for every role — the event log is append-only
+through the History API as the system, and has no destroy action at all.
+
+## Automation & newsletter
+
+`Automation.Rule`, `Newsletter.Subscriber`, `Newsletter.Segment`,
+`Newsletter.SegmentMembership`, `Newsletter.NewsletterSend` all carry the same
+single policy: `authorize_if OrgAdmin` on every action. Admin-only across the
+board; editors, viewers and anonymous callers get nothing.
+
+The public newsletter flows (`subscribe`, `confirm`, `unsubscribe`) and the send
+pipeline run as the **system** behind signed-token checks. The two token reads
+(`by_confirm_token`, `by_unsubscribe_token`) declare `multitenancy :bypass`
+deliberately — the token is the secret, and the confirming visitor has no
+tenant context.
+
+## Delivery internals — `PublishedArtifact`, `ReferenceEdge`, `BlockEmbedding`
+
+| Resource | read | `create` / `update` / `destroy` |
+|---|---|---|
+| `Firing.PublishedArtifact` | ✅ everyone incl. anonymous | ❌ **everyone, incl. admin** |
+| `Firing.ReferenceEdge` | ✅ everyone incl. anonymous | ❌ **everyone, incl. admin** |
+| `Search.BlockEmbedding` | ✅ everyone incl. anonymous | ❌ **everyone, incl. admin** |
+
+These three have no bypass of any kind: the firing engine and the search indexer
+write them as the **system**, so no caller-facing write path exists. Their reads
+are `authorize_if always()`.
+
+That read grant is worth understanding rather than assuming: `PublishedArtifact`
+holds the *rendered* body of a document, so the audience axis enforced on
+`Content` is not re-enforced at the artifact tier. None of the three is exposed
+through `json_api` or `graphql`, so reachability is via internal code paths
+only. Tracked as residual risk 6 in [`threat-model.md`](threat-model.md).
+
+## Webhook deliveries — `WebhookDelivery`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `recent`), `create`, `record_attempt`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Delivery history is admin-only. The delivery pipeline writes attempts as the
+system, and the `prune_deliveries` AshOban trigger runs under the
+`AshObanInteraction` bypass.
+
+## The API-key axis
+
+Role and audience are not the only axes. An actor authenticated by a `kiln_…`
+API key carries an immutable **access scope**, and two checks gate on it:
+
+| Check | Matches |
+|---|---|
+| `KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess` | an API-key actor whose key is *not* `:read_write` — i.e. a `:read` key, or any key whose record cannot be inspected (**fails closed to read-only**) |
+| `AshAuthentication.Checks.UsingApiKey` | *any* API-key actor, regardless of scope |
+
+Applied as `forbid_if` clauses placed **before** the `OrgAdmin` bypass, so a key
+minted on an admin account cannot skip them:
+
+| Resource | `create` / `update` | `destroy` | `purge` (hard delete) |
+|---|---|---|---|
+| `Page`, `Post`, `Entry` | forbid `ApiKeyWithoutWriteAccess` | forbid `ApiKeyWithoutWriteAccess` | forbid **any** API key |
+| `MediaItem`, `Tag`, `TagGroup`, `Category` | forbid `ApiKeyWithoutWriteAccess` | forbid **any** API key | — |
+| `Tagging`, `ContentLink` | forbid `ApiKeyWithoutWriteAccess` (all write types) | — | — |
+
+The net rule: a `:read` key may read whatever its owner may read and write
+nothing; a `:read_write` key may author as its owner; **no** key may hard-delete
+anything, whoever owns it.
+
+## Block field policies — `editable_by`
+
+A third, finer axis sits *inside* the block tree. A `Kiln.Block` field may
+declare `editable_by: [roles]` (`Kiln.Block.Policy`); absent that, any editor
+may edit it, and admins may edit everything. Today `KilnCMS.Blocks.Quote`
+declares `field :featured, editable_by: [:admin]`.
+
+Enforcement is at the resource boundary, not in the UI:
+`KilnCMS.CMS.Changes.EnforceBlockFieldPolicy` runs on every content create and
+update, so the write API's `block_tree` argument, MCP tools and GraphQL
+mutations are all covered — not just the editor form, which additionally filters
+the fields it renders. An existing block (matched by id) may keep whatever value
+it already had; a new block must carry the field's declared default.
+
+Nested children of a `columns` block are raw maps rather than union members, so
+they carry no id to diff and are held to the stricter default-value rule. A
+headless client that drops block ids *and* omits a restricted field still gets
+the default, which can clear an admin-set value — residual risk 8 in
+[`threat-model.md`](threat-model.md).
+
+## Coverage
+
+Every resource registered in `:ash_domains` appears above.
+`test/kiln_cms/policy_coverage_test.exs` fails the build if a resource is ever
+added without `Ash.Policy.Authorizer` and a `policies` block — the failure mode
+that matters, since a resource with no authorizer is not merely unprotected but
+silently world-writable.

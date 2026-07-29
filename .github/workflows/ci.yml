@@ -131,6 +131,61 @@ jobs:
       - name: Dialyzer
         run: mix dialyzer
 
+  # Deliberately its own job rather than a step in `build` (#51). The advisory
+  # database moves on its own schedule, so this gate can fail on a PR that
+  # changed nothing about dependencies. Kept separate, that failure reads as
+  # "a new CVE landed" instead of burying the format/credo/sobelow/test results
+  # for an unrelated change — the way the in-job gettext gate already does.
+  deps_audit:
+    name: Dependency audit (mix_audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Cache deps and _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-audit-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-audit-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      # `mix deps.audit` reads mix.lock only — it never compiles the app, so this
+      # job needs no database and no asset build.
+      - name: Install dependencies
+        run: mix deps.get
+
+      # mix_audit clones the advisory database into ~/.local/share at *run* time
+      # and discards the exit status of its own git commands
+      # (MixAudit.Repo.synchronize/0). If that clone fails — offline runner,
+      # GitHub outage — the advisory set is empty and `mix deps.audit` reports
+      # "No vulnerabilities found" and exits 0. A gate that silently passes
+      # because it checked nothing is worse than no gate, so fetch the database
+      # here and fail loudly when it is missing or empty.
+      - name: Fetch advisory database
+        run: |
+          set -euo pipefail
+          db="$HOME/.local/share/elixir-security-advisories-mirego"
+          git clone --quiet https://github.com/mirego/elixir-security-advisories.git "$db"
+          count=$(find "$db/packages" -name '*.yml' | wc -l)
+          echo "Advisory database: $count advisories"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::Advisory database is empty — the audit would pass vacuously."
+            exit 1
+          fi
+
+      - name: Dependency audit
+        run: mix deps.audit
+
   client:
     name: Elixir client (kiln_client)
     runs-on: ubuntu-latest

@@ -93,11 +93,38 @@ mix precommit
 ```
 
 It runs: `compile --warnings-as-errors`, `deps.unlock --unused`, `format`,
-`credo --strict`, `sobelow` (security scan), and the test suite. CI
+`credo --strict`, `sobelow` (security scan), `deps.audit` (dependency CVE scan,
+see below), `kiln.plugins.doctor`, and the test suite. CI
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) additionally runs
-`mix ash.codegen --check` (migration/snapshot drift, see above) and
+`mix ash.codegen --check` (migration/snapshot drift, see above),
 `mix dialyzer` (the first local run builds a PLT and is slow; it's cached
-afterwards).
+afterwards), and a **gettext catalog gate** — `mix gettext.extract --merge`
+must leave `priv/gettext` unchanged. That gate is CI-only and is not part of
+`mix precommit`, so run it yourself before pushing any change to a file
+containing `gettext(...)`; drifting line references alone will fail CI:
+
+```bash
+mix gettext.extract --merge && git diff --exit-code -- priv/gettext
+```
+
+### Dependency audit
+
+`mix deps.audit` ([mix_audit](https://github.com/mirego/mix_audit)) checks
+`mix.lock` against the Elixir security advisory database. It runs in
+`mix precommit` and as its own CI job (`Dependency audit`).
+
+Because the advisory database moves independently of this repo, **this gate can
+fail on a PR that touched no dependencies** — that means a new advisory landed
+against something already locked, not that your change broke anything. It has
+its own job precisely so that failure doesn't bury the lint/test results of an
+unrelated change. Remediate by upgrading the affected dependency; if no fixed
+version exists, document the accepted risk and use mix_audit's ignore options
+rather than dropping the check.
+
+The job fetches the advisory database explicitly before running the audit.
+mix_audit clones it at run time and ignores the exit status of its own git
+commands, so a failed fetch would otherwise leave it with zero advisories and a
+green "No vulnerabilities found" — a pass that verified nothing.
 
 ### Testing
 

@@ -237,6 +237,43 @@ defmodule KilnCMSWeb.WriteApiTest do
       assert length(post.blocks) == 1
     end
 
+    # `block_tree` is exactly the path the content editor's field filtering
+    # never covered: `Kiln.Block.Policy` was enforced only by the LiveView
+    # declining to render an admin-only field, so a key-authenticated editor
+    # could set one straight through the API (#51).
+    test "an editor cannot set an admin-only block field through block_tree" do
+      key = mint(user(:editor), :read_write)
+      featured = [%{"_type" => "quote", "text" => "Pull me", "featured" => true}]
+
+      assert {status, body} =
+               post_json("/api/json/posts", %{title: "Q", slug: slug(), block_tree: featured},
+                 type: "post",
+                 bearer: key
+               )
+
+      # 400/InvalidAttribute rather than 403: the rule is enforced by a change
+      # on the write path, so it surfaces as a rejected attribute rather than a
+      # policy Forbidden.
+      assert status == 400
+      assert [%{"source" => %{"pointer" => "/data/attributes/blocks"}} = error] = body["errors"]
+      assert error["detail"] =~ "cannot change `featured`"
+    end
+
+    test "an admin may set the same admin-only block field" do
+      key = mint(user(:admin), :read_write)
+      s = slug()
+      featured = [%{"_type" => "quote", "text" => "Pull me", "featured" => true}]
+
+      assert {201, _} =
+               post_json("/api/json/posts", %{title: "Q", slug: s, block_tree: featured},
+                 type: "post",
+                 bearer: key
+               )
+
+      [post] = CMS.list_posts!(actor: user(:admin), query: [filter: [slug: s]])
+      assert [%Ash.Union{value: %{featured: true}}] = post.blocks
+    end
+
     test "editing already-published content re-fires its artifact" do
       admin = user(:admin)
       admin_key = mint(admin, :read_write)
