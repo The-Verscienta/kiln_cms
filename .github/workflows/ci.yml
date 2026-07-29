@@ -203,6 +203,15 @@ jobs:
 
     env:
       MIX_ENV: dev
+      # The only job that overrides the workflow's Elixir pin, and it has to.
+      # `config/dev.exs` uses the `E` (`:export`) regex modifier on its
+      # live-reload patterns, which is Elixir 1.19.3+ syntax — 1.18 fails to
+      # parse the file at all. That modifier is load-bearing for anyone
+      # developing on OTP 28+, where a regex passed through config must be
+      # exported, so the fix belongs here rather than in `config/dev.exs`.
+      # Every other job runs MIX_ENV=test and never loads dev config, which is
+      # why nothing caught this before there was a dev-profile job.
+      ELIXIR_VERSION: "1.19"
 
     steps:
       - uses: actions/checkout@v5
