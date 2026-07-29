@@ -54,8 +54,11 @@ defmodule KilnCMS.Application do
       # delivery. `max_children` bounds in-flight tasks: under a crawler/traffic
       # spike, excess best-effort writes are dropped instead of spawning without
       # limit and exhausting the DB pool (start_child returns {:error,
-      # :max_children}, which callers treat as a dropped sample).
-      {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 50},
+      # :max_children}, which callers treat as a dropped sample). Raised from 50
+      # when page-view tracking gained its daily bucket (#45): each analytics
+      # task now makes two round trips instead of one, so the same cap would
+      # have halved the concurrency headroom before views start being dropped.
+      {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 100},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
       # Collaborative-editing CRDT prototype (KilnCMS.Collab.Crdt): one

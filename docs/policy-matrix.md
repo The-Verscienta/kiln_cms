@@ -151,11 +151,11 @@ definitions so the content editor can render the inputs. Both the editor and the
 `ApplyCustomFields` write change read definitions as the **system**
 (`authorize?: false`).
 
-## Analytics — `ContentView`, `SearchQuery`
+## Analytics — `ContentView`, `ContentViewDay`, `SearchQuery`
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
-| read (`top`, `zero_result`) | ✅ | ✅ | ❌ | ❌ |
+| read (`top`, `in_window`, `zero_result`) | ✅ | ✅ | ❌ | ❌ |
 | `record` | ⚙️ | ⚙️ | ⚙️ | ⚙️ |
 
 `record` is `forbid_if always()` for every role — view/search counts are written

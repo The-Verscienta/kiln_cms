@@ -29,6 +29,21 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- Content analytics now keeps a **daily view bucket** alongside the all-time
+  counter, so the analytics dashboard shows a 7-day / 30-day trend chart and a
+  per-item view count for the selected range. The range lives in the URL
+  (`/editor/analytics?range=7`), so it is shareable and survives the back
+  button. The chart is server-rendered SVG with a visually-hidden data table, so
+  screen readers get every value rather than a summary. Adds a migration
+  (`content_view_days`). History starts at deploy — there is nothing to backfill
+  from, since the previous counter stored no dates. Buckets are purged after
+  `config :kiln_cms, :view_analytics, retention_days: 400`; the all-time counter
+  is never purged, so the two deliberately do not sum to the same number.
+- Recording a content view now emits a `[:kiln_cms, :analytics, :view]`
+  `:telemetry` event (measurement `count`, metadata `type` and `content_id`),
+  with a matching `kiln_cms.analytics.view.count` metric tagged by content type.
+  External sinks can graph read traffic without polling the analytics tables.
+  See `docs/observability.md`.
 - `Kiln.Version` — a running instance can now report its release version, and
   the git SHA and build date baked in by the Dockerfile (`--build-arg GIT_SHA`
   / `BUILD_DATE`). Images built without those args still boot and simply report

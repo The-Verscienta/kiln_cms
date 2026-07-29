@@ -294,6 +294,13 @@ config :kiln_cms, :trash, retention_days: 30
 # titles, so it isn't kept indefinitely. See docs/data-flows.md (#213, #220).
 config :kiln_cms, :search_analytics, retention_days: 90
 
+# How many days of daily content-view buckets (KilnCMS.Analytics.ContentViewDay)
+# are retained before the nightly AshOban `purge_expired` trigger deletes them.
+# A bucket is (content type, id, UTC day, count) with no visitor data at all, so
+# unlike search queries this is a capacity limit rather than a privacy one; a
+# year-plus keeps year-over-year comparisons resolvable (#45).
+config :kiln_cms, :view_analytics, retention_days: 400
+
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
 # GraphQL subscriptions (real-time headless): the DSL is opt-in while beta.
