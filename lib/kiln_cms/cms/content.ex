@@ -1379,6 +1379,12 @@ defmodule KilnCMS.CMS.Content do
         # on every update action — transitions carry no content attributes and
         # pass untouched; admins are exempt (see the change module).
         change KilnCMS.CMS.Changes.EnforceFieldGrants, on: [:update]
+
+        # Block field policies (#51): `editable_by` on a `Kiln.Block` field was
+        # enforced only by the editor filtering the fields it renders, so the
+        # write API / MCP / GraphQL could set an admin-only field as an editor.
+        # Checks the cast block tree in a before_action hook; admins exempt.
+        change KilnCMS.CMS.Changes.EnforceBlockFieldPolicy, on: [:create, :update]
       end
 
       policies do
