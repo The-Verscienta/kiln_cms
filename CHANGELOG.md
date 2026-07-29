@@ -52,6 +52,14 @@ migration, a rewritten column, a dropped config key).
   nosniff` **cannot** be set as S3 object metadata and remains an operator
   task; `docs/media-pipeline.md` now documents it per CDN.
 
+### Fixed
+
+- The media library's responsive-variant list previews each variant inline
+  instead of linking to it. The old per-variant "open" link announced itself as
+  opening in a new tab, but media carries `Content-Disposition: attachment` on
+  both storage adapters, so it downloaded a UUID-named file — misleading for
+  sighted and screen-reader users alike. The copyable media URL now says so too.
+
 ## [0.1.0]
 
 First tagged release. Everything before this point shipped untagged on `main`;

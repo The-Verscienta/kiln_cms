@@ -1174,21 +1174,24 @@ defmodule KilnCMSWeb.MediaLive do
 
         <div :if={@item.variants not in [nil, %{}]} class="mt-4">
           <p class="text-xs text-base-content/70">{gettext("Responsive variants")}</p>
+          <%!-- Preview each variant inline rather than linking to it. Media blobs carry
+               `content-disposition: attachment` on both storage adapters — from
+               KilnCMSWeb.Endpoint for Local, from object metadata for S3 — so
+               navigating to a variant downloads a UUID-named file. That header is
+               ignored for subresource loads, so an <img> previews it in place, which
+               is how the rest of the library renders media anyway. Decorative alt: the
+               label and dimensions name the row, and the full-size preview above
+               carries the real alt text. --%>
           <ul class="mt-1 space-y-1">
-            <li
-              :for={{label, v} <- @item.variants}
-              class="flex items-center justify-between gap-2 text-xs"
-            >
+            <li :for={{label, v} <- @item.variants} class="flex items-center gap-2 text-xs">
+              <img
+                src={v["url"]}
+                alt=""
+                loading="lazy"
+                class="size-10 shrink-0 rounded border border-base-300 object-cover"
+              />
               <span class="font-medium capitalize">{label}</span>
-              <span class="text-base-content/70">{v["width"]} × {v["height"]}</span>
-              <a
-                href={v["url"]}
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-primary hover:underline"
-              >
-                {gettext("open")} <span class="sr-only">{gettext("(opens in a new tab)")}</span>
-              </a>
+              <span class="ml-auto text-base-content/70">{v["width"]} × {v["height"]}</span>
             </li>
           </ul>
         </div>
@@ -1212,6 +1215,11 @@ defmodule KilnCMSWeb.MediaLive do
               {gettext("Copy")}
             </button>
           </div>
+          <p class="mt-1 text-[10px] text-base-content/50">
+            {gettext(
+              "Use this in content. Pasting it into the address bar downloads the file instead of displaying it."
+            )}
+          </p>
         </div>
 
         <form phx-submit="save_meta" class="mt-5 space-y-3">

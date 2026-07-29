@@ -151,6 +151,12 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert panel =~ "Responsive variants"
       assert panel =~ "thumb"
 
+      # Variants preview inline. They must not be links: media blobs carry
+      # `content-disposition: attachment` on both storage adapters, so navigating
+      # to one downloads a UUID-named file rather than opening it.
+      assert panel =~ ~s(src="/uploads/thumb")
+      refute panel =~ ~s(href="/uploads/thumb")
+
       lv
       |> form("form[phx-submit=save_meta]", %{alt: "A nice photo", caption: "At dusk"})
       |> render_submit()

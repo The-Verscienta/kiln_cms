@@ -284,7 +284,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:3727
 #: lib/kiln_cms_web/live/content_editor_live.ex:4092
-#: lib/kiln_cms_web/live/media_live.ex:1219
+#: lib/kiln_cms_web/live/media_live.ex:1227
 #, elixir-autogen, elixir-format
 msgid "Alt text"
 msgstr ""
@@ -310,7 +310,7 @@ msgid "Canonical URL"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4093
-#: lib/kiln_cms_web/live/media_live.ex:1229
+#: lib/kiln_cms_web/live/media_live.ex:1237
 #, elixir-autogen, elixir-format
 msgid "Caption"
 msgstr ""
@@ -364,7 +364,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4446
 #: lib/kiln_cms_web/live/form_builder_live.ex:741
-#: lib/kiln_cms_web/live/media_live.ex:1212
+#: lib/kiln_cms_web/live/media_live.ex:1215
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr ""
@@ -421,7 +421,7 @@ msgstr ""
 msgid "Deleted."
 msgstr ""
 
-#: lib/kiln_cms_web/live/media_live.ex:1224
+#: lib/kiln_cms_web/live/media_live.ex:1232
 #, elixir-autogen, elixir-format
 msgid "Describe the image for screen readers"
 msgstr ""
@@ -675,7 +675,7 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-#: lib/kiln_cms_web/live/media_live.ex:1237
+#: lib/kiln_cms_web/live/media_live.ex:1245
 #, elixir-autogen, elixir-format
 msgid "Save details"
 msgstr ""
@@ -783,7 +783,7 @@ msgstr ""
 msgid "Trash is empty."
 msgstr ""
 
-#: lib/kiln_cms_web/live/media_live.ex:1197
+#: lib/kiln_cms_web/live/media_live.ex:1200
 #, elixir-autogen, elixir-format
 msgid "URL"
 msgstr ""
@@ -843,11 +843,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex:224
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to restore media."
-msgstr ""
-
-#: lib/kiln_cms_web/live/media_live.ex:1190
-#, elixir-autogen, elixir-format
-msgid "open"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex:750
@@ -1391,7 +1386,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/analytics_live.ex:162
 #: lib/kiln_cms_web/live/content_editor_live.ex:3811
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:465
-#: lib/kiln_cms_web/live/media_live.ex:1190
 #, elixir-autogen, elixir-format
 msgid "(opens in a new tab)"
 msgstr ""
@@ -6058,4 +6052,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex:118
 #, elixir-autogen, elixir-format
 msgid "unknown"
+msgstr ""
+
+#: lib/kiln_cms_web/live/media_live.ex:1219
+#, elixir-autogen, elixir-format
+msgid "Use this in content. Pasting it into the address bar downloads the file instead of displaying it."
 msgstr ""

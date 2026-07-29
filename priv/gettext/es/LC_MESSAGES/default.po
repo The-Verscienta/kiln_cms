@@ -284,7 +284,7 @@ msgstr "Añadir %{kind}"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:3727
 #: lib/kiln_cms_web/live/content_editor_live.ex:4092
-#: lib/kiln_cms_web/live/media_live.ex:1219
+#: lib/kiln_cms_web/live/media_live.ex:1227
 #, elixir-autogen, elixir-format
 msgid "Alt text"
 msgstr "Texto alternativo"
@@ -310,7 +310,7 @@ msgid "Canonical URL"
 msgstr "URL canónica"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4093
-#: lib/kiln_cms_web/live/media_live.ex:1229
+#: lib/kiln_cms_web/live/media_live.ex:1237
 #, elixir-autogen, elixir-format
 msgid "Caption"
 msgstr "Leyenda"
@@ -364,7 +364,7 @@ msgstr "El contenido puede llevar cualquier número de etiquetas."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4446
 #: lib/kiln_cms_web/live/form_builder_live.ex:741
-#: lib/kiln_cms_web/live/media_live.ex:1212
+#: lib/kiln_cms_web/live/media_live.ex:1215
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr "Copiar"
@@ -421,7 +421,7 @@ msgstr "¿Eliminar «%{name}»?"
 msgid "Deleted."
 msgstr "Eliminado."
 
-#: lib/kiln_cms_web/live/media_live.ex:1224
+#: lib/kiln_cms_web/live/media_live.ex:1232
 #, elixir-autogen, elixir-format
 msgid "Describe the image for screen readers"
 msgstr "Describa la imagen para los lectores de pantalla"
@@ -675,7 +675,7 @@ msgstr "Título SEO"
 msgid "Save"
 msgstr "Guardar"
 
-#: lib/kiln_cms_web/live/media_live.ex:1237
+#: lib/kiln_cms_web/live/media_live.ex:1245
 #, elixir-autogen, elixir-format
 msgid "Save details"
 msgstr "Guardar detalles"
@@ -783,7 +783,7 @@ msgstr "Papelera (%{count})"
 msgid "Trash is empty."
 msgstr "La papelera está vacía."
 
-#: lib/kiln_cms_web/live/media_live.ex:1197
+#: lib/kiln_cms_web/live/media_live.ex:1200
 #, elixir-autogen, elixir-format
 msgid "URL"
 msgstr "URL"
@@ -844,11 +844,6 @@ msgstr "No tiene permiso para eliminar medios."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to restore media."
 msgstr "No tiene permiso para restaurar medios."
-
-#: lib/kiln_cms_web/live/media_live.ex:1190
-#, elixir-autogen, elixir-format
-msgid "open"
-msgstr "abrir"
 
 #: lib/kiln_cms_web/live/media_live.ex:750
 #, elixir-autogen, elixir-format
@@ -1391,7 +1386,6 @@ msgstr "%{count} resultados para «%{query}»."
 #: lib/kiln_cms_web/live/analytics_live.ex:162
 #: lib/kiln_cms_web/live/content_editor_live.ex:3811
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:465
-#: lib/kiln_cms_web/live/media_live.ex:1190
 #, elixir-autogen, elixir-format
 msgid "(opens in a new tab)"
 msgstr "(se abre en una pestaña nueva)"
@@ -6059,3 +6053,8 @@ msgstr "publicada el"
 #, elixir-autogen, elixir-format
 msgid "unknown"
 msgstr "desconocido"
+
+#: lib/kiln_cms_web/live/media_live.ex:1219
+#, elixir-autogen, elixir-format
+msgid "Use this in content. Pasting it into the address bar downloads the file instead of displaying it."
+msgstr ""
