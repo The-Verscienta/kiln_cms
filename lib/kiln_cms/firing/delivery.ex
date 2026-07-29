@@ -9,7 +9,7 @@ defmodule KilnCMS.Firing.Delivery do
   `KilnCMS.Firing.Cache` for the body) — Cachex/ETS, no database. This module
   makes that an *explicit, tested guarantee*:
 
-    * Resolution goes **cache-first** through `KilnCMS.Cache.fetch_published/4`
+    * Resolution goes **cache-first** through `KilnCMS.Cache.fetch_published/5`
       (already invalidated precisely on content writes), so a warm slug resolves
       with **zero database queries**.
     * The body read is cache-first (`KilnCMS.Firing.Cache` → artifact table).

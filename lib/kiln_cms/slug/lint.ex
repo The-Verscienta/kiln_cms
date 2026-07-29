@@ -11,7 +11,7 @@ defmodule KilnCMS.Slug.Lint do
     * `:keyphrase_not_in_title` — the focus keyphrase's content words don't
       all appear in the title or SEO title
 
-  Word comparisons run through `Slug.derive/1` on both sides, so stop words
+  Word comparisons run through `KilnCMS.Slug.derive/1` on both sides, so stop words
   and punctuation never cause false mismatches.
   """
 

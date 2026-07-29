@@ -29,6 +29,16 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- `mix docs` now builds a complete manual: the API reference for every module in
+  `lib/`, the `mix kiln.*` task reference, and all 63 guides under `docs/`,
+  grouped into a sidebar (Getting started, Authoring & editorial, APIs &
+  headless, Operations & deployment, Security & access, and two archive groups
+  for design records and point-in-time audits). The landing page is a new
+  `docs/getting-started.md` onboarding path for contributors. Output goes to the
+  gitignored `doc/`; run it under `MIX_ENV=dev`, which is the default. CI builds
+  the docs with `--warnings-as-errors` in its own job, so a renamed guide, a
+  dead cross-reference, or a moduledoc naming a function that no longer exists
+  now fails a check instead of rotting quietly.
 - Content analytics now keeps a **daily view bucket** alongside the all-time
   counter, so the analytics dashboard shows a 7-day / 30-day trend chart and a
   per-item view count for the selected range. The range lives in the URL

@@ -108,7 +108,7 @@ defmodule Kiln.Advisory.Body do
   @doc """
   Case- and whitespace-folded text, for substring matching (keyphrase density).
 
-  Deliberately *not* `Slug.derive/1`: routing the whole body through slug
+  Deliberately *not* `KilnCMS.Slug.derive/1`: routing the whole body through slug
   normalization cost ~80ms on a long document because of NFD normalization and
   per-word stop-word filtering, and this sits in the editor's keystroke path.
   Folding is a plain downcase plus whitespace collapse, which is all a

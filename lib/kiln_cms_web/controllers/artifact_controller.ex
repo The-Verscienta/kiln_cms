@@ -4,7 +4,7 @@ defmodule KilnCMSWeb.ArtifactController do
 
   `GET /api/content/:type/:slug?surface=json` serves the immutable, pre-serialized
   output a published document compiled to on publish — read from the artifact
-  cache/table via `KilnCMS.Firing.Engine.read/3`, **never** the live block tree.
+  cache/table via `KilnCMS.Firing.Engine.read/4`, **never** the live block tree.
   This is the v2 headless surface (the raw editable block tree is no longer auto-
   exposed). Surfaces: `json` (default, structured intent), `json_ld` (schema.org
   graph), `web` (`%{"html" => …}`).

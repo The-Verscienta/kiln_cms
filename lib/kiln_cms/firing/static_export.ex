@@ -10,7 +10,7 @@ defmodule KilnCMS.Firing.StaticExport do
   edge cache, or ship to an air-gapped host. The live CMS stays authoritative;
   the export is a snapshot, **not** a fork.
 
-  **No re-render.** Bodies are read through `KilnCMS.Firing.Engine.read/3` (cache
+  **No re-render.** Bodies are read through `KilnCMS.Firing.Engine.read/4` (cache
   → artifact table), exactly the delivery read path — never the live block tree.
   A published document that has never been fired is skipped and counted (run a
   publish/backfill first); nothing is compiled on the export path.

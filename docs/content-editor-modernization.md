@@ -1,9 +1,10 @@
 # Content Editor Modernization — Scope
 
 > **Track:** UX overhaul of `KilnCMSWeb.ContentEditorLive` (the primary content
-> authoring surface). Sibling to, but distinct from, the reliability audit
-> (`docs/audit-content-editor.md`, all 5 themes shipped). Reliability made the
-> editor *trustworthy*; this track makes it feel *current*.
+> authoring surface). Sibling to, but distinct from, the 2026-07 content-editor
+> reliability audit (all 5 themes shipped; it was never written up as a
+> standalone document). Reliability made the editor *trustworthy*; this track
+> makes it feel *current*.
 >
 > **Ambition:** UX overhaul — rework the interaction model to a Storyblok/
 > Contentful-class experience **on the existing Ash + LiveView backend**. No

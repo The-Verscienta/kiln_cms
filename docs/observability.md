@@ -127,7 +127,7 @@ Wiring (all gated on the DSN):
 - **Transport** — the default `Sentry.FinchClient`. Finch is already in the tree
   via Req, so no extra HTTP client (e.g. hackney) is pulled in.
 - **Source context** — `mix sentry.package_source_code` runs in the
-  [Dockerfile](../Dockerfile) so stack frames in the Sentry UI show the
+  [Dockerfile](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile) so stack frames in the Sentry UI show the
   surrounding code.
 
 Environment variables:

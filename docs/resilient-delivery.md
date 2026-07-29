@@ -36,7 +36,7 @@ therefore *does* need the database; it is not covered by this guarantee.
 `KilnCMS.Firing.Delivery` is the resilient read path used by
 `KilnCMSWeb.ArtifactController`:
 
-- **Resolution is cache-first** through `KilnCMS.Cache.fetch_published/4` — the
+- **Resolution is cache-first** through `KilnCMS.Cache.fetch_published/5` — the
   headless artifact API previously resolved the slug straight from Postgres on
   every request, so even a fully-warmed artifact couldn't be served with the DB
   down. Routing it through the (already-invalidated) content cache closes that

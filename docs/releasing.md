@@ -85,7 +85,7 @@ mix kiln.update             # move the pin to the newest release
 ```
 
 Then commit the moved pin, rebuild the image, and redeploy. Migrations run on
-boot (see the `CMD` in the [`Dockerfile`](../Dockerfile)), so deploying applies
+boot (see the `CMD` in the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)), so deploying applies
 them — **take a backup first** (`scripts/backup.sh`) if the report listed any.
 
 Useful flags: `--to vX.Y.Z` to land on a specific release rather than the

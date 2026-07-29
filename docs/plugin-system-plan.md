@@ -1,6 +1,12 @@
 # Plugin system — design & phased plan
 
-**Status:** design (decision **D18** proposed below).
+**Status:** **shipped** — decision **D18**, proposed below, was accepted and
+built. The contract is `Kiln.Plugin`, the registry is `Kiln.Plugins`, plugin
+routes mount through `KilnCMSWeb.PluginRouter`, and `mix kiln.gen.plugin` /
+`mix kiln.plugins.list` / `mix kiln.plugins.doctor` are the operator surface.
+This document is the design record; see
+[Runtime extensibility](plugin-extensibility.md) for the marketplace question
+that remains deferred.
 **Goal:** the WordPress-moat pillar — a package drops into a KilnCMS install,
 registers **one config line**, and contributes block types, content types,
 admin panels, workers and background queues, with the core none the wiser.

@@ -127,7 +127,7 @@ decisions above are written down. Delete the spike module; keep the notes.
 > `render/2` + `search_text/1`). Three typed blocks land — `Heading`, `Image`,
 > `RichText` — discovered + dispatched via `KilnCMS.Blocks` (registry by `_type`,
 > `render/2`/`search_text/1` by struct). Portable Text is implemented as canonical
-> PT JSON with `KilnCMS.Blocks.PortableText.{from_tiptap,to_html,to_plain_text}/1`
+> PT JSON with `KilnCMS.Blocks.PortableText` (`from_tiptap/1`, `to_html/1`, `to_plain_text/1`)
 > (paragraph/heading/blockquote + strong/em/code/strike/underline/link; lists +
 > embedded objects noted as follow-ups). **20 new tests pass; full suite 404 green;
 > `mix precommit` clean.** No change yet to how `Page.blocks` is stored — that's Phase C.
@@ -372,7 +372,7 @@ plan's core performance/correctness primitive.
    - Upsert `PublishedArtifact` rows in a transaction.
    - Push into cache (step 4). Broadcast `{:fired, document_type, id}` on PubSub.
 3. **Hook into publish.** In the `Content` macro's `:publish` action, add an
-   `after_action`/`after_transaction` change that calls `KilnCMS.Firing.fire/2`.
+   `after_action`/`after_transaction` change that calls `KilnCMS.Firing.Engine.fire/2`.
    Keep PaperTrail snapshot (it becomes `source_version_id`). `:unpublish` deletes
    artifacts + evicts cache.
 4. **Two-tier cache behind a behaviour** `KilnCMS.Firing.Cache`:

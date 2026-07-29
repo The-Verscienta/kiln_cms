@@ -36,7 +36,7 @@ Behaviour:
   gated content never appear; dynamic types (D17) are included.
 - **Grouped by content type** (Pages, Posts, and any custom type), with each
   entry's title, public URL, and `seo_description` when set.
-- **Cached** under one aggregate key (`KilnCMS.Cache.llms_key/0`, 5-minute TTL),
+- **Cached** under one aggregate key (`KilnCMS.Cache.llms_key/1`, 5-minute TTL),
   busted on every publish/unpublish and type change — exactly like the sitemap.
 - **Bounded** to 10,000 entries so the per-request scan stays cheap.
 - Served on the rate-limited `:probe` pipeline alongside `sitemap.xml` /

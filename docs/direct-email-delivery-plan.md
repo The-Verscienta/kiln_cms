@@ -91,7 +91,7 @@ New modules:
     `[:kiln_cms, :mail, :bounced]`, no retry;
   - transient (4xx, connect/timeout/DNS errors): raise → Oban retries.
 - Convert the three senders + `WorkflowMailWorker`'s `Mailer.deliver!` to
-  `KilnCMS.Mail.enqueue/1`. `WorkflowMailWorker` keeps building the email but
+  `KilnCMS.Mail.enqueue!/1`. `WorkflowMailWorker` keeps building the email but
   delegates delivery (or is folded into `DeliveryWorker` — decide in
   implementation; folding removes one worker but loses its build-at-run-time
   args shape; either fine).

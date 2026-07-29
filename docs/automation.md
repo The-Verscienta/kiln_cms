@@ -39,7 +39,7 @@ Manage rules at **`/editor/automation`** (admin-only). A rule is:
 `{{id}}`, `{{type}}`, `{{event}}` (each HTML-escaped).
 
 **HTTP / Slack notifications** are deliberately *not* an automation action —
-that's exactly what the signed, SSRF-safe [Webhooks](webhooks.md) feature does.
+that's exactly what the signed, SSRF-safe [Webhooks](api.md#webhooks) feature does.
 Automation complements it with the reactions webhooks can't do.
 
 ### Examples

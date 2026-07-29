@@ -9,7 +9,7 @@ defmodule KilnCMS.Seo.Checks.Keyphrase do
   failures, so applicability (`:n_a` when there is no keyphrase, or no slug
   yet) is decided here.
 
-  **English-biased**, like everything routed through `Slug.content_words/1`,
+  **English-biased**, like everything routed through `KilnCMS.Slug.content_words/1`,
   which strips English stop words.
   """
   use Kiln.Advisory

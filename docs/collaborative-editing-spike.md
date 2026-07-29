@@ -1,7 +1,12 @@
 # Spike: Real-time collaborative editing (CRDT research)
 
 **Issue:** #61 ([Stretch] Real-time collaborative editing — CRDT research).
-**Status:** research spike / feasibility doc. **No code change proposed for v1.**
+**Status:** research spike / feasibility doc — **overtaken by what shipped.** The
+spike proposed no code for v1, but the conclusion was later acted on: `y_ex` is a
+dependency, `KilnCMS.Collab` applies block ops and prose patches server-side over
+one `DocumentEvent` substrate, and `Phoenix.Presence` drives
+[multiplayer preview](multiplayer-preview.md). Read this for the CRDT reasoning
+and the options that were rejected, not for the current design.
 **Decision context:** D5 in `KilnCMS_Project_Plan.md` — *"Ship single-active-editor
 with Phoenix Presence indicators. CRDT/Yjs collaborative editing fights LiveView's
 server-authoritative model and is firmly post-v1 research."* This document is that
