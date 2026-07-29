@@ -128,6 +128,13 @@ defmodule KilnCMSWeb.Telemetry do
         tags: [:type, :status],
         description: "Time to build a public HTML delivery response"
       ),
+      counter("kiln_cms.analytics.view.count",
+        tags: [:type],
+        description:
+          "Public content views recorded, by content type. Aggregate only — the " <>
+            "event's content_id metadata is deliberately not a tag (it would be " <>
+            "an unbounded series)."
+      ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures
       summary("oban.job.stop.duration",

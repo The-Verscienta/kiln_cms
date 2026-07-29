@@ -1,31 +1,100 @@
 defmodule KilnCMSWeb.AnalyticsLive do
   @moduledoc """
-  Privacy-first analytics dashboard: total content views and the most-viewed
-  content. Editor/admin only (`:live_editor_required`). Counts come from
-  `KilnCMS.Analytics`; no per-visitor data is collected.
+  Privacy-first analytics dashboard: total content views, a 7d/30d trend, and
+  the most-viewed content. Editor/admin only (`:live_editor_required`). Counts
+  come from `KilnCMS.Analytics`; no per-visitor data is collected.
+
+  The trend window lives in the URL (`?range=7`) rather than in socket state, so
+  a range is shareable, survives the back button, and is re-derived on reconnect.
   """
   use KilnCMSWeb, :live_view
+
+  import KilnCMSWeb.ChartComponents, only: [bar_chart: 1]
 
   alias KilnCMS.Analytics
   alias KilnCMS.CMS.ContentTypes
 
   @top_limit 50
+  @ranges [7, 30]
+  @default_range 30
 
   @impl true
   def mount(_params, _session, socket) do
-    actor = socket.assigns.current_user
-    # Scope the dashboard to the current site (epic #336).
-    org = socket.assigns.current_org
-    # Only the rows the table shows — the total is a DB-side SUM, so mount no
-    # longer loads one counter row per ever-viewed content item.
-    rows = Analytics.list_views!(actor: actor, tenant: org, query: [limit: @top_limit])
-
     {:ok,
      socket
      |> assign(:page_title, gettext("Analytics"))
-     |> assign(:total, total_views(actor, org))
-     |> assign(:rows, decorate_all(rows, org))}
+     |> assign(:ranges, @ranges)}
   end
+
+  # The window read, the top-N table and the total are all re-run per range so
+  # that patching between 7d and 30d shows consistent numbers.
+  @impl true
+  def handle_params(params, _uri, socket) do
+    actor = socket.assigns.current_user
+    # Scope the dashboard to the current site (epic #336).
+    org = socket.assigns.current_org
+    range = range_from(params)
+    since = Date.add(Date.utc_today(), -(range - 1))
+
+    # One windowed read feeds both the chart and the per-row window column.
+    # Bounded by the range (unlike the all-time read that audit finding P-M9
+    # flagged) and narrowed by the action's select.
+    buckets = Analytics.views_since!(since, actor: actor, tenant: org)
+    window = window_totals(buckets)
+
+    # Only the rows the table shows — the total is a DB-side SUM, so this no
+    # longer loads one counter row per ever-viewed content item.
+    rows = Analytics.list_views!(actor: actor, tenant: org, query: [limit: @top_limit])
+
+    {:noreply,
+     socket
+     |> assign(:range, range)
+     |> assign(:series, series(buckets, since, range))
+     |> assign(:total, total_views(actor, org))
+     |> assign(:window_total, buckets |> Enum.map(& &1.views) |> Enum.sum())
+     |> assign(:rows, rows |> decorate_all(org) |> Enum.map(&add_window(&1, window)))}
+  end
+
+  # An unknown or hostile `?range=` falls back to the default rather than
+  # raising — this is a bookmarkable URL, not a form submission.
+  defp range_from(%{"range" => raw}) do
+    case Integer.parse(raw) do
+      {n, ""} -> if n in @ranges, do: n, else: @default_range
+      _ -> @default_range
+    end
+  end
+
+  defp range_from(_params), do: @default_range
+
+  # A continuous series, oldest → newest, with days that saw no views filled in
+  # as zero. Without the fill the chart would close the gaps and misstate the
+  # trend. Buckets are summed across all content for the site-wide line.
+  defp series(buckets, since, range) do
+    by_day =
+      Enum.reduce(buckets, %{}, fn bucket, acc ->
+        Map.update(acc, bucket.day, bucket.views, &(&1 + bucket.views))
+      end)
+
+    for offset <- 0..(range - 1) do
+      day = Date.add(since, offset)
+      %{day: day, views: Map.get(by_day, day, 0)}
+    end
+  end
+
+  # Views per content item within the window, for the table's range column.
+  defp window_totals(buckets) do
+    Enum.reduce(buckets, %{}, fn bucket, acc ->
+      Map.update(
+        acc,
+        {bucket.content_type, bucket.content_id},
+        bucket.views,
+        &(&1 + bucket.views)
+      )
+    end)
+  end
+
+  defp add_window(row, window),
+    do: Map.put(row, :window_views, Map.get(window, {row.type, row.id}, 0))
 
   # SUM over zero rows yields nil (despite Ash.sum's number() typing, which is
   # why this is a pattern match rather than `|| 0` — dialyzer rejects the
@@ -125,9 +194,71 @@ defmodule KilnCMSWeb.AnalyticsLive do
           </p>
         </div>
 
-        <div class="card card-pad">
-          <p class="text-xs uppercase tracking-wide text-base-content/70">{gettext("Total views")}</p>
-          <p class="mt-1 text-3xl font-semibold">{@total}</p>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="card card-pad">
+            <p class="text-xs uppercase tracking-wide text-base-content/70">
+              {gettext("Total views")}
+            </p>
+            <p class="mt-1 text-3xl font-semibold tabular-nums">{@total}</p>
+            <p class="text-xs text-base-content/60">{gettext("All time")}</p>
+          </div>
+          <div class="card card-pad">
+            <p class="text-xs uppercase tracking-wide text-base-content/70">
+              {gettext("Views in range")}
+            </p>
+            <p class="mt-1 text-3xl font-semibold tabular-nums">{@window_total}</p>
+            <p class="text-xs text-base-content/60">
+              {ngettext("Last %{count} day", "Last %{count} days", @range, count: @range)}
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-lg font-medium">{gettext("Views over time")}</h2>
+            <div class="tabs" role="tablist" aria-label={gettext("Trend range")}>
+              <.link
+                :for={r <- @ranges}
+                patch={~p"/editor/analytics?#{[range: r]}"}
+                role="tab"
+                aria-selected={to_string(@range == r)}
+                class="tab"
+              >
+                {ngettext("%{count} day", "%{count} days", r, count: r)}
+              </.link>
+            </div>
+          </div>
+
+          <p :if={@total == 0} class="text-sm text-base-content/60">
+            {gettext("No views recorded yet.")}
+          </p>
+          <p :if={@total > 0 and @window_total == 0} class="text-sm text-base-content/60">
+            {ngettext(
+              "No views in the last %{count} day.",
+              "No views in the last %{count} days.",
+              @range,
+              count: @range
+            )}
+          </p>
+
+          <.bar_chart
+            :if={@window_total > 0}
+            series={@series}
+            label={
+              ngettext(
+                "Content views per day for the last %{count} day",
+                "Content views per day for the last %{count} days",
+                @range,
+                count: @range
+              )
+            }
+          />
+
+          <p :if={@window_total > 0} class="mt-2 text-xs text-base-content/60">
+            {gettext(
+              "Daily buckets use UTC calendar days; today's bar is still filling. History starts when this feature was deployed."
+            )}
+          </p>
         </div>
 
         <div>
@@ -141,7 +272,10 @@ defmodule KilnCMSWeb.AnalyticsLive do
               <tr>
                 <th scope="col">{gettext("Content")}</th>
                 <th scope="col">{gettext("Type")}</th>
-                <th scope="col" class="text-right">{gettext("Views")}</th>
+                <th scope="col" class="text-right">
+                  {ngettext("Views (%{count}d)", "Views (%{count}d)", @range, count: @range)}
+                </th>
+                <th scope="col" class="text-right">{gettext("Views (all time)")}</th>
                 <th scope="col" class="text-right">{gettext("Last viewed")}</th>
               </tr>
             </thead>
@@ -163,7 +297,8 @@ defmodule KilnCMSWeb.AnalyticsLive do
                   </a>
                 </td>
                 <td class="capitalize text-base-content/70">{row.type}</td>
-                <td class="text-right font-medium">{row.views}</td>
+                <td class="text-right tabular-nums">{row.window_views}</td>
+                <td class="text-right font-medium tabular-nums">{row.views}</td>
                 <td class="text-right text-base-content/60">
                   <time
                     :if={row.last}

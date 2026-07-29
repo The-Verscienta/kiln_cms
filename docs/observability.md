@@ -32,6 +32,32 @@ wraps the underlying Ash submit/transition with a timing span.
 - `:result` — `:ok` or `:error`, derived from the action's return tuple, so you
   can split success from failure latency and alert on error rate.
 
+## Content-view events
+
+Public content delivery emits one event per recorded page view, so an external
+sink can graph read traffic without polling the analytics tables (issue #45).
+
+| Event                              | Fired by                                      | Measurements | Metadata |
+|------------------------------------|-----------------------------------------------|--------------|----------|
+| `[:kiln_cms, :analytics, :view]`   | `ContentController.track_view/3` on delivery  | `count`      | `type`, `content_id` |
+
+- `:type` — the content type as a string (`"page"`, `"post"`, …).
+- `:content_id` — the viewed record's id.
+
+**Metadata is not the same as tag cardinality.** `content_id` is deliberately
+*not* a tag on the metric below: one Prometheus series per content item grows
+without bound. Keep high-cardinality values in metadata (where a handler can use
+them) and tag only low-cardinality dimensions. `org_id` is omitted from this
+event entirely — metadata can reach Sentry/OTLP exporters, the same reasoning
+that scrubs recipient addresses in [`KilnCMS.Mail`](../lib/kiln_cms/mail.ex).
+
+The event is emitted **before** the database write is dispatched, and the write
+is a best-effort supervised task that is shed under load. So this counter tracks
+real traffic while the stored counters track what the database absorbed; a
+sustained gap between them is a backpressure signal, not a bug.
+
+Useful Grafana panel: `sum(rate(kiln_cms_analytics_view_count[5m])) by (type)`.
+
 ## LiveDashboard panel
 
 The matching `Telemetry.Metrics` definitions live in

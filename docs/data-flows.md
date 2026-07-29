@@ -33,6 +33,7 @@ your deployment.
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See [Search query retention](#search-query-retention-213--disclosure-220). |
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
+| Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
 
 ## What data leaves the system
 
@@ -84,14 +85,22 @@ rather than relying on leaving something unset.
 
 ## Retention & automated purge
 
-All three retention jobs are AshOban triggers wired through the Oban `Cron`
+All four retention jobs are AshOban triggers wired through the Oban `Cron`
 plugin; they run as trusted system jobs (no actor).
 
 | Data | Default retention | Trigger (cron) | Config key |
 |------|-------------------|----------------|------------|
 | Expired auth tokens | purged within ~24h of expiry | `Token` `:expunge_expired` (`0 4 * * *`) | — (driven by token expiry) |
 | Recorded search queries | 90 days since last search | `SearchQuery` `:purge_expired` (`0 3 * * *`) | `config :kiln_cms, :search_analytics, retention_days: 90` |
+| Daily view buckets | 400 days since first recorded | `ContentViewDay` `:purge_expired` (`15 3 * * *`) | `config :kiln_cms, :view_analytics, retention_days: 400` |
 | Trashed (soft-deleted) content | 30 days | `Page`/`Post` `:purge_trashed` (`0 3 * * *`) | `config :kiln_cms, :trash, retention_days: 30` |
+
+View buckets keep a longer window than search queries on purpose: a bucket is
+`(content type, id, UTC day, count)` with no query text and no visitor data, so
+the limit is a capacity choice rather than a privacy one, and 400 days is the
+smallest window in which year-over-year comparisons always resolve. The all-time
+`content_views` counter is never purged, so totals stay correct as buckets age
+out — which is also why the two will not sum to the same number.
 
 ### Auth token retention (#218)
 
@@ -195,7 +204,8 @@ not impose one because it is jurisdiction- and policy-dependent.
 
 - [ ] Reviewed configured webhook endpoints (`/editor/webhooks`).
 - [ ] Decided on Meilisearch / S3 — listed as subprocessors if enabled.
-- [ ] Set `search_analytics.retention_days` and `trash.retention_days` to policy.
+- [ ] Set `search_analytics.retention_days`, `view_analytics.retention_days` and
+      `trash.retention_days` to policy.
 - [ ] Documented your content-version (PaperTrail) audit-retention period.
 - [ ] Know the two subject-rights paths: self-export (`/editor/settings`) and
       admin erasure (`anonymize_user`).
