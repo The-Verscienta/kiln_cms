@@ -44,6 +44,13 @@ migration, a rewritten column, a dropped config key).
   UUIDs. Local-adapter media already sent this header. Existing objects keep
   whatever metadata they were uploaded with — re-upload or set it bucket-side
   if you want them covered. New CDN deployment guide in `docs/media-pipeline.md`.
+- Media stored on S3/MinIO is now uploaded with `Content-Disposition:
+  attachment`, closing half the gap against Local-adapter media, which has
+  always carried it. Rendering is unaffected — disposition is ignored for
+  `<img>` and other subresource loads. As above, existing objects keep the
+  metadata they were uploaded with. The companion `X-Content-Type-Options:
+  nosniff` **cannot** be set as S3 object metadata and remains an operator
+  task; `docs/media-pipeline.md` now documents it per CDN.
 
 ## [0.1.0]
 

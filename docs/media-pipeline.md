@@ -88,3 +88,48 @@ will duplicate work.
 Finally: if the CDN hostname differs from the site's own origin, add it to
 `CSP_IMG_SRC` (space-separated, read in `config/runtime.exs`) or the browser's
 `img-src` policy will block every image.
+
+### Security headers
+
+Local-adapter responses carry two defense-in-depth headers, set by
+`secure_upload_headers/2` in `KilnCMSWeb.Endpoint` on every `/uploads/*`
+request. S3-served media bypasses Phoenix entirely, so it has to get them
+elsewhere — and only one of the two can ride along on the object:
+
+| Header | Local | S3 | Where it comes from |
+|---|---|---|---|
+| `Content-Disposition: attachment` | ✅ | ✅ | object metadata at `PUT` ([`Storage.S3`](../lib/kiln_cms/storage/s3.ex)) |
+| `X-Content-Type-Options: nosniff` | ✅ | ⚠️ **you configure this** | CDN or bucket response headers |
+
+Neither header affects rendering: disposition is ignored for `<img>` and other
+subresource loads, and every media URL Kiln emits is a subresource. They matter
+only when someone navigates directly at a media URL, where together they stop a
+stored file from being interpreted as active content rather than served as a
+download.
+
+**`nosniff` is not settable as S3 object metadata.** S3 persists a fixed set of
+system headers (`Content-Type`, `Content-Disposition`, `Cache-Control`,
+`Content-Encoding`, `Content-Language`, `Expires`); anything else you attach is
+returned prefixed as `x-amz-meta-*`, which no browser acts on. Add it at the
+edge instead:
+
+| CDN | Where |
+|---|---|
+| CloudFront | Response headers policy → *Security headers* → `X-Content-Type-Options` (the managed `SecurityHeadersPolicy` includes it) |
+| Cloudflare / R2 | Rules → Transform Rules → *Modify Response Header* → set `X-Content-Type-Options: nosniff` |
+| Bunny | Edge rules → *Set Response Header* |
+| nginx in front of MinIO | `add_header X-Content-Type-Options nosniff always;` |
+
+Two S3-specific caveats on the disposition header, both absent on the Local
+adapter, where it is a per-request plug:
+
+* It is written **once, at upload time**. Changing it later does not follow
+  from a deploy — you have to rewrite the existing objects
+  (`aws s3 cp s3://bucket s3://bucket --recursive --metadata-directive REPLACE`).
+* `url/1` emits a plain public URL, not a presigned one, so there is no
+  per-request `response-content-disposition` override to reach for.
+
+The practical consequence: pasting a media URL straight into the address bar
+downloads the file instead of displaying it — on both adapters. That is the
+intended behavior, not a misconfiguration. To eyeball a stored image, view it
+in the media library at `/media`, which renders it as an `<img>`.
