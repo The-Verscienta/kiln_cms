@@ -25,7 +25,7 @@ defmodule KilnCMS.Search.Highlight do
   Render a raw `highlight` snippet as safe HTML.
 
   Escapes everything, then reveals the `<mark>` tags around matched terms.
-  Returns a `Phoenix.HTML.safe/0` tuple, so it renders verbatim in HEEx.
+  Returns a `t:Phoenix.HTML.safe/0` tuple, so it renders verbatim in HEEx.
   `nil`/blank input renders as empty.
   """
   @spec to_safe_html(String.t() | nil) :: Phoenix.HTML.safe()

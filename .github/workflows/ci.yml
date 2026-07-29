@@ -186,6 +186,54 @@ jobs:
       - name: Dependency audit
         run: mix deps.audit
 
+  # Also its own job, for the same reason `deps_audit` is (#53). `mix docs` is
+  # the only thing in CI that checks documentation cross-references — a dead
+  # link between guides, a renamed `docs/` file still listed in `extras`, a
+  # moduledoc naming a function that no longer exists. Those failures should
+  # read as "a doc reference broke", not bury the format/credo/sobelow/test
+  # results for a change that had nothing to do with docs.
+  #
+  # This job is also the reason MIX_ENV is overridden below. `ex_doc` is a
+  # `:dev`-only dependency, and under `:test` the project compiles
+  # `test/support` too, which would publish `DataCase` and the `Stub*` test
+  # doubles as part of the API reference. Docs are a dev-profile build.
+  docs:
+    name: Documentation (mix docs)
+    runs-on: ubuntu-latest
+
+    env:
+      MIX_ENV: dev
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      # Own cache: the dev build profile is distinct from the `build` job's
+      # test profile (`consolidate_protocols` differs, and esbuild/tailwind are
+      # runtime deps only in `:dev`), so sharing that job's key would thrash it.
+      - name: Cache deps and _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-docs-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-docs-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      # `--warnings-as-errors` is the entire point: without it ExDoc prints
+      # broken references and still exits 0.
+      - name: Build documentation
+        run: mix docs --warnings-as-errors
+
   client:
     name: Elixir client (kiln_client)
     runs-on: ubuntu-latest

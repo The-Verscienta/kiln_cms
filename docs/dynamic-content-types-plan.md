@@ -1,6 +1,10 @@
 # Dynamic content types (admin-defined) — design & phased plan
 
-**Status:** design proposal (no code yet).
+**Status:** **shipped** — this document is the design record, kept for the
+reasoning behind the model. The implementation lives in
+`KilnCMS.CMS.TypeDefinition`, `KilnCMS.CMS.FieldDefinition`, `KilnCMS.CMS.Entry`
+and the promotion path, with the admin UI at `/editor/types`. Read the resources
+for current behaviour; read this for *why*.
 **Goal:** a non-developer defines a new content type — "Recipe", with its own
 fields — from the admin UI and starts publishing immediately, with no code
 deploy. This is the single biggest capability gap versus Directus and Drupal,

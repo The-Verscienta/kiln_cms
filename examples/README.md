@@ -11,8 +11,8 @@ an external frontend.
 
 | Example | Stack | Status | Demonstrates |
 |---|---|---|---|
-| [`phoenix_showcase/`](phoenix_showcase) | Phoenix / LiveView (no DB) | Full headless showcase | A decoupled Elixir consumer: blog + article pages (typed blocks rendered on the BEAM), search-as-you-type (GraphQL), locale switcher (`/api/locales`), a schema-driven form, and optional API-key auth |
-| [`astro-blog/`](astro-blog) | Astro (static) | Optional headless example (not the primary delivery path) | Content discovery via `sitemap.xml`, the v2 content delivery API (`/api/content/:type/:slug`), and GraphQL search (`/gql`) |
+| [`phoenix_showcase/`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/phoenix_showcase) | Phoenix / LiveView (no DB) | Full headless showcase | A decoupled Elixir consumer: blog + article pages (typed blocks rendered on the BEAM), search-as-you-type (GraphQL), locale switcher (`/api/locales`), a schema-driven form, and optional API-key auth |
+| [`astro-blog/`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/astro-blog) | Astro (static) | Optional headless example (not the primary delivery path) | Content discovery via `sitemap.xml`, the v2 content delivery API (`/api/content/:type/:slug`), and GraphQL search (`/gql`) |
 
 ## The headless API at a glance
 

@@ -3,7 +3,7 @@
 Thanks for contributing! This guide covers the development workflow and the
 conventions that keep the codebase consistent. For the project vision and
 architecture see [`KilnCMS_Project_Plan.md`](KilnCMS_Project_Plan.md); for the
-authoritative, always-in-context coding rules see [`AGENTS.md`](AGENTS.md)
+authoritative, always-in-context coding rules see [`AGENTS.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/AGENTS.md)
 (which also links the per-package Ash/Phoenix usage rules).
 
 ## Getting set up
@@ -106,6 +106,22 @@ containing `gettext(...)`; drifting line references alone will fail CI:
 ```bash
 mix gettext.extract --merge && git diff --exit-code -- priv/gettext
 ```
+
+### Documentation
+
+CI builds the docs with `mix docs --warnings-as-errors` in its own job. Like the
+gettext gate this is CI-only, so run it yourself if you renamed a file under
+`docs/`, changed a link between guides, or wrote a moduledoc that references
+another module or function:
+
+```bash
+mix docs --warnings-as-errors
+```
+
+It fails on dead cross-references — a `docs/` file listed in `extras` that no
+longer exists, a `` `Module.fun/2` `` that was renamed or changed arity. Adding
+a new guide means adding it to both `extras` and `groups_for_extras` in
+`mix.exs`; an unlisted guide is silently invisible in the generated sidebar.
 
 ### Dependency audit
 

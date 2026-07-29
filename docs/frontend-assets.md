@@ -34,12 +34,12 @@ Mix aliases tie it together ([`mix.exs:152`](../mix.exs)):
   and runs `npm install` in `assets/`.
 - `mix assets.build` — `tailwind kiln_cms` + `esbuild kiln_cms`.
 - `mix assets.deploy` — the same with `--minify`, then `phx.digest` for
-  cache-busting fingerprints. This is what the [`Dockerfile`](../Dockerfile)
+  cache-busting fingerprints. This is what the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
   release build runs.
 
 `node_modules` is gitignored; `assets/package-lock.json` is committed. After
 pulling JS dep changes, run `npm install` in `assets/` (or `mix setup`). Node.js
-is therefore a build-time requirement — see [`AGENTS.md`](../AGENTS.md).
+is therefore a build-time requirement — see [`AGENTS.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/AGENTS.md).
 
 ## Serving model: one JS bundle, one CSS bundle, no CDN
 
@@ -59,7 +59,7 @@ CDN delivery was considered and **rejected**:
   correct long-cache + reload-on-change behavior that an external `<script
   src>` can't participate in.
 
-This matches the project rule in [`AGENTS.md`](../AGENTS.md): *"only the app.js
+This matches the project rule in [`AGENTS.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/AGENTS.md): *"only the app.js
 and app.css bundles are supported … you must import vendor deps into app.js and
 app.css to use them … never reference an external vendor'd script `src` or link
 `href` in the layouts."*

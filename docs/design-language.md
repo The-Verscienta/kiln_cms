@@ -48,7 +48,7 @@ thing, and with **no CSS-framework dependency**.
 | Radius | `--radius-sm | md | lg | xl` |
 | Type | `--font-sans` (system stack), tightened heading tracking |
 
-Brand palette is the **ember** language (see [`design/design-system.md`](../design/design-system.md)):
+Brand palette is the **ember** language (see [Design system](design-system.md)):
 the `#FF6200` ember brand on neutral-gray surfaces in light, and a brighter ember
 on neutral charcoal in dark. Note ember only reaches ~3:1 against white, so
 `--color-primary-content` is a near-black ink — primary buttons/badges carry dark

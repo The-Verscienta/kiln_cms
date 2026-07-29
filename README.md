@@ -141,7 +141,7 @@ mobile consumers: `GET /api/content/:type/:slug` (the v2 fired-artifact API —
 structured `json`, `json_ld`, or pre-rendered `web` HTML), `GET /sitemap.xml`
 for enumeration, `POST /gql` (GraphQL), and the JSON:API at `/api/json`. See
 [`docs/headless-consumer-guide.md`](docs/headless-consumer-guide.md) for which
-surface to use, and [`examples/`](examples) for a runnable headless integration
+surface to use, and [`examples/`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples) for a runnable headless integration
 (an optional Astro example — **not** the reference frontend; the LiveView site
 above is).
 
@@ -163,7 +163,7 @@ mix ash.setup            # create DB + run migrations
 
 ## Deployment
 
-Multi-stage [`Dockerfile`](Dockerfile) builds an OTP release and includes **libvips**
+Multi-stage [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile) builds an OTP release and includes **libvips**
 in the runtime image for image processing. Target: Coolify (RackNerd VPS) or Fly.io/Render.
 
 Performance SLOs, Oban queue/`POOL_SIZE` tuning, and load-test recipes are in
