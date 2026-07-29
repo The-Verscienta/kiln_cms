@@ -14,25 +14,30 @@ defmodule KilnCMS.Accounts.User.Senders.SendMagicLink do
   alias KilnCMS.Mail
 
   @impl true
-  def send(user_or_email, token, _opts) do
+  def send(user_or_email, token, opts) do
+    # White-label branding (#48): AshAuthentication threads the request's tenant
+    # through `opts`, so a sign-in link from `acme.example.com` says "Acme".
+    # `for_org/1` resolves a missing tenant to the operator default.
+    site = KilnCMS.Branding.for_org(opts[:tenant]).site_name
+
     new()
     |> from(Application.fetch_env!(:kiln_cms, :email_from))
     |> to(recipient(user_or_email))
-    |> subject("Your KilnCMS sign-in link")
-    |> html_body(body(token))
+    |> subject("Your #{site} sign-in link")
+    |> html_body(body(token, site))
     |> Mail.enqueue!()
   end
 
   defp recipient(%{email: email}), do: to_string(email)
   defp recipient(email), do: to_string(email)
 
-  defp body(token) do
+  defp body(token, site) do
     url = url(~p"/magic_link/#{token}")
 
     """
-    <p>Click the link below to sign in to KilnCMS. It expires shortly and can
+    <p>Click the link below to sign in to #{site}. It expires shortly and can
     only be used once.</p>
-    <p><a href="#{url}">Sign in to KilnCMS</a></p>
+    <p><a href="#{url}">Sign in to #{site}</a></p>
     <p>If you didn't request this, you can safely ignore this email.</p>
     """
   end

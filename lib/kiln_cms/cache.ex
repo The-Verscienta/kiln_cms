@@ -171,6 +171,23 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved white-label branding tokens (#48). Per-org:
+  each site caches its own `%KilnCMS.Branding{}`.
+  """
+  def branding_key(org_id), do: "branding:#{org_id}"
+
+  @doc """
+  Drop a site's cached branding so a settings save is visible on the next
+  request instead of waiting out the TTL. Per-record `bust/3` doesn't touch this
+  aggregate key, so `Changes.BustBranding` calls it explicitly.
+  """
+  @spec bust_branding(Ash.UUID.t()) :: :ok
+  def bust_branding(org_id) do
+    if enabled?(), do: Cachex.del(@cache, branding_key(org_id))
+    :ok
+  end
+
+  @doc """
   Cache key for a site's generated sitemap XML (shared with the sitemap
   controller). Per-org (epic #336): each organization serves its own sitemap of
   its own published URLs.

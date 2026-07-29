@@ -92,16 +92,22 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :disable_button_text, "Changing password ..."
   end
 
+  # Blanked deliberately (#48). These overrides are a compile-time Spark DSL, so
+  # they cannot carry a per-org logo or site name — the auth pages are rendered
+  # per tenant host, and a white-labelled site showing the KilnCMS mark on its
+  # own sign-in page is the most visible branding leak in the product. The banner
+  # is rendered per-request by `KilnCMSWeb.Layouts.auth/1` instead, wired in via
+  # the `layout:` option on the auth routes in the router.
+  #
+  # (The previous `dark:hidden` / `dark:block` image classes were also already
+  # broken: Tailwind's `dark:` variant keys off `prefers-color-scheme`, but this
+  # app themes via a `data-theme` attribute.)
   override Components.Banner do
-    set :root_class, "mb-6 flex w-full justify-center"
-    set :href_class, nil
-    set :href_url, "/"
-    set :image_class, "h-10 w-auto dark:hidden"
-    set :dark_image_class, "hidden h-10 w-auto dark:block"
-    set :image_url, "/images/logo-mark.png"
-    set :dark_image_url, "/images/logo-mark.png"
-    set :text_class, "ml-3 text-lg font-semibold tracking-tight text-base-content"
-    set :text, "KilnCMS"
+    set :root_class, "hidden"
+    set :href_url, nil
+    set :image_url, nil
+    set :dark_image_url, nil
+    set :text, nil
   end
 
   override Components.HorizontalRule do

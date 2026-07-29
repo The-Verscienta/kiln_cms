@@ -15,15 +15,16 @@ defmodule KilnCMSWeb.StructuredData do
   The JSON-LD for a content page: the main entity (`BlogPosting`/`WebPage`) plus
   a `BreadcrumbList`, as a list of schema.org objects.
   """
-  @spec document(struct(), ContentTypes.t()) :: [map()]
-  def document(record, ct), do: [build(record, ct), breadcrumbs(record, ct)]
+  @spec document(struct(), ContentTypes.t(), term()) :: [map()]
+  def document(record, ct, org \\ nil),
+    do: [build(record, ct, org), breadcrumbs(record, ct)]
 
   @doc """
   Returns the schema.org map for `record` (a published content struct) given its
   `ContentTypes` entry `ct`. Empty/nil fields are omitted.
   """
-  @spec build(struct(), ContentTypes.t()) :: map()
-  def build(record, ct) do
+  @spec build(struct(), ContentTypes.t(), term()) :: map()
+  def build(record, ct, org \\ nil) do
     url = url(record, ct)
 
     %{
@@ -32,7 +33,10 @@ defmodule KilnCMSWeb.StructuredData do
       title_key(ct) => record.title,
       "url" => url,
       "mainEntityOfPage" => url,
-      "publisher" => %{"@type" => "Organization", "name" => site_name()}
+      # The `publisher` is the SITE, which is per-org under white-labelling
+      # (#48). `org` is nil in tenant-less callers, which resolves to the
+      # instance-wide default — the previous behaviour.
+      "publisher" => %{"@type" => "Organization", "name" => site_name(org)}
     }
     |> maybe_put("description", record.seo_description)
     |> maybe_put("keywords", record.seo_keywords)
@@ -125,7 +129,7 @@ defmodule KilnCMSWeb.StructuredData do
 
   defp locale_prefix(_), do: ""
 
-  defp site_name, do: Application.get_env(:kiln_cms, :site_name, "KilnCMS")
+  defp site_name(org), do: KilnCMS.Branding.for_org(org).site_name
   defp base_url, do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
 
   defp iso8601(nil), do: nil

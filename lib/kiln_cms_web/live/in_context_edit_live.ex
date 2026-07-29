@@ -331,7 +331,7 @@ defmodule KilnCMSWeb.InContextEditLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.public locale_links={[]} locale={@record.locale}>
+    <Layouts.public locale_links={[]} locale={@record.locale} current_org={@current_org}>
       <Layouts.flash_group flash={@flash} />
       <.edit_bar
         record={@record}

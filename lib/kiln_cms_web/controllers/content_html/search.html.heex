@@ -1,4 +1,4 @@
-<Layouts.public locale_links={@locale_links} locale={@locale}>
+<Layouts.public locale_links={@locale_links} locale={@locale} current_org={@current_org}>
   <h1 class="text-3xl font-bold tracking-tight">{gettext("Search")}</h1>
 
   <form method="get" action={KilnCMS.I18n.localized_path(@locale, "/search")} class="mt-6">

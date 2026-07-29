@@ -261,7 +261,7 @@ defmodule KilnCMSWeb.PreviewLive do
         </span>
       </div>
 
-      <Layouts.public>
+      <Layouts.public current_org={@current_org}>
         <article class="prose max-w-none">
           <header :if={@excerpt?} class="mb-6">
             <h1 class="text-3xl font-bold tracking-tight">{@title}</h1>
