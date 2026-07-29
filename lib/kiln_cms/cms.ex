@@ -256,6 +256,15 @@ defmodule KilnCMS.CMS do
       define :destroy_redirect, action: :destroy
     end
 
+    # Per-site white-label branding (#48). Reads should go through
+    # `KilnCMS.Branding` (cached + fallback-resolved), not this interface — it
+    # exists for the settings UI's writes and for the resolver's own lookup.
+    resource KilnCMS.CMS.SiteBranding do
+      define :list_site_branding, action: :read
+      define :save_site_branding, action: :save
+      define :reset_site_branding, action: :destroy
+    end
+
     # Editorial/authorization consent linked to content (#356).
     resource KilnCMS.CMS.Consent do
       define :record_consent, action: :record

@@ -406,7 +406,7 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:og_type, "article")
     |> assign(:hreflang, hreflang_alternates(ct, translations))
     |> assign(:locale_links, locale_links(ct, translations, record.locale))
-    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct)))
+    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, current_org_id(conn))))
     |> render(template, record: record, blocks: blocks)
   end
 

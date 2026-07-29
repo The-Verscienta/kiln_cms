@@ -27,8 +27,13 @@ defmodule KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail do
   # the copy unambiguous about who is asking and what it does.
   defp subject(opts) do
     case opts[:confirmation_type] do
-      :identity_link -> "Confirm linking your #{opts[:provider]} login"
-      _ -> "Confirm your email address"
+      :identity_link ->
+        "Confirm linking your #{opts[:provider]} login"
+
+      _ ->
+        # White-label branding (#48) — name the site the account is on, so a
+        # recipient with accounts on several tenants knows which one this is.
+        "Confirm your email address for #{KilnCMS.Branding.for_org(opts[:tenant]).site_name}"
     end
   end
 

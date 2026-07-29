@@ -270,6 +270,9 @@ defmodule KilnCMSWeb.Router do
       live "/editor/automation", AutomationLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
+      # White-label branding for the current site (#48) — name, logo, colour.
+      # Org-scoped: you brand the site you're on (switch org by host).
+      live "/editor/branding", BrandingLive, :index
       live "/editor/mail", MailSettingsLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Compliance & governance dashboard (#352) — audit trail, consent, and
@@ -518,28 +521,46 @@ defmodule KilnCMSWeb.Router do
     # enabled (the default). Set `config :kiln_cms, :registration_enabled, false`
     # for invite-only mode — the registration *action* is also gated, so this
     # just hides the UI affordance. (See KilnCMS.Accounts.Validations.RegistrationEnabled.)
+    # `layout:` + `:assign_current_org` give the auth pages white-label branding
+    # (#48): the AshAuthentication `Components.Banner` overrides are compile-time
+    # literals, so `Layouts.auth/1` draws the per-org logo and site name instead.
+    # `:assign_current_org` resolves from the socket host and needs no user.
     if Application.compile_env(:kiln_cms, :registration_enabled, true) do
       sign_in_route register_path: "/register",
                     reset_path: "/reset",
                     auth_routes_prefix: "/auth",
-                    on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
+                    layout: {KilnCMSWeb.Layouts, :auth},
+                    on_mount: [
+                      {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+                      {KilnCMSWeb.LiveUserAuth, :live_no_user}
+                    ],
                     overrides: [KilnCMSWeb.AuthOverrides]
     else
       sign_in_route reset_path: "/reset",
                     auth_routes_prefix: "/auth",
-                    on_mount: [{KilnCMSWeb.LiveUserAuth, :live_no_user}],
+                    layout: {KilnCMSWeb.Layouts, :auth},
+                    on_mount: [
+                      {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+                      {KilnCMSWeb.LiveUserAuth, :live_no_user}
+                    ],
                     overrides: [KilnCMSWeb.AuthOverrides]
     end
 
     reset_route auth_routes_prefix: "/auth",
+                layout: {KilnCMSWeb.Layouts, :auth},
+                on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
                 overrides: [KilnCMSWeb.AuthOverrides]
 
     confirm_route KilnCMS.Accounts.User, :confirm_new_user,
       auth_routes_prefix: "/auth",
+      layout: {KilnCMSWeb.Layouts, :auth},
+      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
       overrides: [KilnCMSWeb.AuthOverrides]
 
     magic_sign_in_route(KilnCMS.Accounts.User, :magic_link,
       auth_routes_prefix: "/auth",
+      layout: {KilnCMSWeb.Layouts, :auth},
+      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
       overrides: [KilnCMSWeb.AuthOverrides]
     )
   end

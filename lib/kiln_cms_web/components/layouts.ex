@@ -11,6 +11,73 @@ defmodule KilnCMSWeb.Layouts do
   # and other static content.
   embed_templates "layouts/*"
 
+  alias KilnCMS.Branding
+
+  @doc """
+  Emits the request org's brand colour tokens as an **unlayered** `<style>`
+  block, or nothing at all when the site is unbranded (#48).
+
+  Deliberately not an inline `style=` on `<html>`: an inline style outranks the
+  `[data-theme="dark"]` selector, so the dark-mode primary would never apply.
+  Only a `<style>` block can carry both rules — see
+  `KilnCMS.Branding.css_variables/1` for the full cascade reasoning.
+
+  Permitted with no nonce: `style-src` is `'self' 'unsafe-inline'` and carries
+  no nonce source (`KilnCMSWeb.Router`).
+  """
+  attr :org, :any, default: nil, doc: "the request's organization, or nil for the default org"
+
+  def brand_tokens(assigns) do
+    assigns = assign(assigns, :css, Branding.for_org(assigns.org).css)
+
+    # `{...}` does NOT interpolate inside <style> (a HEEx raw-text element), so
+    # this must use <%= %>. `raw/1` is likewise required: escaping would turn the
+    # selector into `[data-theme=&quot;dark&quot;]`, and <style> does not decode
+    # character references — dark mode would silently break. Safe because every
+    # emitted byte is re-derived from parsed colour channels, never passed through.
+    ~H"""
+    <style :if={@css}>
+      <%= Phoenix.HTML.raw(@css) %>
+    </style>
+    """
+  end
+
+  @doc """
+  Inner layout for the AshAuthentication pages, rendering the white-label banner
+  the compile-time `Components.Banner` overrides can't express (#48).
+
+  `AshAuthentication.Phoenix.Overrides` values are Spark DSL literals resolved at
+  render from a compile-time map, so there is no per-request hook for the logo or
+  the site name. The Banner is blanked in `KilnCMSWeb.AuthOverrides` and this
+  layout draws it instead — wired in via `layout:` on the auth route macros, with
+  `:assign_current_org` added to their `on_mount` (it resolves from the socket
+  host and needs no signed-in user).
+  """
+  attr :current_org, :any, default: nil
+  slot :inner_content
+
+  def auth(assigns) do
+    assigns = assign(assigns, :brand, Branding.for_org(assigns[:current_org]))
+
+    ~H"""
+    <div class="mb-6 flex w-full justify-center">
+      <a href="/" class="flex items-center">
+        <img src={@brand.logo_url} class="h-10 w-auto" alt="" referrerpolicy="no-referrer" />
+        <span class="ml-3 text-lg font-semibold tracking-tight text-base-content">
+          {@brand.site_name}
+        </span>
+      </a>
+    </div>
+    {@inner_content}
+    """
+  end
+
+  @doc "The site name for an org, resolved through the branding fallback chain."
+  def brand_name(org), do: Branding.for_org(org).site_name
+
+  @doc "The header logo URL for an org, resolved through the branding fallback chain."
+  def brand_logo(org), do: Branding.for_org(org).logo_url
+
   @doc """
   Renders your app layout.
 
@@ -32,6 +99,10 @@ defmodule KilnCMSWeb.Layouts do
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
   attr :current_user, :map, default: nil, doc: "the signed-in user, if any"
+
+  attr :current_org, :any,
+    default: nil,
+    doc: "the request's organization (#336), supplying the white-label branding (#48)"
 
   attr :container_class, :string,
     default: "mx-auto max-w-5xl space-y-4",
@@ -56,8 +127,13 @@ defmodule KilnCMSWeb.Layouts do
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
-          <img src={~p"/images/logo-mark.png"} class="h-8 w-auto" alt="" />
-          <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
+          <img
+            src={brand_logo(@current_org)}
+            class="h-8 w-auto"
+            alt=""
+            referrerpolicy="no-referrer"
+          />
+          <span class="text-sm font-semibold tracking-tight">{brand_name(@current_org)}</span>
         </a>
         <nav class="flex items-center gap-2 sm:gap-3">
           <%!-- Desktop: inline links --%>
@@ -159,8 +235,13 @@ defmodule KilnCMSWeb.Layouts do
         "lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:bg-base-200/40 lg:shadow-none"
       ]}>
         <div class="flex h-14 items-center gap-2.5 border-b border-base-content/10 px-4">
-          <img src={~p"/images/logo-mark.png"} class="h-7 w-auto" alt="" />
-          <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
+          <img
+            src={brand_logo(@current_org)}
+            class="h-7 w-auto"
+            alt=""
+            referrerpolicy="no-referrer"
+          />
+          <span class="text-sm font-semibold tracking-tight">{brand_name(@current_org)}</span>
         </div>
         <nav class="flex-1 overflow-y-auto px-2 py-2" aria-label={gettext("Primary")}>
           <.console_nav current_user={@current_user} current_org={@current_org} active={@active} />
@@ -298,6 +379,12 @@ defmodule KilnCMSWeb.Layouts do
       if role == :admin do
         [
           %{
+            key: :branding,
+            label: gettext("Branding"),
+            path: ~p"/editor/branding",
+            icon: "hero-swatch"
+          },
+          %{
             key: :types,
             label: gettext("Content types"),
             path: ~p"/editor/types",
@@ -422,15 +509,24 @@ defmodule KilnCMSWeb.Layouts do
   # current}`); rendered as a language switcher when there's more than one.
   attr :locale_links, :list, default: []
   attr :locale, :string, default: nil, doc: "active locale, to keep nav links locale-prefixed"
+
+  # Defaults to nil (the default org) on purpose: PreviewLive, TokenPreviewLive
+  # and the error templates render this component bare.
+  attr :current_org, :any,
+    default: nil,
+    doc: "the request's organization (#336), supplying the white-label branding (#48)"
+
   slot :inner_block, required: true
 
   def public(assigns) do
+    assigns = assign(assigns, :brand, Branding.for_org(assigns.current_org))
+
     ~H"""
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-3xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
-          <img src={~p"/images/logo-mark.png"} class="h-7 w-auto" alt="" />
-          <span class="text-sm font-semibold tracking-tight">KilnCMS</span>
+          <img src={@brand.logo_url} class="h-7 w-auto" alt="" referrerpolicy="no-referrer" />
+          <span class="text-sm font-semibold tracking-tight">{@brand.site_name}</span>
         </a>
         <nav class="flex items-center gap-4 text-sm text-base-content/70">
           <a href={KilnCMS.I18n.localized_path(@locale, "/blog")} class="hover:text-base-content">
@@ -468,8 +564,19 @@ defmodule KilnCMSWeb.Layouts do
       {render_slot(@inner_block)}
     </main>
 
-    <footer class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8">
-      {gettext("Powered by KilnCMS.")}
+    <%!-- Attribution (#48). The stock msgid is kept verbatim for an unbranded
+          site — it's asserted by several tests and lives in four catalogs — and a
+          white-labelled site gets its own interpolated msgid instead. An org can
+          also hide the line entirely. --%>
+    <footer
+      :if={@brand.show_attribution}
+      class="mx-auto max-w-3xl px-4 py-10 text-xs text-base-content/70 sm:px-6 lg:px-8"
+    >
+      <%= if Branding.branded?(@brand) do %>
+        {gettext("Powered by %{name}.", name: @brand.site_name)}
+      <% else %>
+        {gettext("Powered by KilnCMS.")}
+      <% end %>
     </footer>
     """
   end

@@ -251,6 +251,18 @@ if config_env() == :prod do
   # canonical URL host.
   config :kiln_cms, :tenant_base_host, System.get_env("TENANT_BASE_HOST") || host
 
+  # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer
+  # beneath each site's own editor-managed row. Unset vars fall through to the
+  # stock KilnCMS defaults. BRAND_PRIMARY_COLOR must be a hex colour (`#1d4ed8`);
+  # anything else is ignored with a warning, since the value drives the emitted
+  # theme tokens. Off-origin BRAND_LOGO_URL hosts must also be in CSP_IMG_SRC or
+  # the browser will block the image.
+  config :kiln_cms, :branding,
+    site_name: System.get_env("SITE_NAME"),
+    logo_url: System.get_env("BRAND_LOGO_URL"),
+    favicon_url: System.get_env("BRAND_FAVICON_URL"),
+    primary_color: System.get_env("BRAND_PRIMARY_COLOR")
+
   config :kiln_cms, KilnCMSWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     check_origin: check_origin,

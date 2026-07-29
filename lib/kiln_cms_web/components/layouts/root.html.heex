@@ -4,7 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title default="KilnCMS" suffix=" · KilnCMS" phx-no-format>{assigns[:page_title]}</.live_title>
+    <%!-- White-label branding (#48). `assigns[:current_org]` (not `@current_org`):
+          the plug assigns it on every request, but the `:authenticated_routes`
+          live session has no `:assign_current_org` on_mount, and
+          `Branding.for_org(nil)` correctly resolves the default org. --%>
+    <.live_title
+      default={Layouts.brand_name(assigns[:current_org])}
+      suffix={" · " <> Layouts.brand_name(assigns[:current_org])}
+      phx-no-format
+    >{assigns[:page_title]}</.live_title>
+    <link rel="icon" href={KilnCMS.Branding.for_org(assigns[:current_org]).favicon_url} />
     <meta :if={assigns[:meta_description]} name="description" content={@meta_description} />
     <meta :if={assigns[:meta_keywords]} name="keywords" content={@meta_keywords} />
     <link :if={assigns[:canonical_url]} rel="canonical" href={@canonical_url} />
@@ -37,6 +46,12 @@
     />
     {assigns[:json_ld]}
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
+    <%!-- Per-org brand tokens (#48). MUST come after the stylesheet link, and the
+          component MUST emit both the :root and the [data-theme="dark"] rule —
+          these declarations are unlayered, so they outrank both `@layer theme`
+          and `@layer base`, and a :root-only override would silently flatten
+          dark mode. Emits nothing for an unbranded site. --%>
+    <Layouts.brand_tokens org={assigns[:current_org]} />
     <%!-- type="module": the bundle is ESM (esbuild --splitting) so the TipTap
           editor chunk loads on demand in the admin editor only. --%>
     <script defer phx-track-static type="module" src={~p"/assets/js/app.js"}>

@@ -11,11 +11,16 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
   alias KilnCMS.Mail
 
   @impl true
-  def send(user, token, _) do
+  def send(user, token, opts) do
+    # White-label branding (#48). Note the read-based reset path
+    # (`RequestPasswordResetPreparation`) does NOT thread a tenant, so this can
+    # legitimately be nil — `for_org/1` then resolves the operator default.
+    site = KilnCMS.Branding.for_org(opts[:tenant]).site_name
+
     new()
     |> from(Application.fetch_env!(:kiln_cms, :email_from))
     |> to(to_string(user.email))
-    |> subject("Reset your password")
+    |> subject("Reset your #{site} password")
     |> html_body(body(token: token))
     |> Mail.enqueue!()
   end

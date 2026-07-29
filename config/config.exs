@@ -214,8 +214,17 @@ config :kiln_cms, KilnCMS.Firing.StaticExport,
 # elsewhere. EXLA is excluded from the prod build because its from-source XLA NIF
 # is too heavy for the build host; semantic search is disabled by default there.
 
-# Organization name used as the JSON-LD publisher. Override in runtime.exs.
+# Organization name used as the JSON-LD publisher and as the provenance signing
+# identity. Override in runtime.exs. Deliberately instance-wide: `KilnCMS.Branding`
+# falls back to it, but per-site branding must not change what a signature attests.
 config :kiln_cms, :site_name, "KilnCMS"
+
+# White-label branding defaults (#48, see `KilnCMS.Branding`) — the instance-wide
+# layer under each site's own `KilnCMS.CMS.SiteBranding` row. Override at runtime
+# via SITE_NAME / BRAND_LOGO_URL / BRAND_PRIMARY_COLOR (config/runtime.exs).
+# Unset keys fall through to the stock KilnCMS defaults, so a deployment that
+# configures nothing renders exactly as before.
+config :kiln_cms, :branding, []
 
 # GraphQL schema introspection. Enabled by default for local/dev tooling;
 # disabled in production (config/prod.exs) so the public /gql endpoint doesn't

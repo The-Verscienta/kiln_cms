@@ -1,4 +1,4 @@
-<Layouts.public locale_links={@locale_links} locale={@locale}>
+<Layouts.public locale_links={@locale_links} locale={@locale} current_org={@current_org}>
   <h1 class="text-3xl font-bold tracking-tight">{gettext("Blog")}</h1>
 
   <p :if={@posts == []} class="mt-6 text-base-content/60">

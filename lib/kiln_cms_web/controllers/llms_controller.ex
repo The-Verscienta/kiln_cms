@@ -25,7 +25,9 @@ defmodule KilnCMSWeb.LlmsController do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
     body =
-      Cache.fetch(Cache.llms_key(org_id), @cache_ttl, fn -> build_body(build_groups(org_id)) end)
+      Cache.fetch(Cache.llms_key(org_id), @cache_ttl, fn ->
+        build_body(build_groups(org_id), org_id)
+      end)
 
     conn
     |> put_resp_content_type("text/markdown")
@@ -77,11 +79,16 @@ defmodule KilnCMSWeb.LlmsController do
     }
   end
 
-  defp build_body(groups) do
-    header = """
-    # #{site_name()}
+  defp build_body(groups, org_id) do
+    # White-label (#48): llms.txt names the *site*, which is per-org. The body is
+    # cached per-org under `Cache.llms_key/1` and busted by `Changes.BustBranding`
+    # when the name changes.
+    site_name = site_name(org_id)
 
-    > Published content from #{site_name()}, indexed for language models (see https://llmstxt.org).
+    header = """
+    # #{site_name}
+
+    > Published content from #{site_name}, indexed for language models (see https://llmstxt.org).
     """
 
     sections =
@@ -107,6 +114,6 @@ defmodule KilnCMSWeb.LlmsController do
     text |> to_string() |> String.replace(["\r", "\n"], " ") |> String.replace("]", "\\]")
   end
 
-  defp site_name, do: Application.get_env(:kiln_cms, :site_name, "KilnCMS")
+  defp site_name(org_id), do: KilnCMS.Branding.for_org(org_id).site_name
   defp base_url, do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
 end

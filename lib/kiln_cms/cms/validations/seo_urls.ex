@@ -38,7 +38,17 @@ defmodule KilnCMS.CMS.Validations.SeoUrls do
     )
   end
 
-  defp valid?(url) do
+  @doc """
+  Whether `url` is safe to emit into a public document: a same-origin relative
+  path, or an absolute `https://` URL.
+
+  Public so the white-label branding tokens (#48,
+  `KilnCMS.CMS.Validations.BrandTokens`) enforce the identical rule — one
+  definition of "safe outbound URL", one test suite. Branding narrows it
+  further, to hosts the CSP `img-src` actually allows.
+  """
+  @spec valid?(String.t()) :: boolean()
+  def valid?(url) when is_binary(url) do
     url = String.trim(url)
     relative?(url) or https?(url)
   end
