@@ -6058,77 +6058,77 @@ msgstr "desconocido"
 #: lib/kiln_cms_web/live/media_live.ex:1219
 #, elixir-autogen, elixir-format
 msgid "Use this in content. Pasting it into the address bar downloads the file instead of displaying it."
-msgstr ""
+msgstr "Use esto en el contenido. Pegarlo en la barra de direcciones descarga el archivo en lugar de mostrarlo."
 
 #: lib/kiln_cms_web/live/analytics_live.ex:227
-#, elixir-autogen, elixir-format, fuzzy
+#, elixir-autogen, elixir-format
 msgid "%{count} day"
 msgid_plural "%{count} days"
-msgstr[0] "%{count} etiqueta"
-msgstr[1] "%{count} etiquetas"
+msgstr[0] "%{count} día"
+msgstr[1] "%{count} días"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:203
-#, elixir-autogen, elixir-format, fuzzy
+#, elixir-autogen, elixir-format
 msgid "All time"
-msgstr "Todos los tipos"
+msgstr "Desde siempre"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:248
 #, elixir-autogen, elixir-format
 msgid "Content views per day for the last %{count} day"
 msgid_plural "Content views per day for the last %{count} days"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Visitas de contenido por día del último %{count} día"
+msgstr[1] "Visitas de contenido por día de los últimos %{count} días"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:258
 #, elixir-autogen, elixir-format
 msgid "Daily buckets use UTC calendar days; today's bar is still filling. History starts when this feature was deployed."
-msgstr ""
+msgstr "Los intervalos diarios usan días naturales UTC; la barra de hoy aún se está llenando. El historial comienza cuando se implementó esta función."
 
 #: lib/kiln_cms_web/components/chart_components.ex:89
 #, elixir-autogen, elixir-format
 msgid "Day"
-msgstr ""
+msgstr "Día"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:211
 #, elixir-autogen, elixir-format
 msgid "Last %{count} day"
 msgid_plural "Last %{count} days"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Último %{count} día"
+msgstr[1] "Últimos %{count} días"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:236
 #, elixir-autogen, elixir-format
 msgid "No views in the last %{count} day."
 msgid_plural "No views in the last %{count} days."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Sin visitas en el último %{count} día."
+msgstr[1] "Sin visitas en los últimos %{count} días."
 
 #: lib/kiln_cms_web/live/analytics_live.ex:219
 #, elixir-autogen, elixir-format
 msgid "Trend range"
-msgstr ""
+msgstr "Rango de tendencia"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:276
-#, elixir-autogen, elixir-format, fuzzy
+#, elixir-autogen, elixir-format
 msgid "Views (%{count}d)"
 msgid_plural "Views (%{count}d)"
-msgstr[0] "Papelera (%{count})"
-msgstr[1] "Papelera (%{count})"
+msgstr[0] "Visitas (%{count} d)"
+msgstr[1] "Visitas (%{count} d)"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:278
 #, elixir-autogen, elixir-format
 msgid "Views (all time)"
-msgstr ""
+msgstr "Visitas (desde siempre)"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:207
 #, elixir-autogen, elixir-format
 msgid "Views in range"
-msgstr ""
+msgstr "Visitas en el rango"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:218
 #, elixir-autogen, elixir-format
 msgid "Views over time"
-msgstr ""
+msgstr "Visitas a lo largo del tiempo"
 
 #: lib/kiln_cms_web/live/branding_live.ex:199
 #, elixir-autogen, elixir-format
