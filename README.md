@@ -35,7 +35,7 @@ Resources live in `lib/kiln_cms/cms/`:
 
 ## Getting started
 
-Prerequisites: Elixir 1.18+ / OTP 27+, Docker (for Postgres).
+Prerequisites: Elixir 1.19.3+ / OTP 27+, Docker (for Postgres).
 
 ```bash
 # 1. Start Postgres (only required service; optional infra via profiles)

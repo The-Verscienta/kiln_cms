@@ -14,7 +14,7 @@ contributor. It points at the right guide rather than restating it.
 
 ## 1. Run it locally
 
-Prerequisites: Elixir 1.18+ / OTP 27+, Docker (for Postgres), Node.js.
+Prerequisites: Elixir 1.19.3+ / OTP 27+, Docker (for Postgres), Node.js.
 
 ```bash
 docker compose up -d postgres   # the only required service
