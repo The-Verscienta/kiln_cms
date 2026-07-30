@@ -4,8 +4,11 @@ defmodule KilnCMSWeb.SitemapControllerTest do
   # other tests may bust concurrently.
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.OrgFixtures
+
   alias KilnCMS.Cache
   alias KilnCMS.CMS.{Page, Post}
+  alias KilnCMSWeb.Tenant
 
   setup do
     Cache.bust_published()
@@ -88,5 +91,42 @@ defmodule KilnCMSWeb.SitemapControllerTest do
     assert response_content_type(conn, :txt)
     assert body =~ "User-agent: *"
     assert body =~ "Sitemap: http://localhost:4000/sitemap.xml"
+  end
+
+  describe "tenant-hosted sites emit their own host (#557)" do
+    test "a subdomain org's sitemap and robots.txt carry the tenant host, not the default",
+         %{conn: conn} do
+      o = org("acme")
+      slug = "about-#{System.unique_integer([:positive])}"
+      Ash.Seed.seed!(Page, %{title: "P", slug: slug, state: :published}, tenant: o)
+      host = "#{o.slug}.#{Tenant.base_host()}"
+      base_url = Tenant.base_url(o)
+
+      sitemap = %{conn | host: host} |> get(~p"/sitemap.xml") |> response(200)
+
+      assert sitemap =~ "<loc>#{base_url}/#{slug}</loc>"
+      refute sitemap =~ "http://localhost:4000"
+
+      robots = %{conn | host: host} |> get(~p"/robots.txt") |> response(200)
+      assert robots =~ "Sitemap: #{base_url}/sitemap.xml"
+    end
+
+    test "an org with a custom domain emits that domain instead of its slug", %{conn: conn} do
+      domain = "vanity-#{System.unique_integer([:positive])}.example.com"
+      o = org("vanity", custom_domain: domain)
+      slug = "about-#{System.unique_integer([:positive])}"
+      Ash.Seed.seed!(Page, %{title: "P", slug: slug, state: :published}, tenant: o)
+
+      sitemap = %{conn | host: domain} |> get(~p"/sitemap.xml") |> response(200)
+      assert sitemap =~ "<loc>#{Tenant.base_url(o)}/#{slug}</loc>"
+    end
+
+    test "the default org (bare host) is unaffected", %{conn: conn} do
+      n = System.unique_integer([:positive])
+      published_page("default-#{n}")
+
+      body = conn |> get(~p"/sitemap.xml") |> response(200)
+      assert body =~ "<loc>http://localhost:4000/default-#{n}</loc>"
+    end
   end
 end

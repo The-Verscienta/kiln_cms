@@ -16,8 +16,12 @@ defmodule KilnCMSWeb.StructuredData do
   a `BreadcrumbList`, as a list of schema.org objects.
   """
   @spec document(struct(), ContentTypes.t(), term()) :: [map()]
-  def document(record, ct, org \\ nil),
-    do: [build(record, ct, org), breadcrumbs(record, ct)]
+  def document(record, ct, org \\ nil) do
+    # Reuse the main node's already-computed url for the trail's last crumb
+    # instead of having breadcrumbs/4 re-derive it via a second `url/3` call.
+    built = build(record, ct, org)
+    [built, breadcrumbs(record, ct, org, built["url"])]
+  end
 
   @doc """
   Returns the schema.org map for `record` (a published content struct) given its
@@ -25,7 +29,7 @@ defmodule KilnCMSWeb.StructuredData do
   """
   @spec build(struct(), ContentTypes.t(), term()) :: map()
   def build(record, ct, org \\ nil) do
-    url = url(record, ct)
+    url = url(record, ct, org)
 
     %{
       "@context" => "https://schema.org",
@@ -47,9 +51,10 @@ defmodule KilnCMSWeb.StructuredData do
   end
 
   @doc "schema.org `CollectionPage` (+ `ItemList`) for the blog index `posts`."
-  @spec blog([struct()]) :: map()
-  def blog(posts) do
-    blog_url = "#{base_url()}/blog"
+  @spec blog([struct()], term()) :: map()
+  def blog(posts, org \\ nil) do
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+    blog_url = "#{base_url}/blog"
 
     %{
       "@context" => "https://schema.org",
@@ -58,8 +63,7 @@ defmodule KilnCMSWeb.StructuredData do
       "url" => blog_url,
       "mainEntity" => %{
         "@type" => "ItemList",
-        "itemListElement" =>
-          list_items(posts, &"#{base_url()}#{locale_prefix(&1)}/blog/#{&1.slug}")
+        "itemListElement" => list_items(posts, &"#{base_url}#{locale_prefix(&1)}/blog/#{&1.slug}")
       }
     }
   end
@@ -71,11 +75,13 @@ defmodule KilnCMSWeb.StructuredData do
   defp author(_record), do: nil
 
   # Home › [Blog ›] Title — search-engine breadcrumb trail, not localized UI.
-  defp breadcrumbs(record, ct) do
+  defp breadcrumbs(record, ct, org, record_url) do
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+
     crumbs =
-      [{"Home", base_url()}] ++
-        if(ct.type == :post, do: [{"Blog", "#{base_url()}/blog"}], else: []) ++
-        [{record.title, url(record, ct)}]
+      [{"Home", base_url}] ++
+        if(ct.type == :post, do: [{"Blog", "#{base_url}/blog"}], else: []) ++
+        [{record.title, record_url}]
 
     %{
       "@context" => "https://schema.org",
@@ -111,15 +117,16 @@ defmodule KilnCMSWeb.StructuredData do
 
   # Prefer an editor-set canonical URL; otherwise build the public URL the same
   # way the sitemap does (base + the type's path prefix + slug).
-  defp url(%{canonical_url: canonical}, _ct) when is_binary(canonical) and canonical != "",
+  defp url(%{canonical_url: canonical}, _ct, _org) when is_binary(canonical) and canonical != "",
     do: canonical
 
   # A path alias (#485) is the record's canonical path when set.
-  defp url(%{path_alias: alias_path} = record, _ct) when is_binary(alias_path),
-    do: "#{base_url()}#{locale_prefix(record)}#{alias_path}"
+  defp url(%{path_alias: alias_path} = record, _ct, org) when is_binary(alias_path),
+    do: "#{KilnCMSWeb.Tenant.base_url(org)}#{locale_prefix(record)}#{alias_path}"
 
-  defp url(record, ct),
-    do: "#{base_url()}#{locale_prefix(record)}#{ContentTypes.public_prefix(ct)}/#{record.slug}"
+  defp url(record, ct, org),
+    do:
+      "#{KilnCMSWeb.Tenant.base_url(org)}#{locale_prefix(record)}#{ContentTypes.public_prefix(ct)}/#{record.slug}"
 
   # Locale-prefix non-default-locale URLs so JSON-LD matches the locale-prefixed
   # delivery paths (#164). Records carry their own `locale`.
@@ -130,7 +137,6 @@ defmodule KilnCMSWeb.StructuredData do
   defp locale_prefix(_), do: ""
 
   defp site_name(org), do: KilnCMS.Branding.for_org(org).site_name
-  defp base_url, do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
 
   defp iso8601(nil), do: nil
   defp iso8601(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

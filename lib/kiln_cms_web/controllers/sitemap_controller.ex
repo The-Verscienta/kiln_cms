@@ -4,7 +4,8 @@ defmodule KilnCMSWeb.SitemapController do
   frontend. Lists every published content record at its public URL — pages at
   `<base>/<slug>`, posts at `<base>/blog/<slug>`, and other content types at
   `<base>/<plural>/<slug>` — discovered through `KilnCMS.CMS.ContentTypes`. The
-  base URL is `:public_base_url` config.
+  base URL is the request's own tenant (`KilnCMSWeb.Tenant.base_url/1`), falling
+  back to `:public_base_url` config for the default org.
   """
   use KilnCMSWeb, :controller
 
@@ -25,10 +26,10 @@ defmodule KilnCMSWeb.SitemapController do
 
   def index(conn, _params) do
     # Per-org sitemap (epic #336): each site lists only its own published URLs.
-    org_id = KilnCMSWeb.Tenant.current_org_id(conn)
+    org = KilnCMSWeb.Tenant.current_org(conn)
 
     xml =
-      Cache.fetch(Cache.sitemap_key(org_id), @cache_ttl, fn -> sitemap_xml(build_urls(org_id)) end)
+      Cache.fetch(Cache.sitemap_key(org.id), @cache_ttl, fn -> sitemap_xml(build_urls(org)) end)
 
     conn
     |> put_resp_content_type("application/xml")
@@ -39,8 +40,8 @@ defmodule KilnCMSWeb.SitemapController do
   # only, which is exactly what belongs in a public sitemap. Each type's read is
   # capped, and accumulation stops once the overall ceiling is reached.
   # Dynamic types (D17) are included — their entries carry the same read policy.
-  defp build_urls(org_id) do
-    Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id), [], fn ct, acc ->
+  defp build_urls(org) do
+    Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(org.id), [], fn ct, acc ->
       remaining = @max_urls - length(acc)
 
       if remaining <= 0 do
@@ -52,13 +53,13 @@ defmodule KilnCMSWeb.SitemapController do
           ct
           |> ContentTypes.list!(
             authorize?: true,
-            tenant: org_id,
+            tenant: org.id,
             # Only the three fields the XML uses — at the 50k ceiling, full
             # rows (blocks + embeddings) would be a large memory spike per
             # rebuild.
             query: [select: [:slug, :path_alias, :locale, :updated_at], limit: remaining]
           )
-          |> page_entries(ContentTypes.public_prefix(ct))
+          |> page_entries(ContentTypes.public_prefix(ct), org)
 
         {:cont, acc ++ entries}
       end
@@ -66,11 +67,13 @@ defmodule KilnCMSWeb.SitemapController do
   end
 
   def robots(conn, _params) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+
     body = """
     User-agent: *
     Allow: /
 
-    Sitemap: #{base_url()}/sitemap.xml
+    Sitemap: #{KilnCMSWeb.Tenant.base_url(org)}/sitemap.xml
     """
 
     conn
@@ -78,10 +81,12 @@ defmodule KilnCMSWeb.SitemapController do
     |> send_resp(200, body)
   end
 
-  defp page_entries(records, prefix) do
+  defp page_entries(records, prefix, org) do
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+
     Enum.map(records, fn record ->
       %{
-        loc: "#{base_url()}#{locale_prefix(record.locale)}#{public_path(record, prefix)}",
+        loc: "#{base_url}#{locale_prefix(record.locale)}#{public_path(record, prefix)}",
         lastmod: DateTime.to_iso8601(record.updated_at)
       }
     end)
@@ -111,8 +116,6 @@ defmodule KilnCMSWeb.SitemapController do
     </urlset>
     """
   end
-
-  defp base_url, do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
 
   # Minimal XML-entity escaping for the (already URL-ish) slug values.
   defp escape(value) do

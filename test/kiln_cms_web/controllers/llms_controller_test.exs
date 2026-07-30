@@ -4,7 +4,10 @@ defmodule KilnCMSWeb.LlmsControllerTest do
   # sitemap), so parallel tests would contaminate each other's index.
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.OrgFixtures
+
   alias KilnCMS.CMS
+  alias KilnCMSWeb.Tenant
 
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -63,5 +66,26 @@ defmodule KilnCMSWeb.LlmsControllerTest do
 
     conn = get(conn, ~p"/llms.txt")
     assert response(conn, 200) =~ ~r/^# /
+  end
+
+  test "a tenant-hosted request emits llms.txt URLs on its own host (#557)", %{conn: conn} do
+    o = org("llms-tenant")
+    actor = admin()
+
+    post =
+      CMS.create_post!(%{title: "Tenant Post #{slug()}", slug: slug()},
+        actor: actor,
+        tenant: o
+      )
+
+    CMS.publish_post!(post, %{}, actor: actor, tenant: o)
+
+    host = "#{o.slug}.#{Tenant.base_host()}"
+    base_url = Tenant.base_url(o)
+
+    body = %{conn | host: host} |> get(~p"/llms.txt") |> response(200)
+
+    assert body =~ "[#{post.title}](#{base_url}/blog/#{post.slug})"
+    refute body =~ "http://localhost:4000"
   end
 end

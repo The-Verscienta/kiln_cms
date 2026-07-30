@@ -238,6 +238,31 @@ defmodule KilnCMS.MultitenancyTest do
                  authorize?: false
                )
     end
+
+    test "custom_domain must be hostname-shaped (#557)" do
+      # custom_domain is spliced unescaped into every public URL/output
+      # surface the org's site emits (Tenant.base_url/1) — a path separator,
+      # colon, or newline would corrupt or inject into that output.
+      for bad <- [
+            "evil.com/x",
+            "evil.com:8080",
+            "evil.com\nDisallow: /",
+            "-leading-hyphen.com",
+            "no-dot-at-all"
+          ] do
+        assert {:error, _} =
+                 Accounts.create_organization(
+                   %{name: "Bad", slug: uslug("bad"), custom_domain: bad},
+                   authorize?: false
+                 )
+      end
+
+      assert {:ok, _} =
+               Accounts.create_organization(
+                 %{name: "Good", slug: uslug("good"), custom_domain: "www.acme-vanity.com"},
+                 authorize?: false
+               )
+    end
   end
 
   describe "OrgMembership" do

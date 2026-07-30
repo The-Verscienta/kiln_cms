@@ -70,7 +70,8 @@ defmodule KilnCMS.Firing.StaticExport do
 
   Options:
     * `:surfaces` — which surfaces to write (default `#{inspect(@surfaces)}`).
-    * `:base_url` — recorded in the manifest (default `:public_base_url` config).
+    * `:base_url` — recorded in the manifest (default the `:org_id` org's own
+      base URL, `:public_base_url` config for the default org).
     * `:generated_at` — manifest timestamp (default `DateTime.utc_now/0`).
 
   Returns `{:ok, result}` where `result` counts exported vs skipped documents.
@@ -80,12 +81,15 @@ defmodule KilnCMS.Firing.StaticExport do
   @spec export(String.t(), keyword()) :: {:ok, result()}
   def export(out_dir, opts \\ []) do
     surfaces = opts[:surfaces] || @surfaces
-    base_url = opts[:base_url] || Application.get_env(:kiln_cms, :public_base_url)
     generated_at = opts[:generated_at] || DateTime.utc_now()
     # One export = ONE site (#419): the cross-org single-tree behavior is gone
     # (two orgs sharing a slug collided). Pass `:org_id` to export another
     # site; run once per org for a full-fleet export.
     org_id = opts[:org_id] || KilnCMS.Accounts.default_org_id()
+    # #557: the manifest/URLs must carry the exported org's OWN host, not the
+    # deployment-global default — falls back to `:public_base_url` for the
+    # default org.
+    base_url = opts[:base_url] || KilnCMSWeb.Tenant.base_url(org_id)
 
     mkdir_p!(out_dir)
 

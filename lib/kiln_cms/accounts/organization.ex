@@ -35,6 +35,14 @@ defmodule KilnCMS.Accounts.Organization do
   # tenant-less creates — a constant (not a DB lookup) so it's free per write.
   @default_id "00000000-0000-0000-0000-000000000001"
 
+  # Hostname-shaped: dot-separated labels of alphanumerics/hyphens (no leading/
+  # trailing hyphen per label). Rejects `/`, `:`, whitespace/newlines, and
+  # bracket characters — `custom_domain` gets spliced unescaped into every
+  # public URL/output surface the org's site emits (#557: canonical tags,
+  # sitemap `<loc>`, robots.txt, llms.txt), so those characters would corrupt
+  # the URL or inject content (e.g. a crawler directive) into that output.
+  @custom_domain_regex ~r/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/
+
   @doc "The sentinel id of the default organization (see the module doc)."
   @spec default_id() :: Ash.UUID.t()
   def default_id, do: @default_id
@@ -119,7 +127,10 @@ defmodule KilnCMS.Accounts.Organization do
 
     # Optional vanity host (`www.acme.com`). Unique when set; nil for orgs
     # served only on their subdomain.
-    attribute :custom_domain, :string, public?: true
+    attribute :custom_domain, :string do
+      public? true
+      constraints match: @custom_domain_regex
+    end
 
     attribute :status, :atom do
       constraints one_of: [:active, :suspended]

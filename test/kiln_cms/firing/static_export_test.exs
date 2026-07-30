@@ -2,9 +2,11 @@ defmodule KilnCMS.Firing.StaticExportTest do
   @moduledoc "First-class static / edge export of fired artifacts (#353)."
   use KilnCMS.DataCase, async: true
 
+  alias KilnCMS.Accounts.Organization
   alias KilnCMS.CMS
   alias KilnCMS.Firing.StaticExport
   alias KilnCMS.Firing.StaticExportWorker
+  alias KilnCMSWeb.Tenant
 
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -88,6 +90,41 @@ defmodule KilnCMS.Firing.StaticExportTest do
     assert entry["locale"] == "en"
     assert entry["path"] == "content/page/en/#{slug}"
     assert Enum.sort(entry["surfaces"]) == ["json", "json_ld", "llm", "web"]
+  end
+
+  test "the manifest base_url defaults to the default org's :public_base_url" do
+    fired_page()
+    out = tmp_dir()
+
+    {:ok, _} = StaticExport.export(out)
+
+    manifest = Path.join(out, "index.json") |> File.read!() |> Jason.decode!()
+    assert manifest["base_url"] == "http://localhost:4000"
+  end
+
+  test "an explicit :org_id derives the manifest base_url from that org's own host (#557)" do
+    o =
+      Ash.Seed.seed!(Organization, %{
+        name: "Export Org",
+        slug: "export-org-#{System.unique_integer([:positive])}",
+        status: :active
+      })
+
+    actor = admin()
+    slug = "exp-tenant-#{System.unique_integer([:positive])}"
+
+    page =
+      CMS.create_page!(%{title: "Tenant Export", slug: slug}, actor: actor, tenant: o)
+
+    CMS.publish_page!(page, actor: actor, tenant: o)
+    drain_oban()
+
+    out = tmp_dir()
+    {:ok, _} = StaticExport.export(out, org_id: o.id)
+
+    manifest = Path.join(out, "index.json") |> File.read!() |> Jason.decode!()
+    assert manifest["base_url"] == Tenant.base_url(o)
+    refute manifest["base_url"] == "http://localhost:4000"
   end
 
   test "namespaces non-default locales" do

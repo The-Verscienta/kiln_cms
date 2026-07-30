@@ -165,13 +165,14 @@ defmodule KilnCMSWeb.ContentController do
   def blog_index(conn, params) do
     locale = locale(conn)
     page = page_param(params)
+    org = KilnCMSWeb.Tenant.current_org(conn)
 
     # No `count: true` — only `more?` is used, and a count adds a full
     # COUNT(*) over published posts to every request.
     %Ash.Page.Offset{results: posts, more?: more?} =
       CMS.list_published_posts!(
         authorize?: false,
-        tenant: current_org_id(conn),
+        tenant: org.id,
         query: [filter: [locale: locale]],
         page: [limit: @blog_page_size, offset: page * @blog_page_size]
       )
@@ -182,8 +183,8 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Blog"))
     |> assign(:meta_description, gettext("Latest posts."))
-    |> assign(:locale_links, blog_locale_links(locale))
-    |> assign(:json_ld, json_ld_script(StructuredData.blog(posts)))
+    |> assign(:locale_links, blog_locale_links(locale, KilnCMSWeb.Tenant.base_url(org)))
+    |> assign(:json_ld, json_ld_script(StructuredData.blog(posts, org)))
     |> render(:blog_index, posts: posts, page: page, has_prev?: page > 0, has_next?: more?)
   end
 
@@ -194,7 +195,8 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     query = params["q"] |> to_string() |> String.trim()
     # Scope search to the request's org (#336); content sections are per-site.
-    org_id = current_org_id(conn)
+    org = KilnCMSWeb.Tenant.current_org(conn)
+    org_id = org.id
 
     # Optional category facet (`?category=<slug>`): filters both hybrid legs.
     # An unknown slug matches nothing rather than silently unfiltering. Resolved
@@ -247,7 +249,7 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("cache-control", "private, no-cache")
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Search"))
-    |> assign(:locale_links, search_locale_links(locale, query))
+    |> assign(:locale_links, search_locale_links(locale, query, KilnCMSWeb.Tenant.base_url(org)))
     |> render(:search,
       query: query,
       results: results,
@@ -293,7 +295,7 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   # Language-switcher links to the search page (preserving the query) per locale.
-  defp search_locale_links(current, query) do
+  defp search_locale_links(current, query, base_url) do
     suffix = if query == "", do: "", else: "?q=#{URI.encode_www_form(query)}"
 
     for locale <- I18n.locales() do
@@ -301,7 +303,7 @@ defmodule KilnCMSWeb.ContentController do
 
       %{
         locale: locale,
-        href: "#{base_url()}#{prefix}/search#{suffix}",
+        href: "#{base_url}#{prefix}/search#{suffix}",
         current: locale == current
       }
     end
@@ -323,10 +325,10 @@ defmodule KilnCMSWeb.ContentController do
   defp page_param(_params), do: 0
 
   # Language-switcher links to the blog index in each supported locale.
-  defp blog_locale_links(current) do
+  defp blog_locale_links(current, base_url) do
     for locale <- I18n.locales() do
       prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
-      %{locale: locale, href: "#{base_url()}#{prefix}/blog", current: locale == current}
+      %{locale: locale, href: "#{base_url}#{prefix}/blog", current: locale == current}
     end
   end
 
@@ -396,17 +398,23 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   defp render_content_body(conn, template, record, blocks, translations, ct) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+
     conn
     |> assign(:locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
     |> assign(:meta_description, record.seo_description)
     |> assign(:meta_keywords, record.seo_keywords)
-    |> assign(:canonical_url, record.canonical_url || locale_url(ct, record.slug, record.locale))
+    |> assign(
+      :canonical_url,
+      record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
+    )
     |> assign(:og_image, record.seo_image)
     |> assign(:og_type, "article")
-    |> assign(:hreflang, hreflang_alternates(ct, translations))
-    |> assign(:locale_links, locale_links(ct, translations, record.locale))
-    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, current_org_id(conn))))
+    |> assign(:hreflang, hreflang_alternates(ct, translations, base_url))
+    |> assign(:locale_links, locale_links(ct, translations, record.locale, base_url))
+    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org)))
     |> render(template, record: record, blocks: blocks)
   end
 
@@ -421,25 +429,30 @@ defmodule KilnCMSWeb.ContentController do
 
   # `rel="alternate" hreflang` entries for every published locale variant, plus
   # an `x-default` pointing at the default locale.
-  defp hreflang_alternates(ct, translations) do
+  defp hreflang_alternates(ct, translations, base_url) do
     default = I18n.default_locale()
 
     alternates =
-      for t <- translations, do: %{hreflang: t.locale, href: locale_url(ct, t.slug, t.locale)}
+      for t <- translations,
+          do: %{hreflang: t.locale, href: locale_url(ct, t.slug, t.locale, base_url)}
 
     case Enum.find(translations, &(&1.locale == default)) do
-      nil -> alternates
-      t -> alternates ++ [%{hreflang: "x-default", href: locale_url(ct, t.slug, default)}]
+      nil ->
+        alternates
+
+      t ->
+        alternates ++
+          [%{hreflang: "x-default", href: locale_url(ct, t.slug, default, base_url)}]
     end
   end
 
   # Language-switcher links to each published translation of this record.
-  defp locale_links(ct, translations, current) do
+  defp locale_links(ct, translations, current, base_url) do
     translations
     |> Enum.map(
       &%{
         locale: &1.locale,
-        href: locale_url(ct, &1.slug, &1.locale),
+        href: locale_url(ct, &1.slug, &1.locale, base_url),
         current: &1.locale == current
       }
     )
@@ -447,12 +460,10 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   # Absolute public URL for `slug` in `locale` (non-default locales are prefixed).
-  defp locale_url(ct, slug, locale) do
+  defp locale_url(ct, slug, locale, base_url) do
     prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
-    "#{base_url()}#{prefix}#{ContentTypes.public_prefix(ct)}/#{slug}"
+    "#{base_url}#{prefix}#{ContentTypes.public_prefix(ct)}/#{slug}"
   end
-
-  defp base_url, do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
 
   # Pre-render the JSON-LD as a safe <script> tag. HEEx doesn't interpolate
   # inside a literal <script> element, so the layout injects this with `{...}`.

@@ -254,6 +254,34 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert lv |> render_hook("copied", %{}) =~ "Embed code copied to clipboard."
   end
 
+  test "the embed snippet points at the org's own host on a tenant subdomain (#557)",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+
+    org =
+      Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+        name: "Embed Org",
+        slug: "embed-org-#{System.unique_integer([:positive])}",
+        status: :active
+      })
+
+    slug = "fb-#{System.unique_integer([:positive])}"
+    form = CMS.create_form!(%{name: "Contact", slug: slug}, actor: admin, tenant: org)
+
+    host = "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"
+
+    {:ok, lv, _html} =
+      %{conn | host: host} |> log_in(admin) |> live(~p"/editor/forms/#{form.id}")
+
+    html = lv |> element(~s(nav button[phx-value-tab="embed"])) |> render_click()
+
+    # The snippet renders inside a `value="..."` attribute, so `<`/`"` are
+    # HTML-entity-escaped (matches the sibling "copyable snippet" test above).
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+    assert html =~ "src=&quot;#{base_url}/embed.js&quot;"
+    refute html =~ "src=&quot;http://localhost:4000/embed.js&quot;"
+  end
+
   test "the entries tab lists and deletes submissions", %{conn: conn} do
     admin = authed_user(:admin)
     {form, [], lv, _html} = builder(conn, admin)
