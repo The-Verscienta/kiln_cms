@@ -484,8 +484,10 @@ defmodule KilnCMSWeb.Router do
     # LLM content index (llmstxt.org convention) — the GEO analogue of the sitemap.
     get "/llms.txt", LlmsController, :index
 
-    # Health probe for load balancers / uptime monitors / Coolify.
+    # Liveness probe for load balancers / uptime monitors / Coolify.
     get "/up", HealthController, :show
+    # Readiness probe with DB + Oban queue-depth payload for monitoring.
+    get "/ready", HealthController, :ready
   end
 
   scope "/", KilnCMSWeb do
