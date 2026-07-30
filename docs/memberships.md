@@ -1,0 +1,173 @@
+# Paid memberships
+
+Sell reader access to gated content. This is the second phase of the
+"publishing → newsletter → membership" work (issue #337); the first phase is
+[Newsletter](newsletter.md).
+
+> **Status.** This page documents what is in the tree today: provider
+> credentials and the tiers on sale. The membership lifecycle (checkout, the
+> webhook receiver, automatic audience grants), the member-facing `/account`
+> page, the paywall teaser, and member-only newsletters land in later slices of
+> #337 Phase 2.
+
+## The idea
+
+A paid member is not a new kind of account. It is an ordinary self-registered
+user whose active subscription grants them one of the **gated audiences** —
+the consumer read axis that already exists (`KilnCMS.CMS.Audiences`, see
+[Granular RBAC](granular-rbac.md) for how it differs from editorial roles).
+
+- Content carries one `audience`. `:public` is world-readable; anything else is gated.
+- A reader carries a set of `audiences`, and may read a published record whose
+  audience is `:public` or is in their set.
+- Self-registration lands a user as `:viewer` with **no** audiences — i.e. exactly
+  a not-yet-paying member.
+
+So a membership tier is a product that grants an audience, and billing is the
+loop that grants and revokes it. Nothing about the access model changes.
+
+## Two scopes, deliberately
+
+| | Scope | Who may change it |
+|---|---|---|
+| `KilnCMS.Billing.Settings` — provider credentials | **Instance-wide** singleton | Platform admin (global `User.role`) |
+| `KilnCMS.Billing.MembershipTier` — the tiers on sale | **Per organization** | Org admin of that site |
+
+One payment-provider account serves the whole instance; each site sells its own
+tiers. That asymmetry is load-bearing, and mirrors
+`KilnCMS.Mail.Settings` (instance-wide DKIM) versus `KilnCMS.CMS.SiteBranding`
+(per-site tokens). A tenant-less resource must **not** gate on an org-admin
+check: it would resolve every actor against the *default* org and let one site's
+admin rewrite payment credentials for every other site.
+
+> **Known limit.** Because credentials are instance-wide, a multi-org instance
+> bills every site into the same provider account. The `KilnCMS.Keys` seam keeps
+> per-org credentials (e.g. Stripe Connect) possible later without a data
+> migration.
+
+## Setting up
+
+Everything lives at **`/editor/billing`** (platform admin only). Until both
+secrets resolve, `KilnCMS.Billing.configured?/0` is false and **no payment
+surface exists at all** — no tier is offered and no provider call is made. A
+fresh install is inert.
+
+### 1. Credentials
+
+Two secrets, configured independently because they rotate on different cadences:
+
+| Secret | What it is |
+|---|---|
+| **API secret key** | The account-wide bearer credential used to open checkout and billing-portal sessions. Starts with `sk_` or `rk_`. |
+| **Webhook signing secret** | Verifies inbound webhooks. Copy it from the webhook endpoint you create in the provider's dashboard. Starts with `whsec_`. |
+
+There is deliberately **no publishable-key field**: hosted checkout means Kiln
+redirects to a provider-hosted page and never mounts the provider's JavaScript,
+so the publishable key has no use here.
+
+Each secret follows the key-provider model ([`KilnCMS.Keys`](KilnCMS.Keys.html)),
+the same one the DKIM key uses:
+
+- **Environment variable** — recommended for production. You choose the variable
+  name; there is no default, and a blank pointer is refused rather than silently
+  falling back.
+- **File** — recommended for production; the natural fit for Docker/Kubernetes
+  mounted secrets. Trailing newlines are trimmed.
+- **Database (encrypted)** — the zero-ops default: paste the secret and it is
+  stored AES-256-GCM encrypted. The encryption key is derived from
+  `SECRET_KEY_BASE`, so **rotating that secret orphans the stored value** and you
+  will need to paste it again.
+
+"Test connection" performs a live credential check and records which account the
+keys belong to, so a mistyped key fails at setup rather than at a member's first
+checkout. "Disconnect" clears both secrets and returns the instance to inert.
+
+### 2. Tiers
+
+Create one tier per thing you sell. Configure the **price in your provider's
+dashboard** and paste its price ID into the tier, so there is exactly one source
+of truth for money — Kiln stores a pointer, never an amount. `price_config` holds
+display copy for the join page and is never used to charge.
+
+Each tier grants exactly one gated audience. Several tiers may grant the same
+audience (a monthly and an annual plan, say); a reader keeps the audience while
+*any* of their memberships is active.
+
+**A tier's audience cannot be changed after creation.** The entitlement logic
+derives "which audiences billing owns" from this table, so changing an audience
+would stop the old one being owned while live grants for it remained — stranding
+an entitlement nothing would ever revoke. Retire the tier (`active: false`) and
+create a new one instead, which also keeps the audit trail honest.
+
+Retiring a tier stops new sign-ups; it does not revoke existing members.
+
+### 3. Gating content
+
+Set a post or page's **audience** to a gated value in the content editor. The
+audience selector only appears when more than one audience is configured.
+
+## Configuring audiences
+
+The audience list is **compile-time**:
+
+```elixir
+# config/config.exs
+config :kiln_cms, :audiences, [:public, :member]
+```
+
+Adding a paid audience therefore needs a config change, a recompile, **and**
+`mix ash.codegen` + `mix ash.migrate` — the tier table carries a database CHECK
+constraint mirroring the list, so that the public join page and paywall can never
+be taken down by an out-of-band bad write.
+
+Removing an audience while tiers still reference it leaves those tiers
+unreadable; `/editor/billing` warns rather than crashing, but restore the
+audience or retire the tiers.
+
+## The provider seam
+
+`KilnCMS.Billing.Provider` is a behaviour with five callbacks — open a checkout
+session, open a billing-portal session, retrieve a subscription, retrieve a
+checkout session, and verify a webhook signature. One implementation ships,
+`KilnCMS.Billing.Providers.Stripe`, selected via:
+
+```elixir
+config :kiln_cms, KilnCMS.Billing, provider: KilnCMS.Billing.Providers.Stripe
+```
+
+It is a thin `Req` client rather than a third-party dependency. The surface is
+five endpoints against a stable API; a client library would add a permanent
+advisory surface to the dependency-audit gate and could not be stubbed with
+`Req.Test`, which is how every other outbound integration here is tested. The
+provider's API version is pinned so a provider-side default bump cannot silently
+reshape the subscription object the entitlement logic reads.
+
+Deliberately **not** on the behaviour: creating customers (hosted checkout does
+it), creating prices or products (an operator does that in the dashboard), and
+cancelling subscriptions (the hosted portal owns cancellation — a local cancel
+primitive would create a second, divergent cancellation path).
+
+### Webhook signature verification
+
+Inbound webhooks are authorized by an HMAC-SHA256 signature over the **raw**
+request bytes, not by a session — the caller is the payment provider, not a
+browser. Verification happens before JSON decoding, so unauthenticated bytes
+never reach the decoder, and it enforces a ±300s timestamp tolerance to bound
+replay of a captured request. Multiple signatures per request are accepted so a
+signing-secret rotation does not drop events.
+
+## Security notes
+
+- Card data never touches Kiln. Both money-handling calls return a
+  provider-hosted URL that the member is redirected to.
+- Secrets are never returned by any API read: the encrypted columns are
+  `sensitive?` and not writable from input, and the provider-config column holds
+  only a pointer (a variable name or a path), never key material.
+- Payment credentials are purged by the staging scrub, so a production clone
+  cannot act on a real provider account.
+
+## See also
+
+- [Newsletter](newsletter.md) — subscribers, segments and sending
+- [Granular RBAC](granular-rbac.md) — how audiences differ from editorial roles
+- [Data flows](data-flows.md) — what personal data is stored, and subprocessors

@@ -120,6 +120,7 @@ defmodule KilnCMS.MixProject do
       "docs/localization-workflows.md": [],
       "docs/automation.md": [],
       "docs/newsletter.md": [title: "Newsletter"],
+      "docs/memberships.md": [title: "Paid memberships"],
       "docs/provenance.md": [],
       "docs/point-in-time.md": [],
       # Modeling & extending
@@ -211,6 +212,7 @@ defmodule KilnCMS.MixProject do
         "docs/localization-workflows.md",
         "docs/automation.md",
         "docs/newsletter.md",
+        "docs/memberships.md",
         "docs/provenance.md",
         "docs/point-in-time.md"
       ],

@@ -434,6 +434,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-megaphone"
           },
           %{
+            key: :billing,
+            label: gettext("Billing"),
+            path: ~p"/editor/billing",
+            icon: "hero-credit-card"
+          },
+          %{
             key: :governance,
             label: gettext("Governance"),
             path: ~p"/editor/governance",

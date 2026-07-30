@@ -59,7 +59,8 @@ config :kiln_cms,
     KilnCMS.SearchIndex,
     KilnCMS.Mail,
     KilnCMS.Newsletter,
-    KilnCMS.Automation
+    KilnCMS.Automation,
+    KilnCMS.Billing
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the

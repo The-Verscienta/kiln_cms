@@ -43,12 +43,25 @@ defmodule KilnCMS.Keys do
   …}} | :dkim`. `:dkim` reuses the mail signing key (the same "this org's RSA
   key" the issue points at); the tuple forms resolve through the env/file
   providers, letting an operator point at a dedicated content-signing key.
+
+  `:billing_secret_key` / `:billing_webhook_secret` — the payment-provider API
+  key and inbound-webhook signing secret (#337 Phase 2). Provider choice and
+  config live on the `KilnCMS.Billing.Settings` singleton, one pair of columns
+  per secret so the two can be sourced and rotated independently.
   """
-  @spec fetch(:dkim | :provenance) :: {:ok, binary()} | {:error, term()}
+  @spec fetch(:dkim | :provenance | :billing_secret_key | :billing_webhook_secret) ::
+          {:ok, binary()} | {:error, term()}
   def fetch(:dkim) do
     case KilnCMS.Mail.get_settings() do
       nil -> {:error, :not_configured}
       settings -> fetch_for(settings)
+    end
+  end
+
+  def fetch(name) when name in [:billing_secret_key, :billing_webhook_secret] do
+    case KilnCMS.Billing.get_settings() do
+      nil -> {:error, :not_configured}
+      settings -> fetch_billing(settings, name)
     end
   end
 
@@ -82,6 +95,38 @@ defmodule KilnCMS.Keys do
       _env_or_file -> settings.dkim_key_provider_config || %{}
     end
   end
+
+  # Billing secrets follow the same shape, but each has its own provider/config/
+  # ciphertext trio on the settings row (`KilnCMS.Billing.Settings.fields/1`).
+  #
+  # The result is trimmed: the `:file` provider returns whatever is on disk, and
+  # a mounted secret routinely ends in a newline — which inside an
+  # `Authorization: Bearer …` header produces an opaque provider rejection
+  # rather than anything an operator could diagnose.
+  defp fetch_billing(settings, name) do
+    {provider_field, config_field, encrypted_field} =
+      KilnCMS.Billing.Settings.fields(billing_secret(name))
+
+    provider = Map.fetch!(settings, provider_field)
+
+    config =
+      case provider do
+        :database -> %{"encrypted" => Map.fetch!(settings, encrypted_field)}
+        _env_or_file -> Map.get(settings, config_field) || %{}
+      end
+
+    with {:ok, secret} <- provider!(provider).fetch(config) do
+      case String.trim(secret) do
+        "" -> {:error, :no_key_generated}
+        trimmed -> {:ok, trimmed}
+      end
+    end
+  end
+
+  # Registry names are prefixed (`:billing_secret_key`) so the global namespace
+  # stays unambiguous; the resource names its own columns unprefixed.
+  defp billing_secret(:billing_secret_key), do: :secret_key
+  defp billing_secret(:billing_webhook_secret), do: :webhook_secret
 
   ## RSA / PEM helpers
 
@@ -185,7 +230,10 @@ defmodule KilnCMS.Keys do
     do:
       "stored key cannot be decrypted (was SECRET_KEY_BASE rotated?) — regenerate or switch provider"
 
-  def describe_error(:not_configured), do: "mail settings have not been initialised"
+  # Deliberately neutral: this registry now serves mail, provenance and billing
+  # secrets, so naming one of them here would print a mail message on the
+  # billing settings page.
+  def describe_error(:not_configured), do: "settings have not been initialised"
   def describe_error(other), do: "key source error: #{inspect(other)}"
 
   defp decode_rsa_private_key(pem) do

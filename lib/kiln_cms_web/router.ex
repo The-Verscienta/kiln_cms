@@ -275,6 +275,10 @@ defmodule KilnCMSWeb.Router do
       live "/editor/branding", BrandingLive, :index
       live "/editor/mail", MailSettingsLive, :index
       live "/editor/newsletter", NewsletterLive, :index
+      # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus
+      # per-site tiers, so the page itself gates on `platform_admin?` — see the
+      # LiveView's moduledoc.
+      live "/editor/billing", BillingLive, :index
       # Compliance & governance dashboard (#352) — audit trail, consent, and
       # point-in-time history per content item.
       live "/editor/governance", GovernanceLive, :index
