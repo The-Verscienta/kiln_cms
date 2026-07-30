@@ -54,32 +54,86 @@ defmodule KilnCMS.CMS.Slugs do
   end
 
   @doc """
-  The published, public record canonically served at `alias_path` (#485), as
+  The published record canonically served at `alias_path` (#485), as
   `{descriptor, record}` — the delivery fallback's alias lookup. Mirrors the
-  `:public_by_slug` boundary (`state == :published and audience == :public`).
+  `:public_by_slug` boundary, including its `:audiences` widening (#337 Phase 2):
+  `audiences` defaults to `[]`, so a caller that passes none sees `:public` rows
+  only, exactly as before.
   """
-  @spec find_published_by_alias(String.t(), String.t(), Ash.UUID.t()) ::
+  @spec find_published_by_alias(String.t(), String.t(), Ash.UUID.t(), [atom()]) ::
           {ContentTypes.t(), struct()} | nil
-  def find_published_by_alias(alias_path, locale, org_id) do
+  def find_published_by_alias(alias_path, locale, org_id, audiences \\ []) do
     Enum.find_value(alias_resources(), fn resource ->
-      record =
-        resource
-        |> Ash.Query.filter(
-          path_alias == ^alias_path and locale == ^locale and state == :published and
-            audience == :public
-        )
-        |> Ash.Query.load([:author, :category])
-        |> Ash.Query.limit(1)
-        |> Ash.read!(authorize?: false, tenant: org_id)
-        |> List.first()
-
-      with %{} = record <- record,
-           ct when not is_nil(ct) <- descriptor_for_record(record) do
-        {ct, record}
-      else
-        _ -> nil
-      end
+      resource
+      |> Ash.Query.filter(
+        path_alias == ^alias_path and locale == ^locale and state == :published and
+          (audience == :public or audience in ^audiences)
+      )
+      |> Ash.Query.load([:author, :category])
+      |> first_with_descriptor(org_id)
     end)
+  end
+
+  @doc """
+  The GATED published record at `alias_path`, for a paywall teaser (#337 Phase 2).
+
+  A sibling rather than a mode flag on `find_published_by_alias/4`, mirroring the
+  two separate content actions: it *requires* a non-public audience, so it can
+  never stand in for the entitled lookup, and it selects only paywall-safe
+  columns — never the block tree.
+  """
+  @spec find_teaser_by_alias(String.t(), String.t(), Ash.UUID.t()) ::
+          {ContentTypes.t(), struct()} | nil
+  def find_teaser_by_alias(alias_path, locale, org_id) do
+    Enum.find_value(alias_resources(), fn resource ->
+      resource
+      |> Ash.Query.filter(
+        path_alias == ^alias_path and locale == ^locale and state == :published and
+          audience != :public
+      )
+      |> Ash.Query.select(teaser_columns(resource))
+      |> first_with_descriptor(org_id)
+    end)
+  end
+
+  # The paywall-safe column set for a resource — `:excerpt` only where the type
+  # opted into it. Mirrors the `:teaser_by_slug` action's select.
+  defp teaser_columns(resource) do
+    base = [
+      :id,
+      :org_id,
+      :title,
+      :slug,
+      :locale,
+      :audience,
+      :state,
+      :seo_title,
+      :seo_description,
+      :seo_image,
+      :canonical_url,
+      :path_alias,
+      :published_at,
+      :updated_at
+    ]
+
+    Enum.filter(base ++ [:excerpt, :type_definition_id], fn field ->
+      not is_nil(Ash.Resource.Info.attribute(resource, field))
+    end)
+  end
+
+  defp first_with_descriptor(query, org_id) do
+    record =
+      query
+      |> Ash.Query.limit(1)
+      |> Ash.read!(authorize?: false, tenant: org_id)
+      |> List.first()
+
+    with %{} = record <- record,
+         ct when not is_nil(ct) <- descriptor_for_record(record) do
+      {ct, record}
+    else
+      _ -> nil
+    end
   end
 
   # The default derivation as a pattern: the focus keyphrase, which itself

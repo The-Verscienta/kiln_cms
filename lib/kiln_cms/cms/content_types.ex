@@ -339,24 +339,52 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   # Public delivery: fetch a single published record by slug + locale (returns
   # nil rather than raising on a miss).
+  #
+  # `:audiences` (#337 Phase 2) widens the read to gated content the caller has
+  # already established the reader holds. Popped from `opts` into the action's
+  # params, so every existing caller — which passes none — keeps the `:public`-only
+  # behaviour exactly.
   def get_published_by_slug(type, slug, locale, opts \\ []) do
+    {params, opts} = audience_params(opts)
+
     case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} ->
-        CMS.get_published_entry_by_slug!(slug, locale, definition.id, opts)
+        CMS.get_published_entry_by_slug!(slug, locale, definition.id, params, opts)
 
       _compiled ->
-        call(type, "get_published_#{atom(type)}_by_slug!", [slug, locale, opts])
+        call(type, "get_published_#{atom(type)}_by_slug!", [slug, locale, params, opts])
     end
   end
 
-  # Every published locale variant of a slug (for hreflang / language switching).
-  def list_translations(type, slug, opts \\ []) do
+  # Locate a GATED published record in order to render a paywall for a reader who
+  # may not read it. Returns a projection that never carries the block tree — see
+  # the `:teaser_by_slug` action and `KilnCMSWeb.Teaser`.
+  def get_teaser_by_slug(type, slug, locale, opts \\ []) do
     case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} ->
-        CMS.list_entry_translations!(slug, definition.id, opts)
+        CMS.get_entry_teaser_by_slug!(slug, locale, definition.id, opts)
 
       _compiled ->
-        call(type, "list_#{atom(type)}_translations!", [slug, opts])
+        call(type, "get_#{atom(type)}_teaser_by_slug!", [slug, locale, opts])
+    end
+  end
+
+  defp audience_params(opts) do
+    {audiences, opts} = Keyword.pop(opts, :audiences, [])
+    {%{audiences: audiences}, opts}
+  end
+
+  # Every published locale variant of a slug (for hreflang / language switching).
+  # Takes the same `:audiences` widening as `get_published_by_slug/4`.
+  def list_translations(type, slug, opts \\ []) do
+    {params, opts} = audience_params(opts)
+
+    case get!(type, org_from(opts)) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.list_entry_translations!(slug, definition.id, params, opts)
+
+      _compiled ->
+        call(type, "list_#{atom(type)}_translations!", [slug, params, opts])
     end
   end
 

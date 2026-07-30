@@ -23,23 +23,24 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     ct = ContentTypes.get(:page)
     org_id = current_org_id(conn)
+    audiences = reader_audiences(conn)
 
     fetch =
-      &CMS.get_published_page_by_slug!(slug, &1,
+      &CMS.get_published_page_by_slug!(slug, &1, %{audiences: audiences},
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
         load: [:author]
       )
 
-    case Cache.fetch_published_payload(org_id, "page", slug, locale, fn ->
-           payload(fetch, locale, ct, org_id)
+    case fetch_payload(org_id, "page", slug, locale, audiences, fn ->
+           payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
-        follow_redirect_or_404(conn, "/" <> slug)
+        follow_redirect_or_404(conn, "/" <> slug, ct)
 
       payload ->
-        serve(conn, :show_page, "page", payload, ct)
+        serve(conn, :show_page, "page", payload, ct, audiences)
     end
   end
 
@@ -47,23 +48,24 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     ct = ContentTypes.get(:post)
     org_id = current_org_id(conn)
+    audiences = reader_audiences(conn)
 
     fetch =
-      &CMS.get_published_post_by_slug!(slug, &1,
+      &CMS.get_published_post_by_slug!(slug, &1, %{audiences: audiences},
         not_found_error?: false,
         authorize?: false,
         tenant: org_id,
         load: [:author]
       )
 
-    case Cache.fetch_published_payload(org_id, "post", slug, locale, fn ->
-           payload(fetch, locale, ct, org_id)
+    case fetch_payload(org_id, "post", slug, locale, audiences, fn ->
+           payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
-        follow_redirect_or_404(conn, "/blog/" <> slug)
+        follow_redirect_or_404(conn, "/blog/" <> slug, ct)
 
       payload ->
-        serve(conn, :show_post, "post", payload, ct)
+        serve(conn, :show_post, "post", payload, ct, audiences)
     end
   end
 
@@ -72,28 +74,31 @@ defmodule KilnCMSWeb.ContentController do
   def show_content(conn, %{"type" => type, "slug" => slug}) do
     locale = locale(conn)
     org_id = current_org_id(conn)
+    audiences = reader_audiences(conn)
+    ct = ContentTypes.get_by_path(type, org_id)
 
-    with ct when not is_nil(ct) <- ContentTypes.get_by_path(type, org_id),
+    with ct when not is_nil(ct) <- ct,
          fetch =
            &ContentTypes.get_published_by_slug(ct.type, slug, &1,
+             audiences: audiences,
              not_found_error?: false,
              authorize?: false,
              tenant: org_id,
              load: [:author]
            ),
          payload when not is_nil(payload) <-
-           Cache.fetch_published_payload(org_id, to_string(ct.type), slug, locale, fn ->
-             payload(fetch, locale, ct, org_id)
+           fetch_payload(org_id, to_string(ct.type), slug, locale, audiences, fn ->
+             payload(fetch, locale, ct, org_id, audiences)
            end) do
-      serve(conn, :show, to_string(ct.type), payload, ct)
+      serve(conn, :show, to_string(ct.type), payload, ct, audiences)
     else
-      _ -> follow_redirect_or_404(conn, "/" <> type <> "/" <> slug)
+      _ -> follow_redirect_or_404(conn, "/" <> type <> "/" <> slug, ct)
     end
   end
 
   # Serve a payload at its canonical URL: a record with a `path_alias` (#485)
   # 301s its flat `/<prefix>/<slug>` URL to the alias; everything else renders.
-  defp serve(conn, view, type_string, payload, ct) do
+  defp serve(conn, view, type_string, payload, ct, audiences) do
     alias_path = Map.get(payload.record, :path_alias)
 
     if is_binary(alias_path) and conn.request_path != alias_path do
@@ -102,7 +107,7 @@ defmodule KilnCMSWeb.ContentController do
       |> redirect(to: alias_path)
     else
       track_view(type_string, payload.record.id, payload.record.org_id)
-      render_content(conn, view, payload, ct)
+      render_content(conn, view, payload, ct, audiences)
     end
   end
 
@@ -117,17 +122,78 @@ defmodule KilnCMSWeb.ContentController do
   # the canonical home of aliased content — then the redirect table (a
   # published rename leaves a `CMS.Redirect` behind; resolution is live, no
   # chains); anything unresolvable 404s as before.
-  defp follow_redirect_or_404(conn, path) do
+  # `ct` (when known) lets the flat-slug miss try a paywall teaser for that type.
+  #
+  # Order matters: alias, then the redirect table, then the teaser, then 404. The
+  # teaser is LAST so a gated document that also has a legacy redirect still
+  # redirects — a paywall must not shadow an editor's explicit routing decision.
+  defp follow_redirect_or_404(conn, path, ct \\ nil) do
     serve_alias(conn, path) ||
       case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
         nil ->
-          not_found(conn)
+          serve_teaser(conn, path, ct) || not_found(conn)
 
         %{to: to} ->
           conn
           |> put_status(:moved_permanently)
           |> redirect(to: to)
       end
+  end
+
+  # Render a paywall for a GATED published document the reader can't read.
+  #
+  # Only reached once the entitled lookup, the alias lookup and the redirect table
+  # have all missed — so a reader who IS entitled never sees a paywall, and a
+  # genuinely unknown slug still 404s. The read requires a non-public audience and
+  # never selects the block tree; the record is then projected onto
+  # `KilnCMSWeb.Teaser`, which has no `blocks` field at all.
+  defp serve_teaser(_conn, _path, nil), do: nil
+
+  defp serve_teaser(conn, path, ct) do
+    slug = path |> String.split("/") |> List.last()
+    locale = locale(conn)
+    org_id = current_org_id(conn)
+
+    fetch = fn loc ->
+      ContentTypes.get_teaser_by_slug(ct.type, slug, loc,
+        not_found_error?: false,
+        authorize?: false,
+        tenant: org_id
+      )
+    end
+
+    case localized(fetch, locale) do
+      nil -> nil
+      record -> render_teaser(conn, record, ct)
+    end
+  rescue
+    # A content type without a teaser interface (an overlay compiled against an
+    # older macro) simply has no paywall — 404 as before rather than 500.
+    _ -> nil
+  end
+
+  defp render_teaser(conn, record, ct) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+    url = record.canonical_url || locale_url(ct, record.slug, record.locale, base_url)
+    teaser = KilnCMSWeb.Teaser.from_record(record, url)
+
+    conn
+    # Same rule as a member render: this body depends on who asked, and the same
+    # URL returns the full document for an entitled reader — a shared cache keyed
+    # on URL alone would eventually cross the two.
+    |> put_private_delivery_headers()
+    |> assign(:locale, teaser.locale)
+    |> assign(:page_title, teaser.seo_title || teaser.title)
+    |> assign(:meta_description, teaser.seo_description)
+    |> assign(:og_image, teaser.seo_image)
+    |> assign(:og_type, "article")
+    # Canonical is the DOCUMENT's own URL, never the join page: a paywall that
+    # canonicalised elsewhere would have search engines index the wrong URL.
+    |> assign(:canonical_url, teaser.url)
+    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, org)))
+    |> put_view(KilnCMSWeb.ContentHTML)
+    |> render(:teaser, teaser: teaser)
   end
 
   # Render the published record whose `path_alias` is this path, through the
@@ -137,20 +203,35 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     org_id = current_org_id(conn)
 
-    lookup = fn loc -> KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id) end
+    audiences = reader_audiences(conn)
+
+    lookup = fn loc ->
+      KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id, audiences)
+    end
 
     case lookup.(locale) || lookup.(I18n.default_locale()) do
       nil ->
-        nil
+        teaser_alias(conn, path, locale, org_id)
 
       {ct, record} ->
         payload = %{
           record: record,
           blocks: blocks(record, org_id),
-          translations: translations(ct, record.slug, org_id)
+          translations: translations(ct, record.slug, org_id, audiences)
         }
 
-        serve(conn, alias_view(ct), to_string(ct.type), payload, ct)
+        serve(conn, alias_view(ct), to_string(ct.type), payload, ct, audiences)
+    end
+  end
+
+  # An aliased document that is gated for this reader: paywall at the alias, so a
+  # canonical URL doesn't silently 404.
+  defp teaser_alias(conn, path, locale, org_id) do
+    lookup = fn loc -> KilnCMS.CMS.Slugs.find_teaser_by_alias(path, loc, org_id) end
+
+    case lookup.(locale) || lookup.(I18n.default_locale()) do
+      nil -> nil
+      {ct, record} -> render_teaser(conn, record, ct)
     end
   end
 
@@ -337,13 +418,47 @@ defmodule KilnCMSWeb.ContentController do
 
   defp current_org_id(conn), do: KilnCMSWeb.Tenant.current_org_id(conn)
 
+  # The gated audiences this reader holds (#337 Phase 2). The `:browser` pipeline
+  # already runs `:load_from_session` on the delivery scope, so the signed-in user
+  # is here for free — it was simply unused before.
+  #
+  # Filtered through `Audiences.valid?/1`: an audience dropped from
+  # `config :kiln_cms, :audiences` could still sit on a user row, and passing a
+  # stale atom into the action's `one_of` constraint would raise — a 500 on a
+  # public page. Sorted so the value is stable.
+  defp reader_audiences(conn) do
+    case conn.assigns[:current_user] do
+      %{audiences: audiences} when is_list(audiences) ->
+        audiences |> Enum.filter(&KilnCMS.CMS.Audiences.valid?/1) |> Enum.uniq() |> Enum.sort()
+
+      _other ->
+        []
+    end
+  end
+
+  # The `payload` cache namespace is the ANONYMOUS, `:public`-only shape, and it
+  # stays that way: a reader with audiences bypasses it entirely.
+  #
+  # Bypassing rather than adding an audience axis to the key is deliberate. The
+  # key is a string, so correctness would depend on canonically serialising a
+  # SET — `[:member, :pro]` and `[:pro, :member]` are the same entitlement but
+  # different strings — and any normalisation slip, or one caller forgetting the
+  # component, would serve gated blocks to anonymous readers. Bypassing makes
+  # that class of bug unreachable: gated payloads are never in the cache at all.
+  # The cost is one query per gated page view, for the smallest and least
+  # latency-sensitive slice of traffic.
+  defp fetch_payload(org_id, type, slug, locale, [], fun),
+    do: Cache.fetch_published_payload(org_id, type, slug, locale, fun)
+
+  defp fetch_payload(_org_id, _type, _slug, _locale, _audiences, fun), do: fun.()
+
   # The cached delivery payload: the published record, its media-enriched blocks,
   # and its published locale variants. All enrichment (the per-image media lookup
   # + `srcset`, and the `translations` lookup for hreflang/locale links) happens
   # here at cache-miss time, so a cache *hit* carries resolved media URLs and
   # translations and issues no further DB queries. Returns `nil` (not cached)
   # when nothing is found.
-  defp payload(fetch, locale, ct, org_id) do
+  defp payload(fetch, locale, ct, org_id, audiences) do
     case localized(fetch, locale) do
       nil ->
         nil
@@ -352,7 +467,7 @@ defmodule KilnCMSWeb.ContentController do
         %{
           record: record,
           blocks: blocks(record, org_id),
-          translations: translations(ct, record.slug, org_id)
+          translations: translations(ct, record.slug, org_id, audiences)
         }
     end
   end
@@ -374,13 +489,25 @@ defmodule KilnCMSWeb.ContentController do
          conn,
          template,
          %{record: record, blocks: blocks, translations: translations},
-         ct
+         ct,
+         audiences
        ) do
-    conn = put_delivery_cache_headers(conn, record)
+    # A render that depended on WHO asked must never be shared-cached. The public
+    # headers carry `public, max-age=60, stale-while-revalidate=300`, so a CDN in
+    # front would happily serve one member's gated render to every anonymous
+    # visitor. ETag/304 is skipped for the same reason — a conditional hit would
+    # revalidate against a body that isn't the same for everyone.
+    private? = audiences != []
+
+    conn =
+      if private?,
+        do: put_private_delivery_headers(conn),
+        else: put_delivery_cache_headers(conn, record)
+
     start = System.monotonic_time()
 
     result =
-      if delivery_fresh?(conn, record) do
+      if not private? and delivery_fresh?(conn, record) do
         send_resp(conn, :not_modified, "")
       else
         render_content_body(conn, template, record, blocks, translations, ct)
@@ -421,8 +548,12 @@ defmodule KilnCMSWeb.ContentController do
   # Published locale variants of `slug`, scoped to the request's site (#336) so
   # hreflang/locale links never point at another org's content. Best-effort: a
   # content type without a translations interface simply yields none.
-  defp translations(ct, slug, org_id) do
-    ContentTypes.list_translations(ct.type, slug, authorize?: false, tenant: org_id)
+  defp translations(ct, slug, org_id, audiences) do
+    ContentTypes.list_translations(ct.type, slug,
+      audiences: audiences,
+      authorize?: false,
+      tenant: org_id
+    )
   rescue
     _ -> []
   end
@@ -723,6 +854,14 @@ defmodule KilnCMSWeb.ContentController do
   # longer stale-while-revalidate window (the in-BEAM cache is single-node, so
   # these let a CDN absorb origin load), plus a content ETag for conditional GETs
   # and `Vary: Accept-Language` since delivery is locale-sensitive.
+  # Personalised or paywalled HTML: never shared-cacheable. `Vary: Cookie` is a
+  # belt (CDNs honour it unevenly); `no-store` is the actual control.
+  defp put_private_delivery_headers(conn) do
+    conn
+    |> put_resp_header("cache-control", "private, no-store")
+    |> put_resp_header("vary", "Cookie, Accept-Language")
+  end
+
   defp put_delivery_cache_headers(conn, record) do
     conn
     |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")

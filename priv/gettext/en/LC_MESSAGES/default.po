@@ -24,7 +24,7 @@ msgid "Attempting to reconnect"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:539
-#: lib/kiln_cms_web/controllers/content_controller.ex:184
+#: lib/kiln_cms_web/controllers/content_controller.ex:265
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
 msgid "Blog"
@@ -1240,7 +1240,7 @@ msgstr ""
 msgid "Notification preferences saved."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:43
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:54
 #, elixir-autogen, elixir-format
 msgid "Older posts →"
 msgstr ""
@@ -1389,7 +1389,7 @@ msgstr ""
 msgid "Your password has successfully been reset"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:31
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:42
 #, elixir-autogen, elixir-format
 msgid "← Newer posts"
 msgstr ""
@@ -1634,7 +1634,7 @@ msgstr ""
 msgid "Label"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:185
+#: lib/kiln_cms_web/controllers/content_controller.ex:266
 #, elixir-autogen, elixir-format
 msgid "Latest posts."
 msgstr ""
@@ -1710,7 +1710,7 @@ msgstr ""
 msgid "Options (one per line — select only)"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:35
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:46
 #, elixir-autogen, elixir-format
 msgid "Page %{page}"
 msgstr ""
@@ -1726,7 +1726,7 @@ msgstr ""
 msgid "Pages"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:23
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:34
 #, elixir-autogen, elixir-format
 msgid "Pagination"
 msgstr ""
@@ -1822,7 +1822,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex:219
 #: lib/kiln_cms_web/components/layouts.ex:299
 #: lib/kiln_cms_web/components/layouts.ex:542
-#: lib/kiln_cms_web/controllers/content_controller.ex:251
+#: lib/kiln_cms_web/controllers/content_controller.ex:332
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/media_live.ex:941
 #: lib/kiln_cms_web/live/search_palette_live.ex:17
@@ -3971,6 +3971,7 @@ msgstr ""
 msgid "Member removed."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:20
 #: lib/kiln_cms_web/live/team_live.ex:370
 #, elixir-autogen, elixir-format
 msgid "Members"
@@ -6647,6 +6648,7 @@ msgstr ""
 msgid "See all plans"
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/content_html/teaser.html.heex:24
 #: lib/kiln_cms_web/live/account_live.ex:184
 #, elixir-autogen, elixir-format
 msgid "See plans"
@@ -6687,4 +6689,24 @@ msgstr ""
 #: lib/kiln_cms_web/live/membership_live.ex:117
 #, elixir-autogen, elixir-format
 msgid "Your plan"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/teaser.html.heex:27
+#, elixir-autogen, elixir-format
+msgid "Already a member? Sign in"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/teaser.html.heex:20
+#, elixir-autogen, elixir-format
+msgid "Join to read this in full, along with everything else behind the door."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/teaser.html.heex:12
+#, elixir-autogen, elixir-format
+msgid "Members only"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/teaser.html.heex:18
+#, elixir-autogen, elixir-format
+msgid "This one's for members"
 msgstr ""

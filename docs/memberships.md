@@ -6,10 +6,9 @@ Sell reader access to gated content. This is the second phase of the
 
 > **Status.** This page documents what is in the tree today: provider
 > credentials, the tiers on sale, the membership lifecycle (the webhook receiver,
-> automatic audience grants, the audit trail), and the member-facing checkout,
-> `/account` and join pages. The paywall teaser and member-only newsletters land
-> in later slices of #337 Phase 2 — until the teaser ships, gated content still
-> 404s for a reader who isn't entitled to it.
+> automatic audience grants, the audit trail), the member-facing checkout,
+> `/account` and join pages, and the paywall. Member-only newsletters land in a
+> later slice of #337 Phase 2.
 
 ## The idea
 
@@ -274,6 +273,63 @@ and is therefore attacker-suppliable; nothing is ever granted from the query
 parameters themselves. The webhook remains the durable path; this only removes
 the "activating…" wait.
 
+## The paywall
+
+A gated document no longer 404s for a reader who isn't entitled to it. Instead the
+public site serves a **teaser**: the title, a summary, and a link to the plans.
+
+The summary is `excerpt || seo_description` and nothing more. It is never
+synthesised from the document body — doing so would mean fetching the block tree
+for a reader who may not read it, and the whole safety argument rests on never
+doing that. Note `excerpt` is opt-in per content type (present on posts and
+entries, **absent on pages**), so a gated page teases on its title and SEO
+description alone.
+
+### How the block tree is kept out
+
+Three layers, only the third of which is a guarantee:
+
+1. The teaser read *requires* a non-public audience, so it can never stand in for
+   the entitled lookup.
+2. Its `select` omits `blocks`, so the column is never fetched.
+3. The record is projected onto `KilnCMSWeb.Teaser` — a struct with **no `blocks`
+   field** — before it reaches the template. Even if someone later widened the
+   select, the template could not render a block.
+
+### Caching
+
+Gated URLs are `private, no-store` with `Vary: Cookie`, for **both** the teaser
+and the entitled member's render. The public delivery headers are
+`public, max-age=60`, so without this a CDN would happily serve one member's
+gated page to every anonymous visitor.
+
+The in-process payload cache is the **anonymous, public-only** shape. Readers with
+audiences bypass it entirely rather than the key gaining an audience component:
+the key is a string, so correctness would depend on canonically serialising a
+*set*, and any slip there serves gated content to the wrong people. Bypassing
+makes that class of bug unreachable, at the cost of one query per gated page view.
+
+### Search engines
+
+Both the teaser and the entitled render emit `isAccessibleForFree: false` and a
+`hasPart` marking the gated region. They must agree: a crawler and a subscriber
+being told different things about the same URL is the cloaking signal search
+engines penalise. The canonical URL stays the document's own — never the join
+page.
+
+Gated posts appear on the blog index with a "Members" badge. They always did
+appear (the index filters on publish state alone); before the paywall their links
+simply 404'd.
+
+### What stays strict
+
+The headless surfaces are unchanged. The JSON and GraphQL APIs never serve a
+teaser, and the delivery `audiences` argument is **hidden from the GraphQL schema**
+— otherwise an anonymous client could request gated content directly. Gated
+content over headless still requires a bearer token or API key on an entitled
+account. Sitemaps, `llms.txt`, related content and SEO link suggestions all remain
+public-only.
+
 ## Security notes
 
 - Card data never touches Kiln. Both money-handling calls return a
@@ -289,3 +345,4 @@ the "activating…" wait.
 - [Newsletter](newsletter.md) — subscribers, segments and sending
 - [Granular RBAC](granular-rbac.md) — how audiences differ from editorial roles
 - [Data flows](data-flows.md) — what personal data is stored, and subprocessors
+- [Extending content](extending-content.md) — the delivery reads the paywall widens

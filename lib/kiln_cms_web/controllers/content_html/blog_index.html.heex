@@ -8,7 +8,18 @@
   <ul class="mt-8 space-y-8">
     <li :for={post <- @posts}>
       <a href={KilnCMS.I18n.localized_path(@locale, ~p"/blog/#{post.slug}")} class="group block">
-        <h2 class="text-xl font-semibold group-hover:underline">{post.title}</h2>
+        <h2 class="text-xl font-semibold group-hover:underline">
+          {post.title}
+          <%!--
+            Gated posts already appeared on this index (the `:published` read
+            filters on state alone), but their links used to 404. With the paywall
+            they now lead somewhere useful, so label them rather than hiding them
+            — the index is the funnel.
+          --%>
+          <.badge :if={post.audience != :public} variant="primary">
+            {gettext("Members")}
+          </.badge>
+        </h2>
         <p :if={post.published_at} class="mt-1 text-sm text-base-content/70">
           {published_on(post.published_at)}
         </p>
