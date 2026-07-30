@@ -78,6 +78,14 @@ defmodule KilnCMS.Billing.Provider do
               {:ok, map()} | {:error, term()}
 
   @doc """
+  Confirm the credentials work and report which account they belong to.
+
+  Backs the console's connection check, so a mistyped key fails at setup rather
+  than at a member's first checkout.
+  """
+  @callback retrieve_account(config()) :: {:ok, map()} | {:error, term()}
+
+  @doc """
   Verify an inbound webhook against `raw_body` and return the decoded event.
 
   Local — no HTTP. On the behaviour because a second gateway brings a different

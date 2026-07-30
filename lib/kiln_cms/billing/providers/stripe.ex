@@ -73,7 +73,7 @@ defmodule KilnCMS.Billing.Providers.Stripe do
   Used by the console's "Test connection" so a mistyped key fails at save time
   rather than at a member's first checkout.
   """
-  @spec retrieve_account(KilnCMS.Billing.Provider.config()) :: {:ok, map()} | {:error, term()}
+  @impl true
   def retrieve_account(config), do: get("/v1/account", config)
 
   ## HTTP

@@ -5,10 +5,10 @@ Sell reader access to gated content. This is the second phase of the
 [Newsletter](newsletter.md).
 
 > **Status.** This page documents what is in the tree today: provider
-> credentials and the tiers on sale. The membership lifecycle (checkout, the
-> webhook receiver, automatic audience grants), the member-facing `/account`
-> page, the paywall teaser, and member-only newsletters land in later slices of
-> #337 Phase 2.
+> credentials, the tiers on sale, and the membership lifecycle (the webhook
+> receiver, automatic audience grants, and the audit trail). The member-facing
+> checkout and `/account` page, the paywall teaser, and member-only newsletters
+> land in later slices of #337 Phase 2.
 
 ## The idea
 
@@ -155,6 +155,92 @@ browser. Verification happens before JSON decoding, so unauthenticated bytes
 never reach the decoder, and it enforces a ±300s timestamp tolerance to bound
 replay of a captured request. Multiple signatures per request are accepted so a
 signing-secret rotation does not drop events.
+
+## How a membership grants access
+
+### The entitlement rule
+
+Audiences are recomputed **from scratch** on every membership transition, never
+incrementally:
+
+```
+granted   = audiences of every entitling membership (active | past_due | comped)
+managed   = audiences claimed by ANY tier, in ANY org, active or retired
+preserved = current -- managed          # admin-owned, untouched
+new       = preserved ++ granted
+```
+
+Recomputing rather than adding and removing is what makes replayed or
+out-of-order webhooks safe: the result is a pure function of current state, so
+applying it twice changes nothing.
+
+**Division of authority.** For any audience some tier claims, billing is the sole
+authority. Audiences no tier claims stay exactly as an admin left them. The
+consequence worth knowing: once an audience has *ever* been claimed by a tier,
+granting it by hand is transient — the next recompute drops it. **Comping is the
+supported lever** (a membership with status `comped`, no provider subscription);
+`manage_access` is the wrong tool for a tier-managed audience.
+
+Retiring a tier does **not** un-manage its audience, deliberately. If it did,
+retiring a tier would freeze every existing grant of that audience permanently,
+with nothing left to revoke it.
+
+### Statuses
+
+| Status | Grants? | Meaning |
+|---|---|---|
+| `incomplete` | no | created before checkout, so the provider session can carry a stable id |
+| `active` | **yes** | paid and current |
+| `past_due` | **yes** | a payment failed and the provider is retrying. Access survives dunning — locking a member out for an expiring card would be wrong, and the provider keeps the subscription alive through its retry schedule |
+| `canceled` | no | terminal |
+| `comped` | **yes** | granted by an admin, no provider subscription |
+
+### Revocation timing
+
+There is **no local timer**. The audience follows the mapped status and the status
+follows the provider, which gives the right behaviour for free: with
+"cancel at period end", the provider keeps reporting `active` for the whole paid
+period and sends the deletion event when it lapses. Immediate cancellation
+revokes immediately for the same reason. `current_period_end` is stored only so
+the member UI can say "renews on…".
+
+### Webhook setup
+
+Point a webhook endpoint at `POST /billing/webhooks/stripe` and enable exactly
+four events:
+
+- `checkout.session.completed`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+- `invoice.payment_failed`
+
+Anything else is acknowledged and ignored. Paste the endpoint's signing secret
+into `/editor/billing`.
+
+Processing is asynchronous: the receiver verifies the signature, records the
+event, and enqueues it on the `billing` queue. The provider times out in about 20
+seconds and treats a timeout as failure, so handling inline would be a latency bet
+against an external API on a path whose failure mode is "the provider disables
+your endpoint".
+
+**Diagnosing "the member paid but has no access"** starts with the recorded
+events: each one carries its status and, on failure, the reason. Every entitlement
+change also appears in the governance trail with the audience delta and the
+provider event that caused it.
+
+### Organizations
+
+The webhook's organization is resolved from the **event**, never from the request
+host — a webhook arrives at whatever host the provider was configured with, and
+trusting that would write memberships into the wrong site. Resolution goes:
+event metadata (verified against the stored membership), then the subscription id,
+then the customer id disambiguated by price. Nothing resolvable is acknowledged
+and ignored rather than guessed.
+
+Because credentials are instance-wide, checkout stamps the organization onto both
+the checkout session **and** the subscription it creates: session metadata does
+not propagate to the subscription, and the subscription is what carries every
+later event.
 
 ## Security notes
 

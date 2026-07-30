@@ -25,13 +25,17 @@ config :kiln_cms, Oban,
   # POOL_SIZE accordingly in production (see config/runtime.exs and
   # docs/performance.md).
   # Newsletter fan-out/delivery gets its own :newsletter queue so a large blast
-  # can't starve transactional :mail (total worker concurrency is now ~37 — size
-  # POOL_SIZE accordingly).
+  # can't starve transactional :mail.
+  # Inbound payment webhooks get :billing so a provider redelivery backfill can't
+  # starve anything else, and so an entitlement grant is never queued behind a
+  # newsletter blast (total worker concurrency is now ~40 — size POOL_SIZE
+  # accordingly).
   queues: [
     firing: 5,
     search: 5,
     mail: 3,
     newsletter: 3,
+    billing: 3,
     media: 3,
     webhooks: 3,
     scheduling: 5,

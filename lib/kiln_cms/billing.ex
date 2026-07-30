@@ -55,6 +55,46 @@ defmodule KilnCMS.Billing do
       define :get_tier_by_slug, action: :read, get_by: [:slug]
       define :tier_by_price, action: :by_price, args: [:provider_price_id]
     end
+
+    resource KilnCMS.Billing.Membership do
+      define :start_membership, action: :start
+      define :list_memberships, action: :read
+      define :get_membership, action: :read, get_by: [:id]
+      define :memberships_for_user, action: :for_user, args: [:user_id]
+      define :entitling_memberships_for_user, action: :entitling_for_user, args: [:user_id]
+
+      define :membership_by_subscription,
+        action: :by_subscription,
+        args: [:provider_subscription_id]
+
+      define :memberships_by_customer, action: :by_customer, args: [:provider_customer_id]
+      define :stale_memberships, action: :stale, args: [:before]
+      # System-only (`authorize?: false`) — the webhook worker and reconcile sweep.
+      define :apply_provider_state, action: :apply_provider_state
+      define :comp_membership, action: :comp
+      define :uncomp_membership, action: :uncomp
+    end
+
+    resource KilnCMS.Billing.WebhookEvent do
+      # All system-only: the receiver and worker run `authorize?: false`.
+      define :receive_webhook_event, action: :receive
+      define :claim_webhook_event, action: :claim
+      define :mark_webhook_event_processed, action: :mark_processed
+      define :mark_webhook_event_ignored, action: :mark_ignored
+      define :mark_webhook_event_failed, action: :mark_failed
+      define :get_webhook_event, action: :read, get_by: [:id]
+      define :webhook_event_by_event_id, action: :by_event_id, args: [:provider_event_id]
+      define :recent_webhook_events, action: :recent
+      define :purgeable_webhook_events, action: :purgeable, args: [:before]
+      define :destroy_webhook_event, action: :destroy
+    end
+
+    resource KilnCMS.Billing.MembershipEvent do
+      define :append_membership_event, action: :append
+      define :membership_events, action: :for_membership, args: [:membership_id]
+      define :recent_membership_events, action: :recent
+      define :anonymize_membership_event_actor, action: :anonymize_actor
+    end
   end
 
   @doc """
