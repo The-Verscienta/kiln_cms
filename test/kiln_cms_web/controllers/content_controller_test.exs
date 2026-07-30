@@ -5,6 +5,8 @@ defmodule KilnCMSWeb.ContentControllerTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
+  import KilnCMS.OrgFixtures
+
   alias KilnCMS.CMS.Page
   alias KilnCMS.CMS.Post
 
@@ -347,6 +349,30 @@ defmodule KilnCMSWeb.ContentControllerTest do
       html = conn |> get(~p"/blog") |> html_response(200)
       assert html =~ ~s("@type":"CollectionPage")
       assert html =~ ~s("@type":"ItemList")
+    end
+  end
+
+  describe "tenant-hosted canonical/JSON-LD URLs (#557)" do
+    test "a page served on a tenant subdomain emits a canonical tag with the tenant host",
+         %{conn: conn} do
+      o = org("tc-canonical")
+      p = Ash.Seed.seed!(Page, %{title: "A", slug: "pg-#{uniq()}", state: :published}, tenant: o)
+      host = "#{o.slug}.#{KilnCMSWeb.Tenant.base_host()}"
+      base_url = KilnCMSWeb.Tenant.base_url(o)
+
+      html = %{conn | host: host} |> get(~p"/#{p.slug}") |> html_response(200)
+
+      assert html =~ ~s(<link rel="canonical" href="#{base_url}/#{p.slug}")
+      refute html =~ "http://localhost:4000"
+    end
+
+    test "the default org (bare host) still emits the global :public_base_url",
+         %{conn: conn} do
+      p = page(%{title: "Default host page"})
+
+      html = conn |> get(~p"/#{p.slug}") |> html_response(200)
+
+      assert html =~ ~s(<link rel="canonical" href="http://localhost:4000/#{p.slug}")
     end
   end
 

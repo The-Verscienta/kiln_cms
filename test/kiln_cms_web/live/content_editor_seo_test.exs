@@ -370,6 +370,33 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
 
       assert html =~ "A sharper social headline"
     end
+
+    test "on a tenant subdomain, the card shows that org's host, not the default (#557)",
+         %{conn: conn} do
+      # A platform admin passes `KilnCMS.CMS.Checks.OrgAdmin` on every org
+      # (see `KilnCMS.CMS.Checks.OrgAdmin` moduledoc), so no org-membership
+      # fixture is needed to read/edit a foreign org's content here.
+      admin = authed_user(:admin)
+
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Tenant Org",
+          slug: "tenant-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      page =
+        CMS.create_page!(%{title: "Tenant page", slug: "tenant-card-seo"},
+          actor: admin,
+          tenant: org
+        )
+
+      host = "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"
+      {_lv, html} = open_editor(%{conn | host: host}, admin, page)
+
+      # The card's host line (see the `p.text-xs.uppercase` in `social_card/1`).
+      assert html =~ ~s(text-xs uppercase text-base-content/50">#{host}</p>)
+    end
   end
 
   describe "findings link to the blocks they name" do

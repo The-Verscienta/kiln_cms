@@ -17,14 +17,70 @@ defmodule KilnCMSWeb.Tenant do
   """
   alias KilnCMS.Accounts
 
+  require Logger
+
   # How long a host→org resolution is cached. Short enough that a slug/custom-domain
   # change (rare, admin-only) is picked up promptly.
   @cache_ttl :timer.minutes(5)
 
   @doc "The current organization id from a conn/socket assign, or the default org id."
   @spec current_org_id(map()) :: Ash.UUID.t()
-  def current_org_id(%{assigns: %{current_org: %{id: id}}}), do: id
-  def current_org_id(_), do: Accounts.default_org_id()
+  def current_org_id(assigns), do: current_org(assigns).id
+
+  @doc """
+  The current org struct from a conn/socket assign, or the default org. Never
+  `nil` — `Accounts.default_org/0` reads the seed row, which can miss on a
+  broken/uninitialized install, so a synthetic default-id-only struct is the
+  final fallback rather than propagating a `nil` for callers to crash on.
+  """
+  @spec current_org(map()) :: Accounts.Organization.t()
+  def current_org(%{assigns: %{current_org: %Accounts.Organization{} = org}}), do: org
+
+  def current_org(_),
+    do: Accounts.default_org() || %Accounts.Organization{id: Accounts.default_org_id()}
+
+  @doc """
+  The given org's own absolute base URL (scheme + host [+ port]), for building
+  public-facing URLs (canonical tags, JSON-LD, sitemap, `llms.txt`, static
+  export). A `custom_domain` always wins (even on the default org — an
+  operator can vanity-domain the pre-existing single-tenant site without
+  touching `:public_base_url`); otherwise the default org keeps the
+  deployment-global `:public_base_url` and every other org gets that same
+  scheme/port with `<slug>.<base_host>` substituted in.
+
+  Accepts an `%Organization{}`, a bare org id, or `nil` (→ the global default).
+  """
+  @spec base_url(Accounts.Organization.t() | Ash.UUID.t() | nil) :: String.t()
+  def base_url(%Accounts.Organization{} = org) do
+    cond do
+      is_binary(org.custom_domain) -> with_host(global_base_url(), org.custom_domain)
+      org.id == Accounts.default_org_id() -> global_base_url()
+      true -> with_host(global_base_url(), "#{org.slug}.#{base_host()}")
+    end
+  end
+
+  def base_url(nil), do: global_base_url()
+
+  def base_url(org_id) when is_binary(org_id) do
+    if org_id == Accounts.default_org_id() do
+      global_base_url()
+    else
+      case Accounts.get_organization(org_id, authorize?: false) do
+        {:ok, org} ->
+          base_url(org)
+
+        _ ->
+          Logger.warning("KilnCMSWeb.Tenant.base_url/1: unknown org id #{org_id}")
+          global_base_url()
+      end
+    end
+  end
+
+  defp global_base_url,
+    do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
+
+  defp with_host(base_url, host),
+    do: base_url |> URI.parse() |> Map.put(:host, host) |> URI.to_string()
 
   @doc """
   Resolve the organization for a request host. Always returns an org struct

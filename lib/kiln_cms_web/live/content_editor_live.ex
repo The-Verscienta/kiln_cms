@@ -2810,6 +2810,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   attr :form, :any, required: true
   attr :media, :list, required: true
+  attr :current_org, :any, required: true
 
   # How a shared link to this page will look (#476).
   #
@@ -2830,7 +2831,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         :card_description,
         blank_to_nil(AshPhoenix.Form.value(assigns.form, :seo_description))
       )
-      |> assign(:card_host, public_host())
+      |> assign(:card_host, public_host(assigns.current_org))
 
     ~H"""
     <div>
@@ -2871,8 +2872,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  defp public_host do
-    case URI.parse(Application.get_env(:kiln_cms, :public_base_url, "")) do
+  defp public_host(org) do
+    case URI.parse(KilnCMSWeb.Tenant.base_url(org)) do
       %URI{host: host} when is_binary(host) -> host
       _ -> ""
     end
@@ -4333,7 +4334,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   </div>
                   <.field_cursors field="seo_image" cursors={@cursors} />
                 </div>
-                <.social_card form={@form} media={@media} />
+                <.social_card form={@form} media={@media} current_org={@current_org} />
                 <div class={["relative", lock_ring(@locked_fields, "canonical_url")]}>
                   <.input
                     field={@form[:canonical_url]}

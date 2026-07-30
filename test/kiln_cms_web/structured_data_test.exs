@@ -5,8 +5,18 @@ defmodule KilnCMSWeb.StructuredDataTest do
   """
   use ExUnit.Case, async: true
 
+  alias KilnCMS.Accounts.Organization
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.StructuredData
+
+  # An in-memory org struct (never persisted) — `StructuredData` only reads
+  # `slug`/`custom_domain` off the struct, no DB round-trip needed (#557).
+  defp tenant_org(attrs \\ %{}) do
+    struct(
+      Organization,
+      Map.merge(%{id: Ash.UUID.generate(), slug: "acme", custom_domain: nil}, attrs)
+    )
+  end
 
   defp post(attrs \\ %{}) do
     struct(
@@ -102,5 +112,52 @@ defmodule KilnCMSWeb.StructuredDataTest do
     assert Enum.map(items, & &1["name"]) == ["P1", "P2"]
     assert Enum.map(items, & &1["position"]) == [1, 2]
     assert hd(items)["url"] == "http://localhost:4000/blog/p1"
+  end
+
+  describe "tenant-hosted org URLs (#557)" do
+    test "build/3 and document/3 derive the url/breadcrumbs from the given org's host" do
+      org = tenant_org()
+
+      data = StructuredData.build(page(), ContentTypes.get(:page), org)
+      assert data["url"] == "http://acme.localhost:4000/about"
+      assert data["mainEntityOfPage"] == "http://acme.localhost:4000/about"
+
+      [_main, crumbs] = StructuredData.document(page(), ContentTypes.get(:page), org)
+
+      assert Enum.map(crumbs["itemListElement"], & &1["item"]) == [
+               "http://acme.localhost:4000",
+               "http://acme.localhost:4000/about"
+             ]
+    end
+
+    test "a custom domain org emits that domain instead of its slug" do
+      org = tenant_org(%{custom_domain: "www.acme-vanity.com"})
+      data = StructuredData.build(post(), ContentTypes.get(:post), org)
+      # Same scheme/port as the global config (:4000 in test).
+      assert data["url"] == "http://www.acme-vanity.com:4000/blog/hello"
+    end
+
+    test "blog/2 threads the org through the collection URL and item URLs" do
+      org = tenant_org()
+      data = StructuredData.blog([post(%{title: "P1", slug: "p1"})], org)
+
+      assert data["url"] == "http://acme.localhost:4000/blog"
+
+      assert hd(data["mainEntity"]["itemListElement"])["url"] ==
+               "http://acme.localhost:4000/blog/p1"
+    end
+
+    test "an editor-set canonical URL still wins over the tenant-derived one" do
+      org = tenant_org()
+
+      data =
+        StructuredData.build(
+          page(%{canonical_url: "https://example.com/x"}),
+          ContentTypes.get(:page),
+          org
+        )
+
+      assert data["url"] == "https://example.com/x"
+    end
   end
 end

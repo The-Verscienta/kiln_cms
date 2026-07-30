@@ -190,8 +190,11 @@ defmodule KilnCMSWeb.FormBuilderLive do
     do: {:noreply, put_flash(socket, :info, gettext("Embed code copied to clipboard."))}
 
   # The one-line snippet an embedder pastes on their site (see `/embed.js`).
-  defp embed_snippet(slug) do
-    ~s(<script src="#{KilnCMSWeb.Endpoint.url()}/embed.js" data-kiln-form="#{slug}"></script>)
+  # Must be the ORG'S OWN host (#557) — `embed.js` derives the iframe origin
+  # from this script's `src` unless `data-kiln-origin` is set, so the global
+  # endpoint host here would point every tenant's embed at the default org.
+  defp embed_snippet(slug, org) do
+    ~s(<script src="#{KilnCMSWeb.Tenant.base_url(org)}/embed.js" data-kiln-form="#{slug}"></script>)
   end
 
   # --- data --------------------------------------------------------------------
@@ -726,7 +729,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
           <div class="flex items-center gap-2">
             <input
               type="text"
-              value={embed_snippet(@form.slug)}
+              value={embed_snippet(@form.slug, @current_org)}
               readonly
               aria-label={gettext("Embed code")}
               class="field-input min-w-0 flex-1 font-mono text-xs"
@@ -735,7 +738,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
               type="button"
               id="copy-embed-code"
               phx-hook="Clipboard"
-              data-clipboard-text={embed_snippet(@form.slug)}
+              data-clipboard-text={embed_snippet(@form.slug, @current_org)}
               class="btn btn-sm btn-default shrink-0"
             >
               {gettext("Copy")}

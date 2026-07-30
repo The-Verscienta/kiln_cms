@@ -22,11 +22,11 @@ defmodule KilnCMSWeb.LlmsController do
 
   def index(conn, _params) do
     # Per-org `llms.txt` (epic #336): each site indexes only its own content.
-    org_id = KilnCMSWeb.Tenant.current_org_id(conn)
+    org = KilnCMSWeb.Tenant.current_org(conn)
 
     body =
-      Cache.fetch(Cache.llms_key(org_id), @cache_ttl, fn ->
-        build_body(build_groups(org_id), org_id)
+      Cache.fetch(Cache.llms_key(org.id), @cache_ttl, fn ->
+        build_body(build_groups(org), org)
       end)
 
     conn
@@ -37,11 +37,11 @@ defmodule KilnCMSWeb.LlmsController do
   # No actor + `authorize?: true` ⇒ the read policy returns published records
   # only. Dynamic types (D17) are included — same read policy. Non-default
   # locales are dropped so the index stays single-language and link-clean.
-  defp build_groups(org_id) do
+  defp build_groups(org) do
     default_locale = KilnCMS.I18n.default_locale()
 
     {groups, _count} =
-      Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id), {[], 0}, fn ct,
+      Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(org.id), {[], 0}, fn ct,
                                                                                             {acc,
                                                                                              count} ->
         remaining = @max_entries - count
@@ -53,11 +53,11 @@ defmodule KilnCMSWeb.LlmsController do
             ct
             |> ContentTypes.list!(
               authorize?: true,
-              tenant: org_id,
+              tenant: org.id,
               query: [select: [:title, :slug, :locale, :seo_description], limit: remaining]
             )
             |> Enum.filter(&(&1.locale == default_locale))
-            |> Enum.map(&entry(&1, ct))
+            |> Enum.map(&entry(&1, ct, org))
 
           {:cont, {[%{label: ct.plural, entries: entries} | acc], count + length(entries)}}
         end
@@ -68,22 +68,24 @@ defmodule KilnCMSWeb.LlmsController do
     |> Enum.reject(&(&1.entries == []))
   end
 
-  defp entry(record, ct) do
+  defp entry(record, ct, org) do
+    base_url = KilnCMSWeb.Tenant.base_url(org)
+
     %{
       title: record.title,
-      url: "#{base_url()}#{ContentTypes.public_prefix(ct)}/#{record.slug}",
+      url: "#{base_url}#{ContentTypes.public_prefix(ct)}/#{record.slug}",
       # The fired :llm surface (#357): the clean Markdown form of this document,
       # linked per the llmstxt.org "markdown versions" convention.
-      md_url: "#{base_url()}/api/content/#{ct.type}/#{record.slug}?surface=llm",
+      md_url: "#{base_url}/api/content/#{ct.type}/#{record.slug}?surface=llm",
       description: record.seo_description
     }
   end
 
-  defp build_body(groups, org_id) do
+  defp build_body(groups, org) do
     # White-label (#48): llms.txt names the *site*, which is per-org. The body is
     # cached per-org under `Cache.llms_key/1` and busted by `Changes.BustBranding`
     # when the name changes.
-    site_name = site_name(org_id)
+    site_name = site_name(org)
 
     header = """
     # #{site_name}
@@ -114,6 +116,5 @@ defmodule KilnCMSWeb.LlmsController do
     text |> to_string() |> String.replace(["\r", "\n"], " ") |> String.replace("]", "\\]")
   end
 
-  defp site_name(org_id), do: KilnCMS.Branding.for_org(org_id).site_name
-  defp base_url, do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
+  defp site_name(org), do: KilnCMS.Branding.for_org(org).site_name
 end

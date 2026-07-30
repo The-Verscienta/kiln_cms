@@ -13,25 +13,12 @@ defmodule KilnCMS.MultitenancyDeliveryTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.OrgFixtures
+
   alias KilnCMS.Accounts
-  alias KilnCMS.Accounts.Organization
   alias KilnCMS.CMS
   alias KilnCMS.Firing.{Delivery, Engine}
   alias KilnCMSWeb.Tenant
-
-  defp org(slug, opts \\ []) do
-    Ash.Seed.seed!(
-      Organization,
-      Map.merge(
-        %{
-          name: "Org #{slug}",
-          slug: "#{slug}-#{System.unique_integer([:positive])}",
-          status: :active
-        },
-        Map.new(opts)
-      )
-    )
-  end
 
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
