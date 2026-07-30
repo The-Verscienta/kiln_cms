@@ -22,7 +22,13 @@ defmodule KilnCMSWeb.RateLimit do
     # legitimate load-balancer probes and crawlers are never throttled, while
     # still bounding a flood that would otherwise run an unthrottled DB query
     # (`/up`) or table scan (sitemap cache-miss) per hit.
-    probe: {600, :timer.minutes(1)}
+    probe: {600, :timer.minutes(1)},
+    # Inbound payment-provider webhooks. The provider delivers from a small egress
+    # IP set and can burst (a dunning run, a redelivery backfill), so the tight
+    # `:form` bucket would silently drop real events — and a dropped entitlement
+    # event is a paying member locked out. Generous per IP; the real authorization
+    # is the HMAC signature, not the rate limit.
+    billing_webhook: {300, :timer.minutes(1)}
   }
 
   @doc """

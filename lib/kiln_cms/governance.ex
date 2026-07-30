@@ -24,6 +24,77 @@ defmodule KilnCMS.Governance do
         }
 
   @doc """
+  Recent entitlement changes for a site, newest first (#337 Phase 2).
+
+  Every paid-membership transition and the **audience delta it caused**, with the
+  provider event or the admin that caused it. This is what makes "every
+  entitlement change is visible in the governance audit trail" true rather than
+  nominal: `KilnCMS.Billing.MembershipEvent` rows exist regardless, but nothing
+  would surface them without a read here.
+
+  Returns maps: `%{at, kind, from_status, to_status, added, removed, member,
+  tier, provider_event_id, actor}`. Read as the system, like the rest of this
+  module; the routes that call it are admin-gated.
+  """
+  @spec entitlement_index(Ash.UUID.t(), pos_integer()) :: [map()]
+  def entitlement_index(org_id, limit \\ 100) do
+    events =
+      KilnCMS.Billing.MembershipEvent
+      |> Ash.Query.for_read(:recent, %{}, authorize?: false, tenant: org_id)
+      |> Ash.Query.limit(limit)
+      |> Ash.read!()
+
+    names = entitlement_names(events)
+    tiers = entitlement_tiers(events, org_id)
+
+    Enum.map(events, fn event ->
+      %{
+        at: event.inserted_at,
+        kind: event.kind,
+        from_status: event.from_status,
+        to_status: event.to_status,
+        added: event.audiences_added,
+        removed: event.audiences_removed,
+        member: Map.get(names, event.user_id),
+        tier: Map.get(tiers, event.tier_id),
+        provider_event_id: event.provider_event_id,
+        actor: Map.get(names, event.actor_id)
+      }
+    end)
+  end
+
+  # Members and comping admins in one lookup.
+  defp entitlement_names(events) do
+    ids =
+      events
+      |> Enum.flat_map(&[&1.user_id, &1.actor_id])
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    if ids == [] do
+      %{}
+    else
+      KilnCMS.Accounts.User
+      |> Ash.Query.filter(id in ^ids)
+      |> Ash.read!(authorize?: false)
+      |> Map.new(&{&1.id, &1.name || to_string(&1.email)})
+    end
+  end
+
+  defp entitlement_tiers(events, org_id) do
+    ids = events |> Enum.map(& &1.tier_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    if ids == [] do
+      %{}
+    else
+      KilnCMS.Billing.MembershipTier
+      |> Ash.Query.filter(id in ^ids)
+      |> Ash.read!(authorize?: false, tenant: org_id)
+      |> Map.new(&{&1.id, &1.name})
+    end
+  end
+
+  @doc """
   Recent governable content (compiled AND dynamic types), newest first — the
   dashboard index. Returns lightweight maps: `%{type, id, title, slug, state}`.
   """

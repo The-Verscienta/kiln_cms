@@ -109,6 +109,20 @@ defmodule KilnCMS.Billing.MembershipTier do
       argument :provider_price_id, :string, allow_nil?: false
       filter expr(provider_price_id == ^arg(:provider_price_id))
     end
+
+    # Every tier on the instance, for `KilnCMS.Billing.Entitlements` to work out
+    # which audiences billing owns.
+    #
+    # `multitenancy :bypass` because `User.audiences` is a single global column, so
+    # "is this audience billing-owned?" is an instance-wide question. **Inactive
+    # tiers are included on purpose**: if a retired tier's audience stopped
+    # counting as billing-owned, the recompute would reclassify it as admin-owned
+    # and freeze every existing grant of it permanently, with nothing left to
+    # revoke it.
+    read :all_for_entitlements do
+      multitenancy :bypass
+      prepare build(select: [:id, :org_id, :audience])
+    end
   end
 
   policies do

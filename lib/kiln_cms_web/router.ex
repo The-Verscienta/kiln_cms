@@ -177,6 +177,18 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :form
   end
 
+  # Inbound payment-provider webhooks (#337 Phase 2). No CSRF and no session — the
+  # caller is the payment provider, not a browser; authorization is the
+  # `Stripe-Signature` HMAC over the raw body (preserved by
+  # `KilnCMSWeb.Plugs.RawBodyReader`). Its own rate bucket, because the provider
+  # bursts from a small egress IP set and a dropped entitlement event locks a
+  # paying member out. No secure-browser-headers: the response is an empty JSON
+  # ack, never rendered.
+  pipeline :provider_webhook do
+    plug :accepts, ["json"]
+    plug KilnCMSWeb.Plugs.RateLimit, :billing_webhook
+  end
+
   # The iframe page for an embeddable form. A page load, not a submission, so it
   # gets the generous `:delivery` ceiling rather than the tight `:form` bucket.
   # The controller replaces the CSP with `KilnCMSWeb.Embed.content_security_policy/0`,
@@ -475,6 +487,16 @@ defmodule KilnCMSWeb.Router do
     # so a GET can never mutate.
     get "/unsubscribe/:token", NewsletterController, :unsubscribe_form
     post "/unsubscribe/:token", NewsletterController, :unsubscribe
+  end
+
+  # Inbound payment-provider webhooks (#337 Phase 2). POST only — there is no GET
+  # here at all, so the newsletter's "a GET can never mutate" property holds
+  # trivially. 404s entirely when billing isn't configured, so an unconfigured
+  # instance doesn't confirm the route exists (the ProvenanceController posture).
+  scope "/billing", KilnCMSWeb do
+    pipe_through :provider_webhook
+
+    post "/webhooks/stripe", BillingWebhookController, :stripe
   end
 
   # Public SEO files + health probe. Rate-limited (`:probe`) so an unauthenticated

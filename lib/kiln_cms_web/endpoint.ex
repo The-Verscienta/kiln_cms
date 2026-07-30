@@ -108,6 +108,10 @@ defmodule KilnCMSWeb.Endpoint do
     # single request can force us to buffer; raise per-endpoint if large uploads
     # are ever needed.
     length: 8_000_000,
+    # Preserves the raw bytes for the inbound payment-webhook path only, so its
+    # HMAC signature can be verified over exactly what was sent. Every other
+    # request reads exactly as before — see the module.
+    body_reader: {KilnCMSWeb.Plugs.RawBodyReader, :read_body, []},
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride

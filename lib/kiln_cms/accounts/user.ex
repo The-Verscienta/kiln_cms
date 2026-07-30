@@ -189,6 +189,18 @@ defmodule KilnCMS.Accounts.User do
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
     end
 
+    # Billing-derived read entitlements (#337 Phase 2). Written only by
+    # `KilnCMS.Billing.Entitlements` — the declarative recompute — as a system
+    # call. NOT a general audience editor: `:manage_access` above remains the
+    # admin lever and is untouched.
+    update :sync_billing_audiences do
+      description "Apply billing-derived audiences (system-only)."
+      accept [:audiences]
+      # The guard change runs in Elixir — no atomic expression.
+      require_atomic? false
+      change KilnCMS.Accounts.Changes.SyncBillingAudiences
+    end
+
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
     # revokes tokens + anonymizes audit-event actors, while keeping the row and
     # content/version history (audit retention — #219). See
@@ -533,6 +545,15 @@ defmodule KilnCMS.Accounts.User do
     # the admin bypass above; explicit here to forbid everyone else.
     policy action(:manage_access) do
       authorize_if actor_attribute_equals(:role, :admin)
+    end
+
+    # Billing entitlements are system-only: only `KilnCMS.Billing.Entitlements`
+    # (running `authorize?: false`) may reach this. As with
+    # `:sign_in_with_passkey`, the admin bypass above would still pass a
+    # `forbid_if`, so the SyncBillingAudiences change ALSO refuses any
+    # actor-carrying call — no authorized path grants an entitlement by hand.
+    policy action(:sync_billing_audiences) do
+      forbid_if always()
     end
   end
 

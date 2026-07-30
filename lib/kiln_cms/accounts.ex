@@ -92,6 +92,10 @@ defmodule KilnCMS.Accounts do
       define :complete_passkey_sign_in, action: :sign_in_with_passkey, args: [:user_id]
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
+      # System-only (`authorize?: false`) — called by KilnCMS.Billing.Entitlements,
+      # the declarative recompute. An actor-carrying call is refused by the change
+      # module, since the admin policy bypass would defeat a `forbid_if` alone.
+      define :sync_billing_audiences, action: :sync_billing_audiences
       # GDPR Art. 17 erasure (#212) — admin-only; pass `actor: admin`.
       define :anonymize_user, action: :anonymize
     end
