@@ -211,9 +211,9 @@ defmodule KilnCMSWeb.TokenPreviewLive do
             name="name"
             value={@guest_name}
             maxlength="40"
-            class="input input-xs w-28 min-h-0 border-warning-content/40 bg-warning/60"
+            class="field-input w-28 min-h-0 border-warning-content/40 bg-warning/60 px-2 py-0.5 text-xs"
           />
-          <button type="submit" class="btn btn-xs btn-ghost">{gettext("Set name")}</button>
+          <button type="submit" class="btn btn-ghost px-2 py-0.5 text-xs">{gettext("Set name")}</button>
         </form>
         <.presence_bar viewers={@viewers} />
       </div>

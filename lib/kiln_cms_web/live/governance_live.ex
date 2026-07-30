@@ -266,21 +266,21 @@ defmodule KilnCMSWeb.GovernanceLive do
           >
             <label class="text-xs">
               {gettext("Kind")}
-              <select name="consent[kind]" class="select select-sm mt-1 w-full" required>
+              <select name="consent[kind]" class="field-select mt-1 w-full py-1" required>
                 <option :for={kind <- KilnCMS.CMS.Consent.kinds()} value={kind}>{kind}</option>
               </select>
             </label>
             <label class="text-xs">
               {gettext("Reference (ticket / document id)")}
-              <input name="consent[reference]" class="input input-sm mt-1 w-full" />
+              <input name="consent[reference]" class="field-input mt-1 w-full py-1" />
             </label>
             <label class="text-xs">
               {gettext("Grantor")}
-              <input name="consent[grantor]" class="input input-sm mt-1 w-full" />
+              <input name="consent[grantor]" class="field-input mt-1 w-full py-1" />
             </label>
             <label class="text-xs">
               {gettext("Note")}
-              <input name="consent[note]" class="input input-sm mt-1 w-full" />
+              <input name="consent[note]" class="field-input mt-1 w-full py-1" />
             </label>
             <div class="sm:col-span-2">
               <.button type="submit" variant="primary">{gettext("Record consent")}</.button>

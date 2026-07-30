@@ -322,7 +322,7 @@ defmodule KilnCMSWeb.PresentationLive do
                   name="value"
                   value={value}
                   phx-debounce="200"
-                  class="input input-bordered w-full"
+                  class="field-input w-full"
                   aria-label={field}
                 />
               </form>

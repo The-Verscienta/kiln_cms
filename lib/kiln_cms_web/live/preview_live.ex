@@ -224,7 +224,7 @@ defmodule KilnCMSWeb.PreviewLive do
           <select
             id="preview-locale-switch"
             name="id"
-            class="select select-xs w-auto min-h-0 border-warning-content/40 bg-warning/60 font-medium uppercase"
+            class="field-select w-auto min-h-0 border-warning-content/40 bg-warning/60 px-2 py-0.5 text-xs font-medium uppercase"
           >
             <option :for={v <- @variants} value={v.id} selected={v.id == @record_id}>
               {v.locale}

@@ -271,7 +271,7 @@ defmodule KilnCMSWeb.NewsletterLive do
           <form phx-submit="send" class="card card-pad space-y-4">
             <label class="block">
               <span class="text-sm font-medium">{gettext("Published post")}</span>
-              <select name="send[post_id]" class="select select-bordered mt-1 w-full" required>
+              <select name="send[post_id]" class="field-select mt-1 w-full" required>
                 <option value="">{gettext("Choose a post…")}</option>
                 <option
                   :for={post <- @posts}
@@ -288,7 +288,7 @@ defmodule KilnCMSWeb.NewsletterLive do
 
             <label class="block">
               <span class="text-sm font-medium">{gettext("Segment")}</span>
-              <select name="send[segment_id]" class="select select-bordered mt-1 w-full">
+              <select name="send[segment_id]" class="field-select mt-1 w-full">
                 <option value="">{gettext("All confirmed subscribers")}</option>
                 <option :for={segment <- @segments} value={segment.id}>{segment.name}</option>
               </select>
