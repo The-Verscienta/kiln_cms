@@ -68,6 +68,18 @@ defmodule KilnCMS.CMS.TypeDefinitionTest do
                CMS.create_type_definition(%{name: "posts", label: "X"}, actor: admin())
     end
 
+    test "cannot take a member-surface route (#337 Phase 2)" do
+      # `/account` and `/membership` are real routes; without reserving them an
+      # editor could create a type whose pages are silently shadowed.
+      for segment <- ~w(account membership billing) do
+        assert {:error, _} =
+                 CMS.create_type_definition(
+                   %{name: unique_name(), label: "X", path_segment: segment},
+                   actor: admin()
+                 )
+      end
+    end
+
     test "cannot take a compiled type's path segment or a reserved route" do
       assert {:error, _} =
                CMS.create_type_definition(

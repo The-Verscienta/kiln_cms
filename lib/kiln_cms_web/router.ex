@@ -210,18 +210,25 @@ defmodule KilnCMSWeb.Router do
   scope "/", KilnCMSWeb do
     pipe_through :browser
 
-    ash_authentication_live_session :authenticated_routes do
-      # in each liveview, add one of the following at the top of the module:
-      #
-      # If an authenticated user must be present:
-      # on_mount {KilnCMSWeb.LiveUserAuth, :live_user_required}
-      #
-      # If an authenticated user *may* be present:
-      # on_mount {KilnCMSWeb.LiveUserAuth, :live_user_optional}
-      #
-      # If an authenticated user must *not* be present:
-      # on_mount {KilnCMSWeb.LiveUserAuth, :live_no_user}
+    # Signed in, but NOT necessarily an editor — the reader-facing surface (#337
+    # Phase 2). Gated at the router rather than per-LiveView, like the editor and
+    # admin sessions below.
+    ash_authentication_live_session :authenticated_routes,
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :current_user},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        {KilnCMSWeb.LiveUserAuth, :live_user_required},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
+      live "/account", AccountLive, :show
     end
+
+    # Member payment handoffs. Plain CSRF-protected posts rather than LiveView
+    # events: both end in a redirect to a provider-hosted page on another origin,
+    # which a LiveView cannot navigate to. Two segments, so they must be declared
+    # before the `/:type/:slug` delivery catch-all far below.
+    post "/billing/checkout", BillingController, :checkout
+    post "/billing/portal", BillingController, :portal
 
     # Authoring UIs — editors and admins only.
     ash_authentication_live_session :editor_routes,
@@ -625,6 +632,23 @@ defmodule KilnCMSWeb.Router do
       # AshAuthentication session into AshAdmin's live_session; the actor itself
       # is resolved by `KilnCMSWeb.AshAdmin.ActorPlug` (config/dev.exs).
       ash_admin "/", session: {KilnCMSWeb.AshAdmin.ActorPlug, :admin_session, []}
+    end
+  end
+
+  # The public join page (#337 Phase 2) — where the paywall CTA sends a reader.
+  # Anonymous-tolerant: someone who hasn't signed up yet must be able to see what
+  # is on offer. Registered BEFORE the delivery catch-alls below, or `/:slug`
+  # would swallow it.
+  scope "/", KilnCMSWeb do
+    pipe_through [:browser, :delivery]
+
+    ash_authentication_live_session :member_public_routes,
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :current_user},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
+      live "/membership", MembershipLive, :index
     end
   end
 

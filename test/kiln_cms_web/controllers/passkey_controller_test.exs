@@ -73,13 +73,16 @@ defmodule KilnCMSWeb.PasskeyControllerTest do
     refute message =~ "unknown"
   end
 
-  test "a viewer lands on the site root, not the console", %{conn: conn} do
+  test "a viewer lands on their account page, not the console", %{conn: conn} do
+    # The passkey ceremony shares `AuthController.sign_in_destination/2` with the
+    # redirecting flows precisely so the landing rules can't drift per method —
+    # so the #337 Phase 2 change (viewers land on `/account`) applies here too.
     viewer = passkey_user(:viewer)
     {:ok, _} = enroll(viewer, "ctrl-viewer")
 
     conn = post(conn, ~p"/auth/passkey/options")
     conn = post(conn, ~p"/auth/passkey/verify", assertion("ctrl-viewer"))
 
-    assert %{"redirect_to" => "/"} = json_response(conn, 200)
+    assert %{"redirect_to" => "/account"} = json_response(conn, 200)
   end
 end

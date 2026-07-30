@@ -82,8 +82,10 @@ defmodule KilnCMSWeb.AuthControllerTest do
     end
   end
 
-  # #157: editors/admins land on the console overview after sign-in; viewers
-  # land on home.
+  # #157: editors/admins land on the console overview after sign-in. Viewers used
+  # to land on `/`, but since #337 Phase 2 they land on their own account page —
+  # a reader signing in is almost always there to manage a membership, and `/` is
+  # a dead end for them.
   describe "success/4 redirect" do
     test "an editor is redirected to the console overview" do
       user = signed_in_user(:editor)
@@ -91,10 +93,10 @@ defmodule KilnCMSWeb.AuthControllerTest do
       assert redirected_to(conn) == "/editor/overview"
     end
 
-    test "a viewer is redirected to /" do
+    test "a viewer is redirected to their account page" do
       user = signed_in_user(:viewer)
       conn = AuthController.success(flash_conn(), :sign_in, user, user.__metadata__.token)
-      assert redirected_to(conn) == "/"
+      assert redirected_to(conn) == "/account"
     end
   end
 end

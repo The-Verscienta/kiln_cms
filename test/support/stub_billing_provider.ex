@@ -33,6 +33,8 @@ defmodule KilnCMS.StubBillingProvider do
 
   @impl true
   def create_checkout_session(params, _config) do
+    spy(:checkout_session, params)
+
     case setting(:checkout_session) do
       {:error, reason} ->
         {:error, reason}
@@ -112,6 +114,23 @@ defmodule KilnCMS.StubBillingProvider do
   def put(key, value) do
     settings = Application.get_env(:kiln_cms, :stub_billing_provider, %{})
     Application.put_env(:kiln_cms, :stub_billing_provider, Map.put(settings, key, value))
+  end
+
+  @doc """
+  Forward the params of each `key` call to `pid`, so a test can assert on what
+  was sent to the provider.
+
+      StubBillingProvider.spy_on(:checkout_session, self())
+      ...
+      assert_received {:stub_billing, :checkout_session, params}
+  """
+  def spy_on(key, pid), do: put({:spy, key}, pid)
+
+  defp spy(key, params) do
+    case setting({:spy, key}) do
+      pid when is_pid(pid) -> send(pid, {:stub_billing, key, params})
+      _other -> :ok
+    end
   end
 
   defp setting(key),

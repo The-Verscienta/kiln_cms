@@ -5,10 +5,11 @@ Sell reader access to gated content. This is the second phase of the
 [Newsletter](newsletter.md).
 
 > **Status.** This page documents what is in the tree today: provider
-> credentials, the tiers on sale, and the membership lifecycle (the webhook
-> receiver, automatic audience grants, and the audit trail). The member-facing
-> checkout and `/account` page, the paywall teaser, and member-only newsletters
-> land in later slices of #337 Phase 2.
+> credentials, the tiers on sale, the membership lifecycle (the webhook receiver,
+> automatic audience grants, the audit trail), and the member-facing checkout,
+> `/account` and join pages. The paywall teaser and member-only newsletters land
+> in later slices of #337 Phase 2 — until the teaser ships, gated content still
+> 404s for a reader who isn't entitled to it.
 
 ## The idea
 
@@ -241,6 +242,37 @@ Because credentials are instance-wide, checkout stamps the organization onto bot
 the checkout session **and** the subscription it creates: session metadata does
 not propagate to the subscription, and the subscription is what carries every
 later event.
+
+## The member journey
+
+| Page | Who | What |
+|---|---|---|
+| `/membership` | anyone | The tiers on sale. Where the paywall CTA points. |
+| `/account` | any signed-in user | Current membership, status, renewal date, "Manage billing", data export. |
+
+A reader who isn't signed in is sent to register with their chosen tier
+remembered, so the intent survives account creation — registration is the
+identity step and shouldn't be entangled with payment. After signing in, readers
+land on `/account` rather than the site root.
+
+Both money-handling controls are ordinary form posts to
+`KilnCMSWeb.BillingController`, not LiveView events: each ends on a
+provider-hosted page on another origin, which a LiveView cannot navigate to. They
+work with JavaScript disabled and survive a dropped socket.
+
+Return URLs are built from the **request's** host, so a member on a
+custom-domain site returns to that domain — otherwise their session cookie
+wouldn't be there.
+
+### Coming back from checkout
+
+The member may land on `/account` before the provider's webhook arrives. When the
+membership is still incomplete, the checkout session is retrieved server-side and
+applied through the same path the webhook uses — but only after verifying the
+session's metadata names *that* user. The session id comes from the query string
+and is therefore attacker-suppliable; nothing is ever granted from the query
+parameters themselves. The webhook remains the durable path; this only removes
+the "activating…" wait.
 
 ## Security notes
 
