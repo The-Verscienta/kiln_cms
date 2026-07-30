@@ -6,9 +6,11 @@ architecture see [`KilnCMS_Project_Plan.md`](KilnCMS_Project_Plan.md); for the
 authoritative, always-in-context coding rules see [`AGENTS.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/AGENTS.md)
 (which also links the per-package Ash/Phoenix usage rules).
 
-By participating you agree to the [Code of Conduct](.github/CODE_OF_CONDUCT.md).
+By participating you agree to the
+[Code of Conduct](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/CODE_OF_CONDUCT.md).
 Found a security problem? **Don't open an issue** — follow the
-[security policy](.github/SECURITY.md) and report it privately.
+[security policy](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md)
+and report it privately.
 
 ## Getting set up
 

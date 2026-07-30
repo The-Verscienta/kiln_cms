@@ -36,10 +36,10 @@ mix precommit
 
 ## Impact
 
-- [ ] **No breaking change** to the overlay contract — no renamed/removed `KilnCMS.CMS.Content` extension point, `Kiln.Plugin` callback, or unmigrated block schema change. If there is one, [`CHANGELOG.md`](../CHANGELOG.md) gets an **Upgrading** section.
+- [ ] **No breaking change** to the overlay contract — no renamed/removed `KilnCMS.CMS.Content` extension point, `Kiln.Plugin` callback, or unmigrated block schema change. If there is one, [`CHANGELOG.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/CHANGELOG.md) gets an **Upgrading** section.
 - [ ] Migrations are safe to run against an existing production database (no destructive or long-locking change without a note here)
-- [ ] New public routes, sockets or outbound integrations are reflected in [`docs/threat-model.md`](../docs/threat-model.md)
-- [ ] New env vars are documented in [`docs/environment-variables.md`](../docs/environment-variables.md) and `.env.example`
+- [ ] New public routes, sockets or outbound integrations are reflected in [`docs/threat-model.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/threat-model.md)
+- [ ] New env vars are documented in [`docs/environment-variables.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/environment-variables.md) and `.env.example`
 - [ ] New guides are listed in both `extras` and `groups_for_extras` in `mix.exs`
 
 ## Screenshots
