@@ -1,0 +1,195 @@
+defmodule KilnCMS.Billing do
+  @moduledoc """
+  Paid memberships (#337 Phase 2) — the billing loop that turns a
+  self-registered `:viewer` into an entitled reader.
+
+  A paid member is not a new identity model: it is a self-registered user whose
+  active subscription grants one of the gated audiences from
+  `KilnCMS.CMS.Audiences`. This domain owns the tiers on sale
+  (`KilnCMS.Billing.MembershipTier`) and the provider credentials
+  (`KilnCMS.Billing.Settings`); the payment provider owns money, dunning, tax and
+  invoices, reached through the `KilnCMS.Billing.Provider` seam.
+
+  ## Disabled until configured
+
+  Nothing here activates on its own. `configured?/0` is false until an admin
+  stores both secrets in `/editor/billing`, and every surface reads it: the join
+  page renders no tiers, checkout 404s, and the webhook route 404s. That mirrors
+  the posture of `KilnCMS.Seo.Generator` and `Kiln.Updates` — a fresh install
+  makes no outbound calls and exposes no payment surface.
+
+  ## Two scopes, deliberately
+
+  Credentials are **instance-wide** (one provider account per instance — #337
+  open question 1) and gate on the global `User.role`. Tiers are **per-site** and
+  gate on `KilnCMS.CMS.Checks.OrgAdmin`. See both resources' moduledocs; mixing
+  the two up is the hazard `KilnCMS.CMS.SiteBranding` documents.
+
+  See `docs/memberships.md`.
+  """
+  use Ash.Domain
+
+  alias KilnCMS.Billing.Settings
+
+  resources do
+    resource KilnCMS.Billing.Settings do
+      define :init_settings, action: :init
+      define :list_settings, action: :read
+      define :store_billing_secret, action: :store_secret, args: [:key, :value]
+
+      define :configure_billing_key_source,
+        action: :configure_key_source,
+        args: [:key, :provider, {:optional, :config}]
+
+      define :record_billing_verification, action: :record_verification
+      define :clear_billing_credentials, action: :clear_credentials
+    end
+
+    resource KilnCMS.Billing.MembershipTier do
+      define :create_tier, action: :create
+      define :update_tier, action: :update
+      define :destroy_tier, action: :destroy
+      define :list_tiers, action: :read
+      define :list_active_tiers, action: :active
+      define :get_tier, action: :read, get_by: [:id]
+      define :get_tier_by_slug, action: :read, get_by: [:slug]
+      define :tier_by_price, action: :by_price, args: [:provider_price_id]
+    end
+  end
+
+  @doc """
+  The settings singleton, or nil before first use. A system read
+  (`authorize?: false`): the admin-only policy guards the UI path, while the
+  checkout and webhook paths read config actorlessly.
+  """
+  @spec get_settings() :: Settings.t() | nil
+  def get_settings do
+    # The row is a singleton (unique `singleton` column), so a bare read returns
+    # at most one record.
+    case list_settings!(authorize?: false) do
+      [settings | _rest] -> settings
+      [] -> nil
+    end
+  end
+
+  @doc """
+  The settings singleton, created on first call.
+
+  Called only from the admin console. Never from a read on a public path — that
+  would turn page views into `INSERT`s, the hazard noted on
+  `KilnCMS.CMS.SiteBranding`.
+  """
+  @spec ensure_settings!() :: Settings.t()
+  def ensure_settings! do
+    get_settings() || create_settings!()
+  end
+
+  defp create_settings! do
+    init_settings!(%{}, authorize?: false)
+  rescue
+    # Lost a concurrent-creation race on the singleton identity: the row exists
+    # now, so read it.
+    e in [Ash.Error.Invalid, Ash.Error.Unknown] ->
+      get_settings() || reraise(e, __STACKTRACE__)
+  end
+
+  @doc """
+  Both resolved provider secrets — the single resolution point.
+
+  Returns `{:error, :not_configured}` before setup, or the underlying
+  `KilnCMS.Keys` error (unset env var, unreadable file, failed decrypt) so the
+  console can explain what to fix via `KilnCMS.Keys.describe_error/1`.
+  """
+  @spec credentials() :: {:ok, KilnCMS.Billing.Provider.config()} | {:error, term()}
+  def credentials do
+    with {:ok, secret_key} <- KilnCMS.Keys.fetch(:billing_secret_key),
+         {:ok, webhook_secret} <- KilnCMS.Keys.fetch(:billing_webhook_secret) do
+      {:ok, %{secret_key: secret_key, webhook_secret: webhook_secret}}
+    end
+  end
+
+  @doc """
+  Whether billing is usable: the settings row exists and both secrets resolve.
+
+  Every payment surface gates on this, so an unconfigured instance never renders
+  a dead checkout button or accepts a webhook.
+  """
+  @spec configured?() :: boolean()
+  def configured?, do: match?({:ok, _credentials}, credentials())
+
+  @doc """
+  Confirm the stored credentials work, and record which account they belong to.
+
+  Backs the console's "Test connection" so a mistyped key fails at save time
+  rather than at a member's first checkout.
+  """
+  @spec verify_credentials() :: {:ok, Settings.t()} | {:error, term()}
+  def verify_credentials do
+    settings = ensure_settings!()
+
+    with {:ok, config} <- credentials(),
+         {:ok, account} <- provider().retrieve_account(config) do
+      record_billing_verification(
+        settings,
+        %{
+          provider_account_id: account["id"],
+          # Derived from the key prefix, not the response: the account object has
+          # no reliable live/test flag, whereas the key itself is unambiguous.
+          livemode: live_key?(config.secret_key),
+          verification_error: nil
+        },
+        authorize?: false
+      )
+    else
+      {:error, reason} ->
+        record_billing_verification(
+          settings,
+          %{verification_error: describe_error(reason)},
+          authorize?: false
+        )
+
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  An operator-facing explanation of a credential or provider failure.
+
+  Delegates key-resolution problems to `KilnCMS.Keys.describe_error/1` and adds
+  the provider-transport cases, so the console never renders a raw tuple — or a
+  provider error string, which can carry account details.
+  """
+  @spec describe_error(term()) :: String.t()
+  def describe_error({:http_status, 401, _body}),
+    do: "The payment provider rejected these credentials (401). Check the secret key."
+
+  def describe_error({:http_status, status, _body}),
+    do: "The payment provider returned HTTP #{status}."
+
+  def describe_error(reason) when reason in [:timeout, :closed],
+    do: "The payment provider did not respond in time."
+
+  def describe_error(%{__exception__: true} = error),
+    do: "Could not reach the payment provider: #{Exception.message(error)}"
+
+  def describe_error(reason), do: KilnCMS.Keys.describe_error(reason)
+
+  # A live secret key is `sk_live_…` (or `rk_live_…` for a restricted key). Any
+  # other prefix — including a test key — is treated as not-live, so the console
+  # never claims live mode it can't prove. `credentials/0` resolves through
+  # `KilnCMS.Keys.fetch/1`, which yields a binary or an error tuple, so the
+  # guard is the whole contract — there is no non-binary case to fall back to.
+  defp live_key?(secret_key) when is_binary(secret_key),
+    do: String.contains?(secret_key, "_live_")
+
+  @doc "The configured `KilnCMS.Billing.Provider` implementation."
+  @spec provider() :: module()
+  def provider, do: config(:provider, KilnCMS.Billing.Providers.Stripe)
+
+  @doc false
+  # Extra Req options (e.g. a `Req.Test` plug in the test env).
+  def req_options, do: config(:req_options, [])
+
+  defp config(key, default),
+    do: Keyword.get(Application.get_env(:kiln_cms, __MODULE__, []), key, default)
+end

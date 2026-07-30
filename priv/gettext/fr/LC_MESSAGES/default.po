@@ -12,17 +12,18 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n>1);\n"
 
 #: lib/kiln_cms_web/components/core_components.ex:673
+#: lib/kiln_cms_web/live/billing_live.ex:529
 #, elixir-autogen, elixir-format
 msgid "Actions"
 msgstr "Actions"
 
-#: lib/kiln_cms_web/components/layouts.ex:611
-#: lib/kiln_cms_web/components/layouts.ex:626
+#: lib/kiln_cms_web/components/layouts.ex:617
+#: lib/kiln_cms_web/components/layouts.ex:632
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr "Tentative de reconnexion"
 
-#: lib/kiln_cms_web/components/layouts.ex:533
+#: lib/kiln_cms_web/components/layouts.ex:539
 #: lib/kiln_cms_web/controllers/content_controller.ex:184
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
@@ -34,17 +35,17 @@ msgstr "Blogue"
 msgid "No posts yet."
 msgstr "Aucun article pour le moment."
 
-#: lib/kiln_cms_web/components/layouts.ex:578
+#: lib/kiln_cms_web/components/layouts.ex:584
 #, elixir-autogen, elixir-format
 msgid "Powered by KilnCMS."
 msgstr "Propulsé par KilnCMS."
 
-#: lib/kiln_cms_web/components/layouts.ex:618
+#: lib/kiln_cms_web/components/layouts.ex:624
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr "Une erreur s'est produite !"
 
-#: lib/kiln_cms_web/components/layouts.ex:603
+#: lib/kiln_cms_web/components/layouts.ex:609
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr "Connexion Internet introuvable"
@@ -62,6 +63,7 @@ msgstr "%{count} sélectionné(s)"
 #: lib/kiln_cms_web/live/analytics_live.ex:189
 #: lib/kiln_cms_web/live/api_key_live.ex:125
 #: lib/kiln_cms_web/live/automation_live.ex:221
+#: lib/kiln_cms_web/live/billing_live.ex:352
 #: lib/kiln_cms_web/live/content_editor_live.ex:3794
 #: lib/kiln_cms_web/live/field_definition_live.ex:268
 #: lib/kiln_cms_web/live/form_live.ex:161
@@ -94,6 +96,7 @@ msgid "Archive"
 msgstr "Archiver"
 
 #: lib/kiln_cms_web/live/automation_live.ex:326
+#: lib/kiln_cms_web/live/billing_live.ex:613
 #: lib/kiln_cms_web/live/editor_live.ex:643
 #: lib/kiln_cms_web/live/field_definition_live.ex:490
 #: lib/kiln_cms_web/live/settings_live.ex:458
@@ -118,6 +121,7 @@ msgstr "Annuler"
 msgid "Content"
 msgstr "Contenu"
 
+#: lib/kiln_cms_web/live/billing_live.ex:560
 #: lib/kiln_cms_web/live/editor_live.ex:380
 #: lib/kiln_cms_web/live/editor_live.ex:616
 #: lib/kiln_cms_web/live/media_live.ex:890
@@ -126,6 +130,7 @@ msgid "Delete"
 msgstr "Supprimer"
 
 #: lib/kiln_cms_web/live/automation_live.ex:288
+#: lib/kiln_cms_web/live/billing_live.ex:549
 #: lib/kiln_cms_web/live/content_editor_live.ex:4809
 #: lib/kiln_cms_web/live/editor_live.ex:769
 #: lib/kiln_cms_web/live/field_definition_live.ex:415
@@ -138,7 +143,7 @@ msgstr "Supprimer"
 msgid "Edit"
 msgstr "Modifier"
 
-#: lib/kiln_cms_web/components/layouts.ex:692
+#: lib/kiln_cms_web/components/layouts.ex:698
 #, elixir-autogen, elixir-format
 msgid "Editor"
 msgstr "Éditeur"
@@ -201,7 +206,7 @@ msgstr "Rechercher par titre"
 msgid "Select all"
 msgstr "Tout sélectionner"
 
-#: lib/kiln_cms_web/components/layouts.ex:756
+#: lib/kiln_cms_web/components/layouts.ex:762
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex:23
 #, elixir-autogen, elixir-format
 msgid "Sign in"
@@ -209,7 +214,7 @@ msgstr "Se connecter"
 
 #: lib/kiln_cms_web/components/layouts.ex:269
 #: lib/kiln_cms_web/components/layouts.ex:270
-#: lib/kiln_cms_web/components/layouts.ex:757
+#: lib/kiln_cms_web/components/layouts.ex:763
 #, elixir-autogen, elixir-format
 msgid "Sign out"
 msgstr "Se déconnecter"
@@ -227,7 +232,7 @@ msgstr "Taxonomie"
 msgid "Total views"
 msgstr "Vues totales"
 
-#: lib/kiln_cms_web/components/layouts.ex:448
+#: lib/kiln_cms_web/components/layouts.ex:454
 #: lib/kiln_cms_web/live/media_live.ex:718
 #: lib/kiln_cms_web/live/trash_live.ex:28
 #: lib/kiln_cms_web/live/trash_live.ex:249
@@ -428,6 +433,7 @@ msgid "Describe the image for screen readers"
 msgstr "Décrivez l'image pour les lecteurs d'écran"
 
 #: lib/kiln_cms_web/live/automation_live.ex:372
+#: lib/kiln_cms_web/live/billing_live.ex:581
 #: lib/kiln_cms_web/live/form_builder_live.ex:651
 #: lib/kiln_cms_web/live/taxonomy_live.ex:405
 #: lib/kiln_cms_web/live/taxonomy_live.ex:523
@@ -520,6 +526,8 @@ msgstr "%{name} déplacé vers la corbeille."
 #: lib/kiln_cms_web/live/api_key_live.ex:163
 #: lib/kiln_cms_web/live/api_key_live.ex:220
 #: lib/kiln_cms_web/live/automation_live.ex:349
+#: lib/kiln_cms_web/live/billing_live.ex:525
+#: lib/kiln_cms_web/live/billing_live.ex:579
 #: lib/kiln_cms_web/live/form_builder_live.ex:631
 #: lib/kiln_cms_web/live/form_live.ex:175
 #: lib/kiln_cms_web/live/newsletter_live.ex:318
@@ -717,6 +725,7 @@ msgstr "Publication planifiée le"
 msgid "Size"
 msgstr "Taille"
 
+#: lib/kiln_cms_web/live/billing_live.ex:580
 #: lib/kiln_cms_web/live/content_editor_live.ex:3850
 #: lib/kiln_cms_web/live/form_builder_live.ex:641
 #: lib/kiln_cms_web/live/form_live.ex:179
@@ -955,8 +964,8 @@ msgstr "Diffusion headless"
 msgid "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
 msgstr "KilnCMS associe les ressources Ash, un éditeur de blocs LiveView, l'historique des versions et une diffusion headless GraphQL + JSON:API — centré sur Postgres, temps réel par défaut, et conçu pour les équipes qui veulent le contrôle sans la charge d'exploitation."
 
-#: lib/kiln_cms_web/components/layouts.ex:541
-#: lib/kiln_cms_web/components/layouts.ex:648
+#: lib/kiln_cms_web/components/layouts.ex:547
+#: lib/kiln_cms_web/components/layouts.ex:654
 #, elixir-autogen, elixir-format
 msgid "Language"
 msgstr "Langue"
@@ -1012,6 +1021,8 @@ msgid "You need editor access to view that page."
 msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
 
 #: lib/kiln_cms_web/live/api_key_live.ex:110
+#: lib/kiln_cms_web/live/billing_live.ex:539
+#: lib/kiln_cms_web/live/billing_live.ex:607
 #: lib/kiln_cms_web/live/webhook_live.ex:298
 #: lib/kiln_cms_web/live/webhook_live.ex:384
 #, elixir-autogen, elixir-format
@@ -1299,9 +1310,9 @@ msgstr "Saut de section — aucun champ modifiable."
 msgid "Section title"
 msgstr "Titre de section"
 
-#: lib/kiln_cms_web/components/layouts.ex:457
-#: lib/kiln_cms_web/components/layouts.ex:466
-#: lib/kiln_cms_web/components/layouts.ex:717
+#: lib/kiln_cms_web/components/layouts.ex:463
+#: lib/kiln_cms_web/components/layouts.ex:472
+#: lib/kiln_cms_web/components/layouts.ex:723
 #: lib/kiln_cms_web/live/content_editor_live.ex:4662
 #: lib/kiln_cms_web/live/settings_live.ex:20
 #: lib/kiln_cms_web/live/settings_live.ex:309
@@ -1342,6 +1353,7 @@ msgstr "Vous vous êtes déjà connecté d'une autre manière, mais vous n'avez 
 
 #: lib/kiln_cms_web/live/api_key_live.ex:39
 #: lib/kiln_cms_web/live/automation_live.ex:31
+#: lib/kiln_cms_web/live/billing_live.ex:50
 #: lib/kiln_cms_web/live/field_definition_live.ex:44
 #: lib/kiln_cms_web/live/form_builder_live.ex:56
 #: lib/kiln_cms_web/live/form_live.ex:27
@@ -1420,6 +1432,8 @@ msgstr "Tout"
 msgid "Archived"
 msgstr "Archivé"
 
+#: lib/kiln_cms_web/live/billing_live.ex:526
+#: lib/kiln_cms_web/live/billing_live.ex:585
 #: lib/kiln_cms_web/live/content_editor_live.ex:4178
 #, elixir-autogen, elixir-format
 msgid "Audience"
@@ -1555,7 +1569,7 @@ msgid "Field type"
 msgstr "Type de champ"
 
 #: lib/kiln_cms_web/components/layouts.ex:395
-#: lib/kiln_cms_web/components/layouts.ex:724
+#: lib/kiln_cms_web/components/layouts.ex:730
 #: lib/kiln_cms_web/live/form_builder_live.ex:317
 #, elixir-autogen, elixir-format
 msgid "Fields"
@@ -1580,7 +1594,7 @@ msgid "Go to the homepage"
 msgstr "Aller à la page d'accueil"
 
 #: lib/kiln_cms_web/components/layouts.ex:252
-#: lib/kiln_cms_web/components/layouts.ex:685
+#: lib/kiln_cms_web/components/layouts.ex:691
 #, elixir-autogen, elixir-format
 msgid "GraphQL"
 msgstr "GraphQL"
@@ -1604,7 +1618,7 @@ msgid "In review"
 msgstr "En révision"
 
 #: lib/kiln_cms_web/components/layouts.ex:255
-#: lib/kiln_cms_web/components/layouts.ex:686
+#: lib/kiln_cms_web/components/layouts.ex:692
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex:55
 #, elixir-autogen, elixir-format
 msgid "JSON:API"
@@ -1734,6 +1748,7 @@ msgstr "Supprimer définitivement « %{title} » ? Cette action est irréversibl
 msgid "Permanently deleted."
 msgstr "Supprimé définitivement."
 
+#: lib/kiln_cms_web/live/billing_live.ex:606
 #: lib/kiln_cms_web/live/field_definition_live.ex:337
 #: lib/kiln_cms_web/live/field_definition_live.ex:456
 #: lib/kiln_cms_web/live/taxonomy_live.ex:555
@@ -1803,7 +1818,7 @@ msgstr "Enregistrement…"
 #: lib/kiln_cms_web/components/layouts.ex:125
 #: lib/kiln_cms_web/components/layouts.ex:219
 #: lib/kiln_cms_web/components/layouts.ex:299
-#: lib/kiln_cms_web/components/layouts.ex:536
+#: lib/kiln_cms_web/components/layouts.ex:542
 #: lib/kiln_cms_web/controllers/content_controller.ex:251
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/media_live.ex:941
@@ -1854,7 +1869,7 @@ msgstr "Aller au contenu principal"
 msgid "Submitting…"
 msgstr "Soumission…"
 
-#: lib/kiln_cms_web/components/layouts.ex:778
+#: lib/kiln_cms_web/components/layouts.ex:784
 #, elixir-autogen, elixir-format
 msgid "Theme"
 msgstr "Thème"
@@ -1870,17 +1885,17 @@ msgstr "Ce contenu a été modifié ailleurs. Rechargez pour obtenir la dernièr
 msgid "Upload progress for %{name}"
 msgstr "Progression du téléversement de %{name}"
 
-#: lib/kiln_cms_web/components/layouts.ex:804
+#: lib/kiln_cms_web/components/layouts.ex:810
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
 msgstr "Utiliser le thème sombre"
 
-#: lib/kiln_cms_web/components/layouts.ex:795
+#: lib/kiln_cms_web/components/layouts.ex:801
 #, elixir-autogen, elixir-format
 msgid "Use light theme"
 msgstr "Utiliser le thème clair"
 
-#: lib/kiln_cms_web/components/layouts.ex:786
+#: lib/kiln_cms_web/components/layouts.ex:792
 #, elixir-autogen, elixir-format
 msgid "Use system theme"
 msgstr "Utiliser le thème du système"
@@ -2296,7 +2311,7 @@ msgstr "Une erreur s'est produite"
 msgid "Too many requests"
 msgstr "Trop de requêtes"
 
-#: lib/kiln_cms_web/components/layouts.ex:738
+#: lib/kiln_cms_web/components/layouts.ex:744
 #, elixir-autogen, elixir-format
 msgid "Types"
 msgstr "Types"
@@ -2422,6 +2437,7 @@ msgstr "Vérifier le port sortant 25"
 msgid "Checked, but couldn't save the results."
 msgstr "Vérification effectuée, mais enregistrement des résultats impossible."
 
+#: lib/kiln_cms_web/live/billing_live.ex:418
 #: lib/kiln_cms_web/live/mail_settings_live.ex:522
 #, elixir-autogen, elixir-format
 msgid "Checking…"
@@ -2463,6 +2479,7 @@ msgstr "Signature DKIM"
 msgid "DNS records"
 msgstr "Enregistrements DNS"
 
+#: lib/kiln_cms_web/live/billing_live.ex:305
 #: lib/kiln_cms_web/live/mail_settings_live.ex:331
 #, elixir-autogen, elixir-format
 msgid "Database (encrypted)"
@@ -2503,16 +2520,19 @@ msgstr "Envoi d'e-mails en direct : signez avec DKIM, publiez les enregistrement
 msgid "Enter an address to send the test to."
 msgstr "Saisissez une adresse à laquelle envoyer le test."
 
+#: lib/kiln_cms_web/live/billing_live.ex:303
 #: lib/kiln_cms_web/live/mail_settings_live.ex:329
 #, elixir-autogen, elixir-format
 msgid "Environment variable"
 msgstr "Variable d'environnement"
 
+#: lib/kiln_cms_web/live/billing_live.ex:490
 #: lib/kiln_cms_web/live/mail_settings_live.ex:501
 #, elixir-autogen, elixir-format
 msgid "Environment variable name"
 msgstr "Nom de la variable d'environnement"
 
+#: lib/kiln_cms_web/live/billing_live.ex:304
 #: lib/kiln_cms_web/live/mail_settings_live.ex:330
 #, elixir-autogen, elixir-format
 msgid "File"
@@ -2553,6 +2573,7 @@ msgstr "Clé présente. La clé privée n'est jamais affichée."
 msgid "Key rotated. Publish the new DNS record; the old one can stay up while signed mail is in transit."
 msgstr "Clé renouvelée. Publiez le nouvel enregistrement DNS ; l'ancien peut rester en place tant que du courrier signé est en transit."
 
+#: lib/kiln_cms_web/live/billing_live.ex:107
 #: lib/kiln_cms_web/live/mail_settings_live.ex:104
 #, elixir-autogen, elixir-format
 msgid "Key source saved and checked."
@@ -2640,6 +2661,7 @@ msgstr "Envoi…"
 msgid "Server public IP (for the SPF and reverse-DNS checks)"
 msgstr "IP publique du serveur (pour les vérifications SPF et DNS inverse)"
 
+#: lib/kiln_cms_web/live/billing_live.ex:289
 #: lib/kiln_cms_web/live/form_builder_live.ex:315
 #: lib/kiln_cms_web/live/form_live.ex:144
 #: lib/kiln_cms_web/live/mail_settings_live.ex:325
@@ -2648,6 +2670,8 @@ msgid "Something went wrong."
 msgstr "Une erreur s'est produite."
 
 #: lib/kiln_cms_web/live/api_key_live.ex:223
+#: lib/kiln_cms_web/live/billing_live.ex:365
+#: lib/kiln_cms_web/live/billing_live.ex:528
 #: lib/kiln_cms_web/live/mail_settings_live.ex:383
 #: lib/kiln_cms_web/live/newsletter_live.ex:412
 #: lib/kiln_cms_web/live/webhook_live.ex:422
@@ -2888,7 +2912,7 @@ msgstr "Une URL canonique à plusieurs segments. Lorsqu'elle est définie, l'URL
 msgid "API key created — copy it now, it won't be shown again."
 msgstr "Clé API créée — copiez-la maintenant, elle ne sera plus affichée."
 
-#: lib/kiln_cms_web/components/layouts.ex:745
+#: lib/kiln_cms_web/components/layouts.ex:751
 #: lib/kiln_cms_web/live/api_key_live.ex:29
 #: lib/kiln_cms_web/live/api_key_live.ex:127
 #, elixir-autogen, elixir-format
@@ -3107,7 +3131,7 @@ msgid "Build public forms, place them on content with the form block, and review
 msgstr "Créez des formulaires publics, placez-les dans votre contenu avec le bloc formulaire, et consultez les soumissions ici."
 
 #: lib/kiln_cms_web/components/layouts.ex:359
-#: lib/kiln_cms_web/components/layouts.ex:699
+#: lib/kiln_cms_web/components/layouts.ex:705
 #: lib/kiln_cms_web/live/calendar_live.ex:22
 #: lib/kiln_cms_web/live/overview_live.ex:404
 #, elixir-autogen, elixir-format
@@ -3159,7 +3183,7 @@ msgstr "Colonne %{n}"
 msgid "Comma-separated; the first keyphrase drives the auto-derived slug."
 msgstr "Séparés par des virgules ; la première expression clé détermine le slug dérivé automatiquement."
 
-#: lib/kiln_cms_web/components/layouts.ex:486
+#: lib/kiln_cms_web/components/layouts.ex:492
 #, elixir-autogen, elixir-format
 msgid "Configure"
 msgstr "Configurer"
@@ -3746,7 +3770,7 @@ msgid "Form preview"
 msgstr "Aperçu du formulaire"
 
 #: lib/kiln_cms_web/components/layouts.ex:401
-#: lib/kiln_cms_web/components/layouts.ex:731
+#: lib/kiln_cms_web/components/layouts.ex:737
 #: lib/kiln_cms_web/live/form_live.ex:22
 #: lib/kiln_cms_web/live/form_live.ex:163
 #: lib/kiln_cms_web/live/overview_live.ex:369
@@ -3789,7 +3813,7 @@ msgstr "Éditeur complet"
 msgid "General"
 msgstr "Général"
 
-#: lib/kiln_cms_web/components/layouts.ex:438
+#: lib/kiln_cms_web/components/layouts.ex:444
 #: lib/kiln_cms_web/live/governance_live.ex:15
 #: lib/kiln_cms_web/live/governance_live.ex:170
 #, elixir-autogen, elixir-format
@@ -4879,7 +4903,7 @@ msgstr "Slug cible"
 msgid "Target type"
 msgstr "Type cible"
 
-#: lib/kiln_cms_web/components/layouts.ex:444
+#: lib/kiln_cms_web/components/layouts.ex:450
 #: lib/kiln_cms_web/live/team_live.ex:34
 #: lib/kiln_cms_web/live/team_live.ex:361
 #, elixir-autogen, elixir-format
@@ -5065,7 +5089,7 @@ msgid "Trail"
 msgstr "Piste d'audit"
 
 #: lib/kiln_cms_web/components/layouts.ex:366
-#: lib/kiln_cms_web/components/layouts.ex:710
+#: lib/kiln_cms_web/components/layouts.ex:716
 #: lib/kiln_cms_web/live/content_editor_live.ex:4473
 #: lib/kiln_cms_web/live/overview_live.ex:304
 #: lib/kiln_cms_web/live/translations_live.ex:26
@@ -5992,7 +6016,7 @@ msgstr "Version de Kiln"
 msgid "No build stamp. Pass --build-arg GIT_SHA and --build-arg BUILD_DATE when building the image to record exactly which commit is deployed."
 msgstr "Aucune empreinte de build. Passez --build-arg GIT_SHA et --build-arg BUILD_DATE lors de la construction de l'image pour enregistrer précisément le commit déployé."
 
-#: lib/kiln_cms_web/components/layouts.ex:451
+#: lib/kiln_cms_web/components/layouts.ex:457
 #: lib/kiln_cms_web/live/system_live.ex:34
 #: lib/kiln_cms_web/live/system_live.ex:96
 #, elixir-autogen, elixir-format
@@ -6049,6 +6073,7 @@ msgstr "Mises à jour"
 msgid "released"
 msgstr "publiée le"
 
+#: lib/kiln_cms_web/live/billing_live.ex:393
 #: lib/kiln_cms_web/live/system_live.ex:111
 #: lib/kiln_cms_web/live/system_live.ex:118
 #, elixir-autogen, elixir-format
@@ -6197,7 +6222,7 @@ msgstr "Clair"
 msgid "Logo URL"
 msgstr "URL du logo"
 
-#: lib/kiln_cms_web/components/layouts.ex:576
+#: lib/kiln_cms_web/components/layouts.ex:582
 #, elixir-autogen, elixir-format
 msgid "Powered by %{name}."
 msgstr "Propulsé par %{name}."
@@ -6261,3 +6286,252 @@ msgstr "Personnalisez la marque de ce site : son nom, son logo et sa couleur app
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's branding."
 msgstr "Vous n'avez pas la permission de modifier la personnalisation de marque de ce site."
+
+#: lib/kiln_cms_web/live/billing_live.ex:587
+#, elixir-autogen, elixir-format
+msgid "A tier's audience can't change — existing members would keep an entitlement nothing would revoke. Retire this tier and create a new one instead."
+msgstr "L'audience d'un niveau ne peut pas changer — les membres existants conserveraient un droit d'accès que rien ne révoquerait. Retirez ce niveau et créez-en un nouveau à la place."
+
+#: lib/kiln_cms_web/live/billing_live.ex:291
+#, elixir-autogen, elixir-format
+msgid "API secret key"
+msgstr "Clé secrète d'API"
+
+#: lib/kiln_cms_web/live/billing_live.ex:392
+#, elixir-autogen, elixir-format
+msgid "Account"
+msgstr "Compte"
+
+#: lib/kiln_cms_web/live/billing_live.ex:596
+#, elixir-autogen, elixir-format
+msgid "Audience granted"
+msgstr "Audience accordée"
+
+#: lib/kiln_cms_web/components/layouts.ex:438
+#: lib/kiln_cms_web/live/billing_live.ex:38
+#: lib/kiln_cms_web/live/billing_live.ex:354
+#, elixir-autogen, elixir-format
+msgid "Billing"
+msgstr "Facturation"
+
+#: lib/kiln_cms_web/live/billing_live.ex:368
+#, elixir-autogen, elixir-format
+msgid "Billing is configured. Tiers can be sold."
+msgstr "La facturation est configurée. Les niveaux peuvent être vendus."
+
+#: lib/kiln_cms_web/live/billing_live.ex:370
+#, elixir-autogen, elixir-format
+msgid "Billing is not configured yet. Until both secrets resolve, no tier is offered and no payment page is reachable."
+msgstr "La facturation n'est pas encore configurée. Tant que les deux secrets ne sont pas résolus, aucun niveau n'est proposé et aucune page de paiement n'est accessible."
+
+#: lib/kiln_cms_web/live/billing_live.ex:378
+#, elixir-autogen, elixir-format
+msgid "Configured"
+msgstr "Configurée"
+
+#: lib/kiln_cms_web/live/billing_live.ex:207
+#, elixir-autogen, elixir-format
+msgid "Connected to the payment provider."
+msgstr "Connecté au prestataire de paiement."
+
+#: lib/kiln_cms_web/live/billing_live.ex:519
+#, elixir-autogen, elixir-format
+msgid "Create one below to start selling memberships."
+msgstr "Créez-en un ci-dessous pour commencer à vendre des abonnements."
+
+#: lib/kiln_cms_web/live/billing_live.ex:134
+#, elixir-autogen, elixir-format
+msgid "Credentials cleared. No payment surface is offered now."
+msgstr "Identifiants effacés. Aucune surface de paiement n'est désormais proposée."
+
+#: lib/kiln_cms_web/live/billing_live.ex:557
+#, elixir-autogen, elixir-format
+msgid "Delete this tier? Retiring it is usually safer than deleting."
+msgstr "Supprimer ce niveau ? Le retirer est généralement plus sûr que le supprimer."
+
+#: lib/kiln_cms_web/live/billing_live.ex:431
+#, elixir-autogen, elixir-format
+msgid "Disconnect"
+msgstr "Déconnecter"
+
+#: lib/kiln_cms_web/live/billing_live.ex:426
+#, elixir-autogen, elixir-format
+msgid "Disconnect the payment provider? No new memberships can be sold until you reconnect."
+msgstr "Déconnecter le prestataire de paiement ? Aucun nouvel abonnement ne pourra être vendu avant une reconnexion."
+
+#: lib/kiln_cms_web/live/billing_live.ex:504
+#, elixir-autogen, elixir-format
+msgid "Each tier grants one audience. Configure the price in your provider's dashboard and paste its price ID here, so there is one source of truth for money."
+msgstr "Chaque niveau accorde une audience. Configurez le prix dans le tableau de bord de votre prestataire et collez son identifiant de prix ici, afin qu'il n'y ait qu'une seule source de vérité pour les montants."
+
+#: lib/kiln_cms_web/live/billing_live.ex:576
+#, elixir-autogen, elixir-format
+msgid "Edit tier"
+msgstr "Modifier le niveau"
+
+#: lib/kiln_cms_web/live/billing_live.ex:491
+#, elixir-autogen, elixir-format
+msgid "File path"
+msgstr "Chemin du fichier"
+
+#: lib/kiln_cms_web/live/billing_live.ex:396
+#, elixir-autogen, elixir-format
+msgid "Last checked"
+msgstr "Dernière vérification"
+
+#: lib/kiln_cms_web/live/billing_live.ex:405
+#, elixir-autogen, elixir-format
+msgid "Last error"
+msgstr "Dernière erreur"
+
+#: lib/kiln_cms_web/live/billing_live.ex:381
+#, elixir-autogen, elixir-format
+msgid "Live mode"
+msgstr "Mode production"
+
+#: lib/kiln_cms_web/live/billing_live.ex:502
+#, elixir-autogen, elixir-format
+msgid "Membership tiers"
+msgstr "Niveaux d'abonnement"
+
+#: lib/kiln_cms_web/live/billing_live.ex:576
+#, elixir-autogen, elixir-format
+msgid "New tier"
+msgstr "Nouveau niveau"
+
+#: lib/kiln_cms_web/live/billing_live.ex:518
+#, elixir-autogen, elixir-format
+msgid "No tiers yet"
+msgstr "Aucun niveau pour l'instant"
+
+#: lib/kiln_cms_web/live/billing_live.ex:446
+#, elixir-autogen, elixir-format
+msgid "Not available"
+msgstr "Indisponible"
+
+#: lib/kiln_cms_web/live/billing_live.ex:378
+#, elixir-autogen, elixir-format
+msgid "Not configured"
+msgstr "Non configurée"
+
+#: lib/kiln_cms_web/live/billing_live.ex:356
+#, elixir-autogen, elixir-format
+msgid "Paid memberships: connect a payment provider, then sell tiers that grant readers access to gated content."
+msgstr "Abonnements payants : connectez un prestataire de paiement, puis vendez des niveaux qui donnent aux lecteurs accès au contenu réservé."
+
+#: lib/kiln_cms_web/live/billing_live.ex:475
+#, elixir-autogen, elixir-format
+msgid "Paste the secret"
+msgstr "Collez le secret"
+
+#: lib/kiln_cms_web/live/billing_live.ex:527
+#, elixir-autogen, elixir-format
+msgid "Price ID"
+msgstr "Identifiant de prix"
+
+#: lib/kiln_cms_web/live/billing_live.ex:388
+#, elixir-autogen, elixir-format
+msgid "Provider"
+msgstr "Prestataire"
+
+#: lib/kiln_cms_web/live/billing_live.ex:604
+#, elixir-autogen, elixir-format
+msgid "Provider price ID"
+msgstr "Identifiant de prix du prestataire"
+
+#: lib/kiln_cms_web/live/billing_live.ex:312
+#, elixir-autogen, elixir-format
+msgid "Recommended for production. Reads a file — the natural fit for Docker/Kubernetes mounted secrets."
+msgstr "Recommandé en production. Lit un fichier — le choix naturel pour les secrets montés par Docker/Kubernetes."
+
+#: lib/kiln_cms_web/live/billing_live.ex:308
+#, elixir-autogen, elixir-format
+msgid "Recommended for production. Reads the secret from an environment variable."
+msgstr "Recommandé en production. Lit le secret depuis une variable d'environnement."
+
+#: lib/kiln_cms_web/live/billing_live.ex:444
+#, elixir-autogen, elixir-format
+msgid "Resolves correctly."
+msgstr "Se résout correctement."
+
+#: lib/kiln_cms_web/live/billing_live.ex:539
+#, elixir-autogen, elixir-format
+msgid "Retired"
+msgstr "Retiré"
+
+#: lib/kiln_cms_web/live/billing_live.ex:495
+#, elixir-autogen, elixir-format
+msgid "Save key source"
+msgstr "Enregistrer la source de la clé"
+
+#: lib/kiln_cms_web/live/billing_live.ex:478
+#, elixir-autogen, elixir-format
+msgid "Save secret"
+msgstr "Enregistrer le secret"
+
+#: lib/kiln_cms_web/live/billing_live.ex:610
+#, elixir-autogen, elixir-format
+msgid "Save tier"
+msgstr "Enregistrer le niveau"
+
+#: lib/kiln_cms_web/live/billing_live.ex:77
+#, elixir-autogen, elixir-format
+msgid "Secret saved."
+msgstr "Secret enregistré."
+
+#: lib/kiln_cms_web/live/billing_live.ex:511
+#, elixir-autogen, elixir-format
+msgid "Some tiers grant an audience that is no longer configured. Restore it in config :kiln_cms, :audiences, or retire those tiers."
+msgstr "Certains niveaux accordent une audience qui n'est plus configurée. Rétablissez-la dans config :kiln_cms, :audiences, ou retirez ces niveaux."
+
+#: lib/kiln_cms_web/live/billing_live.ex:418
+#, elixir-autogen, elixir-format
+msgid "Test connection"
+msgstr "Tester la connexion"
+
+#: lib/kiln_cms_web/live/billing_live.ex:166
+#: lib/kiln_cms_web/live/billing_live.ex:181
+#, elixir-autogen, elixir-format
+msgid "That tier no longer exists."
+msgstr "Ce niveau n'existe plus."
+
+#: lib/kiln_cms_web/live/billing_live.ex:222
+#, elixir-autogen, elixir-format
+msgid "The connection check crashed. Check the server logs."
+msgstr "La vérification de la connexion a échoué. Consultez les journaux du serveur."
+
+#: lib/kiln_cms_web/live/billing_live.ex:186
+#: lib/kiln_cms_web/live/billing_live.ex:189
+#, elixir-autogen, elixir-format
+msgid "Tier deleted."
+msgstr "Niveau supprimé."
+
+#: lib/kiln_cms_web/live/billing_live.ex:156
+#, elixir-autogen, elixir-format
+msgid "Tier saved."
+msgstr "Niveau enregistré."
+
+#: lib/kiln_cms_web/live/billing_live.ex:295
+#, elixir-autogen, elixir-format
+msgid "Used to open checkout and billing-portal sessions. Starts with sk_ or rk_."
+msgstr "Utilisée pour ouvrir les sessions de paiement et du portail de facturation. Commence par sk_ ou rk_."
+
+#: lib/kiln_cms_web/live/billing_live.ex:299
+#, elixir-autogen, elixir-format
+msgid "Verifies inbound webhooks. Copy it from the webhook endpoint you created in the provider's dashboard; it starts with whsec_."
+msgstr "Vérifie les webhooks entrants. Copiez-le depuis le point de terminaison webhook que vous avez créé dans le tableau de bord du prestataire ; il commence par whsec_."
+
+#: lib/kiln_cms_web/live/billing_live.ex:292
+#, elixir-autogen, elixir-format
+msgid "Webhook signing secret"
+msgstr "Secret de signature des webhooks"
+
+#: lib/kiln_cms_web/live/billing_live.ex:318
+#, elixir-autogen, elixir-format
+msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans it."
+msgstr "Option par défaut sans configuration : collez le secret ici. Chiffré avec une clé dérivée de SECRET_KEY_BASE — la rotation de ce secret le rend inutilisable."
+
+#: lib/kiln_cms_web/live/billing_live.ex:400
+#, elixir-autogen, elixir-format
+msgid "never"
+msgstr "jamais"
