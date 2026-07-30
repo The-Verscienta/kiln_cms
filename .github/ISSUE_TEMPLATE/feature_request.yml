@@ -1,0 +1,76 @@
+name: Feature request
+description: Propose a capability or an improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do that KilnCMS makes hard or impossible today?
+        Describe the situation, not the solution.
+      placeholder: >
+        Editors have to re-enter the same author bio on every post; there's no
+        way to reference a shared record from a block.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like to see. Sketch the API, UI or resource shape if you have one in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >
+        Workarounds you've tried, and why they fall short — including whether an
+        overlay/plugin in your own `projects/<name>/` could do it without a core
+        change. See [extending-content.md](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/extending-content.md).
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Editor UI (LiveView, blocks, TipTap)
+        - Content model / Ash resources & policies
+        - Delivery & rendering (public site, caching)
+        - Headless API (JSON:API, GraphQL, MCP)
+        - Auth, RBAC & multi-tenancy
+        - Media & asset pipeline
+        - Search (Meilisearch, semantic)
+        - Forms & submissions
+        - Email & webhooks
+        - Background jobs (Oban / AshOban)
+        - Build, CI, deploy or mix tasks
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility impact
+      description: >
+        Would this break the overlay contract for downstream projects — a renamed
+        or removed extension point, a changed `Kiln.Plugin` callback, a block
+        schema change, a migration? See [CHANGELOG.md](https://github.com/The-Verscienta/kiln_cms/blob/main/CHANGELOG.md)
+        for how versions are interpreted.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'm willing to open a PR for this
+          required: false
