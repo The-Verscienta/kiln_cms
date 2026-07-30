@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/The-Verscienta/kiln_cms/security/advisories/new
+    about: Never report security issues publicly — use private advisory reporting.
+  - name: Documentation
+    url: https://github.com/The-Verscienta/kiln_cms/tree/main/docs
+    about: Guides for setup, the headless APIs, extending content, deploying and more.
+  - name: Contributing guide
+    url: https://github.com/The-Verscienta/kiln_cms/blob/main/CONTRIBUTING.md
+    about: Development workflow, the Ash codegen rules, and the `mix precommit` quality gate.
