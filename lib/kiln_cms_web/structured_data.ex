@@ -48,6 +48,63 @@ defmodule KilnCMSWeb.StructuredData do
     |> maybe_put("datePublished", iso8601(record.published_at))
     |> maybe_put("dateModified", iso8601(record.updated_at))
     |> maybe_put("author", author(record))
+    |> maybe_paywalled(record)
+  end
+
+  # A gated document is marked paywalled even when the reader IS entitled, so the
+  # markup a subscriber receives matches what a crawler is told (#337 Phase 2).
+  defp maybe_paywalled(node, %{audience: audience}) when audience != :public,
+    do: Map.merge(node, paywall_markers())
+
+  defp maybe_paywalled(node, _record), do: node
+
+  @doc """
+  The JSON-LD for a paywalled document (#337 Phase 2).
+
+  Emits `isAccessibleForFree: false` plus a `hasPart` marking the gated region, so
+  a crawler is told the page is paywalled rather than being handed a short article
+  it might read as thin content.
+
+  The **same** flags are emitted on the entitled member's full render (see
+  `document/3`), because a crawler and a subscriber disagreeing about whether a
+  page is free is exactly the cloaking signal search engines penalise.
+  """
+  @spec teaser(KilnCMSWeb.Teaser.t(), term()) :: [map()]
+  def teaser(teaser, org \\ nil) do
+    node =
+      %{
+        "@context" => "https://schema.org",
+        "@type" => "WebPage",
+        "name" => teaser.title,
+        "url" => teaser.url,
+        "mainEntityOfPage" => teaser.url,
+        "publisher" => %{"@type" => "Organization", "name" => site_name(org)}
+      }
+      |> maybe_put("description", teaser.summary || teaser.seo_description)
+      |> maybe_put("image", teaser.seo_image)
+      |> maybe_put("datePublished", iso8601(teaser.published_at))
+      |> maybe_put("dateModified", iso8601(teaser.updated_at))
+      |> Map.merge(paywall_markers())
+
+    [node]
+  end
+
+  @doc """
+  The schema.org flags marking a document as paywalled.
+
+  Merged into both the teaser node and the entitled render's node — see
+  `teaser/2` for why they must agree.
+  """
+  @spec paywall_markers() :: map()
+  def paywall_markers do
+    %{
+      "isAccessibleForFree" => false,
+      "hasPart" => %{
+        "@type" => "WebPageElement",
+        "isAccessibleForFree" => false,
+        "cssSelector" => ".kiln-paywalled"
+      }
+    }
   end
 
   @doc "schema.org `CollectionPage` (+ `ItemList`) for the blog index `posts`."

@@ -1,0 +1,32 @@
+<%!--
+  The paywall. Rendered for a GATED published document the reader isn't entitled
+  to read.
+
+  It is handed a `KilnCMSWeb.Teaser` struct, never a content record — that struct
+  has no `blocks` field, so this template *cannot* render document body content
+  even if the underlying read were widened. See `KilnCMSWeb.Teaser`.
+--%>
+<Layouts.public current_org={@current_org} locale={@locale} locale_links={[]}>
+  <article class="kiln-paywalled space-y-6">
+    <header class="space-y-3">
+      <.badge variant="primary">{gettext("Members only")}</.badge>
+      <h1 class="text-3xl font-semibold text-balance">{@teaser.title}</h1>
+      <p :if={@teaser.summary} class="text-lg text-base-content/70">{@teaser.summary}</p>
+    </header>
+
+    <section class="card card-pad space-y-3 text-center">
+      <h2 class="text-lg font-medium">{gettext("This one's for members")}</h2>
+      <p class="text-sm text-base-content/70">
+        {gettext("Join to read this in full, along with everything else behind the door.")}
+      </p>
+      <div class="flex flex-wrap justify-center gap-2 pt-1">
+        <.link navigate={~p"/membership"} class="btn btn-primary">
+          {gettext("See plans")}
+        </.link>
+        <.link :if={is_nil(@current_user)} navigate={~p"/sign-in"} class="btn btn-default">
+          {gettext("Already a member? Sign in")}
+        </.link>
+      </div>
+    </section>
+  </article>
+</Layouts.public>

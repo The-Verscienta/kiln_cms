@@ -95,8 +95,16 @@ record — independent of role. See `KilnCMS.CMS.Audiences` and
   content stays world-readable; audience-restricted published content is visible
   only to readers who belong to that audience.
 
-To serve gated content on the public site, pass the signed-in user as the actor
-on the delivery read — anonymous callers only ever see `:public` content.
+Gated content **is** served on the public site (#337 Phase 2), but not by passing
+an actor: the delivery reads stay `authorize?: false` with their filter as the
+sole boundary, and that filter gained an `audiences` argument the controller
+fills from the signed-in user. Omitting it — as every non-delivery caller does —
+still yields `:public` content only.
+
+A reader without the audience gets a **paywall teaser** rather than a 404, from a
+separate read that requires a non-public audience and never selects the block
+tree. Gated URLs are `private, no-store`, and the `audiences` argument is hidden
+from the GraphQL schema. See [Paid memberships](memberships.md).
 
 ## 4. Dynamic content types, and promoting them (D17)
 

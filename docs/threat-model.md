@@ -120,7 +120,13 @@ build if a resource is ever registered without that authorizer.
   covered by policy tests. *Watch:* any new public read action must carry the
   same filter.
 - **Audience leak** — audience-restricted records require reader membership.
-  *Watch:* delivery caches must stay namespaced per audience.
+  *Resolved (#337 Phase 2):* the delivery payload cache is the anonymous,
+  `:public`-only shape, and audience-aware renders (a member's full document, and
+  the paywall teaser) bypass it entirely rather than the key gaining an audience
+  axis — so a gated payload is never in the cache to be mis-keyed. Those responses
+  are `private, no-store` with `Vary: Cookie`, since the public delivery headers
+  (`public, max-age=60`) would otherwise let a shared cache serve one member's
+  gated render to every anonymous visitor.
 - **Scraping / enumeration** — content is public and the sitemap is intentional.
   The `:delivery` bucket caps volume; front with a CDN to absorb load.
 

@@ -50,6 +50,12 @@ defmodule KilnCMS.Cache do
   # a key: whichever path seeded first would hand the other a shape it can't
   # render (a FunctionClauseError 500), so each shape gets its own namespace and
   # `bust/3` drops both.
+  #
+  # The `payload` namespace is the ANONYMOUS, `:public`-only shape (#337 Phase 2).
+  # Member and paywall-teaser renders bypass this cache entirely — never add an
+  # audience axis to this key. Correctness would then depend on canonically
+  # serialising a SET into a string, and any slip would serve gated blocks to
+  # anonymous readers. See `docs/memberships.md`.
   @shapes ["record", "payload"]
 
   @doc """

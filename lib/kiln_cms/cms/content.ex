@@ -248,11 +248,23 @@ defmodule KilnCMS.CMS.Content do
             # compiled types expose, over the shared entry tier. All are
             # policy/state-filtered, so anonymous callers see published rows only.
             queries do
+              # `hide_inputs [:audiences]` is a SECURITY control, not tidiness:
+              # AshGraphql auto-exposes public action arguments, so without it an
+              # anonymous client could send
+              # `entryBySlug(audiences: [MEMBER]) { blocks }` and walk straight
+              # through the paywall. An argument absent from the schema is
+              # rejected at Absinthe validation — strictly stronger than a policy.
+              # (The argument cannot be `public? false` instead: `cast_params`
+              # gates on `public?`, so a private argument can't be passed through
+              # a code interface at all.)
               get :entry_by_slug, :public_by_slug do
                 identity false
+                hide_inputs [:audiences]
               end
 
-              list :entry_translations, :published_translations
+              list :entry_translations, :published_translations do
+                hide_inputs [:audiences]
+              end
 
               # The published index (newest first), across all dynamic types —
               # scope by the `type_name` filter like the plain list.
@@ -358,11 +370,17 @@ defmodule KilnCMS.CMS.Content do
               # are state-filtered, so anonymous callers only ever see published rows.
               # `identity false` exposes the action's own slug/locale arguments
               # instead of the default `id` lookup.
+              # `hide_inputs [:audiences]` — see the dynamic tier: the delivery
+              # `audiences` argument must never reach the GraphQL schema, or an
+              # anonymous client could request gated content directly.
               get unquote(:"#{type}_by_slug"), :public_by_slug do
                 identity false
+                hide_inputs [:audiences]
               end
 
-              list unquote(:"#{type}_translations"), :published_translations
+              list unquote(:"#{type}_translations"), :published_translations do
+                hide_inputs [:audiences]
+              end
 
               # The published index (newest first).
               unquote(published_query)
@@ -480,6 +498,32 @@ defmodule KilnCMS.CMS.Content do
     # boundary — it must gate the audience axis too, not just publish state
     # (see the read policy). On the entry tier they are additionally scoped by
     # the dynamic type, since slugs are only unique per type.
+    # Paywall-safe projection (#337 Phase 2). Deliberately WITHOUT `:blocks`: the
+    # teaser read exists to describe a document the caller may not read, so the
+    # block tree must never be fetched for it. `Ash.Query.select/2` replaces
+    # rather than merges and preparations run after caller query-building, so a
+    # caller's `ensure_selected(:blocks)` cannot widen this.
+    teaser_fields =
+      [
+        :id,
+        :org_id,
+        :title,
+        :slug,
+        :locale,
+        :audience,
+        :state,
+        :seo_title,
+        :seo_description,
+        :seo_image,
+        :canonical_url,
+        # `path_alias` so the canonical redirect still works on a teaser.
+        :path_alias,
+        :published_at,
+        :updated_at
+      ] ++
+        if(excerpt?, do: [:excerpt], else: []) ++
+        if(dynamic?, do: [:type_definition_id], else: [])
+
     public_reads =
       if dynamic? do
         quote do
@@ -489,8 +533,17 @@ defmodule KilnCMS.CMS.Content do
             argument :locale, :string, allow_nil?: false
             argument :type_definition_id, :uuid, allow_nil?: false
 
+            # Audiences the CALLER has already established the reader holds.
+            # Defaults to `[]`, so every existing caller is bit-identical:
+            # `:public` only. HIDDEN from GraphQL (`hide_inputs` on the query),
+            # or an anonymous client could ask for gated content directly.
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
             filter expr(
-                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
                        ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
                        ^ref(:type_definition_id) == ^arg(:type_definition_id)
                    )
@@ -500,11 +553,34 @@ defmodule KilnCMS.CMS.Content do
             argument :slug, :string, allow_nil?: false
             argument :type_definition_id, :uuid, allow_nil?: false
 
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
             filter expr(
-                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
                        ^ref(:slug) == ^arg(:slug) and
                        ^ref(:type_definition_id) == ^arg(:type_definition_id)
                    )
+          end
+
+          read :teaser_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+            argument :type_definition_id, :uuid, allow_nil?: false
+
+            # Requires a NON-public audience, so this action can never stand in
+            # for `:public_by_slug` — and never returns a row a plain visitor was
+            # already entitled to see.
+            filter expr(
+                     ^ref(:state) == :published and ^ref(:audience) != :public and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
+                       ^ref(:type_definition_id) == ^arg(:type_definition_id)
+                   )
+
+            prepare build(select: unquote(teaser_fields))
           end
         end
       else
@@ -514,8 +590,15 @@ defmodule KilnCMS.CMS.Content do
             argument :slug, :string, allow_nil?: false
             argument :locale, :string, allow_nil?: false
 
+            # See the dynamic tier above: default `[]` keeps every existing
+            # caller unchanged, and the argument is hidden from GraphQL.
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
             filter expr(
-                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
                        ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
                    )
           end
@@ -525,10 +608,32 @@ defmodule KilnCMS.CMS.Content do
           read :published_translations do
             argument :slug, :string, allow_nil?: false
 
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
             filter expr(
-                     ^ref(:state) == :published and ^ref(:audience) == :public and
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
                        ^ref(:slug) == ^arg(:slug)
                    )
+          end
+
+          # Locate a GATED published document in order to render a paywall for a
+          # reader who may not read it. Consumed with `authorize?: false` like the
+          # other delivery reads, so this filter is the sole boundary — note it
+          # *requires* a non-public audience and never selects `:blocks`.
+          read :teaser_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+
+            filter expr(
+                     ^ref(:state) == :published and ^ref(:audience) != :public and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
+                   )
+
+            prepare build(select: unquote(teaser_fields))
           end
         end
       end

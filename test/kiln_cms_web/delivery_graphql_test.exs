@@ -344,4 +344,41 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
       assert draft.id in Enum.map(found, & &1["id"])
     end
   end
+
+  describe "the delivery audiences argument is hidden (#337 Phase 2)" do
+    test "no by-slug query exposes :audiences" do
+      # A SECURITY assertion, not tidiness. `public_by_slug` gained an
+      # `audiences` argument so the HTML site can serve gated content to an
+      # entitled member. AshGraphql auto-exposes public action arguments, so
+      # without `hide_inputs` an anonymous client could send
+      # `postBySlug(slug: "x", locale: "en", audiences: [MEMBER]) { blocks }`
+      # and walk straight through the paywall.
+      #
+      # An argument absent from the schema is rejected at Absinthe validation —
+      # strictly stronger than a policy.
+      root = Absinthe.Schema.lookup_type(KilnCMSWeb.GraphqlSchema, "RootQueryType")
+
+      by_slug_queries =
+        root.fields
+        |> Enum.filter(fn {name, _field} ->
+          name = to_string(name)
+          String.ends_with?(name, "_by_slug") or String.ends_with?(name, "_translations")
+        end)
+
+      assert by_slug_queries != [], "expected delivery queries in the schema"
+
+      for {name, field} <- by_slug_queries do
+        refute :audiences in Map.keys(field.args),
+               "#{name} exposes the :audiences argument — the paywall is bypassable"
+      end
+    end
+
+    test "the teaser read is not exposed at all" do
+      root = Absinthe.Schema.lookup_type(KilnCMSWeb.GraphqlSchema, "RootQueryType")
+
+      refute Enum.any?(root.fields, fn {name, _field} ->
+               to_string(name) =~ "teaser"
+             end)
+    end
+  end
 end
