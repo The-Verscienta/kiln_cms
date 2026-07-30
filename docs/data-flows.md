@@ -32,6 +32,10 @@ your deployment.
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See [Search query retention](#search-query-retention-213--disclosure-220). |
+| Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
+| Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Payments](#payments-337). |
+| Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
+| Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
 | Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
 
@@ -76,6 +80,7 @@ Configure the sender and adapter in `config/runtime.exs`
 | **Meilisearch** | Published content (title, blocks, SEO) for the search index | `config :kiln_cms, KilnCMS.Search.Meilisearch, enabled: true` | `enabled: false` (default) — no content write talks to it. |
 | **S3 / MinIO** | Uploaded media blobs | `config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.S3` | Default is `KilnCMS.Storage.Local` (no third party). |
 | **LLM provider** (SEO drafting) | On an editor's explicit request: the page title, excerpt, headings, existing SEO values and body text (truncated) | `config :kiln_cms, KilnCMS.Seo, generator: …, model: …` — or `SEO_MODEL` | `generator: nil` (default) — no module is called. Pointing `model:` at an on-prem endpoint (`ollama:`/`vllm:`) keeps content in the deployment; Kiln logs a warning at boot and shows an editor notice when the configured provider is third-party. See `docs/seo.md`. |
+| **Stripe** (paid memberships) | The member's email address at checkout, and the tier's price id. Card details never touch Kiln — the member is redirected to a provider-hosted page. Kiln stores only the returned customer/subscription ids. | An admin storing API credentials in `/editor/billing` | **Off by default** — with no credentials `KilnCMS.Billing.configured?/0` is false, no tier is offered, the checkout and webhook routes 404, and no request is made. "Disconnect" in the console clears the keys. See [Paid memberships](memberships.md). |
 | **GitHub (api.github.com)** | **Nothing about this instance.** An unauthenticated GET for the upstream repo's latest release, sent only when an admin opens `/editor/system`. The request carries a bare `KilnCMS` user-agent — no version, no identifier, no content — so GitHub sees only the originating IP. | **On by default** (it needs no credential, so there is no unset secret to imply consent) | `KILN_UPDATE_CHECK=false` |
 
 If you enable any of these, add it to your DPA's subprocessor list. Note the
@@ -135,8 +140,11 @@ anonymously … purged after N days"), so the logging is not silent.
 ### Access / portability (GDPR Art. 15/20)
 
 Any signed-in user can self-export their own data from **`/editor/settings` →
-"Export my data"**, which downloads `kiln-account-export.json` (profile +
-notification preferences; no secrets). Programmatically this is
+"Export my data"** — and a member from **`/account` → "Export my data"** — which
+downloads `kiln-account-export.json` (profile, notification preferences, and paid
+memberships; no secrets). The export is deliberately **cross-organization**: it
+answers "what do you hold about me" for the whole instance, not just the site the
+request arrived on. Programmatically this is
 `KilnCMS.Accounts.export_user_data/1`, served by
 `KilnCMSWeb.AccountController.export/2` (scoped to `current_user`).
 
@@ -155,11 +163,32 @@ It:
 4. Stamps `anonymized_at`.
 5. **Revokes** every stored auth token for the subject (logs out everywhere,
    removes token PII).
-6. **Nulls `actor_id`** on the user's `document_events` so the audit trail keeps
-   the *what* without the *who*.
+6. **Nulls `actor_id`** on the user's `document_events` and
+   `billing_membership_events`, so both audit trails keep the *what* without the
+   *who*.
+7. **Clears `audiences`**, so a tombstoned account keeps no read access. (Before
+   #337 Phase 2 this was missed: credentials were destroyed while access
+   survived.)
+8. **Cancels every paid membership** and drops the stored provider customer and
+   subscription ids. Without this, a late webhook or the nightly reconcile would
+   recompute entitlements and re-grant access to the erased account.
 
 The account **row is retained** (with no personal data) so authorship links and
-referential integrity in content/version history are preserved.
+referential integrity in content/version history are preserved. Membership rows
+are likewise retained, scrubbed, so the entitlement audit trail stays
+referentially intact.
+
+> **Operator action required: cancel the subscription at the payment provider.**
+> Step 8 is **local only** — Kiln does not call the provider during erasure. Two
+> reasons: erasure runs inside a database transaction and must not depend on a
+> third party being reachable, and the same code path is used by
+> `KilnCMS.Staging.Scrub` over a *clone* of production, where cancelling would
+> terminate real customers' billing from a staging environment.
+>
+> So after erasing a paying member, **cancel or refund their subscription in the
+> provider's dashboard**. Until you do, they remain billed. Kiln keeps no
+> invoices; invoice retention is the provider's obligation as controller of its
+> own records.
 
 ## Audit trail vs. user erasure (#219)
 
@@ -203,7 +232,9 @@ not impose one because it is jurisdiction- and policy-dependent.
 ## Quick operator checklist
 
 - [ ] Reviewed configured webhook endpoints (`/editor/webhooks`).
-- [ ] Decided on Meilisearch / S3 — listed as subprocessors if enabled.
+- [ ] Decided on Meilisearch / S3 / Stripe — listed as subprocessors if enabled.
+- [ ] If memberships are sold: know that erasing a member does **not** cancel
+      their subscription at the provider — do that in the provider's dashboard.
 - [ ] Set `search_analytics.retention_days`, `view_analytics.retention_days` and
       `trash.retention_days` to policy.
 - [ ] Documented your content-version (PaperTrail) audit-retention period.
@@ -214,7 +245,8 @@ not impose one because it is jurisdiction- and policy-dependent.
 
 Non-production copies of the database are a privacy concern too: a naive `pg_dump`
 of production carries every editor's email, live API keys, webhook signing secrets,
-and the DKIM private key into a less-locked-down box. KilnCMS ships a **scrub** that
+the DKIM private key, **and live payment-provider credentials and subscription
+ids** into a less-locked-down box. KilnCMS ships a **scrub** that
 reuses the `:anonymize` erasure action above (plus the same retention purges) to make
 a clone PII-free and secret-free by default. See
 [`staging-environments.md`](staging-environments.md).

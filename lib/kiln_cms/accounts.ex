@@ -161,8 +161,39 @@ defmodule KilnCMS.Accounts do
         notify_on_review_request: user.notify_on_review_request,
         notify_on_publish: user.notify_on_publish,
         notify_on_return_to_draft: user.notify_on_return_to_draft
-      }
+      },
+      # Paid memberships (#337 Phase 2). The provider ids ARE included: they are
+      # identifiers a subprocessor holds about this person, so GDPR Art. 15/20
+      # covers them, and having them lets the subject exercise their rights
+      # against the provider directly. They are not credentials.
+      memberships: membership_export(user)
     }
+  end
+
+  # A data-subject export is inherently cross-organization — the request arrives
+  # on one host, but the person may hold memberships on several sites — so this
+  # reads with `multitenancy :bypass` (the sanctioned exception) rather than the
+  # request's tenant.
+  defp membership_export(user) do
+    case KilnCMS.Billing.memberships_for_export(user.id, authorize?: false) do
+      {:ok, memberships} ->
+        Enum.map(memberships, fn membership ->
+          %{
+            org_id: membership.org_id,
+            tier_id: membership.tier_id,
+            status: membership.status,
+            current_period_end: membership.current_period_end,
+            cancel_at_period_end: membership.cancel_at_period_end,
+            activated_at: membership.activated_at,
+            canceled_at: membership.canceled_at,
+            provider_customer_id: membership.provider_customer_id,
+            provider_subscription_id: membership.provider_subscription_id
+          }
+        end)
+
+      _error ->
+        []
+    end
   end
 
   @doc """

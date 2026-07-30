@@ -54,6 +54,8 @@ queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, de
 | `mail`       | `WorkflowMailWorker`                                   |
 | `media`      | `VariantWorker`                                        |
 | `webhooks`   | `DeliveryWorker`                                       |
+| `newsletter` | `SendWorker`, `MailWorker` (newsletter fan-out)        |
+| `billing`    | `WebhookWorker` (inbound payment webhooks)             |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
 | `default`    | Daily AshOban triggers (trash purge, untitled sweep)   |
 
@@ -62,7 +64,12 @@ share `default` with bulk publish/embedding work, the scheduler and worker jobs 
 longer than their one-minute cadence, drifting scheduled publish/unpublish past their target
 time.
 
-**Pool sizing.** Total worker concurrency above is ~34, all sharing the Ecto pool with web
+The `newsletter` and `billing` queues are isolated for the same reason as `scheduling`, from
+the other direction: a large newsletter blast must not starve transactional `mail`, and an
+inbound payment webhook must not queue behind one — a delayed entitlement event is a paying
+member locked out of what they just bought.
+
+**Pool sizing.** Total worker concurrency above is ~40, all sharing the Ecto pool with web
 requests. Size `POOL_SIZE` (in `config/runtime.exs`) so jobs and web requests don't starve
 each other:
 

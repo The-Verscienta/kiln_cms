@@ -28,6 +28,12 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       name: nil,
       hashed_password: random_hash(),
       role: :viewer,
+      # Consumer read entitlements are cleared too (#337 Phase 2). This was a
+      # pre-existing gap: an erased account kept whatever audiences it held, so
+      # its credentials were destroyed while its ACCESS survived. Now that a paid
+      # membership can grant an audience, leaving them would also mean a
+      # tombstoned account still reading paywalled content.
+      audiences: [],
       notify_on_review_request: true,
       notify_on_publish: true,
       notify_on_return_to_draft: true,
@@ -37,9 +43,38 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       revoke_tokens(user)
       remove_identities(user)
       remove_passkeys(user)
+      cancel_memberships(user)
       :ok = History.anonymize_actor(user.id)
+      :ok = KilnCMS.Billing.anonymize_actor(user.id)
       {:ok, user}
     end)
+  end
+
+  # Locally cancel every paid membership and drop the provider identifiers
+  # (#337 Phase 2). Without this a later reconcile or a late webhook would
+  # recompute entitlements and re-grant audiences to a tombstoned account.
+  #
+  # **Local only — this does NOT cancel the subscription at the payment
+  # provider.** Two reasons, and the trade-off is documented in
+  # `docs/data-flows.md` so an operator knows to do it themselves:
+  #
+  #   * erasure runs inside this update's transaction, and an outbound call to a
+  #     third party does not belong there — a provider outage must not block a
+  #     data-subject request;
+  #   * `KilnCMS.Staging.Scrub` calls this action over a *clone* of production. A
+  #     scrub that cancelled subscriptions would cancel REAL customers' billing
+  #     from a staging environment.
+  #
+  # Cross-org by necessity: the person may hold memberships on several sites, and
+  # each write is re-scoped to its own row's `org_id`.
+  defp cancel_memberships(user) do
+    case KilnCMS.Billing.memberships_for_export(user.id, authorize?: false) do
+      {:ok, memberships} ->
+        Enum.each(memberships, &KilnCMS.Billing.anonymize_membership(&1))
+
+      _error ->
+        :ok
+    end
   end
 
   # A throwaway bcrypt hash of random bytes — there is no plaintext that matches

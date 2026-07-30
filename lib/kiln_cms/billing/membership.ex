@@ -127,6 +127,22 @@ defmodule KilnCMS.Billing.Membership do
       change KilnCMS.Billing.Changes.RecordTransition
     end
 
+    # GDPR erasure (#212 × #337 Phase 2): terminate the membership locally and
+    # drop the provider identifiers, while KEEPING the row so the entitlement
+    # audit trail stays referentially intact.
+    #
+    # System-only, like `:apply_provider_state`: this must not be a lever a human
+    # can pull to sever billing state by hand.
+    update :anonymize do
+      accept []
+      require_atomic? false
+      change set_attribute(:status, :canceled)
+      change set_attribute(:provider_customer_id, nil)
+      change set_attribute(:provider_subscription_id, nil)
+      change set_attribute(:note, nil)
+      change set_attribute(:canceled_at, &DateTime.utc_now/0)
+    end
+
     read :for_user do
       argument :user_id, :uuid, allow_nil?: false
       filter expr(user_id == ^arg(:user_id))
@@ -150,6 +166,19 @@ defmodule KilnCMS.Billing.Membership do
       argument :user_id, :uuid, allow_nil?: false
       filter expr(user_id == ^arg(:user_id) and status in ^@entitling)
       prepare build(select: [:id, :org_id, :user_id, :tier_id, :status])
+    end
+
+    # Every membership a person holds, across ALL organizations, in any status.
+    #
+    # `multitenancy :bypass` because both callers are inherently cross-org: a GDPR
+    # export answers "what do you hold about me" for the whole instance, and
+    # erasure must reach every row regardless of which host the request arrived
+    # on. Callers re-scope any follow-up WRITE with each row's own `org_id`.
+    read :all_for_user do
+      multitenancy :bypass
+      argument :user_id, :uuid, allow_nil?: false
+      filter expr(user_id == ^arg(:user_id))
+      prepare build(sort: [inserted_at: :desc])
     end
 
     # Webhook resolution. `multitenancy :bypass` per the sanctioned exception
@@ -210,7 +239,7 @@ defmodule KilnCMS.Billing.Membership do
     # bypass above). Unlike `KilnCMS.Accounts.User`, this resource has NO admin
     # bypass, so `forbid_if always()` genuinely closes the action to every
     # authorized caller.
-    policy action(:apply_provider_state) do
+    policy action([:apply_provider_state, :anonymize]) do
       forbid_if always()
     end
   end

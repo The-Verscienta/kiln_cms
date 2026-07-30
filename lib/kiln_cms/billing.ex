@@ -29,6 +29,8 @@ defmodule KilnCMS.Billing do
   """
   use Ash.Domain
 
+  require Ash.Query
+
   alias KilnCMS.Billing.Settings
 
   resources do
@@ -61,6 +63,8 @@ defmodule KilnCMS.Billing do
       define :list_memberships, action: :read
       define :get_membership, action: :read, get_by: [:id]
       define :memberships_for_user, action: :for_user, args: [:user_id]
+      # Cross-org, all statuses — GDPR export and erasure only.
+      define :memberships_for_export, action: :all_for_user, args: [:user_id]
       define :entitling_memberships_for_user, action: :entitling_for_user, args: [:user_id]
 
       define :membership_by_subscription,
@@ -71,6 +75,8 @@ defmodule KilnCMS.Billing do
       define :stale_memberships, action: :stale, args: [:before]
       # System-only (`authorize?: false`) — the webhook worker and reconcile sweep.
       define :apply_provider_state, action: :apply_provider_state
+      # GDPR erasure — system-only (`authorize?: false`).
+      define :anonymize_membership_row, action: :anonymize
       define :comp_membership, action: :comp
       define :uncomp_membership, action: :uncomp
     end
@@ -221,6 +227,41 @@ defmodule KilnCMS.Billing do
   # guard is the whole contract — there is no non-binary case to fall back to.
   defp live_key?(secret_key) when is_binary(secret_key),
     do: String.contains?(secret_key, "_live_")
+
+  @doc """
+  Terminate a membership for GDPR erasure, re-scoped to its own organization.
+
+  Local only — see `KilnCMS.Accounts.Changes.AnonymizeUser` for why this does not
+  cancel at the payment provider.
+  """
+  @spec anonymize_membership(struct()) :: :ok
+  def anonymize_membership(membership) do
+    anonymize_membership_row(membership, authorize?: false, tenant: membership.org_id)
+    :ok
+  end
+
+  @doc """
+  Clear the acting admin from every membership event they caused (GDPR erasure).
+
+  The events themselves survive as a pseudonymous entitlement trail — the same
+  retention decision `KilnCMS.History.anonymize_actor/1` makes for document
+  events (#219). Cross-org, so it sweeps each organization in turn.
+  """
+  @spec anonymize_actor(Ash.UUID.t()) :: :ok
+  def anonymize_actor(user_id) do
+    Enum.each(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+      KilnCMS.Billing.MembershipEvent
+      |> Ash.Query.for_read(:read, %{}, authorize?: false, tenant: org_id)
+      |> Ash.Query.filter(actor_id == ^user_id)
+      |> Ash.bulk_update(:anonymize_actor, %{},
+        authorize?: false,
+        tenant: org_id,
+        return_errors?: false
+      )
+    end)
+
+    :ok
+  end
 
   @doc "The configured `KilnCMS.Billing.Provider` implementation."
   @spec provider() :: module()

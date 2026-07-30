@@ -69,10 +69,21 @@ sends mail, fires a webhook, or contacts a subprocessor.
 | **Webhook endpoints** | de-activated | A clone must **never** fire deliveries at production consumers' URLs on the next publish. De-activation is data-only (no SSRF DNS re-check). |
 | **Mail settings** | purged (singleton row) | Drops the **encrypted DKIM private key** and server IP so staging can't sign mail as your production domain. Recreated blank on next read (`KilnCMS.Mail.ensure_settings!/0`). |
 | **Recorded search queries** | purged | Query text can contain names, emails, or confidential titles ([#213/#220](data-flows.md)). |
+| **Payment credentials** | purged (singleton row) | Live provider API and webhook-signing keys. Removed **first**, before anything else touches billing rows, so a clone can never act on a real payment account. |
+| **Recorded payment webhooks** | purged | The provider's raw event payloads carry customer emails and amounts. |
+| **Paid memberships** | scrubbed | Provider customer/subscription ids nulled and the status set to cancelled. **Scrubbed, not deleted**: `billing_membership_events` references them, and the entitlement trail should stay referentially intact — the same audit-retention decision as content history. What must go is the live external reference. |
+| **Membership tiers** | deactivated | The catalogue shape keeps staging useful; the price pointer is replaced with a per-row tombstone so nothing in the clone can bill a real account. (Per-row because `provider_price_id` is `NOT NULL` with a per-org unique index.) |
 | **A fresh staging admin** | provisioned (opt-in) | Because every real account is anonymized (nobody can sign in), the scrub can seed **one** known admin from `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` so the environment is usable. |
 
 The scrub is **idempotent** — re-running it anonymizes only accounts that aren't already
 anonymized and re-purges empty tables cheaply.
+
+> **The scrub never contacts a payment provider.** Erasing a member cancels their
+> membership *locally* only, precisely so this path — which runs over a clone of
+> production — can never terminate a real customer's billing. The corollary is
+> that erasing a real member in **production** doesn't cancel their subscription
+> either; do that in the provider's dashboard. See
+> [data flows](data-flows.md#erasure-gdpr-art-17--anonymization).
 
 ### Preview tokens need no scrub
 
