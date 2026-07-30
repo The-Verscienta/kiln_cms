@@ -26,10 +26,17 @@ model (cf. Directus "Professional"/"Patient" access). Configured via
 implied.
 
 - Each content record carries one `audience` (default `:public`).
-- Each user carries a set of `audiences` (`KilnCMS.Accounts.User`), assigned by
-  an admin via `:manage_access` — never self-service.
+- Each user carries a set of `audiences`, assigned by an admin via
+  `:manage_access` — **or granted by an active paid membership** (#337 Phase 2),
+  through a system-only recompute. Never self-service either way.
+- Audiences resolve **per organization** (`KilnCMS.Accounts.Scoping.audiences/2`,
+  applied by `KilnCMS.CMS.Checks.InAudience`): a member's
+  `OrgMembership.audiences` for the site being served; `[]` for an actor
+  affiliated elsewhere but not here (**fail-closed**, since the org comes from a
+  client-controlled host); the global `User.audiences` column only for accounts
+  with no memberships at all (pre-#336 data and single-org installs).
 - A published record is readable when its audience is `:public`, **or** its
-  audience is one of the reader's audiences. Editors/admins see everything.
+  audience is one the reader holds *on that org*. Editors/admins see everything.
 
 So the content read row below is `:public`-published for anonymous/viewer;
 audience-restricted published rows additionally require membership.

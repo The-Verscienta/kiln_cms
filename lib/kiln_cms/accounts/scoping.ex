@@ -122,6 +122,55 @@ defmodule KilnCMS.Accounts.Scoping do
   end
 
   @doc """
+  The consumer **audiences** the actor holds on the org the subject runs under
+  (#337 Phase 2).
+
+  The read axis, resolved per-org rather than globally:
+
+    * a **member** gets their `KilnCMS.Accounts.OrgMembership.audiences` for that
+      org — so paying on one site grants access on that site only;
+    * a **foreign-org** actor (holds memberships, none here) gets `[]` —
+      **fail-closed**, matching every other axis in this module. The org resolves
+      from a client-controlled host, so falling back to the global column there
+      would let a member of one site read another's gated content by switching
+      hosts;
+    * an **unaffiliated** actor (no memberships at all — pre-#336 data that missed
+      the backfill) keeps the legacy `User.audiences` column, so single-org
+      installs and legacy rows behave exactly as before.
+
+  `KilnCMS.Billing.Entitlements` writes both columns on every transition, so the
+  per-org value is already populated for anyone who bought through billing.
+
+  Anonymous callers short-circuit to `[]` without a lookup — the delivery hot path
+  never pays for this.
+  """
+  @spec audiences(map() | nil, Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil) ::
+          [atom()]
+  def audiences(nil, _subject), do: []
+
+  def audiences(actor, subject) do
+    case affiliation(actor, audience_org_id(subject)) do
+      {:member, membership} -> list_of(membership, :audiences)
+      :unaffiliated -> list_of(actor, :audiences)
+      :foreign_org -> []
+    end
+  end
+
+  # `audiences/2` is called from a policy FilterCheck, whose `subject` is the
+  # query — but the web layer may hand a raw org id or an `%Organization{}`, the
+  # same shapes `effective_tier/2` accepts.
+  defp audience_org_id(%{__struct__: KilnCMS.Accounts.Organization, id: id}), do: id
+  defp audience_org_id(org_id) when is_binary(org_id), do: org_id
+  defp audience_org_id(subject), do: org_id(subject)
+
+  defp list_of(source, key) do
+    case Map.get(source, key) do
+      list when is_list(list) -> list
+      _other -> []
+    end
+  end
+
+  @doc """
   The actor's **effective capability tier** on the org the subject runs under
   (#419 — per-org tiers): `:admin` | `:editor` | `:viewer` | `:none`.
 

@@ -1541,9 +1541,12 @@ defmodule KilnCMS.CMS.Content do
         #     headless delivery / public site);
         #   • audience-restricted published content is visible only to a
         #     signed-in reader who belongs to that audience.
-        # Drafts/in-review/archived remain editors-only. `actor(:audiences)` is
-        # nil for anonymous callers, so a gated record simply isn't authorized
-        # (the `in` yields no match) rather than erroring.
+        # Drafts/in-review/archived remain editors-only. The audience grant
+        # resolves PER-ORG through `Checks.InAudience` (#337 Phase 2): reading it
+        # off the global `User.audiences` column made a membership bought on one
+        # site widen access on every other, since memberships are org-scoped while
+        # that column is not. An anonymous caller resolves to `[]` and is simply
+        # not authorized by that grant, rather than erroring.
         # Granular RBAC read axis (#332): the editors-see-everything grant is
         # scoped by the editor's effective `readable_types` — empty means all
         # (the default). A restricted editor reading an out-of-scope type falls
@@ -1552,7 +1555,7 @@ defmodule KilnCMS.CMS.Content do
         policy action_type(:read) do
           authorize_if KilnCMS.CMS.Checks.ReadableContentType
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
-          authorize_if expr(^ref(:state) == :published and ^ref(:audience) in ^actor(:audiences))
+          authorize_if KilnCMS.CMS.Checks.InAudience
         end
 
         # Authoring and workflow transitions are reserved for editors (and admins
