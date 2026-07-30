@@ -44,6 +44,10 @@ admin rewrite payment credentials for every other site.
 > bills every site into the same provider account. The `KilnCMS.Keys` seam keeps
 > per-org credentials (e.g. Stripe Connect) possible later without a data
 > migration.
+>
+> *Access* is not shared, though: entitlements resolve per organization, so a
+> membership bought on one site never unlocks another's gated content — see
+> [Reading gated content](#reading-gated-content).
 
 ## Setting up
 
@@ -272,6 +276,23 @@ session's metadata names *that* user. The session id comes from the query string
 and is therefore attacker-suppliable; nothing is ever granted from the query
 parameters themselves. The webhook remains the durable path; this only removes
 the "activating…" wait.
+
+## Reading gated content
+
+The audience a reader holds is resolved **per organization**, from their
+`OrgMembership` for the site being served:
+
+| Reader | Result |
+|---|---|
+| member of this org | that membership's audiences |
+| member elsewhere, none here | `[]` — **fail-closed** |
+| no memberships at all (legacy / single-org) | the global `User.audiences` column |
+| anonymous | `[]`, with no database lookup |
+
+Fail-closed matters because the organization is resolved from a
+**client-controlled host**. Falling back to the global column for a foreign org
+would let a member of one site read another's gated content by switching hosts —
+the same reasoning the editorial scope axes already use.
 
 ## The paywall
 
