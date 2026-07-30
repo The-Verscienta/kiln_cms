@@ -48,6 +48,51 @@ defmodule KilnCMS.Newsletter.Subscriber do
       change set_attribute(:unsubscribe_token, &KilnCMS.Newsletter.Subscriber.generate_token/0)
     end
 
+    # Link a paying member to their subscriber row (#337 Phase 2).
+    #
+    # `upsert_fields [:user_id]` applies the SAME non-resurrection rule as
+    # `:subscribe` above: an existing row's `status` is never touched, so an
+    # UNSUBSCRIBED person who buys a membership gets linked but stays
+    # unsubscribed. That is the "opt out of email without cancelling your paid
+    # subscription" requirement, enforced by the action rather than by callers
+    # remembering.
+    #
+    # A brand-new row lands `:pending`, not `:confirmed`: paying for access is not
+    # consent to marketing email, and this subscriber model is double opt-in
+    # throughout. Change the `set_attribute(:status, …)` below to `:confirmed` if
+    # your jurisdiction and policy treat purchase as the consent event.
+    create :link_member do
+      accept [:email, :name]
+      upsert? true
+      upsert_identity :unique_email
+      upsert_fields [:user_id]
+
+      argument :user_id, :uuid, allow_nil?: false
+
+      change set_attribute(:user_id, arg(:user_id))
+      change set_attribute(:status, :pending)
+      change set_attribute(:confirm_token, &KilnCMS.Newsletter.Subscriber.generate_token/0)
+      change set_attribute(:unsubscribe_token, &KilnCMS.Newsletter.Subscriber.generate_token/0)
+    end
+
+    # Self-service opt-in from `/account`. Consent given while signed in to a
+    # verified account is the double-opt-in equivalent — the link-click exists to
+    # prove the address belongs to the person, which the session already does.
+    update :resubscribe do
+      accept []
+      change set_attribute(:status, :confirmed)
+      change set_attribute(:confirmed_at, &DateTime.utc_now/0)
+      change set_attribute(:unsubscribed_at, nil)
+    end
+
+    # Every subscriber row linked to one account, across organizations — the
+    # member's own newsletter state on each site they belong to.
+    read :for_user do
+      multitenancy :bypass
+      argument :user_id, :uuid, allow_nil?: false
+      filter expr(user_id == ^arg(:user_id))
+    end
+
     # Double opt-in: the subscriber clicked the confirmation link.
     update :confirm do
       accept []
@@ -98,6 +143,33 @@ defmodule KilnCMS.Newsletter.Subscriber do
   end
 
   policies do
+    bypass AshOban.Checks.AshObanInteraction do
+      authorize_if always()
+    end
+
+    # Linking a member is driven by billing, never by a human (#337 Phase 2) —
+    # it is the one write that may set `user_id`.
+    policy action(:link_member) do
+      forbid_if always()
+    end
+
+    # A signed-in member manages their OWN newsletter consent from `/account`.
+    # Scoped to their linked row, so this grants nothing over anyone else's.
+    #
+    # The admin grant is repeated here on purpose: Ash AND-combines every
+    # applicable policy, so a self-only policy on `:unsubscribe` would NARROW the
+    # blanket admin grant below and stop an admin unsubscribing anyone — the same
+    # trap the comment on the write policies warns about.
+    policy action([:resubscribe, :unsubscribe]) do
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if expr(user_id == ^actor(:id))
+    end
+
+    policy action(:for_user) do
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if expr(user_id == ^actor(:id))
+    end
+
     # Admin-only management. Public subscribe/confirm/unsubscribe and the send
     # pipeline run as the system (`authorize?: false`) behind token checks.
     policy always() do
@@ -145,6 +217,15 @@ defmodule KilnCMS.Newsletter.Subscriber do
     attribute :unsubscribe_token, :string, sensitive?: true
 
     attribute :confirmed_at, :utc_datetime_usec, public?: true
+
+    # The account this subscriber belongs to, when it is a member (#337 Phase 2).
+    # A real FK rather than matching on email: a person can change their address,
+    # and email-matching would silently orphan the link when they do.
+    attribute :user_id, :uuid do
+      writable? false
+      public? false
+    end
+
     attribute :unsubscribed_at, :utc_datetime_usec, public?: true
 
     timestamps()

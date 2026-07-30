@@ -69,7 +69,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_live.ex:161
 #: lib/kiln_cms_web/live/governance_live.ex:209
 #: lib/kiln_cms_web/live/mail_settings_live.ex:372
-#: lib/kiln_cms_web/live/newsletter_live.ex:261
+#: lib/kiln_cms_web/live/newsletter_live.ex:285
 #: lib/kiln_cms_web/live/system_live.ex:94
 #: lib/kiln_cms_web/live/taxonomy_live.ex:296
 #: lib/kiln_cms_web/live/team_live.ex:359
@@ -530,7 +530,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex:579
 #: lib/kiln_cms_web/live/form_builder_live.ex:631
 #: lib/kiln_cms_web/live/form_live.ex:175
-#: lib/kiln_cms_web/live/newsletter_live.ex:318
+#: lib/kiln_cms_web/live/newsletter_live.ex:342
 #: lib/kiln_cms_web/live/taxonomy_live.ex:392
 #: lib/kiln_cms_web/live/taxonomy_live.ex:516
 #: lib/kiln_cms_web/live/team_live.ex:498
@@ -729,7 +729,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex:3850
 #: lib/kiln_cms_web/live/form_builder_live.ex:641
 #: lib/kiln_cms_web/live/form_live.ex:179
-#: lib/kiln_cms_web/live/newsletter_live.ex:319
+#: lib/kiln_cms_web/live/newsletter_live.ex:343
 #: lib/kiln_cms_web/live/taxonomy_live.ex:397
 #: lib/kiln_cms_web/live/taxonomy_live.ex:517
 #, elixir-autogen, elixir-format
@@ -1424,7 +1424,7 @@ msgid "Add typed fields to a content type without a code change. Editors fill th
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex:793
-#: lib/kiln_cms_web/live/newsletter_live.ex:424
+#: lib/kiln_cms_web/live/newsletter_live.ex:448
 #, elixir-autogen, elixir-format
 msgid "All"
 msgstr ""
@@ -2676,7 +2676,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex:365
 #: lib/kiln_cms_web/live/billing_live.ex:528
 #: lib/kiln_cms_web/live/mail_settings_live.ex:383
-#: lib/kiln_cms_web/live/newsletter_live.ex:412
+#: lib/kiln_cms_web/live/newsletter_live.ex:436
 #: lib/kiln_cms_web/live/webhook_live.ex:422
 #, elixir-autogen, elixir-format
 msgid "Status"
@@ -2890,7 +2890,7 @@ msgstr ""
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:174
+#: lib/kiln_cms_web/live/newsletter_live.ex:179
 #, elixir-autogen, elixir-format
 msgid "A campaign for this publish revision was already sent."
 msgstr ""
@@ -3004,7 +3004,7 @@ msgstr ""
 msgid "Add rule"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:320
+#: lib/kiln_cms_web/live/newsletter_live.ex:344
 #, elixir-autogen, elixir-format
 msgid "Add segment"
 msgstr ""
@@ -3014,7 +3014,7 @@ msgstr ""
 msgid "Add step"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:355
+#: lib/kiln_cms_web/live/newsletter_live.ex:379
 #, elixir-autogen, elixir-format
 msgid "Add subscriber"
 msgstr ""
@@ -3040,7 +3040,7 @@ msgstr ""
 msgid "All changes saved"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:292
+#: lib/kiln_cms_web/live/newsletter_live.ex:316
 #, elixir-autogen, elixir-format
 msgid "All confirmed subscribers"
 msgstr ""
@@ -3151,7 +3151,7 @@ msgstr ""
 msgid "Checkbox"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:275
+#: lib/kiln_cms_web/live/newsletter_live.ex:299
 #, elixir-autogen, elixir-format
 msgid "Choose a post…"
 msgstr ""
@@ -3191,7 +3191,7 @@ msgstr ""
 msgid "Configure"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:382
+#: lib/kiln_cms_web/live/newsletter_live.ex:406
 #: lib/kiln_cms_web/live/settings_live.ex:456
 #, elixir-autogen, elixir-format
 msgid "Confirm"
@@ -3454,7 +3454,7 @@ msgstr ""
 msgid "Delete this rule?"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:333
+#: lib/kiln_cms_web/live/newsletter_live.ex:357
 #, elixir-autogen, elixir-format
 msgid "Delete this segment?"
 msgstr ""
@@ -3579,7 +3579,7 @@ msgid "Edits keep the previous file for already-published content."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex:67
-#: lib/kiln_cms_web/live/newsletter_live.ex:353
+#: lib/kiln_cms_web/live/newsletter_live.ex:377
 #: lib/kiln_cms_web/live/team_live.ex:379
 #, elixir-autogen, elixir-format
 msgid "Email"
@@ -3700,7 +3700,7 @@ msgstr ""
 msgid "Export trail (JSON)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:414
+#: lib/kiln_cms_web/live/newsletter_live.ex:438
 #: lib/kiln_cms_web/live/webhook_live.ex:475
 #, elixir-autogen, elixir-format
 msgid "Failed"
@@ -3992,7 +3992,7 @@ msgstr ""
 msgid "Name (e.g. \"MacBook Touch ID\")"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:354
+#: lib/kiln_cms_web/live/newsletter_live.ex:378
 #, elixir-autogen, elixir-format
 msgid "Name (optional)"
 msgstr ""
@@ -4010,7 +4010,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:432
 #: lib/kiln_cms_web/live/newsletter_live.ex:24
-#: lib/kiln_cms_web/live/newsletter_live.ex:263
+#: lib/kiln_cms_web/live/newsletter_live.ex:287
 #, elixir-autogen, elixir-format
 msgid "Newsletter"
 msgstr ""
@@ -4045,7 +4045,7 @@ msgstr ""
 msgid "No automation rules yet."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:402
+#: lib/kiln_cms_web/live/newsletter_live.ex:426
 #, elixir-autogen, elixir-format
 msgid "No campaigns yet."
 msgstr ""
@@ -4101,7 +4101,7 @@ msgstr ""
 msgid "No preview URL configured."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:285
+#: lib/kiln_cms_web/live/newsletter_live.ex:309
 #, elixir-autogen, elixir-format
 msgid "No published, public posts available to send."
 msgstr ""
@@ -4177,7 +4177,7 @@ msgstr ""
 msgid "Only one locale is configured — add locales to config :kiln_cms, :i18n."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:168
+#: lib/kiln_cms_web/live/newsletter_live.ex:173
 #, elixir-autogen, elixir-format
 msgid "Only published posts can be sent."
 msgstr ""
@@ -4362,7 +4362,7 @@ msgstr ""
 msgid "Published content is taken back to draft at this time."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:273
+#: lib/kiln_cms_web/live/newsletter_live.ex:297
 #, elixir-autogen, elixir-format
 msgid "Published post"
 msgstr ""
@@ -4412,7 +4412,7 @@ msgstr ""
 msgid "Readable types (editorial)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:400
+#: lib/kiln_cms_web/live/newsletter_live.ex:424
 #, elixir-autogen, elixir-format
 msgid "Recent campaigns"
 msgstr ""
@@ -4529,7 +4529,7 @@ msgstr ""
 msgid "Remove this passkey? You can no longer sign in with it."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:388
+#: lib/kiln_cms_web/live/newsletter_live.ex:412
 #, elixir-autogen, elixir-format
 msgid "Remove this subscriber?"
 msgstr ""
@@ -4668,8 +4668,8 @@ msgstr ""
 msgid "Searching…"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:290
-#: lib/kiln_cms_web/live/newsletter_live.ex:411
+#: lib/kiln_cms_web/live/newsletter_live.ex:314
+#: lib/kiln_cms_web/live/newsletter_live.ex:435
 #, elixir-autogen, elixir-format
 msgid "Segment"
 msgstr ""
@@ -4684,7 +4684,7 @@ msgstr ""
 msgid "Segment deleted."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:310
+#: lib/kiln_cms_web/live/newsletter_live.ex:334
 #, elixir-autogen, elixir-format
 msgid "Segments"
 msgstr ""
@@ -4694,22 +4694,22 @@ msgstr ""
 msgid "Select a field on the canvas to edit it, or add one from the palette."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:270
+#: lib/kiln_cms_web/live/newsletter_live.ex:294
 #, elixir-autogen, elixir-format
 msgid "Send a newsletter"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:265
+#: lib/kiln_cms_web/live/newsletter_live.ex:289
 #, elixir-autogen, elixir-format
 msgid "Send a published post to your subscribers via the built-in mail server."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:304
+#: lib/kiln_cms_web/live/newsletter_live.ex:328
 #, elixir-autogen, elixir-format
 msgid "Send newsletter"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:413
+#: lib/kiln_cms_web/live/newsletter_live.ex:437
 #, elixir-autogen, elixir-format
 msgid "Sent"
 msgstr ""
@@ -4842,12 +4842,12 @@ msgstr ""
 msgid "Structure"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:410
+#: lib/kiln_cms_web/live/newsletter_live.ex:434
 #, elixir-autogen, elixir-format
 msgid "Subject"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:301
+#: lib/kiln_cms_web/live/newsletter_live.ex:325
 #, elixir-autogen, elixir-format
 msgid "Subject (optional — defaults to the post title)"
 msgstr ""
@@ -4872,7 +4872,7 @@ msgstr ""
 msgid "Subscriber removed."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:344
+#: lib/kiln_cms_web/live/newsletter_live.ex:368
 #, elixir-autogen, elixir-format
 msgid "Subscribers"
 msgstr ""
@@ -4955,12 +4955,7 @@ msgstr ""
 msgid "That path is already the target's own URL."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:166
-#, elixir-autogen, elixir-format
-msgid "That post has a restricted audience and can't be sent to a public list."
-msgstr ""
-
-#: lib/kiln_cms_web/live/newsletter_live.ex:171
+#: lib/kiln_cms_web/live/newsletter_live.ex:176
 #, elixir-autogen, elixir-format
 msgid "That post hasn't been fired yet — republish it and retry."
 msgstr ""
@@ -4970,7 +4965,7 @@ msgstr ""
 msgid "The account must already exist — invite people via sign-up or SSO first."
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:178
+#: lib/kiln_cms_web/live/newsletter_live.ex:183
 #, elixir-autogen, elixir-format
 msgid "The campaign couldn't be recorded — check the details."
 msgstr ""
@@ -5214,7 +5209,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex:265
 #: lib/kiln_cms_web/live/automation_live.ex:354
 #: lib/kiln_cms_web/live/governance_live.ex:301
-#: lib/kiln_cms_web/live/newsletter_live.ex:409
+#: lib/kiln_cms_web/live/newsletter_live.ex:433
 #: lib/kiln_cms_web/live/webhook_live.ex:419
 #, elixir-autogen, elixir-format
 msgid "When"
@@ -5286,7 +5281,7 @@ msgstr ""
 msgid "centre"
 msgstr ""
 
-#: lib/kiln_cms_web/live/newsletter_live.ex:344
+#: lib/kiln_cms_web/live/newsletter_live.ex:368
 #, elixir-autogen, elixir-format
 msgid "confirmed"
 msgstr ""
@@ -6709,4 +6704,14 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/content_html/teaser.html.heex:18
 #, elixir-autogen, elixir-format
 msgid "This one's for members"
+msgstr ""
+
+#: lib/kiln_cms_web/live/newsletter_live.ex:167
+#, elixir-autogen, elixir-format
+msgid "That post is members-only. It can only be sent to the segment of a membership tier that grants the same audience."
+msgstr ""
+
+#: lib/kiln_cms_web/live/newsletter_live.ex:171
+#, elixir-autogen, elixir-format
+msgid "That segment no longer exists."
 msgstr ""

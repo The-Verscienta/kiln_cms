@@ -4,11 +4,10 @@ Sell reader access to gated content. This is the second phase of the
 "publishing → newsletter → membership" work (issue #337); the first phase is
 [Newsletter](newsletter.md).
 
-> **Status.** This page documents what is in the tree today: provider
-> credentials, the tiers on sale, the membership lifecycle (the webhook receiver,
-> automatic audience grants, the audit trail), the member-facing checkout,
-> `/account` and join pages, and the paywall. Member-only newsletters land in a
-> later slice of #337 Phase 2.
+> **Status.** #337 Phase 2 is complete: provider credentials, the tiers on sale,
+> the membership lifecycle (webhook receiver, automatic audience grants, audit
+> trail), the member-facing checkout, `/account` and join pages, the paywall, and
+> member-only newsletters.
 
 ## The idea
 
@@ -350,6 +349,23 @@ teaser, and the delivery `audiences` argument is **hidden from the GraphQL schem
 content over headless still requires a bearer token or API key on an entitled
 account. Sitemaps, `llms.txt`, related content and SEO link suggestions all remain
 public-only.
+
+## Member-only newsletters
+
+Each tier gets an auto-maintained newsletter segment whose membership tracks
+active paid memberships. It is the **only** kind of segment that may receive
+gated content: a hand-built segment is refused even if an admin labels it with
+the same audience, because that label has never been an access boundary.
+
+Consent and entitlement stay separate bits — the sync writes only list membership,
+never `Subscriber.status` — so a member can unsubscribe from email while keeping
+full content access, and cancelling a subscription doesn't withdraw their consent
+record.
+
+A new member lands **pending**, not subscribed: paying for access is not consent
+to marketing email. Only a confirmed address is ever added to a list. See
+[Newsletter](newsletter.md#member-only-newsletters-phase-2) for the details and
+for how to change that default.
 
 ## Security notes
 

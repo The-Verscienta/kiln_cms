@@ -163,7 +163,12 @@ defmodule KilnCMSWeb.NewsletterLive do
   end
 
   defp send_error(:gated),
-    do: gettext("That post has a restricted audience and can't be sent to a public list.")
+    do:
+      gettext(
+        "That post is members-only. It can only be sent to the segment of a membership tier that grants the same audience."
+      )
+
+  defp send_error(:no_such_segment), do: gettext("That segment no longer exists.")
 
   defp send_error(:not_published), do: gettext("Only published posts can be sent.")
 
@@ -202,14 +207,33 @@ defmodule KilnCMSWeb.NewsletterLive do
   # Only published, world-readable posts can be newslettered (gated/embargoed
   # content is excluded up front, mirroring the dispatch guard).
   defp load_posts(socket) do
+    # Gated posts are listed only when some tier-backed segment could legally
+    # receive them (#337 Phase 2) — i.e. a segment whose tier grants exactly that
+    # audience. The server-side guard in `Newsletter.ensure_sendable/2` is the
+    # real boundary; this only avoids offering a combination that would be
+    # refused.
+    sendable = sendable_audiences(socket)
+
     posts =
       KilnCMS.CMS.Post
-      |> Ash.Query.filter(state == :published and audience == :public)
+      |> Ash.Query.filter(state == :published and audience in ^sendable)
       |> Ash.Query.sort(published_at: :desc)
       |> Ash.Query.limit(100)
       |> Ash.read!(actor: socket.assigns.actor, tenant: socket.assigns.current_org)
 
     assign(socket, :posts, posts)
+  end
+
+  # `:public` plus every audience a tier-backed segment on this site is entitled
+  # to.
+  defp sendable_audiences(socket) do
+    tier_audiences =
+      socket.assigns.segments
+      |> Enum.filter(&(&1.managed_by == :tier))
+      |> Enum.map(& &1.audience)
+      |> Enum.reject(&is_nil/1)
+
+    Enum.uniq([:public | tier_audiences])
   end
 
   defp load_sends(socket) do

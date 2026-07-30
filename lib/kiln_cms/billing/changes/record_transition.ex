@@ -27,6 +27,12 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
     |> Ash.Changeset.after_action(fn _changeset, membership ->
       with {:ok, delta} <- Entitlements.recompute(membership.user_id),
            {:ok, _event} <- append_event(changeset, membership, from_status, delta, context) do
+        # Newsletter bookkeeping rides the same hook so it can't drift from the
+        # entitlement recompute. It returns `:ok` even on failure — a mailing-list
+        # write must never roll back the transaction that granted access; the
+        # nightly reconcile catches anything missed.
+        KilnCMS.Newsletter.TierSync.sync_user(membership.user_id, membership.org_id)
+
         {:ok, membership}
       end
     end)
