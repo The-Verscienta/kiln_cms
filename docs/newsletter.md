@@ -6,8 +6,10 @@ phase of the "publishing → newsletter → membership" work
 ([issue #337](https://github.com/The-Verscienta/kiln_cms/issues/337)).
 
 Phase 1 covers subscriber management, segments, double opt-in, manual
-"send this post as a newsletter", and unsubscribe. Auto-send-on-publish and paid
-membership gating are Phase 2 (see the hook points below).
+"send this post as a newsletter", and unsubscribe. Auto-send-on-publish shipped
+alongside it as an automation rule (#376, documented below). Member-only
+newsletters — sending gated content to paying members — arrived with Phase 2; see
+[Paid memberships](memberships.md).
 
 ## What it does
 
@@ -26,13 +28,31 @@ membership gating are Phase 2 (see the hook points below).
   Sending reuses the mail pipeline's DKIM signing, permanent-bounce suppression,
   greylist-aware retry, and per-attempt timeout.
 
-## Gated / embargoed content is refused
+## Gated content is refused — with exactly one exception
 
-`send_as_newsletter/2` only sends a document that is **published and
-world-readable** (`audience: :public`). A gated (non-public) or unpublished
-document returns `{:error, :gated}` / `{:error, :not_published}` and nothing is
-sent — restricted content can't leak to an email list. The admin post picker
-lists only sendable posts.
+`send_as_newsletter/2` sends a document that is **published** and either
+world-readable (`audience: :public`), or gated to precisely the audience the
+target segment is entitled to by its **paid membership tier** (#337 Phase 2).
+Anything else returns `{:error, :gated}` / `{:error, :not_published}` and nothing
+is sent.
+
+The exception is deliberately narrow:
+
+| Target | Gated content? |
+|---|---|
+| A **tier-backed** segment whose tier grants that exact audience | **sent** |
+| A tier-backed segment for a *different* audience | refused |
+| A **hand-built** segment — even one labelled with that audience | refused |
+| No segment (every confirmed subscriber) | refused |
+
+A hand-built segment's `audience` attribute is a **label and not an access
+boundary** — it grants nothing, and setting it must never widen a gated blast to
+a list an admin curated by hand. Only `managed_by: :tier` segments, whose
+membership is maintained from active paid memberships, can receive members-only
+content.
+
+The admin post picker lists a gated post only when some tier-backed segment could
+legally receive it; the server-side guard is the real boundary.
 
 ## Sending
 
@@ -94,8 +114,27 @@ fired), and is deduped per **{rule, content, publish revision}** on the
 campaign ledger — re-fired events and re-delivered jobs can never double-send;
 a genuinely new publish sends again.
 
-## Phase 2 hook points
+## Member-only newsletters (Phase 2)
 
-- **Paid membership gating** — `Subscriber` reserves an `audience` seam; gated
-  audiences can map to paid tiers, with content access rules layered on the
-  existing audience read-axis.
+Each `KilnCMS.Billing.MembershipTier` gets an auto-maintained segment
+(`managed_by: :tier`) whose membership tracks active paid memberships. Those
+segments are the only ones that may receive gated content, and they can't be
+edited by hand — their `audience` is derived from the tier, and the send guard
+matches it against the document's.
+
+**Consent and entitlement stay separate bits.** The billing sync writes only the
+join rows and the `user_id` link; it never touches `Subscriber.status`. So:
+
+- a member who unsubscribes keeps full content access and simply receives
+  nothing (the recipient query requires `status == :confirmed` *and* segment
+  membership);
+- cancelling a subscription removes the join row and leaves their consent record
+  and any hand-built segment memberships untouched.
+
+A brand-new member lands **`:pending`**, not `:confirmed` — paying for access is
+not consent to marketing email, and this model is double opt-in throughout. If
+your policy and jurisdiction treat purchase as the consent event, that is a
+one-line change in `Subscriber`'s `:link_member` action. Only a **confirmed**
+email address is ever added to a list.
+
+See [Paid memberships](memberships.md).

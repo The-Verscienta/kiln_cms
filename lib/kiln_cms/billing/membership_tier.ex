@@ -142,6 +142,18 @@ defmodule KilnCMS.Billing.MembershipTier do
     end
   end
 
+  changes do
+    # Every tier gets its auto-maintained newsletter segment (#337 Phase 2), so
+    # the segment always exists before a membership on it activates — no admin
+    # step to forget. Best-effort: a newsletter bookkeeping failure must not stop
+    # an operator creating a tier.
+    change after_action(fn _changeset, tier, _context ->
+             KilnCMS.Newsletter.TierSync.ensure_segment(tier)
+             {:ok, tier}
+           end),
+           on: [:create, :update]
+  end
+
   multitenancy do
     strategy :attribute
     attribute :org_id

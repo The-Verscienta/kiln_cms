@@ -18,6 +18,7 @@ defmodule KilnCMS.Newsletter do
 
   alias KilnCMS.Firing
   alias KilnCMS.Newsletter.NewsletterSend
+  alias KilnCMS.Newsletter.Segment
   alias KilnCMS.Newsletter.SendWorker
 
   resources do
@@ -30,6 +31,10 @@ defmodule KilnCMS.Newsletter do
       define :confirm_subscriber, action: :confirm
       define :unsubscribe_subscriber, action: :unsubscribe
       define :confirmed_subscribers, action: :confirmed, args: [{:optional, :segment_id}]
+      # System-only (`authorize?: false`) — driven by billing, see TierSync.
+      define :link_member_subscriber, action: :link_member, args: [:user_id]
+      define :resubscribe_subscriber, action: :resubscribe
+      define :subscribers_for_user, action: :for_user, args: [:user_id]
     end
 
     resource KilnCMS.Newsletter.Segment do
@@ -38,10 +43,15 @@ defmodule KilnCMS.Newsletter do
       define :get_segment, action: :read, get_by: [:id]
       define :update_segment, action: :update
       define :destroy_segment, action: :destroy
+      # System-only (`authorize?: false`) — the tier-backed lifecycle.
+      define :create_tier_segment, action: :for_tier, args: [:tier_id, :audience]
+      define :sync_managed_segment, action: :sync_managed
     end
 
     resource KilnCMS.Newsletter.SegmentMembership do
       define :add_to_segment, action: :create
+      define :list_segment_memberships, action: :read
+      define :remove_from_segment, action: :destroy
     end
 
     resource KilnCMS.Newsletter.NewsletterSend do
@@ -69,15 +79,19 @@ defmodule KilnCMS.Newsletter do
 
   Returns `{:ok, %NewsletterSend{}}` once the campaign is queued, or
   `{:error, reason}` when the document isn't safe to send (`:not_published`,
-  `:gated` — a non-public audience — or `:not_fired` when no `:web` artifact
-  exists yet). Actual delivery happens asynchronously via the fan-out worker.
+  `:gated` — a non-public audience with no entitled tier segment targeted,
+  `:no_such_segment`, or `:not_fired` when no `:web` artifact exists yet).
+
+  Gated content may be sent **only** to a tier-backed segment whose tier grants
+  exactly that audience (#337 Phase 2); a hand-built segment is always refused. Actual delivery happens asynchronously via the fan-out worker.
   """
   @spec send_as_newsletter(struct(), keyword()) ::
           {:ok, struct()} | {:error, atom() | Ash.Error.t()}
   def send_as_newsletter(document, opts \\ []) do
     automation = opts[:automation]
 
-    with :ok <- ensure_sendable(document),
+    with {:ok, segment} <- resolve_segment(opts[:segment_id], document.org_id),
+         :ok <- ensure_sendable(document, segment),
          {:ok, _html} <- artifact_html(document) do
       # Ledger row + fan-out job commit in ONE transaction (Oban jobs are
       # Postgres rows), so a crash between them can't strand a campaign that
@@ -159,12 +173,44 @@ defmodule KilnCMS.Newsletter do
     end)
   end
 
-  # A document is safe to newsletter only when it is published *and*
-  # world-readable. Gated/embargoed content is refused so restricted content
-  # never leaks to an email list (the send question 2 decision).
-  defp ensure_sendable(%{state: :published, audience: :public}), do: :ok
-  defp ensure_sendable(%{state: :published}), do: {:error, :gated}
-  defp ensure_sendable(_document), do: {:error, :not_published}
+  # A document is safe to newsletter when it is published AND either
+  # world-readable, or gated to exactly the audience the target segment is
+  # entitled to by its paid tier (#337 Phase 2).
+  #
+  # The second clause binds `audience` TWICE — once from the document, once from
+  # the segment — so it is a literal equality match in the function head with no
+  # comparison logic to get wrong. It requires `managed_by: :tier`, so:
+  #
+  #   * a HAND-BUILT segment can never receive gated content, no matter what
+  #     `audience` label an admin puts on it (that label grants nothing);
+  #   * a nil segment ("every confirmed subscriber") falls through to the same
+  #     refusal, since that is an arbitrary list by definition.
+  #
+  # Clause order preserves the existing `:gated`-before-`:not_published`
+  # precedence.
+  defp ensure_sendable(%{state: :published, audience: :public}, _segment), do: :ok
+
+  defp ensure_sendable(%{state: :published, audience: audience}, %Segment{
+         managed_by: :tier,
+         audience: audience
+       }),
+       do: :ok
+
+  defp ensure_sendable(%{state: :published}, _segment), do: {:error, :gated}
+  defp ensure_sendable(_document, _segment), do: {:error, :not_published}
+
+  # The send guard needs the segment itself, not just its id. Read as the system:
+  # authorization already happened at the LiveView/automation layer, matching the
+  # rest of this funnel.
+  defp resolve_segment(nil, _org_id), do: {:ok, nil}
+
+  defp resolve_segment(segment_id, org_id) do
+    case get_segment(segment_id, authorize?: false, tenant: org_id, not_found_error?: false) do
+      {:ok, nil} -> {:error, :no_such_segment}
+      {:ok, segment} -> {:ok, segment}
+      {:error, _reason} -> {:error, :no_such_segment}
+    end
+  end
 
   # The email body is the already-fired, immutable published HTML — never the
   # live editable tree (same guarantee as public delivery).

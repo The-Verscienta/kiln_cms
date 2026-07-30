@@ -22,10 +22,37 @@ defmodule KilnCMS.Newsletter.Segment do
   postgres do
     table "newsletter_segments"
     repo KilnCMS.Repo
+
+    references do
+      # A managed segment exists only to serve its tier, so it goes with it.
+      # Without the cascade the FK would block tier deletion outright — and
+      # `KilnCMS.Billing.Membership` already restricts deleting a tier that has
+      # live members, which is the constraint that actually matters.
+      reference :tier, on_delete: :delete
+    end
+
+    check_constraints do
+      # Same atom-cast hazard as every other enum column here, plus the pairing
+      # invariant: a tier-managed segment must actually name a tier, so manual
+      # SQL can't leave a half-managed row that the send guard would then read.
+      check_constraint :managed_by, "newsletter_segments_managed_by_must_be_known",
+        check: "managed_by IN ('admin', 'tier')"
+
+      check_constraint :tier_id, "newsletter_segments_tier_required_when_managed",
+        check: "managed_by <> 'tier' OR tier_id IS NOT NULL"
+    end
   end
 
   actions do
-    defaults [:read, :destroy]
+    defaults [:read]
+
+    # Explicit (not a default) so a tier-backed segment can't be deleted out from
+    # under the billing sync that maintains it.
+    destroy :destroy do
+      primary? true
+      require_atomic? false
+      validate KilnCMS.Newsletter.Validations.SegmentNotManaged
+    end
 
     create :create do
       primary? true
@@ -35,10 +62,51 @@ defmodule KilnCMS.Newsletter.Segment do
     update :update do
       primary? true
       accept [:name, :slug, :description, :audience]
+      require_atomic? false
+      validate KilnCMS.Newsletter.Validations.SegmentNotManaged
+    end
+
+    # A tier's auto-maintained segment. System-only: `managed_by`/`tier_id` are
+    # never writable from input, so a hand-built segment can't be promoted into a
+    # tier-backed one by setting a foreign key — which would let an admin widen a
+    # gated blast to a list they curated themselves.
+    create :for_tier do
+      accept [:name, :slug, :description]
+      upsert? true
+      upsert_identity :unique_slug
+      upsert_fields [:name, :description]
+
+      argument :tier_id, :uuid, allow_nil?: false
+
+      argument :audience, :atom do
+        allow_nil? false
+        constraints one_of: KilnCMS.CMS.Audiences.all()
+      end
+
+      change set_attribute(:managed_by, :tier)
+      change set_attribute(:tier_id, arg(:tier_id))
+      # Derived from the tier, never hand-set: `ensure_sendable/2` matches this
+      # against the document's audience, so it must not be an editable label.
+      change set_attribute(:audience, arg(:audience))
+    end
+
+    # Keep a managed segment's display copy in step with its tier. System-only.
+    update :sync_managed do
+      accept [:name, :description]
+      require_atomic? false
     end
   end
 
   policies do
+    bypass AshOban.Checks.AshObanInteraction do
+      authorize_if always()
+    end
+
+    # The tier-backed lifecycle is driven by billing, not by a human.
+    policy action([:for_tier, :sync_managed]) do
+      forbid_if always()
+    end
+
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
@@ -68,10 +136,25 @@ defmodule KilnCMS.Newsletter.Segment do
     attribute :slug, :string, allow_nil?: false, public?: true
     attribute :description, :string, public?: true
 
-    # Optional label linking this segment to a consumer-facing audience tier.
-    # Not an access boundary — just metadata (and a Phase 2 seam for paid tiers).
+    # For a hand-built segment this is a label and **not** an access boundary —
+    # setting it grants nothing. For a `managed_by: :tier` segment it is derived
+    # from the tier and IS load-bearing: the send guard in `KilnCMS.Newsletter`
+    # matches it against the document's audience to decide whether gated content
+    # may be sent (#337 Phase 2).
     attribute :audience, :atom do
       constraints one_of: KilnCMS.CMS.Audiences.all()
+      public? true
+    end
+
+    # Who owns this segment's membership. `:admin` — curated by hand, the
+    # pre-existing behaviour. `:tier` — auto-maintained from active paid
+    # memberships, not hand-editable, and the only kind that may receive gated
+    # content.
+    attribute :managed_by, :atom do
+      allow_nil? false
+      default :admin
+      constraints one_of: [:admin, :tier]
+      writable? false
       public? true
     end
 
@@ -85,6 +168,13 @@ defmodule KilnCMS.Newsletter.Segment do
       define_attribute? false
       attribute_writable? false
       public? false
+    end
+
+    # The tier whose active members this segment tracks (nil for hand-built).
+    belongs_to :tier, KilnCMS.Billing.MembershipTier do
+      allow_nil? true
+      attribute_writable? false
+      public? true
     end
 
     many_to_many :subscribers, KilnCMS.Newsletter.Subscriber do
