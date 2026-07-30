@@ -30,6 +30,10 @@ defmodule KilnCMS.Staging.Scrub do
           webhooks_deactivated: non_neg_integer(),
           mail_settings_purged: non_neg_integer(),
           search_queries_purged: non_neg_integer(),
+          billing_settings_purged: non_neg_integer(),
+          billing_events_purged: non_neg_integer(),
+          memberships_scrubbed: non_neg_integer(),
+          tiers_deactivated: non_neg_integer(),
           admin_provisioned: String.t() | nil
         }
 
@@ -48,6 +52,13 @@ defmodule KilnCMS.Staging.Scrub do
   """
   @spec run(keyword()) :: summary()
   def run(opts \\ []) do
+    # Payment credentials go FIRST, before anything else touches billing rows.
+    # Nothing in this module contacts the provider today — GDPR erasure cancels
+    # memberships locally only — but a clone that holds live API keys is one
+    # careless change away from acting on a real payment account, so the keys are
+    # removed before the rest of the scrub runs.
+    {billing_settings_purged, _} = Repo.delete_all(KilnCMS.Billing.Settings)
+
     users_anonymized = anonymize_users()
 
     # Whole-table purges / de-activations run at the repo level on purpose: they
@@ -66,6 +77,41 @@ defmodule KilnCMS.Staging.Scrub do
         set: [active: false, auto_disabled_at: DateTime.utc_now()]
       )
 
+    # Recorded provider webhooks carry the full event payload — customer emails
+    # and amounts — so they are personal data, not just diagnostics.
+    {billing_events_purged, _} = Repo.delete_all(KilnCMS.Billing.WebhookEvent)
+
+    # Memberships are SCRUBBED, not deleted: `billing_membership_events`
+    # references them, and the entitlement trail should stay referentially intact
+    # (the same audit-retention decision #219 made for content history). What
+    # must go is the live external reference — a clone holding real provider
+    # subscription ids is exactly what this module exists to prevent. Belt to the
+    # per-user cascade in `AnonymizeUser`, which has already run above; this
+    # catches any row whose owner was already a tombstone.
+    {memberships_scrubbed, _} =
+      Repo.update_all(
+        from(m in KilnCMS.Billing.Membership,
+          where: not is_nil(m.provider_customer_id) or not is_nil(m.provider_subscription_id)
+        ),
+        set: [provider_customer_id: nil, provider_subscription_id: nil, status: :canceled]
+      )
+
+    # Tiers are DEACTIVATED rather than deleted (the `WebhookEndpoint` posture):
+    # the catalogue shape keeps staging useful, while the price pointers that
+    # could bill a real account are severed.
+    #
+    # The pointer is replaced with a per-row tombstone rather than nulled:
+    # `provider_price_id` is NOT NULL and carries a unique index per org, so nil
+    # violates the constraint and a shared placeholder collides between tiers.
+    {tiers_deactivated, _} =
+      Repo.update_all(
+        from(t in KilnCMS.Billing.MembershipTier,
+          where: t.active == true,
+          update: [set: [active: false, provider_price_id: fragment("'scrubbed_' || ?", t.id)]]
+        ),
+        []
+      )
+
     admin_provisioned = maybe_provision_admin(opts[:admin_email], opts[:admin_password])
 
     %{
@@ -75,6 +121,10 @@ defmodule KilnCMS.Staging.Scrub do
       webhooks_deactivated: webhooks_deactivated,
       mail_settings_purged: mail_settings_purged,
       search_queries_purged: search_queries_purged,
+      billing_settings_purged: billing_settings_purged,
+      billing_events_purged: billing_events_purged,
+      memberships_scrubbed: memberships_scrubbed,
+      tiers_deactivated: tiers_deactivated,
       admin_provisioned: admin_provisioned
     }
   end

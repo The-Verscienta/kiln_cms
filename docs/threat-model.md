@@ -16,7 +16,9 @@ document is about the network edge.
   and availability matter, confidentiality does not.
 - **Draft / in-review content** — must never leak before publish.
 - **Audience-restricted content** — published but readable only by users holding
-  a matching audience (see the policy matrix). Confidentiality matters.
+  a matching audience (see the policy matrix). Confidentiality matters, and since
+  #337 Phase 2 the audience may be **paid for**, so a leak is also revenue loss.
+  Audiences resolve per-organization and fail closed for a foreign org.
 - **User accounts & roles** — credentials, password hashes, TOTP secrets,
   passkey credentials, and the `role` / `audiences` attributes driving RBAC.
 - **Auth tokens** — AshAuthentication JWTs, magic-link and password-reset
@@ -26,6 +28,14 @@ document is about the network edge.
   media, branding and analytics must not cross org boundaries.
 - **Media & object storage** — uploaded files and their storage credentials.
 - **Outbound webhook secrets** — HMAC signing keys for delivery.
+- **Payment credentials** — the provider API key and the inbound-webhook signing
+  secret, both held through the `KilnCMS.Keys` provider model. The API key has
+  full authority over the payment account; the signing secret is what stops
+  forged entitlement grants. Off by default — an unconfigured instance exposes no
+  payment surface at all.
+- **Membership state** — provider customer/subscription ids, pseudonymous but a
+  live external reference: acting on them from a clone would affect real billing,
+  which is why the staging scrub severs them.
 - **Form submissions** — arbitrary end-user input, frequently PII.
 
 ## Trust boundaries & entry points
@@ -229,6 +239,15 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    enforced on `Content` is not re-enforced at the artifact tier. Tightening
    these means touching the firing engine, search indexer and form rendering,
    and was deliberately left out of #51. Tracked in #565.
+
+   **Raised in importance by #337 Phase 2**, since gated content is now *paid*
+   rather than merely restricted. It is still not exploitable over HTTP: every
+   path to an artifact body — `ArtifactController` and `ProvenanceController`
+   alike — first resolves the record through the audience-gated
+   `Firing.Delivery.published/4`, so a gated artifact cannot be fetched. The
+   paywall teaser deliberately does **not** read artifacts, precisely so it does
+   not become the first caller that would. The gap is that a *future* internal
+   caller could read one without that resolution.
 7. **Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**
    Policies still run, so the audience and published filters hold, but the
    tenant boundary does not for that request.
