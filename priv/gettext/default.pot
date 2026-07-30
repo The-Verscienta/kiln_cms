@@ -1010,7 +1010,7 @@ msgstr ""
 msgid "Updated."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:123
+#: lib/kiln_cms_web/controllers/auth_controller.ex:125
 #, elixir-autogen, elixir-format
 msgid "You are now signed out"
 msgstr ""
@@ -1020,6 +1020,7 @@ msgstr ""
 msgid "You need editor access to view that page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/account_live.ex:140
 #: lib/kiln_cms_web/live/api_key_live.ex:110
 #: lib/kiln_cms_web/live/billing_live.ex:539
 #: lib/kiln_cms_web/live/billing_live.ex:607
@@ -1132,7 +1133,7 @@ msgstr ""
 msgid "All notifications are on by default. Uncheck any you'd rather not receive."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:92
+#: lib/kiln_cms_web/controllers/auth_controller.ex:94
 #, elixir-autogen, elixir-format
 msgid "An account with this email already exists. We've sent a link to that address - confirm it to finish linking this provider to your account."
 msgstr ""
@@ -1177,6 +1178,7 @@ msgstr ""
 msgid "Embedded HTML or external content"
 msgstr ""
 
+#: lib/kiln_cms_web/live/account_live.ex:231
 #: lib/kiln_cms_web/live/settings_live.ex:572
 #, elixir-autogen, elixir-format
 msgid "Export my data"
@@ -1197,7 +1199,7 @@ msgstr ""
 msgid "Highlighted quotation"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:110
+#: lib/kiln_cms_web/controllers/auth_controller.ex:112
 #, elixir-autogen, elixir-format
 msgid "Incorrect email or password"
 msgstr ""
@@ -1340,13 +1342,13 @@ msgstr ""
 msgid "Visual separator between sections"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:72
+#: lib/kiln_cms_web/controllers/auth_controller.ex:74
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex:25
 #, elixir-autogen, elixir-format
 msgid "You are now signed in"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:83
+#: lib/kiln_cms_web/controllers/auth_controller.ex:85
 #, elixir-autogen, elixir-format
 msgid "You have already signed in another way, but have not confirmed your account. You can confirm your account using the link we sent to you, or by resetting your password."
 msgstr ""
@@ -1371,17 +1373,18 @@ msgstr ""
 msgid "You need admin access to view that page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/account_live.ex:225
 #: lib/kiln_cms_web/live/settings_live.ex:561
 #, elixir-autogen, elixir-format
 msgid "Your data"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:69
+#: lib/kiln_cms_web/controllers/auth_controller.ex:71
 #, elixir-autogen, elixir-format
 msgid "Your email address has now been confirmed"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:71
+#: lib/kiln_cms_web/controllers/auth_controller.ex:73
 #, elixir-autogen, elixir-format
 msgid "Your password has successfully been reset"
 msgstr ""
@@ -4770,7 +4773,7 @@ msgstr ""
 msgid "Single line text"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:104
+#: lib/kiln_cms_web/controllers/auth_controller.ex:106
 #, elixir-autogen, elixir-format
 msgid "Single sign-on failed — the identity couldn't be verified or linked. Try again, or contact an administrator."
 msgstr ""
@@ -6534,4 +6537,154 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex:400
 #, elixir-autogen, elixir-format
 msgid "never"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:149
+#, elixir-autogen, elixir-format
+msgid "Access ends on %{date}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:178
+#, elixir-autogen, elixir-format
+msgid "Activating your membership…"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:143
+#, elixir-autogen, elixir-format
+msgid "Cancelled"
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:39
+#, elixir-autogen, elixir-format
+msgid "Checkout cancelled — you haven't been charged."
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:141
+#, elixir-autogen, elixir-format
+msgid "Complimentary"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/billing_controller.ex:211
+#, elixir-autogen, elixir-format
+msgid "Couldn't reach the payment provider. Please try again."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/billing_controller.ex:90
+#, elixir-autogen, elixir-format
+msgid "Create an account to continue."
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:134
+#, elixir-autogen, elixir-format
+msgid "Create an account to join"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:227
+#, elixir-autogen, elixir-format
+msgid "Download everything this site stores about your account."
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:145
+#, elixir-autogen, elixir-format
+msgid "Join"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:181
+#, elixir-autogen, elixir-format
+msgid "Join to read members-only writing."
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:214
+#, elixir-autogen, elixir-format
+msgid "Manage billing"
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:130
+#, elixir-autogen, elixir-format
+msgid "Manage membership"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:174
+#: lib/kiln_cms_web/live/account_live.ex:194
+#: lib/kiln_cms_web/live/membership_live.ex:27
+#: lib/kiln_cms_web/live/membership_live.ex:100
+#, elixir-autogen, elixir-format
+msgid "Membership"
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:109
+#, elixir-autogen, elixir-format
+msgid "Memberships aren't set up on this site. Please check back later."
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:180
+#, elixir-autogen, elixir-format
+msgid "No membership yet"
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:108
+#, elixir-autogen, elixir-format
+msgid "No plans available yet"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:142
+#, elixir-autogen, elixir-format
+msgid "Payment overdue"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:144
+#, elixir-autogen, elixir-format
+msgid "Pending"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:152
+#, elixir-autogen, elixir-format
+msgid "Renews on %{date}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:218
+#, elixir-autogen, elixir-format
+msgid "See all plans"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:184
+#, elixir-autogen, elixir-format
+msgid "See plans"
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:102
+#, elixir-autogen, elixir-format
+msgid "Support this site and unlock members-only writing."
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:59
+#: lib/kiln_cms_web/live/account_live.ex:115
+#, elixir-autogen, elixir-format
+msgid "Thanks for joining!"
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:94
+#, elixir-autogen, elixir-format
+msgid "Thanks for joining! Your membership is being activated."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/billing_controller.ex:110
+#, elixir-autogen, elixir-format
+msgid "That plan isn't available."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/billing_controller.ex:181
+#, elixir-autogen, elixir-format
+msgid "You don't have a membership to manage yet."
+msgstr ""
+
+#: lib/kiln_cms_web/live/account_live.ex:36
+#: lib/kiln_cms_web/live/account_live.ex:169
+#, elixir-autogen, elixir-format
+msgid "Your account"
+msgstr ""
+
+#: lib/kiln_cms_web/live/membership_live.ex:117
+#, elixir-autogen, elixir-format
+msgid "Your plan"
 msgstr ""

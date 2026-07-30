@@ -38,9 +38,10 @@ defmodule KilnCMS.CMS.ContentTypes do
   # types' segments and configured locales are added at validation time (see
   # `Validations.AvailableTypeName`). Keep in sync with the top-level scopes in
   # `KilnCMSWeb.Router`.
-  @reserved_path_segments ~w(admin api auth blog content dev editor gql locale
-                             mailbox media playground preview register reset
-                             search sign_in swaggerui up)
+  @reserved_path_segments ~w(account admin api auth billing blog content dev
+                             editor gql locale mailbox media membership
+                             playground preview register reset search sign_in
+                             swaggerui up)
 
   @doc "The Ash domains scanned for content types (default `[KilnCMS.CMS]`)."
   @spec content_domains() :: [module()]
