@@ -1,9 +1,22 @@
 # Multi-stage build for a KilnCMS OTP release.
 # Includes libvips in the runtime image for on-the-fly image processing.
 
-ARG ELIXIR_VERSION=1.18.4
-ARG OTP_VERSION=27.3.4
-ARG DEBIAN_VERSION=bookworm-20250520-slim
+# Keep these reconciled with `mix.exs`'s `elixir:` requirement and with
+# `.github/workflows/ci.yml`'s ELIXIR_VERSION/OTP_VERSION, in the same PR that
+# changes any of them (#600). Nothing enforces it: CI never builds this image.
+#
+# The previous 1.18.4 could not satisfy mix.exs's `~> 1.19` (raised in #573,
+# which missed this file). Note where that surfaces — `mix deps.get` and
+# `mix deps.compile` do *not* check the requirement, only compiling this project
+# does. So the build ran the whole expensive dep compile and then died at
+# `mix compile` below, which is both the slowest way to find out and late enough
+# to look like a compile error rather than a version mismatch.
+#
+# OTP tracks CI's major (27) rather than the newest available: the release image
+# should run the toolchain the test suite and dialyzer actually ran against.
+ARG ELIXIR_VERSION=1.19.5
+ARG OTP_VERSION=27.3.4.15
+ARG DEBIAN_VERSION=bookworm-20260713-slim
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
