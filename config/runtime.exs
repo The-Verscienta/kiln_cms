@@ -119,12 +119,38 @@ end
 #
 # Trimmed and downcased like KILN_UPDATE_CHECK below, for the mirror-image
 # reason: an operator who set this because every version must be signed must not
-# be silently defeated by `TRUE` or `On`. Unset leaves the compiled default.
+# be silently defeated by `TRUE` or `On`.
+#
+# Only RECOGNIZED spellings write config. An unrecognized value (`enabled`, a
+# typo, a quote-wrapped `"true"` from `docker run --env-file`) leaves the
+# compiled default alone and warns, rather than being read as "off" — for a
+# compliance flag, silently not signing is the dangerous direction, and a typo
+# must not disable an audit trail the deployment deliberately turned on.
+#
+# Skipped under :test so the suite is deterministic regardless of the developer's
+# environment — the flag causes a DB write per save, and the governance tests
+# drive it explicitly with Application.put_env instead.
 anchor_every_write =
   "KILN_AUDIT_ANCHOR_EVERY_WRITE" |> System.get_env("") |> String.trim() |> String.downcase()
 
-if anchor_every_write != "" do
-  config :kiln_cms, :audit_anchor_every_write, anchor_every_write in ~w(true 1 yes on)
+if config_env() != :test do
+  cond do
+    anchor_every_write == "" ->
+      :ok
+
+    anchor_every_write in ~w(true 1 yes on) ->
+      config :kiln_cms, :audit_anchor_every_write, true
+
+    anchor_every_write in ~w(false 0 no off) ->
+      config :kiln_cms, :audit_anchor_every_write, false
+
+    true ->
+      IO.warn("""
+      KILN_AUDIT_ANCHOR_EVERY_WRITE is set to an unrecognized value \
+      (#{inspect(anchor_every_write)}); keeping the configured default. \
+      Use one of: true/1/yes/on, false/0/no/off.\
+      """)
+  end
 end
 
 # ## Presentation console (#355) — where the external front end serves content

@@ -334,12 +334,31 @@ defmodule KilnCMS.Governance.Chain do
 
   # Sign with the provenance signing key when one is configured; otherwise the
   # anchor is stored unsigned (still a useful integrity checksum).
+  #
+  # An unresolvable key is LOGGED, not swallowed. Silently degrading to unsigned
+  # anchors is the failure an operator is least likely to notice and most likely
+  # to care about: the row still lands, the dashboard still shows a chain, and
+  # only the verdict (`:unsigned` rather than `:verified`) betrays that nothing
+  # is actually attested. A misconfigured key must be loud — this is per anchor
+  # on purpose, since it means the deployment is misconfigured right now.
   defp sign(payload) do
     with {:ok, signature} <- Signer.sign(payload),
          {:ok, key_id} <- Signer.key_id() do
       {signature, key_id}
     else
-      _ -> {nil, nil}
+      # Both Signer.sign/1 and Signer.key_id/0 spec {:ok, _} | {:error, term()},
+      # so this is the only reachable shape — a catch-all here is dead code that
+      # dialyzer rejects (pattern_match_cov).
+      #
+      # ASCII only: Logger escapes non-ASCII to \x{...}, which turns an em dash
+      # into noise in exactly the message an operator needs to read.
+      {:error, reason} ->
+        Logger.warning(
+          "History anchor stored UNSIGNED - provenance signing key unavailable: " <>
+            KilnCMS.Keys.describe_error(reason)
+        )
+
+        {nil, nil}
     end
   end
 end
