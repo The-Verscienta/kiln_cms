@@ -105,6 +105,28 @@ if visual_editing = System.get_env("VISUAL_EDITING_ENABLED") do
   config :kiln_cms, :visual_editing_enabled, visual_editing not in ~w(false 0 no off)
 end
 
+# ## Tamper-evident history — anchor every write (#356)
+#
+# Anchors are always minted at publish. This additionally extends the signed
+# chain after *every* versioned write, closing the window between two publishes
+# — #356's "sign every version, not just published artifacts". It costs one
+# signature and one `history_anchors` row per save, which is why the compiled
+# default is `false`: a regulated deployment wants it, a blog does not.
+#
+# Runtime rather than compile-time on purpose — an operator must be able to turn
+# this off without rebuilding the image. See KilnCMS.Governance.Chain and
+# docs/editorial-consent.md.
+#
+# Trimmed and downcased like KILN_UPDATE_CHECK below, for the mirror-image
+# reason: an operator who set this because every version must be signed must not
+# be silently defeated by `TRUE` or `On`. Unset leaves the compiled default.
+anchor_every_write =
+  "KILN_AUDIT_ANCHOR_EVERY_WRITE" |> System.get_env("") |> String.trim() |> String.downcase()
+
+if anchor_every_write != "" do
+  config :kiln_cms, :audit_anchor_every_write, anchor_every_write in ~w(true 1 yes on)
+end
+
 # ## Presentation console (#355) — where the external front end serves content
 #
 # The Kiln-hosted side-by-side editing console iframes the external front end.

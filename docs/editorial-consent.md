@@ -66,10 +66,12 @@ Two properties are worth knowing:
   next publish, and receive a fresh valid anchor over the doctored rows —
   laundering the tampering, since verification reads the latest anchor.
 - **Every write can be anchored.** `config :kiln_cms,
-  :audit_anchor_every_write, true` extends the chain after every versioned
-  write, not just at publish, closing the between-publish window (#356's
-  "sign every version"). Off by default: it costs one signature and one row
-  per save. The incremental fold keeps that cost flat as history grows.
+  :audit_anchor_every_write, true` — or `KILN_AUDIT_ANCHOR_EVERY_WRITE=true`
+  at runtime, so it can be turned off without a rebuild — extends the chain
+  after every versioned write, not just at publish, closing the
+  between-publish window (#356's "sign every version"). Off by default: it
+  costs one signature and one row per save. The incremental fold keeps that
+  cost flat as history grows.
 
 Consent recording now has a dashboard UI (#352). The publish gate is currently
 a single global required-kinds list; per-content-type requirements are a later
