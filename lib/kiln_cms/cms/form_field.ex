@@ -78,10 +78,22 @@ defmodule KilnCMS.CMS.FormField do
       authorize_if always()
     end
 
-    # Fields render on public forms — world-readable (the parent form's
-    # `active` flag is the visibility gate, enforced where forms are fetched).
+    # Fields render on public forms, so `:for_form` stays open to anonymous
+    # visitors — but only for a form that is actually public. This mirrors the
+    # parent's rule (`Form` grants anonymous reads through `:active_by_slug`,
+    # which filters `active == true`); previously the child granted every read
+    # unconditionally, so the fields of an *inactive* form were readable
+    # directly (#565).
+    #
+    # One policy over *every* read action, not a narrower one for `:for_form`:
+    # the public render path is `Forms.get_active/2`, which loads `[:fields]` as
+    # an anonymous but **authorized** read, and a relationship load runs the
+    # resource's primary `:read`. Splitting the grant per action would leave that
+    # load matching an editors-only policy and silently render a form with no
+    # fields — a load filters rather than errors, so nothing would announce it.
     policy action_type(:read) do
-      authorize_if always()
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if expr(form.active == true)
     end
 
     policy action_type([:create, :update, :destroy]) do

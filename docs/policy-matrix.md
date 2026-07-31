@@ -264,14 +264,22 @@ definitions.
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
-| read (`read`, `for_form`) | ✅ | ✅ | ✅ | ✅ |
+| read (`read`, `for_form`) — parent form `active` | ✅ | ✅ | ✅ | ✅ |
+| read (`read`, `for_form`) — parent form inactive | ✅ | ✅ | ❌ | ❌ |
 | `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
-Reads are world-open because fields render on public forms. Note the asymmetry
-with `Form`: the parent's `active` flag is the visibility gate and it is
-enforced *where forms are fetched*, not on this resource — so the fields of an
-inactive form are readable directly. Recorded as residual risk 6 in
-[`threat-model.md`](threat-model.md).
+Anonymous reads stay open because fields render on public forms, but they now
+mirror the parent's visibility rather than being unconditional: the read policy
+filters on `form.active == true`, so the fields of an inactive form are no
+longer readable directly (#565 — previously the `active` flag was enforced only
+*where forms are fetched*, not on this resource).
+
+One policy covers every read action deliberately. The public render path is
+`Forms.get_active/2`, which loads `[:fields]` as an anonymous but **authorized**
+read — and a relationship load runs the resource's primary `:read`, not
+`:for_form`. A narrower per-action grant would leave that load matching an
+editors-only policy and render the form with no fields at all, silently: a load
+filters rather than raises.
 
 `FormSubmission`:
 
@@ -347,19 +355,34 @@ tenant context.
 
 | Resource | read | `create` / `update` / `destroy` |
 |---|---|---|
-| `Firing.PublishedArtifact` | ✅ everyone incl. anonymous | ❌ **everyone, incl. admin** |
-| `Firing.ReferenceEdge` | ✅ everyone incl. anonymous | ❌ **everyone, incl. admin** |
-| `Search.BlockEmbedding` | ✅ everyone incl. anonymous | ❌ **everyone, incl. admin** |
+| `Firing.PublishedArtifact` | ✅ whoever may read the **source document** | ❌ **everyone, incl. admin** |
+| `Firing.ReferenceEdge` | ✅ editor / admin | ❌ **everyone, incl. admin** |
+| `Search.BlockEmbedding` | ✅ editor / admin | ❌ **everyone, incl. admin** |
 
 These three have no bypass of any kind: the firing engine and the search indexer
-write them as the **system**, so no caller-facing write path exists. Their reads
-are `authorize_if always()`.
+write them as the **system**, so no caller-facing write path exists.
 
-That read grant is worth understanding rather than assuming: `PublishedArtifact`
-holds the *rendered* body of a document, so the audience axis enforced on
-`Content` is not re-enforced at the artifact tier. None of the three is exposed
-through `json_api` or `graphql`, so reachability is via internal code paths
-only. Tracked as residual risk 6 in [`threat-model.md`](threat-model.md).
+All three used to read `authorize_if always()`. That was tightened in #565, and
+the reason it was safe is that every production reader is a system path
+(`authorize?: false`): `Firing.Delivery` / `Firing.Engine.read/4` for artifacts,
+`Firing.References` for the re-fire wave, `Search.BlockIndexer` /
+`Search.BlockSearch` / `Search.Related` for embeddings. What changed is what an
+*actor-carrying* caller sees.
+
+`PublishedArtifact` is the one that mattered: it holds the **rendered body** of a
+document, so a blanket grant meant the audience axis enforced on `Content` was
+not re-enforced one tier down — paid, gated content was readable in artifact
+form. Its read now runs `Firing.Checks.DocumentReadable`, a manual (runtime)
+check that re-reads the source document under the caller's own authorization and
+keeps only the artifacts whose document came back. It **delegates** to the
+content policy instead of restating it, for two reasons: `document_type` is
+polymorphic (`:page`, `:post`, `:entry` for every dynamic type) with no
+relationship to join through, and a denormalized `audience` column would lag the
+document, because firing is asynchronous. Editors short-circuit the check.
+
+The other two are enumeration surfaces — the link graph (including edges from
+unpublished drafts) and `ancestor_context` block text from every indexed
+document, drafts included — so they are simply editor-and-up.
 
 ## Webhook deliveries — `WebhookDelivery`
 
