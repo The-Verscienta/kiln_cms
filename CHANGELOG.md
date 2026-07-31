@@ -68,6 +68,13 @@ migration, a rewritten column, a dropped config key).
   upstream release, plus the command to apply it. Set `KILN_PIN_PATH` to have
   that page prefix the command with a `cd` into your pin; left unset it gives
   a layout-agnostic instruction, since an image has no checkout to look in.
+- The update check is no longer nailed to this repo. **Forks should set
+  `KILN_UPDATE_REPO=owner/name`**: left on the default they are told about
+  upstream's releases, and a fork *ahead* of upstream compares as newer, so the
+  page reports "Up to date" indefinitely and the fork's own security releases
+  never surface. `KILN_UPDATE_RELEASES_URL` additionally repoints the API
+  endpoint for GitHub Enterprise or an internal mirror. A value that isn't
+  `owner/name` is rejected rather than silently replaced by the default.
 - Media stored on S3/MinIO is now uploaded with `Cache-Control: public,
   max-age=31536000, immutable`, so a CDN in front of the bucket can cache
   originals and variants indefinitely. Safe because storage keys are write-once
