@@ -117,8 +117,13 @@ defmodule KilnCMS.Search.BlockEmbedding do
   end
 
   policies do
+    # Rows carry `ancestor_context` — block text from every indexed document,
+    # drafts included, with no state or audience filter. That was world-readable
+    # (#565). The indexer writes and `BlockSearch`/`Search.Related` read as the
+    # system (authorize?: false), so no caller-facing read path is lost by
+    # restricting this to editors and up.
     policy action_type(:read) do
-      authorize_if always()
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type([:create, :update, :destroy]) do

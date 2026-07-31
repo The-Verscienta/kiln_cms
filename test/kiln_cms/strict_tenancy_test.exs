@@ -180,6 +180,34 @@ defmodule KilnCMS.StrictTenancyTest do
     end
   end
 
+  # The artifact read policy re-reads the *source document* to re-enforce the
+  # audience axis (#565). That delegated read happens inside a policy check, so
+  # it can't inherit the caller's tenant implicitly — it has to carry the org off
+  # the artifact row. Under strict tenancy a missing tenant raises rather than
+  # quietly returning nothing, and a raise inside a check would take down every
+  # authorized artifact read; only this leg would catch it.
+  test "the artifact read policy's delegated document read carries a tenant (#565)" do
+    actor = admin()
+
+    page =
+      CMS.create_page!(
+        %{title: "Delegated", slug: slug(), blocks: [%{type: :heading, content: "H", order: 0}]},
+        actor: actor,
+        tenant: org_id()
+      )
+
+    page = CMS.publish_page!(page, %{}, actor: actor, tenant: org_id())
+    KilnCMS.DataCase.drain_oban()
+
+    # An editor short-circuits the runtime check; an anonymous reader is what
+    # actually drives it (this page is published and `:public`).
+    assert {:ok, [_ | _]} =
+             KilnCMS.Firing.artifacts_for(:page, page.id, actor: actor, tenant: org_id())
+
+    assert {:ok, [_ | _]} =
+             KilnCMS.Firing.artifacts_for(:page, page.id, actor: nil, tenant: org_id())
+  end
+
   test "the re-fire sweep (#357) runs per-org under strict tenancy" do
     actor = admin()
 
