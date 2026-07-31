@@ -155,6 +155,29 @@ if pin_path != "" do
   config :kiln_cms, Kiln.Updates, pin_path: pin_path
 end
 
+# Which repo this build compares itself against. `The-Verscienta/kiln_cms` is
+# the default because an unmodified install genuinely is that repo — but a fork
+# that keeps the default is told about someone else's releases, and the failure
+# is silent in the dangerous direction: a fork *ahead* of upstream compares as
+# newer, so the page reports "Up to date" forever and the fork's own security
+# releases never surface.
+#
+# KILN_UPDATE_RELEASES_URL additionally repoints the API endpoint, for GitHub
+# Enterprise or an internal mirror — installs that can't reach api.github.com
+# at all and would otherwise be stuck in a permanent error state. It overrides
+# the endpoint only, so set KILN_UPDATE_REPO alongside it. See `Kiln.Updates`.
+update_repo = "KILN_UPDATE_REPO" |> System.get_env("") |> String.trim()
+
+if update_repo != "" do
+  config :kiln_cms, Kiln.Updates, repo: update_repo
+end
+
+releases_url = "KILN_UPDATE_RELEASES_URL" |> System.get_env("") |> String.trim()
+
+if releases_url != "" do
+  config :kiln_cms, Kiln.Updates, releases_url: releases_url
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

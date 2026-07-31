@@ -182,6 +182,12 @@ Meilisearch, S3, Unsplash and mail, it needs no credential to work, so there is
 no unset-secret that implicitly disables it — set `KILN_UPDATE_CHECK=false` if
 your deployment must make no third-party requests at all.
 
+**If you run a fork, set `KILN_UPDATE_REPO`.** The default compares this build
+against `The-Verscienta/kiln_cms`, which for a fork is an answer about someone
+else's code — and the failure is silent in the direction that matters: a fork
+ahead of upstream compares as newer, so the page reports "Up to date"
+indefinitely and the fork's own security releases never surface.
+
 `GIT_SHA` and `BUILD_DATE` are Docker **build args**, not runtime variables —
 the Dockerfile records them as `KILN_GIT_SHA` / `KILN_BUILD_DATE` so a running
 instance can name the commit it was built from. Omitting them is harmless; the
@@ -190,6 +196,8 @@ page then reports the version alone.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `KILN_UPDATE_CHECK` | enabled | Set to `false`/`0`/`no`/`off` (case-insensitive) for an instance that must make no outbound requests. | [`config/runtime.exs:127`](../config/runtime.exs#L127) |
+| `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](../projects/README.md). | [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |

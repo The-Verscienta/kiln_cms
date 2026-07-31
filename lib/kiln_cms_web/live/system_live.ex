@@ -234,6 +234,20 @@ defmodule KilnCMSWeb.SystemLive do
     """
   end
 
+  # Distinct from the catch-all below on purpose: nothing was requested, so
+  # "couldn't reach" would send an operator to look at the network for a
+  # problem that is one environment variable away.
+  defp update_status(%{update: {:error, reason}} = assigns)
+       when reason in [:invalid_repo, :invalid_releases_url] do
+    ~H"""
+    <p class="text-sm text-base-content/70">
+      {gettext(
+        "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
+      )}
+    </p>
+    """
+  end
+
   defp update_status(assigns) do
     ~H"""
     <p class="text-sm text-base-content/70">

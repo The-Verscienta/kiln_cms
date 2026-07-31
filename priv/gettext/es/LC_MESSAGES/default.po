@@ -5993,7 +5993,7 @@ msgstr "Comprobar ahora"
 msgid "Checking for updates..."
 msgstr "Buscando actualizaciones…"
 
-#: lib/kiln_cms_web/live/system_live.ex:240
+#: lib/kiln_cms_web/live/system_live.ex:254
 #, elixir-autogen, elixir-format
 msgid "Couldn't reach the upstream release feed. This says nothing about whether an update exists."
 msgstr "No se pudo acceder al feed de versiones upstream. Esto no indica si existe una actualización."
@@ -6778,3 +6778,8 @@ msgstr "Historial intacto; firmado con una clave que ya no conservamos: registre
 #, elixir-autogen, elixir-format
 msgid "Apply it from your project's Kiln checkout, then rebuild and redeploy:"
 msgstr "Aplícala desde la copia de trabajo de Kiln de tu proyecto, luego reconstruye y vuelve a desplegar:"
+
+#: lib/kiln_cms_web/live/system_live.ex:244
+#, elixir-autogen, elixir-format
+msgid "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
+msgstr "La comprobación de actualizaciones está mal configurada: KILN_UPDATE_REPO debe tener el formato propietario/nombre y KILN_UPDATE_RELEASES_URL ser una URL http(s) completa. No se realizó ninguna comprobación."

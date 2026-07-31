@@ -14,14 +14,25 @@ defmodule Kiln.Updates do
   instead. The two therefore agree only once a tag has an accompanying
   *release* — which is the point of the release checklist in `docs/releasing.md`.
 
+  ## Which upstream
+
+  Whichever one this deployment was told, via `repo/0` and `releases_url/0` —
+  defaulting to the canonical repo, but *only* as a default. A fork that keeps
+  comparing itself against `The-Verscienta/kiln_cms` gets an answer about
+  someone else's code: behind upstream it nags forever about a release its
+  codebase does not contain, and ahead of upstream `compare/2` reads `:gt` and
+  reports "Up to date" indefinitely, so the fork's own security releases never
+  surface.
+
   ## Network behaviour
 
-  One unauthenticated GET to api.github.com, made only when an admin opens the
-  update page. It is a public read of the upstream repo's releases: the request
-  carries a bare `KilnCMS` user-agent and no version, no instance identifier
-  and no content, so nothing about this deployment is disclosed. Operators who
-  still want no outbound traffic at all set `KILN_UPDATE_CHECK=false`, and
-  `check/1` then reports `:disabled` without touching the network.
+  One unauthenticated GET to the releases API, made only when an admin opens
+  the update page. It is a public read of the configured repo's releases: the
+  request carries a bare `KilnCMS` user-agent and no version, no instance
+  identifier and no content, so nothing about this deployment is disclosed.
+  Operators who still want no outbound traffic at all set
+  `KILN_UPDATE_CHECK=false`, and `check/1` then reports `:disabled` without
+  touching the network.
 
   Every outcome is cached in `:persistent_term` — 24h for a comparison, 15
   minutes for a failure — and forced checks are floored at one per minute.
@@ -54,7 +65,21 @@ defmodule Kiln.Updates do
   # an authenticated admin should not be able to burn the hourly budget.
   @min_force_interval_ms :timer.seconds(60)
 
-  @releases_url "https://api.github.com/repos/The-Verscienta/kiln_cms/releases/latest"
+  # The repo this build compares itself against when nobody says otherwise.
+  #
+  # Unlike the sibling `:pin_path`, a default is honest here: the pin's path is
+  # a downstream layout choice with no right answer, whereas an unmodified
+  # install *is* this repo. What must not happen is a **misconfigured** install
+  # quietly landing on it — see `repo/0`.
+  @default_repo "The-Verscienta/kiln_cms"
+
+  @github_api "https://api.github.com"
+  @github_web "https://github.com"
+
+  # `owner/name`, GitHub's own shape. Deliberately strict: anything else is a
+  # typo, and interpolating a typo would resolve somewhere else under
+  # api.github.com rather than fail.
+  @repo_format ~r{\A[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\z}
 
   @typedoc """
   The outcome of an upstream check.
@@ -64,12 +89,16 @@ defmodule Kiln.Updates do
     * `{:error, :disabled}` — the operator turned checks off;
     * `{:error, :unknown_version}` — this build's version doesn't parse, so no
       comparison is meaningful;
+    * `{:error, :invalid_repo}` / `{:error, :invalid_releases_url}` — the
+      upstream this instance was pointed at is unusable, so no request was
+      made;
     * `{:error, reason}` — the check itself failed (offline, rate-limited).
   """
   @type result ::
           {:ok, :current}
           | {:ok, {:behind, release()}}
-          | {:error, :disabled | :unknown_version | term()}
+          | {:error,
+             :disabled | :unknown_version | :invalid_repo | :invalid_releases_url | term()}
 
   @type release :: %{
           version: Version.t(),
@@ -121,6 +150,66 @@ defmodule Kiln.Updates do
   end
 
   @doc """
+  The `owner/name` this instance compares itself against.
+
+  Defaults to `#{@default_repo}`, overridden by `KILN_UPDATE_REPO` so a fork
+  is told about *its own* releases. Comparing a fork against upstream is not a
+  cosmetic mismatch: a fork ahead of upstream reads `:gt`, which `compare/2`
+  treats as current, so the page says "Up to date" forever and the fork's own
+  security releases never surface.
+
+  A configured value that isn't `owner/name` is rejected rather than ignored.
+  Falling back to the default on a typo would reintroduce exactly the silent
+  wrong-repo comparison this key exists to prevent, so it fails closed and the
+  page says the check is misconfigured.
+  """
+  @spec repo() :: {:ok, String.t()} | {:error, :invalid_repo}
+  def repo do
+    case config_string(:repo) do
+      nil -> {:ok, @default_repo}
+      repo -> if Regex.match?(@repo_format, repo), do: {:ok, repo}, else: {:error, :invalid_repo}
+    end
+  end
+
+  @doc """
+  The releases endpoint to GET, derived from `repo/0` unless overridden.
+
+  `KILN_UPDATE_REPO` covers forks on github.com; `KILN_UPDATE_RELEASES_URL`
+  covers the installs that aren't there at all — GitHub Enterprise, or an
+  internal mirror on an air-gapped network, which otherwise sit in a permanent
+  error state with no way to repoint the check.
+
+  It overrides the endpoint only. The link the page offers still comes from
+  the release's own `html_url`; `repo/0` supplies the fallback for the rare
+  response that omits one, so an Enterprise operator generally wants to set
+  both keys.
+  """
+  @spec releases_url() :: {:ok, String.t()} | {:error, :invalid_repo | :invalid_releases_url}
+  def releases_url do
+    with {:ok, repo} <- repo(), do: releases_url(repo)
+  end
+
+  defp releases_url(repo) do
+    case config_string(:releases_url) do
+      nil ->
+        {:ok, "#{@github_api}/repos/#{repo}/releases/latest"}
+
+      url ->
+        # Validated, not trusted: `Req.request/1` raises on a URL with no
+        # scheme, and this call runs inside the update page's `start_async`,
+        # where a raise takes the LiveView down instead of rendering a status.
+        case URI.new(url) do
+          {:ok, %URI{scheme: scheme, host: host}}
+          when scheme in ~w(http https) and is_binary(host) ->
+            {:ok, url}
+
+          _ ->
+            {:error, :invalid_releases_url}
+        end
+    end
+  end
+
+  @doc """
   Where an operator runs `mix kiln.update` from, if this deployment was told.
 
   `nil` unless `KILN_PIN_PATH` is set, and the admin page then gives a
@@ -134,20 +223,23 @@ defmodule Kiln.Updates do
   instance has no checkout to reach.
   """
   @spec pin_path() :: String.t() | nil
-  def pin_path do
-    Application.get_env(:kiln_cms, __MODULE__, [])
-    |> Keyword.get(:pin_path)
-    |> normalize_pin_path()
-  end
+  def pin_path, do: config_string(:pin_path)
 
-  defp normalize_pin_path(path) when is_binary(path) do
-    case String.trim(path) do
-      "" -> nil
-      trimmed -> trimmed
+  # A blank value reads as unset throughout: `runtime.exs` only sets these keys
+  # when the variable is non-empty, but a release template or compose file that
+  # passes an empty string must mean the same thing as leaving it out.
+  defp config_string(key) do
+    case Application.get_env(:kiln_cms, __MODULE__, []) |> Keyword.get(key) do
+      value when is_binary(value) ->
+        case String.trim(value) do
+          "" -> nil
+          trimmed -> trimmed
+        end
+
+      _ ->
+        nil
     end
   end
-
-  defp normalize_pin_path(_path), do: nil
 
   @doc false
   # Exposed so tests can start from a known cache state.
@@ -203,28 +295,35 @@ defmodule Kiln.Updates do
     end
   end
 
+  # The repo is resolved even when `:releases_url` overrides the endpoint: it
+  # still supplies the `html_url` fallback below, and a repo that is set but
+  # malformed should fail closed rather than be silently unused.
   defp fetch_latest do
-    case request() do
-      {:ok, %Req.Response{status: 200, body: body}} ->
-        parse_release(body)
-
-      {:ok, %Req.Response{status: status}} ->
-        {:error, {:http_status, status}}
-
-      {:error, reason} ->
-        Logger.debug("Kiln update check failed: #{inspect(reason)}")
-        {:error, reason}
+    with {:ok, repo} <- repo(),
+         {:ok, endpoint} <- releases_url(repo) do
+      handle_response(request(endpoint), repo)
     end
   end
 
-  defp parse_release(%{"tag_name" => tag} = body) do
+  defp handle_response({:ok, %Req.Response{status: 200, body: body}}, repo),
+    do: parse_release(body, repo)
+
+  defp handle_response({:ok, %Req.Response{status: status}}, _repo),
+    do: {:error, {:http_status, status}}
+
+  defp handle_response({:error, reason}, _repo) do
+    Logger.debug("Kiln update check failed: #{inspect(reason)}")
+    {:error, reason}
+  end
+
+  defp parse_release(%{"tag_name" => tag} = body, repo) do
     case Version.parse(String.trim_leading(tag, "v")) do
       {:ok, version} ->
         {:ok,
          %{
            version: version,
            tag: tag,
-           url: body["html_url"] || "https://github.com/The-Verscienta/kiln_cms/releases",
+           url: body["html_url"] || "#{@github_web}/#{repo}/releases",
            published_at: parse_timestamp(body["published_at"])
          }}
 
@@ -233,7 +332,7 @@ defmodule Kiln.Updates do
     end
   end
 
-  defp parse_release(_body), do: {:error, :unparseable_release}
+  defp parse_release(_body, _repo), do: {:error, :unparseable_release}
 
   defp parse_timestamp(nil), do: nil
 
@@ -244,9 +343,9 @@ defmodule Kiln.Updates do
     end
   end
 
-  defp request do
+  defp request(url) do
     [
-      url: @releases_url,
+      url: url,
       headers: [
         {"accept", "application/vnd.github+json"},
         {"user-agent", "KilnCMS"}

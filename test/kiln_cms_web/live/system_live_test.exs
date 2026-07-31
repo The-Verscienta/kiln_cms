@@ -170,6 +170,37 @@ defmodule KilnCMSWeb.SystemLiveTest do
       refute html =~ "Update available"
     end
 
+    # A misconfigured upstream is not an unreachable one. "Couldn't reach"
+    # would send an operator to look at egress and DNS for a problem that is
+    # one environment variable away, so it gets its own status.
+    test "names the misconfiguration instead of blaming the network", %{conn: conn} do
+      Req.Test.stub(Updates, fn _conn -> flunk("requested with a malformed repo") end)
+      put_updates_env(:repo, "acmekiln")
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2_000)
+
+      assert html =~ "KILN_UPDATE_REPO"
+      refute html =~ "Couldn&#39;t reach"
+      refute html =~ "Update available"
+    end
+
+    # The page links the release it names. Left deriving from upstream, a
+    # fork's admin would be sent to someone else's releases page.
+    test "links the configured repo when the release omits an html_url", %{conn: conn} do
+      put_updates_env(:repo, "acme/kiln")
+
+      Req.Test.stub(Updates, fn conn ->
+        Req.Test.json(conn, %{"tag_name" => newer_tag(), "html_url" => nil})
+      end)
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2_000)
+
+      assert html =~ "https://github.com/acme/kiln/releases"
+      refute html =~ "https://github.com/The-Verscienta/kiln_cms/releases"
+    end
+
     test "check now re-queries upstream, bypassing the cache", %{conn: conn} do
       stub_release("v#{Kiln.Version.version()}")
 

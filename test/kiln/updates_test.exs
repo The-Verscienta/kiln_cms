@@ -111,6 +111,108 @@ defmodule Kiln.UpdatesTest do
     end
   end
 
+  # A fork left on the default is told about someone else's releases, and it
+  # fails silently in the worst direction: ahead of upstream, `compare/2` reads
+  # `:gt` and the page says "Up to date" forever, so the fork's own security
+  # releases never surface. Hence the request URL is asserted directly rather
+  # than inferred from a green comparison — the comparison is green either way.
+  describe "repo/0 and releases_url/0" do
+    defp put_config(key, value) do
+      previous = Application.get_env(:kiln_cms, Updates, [])
+      Application.put_env(:kiln_cms, Updates, Keyword.put(previous, key, value))
+      on_exit(fn -> Application.put_env(:kiln_cms, Updates, previous) end)
+    end
+
+    test "defaults to the canonical repo" do
+      assert Updates.repo() == {:ok, "The-Verscienta/kiln_cms"}
+
+      assert Updates.releases_url() ==
+               {:ok, "https://api.github.com/repos/The-Verscienta/kiln_cms/releases/latest"}
+    end
+
+    test "a configured fork replaces the repo in the endpoint" do
+      put_config(:repo, "acme/kiln")
+
+      assert Updates.repo() == {:ok, "acme/kiln"}
+
+      assert Updates.releases_url() ==
+               {:ok, "https://api.github.com/repos/acme/kiln/releases/latest"}
+    end
+
+    test "blank and padded values behave like the sibling pin path" do
+      put_config(:repo, "  ")
+      assert Updates.repo() == {:ok, "The-Verscienta/kiln_cms"}
+
+      put_config(:repo, " acme/kiln\n")
+      assert Updates.repo() == {:ok, "acme/kiln"}
+    end
+
+    # Falling back to the default on a typo would reinstate the exact silent
+    # wrong-repo comparison this key exists to remove, so it fails closed.
+    for bad <- ["acmekiln", "acme/kiln/extra", "../../etc", "acme/kiln?x=1", "https://x/y"] do
+      test "rejects #{inspect(bad)} rather than falling back to upstream" do
+        put_config(:repo, unquote(bad))
+
+        assert Updates.repo() == {:error, :invalid_repo}
+        assert Updates.releases_url() == {:error, :invalid_repo}
+      end
+    end
+
+    test "requests the configured repo's endpoint, not upstream's" do
+      newer = bump(current_version(), :minor)
+      put_config(:repo, "acme/kiln")
+
+      Req.Test.stub(Updates, fn conn ->
+        assert conn.request_path == "/repos/acme/kiln/releases/latest"
+        Req.Test.json(conn, %{"tag_name" => "v#{newer}", "html_url" => nil})
+      end)
+
+      assert {:ok, {:behind, release}} = Updates.check()
+      # The html_url fallback follows the same repo — otherwise "Update
+      # available" would link a fork's admin at upstream's releases page.
+      assert release.url == "https://github.com/acme/kiln/releases"
+    end
+
+    test "a full releases URL repoints the endpoint for Enterprise or a mirror" do
+      newer = bump(current_version(), :minor)
+      put_config(:releases_url, "https://ghe.example.com/api/v3/repos/acme/kiln/releases/latest")
+
+      assert Updates.releases_url() ==
+               {:ok, "https://ghe.example.com/api/v3/repos/acme/kiln/releases/latest"}
+
+      Req.Test.stub(Updates, fn conn ->
+        assert conn.host == "ghe.example.com"
+        assert conn.request_path == "/api/v3/repos/acme/kiln/releases/latest"
+        Req.Test.json(conn, %{"tag_name" => "v#{newer}"})
+      end)
+
+      assert {:ok, {:behind, _}} = Updates.check()
+    end
+
+    # `Req.request/1` raises on a URL with no scheme, and the check runs inside
+    # the system page's `start_async` — a raise there takes the LiveView down
+    # instead of rendering a status.
+    test "rejects a releases URL that is not an absolute http(s) URL" do
+      Req.Test.stub(Updates, fn _conn -> flunk("requested a malformed endpoint") end)
+
+      put_config(:releases_url, "api.github.com/repos/acme/kiln/releases/latest")
+
+      assert Updates.releases_url() == {:error, :invalid_releases_url}
+      assert Updates.check() == {:error, :invalid_releases_url}
+    end
+
+    # The endpoint override doesn't rescue a malformed repo: the repo still
+    # supplies the html_url fallback, so a set-but-broken value fails closed.
+    test "a malformed repo fails closed even when the endpoint is overridden" do
+      Req.Test.stub(Updates, fn _conn -> flunk("requested with a malformed repo") end)
+
+      put_config(:repo, "acmekiln")
+      put_config(:releases_url, "https://ghe.example.com/api/v3/repos/acme/kiln/releases/latest")
+
+      assert Updates.check() == {:error, :invalid_repo}
+    end
+  end
+
   describe "failure modes" do
     test "surfaces a non-200 as an http_status error" do
       Req.Test.stub(Updates, fn conn -> Plug.Conn.send_resp(conn, 403, "rate limited") end)
