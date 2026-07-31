@@ -168,6 +168,17 @@ defmodule KilnCMSWeb.ArtifactController do
       {:error, :not_published} ->
         error(conn, :not_found, "not_published", "No published version as of that date.")
 
+      # Distinct from never-published: this content existed and had been taken
+      # down at that moment. A compliance reader asking "what did this say on
+      # date X" is owed "it wasn't published then", not the prior publish.
+      {:error, :withdrawn} ->
+        error(
+          conn,
+          :not_found,
+          "withdrawn",
+          "This content had been withdrawn as of that date."
+        )
+
       _ ->
         error(conn, :not_found, "not_found", "Content not found.")
     end
