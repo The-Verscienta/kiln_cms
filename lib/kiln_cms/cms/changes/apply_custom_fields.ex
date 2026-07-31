@@ -99,14 +99,26 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # derives nothing new stays byte-identical to before — no spurious version
   # diff, no phantom "changed" attribute for anything downstream to react to.
   defp refresh_computed(changeset) do
-    case changeset |> definitions_for() |> Enum.filter(&(&1.field_type == :computed)) do
+    defs = definitions_for(changeset)
+
+    case Enum.filter(defs, &(&1.field_type == :computed)) do
       [] -> changeset
-      computed -> recompute(changeset, computed)
+      computed -> recompute(changeset, defs, computed)
     end
   end
 
-  defp recompute(changeset, computed) do
-    stored = stringify_keys(changeset.data.custom_fields || %{})
+  defp recompute(changeset, defs, computed) do
+    # Project onto the current definitions, as `apply_definitions/1` and
+    # `Firing.CustomFields.resolve/2` both do. Carrying `stored` whole here
+    # would let this path resurrect a key whose definition was deleted, and
+    # would feed formulas a sibling value the other two paths no longer see —
+    # three write paths giving three answers for one document.
+    stored =
+      changeset.data.custom_fields
+      |> Kernel.||(%{})
+      |> stringify_keys()
+      |> Map.take(Enum.map(defs, & &1.name))
+
     editable = Map.drop(stored, Enum.map(computed, & &1.name))
     {cleaned, errors} = apply_computed(computed, changeset, editable, [])
 
@@ -122,23 +134,27 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # Derive every computed field from the document plus the editable values just
   # resolved. The supplied payload is **not consulted**: a computed field is
   # read-only everywhere (editor, JSON:API, GraphQL, MCP), so whatever a client
-  # posted under its key is discarded rather than trusted. A blank result skips
-  # the key, and `required` still applies — the same contract every other type
-  # has.
+  # posted under its key is discarded rather than trusted.
+  #
+  # A blank result simply skips the key — `required` is deliberately **not**
+  # enforced here. There is no editor to require anything of: the input renders
+  # read-only, so a formula that evaluates blank for a record would attach an
+  # error nobody can clear, to *every* create and *every* update of that content
+  # type, bricking it until an admin edits the definition.
+  # `Validations.ComputeExpression` refuses `required` on a computed definition
+  # up front so the option can't be set in the first place.
   defp apply_computed([], _changeset, cleaned, errors), do: {cleaned, errors}
 
   defp apply_computed(defs, changeset, cleaned, errors) do
     context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleaned)
 
-    Enum.reduce(defs, {cleaned, errors}, fn def, {cleaned, errors} ->
-      value = KilnCMS.CMS.Computed.evaluate(def.compute || "", context)
+    {Enum.reduce(defs, cleaned, &put_computed(&1, context, &2)), errors}
+  end
 
-      cond do
-        not blank?(value) -> {Map.put(cleaned, def.name, value), errors}
-        def.required -> {cleaned, [error(def, "is required") | errors]}
-        true -> {cleaned, errors}
-      end
-    end)
+  defp put_computed(def, context, cleaned) do
+    value = KilnCMS.CMS.Computed.evaluate(def.compute || "", context)
+
+    if blank?(value), do: cleaned, else: Map.put(cleaned, def.name, value)
   end
 
   # The definitions in scope: a compiled content type's (by its type atom) or,
@@ -195,12 +211,39 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # The coerced value for a definition from a supplied `raw` (or its default):
   # `:skip` when blank-and-optional, or an error when blank-and-required.
   defp resolve(def, raw, tenant) do
-    raw = if blank?(raw), do: def.default, else: raw
+    blank? = &blank_for?(def, &1)
+    raw = if blank?.(raw), do: def.default, else: raw
 
     cond do
-      blank?(raw) and def.required -> {:error, "is required"}
-      blank?(raw) -> :skip
+      blank?.(raw) and def.required -> {:error, "is required"}
+      blank?.(raw) -> :skip
       true -> coerce(raw, def, tenant)
+    end
+  end
+
+  # Blankness, per field type. A **composite** type (one declaring
+  # `input_parts/1`, e.g. `:geolocation`) submits a map of parts, and an
+  # untouched widget submits a map of blanks — that is the field being empty.
+  #
+  # This must NOT apply to every map. `:media`/`:reference` accept an
+  # unresolved payload like `%{"id" => ""}`, which is *invalid*, not absent:
+  # treating it as blank silently clears the field, or substitutes the
+  # definition's default, where it used to return "must be an existing media
+  # item".
+  defp blank_for?(def, value) when is_map(value) and not is_struct(value) do
+    if composite?(def), do: Enum.all?(Map.values(value), &blank?/1), else: false
+  end
+
+  defp blank_for?(_def, value), do: blank?(value)
+
+  defp composite?(%{field_type: type} = def) do
+    case KilnCMS.CMS.FieldTypes.get(type) do
+      nil ->
+        false
+
+      module ->
+        Code.ensure_loaded?(module) and function_exported?(module, :input_parts, 1) and
+          module.input_parts(def) != []
     end
   end
 
@@ -343,14 +386,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # --- helpers ---------------------------------------------------------------
 
-  # A composite value (a `Kiln.FieldType` declaring `input_parts/1`, e.g.
-  # `:geolocation`) submits a map of parts, and an untouched one submits a map
-  # of *blanks* — which is the field being empty, not a value to cast. Treating
-  # an all-blank map as blank keeps `required` and `default` working for
-  # composite types exactly as they do for scalars. A resolved `:media` /
-  # `:reference` snapshot always carries an id, so it is never blank by this
-  # rule.
-  defp blank?(value) when is_map(value), do: Enum.all?(Map.values(value), &blank?/1)
+  # Type-independent blankness. Maps are handled by `blank_for?/2`, which knows
+  # the definition — an empty map is only "no value" for a composite type.
+  defp blank?(%{} = value) when not is_struct(value), do: map_size(value) == 0
 
   defp blank?(value), do: value in [nil, ""] or (is_binary(value) and String.trim(value) == "")
 

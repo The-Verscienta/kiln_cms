@@ -212,7 +212,12 @@ defmodule KilnCMS.Firing.PointInTime do
           version_module
           |> replay(id, published_at, org_id)
           |> build_document(resource, id, org_id)
-          |> Engine.fire(mode: :preview)
+          # `:as_stored` — the replayed `custom_fields` are what this document
+          # actually carried at `as_of`. Recomputing them would derive from
+          # today's formulas, and projecting onto today's field definitions
+          # would add fields defined since and drop fields since deleted, making
+          # the historical artifact assert values that were never live then.
+          |> Engine.fire(mode: :preview, custom_fields: :as_stored)
 
         {:ok, Map.fetch!(artifacts, surface), published_at}
 

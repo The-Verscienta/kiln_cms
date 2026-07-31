@@ -179,6 +179,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
+  # A geolocation (#428) is a composite jsonb object with no stable scalar to
+  # match on — comparing it as text silently returns wrong rows (a JSON string
+  # never equals a JSON object), so refuse the predicate outright the way the
+  # sort path does.
+  defp condition(%{field_type: :geolocation, name: name}, _op, _raw),
+    do: {:error, "custom field #{inspect(name)} (geolocation) is not filterable"}
+
   # media/reference snapshots: match on the stable id inside the map.
   defp condition(%{field_type: type, name: name}, op, raw) when type in [:media, :reference] do
     field = expr(get_path(custom_fields, [^name, "id"]))
@@ -255,7 +262,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         end
 
       case resolve(defs, name) do
-        {:ok, %{field_type: type}} when type in [:media, :reference] ->
+        # Composite values are jsonb objects. Sorting them orders by key count
+        # then key/value text, which is meaningless for a coordinate or a
+        # snapshot — refuse rather than return a 200 in nonsense order.
+        {:ok, %{field_type: type}} when type in [:media, :reference, :geolocation] ->
           invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
 
         {:ok, definition} ->
@@ -289,9 +299,32 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp ash_type(%{field_type: :boolean}), do: :boolean
   defp ash_type(%{field_type: :date}), do: :date
   defp ash_type(%{field_type: :datetime}), do: :naive_datetime
+  # A `:computed` field (#429) has no static type — its formula decides, so
+  # `{{ word_count(body) }}` stores a JSON number while `{{ slugify(title) }}`
+  # stores a JSON string. Infer from the supplied predicate instead: text-casting
+  # a number would compare a JSON string against a JSON number, which doesn't
+  # merely miss — jsonb orders Number below String, so a range predicate
+  # silently matches every row or none.
+  defp ash_type(%{field_type: :computed}), do: :dynamic
   defp ash_type(_definition), do: nil
 
   # --- value casting -------------------------------------------------------------
+
+  # Preserve the caller's JSON-native type so the encoded predicate matches how
+  # the value is actually stored.
+  defp cast_value(raw, :dynamic, _name) when is_number(raw) or is_boolean(raw), do: {:ok, raw}
+
+  defp cast_value(raw, :dynamic, name) when is_binary(raw) do
+    # `safe_float/1` — `Float.parse/1` raises on an overflow literal under the
+    # pinned Elixir 1.19, and this value comes straight off a query string.
+    case {Integer.parse(raw), KilnCMS.CMS.Computed.safe_float(raw)} do
+      {{integer, ""}, _} -> {:ok, integer}
+      {_, {float, ""}} -> {:ok, float}
+      _ -> cast_value(raw, nil, name)
+    end
+  end
+
+  defp cast_value(raw, :dynamic, name), do: cast_value(raw, nil, name)
 
   defp cast_value(raw, nil, name) do
     if is_binary(raw) or is_number(raw) or is_boolean(raw) do

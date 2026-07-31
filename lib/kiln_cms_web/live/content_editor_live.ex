@@ -2638,12 +2638,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # The composite parts a field type declares, or `[]` for core/scalar types.
-  # `input_parts/1` was added to `Kiln.FieldType` after the contract shipped and
-  # `use Kiln.FieldType` defaults it, but a hand-rolled `@behaviour` module from
-  # an out-of-tree plugin may predate it — fall back to a scalar input rather
-  # than crashing the editor on an undefined function.
+  # `input_parts/1` is optional on `Kiln.FieldType` (a hand-rolled `@behaviour`
+  # module from an out-of-tree plugin may predate it), so fall back to a scalar
+  # input rather than crashing on an undefined function.
+  #
+  # `Code.ensure_loaded?/1` is not optional here: `function_exported?/3` answers
+  # false for a module that is compiled but not yet *loaded*, and nothing loads
+  # a field-type module at runtime — the registry is built at compile time and
+  # only carries the atom. Without it, the first editor render after boot
+  # silently degrades a composite field to a single text input, and submitting
+  # that input wipes the stored value.
   defp field_type_parts(definition) do
     with module when not is_nil(module) <- KilnCMS.CMS.FieldTypes.get(definition.field_type),
+         true <- Code.ensure_loaded?(module),
          true <- function_exported?(module, :input_parts, 1) do
       module.input_parts(definition)
     else
@@ -2657,7 +2664,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # controls and only the legend names them all.
   defp composite_custom_field_input(assigns) do
     ~H"""
-    <fieldset>
+    <fieldset aria-required={@definition.required && "true"}>
       <legend class="mb-1 block text-sm font-medium">{@definition.label}</legend>
       <div class="grid grid-cols-2 gap-2">
         <div :for={part <- @parts}>
@@ -2672,6 +2679,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             type={Map.get(part, :type, "text")}
             name={"#{@name}[#{part.key}]"}
             value={composite_part_value(@value, part.key)}
+            required={@definition.required && Map.get(part, :required?, true)}
             aria-invalid={@errors != [] && "true"}
             aria-describedby={@errors != [] && cf_errors_id(@definition)}
             class="field-input"

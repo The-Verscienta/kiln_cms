@@ -62,21 +62,66 @@ defmodule KilnCMS.CMS.ComputedTest do
       assert {:error, _} = Computed.parse("{{ ! }}")
     end
 
-    test "every advertised function parses" do
-      for name <- Computed.functions() do
-        args = Enum.map_join(1..3, ", ", fn _ -> "title" end)
+    test "an unterminated {{ is rejected, not silently treated as an expression" do
+      assert {:error, message} = Computed.parse("{{ title")
+      assert message =~ "never closed"
 
-        assert Enum.any?(
-                 [
-                   "{{ #{name}(title) }}",
-                   "{{ #{name}(title, title) }}",
-                   "{{ #{name}(#{args}) }}"
-                 ],
-                 fn source ->
-                   match?({:ok, _}, Computed.parse(source))
-                 end
-               ),
-               "#{name} did not parse at any arity from 1 to 3"
+      # The tail of a well-formed expression plus a stray opener must not be
+      # parsed as a second expression and silently dropped.
+      assert {:error, _} = Computed.parse("{{ title }}{{ oops")
+    end
+
+    test "surrounding whitespace does not demote a lone expression" do
+      ctx = context()
+
+      assert Computed.evaluate("{{ word_count(body) }}", ctx) === 5
+      assert Computed.evaluate("  {{ word_count(body) }}  ", ctx) === 5
+      assert Computed.evaluate("{{ word_count(body) }}\n", ctx) === 5
+    end
+
+    test "a literal that overflows a float parses and evaluates without raising" do
+      huge = String.duplicate("9", 320) <> ".5"
+
+      assert {:ok, _} = Computed.parse("{{ round(#{huge}, 2) }}")
+      assert is_number(Computed.evaluate("{{ round(#{huge}, 2) }}", context()))
+    end
+
+    test "safe_float/1 is total across toolchain versions" do
+      # `Float.parse/1` is version-dependent for an overflow literal: it returns
+      # `:error` on Elixir 1.20 but *raises* ArgumentError from
+      # `:erlang.list_to_float/1` on 1.19 — the version `.tool-versions` pins and
+      # CI runs. Anything pattern-matching its result must go through this.
+      assert Computed.safe_float(String.duplicate("9", 400) <> ".0") == :error
+      assert Computed.safe_float("not a number") == :error
+      assert Computed.safe_float("1.5") == {1.5, ""}
+      assert Computed.safe_float("2.5kg") == {2.5, "kg"}
+    end
+
+    test "every advertised function parses AND evaluates" do
+      # Parsing only consults the `@functions` allowlist, so a name listed there
+      # with no matching `call/2` clause would parse fine and then raise at
+      # runtime — swallowed by `evaluate/2`'s rescue into a silently blank field
+      # on every record. Evaluate each one so the allowlist can't outrun the
+      # implementation.
+      ctx = context(%{fields: %{"n" => 2}})
+
+      for name <- Computed.functions() do
+        # Both a text-shaped and a number-shaped call, since the allowlist mixes
+        # string functions with arithmetic ones.
+        sources = [
+          "{{ #{name}(title) }}",
+          "{{ #{name}(title, n) }}",
+          "{{ #{name}(title, title, title) }}",
+          "{{ #{name}(n) }}",
+          "{{ #{name}(n, n) }}",
+          "{{ #{name}(n, n, n) }}"
+        ]
+
+        assert Enum.any?(sources, fn source ->
+                 match?({:ok, _}, Computed.parse(source)) and
+                   Computed.evaluate(source, ctx) != nil
+               end),
+               "#{name} did not both parse and evaluate at any arity from 1 to 3"
       end
     end
   end
