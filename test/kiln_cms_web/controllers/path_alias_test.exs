@@ -48,6 +48,14 @@ defmodule KilnCMSWeb.PathAliasTest do
     assert redirected_to(get(conn, "/#{page.slug}"), 301) == alias_path
   end
 
+  test "the flat URL's 301 to the alias keeps the request's locale prefix", %{conn: conn} do
+    n = uniq()
+    alias_path = "/acupuncture/aiguille/#{n}mm"
+    page = published_page(%{path_alias: alias_path, locale: "fr"})
+
+    assert redirected_to(get(conn, "/fr/#{page.slug}"), 301) == "/fr" <> alias_path
+  end
+
   test "a two-segment alias works through the generic route's fallback", %{conn: conn} do
     n = uniq()
     alias_path = "/kiln/care-#{n}"

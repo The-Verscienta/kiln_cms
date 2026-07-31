@@ -102,9 +102,7 @@ defmodule KilnCMSWeb.ContentController do
     alias_path = Map.get(payload.record, :path_alias)
 
     if is_binary(alias_path) and conn.request_path != alias_path do
-      conn
-      |> put_status(:moved_permanently)
-      |> redirect(to: alias_path)
+      moved_permanently(conn, alias_path)
     else
       track_view(type_string, payload.record.id, payload.record.org_id)
       render_content(conn, view, payload, ct, audiences)
@@ -134,9 +132,7 @@ defmodule KilnCMSWeb.ContentController do
           serve_teaser(conn, path, ct) || not_found(conn)
 
         %{to: to} ->
-          conn
-          |> put_status(:moved_permanently)
-          |> redirect(to: to)
+          moved_permanently(conn, to)
       end
   end
 
@@ -194,6 +190,18 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, org)))
     |> put_view(KilnCMSWeb.ContentHTML)
     |> render(:teaser, teaser: teaser)
+  end
+
+  # 301 to a canonical (unprefixed) delivery path, restoring the locale prefix
+  # the visitor arrived through — `/fr/old-slug` lands on `/fr/new-slug` rather
+  # than dumping a French reader on the default locale's URL. Only a *path*
+  # prefix is re-applied (`Plugs.SetLocale` strips it into `:path_locale`),
+  # never a session preference: the destination has to stay a pure function of
+  # the requested URL, since a 301 without `Vary` is cacheable by shared caches.
+  defp moved_permanently(conn, path) do
+    conn
+    |> put_status(:moved_permanently)
+    |> redirect(to: I18n.localized_path(conn.assigns[:path_locale], path))
   end
 
   # Render the published record whose `path_alias` is this path, through the

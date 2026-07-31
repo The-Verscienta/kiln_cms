@@ -9,6 +9,11 @@ defmodule KilnCMSWeb.Plugs.SetLocale do
   locale. The Gettext locale is set too, so UI strings localise once templates
   are wrapped.
 
+  `conn.assigns.path_locale` records the stripped segment (`nil` when the locale
+  came from the session or the default), so a responder that rewrites the URL —
+  a delivery 301, say — can put the prefix back without making the new URL
+  depend on session state.
+
   Runs in the endpoint before the router, so a single set of routes serves every
   locale.
   """
@@ -23,16 +28,19 @@ defmodule KilnCMSWeb.Plugs.SetLocale do
 
   @impl true
   def call(conn, _opts) do
-    {locale, conn} = pop_locale(conn)
+    {locale, path_locale, conn} = pop_locale(conn)
     Gettext.put_locale(KilnCMSWeb.Gettext, locale)
-    assign(conn, :locale, locale)
+
+    conn
+    |> assign(:locale, locale)
+    |> assign(:path_locale, path_locale)
   end
 
   # Strip a leading supported-locale segment (only when something follows it, so
   # a one-segment path like `/fr` is still treated as a slug, not a bare locale).
   defp pop_locale(%Plug.Conn{path_info: [seg | rest]} = conn) when rest != [] do
     if I18n.supported?(seg) do
-      {seg, %{conn | path_info: rest, request_path: "/" <> Enum.join(rest, "/")}}
+      {seg, seg, %{conn | path_info: rest, request_path: "/" <> Enum.join(rest, "/")}}
     else
       session_locale(conn)
     end
@@ -48,9 +56,9 @@ defmodule KilnCMSWeb.Plugs.SetLocale do
   defp session_locale(conn) do
     if conn.private[:plug_session_fetch] do
       conn = fetch_session(conn)
-      {conn |> get_session("locale") |> I18n.normalize(), conn}
+      {conn |> get_session("locale") |> I18n.normalize(), nil, conn}
     else
-      {I18n.default_locale(), conn}
+      {I18n.default_locale(), nil, conn}
     end
   end
 end

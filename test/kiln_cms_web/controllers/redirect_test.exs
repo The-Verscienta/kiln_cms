@@ -85,6 +85,33 @@ defmodule KilnCMSWeb.RedirectTest do
     assert redirected_to(conn, 301) == "/blog/#{renamed.slug}"
   end
 
+  test "a locale-prefixed request keeps its prefix across the 301", %{conn: conn} do
+    page = page(%{locale: "fr"})
+    old_slug = page.slug
+    renamed = rename!(page, "rd-pg-#{uniq()}")
+
+    assert redirected_to(get(conn, "/fr/#{old_slug}"), 301) == "/fr/#{renamed.slug}"
+  end
+
+  test "an explicit default-locale prefix 301s to the canonical unprefixed URL", %{conn: conn} do
+    page = page(%{})
+    old_slug = page.slug
+    renamed = rename!(page, "rd-pg-#{uniq()}")
+
+    assert redirected_to(get(conn, "/en/#{old_slug}"), 301) == "/#{renamed.slug}"
+  end
+
+  # The 301 carries no `Vary`, so its destination must depend on the URL alone —
+  # a session preference must not leak a locale prefix into a cacheable response.
+  test "a session locale preference does not prefix the 301", %{conn: conn} do
+    page = page(%{locale: "fr"})
+    old_slug = page.slug
+    renamed = rename!(page, "rd-pg-#{uniq()}")
+
+    conn = conn |> Plug.Test.init_test_session(locale: "fr") |> get("/#{old_slug}")
+    assert redirected_to(conn, 301) == "/#{renamed.slug}"
+  end
+
   test "the JSON:API redirects list is world-readable and filterable", %{conn: conn} do
     page = page(%{})
     old_slug = page.slug
