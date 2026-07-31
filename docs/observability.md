@@ -58,6 +58,9 @@ sustained gap between them is a backpressure signal, not a bug.
 
 Useful Grafana panel: `sum(rate(kiln_cms_analytics_view_count[5m])) by (type)`.
 
+Referrer attribution, funnels and export are designed on top of this event but
+not built — see [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
+
 ## LiveDashboard panel
 
 The matching `Telemetry.Metrics` definitions live in
