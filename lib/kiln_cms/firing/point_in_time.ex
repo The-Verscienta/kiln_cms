@@ -43,9 +43,13 @@ defmodule KilnCMS.Firing.PointInTime do
 
   reconstructed from version history (title/slug as they were at that
   document's last publish ≤ `as_of`). A document unpublished before `as_of`
-  is excluded — unlike the single-document `read/5`, an index that listed
-  since-removed content would misrepresent the site as it stood. Bounded by
-  `limit` (newest publishes first).
+  is excluded — an index that listed since-removed content would
+  misrepresent the site as it stood. Bounded by `limit` (newest publishes
+  first).
+
+  `:type_definition_id` scopes the read to one **dynamic** type (D17). Every
+  dynamic type shares the `KilnCMS.CMS.Entry` table, so without it an index
+  for one type would list every other type's documents too.
   """
   @spec index(Ash.UUID.t(), module(), DateTime.t(), keyword()) :: [map()]
   def index(org_id, resource, %DateTime{} = as_of, opts \\ []) do
@@ -53,7 +57,7 @@ defmodule KilnCMS.Firing.PointInTime do
     version_module = Module.concat(resource, Version)
 
     version_module
-    |> published_as_of(as_of, org_id, limit)
+    |> published_as_of(resource, as_of, org_id, limit, opts[:type_definition_id])
     |> Enum.map(fn {id, published_at} ->
       entry(version_module, resource, id, published_at, org_id)
     end)
@@ -68,10 +72,34 @@ defmodule KilnCMS.Firing.PointInTime do
   # The only interpolation is the TABLE NAME from AshPostgres compile-time
   # metadata — every runtime value is a bound parameter.
   # sobelow_skip ["SQL.Query"]
-  defp published_as_of(version_module, as_of, org_id, limit) do
+  defp published_as_of(version_module, resource, as_of, org_id, limit, definition_id) do
     table = AshPostgres.DataLayer.Info.table(version_module)
-    actions = Enum.map(@publish_actions ++ @unpublish_actions, &to_string/1)
+    source_table = AshPostgres.DataLayer.Info.table(resource)
+    actions = Enum.map(@state_actions, &to_string/1)
     publishes = Enum.map(@publish_actions, &to_string/1)
+
+    params = [DateTime.to_naive(as_of), actions, publishes, dump_uuid(org_id), limit]
+
+    # The dynamic-type scope reads the type off the SOURCE row, not the version
+    # `changes` map: `type_definition_id` only appears in the create version's
+    # diff, so a publish/unpublish row carries no type at all. The source row is
+    # the authority anyway — a document cannot change type.
+    #
+    # The clause is omitted entirely for compiled types rather than guarded by a
+    # nil bind: Postgres validates column references at parse time, so
+    # `$6 IS NULL OR s.type_definition_id = $6` still fails on a `posts` table
+    # that has no such column.
+    {type_scope, params} =
+      if definition_id do
+        {"""
+           AND EXISTS (
+             SELECT 1 FROM #{source_table} s
+             WHERE s.id = v.version_source_id AND s.type_definition_id = $6
+           )
+         """, params ++ [dump_uuid(definition_id)]}
+      else
+        {"", params}
+      end
 
     %{rows: rows} =
       KilnCMS.Repo.query!(
@@ -79,17 +107,18 @@ defmodule KilnCMS.Firing.PointInTime do
         SELECT version_source_id, version_inserted_at FROM (
           SELECT DISTINCT ON (version_source_id)
             version_source_id, version_action_name, version_inserted_at
-          FROM #{table}
+          FROM #{table} v
           WHERE version_inserted_at <= $1
             AND version_action_name = ANY($2)
             AND ($4::uuid IS NULL OR org_id = $4)
+            #{type_scope}
           ORDER BY version_source_id, version_inserted_at DESC, id DESC
         ) latest
         WHERE version_action_name = ANY($3)
         ORDER BY version_inserted_at DESC
         LIMIT $5
         """,
-        [DateTime.to_naive(as_of), actions, publishes, org_uuid(org_id), limit]
+        params
       )
 
     Enum.map(rows, fn [source_id, published_at] ->
@@ -97,8 +126,10 @@ defmodule KilnCMS.Firing.PointInTime do
     end)
   end
 
-  defp org_uuid(nil), do: nil
-  defp org_uuid(org_id), do: Ecto.UUID.dump!(org_id)
+  # Bind a UUID as a query parameter, preserving nil — the SQL reads a nil bind
+  # as "no filter on this axis".
+  defp dump_uuid(nil), do: nil
+  defp dump_uuid(id), do: Ecto.UUID.dump!(id)
 
   # Index fields as of the effective publish — one slim query folding only the
   # versions that touched title/slug (never the full block-tree payloads).
@@ -124,7 +155,7 @@ defmodule KilnCMS.Firing.PointInTime do
     %{rows: [[exists]]} =
       KilnCMS.Repo.query!(
         "SELECT EXISTS(SELECT 1 FROM #{table} WHERE id = $1 AND ($2::uuid IS NULL OR org_id = $2))",
-        [Ecto.UUID.dump!(id), org_uuid(org_id)]
+        [Ecto.UUID.dump!(id), dump_uuid(org_id)]
       )
 
     exists

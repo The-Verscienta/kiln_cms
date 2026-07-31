@@ -346,10 +346,10 @@ defmodule KilnCMSWeb.GovernanceLive do
                   <span :if={e.diffs == []}>—</span>
                 </td>
                 <td>
-                  <%!-- Point-in-time delivery (#338) serves compiled types
-                        only — no dead links for dynamic entries. --%>
+                  <%!-- Point-in-time delivery (#338) now covers dynamic (D17)
+                        entries too, so every publish row links. --%>
                   <a
-                    :if={e.publish? && !@trail.item.dynamic?}
+                    :if={e.publish?}
                     href={point_in_time_url(@trail.item, e.at)}
                     class="text-xs text-primary hover:underline"
                     target="_blank"
