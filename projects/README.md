@@ -48,20 +48,28 @@ COPY config/project.exs config/        # activation config
 
 ## Staying up to date
 
-The pin is a submodule, so updating Kiln means moving it to a newer upstream
-release, rebuilding, and redeploying. From the project repo:
+Updating Kiln means moving the pin to a newer upstream release, rebuilding, and
+redeploying. Run it **from inside the pinned Kiln checkout** — whichever path
+your layout uses (`kiln/upstream`, `upstream/`, …), submodule or fetched ref:
 
 ```bash
-cd kiln/upstream
+cd <your kiln checkout>
 mix kiln.update --check     # what's new, new migrations, upgrade notes
 mix kiln.update             # move the pin to the newest release
 ```
 
-It targets tagged releases, refuses to move a dirty or locally-patched pin, and
-refuses a major jump (which by this repo's versioning means *your subproject
-needs code changes*) without `--allow-major`. It never runs migrations or
-deploys — it prints those steps. A deployed instance also reports its version
-and whether it's behind at `/editor/system`.
+It refuses to run anywhere else: it identifies the repo to move from the
+directory it runs in, so from the project repo it would read *your* tags,
+migrations and changelog as Kiln's. It targets tagged releases, refuses to move
+a dirty or locally-patched pin, and refuses a major jump (which by this repo's
+versioning means *your subproject needs code changes*) without `--allow-major`.
+It never runs migrations or deploys — it prints those steps, in the order you
+run them.
+
+A deployed instance also reports its version and whether it's behind at
+`/editor/system`, and prints the same command. The image cannot know where your
+pin lives; set `KILN_PIN_PATH` (e.g. `kiln/upstream`) if you want that page to
+show the matching `cd` too.
 
 Full release and upgrade process: [`docs/releasing.md`](../docs/releasing.md).
 

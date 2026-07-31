@@ -120,6 +120,35 @@ defmodule Kiln.Updates do
     |> Keyword.get(:enabled, true)
   end
 
+  @doc """
+  Where an operator runs `mix kiln.update` from, if this deployment was told.
+
+  `nil` unless `KILN_PIN_PATH` is set, and the admin page then gives a
+  layout-agnostic instruction instead of a `cd`. That default is deliberate:
+  `projects/README.md` documents the pin as a submodule *or a fetched ref* at
+  a path the project picks, so there is no path an image could hardcode
+  honestly — and a wrong `cd` compiled into the image is a copy-pasteable
+  `no such file or directory` the page has no way to correct.
+
+  It is display only. Nothing here reads or writes that path; a running
+  instance has no checkout to reach.
+  """
+  @spec pin_path() :: String.t() | nil
+  def pin_path do
+    Application.get_env(:kiln_cms, __MODULE__, [])
+    |> Keyword.get(:pin_path)
+    |> normalize_pin_path()
+  end
+
+  defp normalize_pin_path(path) when is_binary(path) do
+    case String.trim(path) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_pin_path(_path), do: nil
+
   @doc false
   # Exposed so tests can start from a known cache state.
   def clear_cache do

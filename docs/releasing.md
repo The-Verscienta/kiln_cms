@@ -70,16 +70,18 @@ people to pass the flag reflexively.
 6. **Verify** from a project checkout:
 
    ```bash
-   cd kiln/upstream && git fetch --tags && mix kiln.update --check
+   cd <your kiln checkout> && git fetch --tags && mix kiln.update --check
    ```
 
 ## Updating a project to a release
 
-From the project repo (see [`projects/README.md`](../projects/README.md) for
-the overlay layout):
+From inside the project's pinned Kiln checkout — `kiln/upstream`, `upstream/`,
+wherever that project puts it (see [`projects/README.md`](../projects/README.md)
+for the overlay layout). The task refuses to run outside a Kiln checkout, so
+pointing it at the project repo itself is an error, not a wrong answer:
 
 ```bash
-cd kiln/upstream
+cd <your kiln checkout>
 mix kiln.update --check     # what's new, new migrations, upgrade notes
 mix kiln.update             # move the pin to the newest release
 ```

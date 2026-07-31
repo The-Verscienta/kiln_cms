@@ -5,10 +5,10 @@ defmodule KilnCMSWeb.SystemLive do
 
   ## Why this page reports instead of acting
 
-  A deployment runs from an immutable image built off a pinned `kiln/upstream`
-  submodule (`projects/README.md`), so there is no source tree here to rewrite
-  and no way to restart into a different one. An "update" button would be a
-  lie on the deploy path this project actually uses.
+  A deployment runs from an immutable image built off a pinned Kiln checkout
+  (`projects/README.md`), so there is no source tree here to rewrite and no way
+  to restart into a different one. An "update" button would be a lie on the
+  deploy path this project actually uses.
 
   It would also be a bad idea on any path: applying an update means running
   migrations against the live database, and an admin panel that can rewrite
@@ -149,6 +149,23 @@ defmodule KilnCMSWeb.SystemLive do
     """
   end
 
+  # Kept out of the template: the <pre> has to hold its own newlines, which a
+  # HEEx heredoc can't express without breaking its indentation rules.
+  @update_command "mix kiln.update"
+
+  # The command is the same everywhere; only *where* you run it varies, and
+  # this instance genuinely cannot know that — the pin is a submodule or a
+  # fetched ref at a path the project chose, and the image has no checkout to
+  # look in. So the `cd` is shown only when the operator supplied it
+  # (KILN_PIN_PATH); otherwise the prose says "your project's Kiln checkout"
+  # rather than printing a path that is wrong on every non-reference layout.
+  defp update_command do
+    case Updates.pin_path() do
+      nil -> @update_command
+      path -> "cd #{path}\n#{@update_command}"
+    end
+  end
+
   attr :update, :any, required: true
 
   defp update_status(%{update: :loading} = assigns) do
@@ -166,15 +183,11 @@ defmodule KilnCMSWeb.SystemLive do
     """
   end
 
-  # Kept out of the template: the <pre> has to hold its own newlines, which a
-  # HEEx heredoc can't express without breaking its indentation rules.
-  @update_command "cd kiln/upstream\nmix kiln.update"
-
   defp update_status(%{update: {:ok, {:behind, release}}} = assigns) do
     assigns =
       assigns
       |> assign(:release, release)
-      |> assign(:update_command, @update_command)
+      |> assign(:update_command, update_command())
 
     ~H"""
     <div class="space-y-4">
@@ -190,7 +203,7 @@ defmodule KilnCMSWeb.SystemLive do
 
       <div>
         <p class="text-sm text-base-content/70">
-          {gettext("Apply it from a checkout of your project, then rebuild and redeploy:")}
+          {gettext("Apply it from your project's Kiln checkout, then rebuild and redeploy:")}
         </p>
         <pre class="mt-2 rounded bg-base-200 p-3 text-xs overflow-x-auto"><code>{@update_command}</code></pre>
         <p class="mt-2 text-xs text-base-content/60">
