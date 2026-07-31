@@ -7,8 +7,19 @@ on:
   # the same compile/lint/test coverage as PRs into main. A base-branch filter
   # here meant stacked PRs ran zero CI (bit PR #316).
   pull_request:
+  # Required for the merge queue. A queued PR is tested on a temporary
+  # `gh-readonly-queue/...` ref, which is neither a `push` to main nor a
+  # `pull_request` — so without this trigger the required check never starts,
+  # every entry sits until it times out, and the queue ejects it. This trigger
+  # must be on `main` BEFORE the merge_queue rule is enabled, not after.
+  merge_group:
 
 # Cancel superseded runs on the same ref.
+#
+# Safe for the merge queue: each queued entry gets its own unique
+# `gh-readonly-queue/main/pr-<n>-<sha>` ref, so entries never share a group and
+# one can't cancel another. Cancelling a merge_group run would fail that entry
+# and drop it out of the queue.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
