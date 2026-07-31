@@ -73,8 +73,12 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
       assert Exception.message(error) =~ "unknown function slugfy/1"
     end
 
-    test "only a computed field may carry a formula" do
-      assert {:error, error} =
+    test "a formula on a non-computed type is cleared, not rejected" do
+      # Rejecting would be a dead end: the admin form renders the formula input
+      # only for `:computed`, so switching an existing computed field to another
+      # type submits no `compute` and the error would land on a field with no
+      # rendered input.
+      assert {:ok, definition} =
                CMS.create_field_definition(
                  %{
                    content_type: :page,
@@ -86,7 +90,38 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
                  actor: admin()
                )
 
-      assert Exception.message(error) =~ "only a computed field can carry a formula"
+      assert definition.compute == nil
+    end
+
+    test "an existing computed field can be switched to another type" do
+      actor = admin()
+      definition = define!(actor, "{{ slugify(title) }}")
+
+      assert {:ok, switched} =
+               CMS.update_field_definition(definition, %{field_type: :string}, actor: actor)
+
+      assert switched.field_type == :string
+      assert switched.compute == nil
+    end
+
+    test "a computed field can't be required" do
+      # There is no editor to require anything of — the input is read-only — so a
+      # formula that evaluates blank would attach an uncorrectable error to every
+      # create and every update of the whole content type.
+      assert {:error, error} =
+               CMS.create_field_definition(
+                 %{
+                   content_type: :page,
+                   name: "must_derive",
+                   label: "X",
+                   field_type: :computed,
+                   compute: "{{ title }}",
+                   required: true
+                 },
+                 actor: admin()
+               )
+
+      assert Exception.message(error) =~ "can't be required"
     end
   end
 
@@ -170,17 +205,46 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
       assert updated.custom_fields[derived.name] == "second"
     end
 
-    test "a blank result drops the key; required still applies" do
+    test "a blank result drops the key and never blocks the save" do
       actor = admin()
-      optional = define!(actor, "{{ excerpt }}")
+      blank = define!(actor, "{{ excerpt }}")
 
       page = CMS.create_page!(%{title: "No excerpt", slug: slug()}, actor: actor)
-      refute Map.has_key?(page.custom_fields, optional.name)
+      refute Map.has_key?(page.custom_fields, blank.name)
 
-      required = define!(actor, "{{ excerpt }}", %{required: true})
+      # The formula stays blank for this record, but an unrelated edit must
+      # still save — a computed field can't make a document unsaveable.
+      assert {:ok, updated} = CMS.update_page(page, %{title: "Retitled"}, actor: actor)
+      refute Map.has_key?(updated.custom_fields, blank.name)
+    end
 
-      assert {:error, error} = CMS.create_page(%{title: "Nope", slug: slug()}, actor: actor)
-      assert Exception.message(error) =~ "(#{required.name}) is required"
+    test "a whitespace-only result is blank on both the write and the fire path" do
+      actor = admin()
+      # Previously the write path dropped this (its blank? trims) while the fire
+      # path kept it (it only tested for nil), so the record and its artifact
+      # disagreed about whether the key existed.
+      derived = define!(actor, "{{ concat(' ', ' ') }}")
+
+      page = CMS.create_page!(%{title: "Spaces", slug: slug()}, actor: actor)
+      refute Map.has_key?(page.custom_fields, derived.name)
+
+      {:ok, %{json: json}} = Firing.Engine.fire(page, mode: :preview)
+      refute Map.has_key?(json["custom_fields"], derived.name)
+    end
+
+    test "surrounding whitespace in a formula does not change the value's type" do
+      actor = admin()
+      padded = define!(actor, "  {{ word_count(body) }}  ")
+
+      page =
+        CMS.create_page!(
+          %{title: "Post", slug: slug(), blocks: blocks("one two three")},
+          actor: actor
+        )
+
+      # Not the string "3" — a trailing space must not demote it out of the
+      # single-expression path, or custom_sort orders it lexically.
+      assert page.custom_fields[padded.name] === 3
     end
 
     test "a computed field never feeds another computed field" do

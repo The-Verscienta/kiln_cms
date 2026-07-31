@@ -35,12 +35,24 @@ defmodule KilnCMS.Firing.CustomFields do
   `body` is the document's plain text when the caller already has it (firing
   does), sparing a second walk of the block tree.
   """
-  @spec resolve(struct(), String.t() | nil) :: t()
-  def resolve(document, body \\ nil) do
+  @spec resolve(struct(), String.t() | nil, keyword()) :: t()
+  def resolve(document, body \\ nil, opts \\ []) do
     definitions = definitions(document)
     stored = Map.get(document, :custom_fields) || %{}
 
-    %{values: recompute(definitions, document, stored, body), definitions: definitions}
+    if Keyword.get(opts, :recompute?, true) do
+      # Project onto the *current* definitions, exactly as the write path does
+      # (`ApplyCustomFields` reduces over definitions into a fresh map). Taking
+      # the stored map whole would keep publishing a value whose definition has
+      # since been deleted or renamed — the row survives the destroy, and an
+      # ordinary title-only edit never rewrites it.
+      stored = Map.take(stored, Enum.map(definitions, & &1.name))
+      %{values: recompute(definitions, document, stored, body), definitions: definitions}
+    else
+      # Point-in-time: the stored map is the historical truth. Neither the
+      # formulas nor the field registry of today may edit it.
+      %{values: stored, definitions: definitions}
+    end
   end
 
   @doc """
@@ -110,19 +122,31 @@ defmodule KilnCMS.Firing.CustomFields do
   # The definitions in scope: the owning dynamic type's (D17) or the compiled
   # content type's, under the document's own org (epic #336).
   defp definitions(%{org_id: org_id} = document) do
-    case Map.get(document, :type_definition_id) do
-      nil ->
-        KilnCMS.CMS.field_definitions_for!(content_type(document),
-          authorize?: false,
-          tenant: org_id
-        )
+    case {Map.get(document, :type_definition_id), content_type(document)} do
+      {nil, nil} ->
+        # A dynamic entry whose type definition isn't set yet, or a resource
+        # built outside the Content macro: no field schema to resolve.
+        []
 
-      id ->
+      {nil, type} ->
+        KilnCMS.CMS.field_definitions_for!(type, authorize?: false, tenant: org_id)
+
+      {id, _type} ->
         KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: org_id)
     end
   end
 
   defp definitions(_document), do: []
 
-  defp content_type(%module{}), do: module.__kiln_content_type__()
+  # Only compiled types export `__kiln_content_type__/0` — the dynamic entry
+  # tier deliberately does not (see the Content macro's `markers`). Guard the
+  # call the way `Engine.document_type/1` and every other consumer does, or
+  # firing a document without the hook raises `UndefinedFunctionError`:
+  # `FireWorker` would swallow it and never write artifacts, and `RefireWorker`
+  # has no rescue at all, leaving referrer artifacts permanently stale.
+  defp content_type(%module{}) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :__kiln_content_type__, 0) do
+      module.__kiln_content_type__()
+    end
+  end
 end

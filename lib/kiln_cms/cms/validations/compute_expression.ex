@@ -19,22 +19,38 @@ defmodule KilnCMS.CMS.Validations.ComputeExpression do
     field_type = Ash.Changeset.get_attribute(changeset, :field_type)
     compute = Ash.Changeset.get_attribute(changeset, :compute)
 
-    case {field_type, blank?(compute)} do
-      {:computed, true} ->
-        error("a computed field needs a formula, e.g. {{ reading_time(body) }}")
-
-      {:computed, false} ->
-        case Computed.parse(compute) do
-          {:ok, _template} -> :ok
-          {:error, message} -> error("the formula #{message}")
-        end
-
-      {_other, false} ->
-        error("only a computed field can carry a formula")
-
-      {_other, true} ->
-        :ok
+    # Only `:computed` is validated. There is deliberately no "a non-computed
+    # field must not carry a formula" branch: the admin form renders the formula
+    # input only for `:computed`, so switching an existing computed field to any
+    # other type submits no `compute` param, `get_attribute/2` falls back to the
+    # stored value, and the error would land on a field with no rendered input —
+    # an unrecoverable dead end. `ClearCompute` nils the column instead, which is
+    # the same stance `ReferenceTarget` takes toward a stale `target_type`.
+    cond do
+      field_type != :computed -> :ok
+      blank?(compute) -> error("a computed field needs a formula, e.g. {{ reading_time(body) }}")
+      Ash.Changeset.get_attribute(changeset, :required) -> error_required()
+      true -> validate_formula(compute)
     end
+  end
+
+  defp validate_formula(compute) do
+    case Computed.parse(compute) do
+      {:ok, _template} -> :ok
+      {:error, message} -> error("the formula #{message}")
+    end
+  end
+
+  # A computed field has no editor to require anything of — its input is
+  # read-only. Allowing `required` would let a formula that evaluates blank for
+  # some record attach an uncorrectable error to every create and every update
+  # of the whole content type.
+  defp error_required do
+    {:error,
+     Ash.Error.Changes.InvalidAttribute.exception(
+       field: :required,
+       message: "a computed field can't be required — its value isn't the editor's to supply"
+     )}
   end
 
   defp blank?(value), do: value in [nil, ""] or (is_binary(value) and String.trim(value) == "")

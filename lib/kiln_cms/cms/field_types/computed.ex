@@ -45,9 +45,14 @@ defmodule KilnCMS.CMS.FieldTypes.Computed do
   def cast(_value, _definition), do: {:error, "is computed and can't be set directly"}
 
   # A real input rather than static text: it keeps the field in the editor's
-  # normal layout and tab order semantics, and `readonly` (not `disabled`) so
-  # the value stays selectable/copyable. Whatever it submits is discarded by
-  # the compute pass, so it can't be tampered with from the client.
+  # normal layout, and `readonly` (not `disabled`) so the value stays
+  # selectable and copyable. Whatever it submits is discarded by the compute
+  # pass, so it can't be tampered with from the client.
+  #
+  # No `tabindex: "-1"`: `readonly` already blocks editing while leaving the
+  # control focusable, and taking it out of the tab order would put the value
+  # out of reach of exactly the keyboard users who need to select it
+  # (docs/design-language.md, "Accessible by construction").
   @impl Kiln.FieldType
-  def input_attrs(_definition), do: %{readonly: true, tabindex: "-1"}
+  def input_attrs(_definition), do: %{readonly: true}
 end

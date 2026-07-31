@@ -34,11 +34,12 @@ defmodule KilnCMSWeb.VisualEditingController do
          record when not is_nil(record) <-
            fetch_by_slug(ct.type, slug, locale, actor, KilnCMSWeb.Tenant.current_org_id(conn)),
          {:ok, %{json: json}} <- Engine.fire(record, mode: :preview) do
-      # The public `:json` artifact deliberately omits custom fields; the
-      # annotated preview mirrors what a custom-fields-driven front end
-      # renders, so it carries the working copy's map (stega-annotated below).
-      json = Map.put(json, "custom_fields", record.custom_fields || %{})
-
+      # `custom_fields` now rides on the `:json` artifact itself (#428/#429), so
+      # the fired map is used as-is. It is strictly fresher than the record's
+      # stored one — computed fields are recomputed at fire time — and
+      # overwriting it here would show the overlay a stale value the published
+      # artifact disagrees with, which is precisely what this bridge exists to
+      # prevent.
       conn
       # Per-actor draft content: never cache in a shared cache.
       |> put_resp_header("cache-control", "no-store")

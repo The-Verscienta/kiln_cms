@@ -159,6 +159,37 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
       assert Exception.message(error) =~ "must be a latitude and longitude"
     end
 
+    test "the composite blank rule does not leak into media/reference" do
+      # `blank?` treats an all-blank map as empty for composite types only. A
+      # `:media` payload like %{"id" => ""} is *invalid*, not absent — treating
+      # it as blank silently cleared the field, or substituted the definition's
+      # default.
+      actor = admin()
+
+      media =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "hero_#{System.unique_integer([:positive])}",
+            label: "Hero",
+            field_type: :media
+          },
+          actor: actor
+        )
+
+      assert {:error, error} =
+               CMS.create_page(
+                 %{
+                   title: "Bad hero",
+                   slug: slug(),
+                   custom_fields: %{media.name => %{"id" => ""}}
+                 },
+                 actor: actor
+               )
+
+      assert Exception.message(error) =~ "must be an existing media item"
+    end
+
     test "an untouched composite widget submits blanks and counts as empty" do
       actor = admin()
       optional = define!(actor)
@@ -181,6 +212,53 @@ defmodule KilnCMS.CMS.GeolocationFieldTest do
                )
 
       assert Exception.message(error) =~ "(#{required.name}) is required"
+    end
+
+    test "malformed values return a validation error rather than raising" do
+      actor = admin()
+      definition = define!(actor)
+
+      # Each of these used to escape `cast/2`'s {:ok, _} | {:error, binary}
+      # contract as an exception — a 500 on a public write surface.
+      for value <- [
+            # a struct: `Map.new/2` over it raises Protocol.UndefinedError
+            ~D[2020-01-01],
+            # a map label: `to_string/1` on it raises Protocol.UndefinedError
+            %{"lat" => "1", "lng" => "2", "label" => %{"en" => "London"}},
+            # an integer beyond double range: `value / 1` raises ArithmeticError
+            %{"lat" => String.duplicate("9", 400), "lng" => "0"},
+            %{"lat" => "1", "lng" => "2", "zoom" => String.duplicate("9", 400)}
+          ] do
+        assert {:error, %Ash.Error.Invalid{}} =
+                 CMS.create_page(
+                   %{title: "Bad", slug: slug(), custom_fields: %{definition.name => value}},
+                   actor: actor
+                 ),
+               "expected a validation error, not a raise, for #{inspect(value)}"
+      end
+    end
+
+    test "the place-name cap counts characters, not bytes" do
+      actor = admin()
+      definition = define!(actor)
+
+      # 72 characters / 216 bytes — comfortably inside a 200-character cap, but
+      # over it if the limit is measured in bytes.
+      label = String.duplicate("東京都渋谷区神宮前", 8)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Tokyo",
+            slug: slug(),
+            custom_fields: %{
+              definition.name => %{"lat" => "35.6", "lng" => "139.7", "label" => label}
+            }
+          },
+          actor: actor
+        )
+
+      assert page.custom_fields[definition.name]["label"] == label
     end
 
     test "a stored value round-trips through an API-style write" do

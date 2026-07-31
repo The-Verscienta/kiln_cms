@@ -113,6 +113,12 @@ defmodule KilnCMS.CMS.FieldDefinition do
     end
   end
 
+  changes do
+    # A formula belongs to a `:computed` field only — drop it on any other type
+    # so switching an existing computed field away isn't a dead end (#429).
+    change KilnCMS.CMS.Changes.ClearCompute
+  end
+
   validations do
     # A field belongs to exactly one owner: a compiled type XOR a dynamic one.
     validate KilnCMS.CMS.Validations.OneFieldScope

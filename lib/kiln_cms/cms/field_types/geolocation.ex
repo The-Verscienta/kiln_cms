@@ -70,11 +70,20 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
         type: "number",
         attrs: %{step: "any", min: -180, max: 180, placeholder: "-0.1278"}
       },
-      %{key: "label", label: "Place name", type: "text", attrs: %{placeholder: "London"}},
+      # `required?: false` — a required geolocation needs a coordinate; the
+      # place name and zoom stay optional either way.
+      %{
+        key: "label",
+        label: "Place name",
+        type: "text",
+        required?: false,
+        attrs: %{placeholder: "London"}
+      },
       %{
         key: "zoom",
         label: "Map zoom",
         type: "number",
+        required?: false,
         attrs: %{step: 1, min: 0, max: 24, placeholder: "12"}
       }
     ]
@@ -83,7 +92,10 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
   # --- casting ---------------------------------------------------------------
 
   # Normalize every accepted input shape to a string-keyed map of raw parts.
-  defp parts(value) when is_map(value),
+  # `not is_struct` matters: a bare `is_map` guard admits e.g. a `%Date{}` from
+  # an Elixir/MCP/seed caller, and `Map.new/2` over it raises Protocol.
+  # UndefinedError — a 500 where `cast/2` owes `{:error, message}`.
+  defp parts(value) when is_map(value) and not is_struct(value),
     do: {:ok, Map.new(value, fn {k, v} -> {to_string(k), v} end)}
 
   defp parts(value) when is_binary(value) do
@@ -103,6 +115,9 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
       {:ok, _out_of_range} ->
         {:error, "#{name} must be between -#{limit} and #{limit}"}
 
+      :out_of_range ->
+        {:error, "#{name} must be between -#{limit} and #{limit}"}
+
       :error ->
         {:error, format_message()}
     end
@@ -118,13 +133,27 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
 
   defp put_label(extra, blank) when blank in [nil, ""], do: {:ok, extra}
 
-  defp put_label(extra, raw) do
+  # Only strings and numbers become labels. `to_string/1` on a client-supplied
+  # map raises Protocol.UndefinedError, and on a list it silently produces
+  # nonsense via List.Chars — neither is a place name.
+  defp put_label(extra, raw) when is_binary(raw) or is_number(raw) do
     case raw |> to_string() |> String.trim() do
-      "" -> {:ok, extra}
-      trimmed when byte_size(trimmed) > @label_max -> {:error, "place name is too long"}
-      trimmed -> {:ok, Map.put(extra, "label", trimmed)}
+      "" ->
+        {:ok, extra}
+
+      # `String.length/1`, not `byte_size/1`: the cap reads as a character count,
+      # and bytes would reject a Japanese place name at a third of the limit.
+      trimmed when byte_size(trimmed) > @label_max * 4 ->
+        {:error, "place name is too long"}
+
+      trimmed ->
+        if String.length(trimmed) > @label_max,
+          do: {:error, "place name is too long"},
+          else: {:ok, Map.put(extra, "label", trimmed)}
     end
   end
+
+  defp put_label(_extra, _raw), do: {:error, "place name must be text"}
 
   defp zoom(parts), do: parts |> Map.get("zoom") |> parse_zoom()
 
@@ -133,17 +162,31 @@ defmodule KilnCMS.CMS.FieldTypes.Geolocation do
   defp parse_zoom(raw) do
     case number(raw) do
       {:ok, number} -> zoom_level(round(number))
-      :error -> {:error, zoom_message()}
+      _not_a_zoom -> {:error, zoom_message()}
     end
   end
 
   defp zoom_level(zoom) when zoom in @zoom_range, do: {:ok, %{"zoom" => zoom}}
   defp zoom_level(_zoom), do: {:error, zoom_message()}
 
-  defp number(value) when is_number(value), do: {:ok, value / 1}
+  defp number(value) when is_float(value), do: {:ok, value}
+
+  # `value / 1` on an integer beyond double range raises ArithmeticError, so a
+  # 400-digit JSON integer for `lat` would 500 a public write instead of failing
+  # the range check. Integer/float comparison on the BEAM is exact and does not
+  # convert, so bounding first is safe — and anything outside this window is out
+  # of range for every caller here (±180 for coordinates, 0..24 for zoom).
+  defp number(value) when is_integer(value) do
+    if value >= -1_000 and value <= 1_000, do: {:ok, value / 1}, else: :out_of_range
+  end
 
   defp number(value) when is_binary(value) do
-    case value |> String.trim() |> Float.parse() do
+    # `Computed.safe_float/1`, not `Float.parse/1`: the latter *raises* on a
+    # literal that overflows a double under Elixir 1.19 (this project's pinned
+    # toolchain) and merely returns `:error` under 1.20 — and this runs on a
+    # public write surface, where a raise is a 500 rather than a validation
+    # message.
+    case value |> String.trim() |> KilnCMS.CMS.Computed.safe_float() do
       {number, ""} -> {:ok, number}
       _ -> :error
     end

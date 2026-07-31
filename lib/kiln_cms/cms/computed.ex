@@ -7,9 +7,16 @@ defmodule KilnCMS.CMS.Computed do
   Custom fields are *data* (decision D4 keeps types compile-time but fields
   admin-defined), so a computed field can't carry an Elixir function: it would
   have to be stored and evaluated at runtime, and KilnCMS never evaluates
-  stored code. Instead a definition carries a small **template string**, parsed
-  into an AST at save time and interpreted here. There is no `eval`, no atom
+  stored code. Instead a definition carries a small **template string**, which
+  is parsed into an AST and interpreted here. There is no `eval`, no atom
   creation, and no way to reach anything but the document's own values.
+
+  The template is parsed at *definition* time only to validate it
+  (`Validations.ComputeExpression`); the AST is not persisted, so each
+  evaluation re-parses. That is deliberate for now — the formula is bounded to
+  2,000 characters and parsing is linear — but it does mean a re-fire sweep
+  re-parses once per record per field. Cache the compiled form here if that
+  ever shows up in a profile.
 
   ## Syntax
 
@@ -99,6 +106,12 @@ defmodule KilnCMS.CMS.Computed do
   # Guards against a runaway template — these are hand-written by admins, and
   # a formula this long is a paste accident, not a computation.
   @max_length 2_000
+  # Cap on a derived *value*. `@max_length` bounds the formula, not its output,
+  # and a variadic `concat` can amplify the body ~400x — into jsonb, into every
+  # version row, and into the fired artifact.
+  @max_output 64_000
+  # Largest integer that survives conversion to a double.
+  @max_float 1.0e308
 
   @doc "The function names a template may call."
   @spec functions() :: [String.t()]
@@ -114,10 +127,15 @@ defmodule KilnCMS.CMS.Computed do
   """
   @spec parse(String.t() | nil) :: {:ok, template()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
+    # Trim first: the whole-template-is-one-expression rule below is defined on
+    # the trimmed text, and without this a single trailing space silently
+    # demotes `{{ word_count(body) }}` from an integer to a string.
+    trimmed = String.trim(source)
+
     cond do
-      String.trim(source) == "" -> {:error, "can't be blank"}
-      String.length(source) > @max_length -> {:error, "is too long"}
-      true -> source |> segments() |> compile([])
+      trimmed == "" -> {:error, "can't be blank"}
+      String.length(trimmed) > @max_length -> {:error, "is too long"}
+      true -> trimmed |> segments() |> compile([])
     end
   end
 
@@ -131,25 +149,31 @@ defmodule KilnCMS.CMS.Computed do
   Returns a JSON-native value, or `nil` when the result is blank.
   """
   @spec evaluate(template() | String.t(), map()) :: term()
-  def evaluate(source, context) when is_binary(source) do
-    case parse(source) do
-      {:ok, template} -> evaluate(template, context)
-      {:error, _message} -> nil
+  # The rescue wraps **parsing as well as evaluation**. Both run on the content
+  # write path against admin-authored formulas, and a bug in either must not be
+  # the reason a document can't be saved — so a raise anywhere below blanks the
+  # value and leaves a trail instead of propagating.
+  def evaluate(source, context) do
+    case template(source) do
+      {:ok, template} -> run(template, context)
+      :error -> nil
     end
-  end
-
-  def evaluate(template, context) when is_list(template) do
-    # Evaluation is designed to be total, but it runs on the content-write hot
-    # path against admin-authored formulas: a bug here must not be the reason a
-    # document can't be saved. Blank the value and leave a trail instead.
-    run(template, context)
   rescue
     error ->
       Logger.warning("computed field evaluation failed: #{Exception.message(error)}")
       nil
   end
 
-  defp run([{:expr, ast}], context), do: blank_to_nil(eval(ast, context))
+  defp template(source) when is_list(source), do: {:ok, source}
+
+  defp template(source) do
+    case parse(source) do
+      {:ok, template} -> {:ok, template}
+      {:error, _message} -> :error
+    end
+  end
+
+  defp run([{:expr, ast}], context), do: ast |> eval(context) |> blank_to_nil() |> bounded()
 
   defp run(template, context) do
     template
@@ -159,9 +183,32 @@ defmodule KilnCMS.CMS.Computed do
     end)
     |> String.trim()
     |> blank_to_nil()
+    |> bounded()
   end
 
-  defp blank_to_nil(""), do: nil
+  # Backstop on the derived value's size, for the paths `bounded_join/2` doesn't
+  # cover (`{{ body }}` on a huge document, interpolation of several fields).
+  defp bounded(value) when is_binary(value) do
+    if byte_size(value) > @max_output do
+      Logger.warning("computed field result exceeded #{@max_output} bytes; blanked")
+      nil
+    else
+      value
+    end
+  end
+
+  defp bounded(value), do: value
+
+  # What counts as "no value". This must agree with the write path's own
+  # `blank?/1` (`Changes.ApplyCustomFields`), because the write stores the
+  # result and the fire re-derives it: if the two disagree about a
+  # whitespace-only or empty result, the record and its artifact disagree.
+  defp blank_to_nil(value) when is_binary(value),
+    do: if(String.trim(value) == "", do: nil, else: value)
+
+  defp blank_to_nil(value) when is_map(value),
+    do: if(value == %{}, do: nil, else: value)
+
   defp blank_to_nil(value), do: value
 
   # --- parsing ---------------------------------------------------------------
@@ -169,25 +216,39 @@ defmodule KilnCMS.CMS.Computed do
   # Split the source into alternating literal text and `{{ … }}` expressions.
   # Literal-only segments that are empty drop out, so `"{{ a }}{{ b }}"` doesn't
   # carry three empty strings around.
+  #
+  # `Regex.split/3` with `include_captures: true` emits matches and literals
+  # interleaved, but a *literal* can also start with `{{` when a brace pair is
+  # never closed. Classifying on the `"{{"` prefix alone would then parse that
+  # literal as an expression — so `"{{ title"` would silently look exactly like
+  # `"{{ title }}"`, and the tail of `"{{ a }}{{ oops"` would vanish from every
+  # record. Match the delimiters at both ends instead, and reject anything with
+  # a stray opener left in it.
   defp segments(source) do
     ~r/\{\{(.*?)\}\}/s
     |> Regex.split(source, include_captures: true, trim: true)
-    |> Enum.map(fn
-      "{{" <> _rest = chunk ->
-        {:expr, chunk |> String.trim_leading("{{") |> String.trim_trailing("}}")}
-
-      text ->
-        {:text, text}
+    |> Enum.map(fn chunk ->
+      case Regex.run(~r/\A\{\{(.*)\}\}\z/s, chunk) do
+        [_whole, expression] -> {:expr, expression}
+        nil -> {:text, chunk}
+      end
     end)
   end
+
+  # An unclosed `{{` survives as literal text; it is always a typo, and silently
+  # rendering it verbatim would be worse than saying so.
+  defp unclosed?(template), do: Enum.any?(template, &unclosed_text?/1)
+
+  defp unclosed_text?({:text, text}), do: String.contains?(text, "{{")
+  defp unclosed_text?(_segment), do: false
 
   defp compile([], acc) do
     template = Enum.reverse(acc)
 
-    if Enum.any?(template, &match?({:expr, _}, &1)) do
-      {:ok, template}
-    else
-      {:error, "must contain at least one {{ … }} expression"}
+    cond do
+      unclosed?(template) -> {:error, "has a {{ that is never closed"}
+      Enum.any?(template, &match?({:expr, _}, &1)) -> {:ok, template}
+      true -> {:error, "must contain at least one {{ … }} expression"}
     end
   end
 
@@ -248,11 +309,28 @@ defmodule KilnCMS.CMS.Computed do
   defp tokenize(<<char::utf8, _rest::binary>>, _acc),
     do: {:error, "has an unexpected #{inspect(<<char::utf8>>)}"}
 
+  # Fall back to the integer part rather than blowing up on a number nobody can
+  # represent — `parse/1` is called directly by the fields admin, so a raise
+  # here is a 500 on a form.
   defp to_number(text) do
-    case Integer.parse(text) do
-      {integer, ""} -> integer
-      _ -> text |> Float.parse() |> elem(0)
+    case {Integer.parse(text), safe_float(text)} do
+      {{integer, ""}, _} -> integer
+      {_, {float, ""}} -> float
+      {{integer, _remainder}, _} -> integer
+      {:error, _} -> 0
     end
+  end
+
+  @doc false
+  # `Float.parse/1` is not total, and *how* it fails is version-dependent: for a
+  # literal that overflows a double it returns the bare atom `:error` on Elixir
+  # 1.20 but **raises** ArgumentError from `:erlang.list_to_float/1` on 1.19
+  # (this project's pinned toolchain — see `.tool-versions`). Neither is safe to
+  # pattern-match on directly, so normalize both into `:error` here.
+  def safe_float(text) do
+    Float.parse(text)
+  rescue
+    ArgumentError -> :error
   end
 
   # --- recursive-descent parser ----------------------------------------------
@@ -368,13 +446,13 @@ defmodule KilnCMS.CMS.Computed do
     end
   end
 
-  defp call("concat", args), do: Enum.map_join(args, "", &stringify/1)
+  defp call("concat", args), do: args |> Enum.map(&stringify/1) |> bounded_join("")
 
   defp call("join", [separator | args]) do
     args
     |> Enum.map(&stringify/1)
     |> Enum.reject(&(String.trim(&1) == ""))
-    |> Enum.join(stringify(separator))
+    |> bounded_join(stringify(separator))
   end
 
   defp call("sum", args), do: reduce_numbers(args, &(&1 + &2))
@@ -388,7 +466,9 @@ defmodule KilnCMS.CMS.Computed do
 
   defp call("divide", [a, b]) do
     with {:ok, left} <- number(a),
-         {:ok, right} when right != 0 <- number(b) do
+         {:ok, right} when right != 0 <- number(b),
+         {:ok, left} <- to_float(left),
+         {:ok, right} <- to_float(right) do
       left / right
     else
       _ -> nil
@@ -404,9 +484,12 @@ defmodule KilnCMS.CMS.Computed do
 
   defp call("round", [value, precision]) do
     with {:ok, number} <- number(value),
-         {:ok, digits} when digits >= 0 <- number(precision) do
-      Float.round(number / 1, min(trunc(digits), 15))
+         {:ok, digits} when digits >= 0 <- number(precision),
+         {:ok, float} <- to_float(number) do
+      Float.round(float, min(trunc(digits), 15))
     else
+      # Includes the out-of-double-range case, where `round/1` still works fine
+      # on the integer — better than blanking a field over precision.
       _ -> call("round", [value])
     end
   end
@@ -439,7 +522,7 @@ defmodule KilnCMS.CMS.Computed do
         {:ok, integer}
 
       _ ->
-        case Float.parse(trimmed) do
+        case safe_float(trimmed) do
           {float, ""} -> {:ok, float}
           _ -> :error
         end
@@ -447,6 +530,33 @@ defmodule KilnCMS.CMS.Computed do
   end
 
   defp number(_value), do: :error
+
+  # Integers are arbitrary-precision on the BEAM but floats are not, so
+  # converting one that overflows a double raises ArithmeticError. Callers that
+  # need float maths check first and fall back rather than blanking the field.
+  defp to_float(number) when is_float(number), do: {:ok, number}
+
+  defp to_float(number) when is_integer(number) do
+    if number >= -@max_float and number <= @max_float, do: {:ok, number / 1}, else: :error
+  end
+
+  # `concat`/`join` are variadic over document values, so a formula that fits
+  # inside `@max_length` can still ask for ~400 copies of the body. Stop
+  # building once the result passes the cap: the value is stored in jsonb, in
+  # every PaperTrail version, and in the fired artifact, so an unbounded one is
+  # a memory-exhaustion lever for anyone who can define a field.
+  defp bounded_join(parts, separator) do
+    parts
+    |> Enum.reduce_while([], fn part, acc ->
+      acc = if acc == [], do: [part], else: [part, separator | acc]
+
+      if IO.iodata_length(acc) > @max_output, do: {:halt, :too_large}, else: {:cont, acc}
+    end)
+    |> case do
+      :too_large -> nil
+      acc -> acc |> Enum.reverse() |> IO.iodata_to_binary()
+    end
+  end
 
   defp words(text), do: text |> stringify() |> String.split(~r/\s+/u, trim: true)
 

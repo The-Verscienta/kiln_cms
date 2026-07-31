@@ -96,6 +96,10 @@ defmodule Kiln.FieldType do
           required(:key) => String.t(),
           required(:label) => String.t(),
           optional(:type) => String.t(),
+          # Whether this part carries the definition's `required` flag. Defaults
+          # to true; set false for a part that stays optional even when the
+          # field as a whole is required (a geolocation's place name or zoom).
+          optional(:required?) => boolean(),
           optional(:attrs) => %{optional(atom()) => term()}
         }
 
@@ -105,6 +109,13 @@ defmodule Kiln.FieldType do
   `<input>` of `c:input_type/0`.
   """
   @callback input_parts(definition :: struct()) :: [input_part()]
+
+  # `input_parts/1` was added after this contract shipped. `use Kiln.FieldType`
+  # defaults it, but a plugin that hand-rolls `@behaviour Kiln.FieldType` is
+  # explicitly sanctioned (`mix kiln.plugins.doctor` requires only `cast/2` and
+  # `name/0`), and such a module would otherwise fail to compile under
+  # `--warnings-as-errors` on upgrade. Optional here, defaulted there.
+  @optional_callbacks input_parts: 1
 
   defmacro __using__(_opts) do
     quote do

@@ -38,7 +38,15 @@ defmodule KilnCMS.Firing.Engine do
     # Custom fields are resolved once and shared by every surface: the read is
     # one query, and computed fields (#429) are recomputed exactly once per
     # fire rather than once per surface.
-    custom = KilnCMS.Firing.CustomFields.resolve(document, body_text(typed))
+    #
+    # `custom_fields: :as_stored` opts out of recomputation and of projecting
+    # onto the current definitions — for point-in-time reads, where deriving
+    # from today's formulas and today's field registry would report values that
+    # were never live at the requested instant.
+    custom =
+      KilnCMS.Firing.CustomFields.resolve(document, body_text(typed),
+        recompute?: Keyword.get(opts, :custom_fields, :recompute) == :recompute
+      )
 
     artifacts =
       Map.new(@surfaces, fn surface -> {surface, compose(document, typed, custom, surface)} end)
