@@ -1020,7 +1020,7 @@ msgstr "Vous êtes maintenant déconnecté"
 msgid "You need editor access to view that page."
 msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
 
-#: lib/kiln_cms_web/live/account_live.ex:140
+#: lib/kiln_cms_web/live/account_live.ex:234
 #: lib/kiln_cms_web/live/api_key_live.ex:110
 #: lib/kiln_cms_web/live/billing_live.ex:539
 #: lib/kiln_cms_web/live/billing_live.ex:607
@@ -1178,7 +1178,7 @@ msgstr "Notifications par e-mail"
 msgid "Embedded HTML or external content"
 msgstr "HTML intégré ou contenu externe"
 
-#: lib/kiln_cms_web/live/account_live.ex:231
+#: lib/kiln_cms_web/live/account_live.ex:349
 #: lib/kiln_cms_web/live/settings_live.ex:572
 #, elixir-autogen, elixir-format
 msgid "Export my data"
@@ -1373,7 +1373,7 @@ msgstr "Vous vous êtes déjà connecté d'une autre manière, mais vous n'avez 
 msgid "You need admin access to view that page."
 msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
 
-#: lib/kiln_cms_web/live/account_live.ex:225
+#: lib/kiln_cms_web/live/account_live.ex:343
 #: lib/kiln_cms_web/live/settings_live.ex:561
 #, elixir-autogen, elixir-format
 msgid "Your data"
@@ -2305,6 +2305,7 @@ msgid "Shown in your local timezone; stored as UTC."
 msgstr "Affiché dans votre fuseau horaire local ; stocké en UTC."
 
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex:7
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:95
 #, elixir-autogen, elixir-format
 msgid "Something went wrong"
 msgstr "Une erreur s'est produite"
@@ -3949,9 +3950,9 @@ msgstr "Laissez ce champ vide"
 msgid "Library (%{count} of %{total})"
 msgstr "Bibliothèque (%{count} sur %{total})"
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:25
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:37
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:74
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:127
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:139
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:176
 #, elixir-autogen, elixir-format
 msgid "Link not recognized"
 msgstr "Lien non reconnu"
@@ -4009,6 +4010,7 @@ msgid "New recovery codes generated — the old ones no longer work."
 msgstr "Nouveaux codes de récupération générés — les anciens ne fonctionnent plus."
 
 #: lib/kiln_cms_web/components/layouts.ex:432
+#: lib/kiln_cms_web/live/account_live.ex:319
 #: lib/kiln_cms_web/live/newsletter_live.ex:24
 #: lib/kiln_cms_web/live/newsletter_live.ex:287
 #, elixir-autogen, elixir-format
@@ -4832,7 +4834,7 @@ msgstr "Libellé de l'étape (facultatif)"
 msgid "Step-by-step guide, fired as HowTo structured data"
 msgstr "Guide pas à pas, publié en données structurées HowTo"
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:108
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:210
 #, elixir-autogen, elixir-format
 msgid "Stop sending newsletters to %{email}?"
 msgstr "Cesser d'envoyer des newsletters à %{email} ?"
@@ -4877,7 +4879,7 @@ msgstr "Abonné supprimé."
 msgid "Subscribers"
 msgstr "Abonnés"
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:84
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:186
 #, elixir-autogen, elixir-format
 msgid "Subscription confirmed"
 msgstr "Abonnement confirmé"
@@ -4919,7 +4921,7 @@ msgstr "Équipe"
 msgid "Test ping queued — see deliveries below."
 msgstr "Test mis en file d'attente — voir les envois ci-dessous."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:85
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:187
 #, elixir-autogen, elixir-format
 msgid "Thanks — your subscription to %{email} is confirmed."
 msgstr "Merci — votre abonnement pour %{email} est confirmé."
@@ -5021,7 +5023,7 @@ msgstr "Ces adresses ont renvoyé un rejet définitif et sont ignorées lors des
 msgid "Third"
 msgstr "Tiers"
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:75
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:177
 #, elixir-autogen, elixir-format
 msgid "This confirmation link is invalid or expired."
 msgstr "Ce lien de confirmation est invalide ou expiré."
@@ -5056,8 +5058,8 @@ msgstr "Ce lien d'aperçu a expiré"
 msgid "This site publishes its content over two headless API surfaces — GraphQL and JSON:API — plus a rendered-artifact endpoint for full page bodies. Anonymous requests read published content; a bearer token unlocks drafts."
 msgstr "Ce site publie son contenu via deux surfaces d'API headless — GraphQL et JSON:API — auxquelles s'ajoute un point de terminaison d'artefacts rendus pour les corps de page complets. Les requêtes anonymes lisent le contenu publié ; un jeton bearer donne accès aux brouillons."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:25
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:37
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:127
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:139
 #, elixir-autogen, elixir-format
 msgid "This unsubscribe link is invalid."
 msgstr "Ce lien de désabonnement est invalide."
@@ -5154,8 +5156,9 @@ msgstr "Photo Unsplash"
 msgid "Unsplash search failed — please try again."
 msgstr "La recherche Unsplash a échoué — veuillez réessayer."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:103
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:106
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:205
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:208
+#: lib/kiln_cms_web/live/account_live.ex:337
 #, elixir-autogen, elixir-format
 msgid "Unsubscribe"
 msgstr "Se désabonner"
@@ -5230,17 +5233,17 @@ msgstr "Qui peut créer quoi sur ce site : les membres, leur niveau de capacité
 msgid "Width"
 msgstr "Largeur"
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:112
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:214
 #, elixir-autogen, elixir-format
 msgid "Yes, unsubscribe"
 msgstr "Oui, me désabonner"
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:51
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:153
 #, elixir-autogen, elixir-format
 msgid "You won't receive further newsletters at %{email}."
 msgstr "Vous ne recevrez plus de newsletters à l'adresse %{email}."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex:50
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:152
 #, elixir-autogen, elixir-format
 msgid "You've been unsubscribed"
 msgstr "Vous avez été désabonné"
@@ -6535,17 +6538,17 @@ msgstr "Option par défaut sans configuration : collez le secret ici. Chiffré a
 msgid "never"
 msgstr "jamais"
 
-#: lib/kiln_cms_web/live/account_live.ex:149
+#: lib/kiln_cms_web/live/account_live.ex:243
 #, elixir-autogen, elixir-format
 msgid "Access ends on %{date}"
 msgstr "L'accès prend fin le %{date}"
 
-#: lib/kiln_cms_web/live/account_live.ex:178
+#: lib/kiln_cms_web/live/account_live.ex:272
 #, elixir-autogen, elixir-format
 msgid "Activating your membership…"
 msgstr "Activation de votre abonnement…"
 
-#: lib/kiln_cms_web/live/account_live.ex:143
+#: lib/kiln_cms_web/live/account_live.ex:237
 #, elixir-autogen, elixir-format
 msgid "Cancelled"
 msgstr "Résilié"
@@ -6555,7 +6558,7 @@ msgstr "Résilié"
 msgid "Checkout cancelled — you haven't been charged."
 msgstr "Paiement annulé — vous n'avez pas été débité."
 
-#: lib/kiln_cms_web/live/account_live.ex:141
+#: lib/kiln_cms_web/live/account_live.ex:235
 #, elixir-autogen, elixir-format
 msgid "Complimentary"
 msgstr "Offert"
@@ -6575,7 +6578,7 @@ msgstr "Créez un compte pour continuer."
 msgid "Create an account to join"
 msgstr "Créer un compte pour adhérer"
 
-#: lib/kiln_cms_web/live/account_live.ex:227
+#: lib/kiln_cms_web/live/account_live.ex:345
 #, elixir-autogen, elixir-format
 msgid "Download everything this site stores about your account."
 msgstr "Téléchargez toutes les données que ce site conserve sur votre compte."
@@ -6585,12 +6588,12 @@ msgstr "Téléchargez toutes les données que ce site conserve sur votre compte.
 msgid "Join"
 msgstr "Adhérer"
 
-#: lib/kiln_cms_web/live/account_live.ex:181
+#: lib/kiln_cms_web/live/account_live.ex:275
 #, elixir-autogen, elixir-format
 msgid "Join to read members-only writing."
 msgstr "Adhérez pour lire les articles réservés aux membres."
 
-#: lib/kiln_cms_web/live/account_live.ex:214
+#: lib/kiln_cms_web/live/account_live.ex:308
 #, elixir-autogen, elixir-format
 msgid "Manage billing"
 msgstr "Gérer la facturation"
@@ -6600,8 +6603,8 @@ msgstr "Gérer la facturation"
 msgid "Manage membership"
 msgstr "Gérer l'abonnement"
 
-#: lib/kiln_cms_web/live/account_live.ex:174
-#: lib/kiln_cms_web/live/account_live.ex:194
+#: lib/kiln_cms_web/live/account_live.ex:268
+#: lib/kiln_cms_web/live/account_live.ex:288
 #: lib/kiln_cms_web/live/membership_live.ex:27
 #: lib/kiln_cms_web/live/membership_live.ex:100
 #, elixir-autogen, elixir-format
@@ -6613,7 +6616,7 @@ msgstr "Abonnement"
 msgid "Memberships aren't set up on this site. Please check back later."
 msgstr "Les abonnements ne sont pas configurés sur ce site. Revenez plus tard."
 
-#: lib/kiln_cms_web/live/account_live.ex:180
+#: lib/kiln_cms_web/live/account_live.ex:274
 #, elixir-autogen, elixir-format
 msgid "No membership yet"
 msgstr "Aucun abonnement pour l'instant"
@@ -6623,28 +6626,28 @@ msgstr "Aucun abonnement pour l'instant"
 msgid "No plans available yet"
 msgstr "Aucune formule disponible pour l'instant"
 
-#: lib/kiln_cms_web/live/account_live.ex:142
+#: lib/kiln_cms_web/live/account_live.ex:236
 #, elixir-autogen, elixir-format
 msgid "Payment overdue"
 msgstr "Paiement en retard"
 
-#: lib/kiln_cms_web/live/account_live.ex:144
+#: lib/kiln_cms_web/live/account_live.ex:238
 #, elixir-autogen, elixir-format
 msgid "Pending"
 msgstr "En attente"
 
-#: lib/kiln_cms_web/live/account_live.ex:152
+#: lib/kiln_cms_web/live/account_live.ex:246
 #, elixir-autogen, elixir-format
 msgid "Renews on %{date}"
 msgstr "Renouvellement le %{date}"
 
-#: lib/kiln_cms_web/live/account_live.ex:218
+#: lib/kiln_cms_web/live/account_live.ex:312
 #, elixir-autogen, elixir-format
 msgid "See all plans"
 msgstr "Voir toutes les formules"
 
 #: lib/kiln_cms_web/controllers/content_html/teaser.html.heex:24
-#: lib/kiln_cms_web/live/account_live.ex:184
+#: lib/kiln_cms_web/live/account_live.ex:278
 #, elixir-autogen, elixir-format
 msgid "See plans"
 msgstr "Voir les formules"
@@ -6654,13 +6657,13 @@ msgstr "Voir les formules"
 msgid "Support this site and unlock members-only writing."
 msgstr "Soutenez ce site et accédez aux articles réservés aux membres."
 
-#: lib/kiln_cms_web/live/account_live.ex:59
-#: lib/kiln_cms_web/live/account_live.ex:115
+#: lib/kiln_cms_web/live/account_live.ex:84
+#: lib/kiln_cms_web/live/account_live.ex:140
 #, elixir-autogen, elixir-format
 msgid "Thanks for joining!"
 msgstr "Merci de votre adhésion !"
 
-#: lib/kiln_cms_web/live/account_live.ex:94
+#: lib/kiln_cms_web/live/account_live.ex:119
 #, elixir-autogen, elixir-format
 msgid "Thanks for joining! Your membership is being activated."
 msgstr "Merci de votre adhésion ! Votre abonnement est en cours d'activation."
@@ -6675,8 +6678,8 @@ msgstr "Cette formule n'est pas disponible."
 msgid "You don't have a membership to manage yet."
 msgstr "Vous n'avez pas encore d'abonnement à gérer."
 
-#: lib/kiln_cms_web/live/account_live.ex:36
-#: lib/kiln_cms_web/live/account_live.ex:169
+#: lib/kiln_cms_web/live/account_live.ex:60
+#: lib/kiln_cms_web/live/account_live.ex:263
 #, elixir-autogen, elixir-format
 msgid "Your account"
 msgstr "Votre compte"
@@ -6715,3 +6718,63 @@ msgstr "Cet article est réservé aux membres. Il ne peut être envoyé qu'au se
 #, elixir-autogen, elixir-format
 msgid "That segment no longer exists."
 msgstr "Ce segment n'existe plus."
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:116
+#, elixir-autogen, elixir-format
+msgid "Almost there"
+msgstr "Presque terminé"
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:108
+#, elixir-autogen, elixir-format
+msgid "Check that address"
+msgstr "Vérifiez cette adresse"
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:117
+#, elixir-autogen, elixir-format
+msgid "Check your inbox for a confirmation link. You won't receive anything until you click it."
+msgstr "Consultez votre boîte de réception : vous y trouverez un lien de confirmation. Vous ne recevrez rien tant que vous ne l'aurez pas cliqué."
+
+#: lib/kiln_cms_web/live/account_live.ex:196
+#, elixir-autogen, elixir-format
+msgid "Couldn't update your newsletter preference."
+msgstr "Impossible de mettre à jour votre préférence de newsletter."
+
+#: lib/kiln_cms_web/live/account_live.ex:329
+#, elixir-autogen, elixir-format
+msgid "Subscribe"
+msgstr "S'abonner"
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:109
+#, elixir-autogen, elixir-format
+msgid "That doesn't look like an email address. Please go back and try again."
+msgstr "Cela ne ressemble pas à une adresse e-mail. Revenez en arrière et réessayez."
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex:96
+#, elixir-autogen, elixir-format
+msgid "We couldn't sign you up just now. Please try again shortly."
+msgstr "Nous n'avons pas pu vous inscrire pour le moment. Veuillez réessayer dans quelques instants."
+
+#: lib/kiln_cms_web/live/account_live.ex:225
+#, elixir-autogen, elixir-format
+msgid "You're not receiving the newsletter."
+msgstr "Vous ne recevez pas la newsletter."
+
+#: lib/kiln_cms_web/live/account_live.ex:220
+#, elixir-autogen, elixir-format
+msgid "You're on the list but haven't confirmed yet, so nothing is being sent. Subscribe to start receiving it."
+msgstr "Vous êtes sur la liste mais vous n'avez pas encore confirmé, donc rien ne vous est envoyé. Abonnez-vous pour commencer à la recevoir."
+
+#: lib/kiln_cms_web/live/account_live.ex:216
+#, elixir-autogen, elixir-format
+msgid "You're receiving the newsletter at this address."
+msgstr "Vous recevez la newsletter à cette adresse."
+
+#: lib/kiln_cms_web/live/account_live.ex:166
+#, elixir-autogen, elixir-format
+msgid "You're subscribed to the newsletter."
+msgstr "Votre abonnement à la newsletter est actif."
+
+#: lib/kiln_cms_web/live/account_live.ex:175
+#, elixir-autogen, elixir-format
+msgid "You've been unsubscribed."
+msgstr "Votre désabonnement a bien été pris en compte."

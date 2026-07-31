@@ -1,10 +1,13 @@
 defmodule KilnCMSWeb.NewsletterController do
   @moduledoc """
-  Public newsletter endpoints: double-opt-in confirmation and unsubscribe.
+  Public newsletter endpoints: sign-up, double-opt-in confirmation, unsubscribe.
 
-  Authorized by an opaque per-subscriber token (not a session), so the actions
-  run `authorize?: false` behind token lookup — mirroring the preview/form
-  public surfaces.
+  Confirm and unsubscribe are authorized by an opaque per-subscriber token (not
+  a session), so the actions run `authorize?: false` behind token lookup —
+  mirroring the preview/form public surfaces. `subscribe/2` is anonymous by
+  nature and gets no authorization at all; what makes it safe is that it can
+  only ever create a `:pending` row, which receives nothing until the address
+  owner clicks the link mailed to them.
 
   Unsubscribe is split by verb so a *GET never mutates state* — an email link
   scanner/prefetcher following the footer link must not silently unsubscribe the
@@ -15,7 +18,106 @@ defmodule KilnCMSWeb.NewsletterController do
   """
   use KilnCMSWeb, :controller
 
+  require Logger
+
+  alias KilnCMS.Forms
   alias KilnCMS.Newsletter
+  alias KilnCMSWeb.Tenant
+
+  @doc """
+  `POST /newsletter/subscribe` — anonymous sign-up (issue #586).
+
+  Form-encoded `email` (required) and `name`; the on-site form is expected to
+  carry the shared honeypot input (`KilnCMS.Forms.honeypot_field/0`), whose
+  presence discards the submission with a *fake success*, exactly as public form
+  submissions do.
+
+  **Every outcome renders the same page.** Whether the address was new, already
+  confirmed, previously unsubscribed, or honeypotted, the response is "check
+  your email" — otherwise this endpoint becomes an oracle for whether a given
+  address subscribes to this site. Only a syntactically invalid address gets a
+  distinct response, since that leaks nothing about anyone.
+
+  Rate limiting is the `:form` bucket on the `:public_form` pipeline, which
+  bounds how fast anyone can make us mail an address they don't own.
+  """
+  def subscribe(conn, params) do
+    email = params |> Map.get("email", "") |> to_string() |> String.trim()
+
+    cond do
+      email == "" ->
+        invalid(conn)
+
+      # Honeypot tripped: report success, store nothing, mail nothing.
+      params[Forms.honeypot_field()] not in [nil, ""] ->
+        submitted(conn)
+
+      true ->
+        do_subscribe(conn, email, params["name"])
+    end
+  end
+
+  defp do_subscribe(conn, email, name) do
+    # Anonymous caller, so no actor: `authorize?: false` behind the tenant, like
+    # the confirm/unsubscribe writes below. The site is the request's own org
+    # (epic #336) — a subscriber belongs to one site.
+    case Newsletter.subscribe(%{email: email, name: name},
+           authorize?: false,
+           tenant: Tenant.current_org_id(conn)
+         ) do
+      {:ok, _subscriber} ->
+        submitted(conn)
+
+      {:error, %Ash.Error.Invalid{errors: errors}} ->
+        # A rejected address shape is the one failure worth telling the visitor
+        # about; anything else is ours, not theirs.
+        if Enum.any?(errors, &match?(%Ash.Error.Changes.InvalidAttribute{field: :email}, &1)) do
+          invalid(conn)
+        else
+          failed(conn, errors)
+        end
+
+      {:error, error} ->
+        failed(conn, List.wrap(error))
+    end
+  end
+
+  # Logs the error *classes* only. `inspect/1` on an Ash error carries the
+  # changeset, and with it the address someone just typed into a public form —
+  # which has no business in the log aggregator (see the privacy note on
+  # `KilnCMS.Mail`'s own reason redaction).
+  defp failed(conn, errors) do
+    classes = errors |> Enum.map(&error_class/1) |> Enum.uniq() |> Enum.join(", ")
+    Logger.warning("newsletter subscribe failed: #{classes}")
+
+    page(
+      conn,
+      gettext("Something went wrong"),
+      gettext("We couldn't sign you up just now. Please try again shortly.")
+    )
+  end
+
+  defp error_class(%struct{}), do: inspect(struct)
+  defp error_class(other) when is_atom(other), do: inspect(other)
+  defp error_class(_other), do: "unknown"
+
+  defp invalid(conn),
+    do:
+      page(
+        conn,
+        gettext("Check that address"),
+        gettext("That doesn't look like an email address. Please go back and try again.")
+      )
+
+  defp submitted(conn),
+    do:
+      page(
+        conn,
+        gettext("Almost there"),
+        gettext(
+          "Check your inbox for a confirmation link. You won't receive anything until you click it."
+        )
+      )
 
   # GET /newsletter/unsubscribe/:token — a confirmation page only (no state
   # change). The button POSTs to `unsubscribe/2` below.
