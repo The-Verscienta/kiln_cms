@@ -64,4 +64,40 @@ defmodule KilnCMSWeb.ArtifactPointInTimeTest do
     body = conn |> get("/api/content/post/#{the_slug}?as_of=#{yesterday}") |> json_response(404)
     assert hd(body["errors"])["code"] == "not_published"
   end
+
+  test "as_of inside an unpublish window reports withdrawn, not the prior publish", %{conn: conn} do
+    admin = admin()
+    the_slug = slug()
+
+    # Published, then taken down, then put back — ask about the gap between.
+    post = CMS.create_post!(%{title: "Live then pulled", slug: the_slug}, actor: admin)
+    post = CMS.publish_post!(post, %{}, actor: admin)
+    post = CMS.unpublish_post!(post, %{}, actor: admin)
+    dark = DateTime.utc_now() |> DateTime.to_iso8601()
+    CMS.publish_post!(post, %{}, actor: admin)
+
+    body = conn |> get("/api/content/post/#{the_slug}?as_of=#{dark}") |> json_response(404)
+
+    # Serving "Live then pulled" here would assert the content was published at
+    # a moment it had already been withdrawn.
+    assert hd(body["errors"])["code"] == "withdrawn"
+  end
+
+  test "the historical index and the per-document snapshot agree about a dark window", %{
+    conn: conn
+  } do
+    admin = admin()
+    the_slug = slug()
+
+    post = CMS.create_post!(%{title: "Withdrawn", slug: the_slug}, actor: admin)
+    post = CMS.publish_post!(post, %{}, actor: admin)
+    CMS.unpublish_post!(post, %{}, actor: admin)
+    dark = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    index = conn |> get("/api/content/post?as_of=#{dark}") |> json_response(200)
+    refute Enum.any?(index["entries"], &(&1["slug"] == the_slug))
+
+    # The index already excluded it; the snapshot must not contradict that.
+    conn |> get("/api/content/post/#{the_slug}?as_of=#{dark}") |> json_response(404)
+  end
 end

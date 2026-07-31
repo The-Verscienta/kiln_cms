@@ -22,15 +22,20 @@ default, `json_ld`, `web`), plus response headers:
 - `x-kiln-as-of` — the moment requested.
 - `x-kiln-published-at` — the **effective publish time** of the version served.
 
-`404 not_published` if nothing was published by that moment; `400 invalid_as_of`
-for an unparseable date.
+`400 invalid_as_of` for an unparseable date, and two distinct 404s:
+
+- `not_published` — nothing had been published by that moment.
+- `withdrawn` — it *had* been published, but was unpublished or archived
+  before `as_of` and not republished by then. See
+  [Withdrawn content](#withdrawn-content).
 
 ## How it works
 
 `KilnCMS.Firing.PointInTime`:
 
-1. Finds the last `:publish` / `:publish_scheduled` **PaperTrail version** at or
-   before `as_of` (versions are tagged with their action name).
+1. Finds the last **state transition** — publish *or* unpublish/archive — at or
+   before `as_of` (PaperTrail versions are tagged with their action name). An
+   unpublish means the document was dark then, and the read stops there.
 2. **Replays** the `:changes_only` version history up to that version to
    reconstruct the full published state (the same merge `RestoreVersion` uses).
 3. Re-fires that state through `KilnCMS.Firing.Engine` in **`:preview` mode** — no
@@ -61,15 +66,29 @@ Compiled types only (a dynamic type answers 404 — the documented later-phase
 boundary), and content whose history predates version tracking can't be
 reconstructed and is omitted.
 
+## Withdrawn content
+
+Publishing is not a one-way door: content gets taken down, corrected, and put
+back. If you ask what a document said on a date when it had been **withdrawn**,
+answering with the publish that preceded the withdrawal would assert the
+content was live at a moment it demonstrably wasn't — precisely the claim this
+endpoint exists to make truthfully, and the one a regulator would test.
+
+So the single-document read resolves the last *transition* (publish or
+unpublish/archive) rather than the last publish, and answers `404 withdrawn`
+inside a dark window. This matches what the collection index already did, so
+the two views can't contradict each other: a document absent from the index for
+a date can no longer serve content for that same date.
+
+Republishing reopens the window — `as_of` after the republish serves the
+republished state, as before.
+
 ## Scope & later phases
 
 - **Single-document lookup is by the current record's id** (resolved from the
   slug), so a since-deleted document's snapshot isn't reachable that way — use
   the collection index for discovery; id-addressable single-doc history is a
   later phase.
-- The single-document read's temporary-unpublish "dark window" still reports
-  the most recent publish (dark-window awareness is a later phase; the
-  collection index already accounts for it).
 - Compiled types (page/post/project types); dynamic (D17) entries are a later
   phase.
 - Pairs with **#356** (tamper-evident history + signed versions) and **#352**

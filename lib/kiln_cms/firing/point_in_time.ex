@@ -12,11 +12,15 @@ defmodule KilnCMS.Firing.PointInTime do
   firing engine in `:preview` mode — no DB write, no cache. It produces the same
   per-surface artifacts (`:web` / `:json` / `:json_ld`) as live delivery.
 
-  Phase 1 scope: lookup is by a document's id (the caller resolves it from the
-  *current* record), so content that has since been unpublished/removed isn't
-  reachable; and a temporary unpublish "dark window" still reports the most
-  recent publish. Id-addressable history and dark-window awareness are later
-  phases.
+  Both the single-document read and the collection index resolve the **last
+  state transition** at or before the requested moment, so a document that had
+  been withdrawn then is reported as withdrawn rather than serving the publish
+  that preceded the withdrawal.
+
+  Scope: lookup is by a document's id (the caller resolves it from the
+  *current* record), so content that has since been removed isn't reachable
+  that way — the collection index is the discovery path. Id-addressable
+  history is a later phase.
   """
   require Ash.Query
 
@@ -29,6 +33,7 @@ defmodule KilnCMS.Firing.PointInTime do
   # survive, but re-exposing deliberately erased content would be a privacy
   # regression.)
   @unpublish_actions [:unpublish, :unpublish_scheduled, :archive, :destroy]
+  @state_actions @publish_actions ++ @unpublish_actions
 
   @doc """
   The **collection view as of a date** (#338 phase 2): every document of
@@ -153,18 +158,24 @@ defmodule KilnCMS.Firing.PointInTime do
 
   @doc """
   The fired `surface` body for `resource`/`id` as published at or before
-  `as_of`, plus the effective publish time. `{:error, :not_published}` when
-  nothing was published by then.
+  `as_of`, plus the effective publish time.
+
+    * `{:error, :not_published}` — nothing had been published by then.
+    * `{:error, :withdrawn}` — it *had* been published, but was unpublished or
+      archived before `as_of` and not republished by then. Serving the earlier
+      publish here would assert that content was live at a moment it had
+      already been taken down — the exact claim this endpoint exists to make
+      truthfully.
   """
   @spec read(Ash.UUID.t(), module(), Ash.UUID.t(), atom(), DateTime.t()) ::
-          {:ok, map(), DateTime.t()} | {:error, :not_published}
+          {:ok, map(), DateTime.t()} | {:error, :not_published | :withdrawn}
   def read(org_id, resource, id, surface, %DateTime{} = as_of) do
     version_module = Module.concat(resource, Version)
 
     # Version rows inherit the source's tenant (epic #336), so the history reads
     # are scoped to this org; the rebuilt document is re-stamped with `org_id` so
     # the in-memory re-fire stays in the right tenant.
-    case last_publish(version_module, id, as_of, org_id) do
+    case last_transition(version_module, id, as_of, org_id) do
       {:ok, published_at} ->
         {:ok, artifacts} =
           version_module
@@ -174,24 +185,35 @@ defmodule KilnCMS.Firing.PointInTime do
 
         {:ok, Map.fetch!(artifacts, surface), published_at}
 
-      :error ->
-        {:error, :not_published}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  # The most recent publish at or before `as_of` — its timestamp bounds the replay.
-  defp last_publish(version_module, id, as_of, org_id) do
+  # The most recent publish/unpublish transition at or before `as_of`. A publish
+  # bounds the replay; an unpublish means the document was dark at that moment.
+  # Mirrors the `DISTINCT ON` pass behind `index/4` — the two views must agree
+  # on what "published then" means, or a document could be absent from the
+  # historical index while its own snapshot still served content.
+  defp last_transition(version_module, id, as_of, org_id) do
     version_module
     |> Ash.Query.filter(
       version_source_id == ^id and version_inserted_at <= ^as_of and
-        version_action_name in ^@publish_actions
+        version_action_name in ^@state_actions
     )
-    |> Ash.Query.sort(version_inserted_at: :desc)
+    # id tiebreaks a publish and an unpublish sharing a timestamp, as in index/4.
+    |> Ash.Query.sort(version_inserted_at: :desc, id: :desc)
     |> Ash.Query.limit(1)
     |> Ash.read(authorize?: false, tenant: org_id)
     |> case do
-      {:ok, [version]} -> {:ok, version.version_inserted_at}
-      _ -> :error
+      {:ok, [%{version_action_name: action} = version]} when action in @publish_actions ->
+        {:ok, version.version_inserted_at}
+
+      {:ok, [_unpublished]} ->
+        {:error, :withdrawn}
+
+      _none ->
+        {:error, :not_published}
     end
   end
 
