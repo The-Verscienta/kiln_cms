@@ -9,18 +9,37 @@ defmodule KilnCMS.Governance.Chain do
       chain_n = digest(%{"prev" => chain_n-1, "item" => digest(version_n)})
 
   so changing, removing, or reordering **any** anchored version changes the
-  final hash. Anchors are minted on publish (see
-  `KilnCMS.CMS.Changes.RecordPublishedVersion`) — the moments that matter for
-  compliance — and signed with the provenance signing key when configured
-  (`KilnCMS.Provenance.Signer` / `KilnCMS.Keys`), so the anchor row itself
-  can't be silently rewritten to match doctored history. Edits made after the
-  latest anchor are not yet covered (they anchor at the next publish); the
-  governance trail surfaces that window via `unanchored_tail/2`.
+  final hash. Anchors are signed with the provenance signing key when
+  configured (`KilnCMS.Provenance.Signer` / `KilnCMS.Keys`), so the anchor row
+  itself can't be silently rewritten to match doctored history.
 
-  Anchoring recomputes the full chain at each publish — O(version count).
-  Fine for editorial documents (tens to hundreds of versions); an incremental
-  fold seeded from the previous anchor is the follow-on if very hot documents
-  ever make publishes noticeably slower.
+  ## Anchors chain to each other
+
+  A new anchor is folded **incrementally, seeded from the previous anchor's
+  recorded `chain_hash`** — never recomputed from scratch over the live
+  version rows.
+
+  This is a correctness property, not an optimization. Re-folding from genesis
+  at each anchor would derive the new hash from whatever the version table
+  says *now*, so an attacker who doctored history and then waited for the next
+  publish would get a fresh, valid, correctly-signed anchor over the doctored
+  rows — and since `verify/4` checks the latest anchor, the tampering would
+  read as `:verified`. Seeding from the recorded hash means every anchor
+  transitively commits to every earlier one, so a doctored version can never
+  be re-blessed by a later write.
+
+  It is also O(new versions) rather than O(history), which is what makes
+  per-write anchoring affordable.
+
+  ## When anchors are minted
+
+  Always at publish (`KilnCMS.CMS.Changes.RecordPublishedVersion`) — the
+  moments that matter most for compliance. With `anchor_every_write: true`,
+  also after **every** versioned write (`KilnCMS.CMS.Changes.AnchorVersion`),
+  which closes the between-publish window #356 asks about. Off by default:
+  it costs one signature and one row per save, which a regulated deployment
+  wants and a blog does not. Either way the governance trail surfaces any
+  still-uncovered tail via `unanchored_tail/2`.
   """
   require Ash.Query
   require Logger
@@ -44,6 +63,13 @@ defmodule KilnCMS.Governance.Chain do
   def enabled?, do: Application.get_env(:kiln_cms, :audit_anchors_enabled, true)
 
   @doc """
+  Whether every versioned write is anchored, not just publishes (#356).
+  Default false — see the module docs on cost.
+  """
+  @spec every_write?() :: boolean()
+  def every_write?, do: Application.get_env(:kiln_cms, :audit_anchor_every_write, false)
+
+  @doc """
   Fold the document's versions (ascending) into the chain — all of them, or
   only the first `count` (the prefix an earlier anchor covered). Returns
   `%{chain_hash, version_count, last_version_id}`.
@@ -59,15 +85,27 @@ defmodule KilnCMS.Governance.Chain do
 
   @doc "Fold an already-loaded ascending version list into the chain shape."
   @spec fold([struct()]) :: map()
-  def fold(versions) do
+  def fold(versions), do: fold_from(@genesis, 0, versions)
+
+  @doc """
+  Fold `versions` onto an existing chain head — `seed` being the previous
+  anchor's recorded `chain_hash` and `offset` the version count it covered.
+
+  Folding all versions from genesis yields the same hash as folding the tail
+  onto an honest prefix, so this is interchangeable with `fold/1` on intact
+  history — and *not* interchangeable on doctored history, which is the point
+  (see the module docs).
+  """
+  @spec fold_from(String.t(), non_neg_integer(), [struct()]) :: map()
+  def fold_from(seed, offset, versions) do
     chain_hash =
-      Enum.reduce(versions, @genesis, fn version, prev ->
+      Enum.reduce(versions, seed, fn version, prev ->
         Canonical.digest(%{"prev" => prev, "item" => item_digest(version)})
       end)
 
     %{
       chain_hash: chain_hash,
-      version_count: length(versions),
+      version_count: offset + length(versions),
       last_version_id: versions |> List.last() |> then(&(&1 && &1.id))
     }
   end
@@ -78,9 +116,46 @@ defmodule KilnCMS.Governance.Chain do
   """
   @spec anchor(struct(), keyword()) :: :ok
   def anchor(record, opts \\ []) do
-    if enabled?() do
-      type = to_string(KilnCMS.Firing.Engine.document_type(record))
-      computed = compute(record.__struct__, record.id, record.org_id)
+    # allow_empty?: a publish anchor is recorded even when it covers no new
+    # versions, because it also carries the `published_version_id` linkage.
+    if enabled?(), do: mint(record, opts, true), else: :ok
+  rescue
+    error ->
+      Logger.error("History anchoring failed (publish unaffected): #{inspect(error)}")
+      :ok
+  end
+
+  @doc """
+  Extend the chain after a *non-publish* versioned write, when
+  `anchor_every_write` is on (#356). Same guarantees and the same never-raise
+  contract as `anchor/2`; publishes go through `anchor/2` instead so the
+  anchor also records `published_version_id`.
+  """
+  @spec extend(struct(), keyword()) :: :ok
+  def extend(record, opts \\ []) do
+    if enabled?() and every_write?(), do: mint(record, opts, false), else: :ok
+  rescue
+    error ->
+      Logger.error("History anchoring failed (write unaffected): #{inspect(error)}")
+      :ok
+  end
+
+  # Fold whatever is new since the latest anchor onto its recorded hash, and
+  # record + sign the result. Seeding from the recorded hash (rather than
+  # re-folding the live rows from genesis) is what stops a later write from
+  # re-blessing doctored history — see the module docs.
+  defp mint(record, opts, allow_empty?) do
+    type = to_string(KilnCMS.Firing.Engine.document_type(record))
+    previous = latest_anchor(type, record.id, record.org_id)
+    {seed, offset} = seed(previous)
+    fresh = versions(record.__struct__, record.id, :all, record.org_id, offset)
+
+    # Nothing new to cover: a second anchor over the identical prefix would say
+    # nothing. Publishes opt out — theirs carries `published_version_id`.
+    if fresh == [] and not is_nil(previous) and not allow_empty? do
+      :ok
+    else
+      computed = fold_from(seed, offset, fresh)
       {signature, key_id} = sign(anchor_payload(type, record.id, computed))
 
       CMS.create_history_anchor!(
@@ -89,7 +164,7 @@ defmodule KilnCMS.Governance.Chain do
           source_id: record.id,
           chain_hash: computed.chain_hash,
           version_count: computed.version_count,
-          last_version_id: computed.last_version_id,
+          last_version_id: computed.last_version_id || previous_last_version_id(previous),
           published_version_id: Map.get(record, :published_version_id),
           signature: signature,
           key_id: key_id,
@@ -100,14 +175,14 @@ defmodule KilnCMS.Governance.Chain do
       )
 
       :ok
-    else
-      :ok
     end
-  rescue
-    error ->
-      Logger.error("History anchoring failed (publish unaffected): #{inspect(error)}")
-      :ok
   end
+
+  defp seed(nil), do: {@genesis, 0}
+  defp seed(anchor), do: {anchor.chain_hash, anchor.version_count}
+
+  defp previous_last_version_id(nil), do: nil
+  defp previous_last_version_id(anchor), do: anchor.last_version_id
 
   @doc """
   Verify a document's history against its **latest** anchor:
@@ -221,13 +296,16 @@ defmodule KilnCMS.Governance.Chain do
   # ── internals ─────────────────────────────────────────────────────────────
 
   # Version twins are tenant-strict (#419) — the chain reads under the org.
-  defp versions(resource, source_id, count, org_id) do
+  # `offset` skips the prefix an earlier anchor already covered, so an
+  # incremental fold reads only what is new.
+  defp versions(resource, source_id, count, org_id, offset \\ 0) do
     query =
       Module.concat(resource, Version)
       |> Ash.Query.filter(version_source_id == ^source_id)
       |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
 
     query = if count == :all, do: query, else: Ash.Query.limit(query, count)
+    query = if offset > 0, do: Ash.Query.offset(query, offset), else: query
 
     Ash.read!(query, authorize?: false, tenant: org_id)
   end

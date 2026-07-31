@@ -61,10 +61,27 @@ Unlike the single-document read, the **index respects unpublish** — a list
 that included since-removed content would misrepresent the site as it stood.
 Bounded (`limit`, default 100, max 500) — the last-transition scan runs as one
 `DISTINCT ON` SQL pass, so cost scales with matching documents, never with
-total publish history — and results are server-cached for 5 minutes.
-Compiled types only (a dynamic type answers 404 — the documented later-phase
-boundary), and content whose history predates version tracking can't be
-reconstructed and is omitted.
+total publish history — and results are server-cached for 5 minutes. Content
+whose history predates version tracking can't be reconstructed and is omitted.
+
+## Dynamic (D17) types
+
+Dynamic types are served too, under their public type name. They need no
+special handling on the single-document read — the storage resource comes from
+the resolved record rather than the registry descriptor (a dynamic descriptor
+carries `resource: nil`).
+
+The **collection index** does need care: every dynamic type shares the
+`KilnCMS.CMS.Entry` table, so an unscoped historical index for one type would
+list every other type's documents. `index/4` takes a `:type_definition_id` and
+scopes on the **source row**, not the version `changes` map — a publish or
+unpublish version carries no `type_definition_id` in its diff (only the create
+version does), and the source row is the authority anyway since a document
+can't change type.
+
+Because the governance dashboard's "View as of then" links no longer have to
+be suppressed for dynamic entries, every publish row in a trail now links to
+its snapshot.
 
 ## Withdrawn content
 
@@ -89,7 +106,5 @@ republished state, as before.
   slug), so a since-deleted document's snapshot isn't reachable that way — use
   the collection index for discovery; id-addressable single-doc history is a
   later phase.
-- Compiled types (page/post/project types); dynamic (D17) entries are a later
-  phase.
 - Pairs with **#356** (tamper-evident history + signed versions) and **#352**
   (a governance dashboard that surfaces version diffs + point-in-time export).

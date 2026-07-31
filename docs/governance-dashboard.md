@@ -65,8 +65,8 @@ Phase 3 (closing #352):
   system jobs) are unattributed.
 - **Dynamic (D17) types** — entries appear in the index under their public
   type names and have full trails (chain anchors already keyed on the `:entry`
-  storage tier). Point-in-time links stay compiled-only (#338's documented
-  boundary), so the dashboard suppresses them for dynamic entries.
+  storage tier). Point-in-time delivery now covers them too, so every publish
+  row links to its snapshot — the earlier suppression is gone.
 - **CSV export** — the flat spreadsheet twin of the JSON export: one row per
   timeline event or consent, formula-escaped against CSV injection.
 
