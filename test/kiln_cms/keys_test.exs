@@ -57,6 +57,27 @@ defmodule KilnCMS.KeysTest do
       assert Keys.describe_error(:pkcs8_unsupported) =~ "openssl rsa"
     end
 
+    test "rsa_public_key_from_pem accepts either half and agrees on the key" do
+      pem = Keys.generate_rsa_pem()
+      {:ok, private_key} = Keys.rsa_private_key(pem)
+      public_pem = Keys.rsa_public_key_pem(private_key)
+
+      assert public_pem =~ "BEGIN PUBLIC KEY"
+      refute public_pem =~ "PRIVATE"
+
+      # A retired key published as its public half alone must resolve to the
+      # same key the private half would — that is what makes destroying the
+      # rotated-out private key safe (KilnCMS.Provenance.KeyRegistry).
+      assert {:ok, from_public} = Keys.rsa_public_key_from_pem(public_pem)
+      assert {:ok, from_private} = Keys.rsa_public_key_from_pem(pem)
+      assert from_public == from_private
+      assert Keys.rsa_public_key_der_b64(from_public) == elem(Keys.rsa_public_key_b64(pem), 1)
+    end
+
+    test "rsa_public_key_from_pem rejects garbage" do
+      assert {:error, :invalid_pem} = Keys.rsa_public_key_from_pem("not a key at all")
+    end
+
     test "selectors are DNS-label-safe and unique" do
       selectors = for _i <- 1..20, do: Keys.new_selector()
 

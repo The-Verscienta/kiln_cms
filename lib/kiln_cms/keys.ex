@@ -160,18 +160,56 @@ defmodule KilnCMS.Keys do
   @spec rsa_public_key_b64(binary()) :: {:ok, String.t()} | {:error, term()}
   def rsa_public_key_b64(pem) do
     with {:ok, key} <- decode_rsa_private_key(pem) do
-      modulus = elem(key, 2)
-      public_exponent = elem(key, 3)
-
-      {:SubjectPublicKeyInfo, der, :not_encrypted} =
-        :public_key.pem_entry_encode(
-          :SubjectPublicKeyInfo,
-          {:RSAPublicKey, modulus, public_exponent}
-        )
-
-      {:ok, Base.encode64(der)}
+      {:ok, key |> rsa_public_key() |> rsa_public_key_der_b64()}
     end
   end
+
+  @doc """
+  Decode an RSA **public** key from a PEM that may hold either half: a
+  SubjectPublicKeyInfo / PKCS#1 public key (`BEGIN PUBLIC KEY` / `BEGIN RSA
+  PUBLIC KEY`), or an RSA private key whose public half is derived.
+
+  Verification only ever needs the public half, so a *retired* signing key can
+  be registered as the public key alone and its private half destroyed
+  (`KilnCMS.Provenance.KeyRegistry`).
+  """
+  @spec rsa_public_key_from_pem(binary()) :: {:ok, tuple()} | {:error, term()}
+  def rsa_public_key_from_pem(pem) when is_binary(pem) do
+    case :public_key.pem_decode(pem) do
+      [{:SubjectPublicKeyInfo, _der, :not_encrypted} = entry | _rest] ->
+        case :public_key.pem_entry_decode(entry) do
+          {:RSAPublicKey, _modulus, _exponent} = key -> {:ok, key}
+          _other -> {:error, :not_an_rsa_public_key}
+        end
+
+      [{:RSAPublicKey, _der, :not_encrypted} = entry | _rest] ->
+        {:ok, :public_key.pem_entry_decode(entry)}
+
+      # No public entry — accept a private key PEM and derive the public half.
+      _other ->
+        with {:ok, private_key} <- decode_rsa_private_key(pem) do
+          {:ok, rsa_public_key(private_key)}
+        end
+    end
+  rescue
+    _e -> {:error, :invalid_pem}
+  end
+
+  @doc """
+  Base64 of the SubjectPublicKeyInfo DER for an RSA key record — accepts the
+  public record directly or a private one (public half derived). This DER is
+  what key fingerprints (`key_id`) are taken over.
+  """
+  @spec rsa_public_key_der_b64(tuple()) :: String.t()
+  def rsa_public_key_der_b64({:RSAPublicKey, _modulus, _exponent} = public_key) do
+    {:SubjectPublicKeyInfo, der, :not_encrypted} =
+      :public_key.pem_entry_encode(:SubjectPublicKeyInfo, public_key)
+
+    Base.encode64(der)
+  end
+
+  def rsa_public_key_der_b64(private_key),
+    do: private_key |> rsa_public_key() |> rsa_public_key_der_b64()
 
   @doc """
   Decode an RSA private key PEM to the `:public_key` record used by
@@ -190,12 +228,17 @@ defmodule KilnCMS.Keys do
     {:RSAPublicKey, elem(private_key, 2), elem(private_key, 3)}
   end
 
-  @doc "Encode an RSA private key's public half as a SubjectPublicKeyInfo PEM."
+  @doc """
+  Encode an RSA key's public half as a SubjectPublicKeyInfo PEM — accepts the
+  public record directly or a private one.
+  """
   @spec rsa_public_key_pem(tuple()) :: binary()
-  def rsa_public_key_pem(private_key) do
-    entry = :public_key.pem_entry_encode(:SubjectPublicKeyInfo, rsa_public_key(private_key))
-    :public_key.pem_encode([entry])
+  def rsa_public_key_pem({:RSAPublicKey, _modulus, _exponent} = public_key) do
+    :public_key.pem_encode([:public_key.pem_entry_encode(:SubjectPublicKeyInfo, public_key)])
   end
+
+  def rsa_public_key_pem(private_key),
+    do: private_key |> rsa_public_key() |> rsa_public_key_pem()
 
   @doc """
   A fresh DKIM selector, e.g. `kiln2026073f9ea1b2` — month-stamped for humans,
@@ -224,7 +267,13 @@ defmodule KilnCMS.Keys do
 
   def describe_error(:invalid_pem), do: "not a valid PEM-encoded private key"
   def describe_error(:not_an_rsa_private_key), do: "not an RSA private key"
+  def describe_error(:not_an_rsa_public_key), do: "not an RSA public key"
   def describe_error(:no_key_generated), do: "no key has been generated yet"
+
+  def describe_error({:unknown_key_id, key_id}),
+    do:
+      "signature was made by key #{key_id}, which is neither the active signing key " <>
+        "nor listed in :retired_keys — register its public half to keep verifying it"
 
   def describe_error(:decrypt_failed),
     do:

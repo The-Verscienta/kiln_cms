@@ -124,7 +124,9 @@ defmodule KilnCMSWeb.GovernanceLive do
         :if={@chain == :unverifiable}
         class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
       >
-        {gettext("History intact; anchor signed under a previous key (rotate-safe, not re-checkable)")}
+        {gettext(
+          "History intact; signed by a key we no longer hold — register its public half in :retired_keys to re-check"
+        )}
       </span>
       <span
         :if={@chain == :unanchored}

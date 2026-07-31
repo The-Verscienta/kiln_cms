@@ -118,29 +118,90 @@ defmodule KilnCMS.Governance.ChainTest do
     assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
   end
 
-  test "rotating the signing key yields :unverifiable, never a false TAMPERED" do
-    page = published_page(admin())
-    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
-
-    # Rotate: a different key is now configured; the old anchor's signature
-    # can't be checked, but intact history must not read as tampering.
-    rotated = KilnCMS.Keys.generate_rsa_pem()
-    var = "KILN_TEST_ROTATED_#{System.unique_integer([:positive])}"
-    System.put_env(var, rotated)
+  # Swap in a freshly generated signing key. Returns the PUBLIC half of the key
+  # that just got rotated out — what an operator would publish as a retired key.
+  defp rotate! do
     prev = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+    {:env, %{"var" => var}} = Keyword.fetch!(prev, :signing_key)
+    {:ok, outgoing} = KilnCMS.Keys.rsa_private_key(System.get_env(var))
+
+    rotated_var = "KILN_TEST_ROTATED_#{System.unique_integer([:positive])}"
+    System.put_env(rotated_var, KilnCMS.Keys.generate_rsa_pem())
 
     Application.put_env(
       :kiln_cms,
       KilnCMS.Provenance,
-      Keyword.merge(prev || [], signing_key: {:env, %{"var" => var}})
+      Keyword.merge(prev, signing_key: {:env, %{"var" => rotated_var}}, retired_keys: [])
     )
 
     on_exit(fn ->
       Application.put_env(:kiln_cms, KilnCMS.Provenance, prev)
-      System.delete_env(var)
+      System.delete_env(rotated_var)
     end)
 
+    KilnCMS.Keys.rsa_public_key_pem(outgoing)
+  end
+
+  defp register_retired!(entries) do
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Provenance,
+      Keyword.merge(Application.get_env(:kiln_cms, KilnCMS.Provenance), retired_keys: entries)
+    )
+  end
+
+  test "rotating the signing key yields :unverifiable, never a false TAMPERED" do
+    page = published_page(admin())
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+    # Rotate with the old key registered nowhere: the anchor's signature can't
+    # be checked, but intact history must not read as tampering.
+    rotate!()
+
     assert :unverifiable = Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
+  test "a retired key registered by its PUBLIC half keeps old anchors :verified" do
+    page = published_page(admin())
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+    # Rotate, but publish the retired key's public half — the private half can
+    # be destroyed and the historical trail still attests.
+    public_pem = rotate!()
+    refute public_pem =~ "PRIVATE"
+    register_retired!([public_pem])
+
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
+  test "holding the retired key does not launder a doctored anchor signature" do
+    page = published_page(admin())
+    register_retired!([rotate!()])
+
+    # The key_id still resolves (via the retired registry), so a signature that
+    # fails against it is real evidence — it must read TAMPERED, not the
+    # can't-check :unverifiable.
+    anchor = Chain.latest_anchor("page", page.id, page.org_id)
+    <<first, rest::binary>> = Base.decode64!(anchor.signature)
+    forged = <<Bitwise.bxor(first, 0xFF), rest::binary>>
+
+    KilnCMS.Repo.update_all(
+      from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+      set: [signature: Base.encode64(forged)]
+    )
+
+    assert {:tampered, "anchor signature does not verify"} =
+             Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
+  test "an unresolvable retired-key entry is skipped, not fatal" do
+    page = published_page(admin())
+    public_pem = rotate!()
+
+    # The good entry still resolves despite the broken one ahead of it.
+    register_retired!([{:file, %{"path" => "/nonexistent/kiln-retired.pem"}}, public_pem])
+
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
   end
 
   test "an unpublished draft is simply unanchored" do

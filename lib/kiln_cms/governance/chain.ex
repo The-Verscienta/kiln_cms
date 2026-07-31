@@ -113,19 +113,21 @@ defmodule KilnCMS.Governance.Chain do
   Verify a document's history against its **latest** anchor:
 
     * `:verified` — the anchored prefix recomputes to the anchored hash and
-      the anchor's signature checks out against the current signing key.
+      the anchor's signature checks out against the key it names (the active
+      signing key, or a registered retired one).
     * `:unsigned` — prefix intact, but the anchor carries no signature (no
       signing key was configured when it was minted).
-    * `:unverifiable` — prefix intact and the anchor IS signed, but the
-      signature was made under a different key than the one currently
-      configured (`key_id` mismatch — e.g. after a key rotation) or no key is
-      configured now, so it cannot be checked. Deliberately distinct from
-      tampering: a rotation must not turn the whole corpus red.
+    * `:unverifiable` — prefix intact and the anchor IS signed, but no key
+      matching the anchor's `key_id` is available: it was rotated out and
+      never registered in `retired_keys`, or no key is configured at all.
+      Deliberately distinct from tampering — we cannot attest this anchor, but
+      nothing says it is bad. Registering the retired key's public half
+      (`KilnCMS.Provenance.KeyRegistry`) turns these back into `:verified`.
     * `:unanchored` — the document has no anchors yet (never published since
       anchoring was enabled).
     * `{:tampered, reason}` — the anchored history no longer reproduces the
-      hash (altered/deleted/reordered versions), or a signature made under
-      the CURRENT key fails.
+      hash (altered/deleted/reordered versions), or the signature fails
+      against a key we DO hold. Not holding the key is `:unverifiable`, above.
 
   Only the anchored prefix is covered — edits since the last publish anchor
   at the next publish. Callers that need to show that window use
@@ -175,21 +177,26 @@ defmodule KilnCMS.Governance.Chain do
       is_nil(anchor.signature) ->
         :unsigned
 
-      not current_key?(anchor) ->
-        :unverifiable
-
-      signature_ok?(anchor, type, source_id) ->
-        :verified
-
       true ->
-        {:tampered, "anchor signature does not verify"}
+        signature_verdict(anchor, type, source_id)
     end
   end
 
-  # The anchor was signed by the key currently configured; only then is a
-  # failing signature evidence of tampering rather than rotation.
-  defp current_key?(anchor) do
-    match?({:ok, key_id} when key_id == anchor.key_id, Signer.key_id())
+  # Resolve the key the anchor says signed it (active or retired) and check
+  # against *that*. A failure under a key we hold is tampering; not holding the
+  # key at all is unverifiable — never red. See `Provenance.KeyRegistry`.
+  defp signature_verdict(anchor, type, source_id) do
+    payload =
+      anchor_payload(type, source_id, %{
+        chain_hash: anchor.chain_hash,
+        version_count: anchor.version_count
+      })
+
+    case Signer.verify(payload, anchor.signature, anchor.key_id) do
+      {:ok, true} -> :verified
+      {:ok, false} -> {:tampered, "anchor signature does not verify"}
+      {:error, _reason} -> :unverifiable
+    end
   end
 
   @doc """
@@ -256,15 +263,5 @@ defmodule KilnCMS.Governance.Chain do
     else
       _ -> {nil, nil}
     end
-  end
-
-  defp signature_ok?(anchor, type, source_id) do
-    payload =
-      anchor_payload(type, source_id, %{
-        chain_hash: anchor.chain_hash,
-        version_count: anchor.version_count
-      })
-
-    match?({:ok, true}, Signer.verify(payload, anchor.signature))
   end
 end

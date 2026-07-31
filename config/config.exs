@@ -435,7 +435,14 @@ config :kiln_cms, KilnCMS.Provenance,
   # Default AI disclosure when a document doesn't set custom_fields["ai_disclosure"]:
   # :human | :ai_assisted | :ai_generated.
   ai_disclosure: :human,
-  signing_key: {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}
+  signing_key: {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}},
+  # Keys that no longer sign but must still VERIFY: manifests and history
+  # anchors (#356) record the key that signed them, so without this a rotation
+  # would blind everything signed before it. Register the retired key's
+  # **public half** — that is all verification needs, so the old private key
+  # can be destroyed. Same provider tuples as `signing_key`, or a raw PEM.
+  #   retired_keys: [{:file, %{"path" => "/etc/kiln/keys/2025.pub.pem"}}]
+  retired_keys: []
 
 # Configure esbuild (the version is required)
 config :esbuild,

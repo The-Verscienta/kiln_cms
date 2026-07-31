@@ -160,24 +160,77 @@ defmodule KilnCMS.ProvenanceTest do
                Provenance.verify(forged, artifact.body)
     end
 
-    test "a signature from a different key does not verify" do
+    test "a bad signature under a key we hold is inauthentic" do
       {page, artifact} = fired_artifact(:json)
       {:ok, manifest} = Provenance.manifest_for(artifact, page)
 
-      # Rotate to a fresh key; the old signature must no longer verify.
-      other = KilnCMS.Keys.generate_rsa_pem()
-      var = "KILN_TEST_PROV_ROT_#{System.unique_integer([:positive])}"
-      System.put_env(var, other)
-      cfg = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+      # key_id still names the active key, so we CAN check the signature —
+      # and it fails. That is a forgery verdict, not an inconclusive one.
+      <<first, rest::binary>> = Base.decode64!(manifest["signature"]["value"])
+      forged_bytes = Base.encode64(<<Bitwise.bxor(first, 0xFF), rest::binary>>)
+      forged = put_in(manifest, ["signature", "value"], forged_bytes)
 
-      Application.put_env(
-        :kiln_cms,
-        KilnCMS.Provenance,
-        Keyword.put(cfg, :signing_key, {:env, %{"var" => var}})
-      )
-
-      assert {:ok, %{"authentic" => false}} = Provenance.verify(manifest, artifact.body)
-      System.delete_env(var)
+      assert {:ok, %{"verified" => false, "authentic" => false}} =
+               Provenance.verify(forged, artifact.body)
     end
+
+    test "after rotation an unregistered key is inconclusive, not inauthentic" do
+      {page, artifact} = fired_artifact(:json)
+      {:ok, manifest} = Provenance.manifest_for(artifact, page)
+
+      rotate!(retired: [])
+
+      # We no longer hold the key this manifest names. Reporting `authentic:
+      # false` here would be a false accusation against our own content.
+      assert {:error, {:unknown_key_id, key_id}} = Provenance.verify(manifest, artifact.body)
+      assert key_id == manifest["signature"]["key_id"]
+    end
+
+    test "a manifest signed before a rotation still verifies via the retired registry" do
+      {page, artifact} = fired_artifact(:json)
+      {:ok, manifest} = Provenance.manifest_for(artifact, page)
+
+      rotate!(retired: :previous)
+
+      assert {:ok, %{"verified" => true, "authentic" => true, "unaltered" => true}} =
+               Provenance.verify(manifest, artifact.body)
+    end
+
+    test "public_key_info lists the active key plus every retired one" do
+      rotate!(retired: :previous)
+
+      {:ok, info} = Provenance.Signer.public_key_info()
+      assert [%{"status" => "active"} = active, %{"status" => "retired"} = retired] = info["keys"]
+
+      # The top-level fields keep describing the active key (existing contract).
+      assert info["key_id"] == active["key_id"]
+      assert retired["key_id"] != active["key_id"]
+      assert retired["public_key_pem"] =~ "PUBLIC KEY"
+    end
+  end
+
+  # Rotate to a fresh signing key. `retired: :previous` publishes the outgoing
+  # key's public half so historical signatures keep verifying; `retired: []`
+  # simulates an operator who rotated without registering anything.
+  defp rotate!(opts) do
+    cfg = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+    {:env, %{"var" => var}} = Keyword.fetch!(cfg, :signing_key)
+    {:ok, outgoing} = KilnCMS.Keys.rsa_private_key(System.get_env(var))
+
+    rotated_var = "KILN_TEST_PROV_ROT_#{System.unique_integer([:positive])}"
+    System.put_env(rotated_var, KilnCMS.Keys.generate_rsa_pem())
+    on_exit(fn -> System.delete_env(rotated_var) end)
+
+    retired =
+      case Keyword.fetch!(opts, :retired) do
+        :previous -> [KilnCMS.Keys.rsa_public_key_pem(outgoing)]
+        list when is_list(list) -> list
+      end
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Provenance,
+      Keyword.merge(cfg, signing_key: {:env, %{"var" => rotated_var}}, retired_keys: retired)
+    )
   end
 end
