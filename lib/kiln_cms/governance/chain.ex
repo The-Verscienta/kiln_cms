@@ -346,18 +346,18 @@ defmodule KilnCMS.Governance.Chain do
          {:ok, key_id} <- Signer.key_id() do
       {signature, key_id}
     else
+      # Both Signer.sign/1 and Signer.key_id/0 spec {:ok, _} | {:error, term()},
+      # so this is the only reachable shape — a catch-all here is dead code that
+      # dialyzer rejects (pattern_match_cov).
+      #
+      # ASCII only: Logger escapes non-ASCII to \x{...}, which turns an em dash
+      # into noise in exactly the message an operator needs to read.
       {:error, reason} ->
-        # ASCII only: Logger escapes non-ASCII to \x{...}, which turns an em
-        # dash into noise in exactly the message an operator needs to read.
         Logger.warning(
           "History anchor stored UNSIGNED - provenance signing key unavailable: " <>
             KilnCMS.Keys.describe_error(reason)
         )
 
-        {nil, nil}
-
-      _other ->
-        Logger.warning("History anchor stored UNSIGNED - provenance signing key unavailable.")
         {nil, nil}
     end
   end
