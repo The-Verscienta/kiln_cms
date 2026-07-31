@@ -50,15 +50,27 @@ absent config is a no-op, so existing publishing is unchanged
 
 ## Scope & the rest of #356
 
-Phase 1 was the consent side of #356. The **tamper-evident audit log** phase 2
-shipped as **signed history anchors**: at every publish the document's full
-PaperTrail version chain is folded into a canonical hash and recorded
-append-only (`KilnCMS.CMS.HistoryAnchor`), RSA-signed via the #340 signing key
-when configured — see `KilnCMS.Governance.Chain`, `mix kiln.audit.verify`, and
-the chain status on the governance dashboard. Any later alteration, deletion,
-or reordering of anchored history is detected; edits after the newest anchor
-are covered at the next publish. Per-write chaining (an entry per version at
-write time, closing that between-publish window) remains the finer-grained
-follow-on. Consent recording now has a dashboard UI (#352). The publish gate
-is currently a single global required-kinds list; per-content-type
-requirements are a later phase.
+Phase 1 was the consent side of #356. The **tamper-evident audit log** shipped
+as **signed history anchors**: the document's PaperTrail version chain is
+folded into a canonical hash and recorded append-only
+(`KilnCMS.CMS.HistoryAnchor`), RSA-signed via the #340 signing key when
+configured — see `KilnCMS.Governance.Chain`, `mix kiln.audit.verify`, and the
+chain status on the governance dashboard. Any later alteration, deletion, or
+reordering of anchored history is detected.
+
+Two properties are worth knowing:
+
+- **Anchors chain to each other.** Each anchor is folded incrementally from
+  the *previous anchor's recorded hash*, never re-derived from the live
+  version rows. Re-deriving would let someone doctor history, wait for the
+  next publish, and receive a fresh valid anchor over the doctored rows —
+  laundering the tampering, since verification reads the latest anchor.
+- **Every write can be anchored.** `config :kiln_cms,
+  :audit_anchor_every_write, true` extends the chain after every versioned
+  write, not just at publish, closing the between-publish window (#356's
+  "sign every version"). Off by default: it costs one signature and one row
+  per save. The incremental fold keeps that cost flat as history grows.
+
+Consent recording now has a dashboard UI (#352). The publish gate is currently
+a single global required-kinds list; per-content-type requirements are a later
+phase.
