@@ -7,7 +7,12 @@
 # moved on its own, and could not be matched by the Dockerfile, which needs
 # exact tags. See #600.
 #
-# Changing these is a real change: bump, run `mix kiln.toolchain.check`, and
-# expect dialyzer to have opinions on an OTP major bump (#599).
+# Floor: Elixir must stay 1.19.3+. config/dev.exs uses the `E` (`:export`) regex
+# modifier on its live-reload patterns, which 1.18 cannot parse (#572).
+#
+# Changing these is a real change: bump, run `mix kiln.toolchain.check`, mirror
+# into the Dockerfile ARGs, and expect dialyzer to have opinions on an OTP major
+# bump (#599). setup-beam matches these strictly, so a version with no published
+# build for ubuntu-24.04 fails every job — check builds.hex.pm first.
 elixir 1.19.5-otp-27
 erlang 27.3.4.15

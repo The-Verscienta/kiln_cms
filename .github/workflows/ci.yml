@@ -18,12 +18,11 @@ permissions:
 
 env:
   MIX_ENV: test
-  # The toolchain lives in .tool-versions, which every setup-beam step reads via
-  # `version-file:`. It is deliberately NOT restated here: these env vars used to
-  # be "1.19"/"27", which setup-beam resolves to whatever is newest, so the
-  # toolchain CI actually tested drifted on its own and could never be matched by
-  # the Dockerfile's exact tags (#600). Must stay 1.19.3+: config/dev.exs uses the
-  # `E` (`:export`) regex modifier, which 1.18 cannot parse (#572).
+  # The toolchain is NOT declared here. It lives in .tool-versions, which every
+  # setup-beam step reads via `version-file:`. These used to be ELIXIR_VERSION
+  # "1.19" / OTP_VERSION "27" — loose, so setup-beam resolved them to whatever
+  # was newest and the toolchain CI actually tested drifted on its own, beyond
+  # anything the Dockerfile's exact tags could match (#600).
 
 jobs:
   build:
@@ -59,6 +58,10 @@ jobs:
           # restate the versions here; `mix kiln.toolchain.check` guards the
           # two places that genuinely cannot read it (mix.exs, Dockerfile).
           version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
 
       - name: Cache deps and _build
         uses: actions/cache@v5
@@ -166,6 +169,10 @@ jobs:
           # restate the versions here; `mix kiln.toolchain.check` guards the
           # two places that genuinely cannot read it (mix.exs, Dockerfile).
           version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
 
       - name: Cache deps and _build
         uses: actions/cache@v5
@@ -232,6 +239,10 @@ jobs:
           # restate the versions here; `mix kiln.toolchain.check` guards the
           # two places that genuinely cannot read it (mix.exs, Dockerfile).
           version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
 
       # Own cache: the dev build profile is distinct from the `build` job's
       # test profile (`consolidate_protocols` differs, and esbuild/tailwind are
@@ -272,6 +283,10 @@ jobs:
           # restate the versions here; `mix kiln.toolchain.check` guards the
           # two places that genuinely cannot read it (mix.exs, Dockerfile).
           version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
 
       - name: Cache deps and _build
         uses: actions/cache@v5
@@ -328,6 +343,10 @@ jobs:
           # restate the versions here; `mix kiln.toolchain.check` guards the
           # two places that genuinely cannot read it (mix.exs, Dockerfile).
           version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -422,6 +441,10 @@ jobs:
           # restate the versions here; `mix kiln.toolchain.check` guards the
           # two places that genuinely cannot read it (mix.exs, Dockerfile).
           version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
 
       - name: Cache deps and strict build
         uses: actions/cache@v5
@@ -498,6 +521,10 @@ jobs:
           # restate the versions here; `mix kiln.toolchain.check` guards the
           # two places that genuinely cannot read it (mix.exs, Dockerfile).
           version-file: .tool-versions
+          # Required by setup-beam whenever version-file is used: it refuses to
+          # guess. Suits us — .tool-versions carries exact versions precisely so
+          # the Dockerfile can mirror them.
+          version-type: strict
 
       - name: Cache deps and overlay build
         uses: actions/cache@v5
