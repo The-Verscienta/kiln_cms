@@ -143,7 +143,17 @@ agility of a live marketplace while staying compile-time-safe:
   a collection live" capability *without* code loading.
 - **Custom field types (`Kiln.FieldType`).** Plugin-contributed field types are
   compile-time code, but admins *select and configure* them per field at
-  runtime in the fields admin (`/editor/fields`).
+  runtime in the fields admin (`/editor/fields`). A type declares `cast/2`
+  plus how it edits: `input_type/0` + `input_attrs/1` for a single control, or
+  `input_parts/1` for a **composite** value rendered as one labelled input per
+  part and cast as a map.
+
+  Two implementations ship in-tree and are written against exactly this
+  contract rather than special-cased in the host, so they double as reference
+  examples: `KilnCMS.CMS.FieldTypes.Geolocation` (#428, composite) and
+  `KilnCMS.CMS.FieldTypes.Computed` (#429, derived). Their names are reserved —
+  `mix kiln.plugins.doctor` rejects a plugin that claims either, the same way
+  it rejects one claiming a core type.
 - **Declarative editorial automation (#342).** "When X, do Y" rules are Oban-
   backed **data**, authored in the admin UI — the safe substitute for the
   "run this script on publish" hooks that other marketplaces sell.

@@ -41,15 +41,20 @@ scoped by the type's name:
 | Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` — exactly like compiled types |
 
 Admin-defined **custom fields** are delivered in each entry's `custom_fields`
-map on every surface, and are **filterable/sortable** on the JSON:API and
-GraphQL list surfaces via `custom_filter`/`custom_sort` (see
+map on every surface — including the fired artifact's `json` surface — and are
+**filterable/sortable** on the JSON:API and GraphQL list surfaces via
+`custom_filter`/`custom_sort` (see
 [json-api.md](json-api.md) → "Custom fields"). Scalar fields are JSON-native values; `media` and
 `reference` fields are **write-time snapshots** — `{"id", "url", "alt"}` for
 media, `{"id", "type", "slug", "title"}` for references — so no extra
 resolution is needed to render them (fetch fresh content by `id`/`type` when
-you need more than the label). Per-type typed GraphQL/JSON:API schemas are
-deliberately not generated at runtime — promote the type to a compiled one
-when you need them.
+you need more than the label). A `geolocation` field is
+`{"lat", "lng"}` (plus optional `"zoom"`/`"label"`), and also appears on the
+`json_ld` surface as the document's `contentLocation`. A `computed` field is
+**derived server-side and read-only** — writing to its key is silently ignored,
+and the artifact always carries a freshly recomputed value. Per-type typed
+GraphQL/JSON:API schemas are deliberately not generated at runtime — promote
+the type to a compiled one when you need them.
 
 ## Why three different block shapes?
 

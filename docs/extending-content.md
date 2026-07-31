@@ -17,8 +17,11 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `help_text`, `position`, `default`). Field types: `:string`, `:text`,
-  `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`, `:select`.
+  `help_text`, `position`, `default`, `compute`). Field types: `:string`,
+  `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
+  `:select`, `:media`, `:reference`, `:geolocation`, `:computed` — plus
+  anything a plugin registers (see
+  [plugin-extensibility.md](plugin-extensibility.md)).
 - **Store**: values live in the `custom_fields` map on each content record.
 - **Validate**: `KilnCMS.CMS.Changes.ApplyCustomFields` runs on every write — it
   coerces values to the declared type, enforces `required`, checks `:select`
@@ -42,6 +45,65 @@ CMS.create_field_definition!(%{
 CMS.create_page!(%{title: "Aconite", slug: "aconite",
   custom_fields: %{"toxicity_level" => "high"}}, actor: editor)
 ```
+
+### Geolocation fields
+
+A `:geolocation` field stores a structured coordinate — `lat` and `lng`, plus
+an optional map `zoom` and a place `label`:
+
+```elixir
+CMS.create_field_definition!(%{
+  content_type: :page, name: "clinic", label: "Clinic location",
+  field_type: :geolocation
+}, actor: admin)
+
+CMS.create_page!(%{title: "Clinic", slug: "clinic",
+  custom_fields: %{"clinic" => %{"lat" => "51.5074", "lng" => "-0.1278"}}},
+  actor: editor)
+#=> %{"clinic" => %{"lat" => 51.5074, "lng" => -0.1278}}
+```
+
+The editor renders one labelled input per part. Writers may also post a
+`"51.5074, -0.1278"` string, which is what a `default` must be (that column is
+a plain string). Latitude is bounded to ±90 and longitude to ±180, so a
+transposed pair is usually caught rather than silently relocated.
+
+On the fired `:json_ld` surface each populated geolocation field becomes the
+document's `contentLocation` — a schema.org `Place` carrying `GeoCoordinates`
+— so structured data falls out of the type with no per-type wiring.
+
+### Computed fields
+
+A `:computed` field derives its value from the rest of the document instead of
+being typed by an editor. The definition carries a `compute` formula
+(`KilnCMS.CMS.Computed`):
+
+```elixir
+CMS.create_field_definition!(%{
+  content_type: :post, name: "reading_time", label: "Reading time",
+  field_type: :computed, compute: "{{ reading_time(body) }} min read"
+}, actor: admin)
+```
+
+- **Syntax**: literal text plus `{{ … }}` expressions. A template that is
+  *only* an expression keeps the native type (`{{ word_count(body) }}` → an
+  integer); anything else is string interpolation.
+- **References**: `title`, `slug`, `locale`, `excerpt`, `body` (the block
+  tree's plain text), `seo_title`, `seo_description`, `seo_keywords` — then the
+  record's other custom fields by name. `field.<name>` always means the custom
+  field, for names that collide with a document scalar.
+- **Functions**: `word_count`, `reading_time`, `char_count`, `slugify`,
+  `upcase`, `downcase`, `capitalize`, `trim`, `truncate`, `concat`, `join`,
+  `sum`, `product`, `min`, `max`, `subtract`, `divide`, `round`, `default`.
+  There is no `eval`: the allowlist *is* the sandbox, and an unknown function
+  or wrong arity fails when the **field is defined**, not silently per record.
+- **Read-only**: the write pass never consults the submitted payload, so a
+  computed field cannot be set through the editor, JSON:API, GraphQL or MCP.
+- **Evaluated twice**: on write (so the value is stored and participates in
+  search, embeddings and `custom_filter`/`custom_sort`) and again on fire (so
+  **editing a formula reaches published content on the next fire**, with no
+  re-save sweep). A stale stored value therefore never reaches an artifact.
+- **One pass**: a computed field never feeds another computed field.
 
 **When to use a real attribute instead.** Custom fields cover the long tail of
 editor-owned fields. A field that is core, needs a DB constraint/index, or is

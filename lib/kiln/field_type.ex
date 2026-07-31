@@ -37,8 +37,26 @@ defmodule Kiln.FieldType do
   it's stored in the `custom_fields` jsonb column and served on delivery
   as-is. The content editor renders the field as
   `<input type={input_type()} {input_attrs(definition)}>`, so standard HTML
-  input kinds (number, color, range, …) come free; a field type needing a
-  bespoke widget should ship an admin LiveView instead.
+  input kinds (number, color, range, …) come free.
+
+  ## Composite values
+
+  A type whose value is a **map of parts** (a coordinate pair, a price and a
+  currency) declares those parts with `c:input_parts/1`. The editor then
+  renders one labelled input per part, named into the field's own map
+  (`…[custom_fields][<field>][<part>]`), and `cast/2` receives that map —
+  string-keyed, values as submitted. `KilnCMS.CMS.FieldTypes.Geolocation` is
+  the worked example. A type needing more than a grid of inputs (a map picker,
+  a bespoke chooser) should ship an admin LiveView instead.
+
+  ## Built-in types
+
+  `:geolocation` and `:computed` ship in-tree and are implemented against this
+  very contract rather than special-cased in the host — they're the reference
+  implementations, and they register through
+  `KilnCMS.CMS.FieldTypes.builtin/0` exactly as a plugin's do through
+  `c:Kiln.Plugin.field_types/0`. Their names are reserved: a plugin may not
+  reuse them (`mix kiln.plugins.doctor`).
   """
 
   @doc """
@@ -69,6 +87,25 @@ defmodule Kiln.FieldType do
   """
   @callback input_attrs(definition :: struct()) :: %{optional(atom()) => term()}
 
+  @typedoc """
+  One part of a composite field's editor widget: the key it occupies inside the
+  field's value map, its label, its HTML input `type`, and any extra input
+  attributes.
+  """
+  @type input_part :: %{
+          required(:key) => String.t(),
+          required(:label) => String.t(),
+          optional(:type) => String.t(),
+          optional(:attrs) => %{optional(atom()) => term()}
+        }
+
+  @doc """
+  The parts of a **composite** value, rendered as one labelled input each and
+  submitted as a map under the field's own key. Defaults to `[]` — a single
+  `<input>` of `c:input_type/0`.
+  """
+  @callback input_parts(definition :: struct()) :: [input_part()]
+
   defmacro __using__(_opts) do
     quote do
       @behaviour Kiln.FieldType
@@ -97,7 +134,10 @@ defmodule Kiln.FieldType do
       @impl Kiln.FieldType
       def input_attrs(_definition), do: %{}
 
-      defoverridable name: 0, label: 0, input_type: 0, input_attrs: 1
+      @impl Kiln.FieldType
+      def input_parts(_definition), do: []
+
+      defoverridable name: 0, label: 0, input_type: 0, input_attrs: 1, input_parts: 1
     end
   end
 end

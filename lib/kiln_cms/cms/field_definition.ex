@@ -22,6 +22,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
   This deliberately does *not* replace hand-declared attributes: core, queryable,
   or strongly-typed fields still belong in the resource. It covers the long tail
   of editor-owned fields that would otherwise mean a migration per field.
+
+  Not every field is editor-filled: a `:computed` definition carries a
+  `compute` formula (`KilnCMS.CMS.Computed`) and derives its value from the
+  rest of the document instead (#429).
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -62,7 +66,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :target_type,
       :help_text,
       :position,
-      :default
+      :default,
+      :compute
     ]
 
     create :create, primary?: true
@@ -130,6 +135,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # A :reference field must target a known content type (compiled or dynamic).
     validate KilnCMS.CMS.Validations.ReferenceTarget
+
+    # A :computed field must carry a `compute` formula that parses — and no
+    # other type may carry one.
+    validate KilnCMS.CMS.Validations.ComputeExpression
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as the content
@@ -194,6 +203,12 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Optional default value (stored as a string, coerced to the field type when
     # an editor leaves the input blank).
     attribute :default, :string, public?: true
+
+    # The formula behind a `:computed` field (#429) — a `KilnCMS.CMS.Computed`
+    # template like `"{{ reading_time(body) }} min read"`, parsed and validated
+    # on save by `Validations.ComputeExpression` and interpreted on every write
+    # and every fire. Nil for every other field type.
+    attribute :compute, :string, public?: true
 
     timestamps()
   end

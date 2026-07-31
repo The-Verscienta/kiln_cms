@@ -2627,10 +2627,70 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # Everything else renders as a plain `<input>`. Plugin field types
-  # (`Kiln.FieldType`) pick their HTML input kind + extra attributes
-  # (min/max/step/…) via the registry; core types map below.
+  # Everything else is registry-driven. A composite field type
+  # (`Kiln.FieldType` declaring `input_parts/1`, e.g. `:geolocation`) renders a
+  # labelled input per part; anything else renders a single `<input>`.
   defp custom_field_input(assigns) do
+    case field_type_parts(assigns.definition) do
+      [] -> scalar_custom_field_input(assigns)
+      parts -> composite_custom_field_input(assign(assigns, :parts, parts))
+    end
+  end
+
+  # The composite parts a field type declares, or `[]` for core/scalar types.
+  # `input_parts/1` was added to `Kiln.FieldType` after the contract shipped and
+  # `use Kiln.FieldType` defaults it, but a hand-rolled `@behaviour` module from
+  # an out-of-tree plugin may predate it — fall back to a scalar input rather
+  # than crashing the editor on an undefined function.
+  defp field_type_parts(definition) do
+    with module when not is_nil(module) <- KilnCMS.CMS.FieldTypes.get(definition.field_type),
+         true <- function_exported?(module, :input_parts, 1) do
+      module.input_parts(definition)
+    else
+      _no_parts -> []
+    end
+  end
+
+  # Each part is named into the field's own map —
+  # `…[custom_fields][<field>][<part>]` — so the whole map arrives at `cast/2`
+  # as a unit. A fieldset rather than a label, because the group has several
+  # controls and only the legend names them all.
+  defp composite_custom_field_input(assigns) do
+    ~H"""
+    <fieldset>
+      <legend class="mb-1 block text-sm font-medium">{@definition.label}</legend>
+      <div class="grid grid-cols-2 gap-2">
+        <div :for={part <- @parts}>
+          <label
+            for={cf_part_id(@definition, part)}
+            class="mb-0.5 block text-xs text-base-content/70"
+          >
+            {part.label}
+          </label>
+          <input
+            id={cf_part_id(@definition, part)}
+            type={Map.get(part, :type, "text")}
+            name={"#{@name}[#{part.key}]"}
+            value={composite_part_value(@value, part.key)}
+            aria-invalid={@errors != [] && "true"}
+            aria-describedby={@errors != [] && cf_errors_id(@definition)}
+            class="field-input"
+            {Map.get(part, :attrs, %{})}
+          />
+        </div>
+      </div>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </fieldset>
+    """
+  end
+
+  # A plain `<input>`. Plugin and built-in field types (`Kiln.FieldType`) pick
+  # their HTML input kind + extra attributes (min/max/step/readonly/…) via the
+  # registry; core types map below.
+  defp scalar_custom_field_input(assigns) do
     definition = assigns.definition
 
     {input_type, extra} =
@@ -2685,6 +2745,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp cf_id(definition), do: "custom-field-#{definition.name}"
   defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
+  defp cf_part_id(definition, part), do: "custom-field-#{definition.name}-#{part.key}"
+
+  # One part of a composite value: the stored/mid-edit map's entry for that key.
+  # The value may still be the raw param map during a validate round-trip, so
+  # accept string keys only (jsonb and form params both give strings).
+  defp composite_part_value(value, key) when is_map(value), do: Map.get(value, key)
+  defp composite_part_value(_value, _key), do: nil
 
   # The current selection for a pick-list field: the stored snapshot's id, or
   # the raw id while a change is mid-validate.

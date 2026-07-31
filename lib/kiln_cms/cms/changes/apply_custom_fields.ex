@@ -28,6 +28,13 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   The form editor is unaffected: it renders an input for every definition and
   submits the complete map (blank for empties), so every key is "present" and
   clearing a field by emptying it still works exactly as before.
+
+  ## Computed fields are outside all of that
+
+  A `:computed` definition (#429) has no editor-supplied value at all. Those
+  fields resolve in a second pass, after the editable ones, from the document
+  and the values just coerced — and the payload is never consulted, so posting
+  a value under a computed field's key can't overwrite it.
   """
   use Ash.Resource.Change
 
@@ -39,7 +46,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
          Ash.Changeset.changing_attribute?(changeset, :custom_fields) do
       apply_definitions(changeset)
     else
-      changeset
+      # An update that never mentions `custom_fields` still has to refresh
+      # computed fields: their inputs are the *document* — a retitled page
+      # changes `{{ slugify(title) }}`, a reworded one changes reading time.
+      refresh_computed(changeset)
     end
   end
 
@@ -64,12 +74,71 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         _ -> stringify_keys(changeset.data.custom_fields || %{})
       end
 
+    # Computed fields (#429) are resolved in a second pass, after the editable
+    # ones: their formulas reference sibling values, so they must see the
+    # already-coerced results rather than raw params.
+    {computed, editable} = Enum.split_with(defs, &(&1.field_type == :computed))
+
     {cleaned, errors} =
-      Enum.reduce(defs, {%{}, []}, &accumulate(&1, supplied, existing, tenant, &2))
+      Enum.reduce(editable, {%{}, []}, &accumulate(&1, supplied, existing, tenant, &2))
+
+    {cleaned, errors} = apply_computed(computed, changeset, cleaned, errors)
 
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
+  end
+
+  # The computed-only path, for an update that changes the document but not
+  # `custom_fields`. It deliberately does **not** re-run the editable pass: a
+  # stored `:media`/`:reference` snapshot must not be re-resolved, and a
+  # since-changed definition must not reject a value the caller never sent.
+  #
+  # This costs one indexed definitions read per content update. The attribute
+  # is force-changed only when a computed value actually moved, so a write that
+  # derives nothing new stays byte-identical to before — no spurious version
+  # diff, no phantom "changed" attribute for anything downstream to react to.
+  defp refresh_computed(changeset) do
+    case changeset |> definitions_for() |> Enum.filter(&(&1.field_type == :computed)) do
+      [] -> changeset
+      computed -> recompute(changeset, computed)
+    end
+  end
+
+  defp recompute(changeset, computed) do
+    stored = stringify_keys(changeset.data.custom_fields || %{})
+    editable = Map.drop(stored, Enum.map(computed, & &1.name))
+    {cleaned, errors} = apply_computed(computed, changeset, editable, [])
+
+    if cleaned == stored and errors == [] do
+      changeset
+    else
+      changeset
+      |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
+      |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
+    end
+  end
+
+  # Derive every computed field from the document plus the editable values just
+  # resolved. The supplied payload is **not consulted**: a computed field is
+  # read-only everywhere (editor, JSON:API, GraphQL, MCP), so whatever a client
+  # posted under its key is discarded rather than trusted. A blank result skips
+  # the key, and `required` still applies — the same contract every other type
+  # has.
+  defp apply_computed([], _changeset, cleaned, errors), do: {cleaned, errors}
+
+  defp apply_computed(defs, changeset, cleaned, errors) do
+    context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleaned)
+
+    Enum.reduce(defs, {cleaned, errors}, fn def, {cleaned, errors} ->
+      value = KilnCMS.CMS.Computed.evaluate(def.compute || "", context)
+
+      cond do
+        not blank?(value) -> {Map.put(cleaned, def.name, value), errors}
+        def.required -> {cleaned, [error(def, "is required") | errors]}
+        true -> {cleaned, errors}
+      end
+    end)
   end
 
   # The definitions in scope: a compiled content type's (by its type atom) or,
@@ -273,6 +342,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   # --- helpers ---------------------------------------------------------------
+
+  # A composite value (a `Kiln.FieldType` declaring `input_parts/1`, e.g.
+  # `:geolocation`) submits a map of parts, and an untouched one submits a map
+  # of *blanks* — which is the field being empty, not a value to cast. Treating
+  # an all-blank map as blank keeps `required` and `default` working for
+  # composite types exactly as they do for scalars. A resolved `:media` /
+  # `:reference` snapshot always carries an id, so it is never blank by this
+  # rule.
+  defp blank?(value) when is_map(value), do: Enum.all?(Map.values(value), &blank?/1)
 
   defp blank?(value), do: value in [nil, ""] or (is_binary(value) and String.trim(value) == "")
 

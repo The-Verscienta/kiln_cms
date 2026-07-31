@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       read them straight from config, so the install step must add them);
     * block type names don't collide (across core and all plugins);
     * field-type modules implement `Kiln.FieldType` and their names don't
-      collide (across core and all plugins);
+      collide (across core, the built-in types, and all plugins);
     * plugin Oban queues don't redefine core queues;
     * nav paths and admin routes are well-formed (`/editor/...`).
 
@@ -133,7 +133,10 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         "#{plugin.name()}: field type #{inspect(mod)} does not implement Kiln.FieldType"
       end
 
-    core = KilnCMS.CMS.FieldTypes.core()
+    # Core types *and* the in-tree `Kiln.FieldType` implementations
+    # (`:geolocation`, `:computed`) are off limits — a plugin claiming either
+    # would shadow it in the registry.
+    reserved = KilnCMS.CMS.FieldTypes.reserved()
 
     collisions =
       declared
@@ -143,7 +146,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       |> Enum.group_by(fn {_plugin, mod} -> mod.name() end)
       |> Enum.flat_map(fn {name, owners} ->
         cond do
-          name in core -> ["field type #{inspect(name)} collides with a core field type"]
+          name in reserved -> ["field type #{inspect(name)} collides with a built-in field type"]
           length(owners) > 1 -> ["field type #{inspect(name)} declared by multiple plugins"]
           true -> []
         end
