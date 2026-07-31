@@ -48,9 +48,12 @@ Phase 1 was a read model over what the cluster already produces. Phase 2
 - **Side-by-side value diffs** — each timeline entry expands to old → new per
   changed field (strings verbatim, structures inspected + capped).
 - **Tamper-evidence** — the detail header shows the signed-anchor chain
-  verdict (`verified` / `intact-unsigned` / `unanchored` / `TAMPERED`), and the
-  JSON export carries it. Anchors are minted at publish
+  verdict (`verified` / `intact-unsigned` / `unverifiable` / `unanchored` /
+  `TAMPERED`), and the JSON export carries it. Anchors are minted at publish
   (`KilnCMS.Governance.Chain`); verify fleet-wide with `mix kiln.audit.verify`.
+  Anchors verify against the key that signed them, so rotating the signing key
+  doesn't turn the corpus `unverifiable` — register the outgoing key's public
+  half under `retired_keys` (see docs/provenance.md#key-rotation).
 - **Consent recording UI** — record a consent (kind / grantor / reference /
   note) directly from the trail page.
 

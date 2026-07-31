@@ -56,7 +56,7 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
       case verdict do
         :verified -> "VERIFIED"
         :unsigned -> "intact (unsigned)"
-        :unverifiable -> "intact (signed under a previous key)"
+        :unverifiable -> "intact (signed by an unregistered key — see :retired_keys)"
         {:tampered, reason} -> "TAMPERED — #{reason}"
       end
 

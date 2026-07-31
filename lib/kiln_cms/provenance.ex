@@ -116,22 +116,30 @@ defmodule KilnCMS.Provenance do
 
   @doc """
   Verify a manifest against an artifact `body`: the hash must match the body's
-  canonical digest (unaltered) and the signature must verify against the
-  configured public key (authentic). Returns a verdict map; both checks must
-  pass for `"verified" => true`.
+  canonical digest (unaltered) and the signature must verify (authentic).
+  Returns a verdict map; both checks must pass for `"verified" => true`.
+
+  The signature is checked against the key the manifest **names**
+  (`signature.key_id`), resolved through `KilnCMS.Provenance.KeyRegistry` — so
+  a manifest published before a key rotation still verifies, provided the
+  retired key's public half is registered. An unregistered `key_id` is an
+  error, not a `false` verdict: we cannot check it, which is not the same as
+  it being wrong.
   """
   @spec verify(map(), map()) :: {:ok, map()} | {:error, term()}
-  def verify(%{"signature" => %{"value" => signature}} = manifest, body) do
+  def verify(%{"signature" => %{"value" => signature} = signed} = manifest, body) do
     unsigned = Map.delete(manifest, "signature")
     expected_hash = get_in(manifest, ["artifact", "hash", "value"])
     unaltered = expected_hash == Canonical.digest(body)
 
-    with {:ok, authentic} <- Signer.verify(Canonical.encode(unsigned), signature) do
+    with {:ok, authentic} <-
+           Signer.verify(Canonical.encode(unsigned), signature, signed["key_id"]) do
       {:ok,
        %{
          "verified" => unaltered and authentic,
          "unaltered" => unaltered,
          "authentic" => authentic,
+         "key_id" => signed["key_id"],
          "claim" => manifest["claim"]
        }}
     end

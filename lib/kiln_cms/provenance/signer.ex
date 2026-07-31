@@ -10,9 +10,14 @@ defmodule KilnCMS.Provenance.Signer do
 
   Signatures are RSASSA-PKCS1-v1_5 over SHA-256 — deterministic, so re-deriving
   a manifest for the same immutable artifact yields the same signature.
+
+  Signing always uses the *active* key; verification resolves the key named by
+  the signature's `key_id` through `KilnCMS.Provenance.KeyRegistry`, so a
+  rotation doesn't invalidate what was signed before it.
   """
 
   alias KilnCMS.Keys
+  alias KilnCMS.Provenance.KeyRegistry
 
   @doc """
   Sign a canonical payload binary. Returns `{:ok, base64_signature}` or an
@@ -28,51 +33,65 @@ defmodule KilnCMS.Provenance.Signer do
   end
 
   @doc """
-  Verify a base64 signature over `payload` against the configured public key.
-  Returns a boolean; `{:error, reason}` only when the key can't be resolved.
+  Verify a base64 signature over `payload` using the key named by `key_id`.
+
+  `nil` (the default) means the active signing key. A `key_id` naming a
+  rotated-out key resolves through the retired registry, so historical
+  signatures keep verifying across rotations.
+
+  `{:ok, false}` is a signature that failed against a key we **do** hold —
+  evidence of tampering. `{:error, {:unknown_key_id, _}}` is a key we don't
+  hold at all, which says nothing either way; callers must not conflate them.
   """
-  @spec verify(binary(), String.t()) :: {:ok, boolean()} | {:error, term()}
-  def verify(payload, base64_signature) when is_binary(payload) do
-    with {:ok, pem} <- Keys.fetch(:provenance),
-         {:ok, private_key} <- Keys.rsa_private_key(pem),
-         {:ok, signature} <- decode_b64(base64_signature) do
-      public_key = Keys.rsa_public_key(private_key)
+  @spec verify(binary(), String.t(), String.t() | nil) :: {:ok, boolean()} | {:error, term()}
+  def verify(payload, base64_signature, key_id \\ nil)
+
+  def verify(payload, base64_signature, key_id) when is_binary(payload) do
+    with {:ok, signature} <- decode_b64(base64_signature),
+         {:ok, public_key} <- KeyRegistry.verifier(key_id) do
       {:ok, :public_key.verify(payload, :sha256, signature, public_key)}
     end
   end
 
   @doc """
-  The configured signing key's public half, for consumers to verify manifests
-  offline. Returns `{:ok, %{alg, key_id, public_key_pem, public_key_b64}}` where
-  `key_id` is a stable fingerprint of the SubjectPublicKeyInfo DER.
+  The public key material consumers need to verify manifests offline.
+
+  Returns `{:ok, %{alg, key_id, public_key_pem, public_key_b64, keys}}`. The
+  top-level fields describe the **active** key; `keys` lists every key that can
+  still verify something we published — the active one plus each registered
+  retired key — so a consumer holding a manifest signed before a rotation
+  looks its `signature.key_id` up here instead of failing.
   """
   @spec public_key_info() :: {:ok, map()} | {:error, term()}
   def public_key_info do
-    with {:ok, pem} <- Keys.fetch(:provenance),
-         {:ok, private_key} <- Keys.rsa_private_key(pem),
-         {:ok, der_b64} <- Keys.rsa_public_key_b64(pem) do
+    with {:ok, current} <- KeyRegistry.current() do
       {:ok,
        %{
          "alg" => "rsa-sha256",
-         "key_id" => key_id(der_b64),
-         "public_key_pem" => Keys.rsa_public_key_pem(private_key),
-         "public_key_b64" => der_b64
+         "key_id" => current.key_id,
+         "public_key_pem" => current.pem,
+         "public_key_b64" => current.der_b64,
+         "keys" => [
+           describe(current, "active") | Enum.map(KeyRegistry.retired(), &describe(&1, "retired"))
+         ]
        }}
     end
   end
 
-  @doc "Stable fingerprint of the signing key: `sha256:<hex>` over the SPKI DER."
+  @doc "Stable fingerprint of the active signing key: `sha256:<hex>` over the SPKI DER."
   @spec key_id() :: {:ok, String.t()} | {:error, term()}
   def key_id do
-    with {:ok, pem} <- Keys.fetch(:provenance),
-         {:ok, der_b64} <- Keys.rsa_public_key_b64(pem) do
-      {:ok, key_id(der_b64)}
-    end
+    with {:ok, current} <- KeyRegistry.current(), do: {:ok, current.key_id}
   end
 
-  defp key_id(der_b64) do
-    der = Base.decode64!(der_b64)
-    "sha256:" <> Base.encode16(:crypto.hash(:sha256, der), case: :lower)
+  defp describe(entry, status) do
+    %{
+      "key_id" => entry.key_id,
+      "alg" => "rsa-sha256",
+      "status" => status,
+      "public_key_pem" => entry.pem,
+      "public_key_b64" => entry.der_b64
+    }
   end
 
   defp decode_b64(str) do

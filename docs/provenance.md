@@ -76,7 +76,19 @@ GET /api/provenance/post/my-post?surface=json
 
 ```
 GET /api/provenance/public-key
+→ {
+    "alg": "rsa-sha256", "key_id": "sha256:…",       ← the ACTIVE key
+    "public_key_pem": "…", "public_key_b64": "…",
+    "keys": [                                         ← everything that still verifies
+      { "key_id": "sha256:…", "status": "active",  "public_key_pem": "…", … },
+      { "key_id": "sha256:…", "status": "retired", "public_key_pem": "…", … }
+    ]
+  }
 ```
+
+Match a manifest's `signature.key_id` against `keys[]` — that is what keeps
+manifests published before a key rotation verifiable (see
+[Key rotation](#key-rotation)).
 
 **Server-side verify** — a convenience verdict for the live artifact:
 
@@ -94,11 +106,46 @@ of the artifact bytes verifies without trusting our server:
    sorted lexicographically, no insignificant whitespace, SHA-256, Base64) and
    check it equals `artifact.hash.value` → **unaltered**.
 2. Rebuild the manifest without its `signature`, canonical-encode it, and verify
-   `signature.value` (RSASSA-PKCS1-v1_5 / SHA-256) against the published public
-   key → **authentic**.
+   `signature.value` (RSASSA-PKCS1-v1_5 / SHA-256) against the public key whose
+   `key_id` the manifest names → **authentic**.
 
 Both passing proves the content is exactly what we signed, at the stated version,
 with the stated AI disclosure.
+
+## Key rotation
+
+Signatures name the key that made them, and verification resolves *that* key —
+never "whatever is signing today". Rotating the signing key would otherwise
+blind everything signed before the rotation, which is the opposite of what an
+audit trail is for.
+
+So when you rotate, register the outgoing key's **public half**:
+
+```elixir
+config :kiln_cms, KilnCMS.Provenance,
+  signing_key: {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}},
+  retired_keys: [
+    {:file, %{"path" => "/etc/kiln/keys/2025-provenance.pub.pem"}},
+    {:env, %{"var" => "KILN_PROVENANCE_RETIRED_2024"}}
+  ]
+```
+
+Entries are `KilnCMS.Keys` provider tuples (`:env` / `:file`) or a raw PEM.
+The public half is all verification needs, so **the retired private key can be
+destroyed** — that is the point of registering the public one. A private key
+PEM is accepted too (public half derived), but publishing the public half is
+the better habit. Get the public half of a key you still hold with:
+
+```bash
+openssl rsa -in provenance.pem -pubout -out provenance.pub.pem
+```
+
+An entry that can't be read is logged and skipped, so one bad path can't take
+down verification for the keys that do resolve. A `key_id` matching nothing is
+reported as *unverifiable* — never as a failed signature: not holding a key
+says nothing about the content, and conflating the two would slander your own
+archive. `KilnCMS.Provenance.KeyRegistry` owns this resolution, and the
+tamper-evident history anchors (#356) verify through the same registry.
 
 ## AI-generation disclosure
 
@@ -118,15 +165,13 @@ reuses the DKIM RSA helpers in `KilnCMS.Keys`.
 - `KilnCMS.Provenance` — config + manifest build/verify.
 - `KilnCMS.Provenance.Canonical` — deterministic JSON + SHA-256 digest.
 - `KilnCMS.Provenance.Signer` — RSA sign/verify + public-key info via `KilnCMS.Keys`.
+- `KilnCMS.Provenance.KeyRegistry` — resolves which key verifies a given `key_id`.
 - `KilnCMSWeb.ProvenanceController` — the public endpoints.
 
 ## Scope & Phase 2
 
-This is a Phase-1 slice:
+Multi-key verification shipped (see [Key rotation](#key-rotation)). Still open:
 
-- **Single active signing key.** Rotation changes `key_id`; old cached manifests
-  verify only against the key that is current. A key registry (verify against
-  any of N historical public keys) is a follow-on.
 - **Stateless derivation.** Persisting the manifest at fire-time would pin the
   signer/key/disclosure *as of publish* (audit-grade, survives config changes)
   and let `/verify` detect server-side drift — a natural Phase-2 upgrade that
