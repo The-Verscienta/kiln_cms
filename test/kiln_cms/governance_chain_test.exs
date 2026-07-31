@@ -204,6 +204,113 @@ defmodule KilnCMS.Governance.ChainTest do
     assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
   end
 
+  test "a later publish cannot re-bless doctored history" do
+    actor = admin()
+    page = published_page(actor)
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+    KilnCMS.Repo.update_all(
+      from(v in "pages_versions",
+        where: v.version_source_id == type(^page.id, :binary_id),
+        where: v.version_action_name == "create"
+      ),
+      set: [changes: %{"title" => "Doctored"}]
+    )
+
+    assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
+
+    # Publishing again mints a fresh, correctly-signed anchor. If that anchor
+    # were re-folded from the LIVE rows it would match the doctored history and
+    # verify clean — laundering the tampering, since verify/4 reads the latest
+    # anchor. Seeding from the previous anchor's recorded hash prevents it.
+    page = KilnCMS.CMS.unpublish_page!(page, %{}, actor: actor)
+    page = KilnCMS.CMS.publish_page!(page, %{}, actor: actor)
+
+    assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
+  test "an incremental anchor agrees with a from-genesis fold on intact history" do
+    actor = admin()
+    page = published_page(actor)
+
+    page = KilnCMS.CMS.update_page!(page, %{title: "Second"}, actor: actor)
+    page = KilnCMS.CMS.unpublish_page!(page, %{}, actor: actor)
+    page = KilnCMS.CMS.publish_page!(page, %{}, actor: actor)
+
+    anchor = Chain.latest_anchor("page", page.id, page.org_id)
+
+    # verify/4 recomputes from genesis; the anchor was folded incrementally.
+    # They must coincide, or every existing anchor would start reading tampered.
+    assert Chain.compute(Page, page.id, page.org_id, anchor.version_count).chain_hash ==
+             anchor.chain_hash
+
+    assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+  end
+
+  describe "anchor_every_write" do
+    setup do
+      Application.put_env(:kiln_cms, :audit_anchor_every_write, true)
+      on_exit(fn -> Application.delete_env(:kiln_cms, :audit_anchor_every_write) end)
+      :ok
+    end
+
+    test "a plain draft edit is anchored, leaving no unanchored tail" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{title: "Draft", slug: "chain-w-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      # Never published — under publish-only anchoring this would be
+      # :unanchored, the window #356 asks about.
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      page = CMS.update_page!(page, %{title: "Edited"}, actor: actor)
+
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+      versions = Chain.compute(Page, page.id, page.org_id)
+      assert anchor.version_count == versions.version_count
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "the publish anchor still carries published_version_id" do
+      actor = admin()
+      page = published_page(actor)
+
+      # `:set_published_version_id` runs inside the publish pipeline's
+      # after_transaction. Anchoring it would swallow the publish's own version
+      # and leave RecordPublishedVersion nothing to anchor, silently dropping
+      # the #338 linkage — the publish-time anchor must still carry it.
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+      assert anchor.published_version_id
+      assert anchor.published_version_id == page.published_version_id
+    end
+
+    test "tampering with a write-anchored draft is still detected" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{title: "Draft", slug: "chain-w-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      CMS.update_page!(page, %{title: "Edited"}, actor: actor)
+
+      KilnCMS.Repo.update_all(
+        from(v in "pages_versions",
+          where: v.version_source_id == type(^page.id, :binary_id),
+          where: v.version_action_name == "create"
+        ),
+        set: [changes: %{"title" => "Doctored"}]
+      )
+
+      assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+  end
+
   test "an unpublished draft is simply unanchored" do
     draft =
       CMS.create_page!(

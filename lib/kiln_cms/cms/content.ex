@@ -1490,6 +1490,12 @@ defmodule KilnCMS.CMS.Content do
         # write API / MCP / GraphQL could set an admin-only field as an editor.
         # Checks the cast block tree in a before_action hook; admins exempt.
         change KilnCMS.CMS.Changes.EnforceBlockFieldPolicy, on: [:create, :update]
+
+        # Tamper-evident history (#356): with `audit_anchor_every_write` on,
+        # extend the signed anchor chain after every versioned write, closing
+        # the between-publish window. Off by default and skipped for publishes
+        # (RecordPublishedVersion anchors those) — see the change module.
+        change KilnCMS.CMS.Changes.AnchorVersion, on: [:create, :update, :destroy]
       end
 
       policies do
