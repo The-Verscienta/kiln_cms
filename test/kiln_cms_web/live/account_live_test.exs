@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.AccountLiveTest do
   alias KilnCMS.Accounts.User
   alias KilnCMS.Billing
   alias KilnCMS.CMS.Audiences
+  alias KilnCMS.Newsletter
 
   @password "password123456"
   @gated hd(Audiences.gated())
@@ -280,6 +281,91 @@ defmodule KilnCMSWeb.AccountLiveTest do
                live(conn, ~p"/account?checkout=success&session_id=cs_whatever")
 
       assert html =~ "Active"
+    end
+  end
+
+  describe "newsletter card (#586)" do
+    defp link_subscriber(user) do
+      Newsletter.link_member_subscriber!(
+        user.id,
+        %{email: to_string(user.email)},
+        authorize?: false,
+        tenant: default_org_id()
+      )
+    end
+
+    defp reload(subscriber),
+      do:
+        Newsletter.get_subscriber!(subscriber.id,
+          authorize?: false,
+          tenant: subscriber.org_id
+        )
+
+    test "no card at all for a member with no subscriber row", %{conn: conn} do
+      conn = log_in(conn, authed_user())
+
+      {:ok, _view, html} = live(conn, ~p"/account")
+
+      refute html =~ "Newsletter"
+    end
+
+    test "a PENDING member is told nothing is being sent, and can fix it", %{conn: conn} do
+      # The whole point of #586: `TierSync` links a paying member as `:pending`,
+      # and before this there was no path in the shipped app to `:confirmed` —
+      # so they sat in their tier's segment receiving nothing, permanently.
+      user = authed_user()
+      subscriber = link_subscriber(user)
+      assert subscriber.status == :pending
+
+      conn = log_in(conn, user)
+      {:ok, view, html} = live(conn, ~p"/account")
+
+      assert html =~ "Newsletter"
+      assert html =~ "haven&#39;t confirmed yet"
+
+      html = view |> element("button[phx-click=newsletter_subscribe]") |> render_click()
+
+      assert html =~ "You&#39;re receiving the newsletter"
+      assert reload(subscriber).status == :confirmed
+    end
+
+    test "a confirmed member can unsubscribe without touching their membership",
+         %{conn: conn} do
+      # Consent and entitlement are separate bits — opting out of email must
+      # leave paid content access alone.
+      user = authed_user()
+      m = membership(user, tier(), %{})
+      subscriber = link_subscriber(user)
+
+      {:ok, _} =
+        Newsletter.resubscribe_subscriber(subscriber, authorize?: false, tenant: m.org_id)
+
+      conn = log_in(conn, user)
+      {:ok, view, html} = live(conn, ~p"/account")
+      assert html =~ "You&#39;re receiving the newsletter"
+
+      html = view |> element("button[phx-click=newsletter_unsubscribe]") |> render_click()
+
+      assert html =~ "not receiving the newsletter"
+      assert reload(subscriber).status == :unsubscribed
+
+      {:ok, reloaded} = Billing.get_membership(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.status == :active
+    end
+
+    test "the card shows only THIS member's row, never another account's", %{conn: conn} do
+      # `:for_user` bypasses multitenancy and is policy-scoped rather than
+      # tenant-scoped, so the self-only filter is the whole boundary.
+      stranger = authed_user()
+      stranger_subscriber = link_subscriber(stranger)
+
+      user = authed_user()
+      conn = log_in(conn, user)
+
+      {:ok, _view, html} = live(conn, ~p"/account")
+
+      refute html =~ "Newsletter"
+      assert reload(stranger_subscriber).status == :pending
     end
   end
 end

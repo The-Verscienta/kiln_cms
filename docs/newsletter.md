@@ -14,9 +14,11 @@ newsletters — sending gated content to paying members — arrived with Phase 2
 ## What it does
 
 - **Subscribers** (`KilnCMS.Newsletter.Subscriber`) — external email addresses
-  with no login, distinct from `Accounts.User`. Double opt-in: a public
-  `:subscribe` creates a `:pending` subscriber; the confirmation link flips it
-  to `:confirmed`. Only confirmed subscribers are mailed.
+  with no login, distinct from `Accounts.User`. Double opt-in: `:subscribe`
+  creates a `:pending` subscriber and mails them a confirmation link
+  (`KilnCMS.Newsletter.Changes.SendConfirmationEmail`, queued on the `:mail`
+  queue like every other outbound message); clicking it flips them to
+  `:confirmed`. Only confirmed subscribers are mailed.
 - **Segments** (`KilnCMS.Newsletter.Segment`) — named groups of subscribers (the
   "send to audience X" axis). A segment may optionally reference a consumer
   `audience` as a label; it is **not** an access boundary. Membership lives in a
@@ -92,11 +94,43 @@ total worker concurrency to ~37 — size `POOL_SIZE` accordingly in production
 
 ## Public endpoints
 
-Token-authorized (no session), CSRF-free (`:public_form` pipeline):
+CSRF-free (`:public_form` pipeline) and rate-limited on the `:form` bucket:
 
+- `POST /newsletter/subscribe` — anonymous sign-up (`email`, optional `name`).
 - `GET  /newsletter/confirm/:token` — double-opt-in confirmation.
 - `GET  /newsletter/unsubscribe/:token` — unsubscribe (footer link).
 - `POST /newsletter/unsubscribe/:token` — RFC 8058 one-click unsubscribe.
+
+Everything but sign-up is authorized by an opaque per-subscriber token rather
+than a session. Sign-up needs no authorization because it can only ever produce
+a `:pending` row, which receives nothing until the address owner clicks the link
+mailed to them.
+
+### Signing up
+
+Post `email` (and optionally `name`) to `/newsletter/subscribe`. Include the
+shared honeypot input (`KilnCMS.Forms.honeypot_field/0` — `website`), which
+public form submissions already use; filling it yields a fake success.
+
+```html
+<form method="post" action="/newsletter/subscribe">
+  <input type="email" name="email" required />
+  <input type="text" name="website" tabindex="-1" autocomplete="off" hidden />
+  <button type="submit">Subscribe</button>
+</form>
+```
+
+**Every outcome renders the same "check your inbox" page** — new address,
+already confirmed, or previously unsubscribed. Otherwise the endpoint would
+answer "does this person subscribe to this site?" for any address. Only a
+malformed address gets a distinct response, since that leaks nothing.
+
+Sign-up is also **non-resurrecting**: `:subscribe` upserts with
+`upsert_fields [:name]`, so an existing row's status and tokens are untouched,
+and the confirmation mailer sends only when the resulting row is `:pending`. A
+confirmed subscriber is not re-mailed (that would make this a way to mail an
+arbitrary address on demand), and an unsubscribed one is neither mailed nor
+resurrected.
 
 Unsubscribe tokens are **stored and non-expiring**, so links in old newsletters
 keep working. Unsubscribe is treated as *consent* and is deliberately separate
@@ -136,5 +170,14 @@ not consent to marketing email, and this model is double opt-in throughout. If
 your policy and jurisdiction treat purchase as the consent event, that is a
 one-line change in `Subscriber`'s `:link_member` action. Only a **confirmed**
 email address is ever added to a list.
+
+Activating a membership sends **no** newsletter opt-in email: the person bought
+access, they didn't ask for a message. They turn it on themselves from the
+**newsletter card on `/account`**, which is the member-facing control for their
+own consent (`:resubscribe` / `:unsubscribe`). Those two actions plus `:for_user`
+are a **`bypass`** on the resource, not ordinary policies — Ash AND-combines
+policies, so as a policy the self-grant was narrowed to nothing by the blanket
+admin policy and every member-driven call came back forbidden. A failing bypass
+falls through, so admin management is unaffected.
 
 See [Paid memberships](memberships.md).

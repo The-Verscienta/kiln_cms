@@ -22,12 +22,36 @@ defmodule KilnCMSWeb.AccountLive do
   from the query string and is therefore attacker-suppliable; the ownership check
   is what makes acting on it safe. Nothing is ever granted from the query
   parameters themselves.
+
+  ## The newsletter card (issue #586)
+
+  `KilnCMS.Newsletter.TierSync` links an activating member's subscriber row as
+  **`:pending`** — a purchase is not consent to marketing email. Nothing in the
+  shipped app then moved that row to `:confirmed`, so a paying member sat in
+  their tier's segment receiving nothing, permanently. This card is the missing
+  control.
+
+  Wiring it up needed a policy fix, not just markup. `:resubscribe`,
+  `:unsubscribe` and `:for_user` were already scoped to `user_id ==
+  ^actor(:id)`, but as ordinary policies those self-grants were AND-narrowed to
+  nothing by the resource's blanket admin policy — a member is not an admin — so
+  the reads filtered to `[]` and the writes came back forbidden. They are a
+  `bypass` on `KilnCMS.Newsletter.Subscriber` now. The grant itself is unchanged
+  and still self-only; every call here passes the member as actor rather than
+  `authorize?: false`, so the policy — not this module — is what confines them
+  to their own row.
+
+  The card appears only when a subscriber row already exists for this site.
+  Opt-in from scratch is the public `POST /newsletter/subscribe` endpoint's job;
+  offering it here would mean granting a non-admin the `:subscribe` action,
+  which is a separate decision.
   """
   use KilnCMSWeb, :live_view
 
   require Logger
 
   alias KilnCMS.Billing
+  alias KilnCMS.Newsletter
 
   @impl true
   def mount(_params, _session, socket) do
@@ -35,7 +59,8 @@ defmodule KilnCMSWeb.AccountLive do
      socket
      |> assign(:page_title, gettext("Your account"))
      |> assign(:reconciling?, false)
-     |> load_memberships()}
+     |> load_memberships()
+     |> load_subscriber()}
   end
 
   @impl true
@@ -130,6 +155,75 @@ defmodule KilnCMSWeb.AccountLive do
     |> assign(:memberships, Enum.reject(all, &(&1.status == :incomplete)))
   end
 
+  # --- newsletter (issue #586) -----------------------------------------------
+
+  @impl true
+  def handle_event("newsletter_subscribe", _params, socket) do
+    {:noreply,
+     set_consent(
+       socket,
+       &Newsletter.resubscribe_subscriber/2,
+       gettext("You're subscribed to the newsletter.")
+     )}
+  end
+
+  def handle_event("newsletter_unsubscribe", _params, socket) do
+    {:noreply,
+     set_consent(
+       socket,
+       &Newsletter.unsubscribe_subscriber/2,
+       gettext("You've been unsubscribed.")
+     )}
+  end
+
+  # Guards the events against a client that fires them with no row loaded; the
+  # buttons only render when there is one.
+  defp set_consent(%{assigns: %{subscriber: nil}} = socket, _action, _flash), do: socket
+
+  defp set_consent(socket, action, flash) do
+    subscriber = socket.assigns.subscriber
+
+    # The row's OWN org, not the socket's: `:for_user` reads across sites
+    # (`multitenancy :bypass`), so re-scoping the write to the request's tenant
+    # would be a guess. Actor, not `authorize?: false` — the self-scoping policy
+    # is the check.
+    case action.(subscriber, actor: socket.assigns.current_user, tenant: subscriber.org_id) do
+      {:ok, _updated} ->
+        socket |> load_subscriber() |> put_flash(:info, flash)
+
+      {:error, reason} ->
+        Logger.warning("account: newsletter consent update failed: #{inspect(reason)}")
+        put_flash(socket, :error, gettext("Couldn't update your newsletter preference."))
+    end
+  end
+
+  # The member's subscriber row for THIS site, if they have one. `:for_user`
+  # spans organizations by design (one account, one row per site it belongs to),
+  # so the current org is filtered for here rather than passed as a tenant.
+  defp load_subscriber(socket) do
+    user = socket.assigns.current_user
+    org_id = org_id(socket) || KilnCMS.Accounts.default_org_id()
+
+    subscriber =
+      user.id
+      |> Newsletter.subscribers_for_user!(actor: user)
+      |> Enum.find(&(&1.org_id == org_id))
+
+    assign(socket, :subscriber, subscriber)
+  end
+
+  defp newsletter_line(%{status: :confirmed}),
+    do: gettext("You're receiving the newsletter at this address.")
+
+  defp newsletter_line(%{status: :pending}),
+    do:
+      gettext(
+        "You're on the list but haven't confirmed yet, so nothing is being sent. Subscribe to start receiving it."
+      )
+
+  defp newsletter_line(_subscriber),
+    do: gettext("You're not receiving the newsletter.")
+
   defp org_id(socket), do: socket.assigns.current_org && socket.assigns.current_org.id
 
   defp status_variant(:active), do: "success"
@@ -219,6 +313,30 @@ defmodule KilnCMSWeb.AccountLive do
                 </.link>
               </div>
           <% end %>
+        </section>
+
+        <section :if={@subscriber} class="card card-pad space-y-3">
+          <h2 class="text-lg font-medium">{gettext("Newsletter")}</h2>
+          <p class="text-sm text-base-content/70">{newsletter_line(@subscriber)}</p>
+
+          <div>
+            <button
+              :if={@subscriber.status != :confirmed}
+              type="button"
+              phx-click="newsletter_subscribe"
+              class="btn btn-primary btn-sm"
+            >
+              {gettext("Subscribe")}
+            </button>
+            <button
+              :if={@subscriber.status == :confirmed}
+              type="button"
+              phx-click="newsletter_unsubscribe"
+              class="btn btn-default btn-sm"
+            >
+              {gettext("Unsubscribe")}
+            </button>
+          </div>
         </section>
 
         <section class="card card-pad space-y-2">

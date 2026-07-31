@@ -6,9 +6,10 @@ defmodule KilnCMS.Newsletter.Subscriber do
   the public confirm/unsubscribe links.
 
   Double opt-in: a public `:subscribe` lands on `:pending` and mails a
-  confirmation link; clicking it (`:confirm`) flips to `:confirmed`, and only
-  confirmed subscribers are mailed. `:unsubscribe` is honoured indefinitely via
-  a stored (non-expiring) token so links in old newsletters keep working.
+  confirmation link (`KilnCMS.Newsletter.Changes.SendConfirmationEmail`);
+  clicking it (`:confirm`) flips to `:confirmed`, and only confirmed subscribers
+  are mailed. `:unsubscribe` is honoured indefinitely via a stored
+  (non-expiring) token so links in old newsletters keep working.
 
   Admin-managed; the public subscribe/confirm/unsubscribe flows run
   `authorize?: false` behind token verification (mirroring
@@ -43,9 +44,16 @@ defmodule KilnCMS.Newsletter.Subscriber do
       upsert_identity :unique_email
       upsert_fields [:name]
 
+      validate KilnCMS.Newsletter.Validations.EmailAddress
+
       change set_attribute(:status, :pending)
       change set_attribute(:confirm_token, &KilnCMS.Newsletter.Subscriber.generate_token/0)
       change set_attribute(:unsubscribe_token, &KilnCMS.Newsletter.Subscriber.generate_token/0)
+
+      # The half of double opt-in that was missing until #586: mail the link.
+      # Only a `:pending` result is mailed, so the upsert above stays
+      # non-resurrecting — see the change's moduledoc.
+      change KilnCMS.Newsletter.Changes.SendConfirmationEmail
     end
 
     # Link a paying member to their subscriber row (#337 Phase 2).
@@ -156,18 +164,20 @@ defmodule KilnCMS.Newsletter.Subscriber do
     # A signed-in member manages their OWN newsletter consent from `/account`.
     # Scoped to their linked row, so this grants nothing over anyone else's.
     #
-    # The admin grant is repeated here on purpose: Ash AND-combines every
-    # applicable policy, so a self-only policy on `:unsubscribe` would NARROW the
-    # blanket admin grant below and stop an admin unsubscribing anyone — the same
-    # trap the comment on the write policies warns about.
-    policy action([:resubscribe, :unsubscribe]) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      authorize_if expr(user_id == ^actor(:id))
-    end
-
-    policy action(:for_user) do
-      authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      authorize_if expr(user_id == ^actor(:id))
+    # A BYPASS, not a `policy` (#586). Ash AND-combines every applicable policy,
+    # so as a plain policy this was silently narrowed to nothing by the blanket
+    # admin policy below — a member is not an admin, so `:resubscribe` came back
+    # Forbidden and `:for_user` filtered to `[]`. That is the same trap the note
+    # on the write policies warns about, one level up: repeating the admin grant
+    # here doesn't help, because the *self* grant is the one being ANDed away.
+    # A passing bypass short-circuits the rest; a failing one falls through, so
+    # an admin still reaches these actions via the blanket policy.
+    #
+    # `not is_nil(user_id)` is load-bearing: without it an actor-less caller
+    # templates `^actor(:id)` to nil and the check reduces to `user_id == nil`,
+    # which would match every unlinked subscriber row on the site.
+    bypass action([:resubscribe, :unsubscribe, :for_user]) do
+      authorize_if expr(not is_nil(user_id) and user_id == ^actor(:id))
     end
 
     # Admin-only management. Public subscribe/confirm/unsubscribe and the send
