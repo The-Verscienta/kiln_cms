@@ -49,8 +49,13 @@ defmodule KilnCMS.Firing.ReferenceEdge do
   end
 
   policies do
+    # The edge table is the link graph, including edges whose source is an
+    # unpublished draft — an enumeration surface that says which documents exist
+    # and reference each other. It was world-readable (#565); nothing outside the
+    # re-fire wave reads it, and the wave runs as the system (authorize?: false),
+    # so editors-and-up is the whole legitimate audience.
     policy action_type(:read) do
-      authorize_if always()
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type([:create, :update, :destroy]) do

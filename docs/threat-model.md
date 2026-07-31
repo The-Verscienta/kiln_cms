@@ -230,24 +230,28 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    loads with `authorize?: false` and no tenant, and `live_session
    :token_preview` carries no `on_mount` hooks, so the preview LiveView has no
    `:current_org`. Token validity and expiry are the whole control.
-6. **Four resources are world-readable by policy** —
-   `Firing.PublishedArtifact`, `Firing.ReferenceEdge`, `CMS.FormField`, and
-   `Search.BlockEmbedding` all declare `authorize_if always()` on reads. Each is
-   deliberate and none is exposed through `json_api`/`graphql` directly, so
-   reachability is via internal code paths. The notable one is
-   `PublishedArtifact`: it holds *rendered* bodies, so the audience axis
-   enforced on `Content` is not re-enforced at the artifact tier. Tightening
-   these means touching the firing engine, search indexer and form rendering,
-   and was deliberately left out of #51. Tracked in #565.
+6. ~~**Four resources are world-readable by policy.**~~ **Closed in #565.**
+   `Firing.PublishedArtifact`, `Firing.ReferenceEdge`, `CMS.FormField` and
+   `Search.BlockEmbedding` no longer declare `authorize_if always()` on reads:
 
-   **Raised in importance by #337 Phase 2**, since gated content is now *paid*
-   rather than merely restricted. It is still not exploitable over HTTP: every
-   path to an artifact body — `ArtifactController` and `ProvenanceController`
-   alike — first resolves the record through the audience-gated
-   `Firing.Delivery.published/4`, so a gated artifact cannot be fetched. The
-   paywall teaser deliberately does **not** read artifacts, precisely so it does
-   not become the first caller that would. The gap is that a *future* internal
-   caller could read one without that resolution.
+   - `PublishedArtifact` — the one that mattered, because it holds *rendered*
+     bodies and #337 Phase 2 made gated content *paid* rather than merely
+     restricted. Its read now runs `Firing.Checks.DocumentReadable`, which
+     re-reads the source document under the caller's own authorization, so the
+     audience axis holds at the artifact tier too. It was never exploitable over
+     HTTP (every path resolved the record through the audience-gated
+     `Firing.Delivery.published/4` first); what is closed is the *future*
+     internal caller that would have read one without that resolution.
+   - `ReferenceEdge`, `BlockEmbedding` — enumeration surfaces (the link graph
+     including draft sources; `ancestor_context` block text from every indexed
+     document), now editor-and-up.
+   - `FormField` — reads now filter on `form.active == true`, mirroring the
+     parent `Form`'s visibility instead of relying on it being enforced
+     elsewhere.
+
+   Delivery, the re-fire wave, the indexer and form rendering were unaffected
+   because they read as the system (`authorize?: false`). See
+   [`policy-matrix.md`](policy-matrix.md) for the resulting grants.
 7. **Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**
    Policies still run, so the audience and published filters hold, but the
    tenant boundary does not for that request.

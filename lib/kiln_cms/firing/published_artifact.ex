@@ -66,10 +66,25 @@ defmodule KilnCMS.Firing.PublishedArtifact do
   end
 
   policies do
-    # Fired artifacts are public output; writes happen only via the firing engine
-    # (which runs authorize?: false), so they're forbidden through normal policy.
+    # Writes happen only via the firing engine (which runs authorize?: false), so
+    # they're forbidden through normal policy.
+    #
+    # Reads re-enforce the **audience axis** one layer down (#565). An artifact
+    # carries the rendered body of its document, so `authorize_if always()` here
+    # made the gate on `Content` — published + `:public`, or an audience the
+    # reader holds — moot for anyone who could reach this resource. The check
+    # delegates to the document's own read policy rather than restating it; see
+    # `Checks.DocumentReadable` for why that beats denormalizing the audience.
+    #
+    # `access_type :runtime` is required by the manual check: rows are fetched,
+    # then filtered. Not a hot path — delivery reads artifacts as the system.
     policy action_type(:read) do
-      authorize_if always()
+      access_type :runtime
+
+      # Editors and admins see every document, so they see every artifact. A
+      # simple check, so it short-circuits before the runtime check's query.
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.Firing.Checks.DocumentReadable
     end
 
     policy action_type([:create, :update, :destroy]) do
