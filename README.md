@@ -35,7 +35,9 @@ Resources live in `lib/kiln_cms/cms/`:
 
 ## Getting started
 
-Prerequisites: Elixir 1.19.3+ / OTP 27+, Docker (for Postgres).
+Prerequisites: Elixir 1.19.3+ / OTP 27+, Docker (for Postgres). `.tool-versions`
+holds the exact pair CI and the release image build on, so `asdf install` (or
+`mise install`) gives you that toolchain; anything newer works for development.
 
 ```bash
 # 1. Start Postgres (only required service; optional infra via profiles)

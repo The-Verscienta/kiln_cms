@@ -520,6 +520,10 @@ defmodule KilnCMS.MixProject do
         "sobelow --config",
         "deps.audit",
         "kiln.plugins.doctor",
+        # Cheap, and catches a class nothing else can: CI never builds the
+        # release image, so a Dockerfile pin that can't satisfy this file's
+        # `elixir:` requirement is green everywhere until a deploy fails (#600).
+        "kiln.toolchain.check",
         # Catches untranslated/fuzzy msgstrs locally. Read-only, so `precommit`
         # keeps its non-destructive contract — the *drift* half of the gate
         # still lives in CI only, because `gettext.extract --merge` rewrites

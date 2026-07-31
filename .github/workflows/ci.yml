@@ -18,13 +18,12 @@ permissions:
 
 env:
   MIX_ENV: test
-  # Pinned to a stable release that satisfies `elixir ~> 1.19`. The repo builds
-  # locally on edge 1.20.x, but CI uses a stable toolchain for reproducibility.
-  # Must be 1.19.3+: config/dev.exs uses the `E` (`:export`) regex modifier on
-  # its live-reload patterns, which 1.18 fails to parse. Every job shares this
-  # pin (the `docs` job used to override it alone; see #572).
-  ELIXIR_VERSION: "1.19"
-  OTP_VERSION: "27"
+  # The toolchain lives in .tool-versions, which every setup-beam step reads via
+  # `version-file:`. It is deliberately NOT restated here: these env vars used to
+  # be "1.19"/"27", which setup-beam resolves to whatever is newest, so the
+  # toolchain CI actually tested drifted on its own and could never be matched by
+  # the Dockerfile's exact tags (#600). Must stay 1.19.3+: config/dev.exs uses the
+  # `E` (`:export`) regex modifier, which 1.18 cannot parse (#572).
 
 jobs:
   build:
@@ -56,8 +55,10 @@ jobs:
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
 
       - name: Cache deps and _build
         uses: actions/cache@v5
@@ -65,17 +66,17 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Dialyzer PLTs
         uses: actions/cache@v5
         with:
           path: priv/plts
-          key: ${{ runner.os }}-plt-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-plt-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-
 
       - name: Install dependencies
         run: mix deps.get
@@ -85,6 +86,18 @@ jobs:
 
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
+
+      - name: Check the toolchain declarations agree
+        # .tool-versions is the source of truth, and this job already reads it
+        # via setup-beam. The two places that *cannot* read it — mix.exs's
+        # `elixir:` requirement and the Dockerfile's ARGs — are guarded here.
+        #
+        # This is the cheap half of #600. The expensive half is that CI does not
+        # build the release image at all, so a Dockerfile broken any *other* way
+        # stays invisible until a deploy. #573 raised the elixir requirement and
+        # left the Dockerfile on 1.18.4, which cannot compile this project; every
+        # job stayed green because none of them builds that image.
+        run: mix kiln.toolchain.check
 
       # NOTE (#419): the migration/snapshot drift check moved to the
       # strict_tenancy job — snapshots are generated from the STRICT build
@@ -149,8 +162,10 @@ jobs:
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
 
       - name: Cache deps and _build
         uses: actions/cache@v5
@@ -158,9 +173,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-audit-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: ${{ runner.os }}-audit-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-audit-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-audit-mix-${{ hashFiles('.tool-versions') }}-
 
       # `mix deps.audit` reads mix.lock only — it never compiles the app, so this
       # job needs no database and no asset build.
@@ -213,8 +228,10 @@ jobs:
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
 
       # Own cache: the dev build profile is distinct from the `build` job's
       # test profile (`consolidate_protocols` differs, and esbuild/tailwind are
@@ -225,9 +242,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-docs-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: ${{ runner.os }}-docs-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-docs-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-docs-mix-${{ hashFiles('.tool-versions') }}-
 
       - name: Install dependencies
         run: mix deps.get
@@ -251,8 +268,10 @@ jobs:
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
 
       - name: Cache deps and _build
         uses: actions/cache@v5
@@ -260,9 +279,9 @@ jobs:
           path: |
             clients/elixir/kiln_client/deps
             clients/elixir/kiln_client/_build
-          key: ${{ runner.os }}-client-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('clients/elixir/kiln_client/mix.lock') }}
+          key: ${{ runner.os }}-client-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('clients/elixir/kiln_client/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-client-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-client-mix-${{ hashFiles('.tool-versions') }}-
 
       - name: Install dependencies
         run: mix deps.get
@@ -305,8 +324,10 @@ jobs:
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -319,9 +340,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-e2e-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-e2e-${{ hashFiles('.tool-versions') }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-e2e-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-mix-e2e-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Playwright browsers
         uses: actions/cache@v5
@@ -397,8 +418,10 @@ jobs:
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
 
       - name: Cache deps and strict build
         uses: actions/cache@v5
@@ -408,7 +431,7 @@ jobs:
             _build_strict
           # v2: the v1 cache holds a half-compiled gproc from before the
           # local.rebar bootstrap step existed.
-          key: strict-v2-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: strict-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
 
       - name: Install dependencies
         # local.rebar explicitly: this job has no warm _build cache on first
@@ -471,8 +494,10 @@ jobs:
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          # Reads .tool-versions — the single source of truth (#600). Do not
+          # restate the versions here; `mix kiln.toolchain.check` guards the
+          # two places that genuinely cannot read it (mix.exs, Dockerfile).
+          version-file: .tool-versions
 
       - name: Cache deps and overlay build
         uses: actions/cache@v5
@@ -480,7 +505,7 @@ jobs:
           path: |
             deps
             _build_overlay
-          key: overlay-v1-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: overlay-v1-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
 
       - name: Install dependencies
         run: |
