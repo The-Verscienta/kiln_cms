@@ -190,6 +190,7 @@ page then reports the version alone.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `KILN_UPDATE_CHECK` | enabled | Set to `false`/`0`/`no`/`off` (case-insensitive) for an instance that must make no outbound requests. | [`config/runtime.exs:127`](../config/runtime.exs#L127) |
+| `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](../projects/README.md). | [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 

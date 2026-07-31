@@ -137,6 +137,40 @@ defmodule Kiln.UpdatesTest do
     end
   end
 
+  # The pin's path is a downstream layout choice — submodule or fetched ref, at
+  # whatever path — and an image has no checkout to look in. So it is operator
+  # input with no default: a guessed default would be a wrong `cd` compiled
+  # into the image, which the admin page offers no way to correct.
+  describe "pin_path/0" do
+    defp put_pin_path(value) do
+      previous = Application.get_env(:kiln_cms, Updates, [])
+      Application.put_env(:kiln_cms, Updates, Keyword.put(previous, :pin_path, value))
+      on_exit(fn -> Application.put_env(:kiln_cms, Updates, previous) end)
+    end
+
+    test "is nil when unconfigured" do
+      assert Updates.pin_path() == nil
+    end
+
+    test "returns the configured path" do
+      put_pin_path("kiln/upstream")
+
+      assert Updates.pin_path() == "kiln/upstream"
+    end
+
+    test "treats a blank value as unconfigured" do
+      put_pin_path("   ")
+
+      assert Updates.pin_path() == nil
+    end
+
+    test "trims surrounding whitespace" do
+      put_pin_path(" upstream\n")
+
+      assert Updates.pin_path() == "upstream"
+    end
+  end
+
   describe "caching" do
     test "serves a repeat check from cache instead of re-requesting" do
       newer = bump(current_version(), :minor)

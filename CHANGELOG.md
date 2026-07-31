@@ -58,11 +58,16 @@ migration, a rewritten column, a dropped config key).
   the git SHA and build date baked in by the Dockerfile (`--build-arg GIT_SHA`
   / `BUILD_DATE`). Images built without those args still boot and simply report
   no build stamp.
-- `mix kiln.update` — moves a downstream project's pinned `kiln/upstream`
-  submodule to a tagged upstream release, reporting the changelog and any new
-  migrations first. `--check` reports without changing anything.
+- `mix kiln.update` — moves a downstream project's pinned Kiln checkout
+  (submodule or fetched ref, at whatever path the project uses) to a tagged
+  upstream release, reporting the changelog and any new migrations first.
+  `--check` reports without changing anything. It must be run from inside the
+  Kiln checkout and refuses to run anywhere else, so it cannot mistake a
+  project repo's tags, migrations or changelog for Kiln's.
 - An admin-only update notice showing the running version against the latest
-  upstream release, plus the command to apply it.
+  upstream release, plus the command to apply it. Set `KILN_PIN_PATH` to have
+  that page prefix the command with a `cd` into your pin; left unset it gives
+  a layout-agnostic instruction, since an image has no checkout to look in.
 - Media stored on S3/MinIO is now uploaded with `Cache-Control: public,
   max-age=31536000, immutable`, so a CDN in front of the bucket can cache
   originals and variants indefinitely. Safe because storage keys are write-once

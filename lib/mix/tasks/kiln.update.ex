@@ -5,16 +5,22 @@ defmodule Mix.Tasks.Kiln.Update do
   Updates a downstream project's pinned Kiln core.
 
   A project layers its own `projects/<name>/` overlay onto this repo and pins
-  it as a git submodule at `kiln/upstream` (see `projects/README.md`). Updating
-  Kiln therefore means moving that pin to a newer tag, rebuilding the image,
-  and running the migrations the new version brings — this task does the first
-  part and tells you precisely what the rest is.
+  it as a git checkout of its own — a submodule or a fetched ref, at whatever
+  path that project chose (see `projects/README.md`). Updating Kiln therefore
+  means moving that pin to a newer tag, rebuilding the image, and running the
+  migrations the new version brings — this task does the first part and tells
+  you precisely what the rest is.
 
-  Run it from inside the submodule:
+  Run it from inside the pinned Kiln checkout, wherever your project keeps it:
 
-      cd kiln/upstream
+      cd <your kiln checkout>
       mix kiln.update --check     # report only, change nothing
       mix kiln.update             # move the pin to the latest release
+
+  It refuses to run from anywhere else. The repo it would move is worked out
+  from the directory it runs in, so run from a project repo it would read that
+  project's tags, migrations and changelog as Kiln's — and check a Kiln SHA
+  out over the project's own working tree.
 
   ## What it refuses to do
 
@@ -59,6 +65,13 @@ defmodule Mix.Tasks.Kiln.Update do
   @requirements []
 
   @tag_pattern "v*"
+
+  # What makes a checkout *this* repo rather than merely *a* repo. Both are
+  # required: `lib/kiln_cms/application.ex` alone could be a vendored copy
+  # sitting inside a project repo, and a `mix.exs` alone could be any Elixir
+  # project. Together they say "the toplevel of this git repo is the Kiln core".
+  @kiln_marker "lib/kiln_cms/application.ex"
+  @kiln_app ~r/app:\s*:kiln_cms\b/
 
   @switches [
     check: :boolean,
@@ -139,6 +152,7 @@ defmodule Mix.Tasks.Kiln.Update do
   # superproject, since the pin lives in the *parent* repo's index.
   defp locate_repo! do
     root = git!(".", ~w[rev-parse --show-toplevel])
+    assert_kiln_checkout!(root)
 
     superproject =
       case git(".", ~w[rev-parse --show-superproject-working-tree]) do
@@ -159,6 +173,50 @@ defmodule Mix.Tasks.Kiln.Update do
     end
 
     %{root: root, superproject: superproject}
+  end
+
+  # `rev-parse --show-toplevel` answers "which repo am I standing in", which is
+  # only the same question as "where is the Kiln pin" when Kiln is its own git
+  # repo. In a project that vendored the core instead, the toplevel is the
+  # *project* — whose `v*` tags, `priv/repo/migrations` and `CHANGELOG.md` this
+  # task would then report as Kiln's, and whose entire working tree
+  # `apply_update!` would `git checkout --detach`. So prove it's Kiln first,
+  # and fail closed when it isn't: an operator acting on the wrong changelog is
+  # the *good* outcome of guessing here.
+  defp assert_kiln_checkout!(root) do
+    unless kiln_checkout?(root) do
+      Mix.raise("""
+      Not a Kiln checkout: #{root}
+
+      That is the top level of the git repo this task is running in. It is
+      missing #{@kiln_marker}, or its mix.exs doesn't declare
+      `app: :kiln_cms` — either way it isn't the Kiln core.
+
+      Run the task from inside the Kiln checkout your project pins — the
+      directory holding Kiln's own mix.exs — not from the project repo:
+
+          cd <your kiln checkout>
+          mix kiln.update
+
+      If Kiln was copied into your project rather than pinned as a submodule
+      or a fetched ref, there is no separate pin for this task to move. Convert
+      it to a pin (see projects/README.md) and re-run.
+      """)
+    end
+  end
+
+  @doc false
+  # Public only so it can be tested against fixture directories rather than by
+  # chdir-ing the test VM into a scratch git repo.
+  def kiln_checkout?(root) do
+    File.exists?(Path.join(root, @kiln_marker)) and declares_kiln_app?(root)
+  end
+
+  defp declares_kiln_app?(root) do
+    case File.read(Path.join(root, "mix.exs")) do
+      {:ok, source} -> source =~ @kiln_app
+      {:error, _reason} -> false
+    end
   end
 
   defp fetch!(repo) do
@@ -470,24 +528,14 @@ defmodule Mix.Tasks.Kiln.Update do
     Mix.shell().info([:green, "Pin moved.", :reset])
   end
 
+  # The steps are meant to be run top to bottom from where the task just ran,
+  # so `mix deps.get` comes *before* the `cd`. The mix project lives in the
+  # Kiln checkout; the superproject is where the pin is committed and is often
+  # not an Elixir project at all (the reference downstream is a polyglot
+  # monorepo with no root mix.exs), so deps.get after the cd fails with
+  # "Could not find a Mix.Project" in exactly the layout this task is for.
   defp print_next_steps(repo, target) do
-    submodule_path =
-      if repo.superproject, do: Path.relative_to(repo.root, repo.superproject), else: nil
-
-    steps =
-      List.flatten([
-        if submodule_path do
-          [
-            "cd #{repo.superproject}",
-            "git add #{submodule_path}",
-            "git commit -m \"chore: update kiln to #{target.tag}\""
-          ]
-        else
-          []
-        end,
-        "mix deps.get",
-        "# rebuild and redeploy your image, then verify migrations ran"
-      ])
+    steps = next_steps(repo, target)
 
     Mix.shell().info([:bright, "\nNext steps:", :reset])
     Enum.each(steps, &Mix.shell().info("  #{&1}"))
@@ -497,6 +545,29 @@ defmodule Mix.Tasks.Kiln.Update do
     Migrations run on boot (see the Dockerfile CMD), so deploying the rebuilt
     image applies them. Take a backup first if the report above listed any.
     """)
+  end
+
+  @doc false
+  # Public only so the *order* can be asserted in tests — the bug it replaces
+  # printed a step that fails when run where the step above it leaves you.
+  def next_steps(repo, target) do
+    List.flatten([
+      "mix deps.get",
+      commit_pin_steps(repo, target),
+      "# rebuild and redeploy your image, then verify migrations ran"
+    ])
+  end
+
+  # Only a pin *inside another repo* needs committing; a standalone Kiln
+  # checkout has already recorded the move in its own HEAD.
+  defp commit_pin_steps(%{superproject: nil}, _target), do: []
+
+  defp commit_pin_steps(repo, target) do
+    [
+      "cd #{repo.superproject}",
+      "git add #{Path.relative_to(repo.root, repo.superproject)}",
+      "git commit -m \"chore: update kiln to #{target.tag}\""
+    ]
   end
 
   # ---- git plumbing ------------------------------------------------------

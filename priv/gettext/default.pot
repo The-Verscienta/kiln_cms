@@ -5973,11 +5973,6 @@ msgstr ""
 msgid "%{passed} of %{total} checks passing"
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:193
-#, elixir-autogen, elixir-format
-msgid "Apply it from a checkout of your project, then rebuild and redeploy:"
-msgstr ""
-
 #: lib/kiln_cms_web/live/system_live.ex:109
 #, elixir-autogen, elixir-format
 msgid "Build"
@@ -5993,12 +5988,12 @@ msgstr ""
 msgid "Check now"
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:156
+#: lib/kiln_cms_web/live/system_live.ex:173
 #, elixir-autogen, elixir-format
 msgid "Checking for updates..."
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:227
+#: lib/kiln_cms_web/live/system_live.ex:240
 #, elixir-autogen, elixir-format
 msgid "Couldn't reach the upstream release feed. This says nothing about whether an update exists."
 msgstr ""
@@ -6025,12 +6020,12 @@ msgstr ""
 msgid "The Kiln core this instance is built from, and how to update it."
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:197
+#: lib/kiln_cms_web/live/system_live.ex:210
 #, elixir-autogen, elixir-format
 msgid "The command reports new migrations and any required upgrade steps before it changes the pin. It does not deploy."
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:219
+#: lib/kiln_cms_web/live/system_live.ex:232
 #, elixir-autogen, elixir-format
 msgid "This build reports no usable version, so it can't be compared against upstream."
 msgstr ""
@@ -6040,22 +6035,22 @@ msgstr ""
 msgid "This instance"
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:164
+#: lib/kiln_cms_web/live/system_live.ex:181
 #, elixir-autogen, elixir-format
 msgid "This is the newest released version of Kiln."
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:163
+#: lib/kiln_cms_web/live/system_live.ex:180
 #, elixir-autogen, elixir-format
 msgid "Up to date"
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:182
+#: lib/kiln_cms_web/live/system_live.ex:195
 #, elixir-autogen, elixir-format
 msgid "Update available"
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:209
+#: lib/kiln_cms_web/live/system_live.ex:222
 #, elixir-autogen, elixir-format
 msgid "Update checks are turned off (KILN_UPDATE_CHECK=false). Compare this instance's version against the upstream releases page manually."
 msgstr ""
@@ -6065,7 +6060,7 @@ msgstr ""
 msgid "Updates"
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex:187
+#: lib/kiln_cms_web/live/system_live.ex:200
 #, elixir-autogen, elixir-format
 msgid "released"
 msgstr ""
@@ -6777,4 +6772,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex:127
 #, elixir-autogen, elixir-format
 msgid "History intact; signed by a key we no longer hold — register its public half in :retired_keys to re-check"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex:206
+#, elixir-autogen, elixir-format
+msgid "Apply it from your project's Kiln checkout, then rebuild and redeploy:"
 msgstr ""
