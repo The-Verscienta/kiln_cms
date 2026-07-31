@@ -18,8 +18,9 @@ defmodule KilnCMS.Firing.Engine do
 
   # `:llm` (#357) is the Markdown surface answer engines extract from.
   @surfaces KilnCMS.Firing.Surfaces.all()
-  # Bumped when a surface's serialized shape changes (decision A2).
-  @format_version 1
+  # Bumped when a surface's serialized shape changes (decision A2). v2 added
+  # `custom_fields` to `:json` and `contentLocation` to `:json_ld` (#428/#429).
+  @format_version 2
 
   @doc "Fire a document. Returns `{:ok, %{surface => body}}`."
   @spec fire(struct(), keyword()) :: {:ok, %{atom() => map()}}
@@ -33,7 +34,14 @@ defmodule KilnCMS.Firing.Engine do
     start = System.monotonic_time()
 
     typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
-    artifacts = Map.new(@surfaces, fn surface -> {surface, compose(document, typed, surface)} end)
+
+    # Custom fields are resolved once and shared by every surface: the read is
+    # one query, and computed fields (#429) are recomputed exactly once per
+    # fire rather than once per surface.
+    custom = KilnCMS.Firing.CustomFields.resolve(document, body_text(typed))
+
+    artifacts =
+      Map.new(@surfaces, fn surface -> {surface, compose(document, typed, custom, surface)} end)
 
     if mode == :persist do
       persist(document, type, org_id, artifacts)
@@ -145,12 +153,12 @@ defmodule KilnCMS.Firing.Engine do
 
   # ── per-surface composition (whole-doc artifact of per-block fragments, A1) ──
 
-  defp compose(_document, typed, :web) do
+  defp compose(_document, typed, _custom, :web) do
     html = typed |> Enum.map(&Blocks.render(&1, :web)) |> IO.iodata_to_binary()
     %{"html" => html}
   end
 
-  defp compose(document, typed, :json) do
+  defp compose(document, typed, custom, :json) do
     %{
       # `id` + `type` address the document for the visual-editing bridge (#355):
       # `(type, id, <field>)` locates a document scalar (title/slug), while each
@@ -160,26 +168,30 @@ defmodule KilnCMS.Firing.Engine do
       "type" => public_type(document),
       "title" => Map.get(document, :title),
       "slug" => Map.get(document, :slug),
+      # The admin-defined custom fields (D4). Already public on the delivery
+      # APIs; carrying them here means the fired artifact is a complete view of
+      # the document, and is what makes computed fields (#429) part of what
+      # publishing produces.
+      "custom_fields" => custom.values,
       "blocks" => Enum.map(typed, &Blocks.render(&1, :json))
     }
   end
 
   # Clean chunked Markdown for LLM/answer-engine extraction (#357, GEO).
-  defp compose(document, typed, :llm) do
+  defp compose(document, typed, _custom, :llm) do
     %{"markdown" => KilnCMS.Firing.LlmMarkdown.compose(document, typed)}
   end
 
-  defp compose(document, typed, :json_ld) do
-    body =
-      typed
-      |> Enum.map(&Blocks.search_text/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.join("\n\n")
-
+  defp compose(document, typed, custom, :json_ld) do
     # The main node's @type is declared per content type (#357, GEO): the
     # Content macro's `schema_org_type:` option or the dynamic type's
     # definition — so a health-domain type fires e.g. a MedicalWebPage.
-    main = KilnCMS.Firing.SchemaOrg.main_node(document, body)
+    main =
+      document
+      |> KilnCMS.Firing.SchemaOrg.main_node(body_text(typed, "\n\n"))
+      # A geolocation custom field (#428) is the document's contentLocation:
+      # a Place carrying GeoCoordinates.
+      |> put_content_location(KilnCMS.Firing.CustomFields.content_location(custom))
 
     # Structured data falls out of the typed blocks (decision D9): each block that
     # has a schema.org representation contributes a node to the document @graph. A
@@ -188,6 +200,19 @@ defmodule KilnCMS.Firing.Engine do
     block_nodes = typed |> Enum.flat_map(&json_ld_nodes/1)
 
     %{"@context" => "https://schema.org", "@graph" => [main | block_nodes]}
+  end
+
+  defp put_content_location(node, nil), do: node
+  defp put_content_location(node, location), do: Map.put(node, "contentLocation", location)
+
+  # The document's plain text, from the already-typed blocks. `:json_ld` wants
+  # paragraph separation; the computed-field context (`word_count`,
+  # `reading_time`) only counts words, so the separator is immaterial there.
+  defp body_text(typed, separator \\ " ") do
+    typed
+    |> Enum.map(&Blocks.search_text/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(separator)
   end
 
   # Normalize a block's `:json_ld` render (nil | node map | list of nodes) to a

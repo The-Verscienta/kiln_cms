@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
 
@@ -195,6 +196,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
 
+  # Whether the compute-formula textarea applies (a `:computed` field, #429).
+  defp computed?(form), do: to_string(form[:field_type].value) == "computed"
+
   defp unpack_scope(params) do
     case Map.pop(params, "scope") do
       {nil, params} ->
@@ -244,6 +248,33 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       %{label: label} -> label
       _ -> Phoenix.Naming.humanize(type)
     end
+  end
+
+  # A literal, so the `{{ … }}` never reaches HEEx as markup (curly braces are
+  # interpolation in a template, including inside attribute strings).
+  defp compute_placeholder, do: "{{ reading_time(body) }} min read"
+
+  attr :form, :any, required: true
+
+  # The formula behind a `:computed` field (#429), shown only for that type —
+  # the same conditional treatment `target_type` gets for `:reference`.
+  defp compute_field(assigns) do
+    ~H"""
+    <div :if={computed?(@form)} class="sm:col-span-2">
+      <.input
+        field={@form[:compute]}
+        label={gettext("Formula")}
+        placeholder={compute_placeholder()}
+      />
+      <p class="mt-1 text-xs text-base-content/60">
+        {gettext(
+          "Derived from the document on every save and every publish — editors can't type into it. Values: %{refs}, plus this type's other fields by name. Functions: %{functions}.",
+          refs: Enum.join(Computed.document_refs(), ", "),
+          functions: Enum.join(Computed.functions(), ", ")
+        )}
+      </p>
+    </div>
+    """
   end
 
   defp editing?(nil, _id), do: false
@@ -333,6 +364,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               options={@target_types}
               prompt={gettext("— Pick a type —")}
             />
+            <.compute_field form={@form} />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.input field={@form[:position]} type="number" label={gettext("Position")} />
             <div class="sm:col-span-2">
@@ -404,6 +436,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     >
                       {gettext("Options")}: {Enum.join(definition.options, ", ")}
                     </p>
+                    <p :if={definition.compute} class="text-xs text-base-content/60">
+                      {gettext("Formula")}: <code>{definition.compute}</code>
+                    </p>
                   </div>
                   <div class="flex shrink-0 items-center gap-1">
                     <button
@@ -452,6 +487,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     options={@target_types}
                     prompt={gettext("— Pick a type —")}
                   />
+                  <.compute_field form={@edit.form} />
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
                   <.input field={@edit.form[:position]} type="number" label={gettext("Position")} />
                   <div class="sm:col-span-2">

@@ -189,16 +189,25 @@ defmodule Kiln.PluginsTest do
         def cast(value, _definition), do: {:ok, value}
       end
 
+      # The in-tree `Kiln.FieldType` implementations (#428/#429) are reserved
+      # too: a plugin claiming one would shadow it in the registry.
+      defmodule ShadowGeolocation do
+        use Kiln.FieldType
+        def name, do: :geolocation
+        def cast(value, _definition), do: {:ok, value}
+      end
+
       defmodule FieldTypePlugin do
         use Kiln.Plugin
-        def field_types, do: [NotAFieldType, ShadowString]
+        def field_types, do: [NotAFieldType, ShadowString, ShadowGeolocation]
       end
 
       Application.put_env(:kiln_cms, :plugins, [FieldTypePlugin])
 
       error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
       assert error.message =~ "does not implement Kiln.FieldType"
-      assert error.message =~ "field type :string collides with a core field type"
+      assert error.message =~ "field type :string collides with a built-in field type"
+      assert error.message =~ "field type :geolocation collides with a built-in field type"
     end
 
     test "flags queue redefinitions and malformed paths" do
