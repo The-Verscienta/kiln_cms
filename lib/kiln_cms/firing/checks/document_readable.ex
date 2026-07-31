@@ -67,6 +67,14 @@ defmodule KilnCMS.Firing.Checks.DocumentReadable do
     end)
   end
 
+  # Every branch yields a plain list and the MapSet is built once, at the end.
+  # That is a dialyzer constraint, not a style choice: on Elixir 1.20+ MapSet
+  # sits on `:sets` v2, where `MapSet.new/1,2` build the internal via the opaque
+  # `:sets.from_list/2` while `MapSet.new/0` returns a raw `%{map: %{}}` literal.
+  # Returning both across branches unions the two representations, OTP 29's
+  # dialyzer strips opacity from the union, and the `MapSet.member?/2` at the
+  # call site then trips `call_without_opaque` (#599). One construction path
+  # keeps the opacity intact. Behaviour is identical either way.
   defp readable_ids(actor, org_id, type, ids) do
     case ContentTypes.get(type, org_id) do
       %{resource: resource} when not is_nil(resource) ->
@@ -74,15 +82,16 @@ defmodule KilnCMS.Firing.Checks.DocumentReadable do
         |> Ash.Query.filter(id in ^ids)
         |> Ash.read(actor: actor, tenant: org_id, authorize?: true)
         |> case do
-          {:ok, documents} -> MapSet.new(documents, & &1.id)
-          {:error, _reason} -> MapSet.new()
+          {:ok, documents} -> Enum.map(documents, & &1.id)
+          {:error, _reason} -> []
         end
 
       # No backing resource: a dynamic type's descriptor (its rows are stored as
       # `:entry`, which does have one) or a type that has since been removed.
       # Either way there is nothing to authorize against — fail closed.
       _ ->
-        MapSet.new()
+        []
     end
+    |> MapSet.new()
   end
 end
