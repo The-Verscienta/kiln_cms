@@ -71,6 +71,24 @@ defmodule KilnCMSWeb.SystemLiveTest do
     "v#{parsed.major}.#{parsed.minor + 1}.0"
   end
 
+  # Merge, don't replace: dropping :req_options would send a stray check to the
+  # real api.github.com.
+  defp put_updates_env(key, value) do
+    previous = Application.get_env(:kiln_cms, Updates, [])
+    Application.put_env(:kiln_cms, Updates, Keyword.put(previous, key, value))
+    on_exit(fn -> Application.put_env(:kiln_cms, Updates, previous) end)
+  end
+
+  # The command is the only copy-pasteable thing on the page, so it is asserted
+  # exactly rather than with =~ — a stray `cd` is precisely the bug, and =~
+  # can't tell "no cd" from "a cd somewhere else in the page".
+  defp update_command(html) do
+    case Regex.run(~r{<code>(.*?)</code>}s, html) do
+      [_, command] -> command
+      nil -> flunk("no command block rendered")
+    end
+  end
+
   describe "authorization" do
     test "anonymous users are redirected to sign-in", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/editor/system")
@@ -109,6 +127,27 @@ defmodule KilnCMSWeb.SystemLiveTest do
       assert html =~ "Update available"
       assert html =~ newer_tag()
       assert html =~ "mix kiln.update"
+    end
+
+    # The pin is a submodule *or* a fetched ref, at a path the project chose,
+    # and this image has no checkout to look in. A hardcoded `cd` would be a
+    # copy-pasteable "no such file or directory" for everyone on a layout other
+    # than the reference one, compiled in with no way to correct it.
+    test "prints no cd when the deployment wasn't told where its pin lives", %{conn: conn} do
+      stub_release(newer_tag())
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+
+      assert update_command(render_async(lv, 2_000)) == "mix kiln.update"
+    end
+
+    test "prefixes the command with a cd when KILN_PIN_PATH is set", %{conn: conn} do
+      put_updates_env(:pin_path, "vendor/kiln")
+      stub_release(newer_tag())
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+
+      assert update_command(render_async(lv, 2_000)) == "cd vendor/kiln\nmix kiln.update"
     end
 
     test "reports up to date when running the newest release", %{conn: conn} do

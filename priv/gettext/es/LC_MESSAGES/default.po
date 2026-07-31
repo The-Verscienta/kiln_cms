@@ -5973,11 +5973,6 @@ msgstr "bloque %{position}"
 msgid "%{passed} of %{total} checks passing"
 msgstr "%{passed} de %{total} comprobaciones superadas"
 
-#: lib/kiln_cms_web/live/system_live.ex:193
-#, elixir-autogen, elixir-format
-msgid "Apply it from a checkout of your project, then rebuild and redeploy:"
-msgstr "Aplícala desde una copia de trabajo de tu proyecto, luego reconstruye y vuelve a desplegar:"
-
 #: lib/kiln_cms_web/live/system_live.ex:109
 #, elixir-autogen, elixir-format
 msgid "Build"
@@ -5993,12 +5988,12 @@ msgstr "Compilado el"
 msgid "Check now"
 msgstr "Comprobar ahora"
 
-#: lib/kiln_cms_web/live/system_live.ex:156
+#: lib/kiln_cms_web/live/system_live.ex:173
 #, elixir-autogen, elixir-format
 msgid "Checking for updates..."
 msgstr "Buscando actualizaciones…"
 
-#: lib/kiln_cms_web/live/system_live.ex:227
+#: lib/kiln_cms_web/live/system_live.ex:240
 #, elixir-autogen, elixir-format
 msgid "Couldn't reach the upstream release feed. This says nothing about whether an update exists."
 msgstr "No se pudo acceder al feed de versiones upstream. Esto no indica si existe una actualización."
@@ -6025,12 +6020,12 @@ msgstr "Sistema"
 msgid "The Kiln core this instance is built from, and how to update it."
 msgstr "El núcleo de Kiln con el que se construyó esta instancia, y cómo actualizarlo."
 
-#: lib/kiln_cms_web/live/system_live.ex:197
+#: lib/kiln_cms_web/live/system_live.ex:210
 #, elixir-autogen, elixir-format
 msgid "The command reports new migrations and any required upgrade steps before it changes the pin. It does not deploy."
 msgstr "El comando informa de las nuevas migraciones y de los pasos de actualización necesarios antes de cambiar la referencia. No despliega."
 
-#: lib/kiln_cms_web/live/system_live.ex:219
+#: lib/kiln_cms_web/live/system_live.ex:232
 #, elixir-autogen, elixir-format
 msgid "This build reports no usable version, so it can't be compared against upstream."
 msgstr "Esta compilación no informa de una versión utilizable, por lo que no puede compararse con upstream."
@@ -6040,22 +6035,22 @@ msgstr "Esta compilación no informa de una versión utilizable, por lo que no p
 msgid "This instance"
 msgstr "Esta instancia"
 
-#: lib/kiln_cms_web/live/system_live.ex:164
+#: lib/kiln_cms_web/live/system_live.ex:181
 #, elixir-autogen, elixir-format
 msgid "This is the newest released version of Kiln."
 msgstr "Esta es la versión publicada más reciente de Kiln."
 
-#: lib/kiln_cms_web/live/system_live.ex:163
+#: lib/kiln_cms_web/live/system_live.ex:180
 #, elixir-autogen, elixir-format
 msgid "Up to date"
 msgstr "Actualizado"
 
-#: lib/kiln_cms_web/live/system_live.ex:182
+#: lib/kiln_cms_web/live/system_live.ex:195
 #, elixir-autogen, elixir-format
 msgid "Update available"
 msgstr "Actualización disponible"
 
-#: lib/kiln_cms_web/live/system_live.ex:209
+#: lib/kiln_cms_web/live/system_live.ex:222
 #, elixir-autogen, elixir-format
 msgid "Update checks are turned off (KILN_UPDATE_CHECK=false). Compare this instance's version against the upstream releases page manually."
 msgstr "Las comprobaciones de actualización están desactivadas (KILN_UPDATE_CHECK=false). Compara manualmente la versión de esta instancia con la página de versiones upstream."
@@ -6065,7 +6060,7 @@ msgstr "Las comprobaciones de actualización están desactivadas (KILN_UPDATE_CH
 msgid "Updates"
 msgstr "Actualizaciones"
 
-#: lib/kiln_cms_web/live/system_live.ex:187
+#: lib/kiln_cms_web/live/system_live.ex:200
 #, elixir-autogen, elixir-format
 msgid "released"
 msgstr "publicada el"
@@ -6778,3 +6773,8 @@ msgstr "Se ha tramitado tu baja."
 #, elixir-autogen, elixir-format
 msgid "History intact; signed by a key we no longer hold — register its public half in :retired_keys to re-check"
 msgstr "Historial intacto; firmado con una clave que ya no conservamos: registre su mitad pública en :retired_keys para reverificar"
+
+#: lib/kiln_cms_web/live/system_live.ex:206
+#, elixir-autogen, elixir-format
+msgid "Apply it from your project's Kiln checkout, then rebuild and redeploy:"
+msgstr "Aplícala desde la copia de trabajo de Kiln de tu proyecto, luego reconstruye y vuelve a desplegar:"

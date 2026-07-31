@@ -140,6 +140,21 @@ if update_check in ~w(false 0 no off) do
   config :kiln_cms, Kiln.Updates, enabled: false
 end
 
+# Where this project keeps its pinned Kiln checkout, relative to the project
+# repo root — `kiln/upstream`, `upstream`, whatever the layout uses. Purely
+# cosmetic: the admin page prefixes the update command with a matching `cd`.
+#
+# Unset by default rather than guessed. The pin is a submodule *or* a fetched
+# ref at a path the project chooses (see projects/README.md), so a default
+# would be a wrong, copy-pasteable `cd` baked into the image for everyone on a
+# different layout. Left unset, the page just says to run it from the Kiln
+# checkout.
+pin_path = "KILN_PIN_PATH" |> System.get_env("") |> String.trim()
+
+if pin_path != "" do
+  config :kiln_cms, Kiln.Updates, pin_path: pin_path
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
