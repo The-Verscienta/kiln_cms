@@ -43,5 +43,48 @@ defmodule KilnCMS.I18n do
     end
   end
 
+  @language_names %{
+    "en" => "English",
+    "fr" => "French",
+    "es" => "Spanish",
+    "de" => "German",
+    "it" => "Italian",
+    "pt" => "Portuguese",
+    "nl" => "Dutch",
+    "ja" => "Japanese",
+    "zh" => "Chinese",
+    "ar" => "Arabic",
+    "fa" => "Persian",
+    "hi" => "Hindi",
+    "pl" => "Polish",
+    "ru" => "Russian",
+    "sv" => "Swedish",
+    "tr" => "Turkish",
+    "ko" => "Korean"
+  }
+
+  @doc ~S"""
+  A human-readable English name for a locale tag, for prompts.
+
+  Used by the LLM features (`KilnCMS.Seo.Prompt`, `KilnCMS.Assist.Prompt`) to
+  pin which language a model must write in. It lives here rather than beside
+  either of them because it was written twice, identically, and the copies
+  would have drifted: the locale set an operator configures is `locales/0`, and
+  a deployment adding one has exactly one map to extend.
+
+  Falls back to naming the tag itself, which still reads as an instruction.
+
+      iex> KilnCMS.I18n.language_name("fr-CA")
+      "French"
+      iex> KilnCMS.I18n.language_name("cy")
+      "the language with IETF tag cy"
+  """
+  @spec language_name(String.t() | atom() | nil) :: String.t()
+  def language_name(locale) do
+    tag = locale |> to_string() |> String.split(~r/[-_]/) |> hd() |> String.downcase()
+
+    Map.get(@language_names, tag, "the language with IETF tag #{locale}")
+  end
+
   defp config, do: Application.get_env(:kiln_cms, :i18n, [])
 end

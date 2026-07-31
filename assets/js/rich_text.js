@@ -651,6 +651,45 @@ function buildEditor(hook, extensions, content = null) {
       hook.pushEvent("add_block", {type, after: hook.el.dataset.blockId}),
   })
 
+  // Block-level AI assist (#60). The server never writes generated prose into
+  // the block itself — it would force the document back into TipTap mid-edit,
+  // throwing away the author's cursor and undo stack and desynchronizing
+  // anyone collaborating. It pushes the accepted suggestion here instead and we
+  // apply it as an ordinary editor transaction: undoable, and correct under
+  // collaboration because Yjs sees it like any other local edit.
+  //
+  // `push_event` reaches EVERY mounted hook that registered a handler, so the
+  // block id filter is what stops one block's suggestion landing in all of
+  // them. The ref is kept so destroyed() can drop the handler.
+  hook._assistRef = hook.handleEvent("assist:apply", ({block_id, mode, paragraphs}) => {
+    if (!block_id || block_id !== hook.el.dataset.blockId) return
+    if (!Array.isArray(paragraphs) || paragraphs.length === 0) return
+
+    // Plain text nodes only — never parsed as HTML. An empty string would make
+    // an invalid text node, so a blank paragraph becomes an empty paragraph.
+    const content = paragraphs.map(text => ({
+      type: "paragraph",
+      content: text ? [{type: "text", text: String(text)}] : [],
+    }))
+
+    const chain = hook.editor.chain().focus()
+    if (mode === "replace") {
+      // `emitUpdate: true` — setContent defaults to setting `preventUpdate` on
+      // the transaction, so onUpdate never fires and the toolbar's active-mark
+      // state and the slash menu keep describing the discarded document until
+      // the next keystroke. Same argument, same reason, as the collab seed above.
+      chain.setContent({type: "doc", content}, true).run()
+    } else {
+      chain.insertContent(content).run()
+    }
+
+    // Don't wait out the debounce: the server has just been told the record is
+    // dirty, and an autosave firing before the body arrives would persist the
+    // block without the text the author just accepted.
+    clearTimeout(hook._debounce)
+    pushBody()
+  })
+
   hook.toolbarButtons = TOOLBAR.map(item => {
     const b = toolbarButton(editor, item)
     toolbarEl.appendChild(b)

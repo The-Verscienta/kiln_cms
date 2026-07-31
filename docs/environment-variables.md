@@ -143,6 +143,19 @@ and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md)
 | `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs`](../config/runtime.exs) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | unset | Provider credentials. **Read by `req_llm`, never by Kiln** — they don't enter Kiln's config or database. | `req_llm` |
 
+## Optional — AI block assist in the editor
+
+The body-copy twin of `SEO_MODEL`, and a **separate** switch: this one sends a
+block's prose *and the editor's typed instruction* on each request, and returns
+text bound for the page body. Setting `SEO_MODEL` alone leaves it off and the
+per-block "AI assist" control never renders. Same on-prem preference and same
+boot warning for a hosted provider. See [`docs/ai-assist.md`](ai-assist.md).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs`](../config/runtime.exs) |
+| `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs`](../config/runtime.exs) |
+
 ## Optional — error tracking (Sentry)
 
 Enabled in any environment only when `SENTRY_DSN` is set; otherwise every Sentry

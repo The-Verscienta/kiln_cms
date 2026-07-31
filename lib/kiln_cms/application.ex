@@ -17,6 +17,7 @@ defmodule KilnCMS.Application do
     _ = Oban.Telemetry.attach_default_logger(level: :info)
     warn_if_no_mailer_in_prod()
     warn_if_seo_drafting_egresses()
+    warn_if_assist_egresses()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -30,10 +31,11 @@ defmodule KilnCMS.Application do
       # Cooldown bucket for the aggregated "relay unreachable" mail alert — one
       # fixed key, so the table stays tiny; a periodic clean keeps it honest.
       {KilnCMS.Mail.RelayAlert, clean_period: :timer.minutes(5)},
-      # Per-user and per-org spend ceilings for SEO drafting. Started
-      # unconditionally: the table is empty until someone asks for a draft, and
-      # starting it lazily would mean the first request raced the supervisor.
-      {KilnCMS.Seo.Budget, clean_period: :timer.minutes(5)},
+      # Per-user and per-org spend ceilings for every optional LLM feature (SEO
+      # drafting, block assist). Started unconditionally: the table is empty
+      # until someone asks for a generation, and starting it lazily would mean
+      # the first request raced the supervisor.
+      {KilnCMS.LLM.Budget, clean_period: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
       # Small dedicated store for in-flight WebAuthn challenges (#331) —
@@ -177,6 +179,24 @@ defmodule KilnCMS.Application do
           "Page title, excerpt and body text are sent to that provider when an editor asks " <>
           "for suggestions. Add it to your DPA's subprocessor list, or point SEO_MODEL at a " <>
           "local endpoint (e.g. ollama:llama3.1) to keep content in the deployment."
+      )
+    end
+  end
+
+  # The twin warning for block assist (#60). Separate from the SEO one because
+  # the switches are separate and so is what gets sent: this ships the block's
+  # prose *and the author's typed instruction*, which is a different disclosure
+  # to put in front of an operator.
+  defp warn_if_assist_egresses do
+    if KilnCMS.Assist.enabled?() and KilnCMS.Assist.egress?() do
+      require Logger
+
+      Logger.warning(
+        "Block AI assist is enabled against #{KilnCMS.Assist.provider()} " <>
+          "(#{KilnCMS.Assist.model()}). Block text, page context and the editor's typed " <>
+          "instruction are sent to that provider on each request. Add it to your DPA's " <>
+          "subprocessor list, or point ASSIST_MODEL at a local endpoint " <>
+          "(e.g. ollama:llama3.1) to keep content in the deployment."
       )
     end
   end

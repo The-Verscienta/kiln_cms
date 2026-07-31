@@ -113,6 +113,7 @@ defmodule KilnCMS.MixProject do
       "docs/advisories.md": [],
       "docs/forms.md": [],
       "docs/seo.md": [],
+      "docs/ai-assist.md": [],
       "docs/geo.md": [],
       "docs/multiplayer-preview.md": [],
       "docs/editorial-consent.md": [],
@@ -206,6 +207,7 @@ defmodule KilnCMS.MixProject do
         "docs/advisories.md",
         "docs/forms.md",
         "docs/seo.md",
+        "docs/ai-assist.md",
         "docs/geo.md",
         "docs/multiplayer-preview.md",
         "docs/editorial-consent.md",
@@ -306,7 +308,7 @@ defmodule KilnCMS.MixProject do
       "Editorial operations":
         ~r/^(Elixir\.)?KilnCMS\.(Governance|History|Provenance|Automation|Webhooks|Staging|Collab)(\.|$)/,
       "Rendering & delivery":
-        ~r/^(Elixir\.)?KilnCMS\.(Firing|HTMLSanitizer|Highlight|VisualEditing|Seo|Branding|I18n)(\.|$)/,
+        ~r/^(Elixir\.)?KilnCMS\.(Firing|HTMLSanitizer|Highlight|VisualEditing|Seo|Assist|LLM|Branding|I18n)(\.|$)/,
       Analytics: ~r/^(Elixir\.)?KilnCMS\.Analytics(\.|$)/,
       "Runtime & infrastructure":
         ~r/^(Elixir\.)?KilnCMS\.(Application|Cache|Migrations|Release|Repo|Secrets|SentryFilter)(\.|$)/,
