@@ -148,6 +148,27 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
       assert artifact.id in readable_artifact_ids(user(:admin))
     end
 
+    # The fall-through in `DocumentReadable.readable_ids/4`: a document type with
+    # no backing resource — a dynamic type's descriptor, or a type since removed
+    # — cannot be authorized against, so the artifact must be dropped rather than
+    # served. Denying is the safe direction for a read, and this branch had no
+    # coverage until #599 changed what it returns.
+    test "an artifact whose document type has no backing resource is dropped" do
+      artifact =
+        Ash.Seed.seed!(Firing.PublishedArtifact, %{
+          org_id: org_id(),
+          document_type: :type_that_no_longer_exists,
+          document_id: Ash.UUID.generate(),
+          surface: :web,
+          format_version: 1,
+          body: %{"html" => "<p>orphan</p>"},
+          fired_at: DateTime.utc_now()
+        })
+
+      refute artifact.id in readable_artifact_ids(nil)
+      refute artifact.id in readable_artifact_ids(user(:viewer, []))
+    end
+
     test "an artifact of unpublished content is hidden from consumers" do
       # Shouldn't normally exist (unpublishing purges artifacts), but the policy
       # must not depend on that housekeeping to hold.
