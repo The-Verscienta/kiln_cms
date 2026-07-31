@@ -482,11 +482,19 @@ defmodule KilnCMSWeb.Router do
     end
   end
 
-  # Public newsletter confirm/unsubscribe — authorized by an opaque per-subscriber
-  # token, not a session. Uses the CSRF-free :public_form pipeline so the RFC 8058
-  # one-click `List-Unsubscribe-Post` POST works from mail clients.
+  # Public newsletter subscribe/confirm/unsubscribe — authorized by an opaque
+  # per-subscriber token, not a session. Uses the CSRF-free :public_form pipeline
+  # so the RFC 8058 one-click `List-Unsubscribe-Post` POST works from mail
+  # clients (and so a fired artifact, which can't carry a CSRF token, can host
+  # the sign-up form).
   scope "/newsletter", KilnCMSWeb do
     pipe_through :public_form
+
+    # POST only: sign-up mails a confirmation link, so a GET must never reach it
+    # (a link prefetcher would otherwise mail whatever address was in the query
+    # string). The row it creates is `:pending` and receives nothing until the
+    # address owner clicks that link.
+    post "/subscribe", NewsletterController, :subscribe
 
     get "/confirm/:token", NewsletterController, :confirm
     # GET renders a confirmation page (no state change); POST performs the
