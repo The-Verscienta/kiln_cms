@@ -276,6 +276,13 @@ config :kiln_cms, :strict_tenancy, true
 # sign per publish); disable only if the audit surface is unwanted.
 config :kiln_cms, :audit_anchors_enabled, true
 
+# Anchor EVERY versioned write, not just publishes (#356). Publish-time
+# anchoring leaves edits between two publishes covered only retroactively;
+# this closes that window at the cost of one signature and one `history_anchors`
+# row per save. Off by default: a regulated deployment wants it, a blog does
+# not. Anchors fold incrementally, so the cost does not grow with history.
+config :kiln_cms, :audit_anchor_every_write, false
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero
