@@ -1,9 +1,11 @@
 # Multi-stage build for a KilnCMS OTP release.
 # Includes libvips in the runtime image for on-the-fly image processing.
 
-# Keep these reconciled with `mix.exs`'s `elixir:` requirement and with
-# `.github/workflows/ci.yml`'s ELIXIR_VERSION/OTP_VERSION, in the same PR that
-# changes any of them (#600). Nothing enforces it: CI never builds this image.
+# These restate `.tool-versions`, which is the source of truth — Docker cannot
+# read a file to default an ARG, so this is the one place the versions have to
+# be duplicated. `mix kiln.toolchain.check` (in `precommit` and CI) fails when
+# they drift from it or from mix.exs's `elixir:` requirement. Change versions in
+# `.tool-versions` first, then mirror them here.
 #
 # The previous 1.18.4 could not satisfy mix.exs's `~> 1.19` (raised in #573,
 # which missed this file). Note where that surfaces — `mix deps.get` and

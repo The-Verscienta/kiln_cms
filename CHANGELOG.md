@@ -68,6 +68,14 @@ migration, a rewritten column, a dropped config key).
   upstream release, plus the command to apply it. Set `KILN_PIN_PATH` to have
   that page prefix the command with a `cd` into your pin; left unset it gives
   a layout-agnostic instruction, since an image has no checkout to look in.
+- `.tool-versions` is now the single source of truth for the Elixir/OTP
+  toolchain. CI's seven `setup-beam` steps read it via `version-file:` instead
+  of restating a loose `"1.19"`/`"27"` that resolved to whatever was newest, and
+  the new `mix kiln.toolchain.check` (in `precommit` and CI) fails when the
+  Dockerfile's ARGs or `mix.exs`'s `elixir:` requirement drift from it. This is
+  the gate that would have caught the release image sitting on Elixir 1.18.4
+  against a `~> 1.19` requirement — a build that could not succeed, green on
+  every CI job because none of them builds that image.
 - The update check is no longer nailed to this repo. **Forks should set
   `KILN_UPDATE_REPO=owner/name`**: left on the default they are told about
   upstream's releases, and a fork *ahead* of upstream compares as newer, so the

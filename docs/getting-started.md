@@ -16,6 +16,11 @@ contributor. It points at the right guide rather than restating it.
 
 Prerequisites: Elixir 1.19.3+ / OTP 27+, Docker (for Postgres), Node.js.
 
+`.tool-versions` pins the exact Elixir/OTP that CI and the release image build
+on — `asdf install` (or `mise install`) reproduces it. Developing on something
+newer is fine and expected; `mix kiln.toolchain.check` compares the *declared*
+versions to each other, never to the one you are running.
+
 ```bash
 docker compose up -d postgres   # the only required service
 mix setup                       # deps.get + ash.setup + assets.setup + npm install
