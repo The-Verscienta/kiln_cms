@@ -167,6 +167,24 @@ Enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which flips the
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol. | [`config/runtime.exs:58`](../config/runtime.exs#L58) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | unset | Standard OTLP headers (honored by the exporter library). | OpenTelemetry exporter (standard `OTEL_*`) |
 
+## Optional — tamper-evident history & content signing (#356, #340)
+
+Every publish folds the document's version chain into a canonical hash and
+records it append-only in `history_anchors`, RSA-signed when a signing key is
+configured. See [editorial-consent.md](editorial-consent.md) and
+[`KilnCMS.Governance.Chain`](../lib/kiln_cms/governance/chain.ex).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_AUDIT_ANCHOR_EVERY_WRITE` | `false` | Set to `true`/`1`/`yes`/`on` to anchor **every** versioned write, not just publishes — #356's "sign every version, not just published artifacts". Closes the window between two publishes, at the cost of one signature and one `history_anchors` row per save. A regulated deployment wants this; a blog does not. Read at runtime so it can be turned off without rebuilding the image. Trimmed and downcased, so `TRUE`/`On` work. | [`config/runtime.exs:124`](../config/runtime.exs#L124) |
+| `KILN_PROVENANCE_PRIVATE_KEY` | unset | PKCS#1 RSA private key PEM (`BEGIN RSA PRIVATE KEY`) used to sign history anchors and C2PA-*style* content manifests (#340). Unset ⇒ anchors are stored **unsigned** — still an integrity checksum, but the anchor row itself is no longer tamper-proof, and `verify` reports `:unsigned` rather than `:verified`. The key source is configurable (`config :kiln_cms, KilnCMS.Provenance, signing_key:`); this var is the default `{:env, …}` binding. PKCS#8 is rejected — convert with `openssl rsa -in key.pem -traditional`. | [`config/config.exs:429`](../config/config.exs#L429) |
+
+> Rotating the signing key does **not** invalidate existing anchors or
+> manifests: verification resolves the key named by each signature's `key_id`.
+> Register the outgoing key's **public half** under `retired_keys` so
+> pre-rotation signatures keep verifying — the private half can then be
+> destroyed. See [`KilnCMS.Provenance.KeyRegistry`](../lib/kiln_cms/provenance/key_registry.ex).
+
 ## Optional — upstream update check
 
 The admin system page (`/editor/system`) reports whether a newer Kiln release

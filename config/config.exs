@@ -281,6 +281,9 @@ config :kiln_cms, :audit_anchors_enabled, true
 # this closes that window at the cost of one signature and one `history_anchors`
 # row per save. Off by default: a regulated deployment wants it, a blog does
 # not. Anchors fold incrementally, so the cost does not grow with history.
+#
+# Override per deployment at runtime with KILN_AUDIT_ANCHOR_EVERY_WRITE=true
+# (runtime.exs) — no rebuild needed to turn it back off.
 config :kiln_cms, :audit_anchor_every_write, false
 
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
