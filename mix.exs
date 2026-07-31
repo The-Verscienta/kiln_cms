@@ -158,6 +158,7 @@ defmodule KilnCMS.MixProject do
       "docs/sso.md": [],
       "docs/threat-model.md": [],
       # Design notes & decision records
+      "docs/advanced-analytics-plan.md": [],
       "docs/collaborative-editing-spike.md": [],
       "docs/content-editor-modernization.md": [],
       "docs/design-language.md": [],
@@ -254,6 +255,7 @@ defmodule KilnCMS.MixProject do
         "docs/threat-model.md"
       ],
       "Design notes & decision records": [
+        "docs/advanced-analytics-plan.md",
         "docs/collaborative-editing-spike.md",
         "docs/content-editor-modernization.md",
         "docs/design-language.md",
