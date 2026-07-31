@@ -83,6 +83,93 @@ defmodule KilnCMSWeb.ArtifactPointInTimeTest do
     assert hd(body["errors"])["code"] == "withdrawn"
   end
 
+  describe "dynamic (D17) types" do
+    setup do
+      admin = admin()
+      name = "pitdyn#{System.unique_integer([:positive])}"
+
+      td =
+        CMS.create_type_definition!(
+          %{name: name, label: "PIT Dyn", plural_label: "PIT Dyns"},
+          actor: admin
+        )
+
+      %{admin: admin, type: name, td: td}
+    end
+
+    defp publish_entry!(admin, td, title) do
+      entry =
+        CMS.create_entry!(
+          %{title: title, slug: slug(), type_definition_id: td.id},
+          actor: admin
+        )
+
+      CMS.publish_entry!(entry, %{}, actor: admin)
+    end
+
+    test "as_of serves a dynamic entry's historical state", %{
+      conn: conn,
+      admin: admin,
+      type: type,
+      td: td
+    } do
+      entry = publish_entry!(admin, td, "Original")
+      as_of = DateTime.utc_now() |> DateTime.to_iso8601()
+
+      entry = CMS.unpublish_entry!(entry, %{}, actor: admin)
+      entry = CMS.update_entry!(entry, %{title: "Revised"}, actor: admin)
+      CMS.publish_entry!(entry, %{}, actor: admin)
+
+      body =
+        conn |> get("/api/content/#{type}/#{entry.slug}?as_of=#{as_of}") |> json_response(200)
+
+      assert body["title"] == "Original"
+      # The public type name, never the shared `entry` storage tier.
+      assert body["type"] == type
+    end
+
+    test "the historical index is scoped to ONE dynamic type", %{
+      conn: conn,
+      admin: admin,
+      type: type,
+      td: td
+    } do
+      mine = publish_entry!(admin, td, "Mine")
+
+      # A second dynamic type's entry lives in the SAME table. Without scoping
+      # by type_definition_id it would show up in this type's index.
+      other_td =
+        CMS.create_type_definition!(
+          %{name: "#{type}b", label: "Other", plural_label: "Others"},
+          actor: admin
+        )
+
+      theirs = publish_entry!(admin, other_td, "Theirs")
+
+      as_of = DateTime.utc_now() |> DateTime.to_iso8601()
+      body = conn |> get("/api/content/#{type}?as_of=#{as_of}") |> json_response(200)
+      slugs = Enum.map(body["entries"], & &1["slug"])
+
+      assert mine.slug in slugs
+      refute theirs.slug in slugs
+    end
+
+    test "a dynamic entry withdrawn before as_of reports withdrawn", %{
+      conn: conn,
+      admin: admin,
+      type: type,
+      td: td
+    } do
+      entry = publish_entry!(admin, td, "Pulled")
+      entry = CMS.unpublish_entry!(entry, %{}, actor: admin)
+      dark = DateTime.utc_now() |> DateTime.to_iso8601()
+      CMS.publish_entry!(entry, %{}, actor: admin)
+
+      body = conn |> get("/api/content/#{type}/#{entry.slug}?as_of=#{dark}") |> json_response(404)
+      assert hd(body["errors"])["code"] == "withdrawn"
+    end
+  end
+
   test "the historical index and the per-document snapshot agree about a dark window", %{
     conn: conn
   } do

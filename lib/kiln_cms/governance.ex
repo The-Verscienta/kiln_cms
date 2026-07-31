@@ -196,8 +196,9 @@ defmodule KilnCMS.Governance do
           state: record.state,
           org_id: record.org_id,
           published_at: Map.get(record, :published_at),
-          # Point-in-time delivery (#338) is compiled-only today — the
-          # dashboard suppresses "view as of then" links for dynamic entries.
+          # Whether this item lives on the shared entry tier (D17). Point-in-time
+          # delivery (#338) covers dynamic types now, so this no longer gates
+          # the "view as of then" links — it stays as trail metadata.
           dynamic?: ct.source == :dynamic
         },
         timeline: timeline,

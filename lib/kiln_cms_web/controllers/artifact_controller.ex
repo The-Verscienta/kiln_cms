@@ -67,19 +67,21 @@ defmodule KilnCMSWeb.ArtifactController do
   def index_point_in_time(conn, %{"type" => type, "as_of" => raw} = params) do
     org_id = current_org_id(conn)
 
-    # Compiled types only: a dynamic (D17) descriptor has `resource: nil` and
-    # version history lives on the shared entry tier — the documented
-    # "dynamic entries are a later phase" boundary, enforced instead of 500ing.
     with {:ok, as_of} <- parse_as_of(raw),
          ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
-         resource when not is_nil(resource) <- ct.resource do
+         {resource, definition_id} when not is_nil(resource) <- storage(ct) do
       limit = index_limit(params)
 
       entries =
         KilnCMS.Cache.fetch(
           {:pit_index, org_id, type, DateTime.to_iso8601(as_of), limit},
           :timer.minutes(5),
-          fn -> PointInTime.index(org_id, resource, as_of, limit: limit) end
+          fn ->
+            PointInTime.index(org_id, resource, as_of,
+              limit: limit,
+              type_definition_id: definition_id
+            )
+          end
         )
 
       entries =
@@ -123,6 +125,14 @@ defmodule KilnCMSWeb.ArtifactController do
     )
   end
 
+  # Where a content type's history actually lives (D17): a compiled type owns
+  # its own table, every dynamic type shares `KilnCMS.CMS.Entry`. The
+  # definition id comes back with it because that shared table needs scoping —
+  # without it, one dynamic type's historical index would list every other
+  # type's documents.
+  defp storage(%{source: :dynamic, definition: %{id: id}}), do: {KilnCMS.CMS.Entry, id}
+  defp storage(%{resource: resource}), do: {resource, nil}
+
   defp snapshot_href(org_id, storage_type, public_type, slug, as_of) do
     locale = KilnCMS.I18n.default_locale()
 
@@ -149,12 +159,16 @@ defmodule KilnCMSWeb.ArtifactController do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
     org_id = current_org_id(conn)
 
+    # The storage resource comes from the resolved RECORD, not the registry
+    # descriptor: a dynamic type's descriptor carries `resource: nil` because
+    # its documents live on the shared entry tier (D17), and the record already
+    # knows which table it came from.
     with {:ok, as_of} <- parse_as_of(params["as_of"]),
-         ct when not is_nil(ct) <- ContentTypes.get(type),
+         ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
          record when not is_nil(record) <- published(org_id, ct.type, slug, locale),
          {:ok, body, published_at} <-
-           PointInTime.read(org_id, ct.resource, record.id, surface, as_of) do
+           PointInTime.read(org_id, record.__struct__, record.id, surface, as_of) do
       serve_point_in_time(conn, as_of, published_at, params["surface"] || "json", body)
     else
       :error ->
