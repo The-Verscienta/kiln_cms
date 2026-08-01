@@ -159,6 +159,35 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **History anchors chain to each other by id and digest, narrowing the
+  laundering route in #597.** The moduledoc claimed a doctored version "can
+  never be re-blessed by a later write". It could: with database write access,
+  doctor a version row, `DELETE` the anchors that expose it, wait for any
+  anchoring write, and the fresh anchor — folded from genesis over the doctored
+  rows, correctly signed — verified clean.
+
+  Each anchor now records its predecessor's id **and a digest of that
+  predecessor's contents** (hash, count, signature, and its own link columns),
+  both inside the signed payload. `verify/4` walks the sequence and reports
+  `{:tampered, "anchor chain broken: …"}` for a predecessor that is missing or
+  altered, and stripping the link from a signed anchor fails its signature.
+
+  **This does not close #597, and the issue stays open.** Deleting the *newest*
+  anchors is still undetected — nothing points at the newest anchor, so a
+  truncated chain is indistinguishable from a younger one, and it is exactly the
+  newest anchors that cover the most recent versions. An attacker now deletes
+  fewer rows rather than none. Wiping every anchor still reads as `unanchored`.
+  And on a deployment with no signing key — the default — the link is advisory,
+  since the digest is computed from public columns. All four limits are now
+  stated in the moduledoc and `docs/editorial-consent.md`, and the truncation
+  case is a characterisation test that will fail when it is closed. Closing it
+  needs state the document's own anchor set cannot provide; tracked in #666.
+
+  Anchors minted before this release keep verifying against their original
+  signed shape, and that fallback is offered only when both link columns are
+  null — so a link cannot be written into a pre-upgrade anchor after the fact.
+  Adds a migration (two nullable columns); no backfill. (#597)
+
 - **A malformed `TRUSTED_PROXIES` no longer takes the node down.** Entries were
   never trimmed — `split(",", trim: true)` drops empty segments, not whitespace —
   so `TRUSTED_PROXIES=10.0.0.0/8, 172.16.0.0/12` (a space after the comma) or a

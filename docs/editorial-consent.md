@@ -60,11 +60,28 @@ reordering of anchored history is detected.
 
 Two properties are worth knowing:
 
-- **Anchors chain to each other.** Each anchor is folded incrementally from
-  the *previous anchor's recorded hash*, never re-derived from the live
-  version rows. Re-deriving would let someone doctor history, wait for the
-  next publish, and receive a fresh valid anchor over the doctored rows —
-  laundering the tampering, since verification reads the latest anchor.
+- **Anchors chain to each other,** two ways. Each anchor is folded
+  incrementally from the *previous anchor's recorded hash*, never re-derived
+  from the live version rows — re-deriving would let someone doctor history,
+  wait for the next publish, and receive a fresh valid anchor over the doctored
+  rows. Each anchor also records the previous anchor's **id and a digest of its
+  contents**, both inside the signed payload, so deleting or rewriting an anchor
+  row leaves a hole its successor still points at (#597).
+
+  This **narrows** the laundering route rather than closing it, and it is worth
+  being precise about which half is which. Deleting or rewriting a *middle*
+  anchor is detected. Deleting the *newest* anchors is not — nothing points at
+  the newest anchor, so a truncated chain looks like a younger one, and it is the
+  newest anchors that cover the most recent versions. Wiping every anchor returns
+  the document to `unanchored`, and the next write anchors it afresh. On a
+  deployment with **no signing key** — the default — the link is advisory, since
+  the digest is computed from columns anyone with database access can read.
+
+  Closing the truncation case needs state the document's own anchor set cannot
+  provide (a monotonic sequence with an external witness, or an append-only
+  store). Until then, revoking `DELETE` on `history_anchors` for the application
+  role is the defence that actually holds, and configuring a signing key is what
+  makes any of the rest mean anything.
 - **Every write can be anchored.** `config :kiln_cms,
   :audit_anchor_every_write, true` — or `KILN_AUDIT_ANCHOR_EVERY_WRITE=true`
   at runtime, so it can be turned off without a rebuild — extends the chain
