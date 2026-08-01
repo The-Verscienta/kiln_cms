@@ -1,8 +1,16 @@
 defmodule KilnCMSWeb.PageController do
   use KilnCMSWeb, :controller
 
+  # `current_org` is forwarded so the header renders THIS site's logo and name.
+  # Without it `Layouts.app`'s `default: nil` attr falls through to
+  # `Branding.for_org(nil)`, so a tenant host showed the DEFAULT org's identity.
+  # The `SetTenant` plug already resolved it; these two actions just dropped it.
   def home(conn, _params) do
-    render(conn, :home, current_scope: nil, current_user: conn.assigns[:current_user])
+    render(conn, :home,
+      current_scope: nil,
+      current_user: conn.assigns[:current_user],
+      current_org: KilnCMSWeb.Tenant.current_org(conn)
+    )
   end
 
   # Served summary of the headless API surfaces (#319): endpoints, auth in
@@ -11,6 +19,7 @@ defmodule KilnCMSWeb.PageController do
     render(conn, :developers,
       current_scope: nil,
       current_user: conn.assigns[:current_user],
+      current_org: KilnCMSWeb.Tenant.current_org(conn),
       page_title: gettext("Developer APIs")
     )
   end

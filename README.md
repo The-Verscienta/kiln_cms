@@ -201,9 +201,15 @@ the front-end integration guide.
   `DATABASE_SSL=false` only for a provider that cannot offer TLS. Point
   `DATABASE_SSL_CACERTFILE` at the provider CA bundle to verify the server certificate
   (otherwise the connection is encrypted but uses `verify_none`).
-- **Behind a reverse proxy**, set `TRUSTED_PROXIES` (comma-separated CIDRs, e.g.
-  `10.0.0.0/8`) so rate limiting keys on the real client IP from `X-Forwarded-For`
-  instead of the proxy address. Leave unset when the app is internet-facing directly.
+- **Behind a reverse proxy** — Coolify, Traefik, nginx, a cloud load balancer — set
+  `TRUSTED_PROXIES` (comma-separated CIDRs, e.g. `10.0.0.0/8`) so rate limiting keys
+  on the real client IP from `X-Forwarded-For` instead of the proxy address. Leave it
+  unset only when the app is internet-facing directly, where the header is spoofable.
+  Unset *behind* a proxy, every request looks like it came from the proxy, so all
+  rate-limit bucket collapses into one counter for the entire internet: one
+  noisy client exhausts `:auth` (20/min) for everybody, and the per-IP brute-force
+  protection on `/sign-in` stops being per-IP. Nothing errors — the app logs a warning
+  once per node the first time a forwarded request arrives while this is unset (#564).
 - **Invite-only mode:** set `config :kiln_cms, :registration_enabled, false` to disable
   open `/register` self-signup (the registration action is gated, not just the UI link).
 

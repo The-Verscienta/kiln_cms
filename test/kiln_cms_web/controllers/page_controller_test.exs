@@ -73,4 +73,45 @@ defmodule KilnCMSWeb.PageControllerTest do
     refute html =~ "signed in as a viewer"
     assert html =~ "Open editor"
   end
+
+  # Both actions used to render `<Layouts.app>` without `current_org`, so the
+  # nil-defaulted attr fell through to `Branding.for_org(nil)` — the DEFAULT
+  # org's logo and site name, served under a tenant's own hostname. Surfaced
+  # while reviewing #563; the `current_org_id/1` raise cannot catch this class,
+  # because the tenant is dropped at an attr rather than at that function.
+  describe "the site header on a tenant host (#563 residual)" do
+    import KilnCMS.OrgFixtures
+
+    # The header name comes from the org's own `SiteBranding` row, so the org
+    # needs one for the leak to be observable at all — an unbranded org falls
+    # back to the instance defaults either way.
+    defp branded_org do
+      o = org("pagebrand")
+
+      Ash.Seed.seed!(KilnCMS.CMS.SiteBranding, %{
+        org_id: o.id,
+        site_name: "Acme Tenant"
+      })
+
+      KilnCMS.Cache.bust_branding(o.id)
+      o
+    end
+
+    for {label, path} <- [{"home", "/"}, {"developers", "/developers"}] do
+      test "#{label} renders the requesting org's name, not the default org's", %{conn: conn} do
+        o = branded_org()
+
+        html =
+          %{conn | host: "#{o.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
+          |> get(unquote(path))
+          |> html_response(200)
+
+        assert html =~ "Acme Tenant"
+      end
+    end
+
+    test "the default org's own site is unaffected", %{conn: conn} do
+      assert conn |> get(~p"/") |> html_response(200) =~ "KilnCMS"
+    end
+  end
 end

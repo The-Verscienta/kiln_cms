@@ -29,6 +29,22 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **A deployment behind a proxy with `TRUSTED_PROXIES` unset now says so.** Rate
+  limiting keys on `remote_ip`, which is the client's address only when a trusted
+  proxy's `X-Forwarded-For` is honoured. Unset behind a proxy, every request
+  carries the proxy's address and every bucket collapses into a single
+  counter for the entire internet — one noisy client exhausts `:auth` (20/min)
+  and `:form` (20/min) for everybody, and the per-IP brute-force protection on
+  `/sign-in` and `/api/auth/sign_in` stops being per-IP. Nothing errored, and the
+  deployment that most needs the control was exactly the one where it silently
+  degraded. The first request carrying a forwarding header — `RemoteIp`'s whole
+  default set, since a proxy that sets only `X-Real-IP` collapses the buckets
+  identically — while no proxies are trusted now logs a warning naming the
+  variable, once per node. The request is
+  the only reliable evidence that there is a proxy in front, which a boot-time
+  check cannot have. Behaviour is unchanged: honouring the header without a
+  trusted-proxy list would be strictly worse, since it is spoofable. Called out
+  in `.env.example`, the README and `docs/environment-variables.md`. (#564)
 - `TENANT_STRICT_HOST=true` rejects a request whose `Host` matches no
   organization instead of serving it the default org (#563). Tenant resolution
   is by host — a subdomain of `TENANT_BASE_HOST`, then an org's `custom_domain`
@@ -143,6 +159,36 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **A malformed `TRUSTED_PROXIES` no longer takes the node down.** Entries were
+  never trimmed — `split(",", trim: true)` drops empty segments, not whitespace —
+  so `TRUSTED_PROXIES=10.0.0.0/8, 172.16.0.0/12` (a space after the comma) or a
+  trailing newline from a mounted secret file reached `RemoteIp.init/1` as a
+  malformed CIDR, which raises. That raise happened inside the endpoint, ahead of
+  the router, and was never cached (the cache is written only on success), so it
+  repeated on **every** request — including `/up`, so the orchestrator marked the
+  container unhealthy, and ahead of `Sentry.PlugContext`, so the report carried no
+  request context. Entries are now trimmed, and an unparseable list degrades to
+  trusting no proxy — the same posture as leaving the variable unset, and the safe
+  direction to fail in — with an error logged once per node naming the value. Found
+  while adding the warning above, which is what makes it reachable: it tells
+  operators to go and set this variable. (#564)
+
+- `TENANT_STRICT_HOST` is read with `Config.Env.fetch/1` rather than `flag/2`, so
+  leaving the variable unset no longer overwrites a project overlay's
+  `config :kiln_cms, :tenant_strict_host, true` with `false` — which would have
+  turned strict host matching off silently, in production, on the multi-org
+  deployment most likely to have set it. The rule is about whether there is an
+  overlay value to preserve: `flag/2` always writes, which is right where the
+  surrounding block is rewritten wholesale anyway (`SMTP_TLS` inside the mailer
+  config), and wrong for a standalone key an overlay may own. (#653)
+- The site header on `/` and `/developers` now renders the requesting
+  organization's logo and name. Both actions rendered `Layouts.app` without
+  `current_org`, so the nil-defaulted attr fell through to the **default** org's
+  branding — one tenant's identity served under another's hostname. The
+  `current_org_id/1` raise added in #563 cannot catch this class, because the
+  tenant is dropped at an attr rather than at that function — a component attr's
+  `nil` default is indistinguishable from a forgotten one. Closes #662; #656 is
+  the same shape on the error pages. (#662)
 - **Embeddable forms no longer default to `frame-ancestors *`.** `EMBED_ORIGINS`
   unset resolved to `:all`, so out of the box any site on the internet could
   iframe `/forms/:slug/embed`. The embed page carries no ambient credentials — a
