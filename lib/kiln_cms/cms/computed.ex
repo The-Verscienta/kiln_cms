@@ -50,7 +50,7 @@ defmodule KilnCMS.CMS.Computed do
   | Function | Result |
   | --- | --- |
   | `word_count(text)` | words in `text` |
-  | `reading_time(text)` / `reading_time(text, wpm)` | whole minutes, `wpm` defaults to 200 |
+  | `reading_time(text)` / `reading_time(text, wpm)` | whole minutes, `wpm` defaults to `config :kiln_cms, :reading_time_wpm` (230) |
   | `char_count(text)` | graphemes in `text` |
   | `slugify(text)` | URL-safe slug |
   | `upcase/downcase/capitalize/trim(text)` | the transformed string |
@@ -102,7 +102,6 @@ defmodule KilnCMS.CMS.Computed do
   # (a resource without one simply resolves it blank).
   @document_refs ~w(title slug locale excerpt body seo_title seo_description seo_keywords)
 
-  @default_wpm 200
   # Guards against a runaway template — these are hand-written by admins, and
   # a formula this long is a paste accident, not a computation.
   @max_length 2_000
@@ -413,7 +412,13 @@ defmodule KilnCMS.CMS.Computed do
 
   defp call("char_count", [text]), do: text |> stringify() |> String.length()
 
-  defp call("reading_time", [text]), do: call("reading_time", [text, @default_wpm])
+  # The rate comes from `KilnCMS.CMS.Calculations.ReadingTime` rather than a
+  # local constant (#492). This used to default to 200 while the calculation used
+  # 230 and ignored `:reading_time_wpm` entirely, so a site with both a
+  # `reading_time` computed field and the `readingTimeMinutes` API field got two
+  # different answers for one document — and setting the config moved only one.
+  defp call("reading_time", [text]),
+    do: call("reading_time", [text, default_wpm()])
 
   defp call("reading_time", [text, wpm]) do
     words = text |> words() |> length()
@@ -422,8 +427,8 @@ defmodule KilnCMS.CMS.Computed do
       {:ok, rate} when rate > 0 and words > 0 -> ceil(words / rate)
       # An empty body reads in no time; a nonsense rate falls back to the
       # default rather than silently yielding nil.
-      {:ok, _rate} -> if words > 0, do: ceil(words / @default_wpm), else: 0
-      :error -> if words > 0, do: ceil(words / @default_wpm), else: 0
+      {:ok, _rate} -> if words > 0, do: ceil(words / default_wpm()), else: 0
+      :error -> if words > 0, do: ceil(words / default_wpm()), else: 0
     end
   end
 
@@ -557,6 +562,8 @@ defmodule KilnCMS.CMS.Computed do
       acc -> acc |> Enum.reverse() |> IO.iodata_to_binary()
     end
   end
+
+  defp default_wpm, do: KilnCMS.CMS.Calculations.ReadingTime.words_per_minute()
 
   defp words(text), do: text |> stringify() |> String.split(~r/\s+/u, trim: true)
 

@@ -66,6 +66,25 @@ the type to a compiled one when you need them.
 > assuming the keys are present. An operator can migrate a whole corpus up front
 > with `mix kiln.refire_all` instead of waiting for reads to drive it.
 
+## Word count and reading time
+
+Every document exposes `word_count` (`wordCount` in GraphQL) and
+`reading_time_minutes` (`readingTimeMinutes`) — folded from the block tree and
+served wherever the rest of the document is, so you do not have to divide by
+your own constant and get a different number from the editor's.
+
+Reading time is `ceil(word_count / wpm)` at 230 words per minute by default,
+configurable per deployment with `KILN_READING_TIME_WPM` (or `config :kiln_cms,
+:reading_time_wpm` in a project overlay). The same rate drives the
+`reading_time()` computed-field function, so a site using both gets one answer. Rounded
+up, so any content at all is at least `1` and only genuinely empty content is
+`0`.
+
+> **Caveat.** One words-per-minute figure is an English-prose assumption.
+> Scripts without spaces — Chinese, Japanese, Thai — are counted as words rather
+> than characters, so their estimate is wrong in a way the calculation cannot
+> see. Locale-aware rates are a follow-up.
+
 ## Why three different block shapes?
 
 | Surface | Blocks field | Shape |

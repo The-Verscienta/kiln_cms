@@ -156,7 +156,11 @@ defmodule KilnCMS.CMS.ComputedTest do
     test "reading time rounds up and respects a custom rate" do
       body = String.duplicate("word ", 450)
 
-      assert eval("{{ reading_time(body) }}", %{document: %{"body" => body}}) == 3
+      # The default rate is `:reading_time_wpm` (230), shared with the
+      # `reading_time_minutes` calculation since #492 — this used to be a local
+      # 200 that ignored the config, so the same document got two answers
+      # depending on which surface asked.
+      assert eval("{{ reading_time(body) }}", %{document: %{"body" => body}}) == 2
       assert eval("{{ reading_time(body, 100) }}", %{document: %{"body" => body}}) == 5
       assert eval("{{ reading_time(body) }}", %{document: %{"body" => ""}}) == 0
     end

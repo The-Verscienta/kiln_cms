@@ -985,7 +985,7 @@ defmodule KilnCMS.CMS.Content do
         destroy_actions [:destroy, :purge]
 
         # Handy derived values on the show view.
-        show_calculations [:published, :word_count]
+        show_calculations [:published, :word_count, :reading_time_minutes]
 
         form do
           field :seo_description, type: :long_text
@@ -1839,6 +1839,20 @@ defmodule KilnCMS.CMS.Content do
         # Total word count across the embedded block tree.
         calculate :word_count, :integer, KilnCMS.CMS.Calculations.WordCount do
           public? true
+          filterable? false
+          sortable? false
+        end
+
+        # Reading time in whole minutes, derived from `word_count` at the
+        # configured words-per-minute rate (#492) — so consumers stop each
+        # reimplementing words ÷ WPM against a different constant.
+        calculate :reading_time_minutes, :integer, KilnCMS.CMS.Calculations.ReadingTime do
+          public? true
+          # Neither this nor `word_count` has an `expression/2`, so a filter or
+          # sort on them raises out of AshSql as a 500. Declaring them unusable
+          # turns that into a proper rejection at the query layer.
+          filterable? false
+          sortable? false
         end
 
         # Full public URL path (type prefix + slug, e.g. `/blog/my-post`) so

@@ -29,6 +29,37 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`reading_time_minutes` alongside `word_count`** on every content type, in
+  the same places: the admin show view, JSON:API and GraphQL
+  (`readingTimeMinutes`). Kiln computed the word count and stopped there, so
+  every consumer divided by its own words-per-minute constant and arrived at a
+  different number from the one the editor showed. It is `ceil(word_count /
+  wpm)` at 230 wpm, overridable with `config :kiln_cms, :reading_time_wpm`;
+  a value that is not a positive integer keeps the default and warns rather than
+  being interpreted, since `0` divides by zero and a negative is not a spelling
+  of an intent. Rounded up, so any content at all is at least one minute and
+  only genuinely empty content is zero. The editor's action bar now shows both,
+  computed from the advisory panel's already-memoised body stats so it costs no
+  extra walk of the block tree. One caveat, documented rather than hidden: a
+  single wpm figure is an English-prose assumption, and scripts without spaces
+  are counted as words rather than characters. Set it per deployment with
+  `KILN_READING_TIME_WPM`. (#492)
+- **`word_count` now counts Unicode whitespace**, fixing a disagreement the new
+  reading time would otherwise have made visible. `KilnCMS.CMS.BlockText` split
+  on `~r/\s+/` while the editor's advisory panel split on `~r/\s+/u`, so a
+  non-breaking space — what `&nbsp;` decodes to, and what every paste from Word
+  or Google Docs is full of — did not separate words for the calculation but did
+  for the editor. `alpha&nbsp;beta gamma&nbsp;delta` counted as two words over
+  the API and four in the editor. Existing counts on `&nbsp;`-heavy documents
+  will go **up**. (#492)
+- The `reading_time()` computed-field function now uses the same configured rate
+  as `reading_time_minutes`. It had its own 200 wpm constant and ignored
+  `:reading_time_wpm` entirely, so a site with both a `reading_time` computed
+  field (the recipe in `docs/extending-content.md`) and the API field got two
+  different numbers for one document, and reconfiguring the rate moved only one.
+  Documents using that function will see their value change where it was
+  computed at 200. (#492)
+
 - **A deployment behind a proxy with `TRUSTED_PROXIES` unset now says so.** Rate
   limiting keys on `remote_ip`, which is the client's address only when a trusted
   proxy's `X-Forwarded-For` is honoured. Unset behind a proxy, every request

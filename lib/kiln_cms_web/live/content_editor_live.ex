@@ -4437,6 +4437,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           conflict={@conflict}
           editors={@editors}
           actor={@actor}
+          word_count={@seo_body_stats.word_count}
         />
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -5202,8 +5203,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :conflict, :boolean, required: true
   attr :editors, :list, required: true
   attr :actor, :any, required: true
+  attr :word_count, :integer, required: true
 
   defp editor_action_bar(assigns) do
+    # Resolved once per render rather than per interpolation: `words_per_minute/0`
+    # WARNS on a misconfigured value, so reading it three times turned one bad
+    # config line into three log lines per keystroke.
+    wpm = KilnCMS.CMS.Calculations.ReadingTime.words_per_minute()
+
+    assigns =
+      assigns
+      |> assign(:wpm, wpm)
+      |> assign(:reading_minutes, reading_minutes(assigns.word_count, wpm))
+
     ~H"""
     <div class="sticky top-14 z-10 rounded-lg border border-base-content/10 bg-base-100/90 px-3 py-2.5 shadow-sm backdrop-blur">
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -5241,6 +5253,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
             >{Calendar.strftime(@record.unpublish_at, "%b %-d, %H:%M")} UTC</time>
           </span>
           <.presence_roster editors={@editors} current_id={@actor.id} />
+
+          <%!-- Word count and reading time (#492). Free to render: the count
+                comes from `@seo_body_stats`, which the advisory panel already
+                folds from the block tree and memoizes on a `phash2` digest, so
+                this adds no per-keystroke walk of its own. --%>
+          <span
+            :if={@word_count > 0}
+            class="inline-flex items-center gap-1 text-xs text-base-content/60"
+            title={gettext("Reading time is an estimate at %{wpm} words per minute.", wpm: @wpm)}
+          >
+            <.icon name="hero-clock" class="size-3.5" />
+            {ngettext("%{count} word", "%{count} words", @word_count, count: @word_count)} &middot; {ngettext(
+              "%{count} min read",
+              "%{count} min read",
+              @reading_minutes,
+              count: @reading_minutes
+            )}
+          </span>
         </div>
 
         <div class="ml-auto flex flex-wrap items-center gap-2">
@@ -5263,6 +5293,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </div>
     """
   end
+
+  # Same arithmetic as `KilnCMS.CMS.Calculations.ReadingTime`, applied to the
+  # in-progress draft rather than the saved record — so the editor's number and
+  # the one consumers read off the API agree once the draft is saved.
+  defp reading_minutes(0, _wpm), do: 0
+  defp reading_minutes(words, wpm), do: ceil(words / wpm)
 
   # Tab strip for the right inspector rail (Theme A). Switching is pure view
   # state; the panels themselves stay mounted (toggled by CSS in render/1).
