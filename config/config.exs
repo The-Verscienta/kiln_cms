@@ -484,13 +484,15 @@ config :kiln_cms, KilnCMS.Provenance,
   # **public half** — that is all verification needs, so the old private key
   # can be destroyed. Same provider tuples as `signing_key`, or a raw PEM.
   #   retired_keys: [{:file, %{"path" => "/etc/kiln/keys/2025.pub.pem"}}]
-  retired_keys: [],
-  # The same thing as bare paths, which is what KILN_PROVENANCE_RETIRED_KEY_FILES
-  # writes. KeyRegistry.retired/0 UNIONS this with :retired_keys above; it is a
-  # second key because Config deep-merges keyword lists and a list of
-  # `{:file, %{…}}` tuples is one, so a runtime write to :retired_keys would
-  # silently drop the :file entries configured here. Paths never merge.
-  retired_key_files: []
+  #
+  # This is the key to use HERE. KILN_PROVENANCE_RETIRED_KEY_FILES writes a
+  # separate `:retired_key_files` (bare paths) that KeyRegistry.retired/0 unions
+  # with this one, so the env var can only ADD verification keys — it is a second
+  # key because Config deep-merges keyword lists and a list of `{:file, %{…}}`
+  # tuples is one, so a runtime write to :retired_keys would Keyword.merge into
+  # this list and silently drop its :file entries. Do not set :retired_key_files
+  # here: it has one writer (runtime.exs) and a runtime write REPLACES it.
+  retired_keys: []
 
 # Configure esbuild (the version is required)
 config :esbuild,

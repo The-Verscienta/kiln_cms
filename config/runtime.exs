@@ -224,13 +224,31 @@ if config_env() != :test do
   # keyword list, and Config deep-merges keyword lists — so writing :retired_keys
   # here would Keyword.merge into any :retired_keys set in source and silently
   # delete every :file entry already there. Losing a verification key is the one
-  # outcome this must never produce. See KilnCMS.Provenance.KeyRegistry.
+  # outcome this must never produce. :retired_key_files is the runtime channel
+  # and this is its only writer; source config belongs in :retired_keys.
+  # See KilnCMS.Provenance.KeyRegistry.
+  #
+  # A value that parses to NO paths warns and writes nothing rather than writing
+  # `[]`. `KILN_PROVENANCE_RETIRED_KEY_FILES=","` — or a shell expanding an unset
+  # variable into a bare separator — otherwise clears the list, and silently
+  # deregistering every retired key is precisely the failure this feature exists
+  # to prevent.
   retired_key_files =
     "KILN_PROVENANCE_RETIRED_KEY_FILES" |> System.get_env("") |> String.trim()
 
-  if retired_key_files != "" do
-    config :kiln_cms, KilnCMS.Provenance,
-      retired_key_files: KilnCMS.Provenance.parse_key_files(retired_key_files)
+  case KilnCMS.Provenance.parse_key_files(retired_key_files) do
+    [] when retired_key_files != "" ->
+      IO.warn("""
+      KILN_PROVENANCE_RETIRED_KEY_FILES is set to #{inspect(retired_key_files)}, \
+      which contains no paths; keeping the configured default. Expected a \
+      comma-separated list of PEM file paths.\
+      """)
+
+    [] ->
+      :ok
+
+    paths ->
+      config :kiln_cms, KilnCMS.Provenance, retired_key_files: paths
   end
 end
 

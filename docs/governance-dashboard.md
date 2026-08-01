@@ -52,8 +52,9 @@ Phase 1 was a read model over what the cluster already produces. Phase 2
   `TAMPERED`), and the JSON export carries it. Anchors are minted at publish
   (`KilnCMS.Governance.Chain`); verify fleet-wide with `mix kiln.audit.verify`.
   Anchors verify against the key that signed them, so rotating the signing key
-  doesn't turn the corpus `unverifiable` — register the outgoing key's public
-  half under `retired_keys` (see docs/provenance.md#key-rotation).
+  doesn't turn the corpus `unverifiable` — provided you register the outgoing
+  key's public half first, via `KILN_PROVENANCE_RETIRED_KEY_FILES` or
+  `retired_keys` (see docs/provenance.md#key-rotation).
 - **Consent recording UI** — record a consent (kind / grantor / reference /
   note) directly from the trail page.
 

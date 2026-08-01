@@ -71,23 +71,36 @@ Key points:
 
 ### #340 provenance (off by default)
 
-In `runtime.exs` / Coolify env:
+In the Coolify env (no rebuild needed — see `docs/environment-variables.md`):
+
+```bash
+KILN_PROVENANCE_ENABLED=true
+KILN_PROVENANCE_KEY_FILE=/run/secrets/kiln-provenance.pem
+```
+
+`signer` / `origin` are source-only and default to `:site_name` /
+`:public_base_url`; set them in `runtime.exs` if you want different values:
 
 ```elixir
 config :kiln_cms, KilnCMS.Provenance,
-  enabled: true,
   signer: "Verscienta Editorial",
   origin: "https://your-domain",
-  # Reuse the DKIM mail key, or point at a dedicated content-signing key:
-  signing_key: {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}   # or  :dkim
+  # Or reuse the DKIM mail key instead of a dedicated content-signing key:
+  signing_key: :dkim
 ```
 
-- [ ] Provide a **PKCS#1 RSA PEM** in `KILN_PROVENANCE_PRIVATE_KEY` (same format
-      as DKIM), or set `signing_key: :dkim` to reuse the mail key.
+- [ ] Provide a **PKCS#1 RSA PEM** at `KILN_PROVENANCE_KEY_FILE` (same format as
+      DKIM) — or inline in `KILN_PROVENANCE_PRIVATE_KEY`, or `signing_key: :dkim`
+      to reuse the mail key.
+- [ ] Set `KILN_PROVENANCE_ENABLED=true`. A signing key alone is **not** enough:
+      without it the key signs history anchors and `/api/provenance/*` still 404s.
 - [ ] Verify — `GET /api/provenance/public-key` returns the key, and a published
       item's `GET /api/provenance/:type/:slug/verify` returns `"verified": true`.
-- [ ] Note: rotating the key changes `key_id`; manifests verify against the
-      *current* key. Plan rotation deliberately. See `docs/provenance.md`.
+- [ ] Rotation: each signature records the `key_id` that made it and verifies
+      against **that** key, not the current one. So before you retire a key, add
+      its public half to `KILN_PROVENANCE_RETIRED_KEY_FILES` — and only then
+      destroy the private half, or every pre-rotation manifest and anchor becomes
+      permanently unverifiable. See `docs/provenance.md#key-rotation`.
 
 ### #353 static export (optional)
 

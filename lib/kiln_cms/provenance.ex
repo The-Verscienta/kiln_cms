@@ -51,8 +51,10 @@ defmodule KilnCMS.Provenance do
   deep-merges keyword lists: setting the env var would then `Keyword.merge`
   into a `:retired_keys` configured in source and silently delete every
   `:file` entry already there. A list of binaries is not a keyword list, so it
-  replaces cleanly, and `KeyRegistry` unions the two — the one direction that
-  cannot make a previously verifiable signature stop verifying.
+  replaces `:retired_key_files` cleanly, and `KeyRegistry` unions that with
+  `:retired_keys` — so the env var cannot make a source-registered key stop
+  verifying. That holds because `:retired_key_files` has exactly one writer;
+  source config belongs in `:retired_keys`.
   """
   @spec parse_key_files(String.t()) :: [String.t()]
   def parse_key_files(value) when is_binary(value) do

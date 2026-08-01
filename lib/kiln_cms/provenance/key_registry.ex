@@ -26,6 +26,12 @@ defmodule KilnCMS.Provenance.KeyRegistry do
   `KilnCMS.Provenance.parse_key_files/1` into `:retired_key_files`, which
   `retired/0` unions with `:retired_keys`.
 
+  Source config belongs in `:retired_keys`; `:retired_key_files` is the runtime
+  channel and `config/runtime.exs` is its only writer, which replaces it
+  wholesale. Setting it in source too would be silently overwritten the first
+  time the env var is used — the union holds *between* the two keys, not within
+  either one.
+
   Registering the **public half alone** is enough — that is all verification
   needs — so a rotated-out private key can be destroyed, but only *after* the
   public half is registered: until then those signatures resolve to
@@ -78,17 +84,18 @@ defmodule KilnCMS.Provenance.KeyRegistry do
   def retired do
     config = Application.get_env(:kiln_cms, KilnCMS.Provenance, [])
 
-    tuples = Enum.map(Keyword.get(config, :retired_keys, []), &{:retired_keys, &1})
-
-    files =
-      config
-      |> Keyword.get(:retired_key_files, [])
-      |> Enum.map(&{:retired_key_files, {:file, %{"path" => &1}}})
-
-    (tuples ++ files)
+    from(config, :retired_keys)
+    |> Kernel.++(from(config, :retired_key_files))
     |> Enum.map(fn {from, source} -> resolve(from, source) end)
     |> Enum.reject(&is_nil/1)
+    # The same key can legitimately be registered both ways for a deploy or two
+    # while an operator moves a retired key out of source config and into the
+    # env var. Publishing it twice on /api/provenance/public-key would just tell
+    # consumers we hold a key we don't.
+    |> Enum.uniq_by(& &1.key_id)
   end
+
+  defp from(config, key), do: Enum.map(Keyword.get(config, key, []), &{key, &1})
 
   @doc """
   The public key that should verify a signature bearing `key_id`.
@@ -139,6 +146,15 @@ defmodule KilnCMS.Provenance.KeyRegistry do
       der_b64: der_b64
     }
   end
+
+  # A `:retired_key_files` entry is a bare path. Widening it to the provider
+  # tuple here rather than at the call site keeps anything that ISN'T a path
+  # flowing through `fetch_source/1`'s catch-all — wrapping unconditionally
+  # made a non-binary entry raise out of `retired/0` (File.read on a tuple),
+  # taking down verification for every key, which is the opposite of the
+  # log-and-skip contract above.
+  defp resolve(:retired_key_files, path) when is_binary(path),
+    do: resolve(:retired_key_files, {:file, %{"path" => path}})
 
   # A config entry is a provider tuple or the PEM itself. `from` names the
   # config key it came from, so the warning points at the thing to go fix —

@@ -270,10 +270,15 @@ defmodule KilnCMS.Keys do
   def describe_error(:not_an_rsa_public_key), do: "not an RSA public key"
   def describe_error(:no_key_generated), do: "no key has been generated yet"
 
+  # Names the env var, not just the config key: this fires during a rotation,
+  # and on a released image `:retired_keys` cannot be edited without a rebuild
+  # (#608). Pointing an operator at the one route they can't take is how a
+  # retired private half gets destroyed before its public half is registered.
   def describe_error({:unknown_key_id, key_id}),
     do:
       "signature was made by key #{key_id}, which is neither the active signing key " <>
-        "nor listed in :retired_keys — register its public half to keep verifying it"
+        "nor registered as retired — add its public half to " <>
+        "KILN_PROVENANCE_RETIRED_KEY_FILES (or :retired_keys) to keep verifying it"
 
   def describe_error(:decrypt_failed),
     do:
