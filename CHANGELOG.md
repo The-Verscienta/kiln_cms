@@ -99,11 +99,57 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **`DATABASE_SSL=True` no longer disables Postgres TLS.** The value was matched
+  raw against `~w(true 1)`, so any capitalized or space-padded spelling missed
+  and fell through to `false` — an operator explicitly asking for TLS got a
+  plaintext connection, with credentials and every query crossing the network
+  unencrypted, and no warning or boot failure to show for it. Only deployments
+  that set the variable deliberately were affected; leaving it unset was, and
+  remains, encrypted. **An unrecognized spelling now behaves differently — see
+  Upgrading below.** (#606)
+- Every on/off environment variable now goes through one parser,
+  `KilnCMS.Config.Env` — seven call sites that previously shared no code, in
+  five distinct parser shapes and three different unrecognized-value semantics.
+  All of them are now trimmed and case-insensitive (`TRUE`, `On`, `" true "`),
+  accept `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off`, treat a blank `FOO=`
+  as unset, and keep the default with a warning on anything else — an
+  unparseable value is never *interpreted*, in either direction. Alongside
+  `DATABASE_SSL` this fixes `VISUAL_EDITING_ENABLED=False`, which used to leave
+  the bridge on, contradicting the documentation. `ECTO_IPV6`,
+  `KILN_UPDATE_CHECK`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, `SMTP_TLS` and
+  `SMTP_TLS_VERIFY` all gain the wider spellings. Two deliberate exclusions:
+  `PHX_SERVER` stays presence-checked as Phoenix generates it (parsing it would
+  turn a typo into a silent outage), and `config/test.exs`'s `KILN_STRICT_TEST`
+  cannot use the parser at all — compile-time config files are evaluated before
+  any project module is on the code path. (#607)
 - The media library's responsive-variant list previews each variant inline
   instead of linking to it. The old per-variant "open" link announced itself as
   opening in a new tab, but media carries `Content-Disposition: attachment` on
   both storage adapters, so it downloaded a UUID-named file — misleading for
   sighted and screen-reader users alike. The copyable media URL now says so too.
+
+### Upgrading
+
+**Check `DATABASE_SSL` before deploying, if you set it at all.** Tightening
+#606 means an unrecognized value now keeps TLS *on* where it used to silently
+turn it off. A deployment that reached for a libpq `sslmode` spelling —
+`DATABASE_SSL=disable`, `=none`, `=require` — was getting a plaintext
+connection and will now attempt TLS. Against a Postgres that cannot offer it,
+that is a **failure to connect on boot** rather than a silent downgrade.
+
+```bash
+grep -rn 'DATABASE_SSL' .env docker-compose.yml 2>/dev/null
+```
+
+Unset is unaffected (encrypted, as before), and so are `false`/`0`/`no`/`off`
+— use one of those if you genuinely need an unencrypted connection. Anything
+else now logs a warning to stderr on boot naming the variable, so a misspelling
+is visible in `docker logs` rather than silent.
+
+The same tightening applies to `VISUAL_EDITING_ENABLED` (an unrecognized value
+no longer leaves the bridge on by accident of parsing) and to `SMTP_TLS` /
+`SMTP_TLS_VERIFY` (`0`/`no`/`off`/`False` now disable, where only the exact
+string `false` did before). Neither can break a boot.
 
 ## [0.1.0]
 

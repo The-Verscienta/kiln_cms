@@ -6,6 +6,25 @@ import Config
 # and secrets from environment variables or elsewhere. Do not define
 # any compile-time configuration in here, as it won't be applied.
 # The block below contains prod specific runtime configuration.
+#
+# ## Boolean environment variables
+#
+# All seven on/off variables below go through `KilnCMS.Config.Env` — one
+# parser, one set of accepted spellings, one rule for a value it cannot read
+# (#607). Do not hand-roll an eighth: matching the raw value is how
+# `DATABASE_SSL=True` came to silently disable Postgres TLS (#606) and
+# `VISUAL_EDITING_ENABLED=False` came to leave the bridge on.
+#
+#   * trimmed and downcased, so `TRUE`, `On` and `" true "` all work
+#   * `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off` are recognized
+#   * anything else is never interpreted: it keeps the default and warns, so a
+#     typo can flip nothing in either direction
+#
+# `Env.flag/2` returns a boolean; `Env.fetch/1` distinguishes "unset" from
+# "explicitly false" for the flags that must only override config when the
+# operator actually set them. See the moduledoc for the per-flag caveats — this
+# fails to the *default*, which is only the safe side when the default is.
+alias KilnCMS.Config.Env
 
 # ## Using releases
 #
@@ -101,8 +120,11 @@ end
 # may fetch it cross-origin and round-trip writes is governed by CORS_ORIGINS
 # (the annotated read and the write API both live under `/api`); draft visibility
 # is governed by the caller's API key. See KilnCMS.VisualEditing.
-if visual_editing = System.get_env("VISUAL_EDITING_ENABLED") do
-  config :kiln_cms, :visual_editing_enabled, visual_editing not in ~w(false 0 no off)
+#
+# Only a recognized spelling writes config, so an unset var keeps the compiled
+# default (or a project overlay's). See the header for the spellings.
+with {:ok, enabled?} <- Env.fetch("VISUAL_EDITING_ENABLED") do
+  config :kiln_cms, :visual_editing_enabled, enabled?
 end
 
 # ## Tamper-evident history — anchor every write (#356)
@@ -117,39 +139,18 @@ end
 # this off without rebuilding the image. See KilnCMS.Governance.Chain and
 # docs/editorial-consent.md.
 #
-# Trimmed and downcased like KILN_UPDATE_CHECK below, for the mirror-image
-# reason: an operator who set this because every version must be signed must not
-# be silently defeated by `TRUE` or `On`.
-#
-# Only RECOGNIZED spellings write config. An unrecognized value (`enabled`, a
+# Only RECOGNIZED spellings write config: an unrecognized value (`enabled`, a
 # typo, a quote-wrapped `"true"` from `docker run --env-file`) leaves the
-# compiled default alone and warns, rather than being read as "off" — for a
-# compliance flag, silently not signing is the dangerous direction, and a typo
-# must not disable an audit trail the deployment deliberately turned on.
+# compiled default alone and warns, rather than disabling an audit trail the
+# deployment deliberately turned on. Note the compiled default here is `false`,
+# so the warning is also the only signal that a typo failed to turn signing ON.
 #
 # Skipped under :test so the suite is deterministic regardless of the developer's
 # environment — the flag causes a DB write per save, and the governance tests
 # drive it explicitly with Application.put_env instead.
-anchor_every_write =
-  "KILN_AUDIT_ANCHOR_EVERY_WRITE" |> System.get_env("") |> String.trim() |> String.downcase()
-
 if config_env() != :test do
-  cond do
-    anchor_every_write == "" ->
-      :ok
-
-    anchor_every_write in ~w(true 1 yes on) ->
-      config :kiln_cms, :audit_anchor_every_write, true
-
-    anchor_every_write in ~w(false 0 no off) ->
-      config :kiln_cms, :audit_anchor_every_write, false
-
-    true ->
-      IO.warn("""
-      KILN_AUDIT_ANCHOR_EVERY_WRITE is set to an unrecognized value \
-      (#{inspect(anchor_every_write)}); keeping the configured default. \
-      Use one of: true/1/yes/on, false/0/no/off.\
-      """)
+  with {:ok, every_write?} <- Env.fetch("KILN_AUDIT_ANCHOR_EVERY_WRITE") do
+    config :kiln_cms, :audit_anchor_every_write, every_write?
   end
 end
 
@@ -179,13 +180,15 @@ end
 # requests at all; the page then reports the running version and the update
 # command without the comparison. See `Kiln.Updates`.
 #
-# Accepted spellings match VISUAL_EDITING_ENABLED above, and are trimmed and
-# downcased: an operator who set this because they need *no* egress must not be
-# defeated by `off` or `FALSE`.
-update_check = "KILN_UPDATE_CHECK" |> System.get_env("") |> String.trim() |> String.downcase()
-
-if update_check in ~w(false 0 no off) do
-  config :kiln_cms, Kiln.Updates, enabled: false
+# Accepted spellings are the shared ones (see the header): an operator who set
+# this because they need *no* egress must not be defeated by `Off` or `FALSE`.
+#
+# An explicit on-spelling now writes `enabled: true` as well, where this used to
+# write only on the off path. That is deliberate — it lets an operator re-enable
+# the check against a build whose compiled config turned it off (`config/e2e.exs`
+# does exactly that) without a rebuild.
+with {:ok, enabled?} <- Env.fetch("KILN_UPDATE_CHECK") do
+  config :kiln_cms, Kiln.Updates, enabled: enabled?
 end
 
 # Where this project keeps its pinned Kiln checkout, relative to the project
@@ -234,7 +237,7 @@ if config_env() == :prod do
       For example: ecto://USER:PASS@HOST/DATABASE
       """
 
-  maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
+  maybe_ipv6 = if Env.flag("ECTO_IPV6", false), do: [:inet6], else: []
 
   # Encrypt the Postgres connection by default. Set DATABASE_SSL=false only for a
   # provider that genuinely cannot offer TLS (most managed Postgres — RDS,
@@ -242,7 +245,10 @@ if config_env() == :prod do
   # points at the provider's CA bundle we verify the server certificate; otherwise
   # we still encrypt but skip peer verification (verify_none) so deployment isn't
   # blocked on cert plumbing.
-  database_ssl? = System.get_env("DATABASE_SSL", "true") in ~w(true 1)
+  #
+  # This is the #606 site the header refers to. Only an explicit off-spelling
+  # disables TLS now; anything unreadable keeps it on.
+  database_ssl? = Env.flag("DATABASE_SSL", true)
 
   database_ssl_opts =
     case System.get_env("DATABASE_SSL_CACERTFILE") do
@@ -555,15 +561,15 @@ if config_env() == :prod do
       # SMTP_TLS_VERIFY=false keeps the connection encrypted but skips peer
       # verification, for relays with self-signed or mismatched certificates.
       smtp_tls_options =
-        if System.get_env("SMTP_TLS_VERIFY") == "false" do
-          [verify: :verify_none]
-        else
+        if Env.flag("SMTP_TLS_VERIFY", true) do
           [
             verify: :verify_peer,
             cacertfile: CAStore.file_path(),
             server_name_indication: String.to_charlist(smtp_host),
             depth: 3
           ]
+        else
+          [verify: :verify_none]
         end
 
       config :kiln_cms, KilnCMS.Mailer,
@@ -572,7 +578,7 @@ if config_env() == :prod do
         port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
         username: System.get_env("SMTP_USERNAME"),
         password: System.get_env("SMTP_PASSWORD"),
-        tls: if(System.get_env("SMTP_TLS") == "false", do: :never, else: :always),
+        tls: if(Env.flag("SMTP_TLS", true), do: :always, else: :never),
         tls_options: smtp_tls_options,
         auth: :always
 

@@ -313,7 +313,7 @@ defmodule KilnCMS.MixProject do
         ~r/^(Elixir\.)?KilnCMS\.(Firing|HTMLSanitizer|Highlight|VisualEditing|Seo|Assist|LLM|Branding|I18n)(\.|$)/,
       Analytics: ~r/^(Elixir\.)?KilnCMS\.Analytics(\.|$)/,
       "Runtime & infrastructure":
-        ~r/^(Elixir\.)?KilnCMS\.(Application|Cache|Migrations|Release|Repo|Secrets|SentryFilter)(\.|$)/,
+        ~r/^(Elixir\.)?KilnCMS\.(Application|Cache|Config|Migrations|Release|Repo|Secrets|SentryFilter)(\.|$)/,
       "Web — LiveViews": ~r/^(Elixir\.)?KilnCMSWeb\..*Live$/,
       "Web — components & templates":
         ~r/^(Elixir\.)?KilnCMSWeb\.(.*Components|.*HTML|.*JSON|Layouts)$/,
