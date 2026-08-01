@@ -345,4 +345,137 @@ defmodule KilnCMS.Governance.ChainTest do
 
     assert {"title", {"Anchored", "Renamed"}} in rename.diffs
   end
+
+  describe "anchor-to-anchor chaining (#597)" do
+    test "each anchor after the first names and digests its predecessor" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [newest, oldest] = Chain.anchors("page", page.id, page.org_id) |> Enum.take(2)
+
+      assert is_nil(oldest.prev_anchor_id)
+      assert newest.prev_anchor_id == oldest.id
+      assert newest.prev_anchor_digest == Chain.anchor_digest(oldest)
+
+      # That last line alone is a tautology — it recomputes the stored value with
+      # the function that produced it, so it holds for any definition, including
+      # one that ignores every field. Pin the binding instead.
+      for {field, altered} <- [
+            {:chain_hash, "doctored"},
+            {:signature, "doctored"},
+            {:version_count, oldest.version_count + 1}
+          ] do
+        refute Chain.anchor_digest(Map.put(oldest, field, altered)) ==
+                 newest.prev_anchor_digest,
+               "anchor_digest/1 ignores #{field}"
+      end
+    end
+
+    # The laundering route #597 describes: doctor a version, delete the anchors
+    # that expose it, wait for the next write, and the fresh anchor is folded
+    # from genesis over the doctored rows and verifies clean. Deleting only the
+    # OLDER anchors now leaves the newest one pointing at nothing.
+    test "deleting a predecessor anchor is detected" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      [newest | older] = Chain.anchors("page", page.id, page.org_id)
+      assert older != [], "expected more than one anchor"
+
+      ids = Enum.map(older, & &1.id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id in ^Enum.map(ids, &Ecto.UUID.dump!/1))
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "anchor chain broken"
+      assert reason =~ newest.prev_anchor_id
+    end
+
+    # A predecessor that is present but rewritten — the other half of the hole.
+    test "rewriting a predecessor anchor is detected" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [_newest | [older | _]] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors",
+          where: a.id == type(^older.id, :binary_id),
+          update: [set: [chain_hash: "doctored"]]
+        ),
+        []
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "anchor chain broken"
+    end
+
+    # Stripping the link from a signed anchor is caught by the SIGNATURE, not by
+    # `chain_intact/1` — which is the whole reason the columns live inside the
+    # signed payload. Without this test, moving them out would silently reopen it.
+    test "nulling the link columns on a signed anchor is detected" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+      refute is_nil(newest.prev_anchor_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors",
+          where: a.id == type(^newest.id, :binary_id),
+          update: [set: [prev_anchor_id: nil, prev_anchor_digest: nil]]
+        ),
+        []
+      )
+
+      assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # The route #597 filed, which this change narrows but does NOT close. An
+    # attacker deletes only the anchors covering the doctored version — the
+    # newest, which nothing points at — so `chain_intact/1` sees no dangling
+    # link. Characterised rather than asserted-as-correct: when the truncation
+    # case is closed this test should FAIL, which is the point of writing it.
+    test "deleting the NEWEST anchor is not detected — the open half of #597" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      # The surviving prefix still verifies, so nothing flags the truncation.
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # The residual the moduledoc now states outright: wiping EVERY anchor returns
+    # the document to :unanchored rather than being detected as tampering.
+    # Asserted so the limit is recorded rather than assumed.
+    test "wiping every anchor reads as unanchored, not tampered" do
+      page = published_page(admin())
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.source_id == type(^page.id, :binary_id))
+      )
+
+      assert :unanchored = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+  end
 end

@@ -45,7 +45,9 @@ defmodule KilnCMS.CMS.HistoryAnchor do
         :published_version_id,
         :signature,
         :key_id,
-        :actor_id
+        :actor_id,
+        :prev_anchor_id,
+        :prev_anchor_digest
       ]
     end
 
@@ -106,6 +108,17 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # plain integrity checksum, upgraded to non-repudiable once keys exist).
     attribute :signature, :string, public?: true
     attribute :key_id, :string, public?: true
+
+    # The anchor this one continues from, and a digest binding that anchor's
+    # CONTENT (#597). `prev_anchor_id` alone would let a deleted predecessor be
+    # replaced by a forged row reusing the id; the digest covers the hash, count
+    # and signature too, and both are inside the signed payload — so an attacker
+    # without the signing key cannot mint a consistent link.
+    #
+    # Null only on a document's FIRST anchor. A non-null id that resolves to no
+    # row is the deletion this exists to make visible.
+    attribute :prev_anchor_id, :uuid, public?: true
+    attribute :prev_anchor_digest, :string, public?: true
 
     attribute :actor_id, :uuid, public?: true
 
