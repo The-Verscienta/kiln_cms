@@ -245,4 +245,105 @@ defmodule KilnCMSWeb.SystemLiveTest do
       assert html =~ Kiln.Version.version()
     end
   end
+
+  # The cache has no bare put — `fetch_published/5` populates it from the fun.
+  defp warm(org, slug),
+    do: KilnCMS.Cache.fetch_published(org, "page", slug, "en", fn -> %{id: slug} end)
+
+  describe "flushing the delivery cache (#483)" do
+    setup do
+      stub_release(Kiln.Version.version())
+      :ok
+    end
+
+    defp system_page(role) do
+      {:ok, lv, html} =
+        build_conn() |> log_in(authed_user(role)) |> live(~p"/editor/system")
+
+      {lv, html}
+    end
+
+    test "an admin sees the button, with the cost stated" do
+      {_lv, html} = system_page(:admin)
+
+      assert html =~ "Flush delivery cache"
+      # The button is destructive-ish: it trades a warm cache for database load,
+      # so the page has to say so rather than presenting a free action.
+      assert html =~ "re-reads the database"
+      assert html =~ "data-confirm"
+    end
+
+    test "flushing clears BOTH delivery caches" do
+      org = KilnCMS.Accounts.default_org_id()
+      doc_id = Ash.UUID.generate()
+
+      warm(org, "cached-slug")
+      KilnCMS.Firing.Cache.put(org, :page, doc_id, :web, %{"html" => "<p>hi</p>"})
+
+      # Both warm to begin with, or the assertions below prove nothing.
+      assert {:ok, _} = KilnCMS.Firing.Cache.get(org, :page, doc_id, :web)
+
+      {lv, _html} = system_page(:admin)
+      lv |> element("button[phx-click='flush-cache']") |> render_click()
+
+      # Clearing one and not the other leaves the site serving half-stale: the
+      # record lookups repopulate from the database while the fired bodies keep
+      # whatever they had. Reverting the artifacts half must fail here.
+      assert KilnCMS.Firing.Cache.get(org, :page, doc_id, :web) == :miss
+
+      # A miss now, where a warm entry would have been returned without the fun
+      # running at all.
+      assert KilnCMS.Cache.fetch_published(org, "page", "cached-slug", "en", fn -> :refetched end) ==
+               :refetched
+    end
+
+    test "the count line reports what actually went" do
+      org = KilnCMS.Accounts.default_org_id()
+      warm(org, "counted-slug")
+      KilnCMS.Firing.Cache.put(org, :page, Ash.UUID.generate(), :web, %{"html" => "<p>hi</p>"})
+
+      {lv, _html} = system_page(:admin)
+      html = lv |> element("button[phx-click='flush-cache']") |> render_click()
+
+      # Not just "Dropped" — that renders for a zero flush too, so it would pass
+      # against a no-op.
+      assert html =~ "1 artifact entries" or html =~ "1 published"
+      refute html =~ "0 published entries and 0 artifact entries"
+    end
+
+    test "an editor cannot reach the page at all" do
+      assert {:error, {:redirect, _}} =
+               build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor/system")
+    end
+
+    # The route gate is a PER-ORG tier while the flush is a global-admin action,
+    # and the handler is what actually flushes — so the guard that matters is the
+    # one inside `handle_event/3`, not the route. Driven directly, because the
+    # route stops this principal before a socket exists.
+    test "the handler itself refuses a non-admin" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}, current_user: authed_user(:editor), flushed: nil, flash: %{}}
+      }
+
+      {:noreply, socket} = KilnCMSWeb.SystemLive.handle_event("flush-cache", %{}, socket)
+
+      assert is_nil(socket.assigns.flushed)
+      assert socket.assigns.flash["error"] =~ "admin access"
+    end
+  end
+
+  describe "KilnCMS.Cache.flush_delivery/0" do
+    test "reports counts from both caches and is safe to repeat" do
+      org = KilnCMS.Accounts.default_org_id()
+      warm(org, "flush-me")
+
+      assert %{published: published, artifacts: artifacts} = KilnCMS.Cache.flush_delivery()
+      assert is_integer(published) and published >= 1
+      assert is_integer(artifacts)
+
+      # A second flush on an empty cache is a no-op, not an error — the mix task
+      # and the button both call it without checking first.
+      assert %{published: 0, artifacts: 0} = KilnCMS.Cache.flush_delivery()
+    end
+  end
 end

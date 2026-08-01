@@ -23,6 +23,8 @@ defmodule KilnCMSWeb.SystemLive do
   """
   use KilnCMSWeb, :live_view
 
+  require Logger
+
   alias Kiln.Updates
   alias Kiln.Version, as: Build
 
@@ -34,6 +36,7 @@ defmodule KilnCMSWeb.SystemLive do
        |> assign(:page_title, gettext("System"))
        |> assign(:build, Build.current())
        |> assign(:update, :loading)
+       |> assign(:flushed, nil)
        |> check_for_updates()}
     else
       {:ok,
@@ -75,6 +78,41 @@ defmodule KilnCMSWeb.SystemLive do
       {:noreply, socket}
     else
       {:noreply, check_for_updates(socket, force: true)}
+    end
+  end
+
+  # Re-checked here, not just in `mount/3` (#483). Every other destructive handler
+  # in this console funnels into an Ash action carrying the actor, so a mount-guard
+  # mistake is still caught by policy — `flush_delivery/0` takes no actor and
+  # checks nothing, which would make the mount guard the only line of defence.
+  # That guard currently holds only because `mount/3` uses `push_navigate`, which
+  # kills the channel; rendering a "no access" panel instead — an ordinary
+  # refactor — would leave this reachable by anyone past the router gate. And the
+  # router gate is a PER-ORG tier, while this is a global-admin action.
+  #
+  # The record of who flushed is a structured log line: there is no generic
+  # audit-log resource, and the governance trail is content-scoped — a cache
+  # flush is not a content event. The actor's id only, never their email: erasure
+  # nulls `actor_id` on the audited tables to keep the what without the who
+  # (`docs/data-flows.md`), and a plaintext address in log storage would outlive
+  # that by design.
+  @impl true
+  def handle_event("flush-cache", _params, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      actor = socket.assigns[:current_user]
+      dropped = KilnCMS.Cache.flush_delivery()
+
+      Logger.warning(
+        "Delivery cache flushed by user #{actor && actor.id}: " <>
+          "#{dropped.published} published, #{dropped.artifacts} artifacts."
+      )
+
+      {:noreply,
+       socket
+       |> assign(:flushed, dropped)
+       |> put_flash(:info, gettext("Delivery cache flushed."))}
+    else
+      {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
     end
   end
 
@@ -142,6 +180,47 @@ defmodule KilnCMSWeb.SystemLive do
 
           <div class="mt-4">
             <.update_status update={@update} />
+          </div>
+        </section>
+
+        <section class="card card-pad max-w-2xl">
+          <h2 class="text-lg font-semibold">{gettext("Delivery cache")}</h2>
+
+          <p class="mt-2 text-sm text-base-content/70">
+            {gettext(
+              "Published content and fired artifacts are cached in memory and invalidated automatically when you edit. Flush them by hand when something changed that Kiln cannot see — a config change, a template deploy, or an external source feeding a custom block."
+            )}
+          </p>
+
+          <p class="mt-2 text-xs text-base-content/60">
+            {gettext(
+              "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. The cache lives in this node's memory: on a multi-node deployment it clears the node serving you and leaves the others."
+            )}
+          </p>
+
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              phx-click="flush-cache"
+              data-confirm={
+                gettext(
+                  "Flush the delivery cache for every organization on this node? Reads will hit the database until it warms again."
+                )
+              }
+              class="btn btn-sm btn-default"
+            >
+              {gettext("Flush delivery cache")}
+            </button>
+
+            <span :if={@flushed} class="text-xs text-base-content/60">
+              {ngettext(
+                "Dropped %{count} published entry and %{artifacts} artifact entries.",
+                "Dropped %{count} published entries and %{artifacts} artifact entries.",
+                @flushed.published,
+                count: @flushed.published,
+                artifacts: @flushed.artifacts
+              )}
+            </span>
           </div>
         </section>
       </div>

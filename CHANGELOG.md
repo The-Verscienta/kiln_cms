@@ -59,6 +59,26 @@ migration, a rewritten column, a dropped config key).
   different numbers for one document, and reconfiguring the rate moved only one.
   Documents using that function will see their value change where it was
   computed at 200. (#492)
+- **A manual delivery-cache purge.** The full-flush primitives existed but
+  nothing user-facing called them, so when cache state went sideways — a config
+  change, a template deploy, an external source feeding a custom block — the only
+  recourse was an IEx shell on production. There is now a **Flush delivery
+  cache** button on `/editor/system` (admin-only, behind a confirm, logging who
+  flushed and what it dropped) and `mix kiln.cache.flush` for local use.
+
+  Both go through a new `KilnCMS.Cache.flush_delivery/0` that clears **both**
+  delivery caches — the published-record cache and the fired-artifact cache
+  (`KilnCMS.Firing.Cache.clear/0`, also new). Clearing one and not the other
+  leaves the site serving half-stale: the record lookups repopulate from the
+  database while the fired bodies keep whatever they had.
+
+  The page states the cost rather than presenting a free button: every request
+  re-reads the database until the caches warm again, and because these are
+  in-process with no shared tier, a flush covers the node that served you and
+  leaves the others. On a release use
+  `bin/kiln_cms rpc "KilnCMS.Cache.flush_delivery()"` — the `mix` task boots a
+  second application node, which would clear its own empty caches and start
+  draining production Oban queues on the way. (#483)
 
 - **A deployment behind a proxy with `TRUSTED_PROXIES` unset now says so.** Rate
   limiting keys on `remote_ip`, which is the client's address only when a trusted

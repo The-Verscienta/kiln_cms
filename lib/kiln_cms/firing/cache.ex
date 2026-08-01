@@ -56,6 +56,21 @@ defmodule KilnCMS.Firing.Cache do
     :ok
   end
 
+  @doc """
+  Drop every cached artifact body. The blunt operator-facing primitive behind
+  `KilnCMS.Cache.flush_delivery/0` and `mix kiln.cache.flush` (#483) — nothing on
+  a write path should reach for it, since writes evict precisely.
+
+  Returns the number of entries dropped, or `0` when the cache is disabled.
+  """
+  @spec clear() :: non_neg_integer()
+  def clear do
+    case Cachex.clear(@cache) do
+      {:ok, count} when is_integer(count) -> count
+      _ -> 0
+    end
+  end
+
   @doc "Evict every surface for a document (on unpublish or re-fire)."
   @spec evict(Ash.UUID.t(), atom(), Ash.UUID.t()) :: :ok
   def evict(org_id, document_type, document_id) do
