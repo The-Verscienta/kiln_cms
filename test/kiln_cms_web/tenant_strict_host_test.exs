@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.TenantStrictHostTest do
     test "resolve_org/1 keeps its default-org fallback — only fetch_org/1 is strict" do
       # `resolve_org/1` exists for callers with no way to reject a request; the
       # strictness lives at the boundaries that can (the plug, the on_mount hook
-      # and the two raw sockets), all of which go through `fetch_org/1`.
+      # and all three sockets), all of which go through `fetch_org/1`.
       assert Tenant.resolve_org(unknown_host()).id == Accounts.default_org_id()
     end
   end

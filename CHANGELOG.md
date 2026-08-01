@@ -91,9 +91,10 @@ migration, a rewritten column, a dropped config key).
   renderer, because the 404 template brands itself from the default org (which
   would leak the site name and logo through the rejection page itself) and
   because the rejection sits above every rate limiter and has to stay cheap.
-  Static files and `/ws/collab` are outside the control by design — see
+  Static files are outside the control by design — see
   `docs/environment-variables.md`, which has the reasoning and a new
-  multi-tenancy section. The health probes and the payment-provider webhook are
+  multi-tenancy section. (`/ws/collab` was outside it too when this shipped;
+  #655, below, brought it in.) The health probes and the payment-provider webhook are
   exempt, keyed on the controller rather than a path list, so turning this on
   cannot fail a deployment's own liveness check or silently drop billing events.
   The deployment's own apex is never refused either, so a missing default-org
@@ -189,6 +190,51 @@ migration, a rewritten column, a dropped config key).
   task; `docs/media-pipeline.md` now documents it per CDN.
 
 ### Security
+
+- **The collaborative-editing socket now authorizes every join against the
+  document it names.** `CollabSocket` verifies a `Phoenix.Token` carrying a
+  *user id* — minted once per editor session, valid for 24 hours — and
+  `CollabChannel.join/3` checked only that the prototype flag was on and the
+  client bundle was current. So a valid editor token was a key to
+  `collab:<kind>:<id>` for **any document in any organization**: read its CRDT
+  state, and push updates that land in the real collaborators' live editors.
+  Each join now resolves the topic to a real document, loads it as the
+  connecting user under the connection's org, and asks whether that user may
+  **autosave** it.
+
+  The gate is the write, not the read, and the distinction matters: they are
+  separate scopes (`ReadableContentType` against `EditableContentType`, #332)
+  and the read is the wider one — it also admits any published, public document
+  to anybody at all. A room is bidirectional, and its terminal action is
+  `Collab.Crdt.Checkpoint`, which persists through `:autosave` with
+  `authorize?: false`. Gating on the read would therefore have let a reader
+  author: an editor scoped to `editable_types: ["post"]` could join a page's
+  room, type, disconnect, and have the checkpoint write it under no policy at
+  all. Every refusal reports one "not found", so the channel answers no question
+  a caller could not answer over HTTP anyway.
+
+  The doc key is rebuilt from the resolved record rather than taken from the
+  client's topic. Ash casts uuids leniently, so `collab:page:0F2E…` and
+  `collab:page:0f2e…` named one document under two keys — two authoritative
+  docs over one record, each invisible to the other's editors and each
+  overwriting the other at checkpoint, and an unbounded supply of doc servers
+  for anyone cycling the casing.
+
+  Two things follow. The socket resolves its tenant from the connect URI like
+  `/ws/gql` and `/ws/bridge`, so it is no longer the one socket
+  `TENANT_STRICT_HOST` could not reach. And `Collab.Crdt.Checkpoint` — the
+  server-side write-back for "every editor crashed before autosave fired" —
+  writes under the document's own org instead of `default_org_id/0`
+  unconditionally, which on any site but the default one meant it found no
+  record and silently discarded the converged text. The socket also resolves
+  the user at connect rather than carrying a bare id, so a token naming a
+  deleted account is refused at the next connect instead of at the end of its
+  24 hours. Not *immediately*: nothing evicts an established socket, so a live
+  session keeps what it was granted until it drops — filed separately.
+
+  Gated behind `:collab_prototype` (off in production) and editor sign-in
+  throughout, so this was never an anonymous surface. Recorded as residual risk
+  13 in `docs/threat-model.md`, now closed. (#655)
 
 - **History anchors chain to each other by id and digest, narrowing the
   laundering route in #597.** The moduledoc claimed a doctored version "can

@@ -19,6 +19,8 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
 
   defp doc_key, do: "collab:test:dur#{System.unique_integer([:positive])}"
 
+  defp org_id, do: KilnCMS.Accounts.default_org_id()
+
   defp text_of(update) do
     doc = Yex.Doc.new()
     :ok = Yex.apply_update(doc, update)
@@ -36,7 +38,7 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
   test "a gracefully stopped doc restores on next open" do
     key = doc_key()
 
-    {:ok, server} = Crdt.ensure_server(key)
+    {:ok, server} = Crdt.ensure_server(key, org_id())
     {initial, 1} = Crdt.attach(server)
     :ok = Crdt.apply_update(server, update_with_text(initial, "survives restarts"))
 
@@ -44,7 +46,7 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
     :ok = GenServer.stop(server)
     refute Process.alive?(server)
 
-    {:ok, revived} = Crdt.ensure_server(key)
+    {:ok, revived} = Crdt.ensure_server(key, org_id())
     refute revived == server
     {restored, 1} = Crdt.attach(revived)
     assert text_of(restored) == "survives restarts"
@@ -53,7 +55,7 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
   test "a dirty doc checkpoints without shutting down" do
     key = doc_key()
 
-    {:ok, server} = Crdt.ensure_server(key)
+    {:ok, server} = Crdt.ensure_server(key, org_id())
     {initial, 1} = Crdt.attach(server)
     :ok = Crdt.apply_update(server, update_with_text(initial, "checkpointed"))
 
@@ -76,7 +78,7 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
     )
 
     # Opening any document triggers the restore-time prune.
-    {:ok, server} = Crdt.ensure_server(doc_key())
+    {:ok, server} = Crdt.ensure_server(doc_key(), org_id())
     {_state, 1} = Crdt.attach(server)
 
     assert %{rows: []} =
@@ -87,7 +89,7 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
     Application.put_env(:kiln_cms, KilnCMS.Collab.Crdt, persist?: false)
 
     key = doc_key()
-    {:ok, server} = Crdt.ensure_server(key)
+    {:ok, server} = Crdt.ensure_server(key, org_id())
     {initial, 1} = Crdt.attach(server)
     :ok = Crdt.apply_update(server, update_with_text(initial, "ephemeral"))
     :ok = GenServer.stop(server)

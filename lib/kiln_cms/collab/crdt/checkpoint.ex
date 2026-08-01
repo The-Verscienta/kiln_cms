@@ -20,16 +20,16 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Collab.Crdt.Materializer
 
-  @doc "Materialize `doc`'s fragments into the record behind `doc_key`. Best-effort."
-  @spec write_back(String.t(), Yex.Doc.t()) :: :ok
-  def write_back("collab:" <> rest, doc) do
-    # Strict tenancy (#419): the collab doc key carries no org, so the
-    # checkpoint resolves the default org. Correct for single-org / default-org
-    # installs (every deployment today); a multi-org collab session on a
-    # non-default site would need the org encoded in the doc key — a prototype
-    # limitation tracked with the rest of the collab work (#258).
-    tenant = KilnCMS.Accounts.default_org_id()
+  @doc """
+  Materialize `doc`'s fragments into the record behind `doc_key`. Best-effort.
 
+  `org_id` is the tenant the channel authorized the document under (#655),
+  carried down from the `DocServer`. It used to be `default_org_id/0`
+  unconditionally — right for a single-org install and wrong for every other
+  one, where a checkpoint either found no record or wrote under the wrong site.
+  """
+  @spec write_back(String.t(), Yex.Doc.t(), Ash.UUID.t()) :: :ok
+  def write_back("collab:" <> rest, doc, tenant) do
     with [kind, id] <- String.split(rest, ":", parts: 2),
          ct when not is_nil(ct) <- ContentTypes.get(kind, tenant),
          {:ok, %{state: :draft} = record} <-
@@ -48,7 +48,7 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
     end
   end
 
-  def write_back(_other_key, _doc), do: :ok
+  def write_back(_other_key, _doc, _tenant), do: :ok
 
   defp materialize_block(%Ash.Union{type: :rich_text} = block, doc) do
     input = TypedBlocks.input_map(block)

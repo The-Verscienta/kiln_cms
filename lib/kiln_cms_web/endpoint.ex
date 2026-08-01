@@ -35,7 +35,13 @@ defmodule KilnCMSWeb.Endpoint do
 
   # Collaborative-editing CRDT prototype (token-authenticated; joins refuse
   # unless :collab_prototype is enabled — see KilnCMSWeb.CollabChannel).
-  socket "/ws/collab", KilnCMSWeb.CollabSocket, websocket: true, longpoll: false
+  # `connect_info: [:uri]` for the same reason as `/ws/gql` above: the socket
+  # resolves its tenant from the connecting host, and every join authorizes the
+  # document under it (#655). This is also what brings the socket inside
+  # `TENANT_STRICT_HOST` (#563), which it previously sat outside.
+  socket "/ws/collab", KilnCMSWeb.CollabSocket,
+    websocket: [connect_info: [:uri]],
+    longpoll: false
 
   # Visual-editing bridge live-preview push (#355). A raw transport socket (plain
   # JSON frames) so the dependency-free `bridge.js` consumes it without a Phoenix

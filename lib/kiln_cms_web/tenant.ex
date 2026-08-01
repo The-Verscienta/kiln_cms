@@ -19,15 +19,15 @@ defmodule KilnCMSWeb.Tenant do
   `fetch_org/1` is the single resolver — `{:ok, org}` or `:error` under strict
   matching — shared by `KilnCMSWeb.Plugs.SetTenant` (from `conn.host`), the
   LiveView `:assign_current_org` on_mount hook (from the socket's `host_uri`)
-  and the two raw sockets (`GraphqlSocket`, `BridgeSocket`, from the connect
-  URI). `resolve_org/1` is the never-failing form, for callers with no way to
-  reject a request. Lookups are Cachex-cached so resolution isn't a DB hit per
-  request.
+  and all three sockets (`GraphqlSocket`, `BridgeSocket`, `CollabSocket`, from
+  the connect URI via `fetch_org_from_connect_info/1`). `resolve_org/1` is the
+  never-failing form, for callers with no way to reject a request. Lookups are
+  Cachex-cached so resolution isn't a DB hit per request.
 
   ## What strict matching does not cover
 
-  It gates what the **router** serves, plus the sockets listed above. Two things
-  sit outside it by design, and neither carries org-scoped reads:
+  It gates what the **router** serves, plus the sockets listed above. One thing
+  sits outside it by design, and it carries no org-scoped reads:
 
     * `Plug.Static` — both static mounts (including `/uploads` under the local
       storage adapter) run earlier in the endpoint and halt on a match, so an
@@ -35,13 +35,11 @@ defmodule KilnCMSWeb.Tenant do
       putting tenant resolution ahead of static would buy two DB lookups per
       asset request; treat media URLs as host-agnostic, as they would be behind
       a CDN.
-    * `/ws/collab` — the collaborative-editing socket resolves no host at all.
-      Its `Phoenix.Token` is per **editor session**, not per document, and the
-      channel's join checks only that the CRDT prototype is enabled and the
-      client bundle is current — so the topic, not tenancy, is what scopes it.
-      Strict host matching does not change that either way; it is called out
-      here so this list is not read as a clean bill of health. See residual risk
-      13 in `docs/threat-model.md`.
+
+  `/ws/collab` was a second until #655: it resolved no host at all, and its
+  `Phoenix.Token` is per **editor session** rather than per document, so the
+  topic and not tenancy was what scoped it. It now resolves its tenant like the
+  other two, and every join authorizes the document under it.
 
   ## The `:current_org` assign
 
@@ -218,6 +216,21 @@ defmodule KilnCMSWeb.Tenant do
       strict_host?() and not canonical_host?(host) -> :error
       true -> {:ok, default_org()}
     end
+  end
+
+  @doc """
+  `fetch_org/1` for a socket's connect info, whose host lives at `[:uri, :host]`.
+
+  Sockets bypass the plug pipeline, so each one has to resolve its own tenant,
+  and all three did it by hand-writing the same `get_in/2` — three copies of one
+  accessor, and of the reasoning about what an absent host means. A missing host
+  (no `connect_info`, as in a bare test connect) resolves to the default org, or
+  is refused under `TENANT_STRICT_HOST` (#563), exactly as a request whose
+  `Host` matches nothing would be.
+  """
+  @spec fetch_org_from_connect_info(map()) :: {:ok, Accounts.Organization.t()} | :error
+  def fetch_org_from_connect_info(connect_info) do
+    fetch_org(get_in(connect_info, [:uri, Access.key(:host)]))
   end
 
   defp canonical_host?(host) when is_binary(host), do: normalize(host) == base_host()

@@ -29,8 +29,11 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
   # Doc states untouched this long are pruned on the next restore.
   @prune_after_days 30
 
-  def start_link(doc_key) do
-    GenServer.start_link(__MODULE__, doc_key, name: via(doc_key))
+  # Started as `{doc_key, org_id}`: the key identifies the doc (and its stored
+  # state row), the org is the tenant the joining channel authorized it under,
+  # carried so the checkpoint writes back to the right site (#655).
+  def start_link({doc_key, _org_id} = arg) do
+    GenServer.start_link(__MODULE__, arg, name: via(doc_key))
   end
 
   defp via(doc_key), do: {:via, Registry, {KilnCMS.Collab.Crdt.Registry, doc_key}}
@@ -55,7 +58,7 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
   def state_update(server), do: GenServer.call(server, :state_update)
 
   @impl true
-  def init(doc_key) do
+  def init({doc_key, org_id}) do
     # So terminate/2 runs (and persists) on supervisor shutdown too.
     Process.flag(:trap_exit, true)
 
@@ -63,6 +66,7 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
       doc: Yex.Doc.new(),
       clients: MapSet.new(),
       doc_key: doc_key,
+      org_id: org_id,
       # Lazy restore on first use — not in init — so a supervised start never
       # blocks on the database (and tests own the connection by then).
       restored?: not persist?(),
@@ -188,7 +192,7 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
   defp materialize(%{materialize_dirty?: false} = state), do: state
 
   defp materialize(state) do
-    KilnCMS.Collab.Crdt.Checkpoint.write_back(state.doc_key, state.doc)
+    KilnCMS.Collab.Crdt.Checkpoint.write_back(state.doc_key, state.doc, state.org_id)
     %{state | materialize_dirty?: false}
   end
 

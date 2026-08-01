@@ -27,10 +27,21 @@ defmodule KilnCMS.Collab.Crdt do
   @spec enabled?() :: boolean()
   def enabled?, do: Application.get_env(:kiln_cms, :collab_prototype, false)
 
-  @doc "Find or start the authoritative doc server for a channel topic."
-  @spec ensure_server(String.t()) :: {:ok, pid()}
-  def ensure_server(doc_key) do
-    case DynamicSupervisor.start_child(KilnCMS.Collab.Crdt.DocSupervisor, {DocServer, doc_key}) do
+  @doc """
+  Find or start the authoritative doc server for a channel topic.
+
+  `org_id` is the tenant the joining channel authorized the document under
+  (#655), carried so the server-side checkpoint writes back to the document's
+  own site rather than the default org. Only the caller that *starts* the
+  server sets it; a document id is unique across organizations, and every
+  joiner has already had its read authorized under the org that holds it, so
+  later joiners cannot disagree about which one that is.
+  """
+  @spec ensure_server(String.t(), Ash.UUID.t()) :: {:ok, pid()}
+  def ensure_server(doc_key, org_id) do
+    child = {DocServer, {doc_key, org_id}}
+
+    case DynamicSupervisor.start_child(KilnCMS.Collab.Crdt.DocSupervisor, child) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
     end

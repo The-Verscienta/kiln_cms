@@ -10,20 +10,24 @@ defmodule KilnCMS.Collab.CrdtTest do
 
   defp doc_key, do: "collab:test:#{System.unique_integer([:positive])}"
 
+  # These keys name no real document, so the org only has to be *an* org for
+  # the checkpoint to carry (#655) — materialization is off in this file.
+  defp org_id, do: KilnCMS.Accounts.default_org_id()
+
   defp text(doc), do: doc |> Yex.Doc.get_text("field") |> Yex.Text.to_string()
 
   test "ensure_server is idempotent per key" do
     key = doc_key()
-    {:ok, a} = Crdt.ensure_server(key)
-    {:ok, b} = Crdt.ensure_server(key)
+    {:ok, a} = Crdt.ensure_server(key, org_id())
+    {:ok, b} = Crdt.ensure_server(key, org_id())
     assert a == b
 
-    {:ok, other} = Crdt.ensure_server(doc_key())
+    {:ok, other} = Crdt.ensure_server(doc_key(), org_id())
     refute a == other
   end
 
   test "a late joiner receives everything applied so far" do
-    {:ok, server} = Crdt.ensure_server(doc_key())
+    {:ok, server} = Crdt.ensure_server(doc_key(), org_id())
 
     {initial, 1} = Crdt.attach(server)
 
@@ -43,7 +47,7 @@ defmodule KilnCMS.Collab.CrdtTest do
   end
 
   test "concurrent divergent edits merge conflict-free" do
-    {:ok, server} = Crdt.ensure_server(doc_key())
+    {:ok, server} = Crdt.ensure_server(doc_key(), org_id())
     {initial, 1} = Crdt.attach(server)
 
     # Two clients start from the same (empty) state…
@@ -77,7 +81,7 @@ defmodule KilnCMS.Collab.CrdtTest do
   end
 
   test "garbage updates are rejected without crashing the doc" do
-    {:ok, server} = Crdt.ensure_server(doc_key())
+    {:ok, server} = Crdt.ensure_server(doc_key(), org_id())
 
     assert {:error, _reason} = Crdt.apply_update(server, "not a yjs update")
 

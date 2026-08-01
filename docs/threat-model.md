@@ -63,7 +63,7 @@ the router so preflights are answered before route matching).
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/sign-in/verify`, `/auth/passkey/*` | varies | `:auth` |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
-| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token / API key | none |
+| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | none |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **The server-side Ash policies are the authorization boundary.** Every read and
@@ -234,10 +234,10 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    Surfaces outside the control, none of which reads the ambient tenant:
    `Plug.Static` (both mounts, including `/uploads` under the local storage
    adapter — UUID-keyed assets answer on any host, as they would behind a CDN);
-   `/ws/collab` (resolves no host, and see residual risk 13); the health probes
-   and the payment-provider webhook, both deliberately exempt so the control
-   cannot fail a deployment's own liveness check or silently drop billing
-   events.
+   the health probes and the payment-provider webhook, both deliberately exempt
+   so the control cannot fail a deployment's own liveness check or silently drop
+   billing events. `/ws/collab` was a fourth until #655 wired it through
+   `Tenant.fetch_org/1` like the other two sockets.
 
    The quieter half is closed unconditionally: `Tenant.current_org_id/1` now
    **raises** when the `:current_org` assign is missing rather than reading the
@@ -302,16 +302,25 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 12. **Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
     `TOKEN_SIGNING_SECRET`, S3 keys) is not written down; pairs with
     [`backups.md`](backups.md).
-13. **The collaborative-editing socket is scoped by topic, not by tenancy.**
-    `CollabSocket` verifies a `Phoenix.Token` carrying a *user id*, minted once
-    per editor session and valid for 24 hours; `CollabChannel.join/3` then
-    checks only that the CRDT prototype is enabled and the client bundle is
-    current. So any signed-in editor's token joins `collab:<kind>:<id>` for any
-    document in any org, and `Collab.Crdt.Checkpoint` writes back under
-    `Accounts.default_org_id()` unconditionally. Gated behind the
-    `:collab_prototype` flag and editor sign-in, so this is not an anonymous
-    surface — but it is the one socket `TENANT_STRICT_HOST` does not reach.
-    Surfaced during the #563 review.
+13. ~~**The collaborative-editing socket is scoped by topic, not by
+    tenancy.**~~ **Closed by #655.** The socket token still names only a user,
+    so it establishes *who* and nothing more; `CollabChannel.join/3` now
+    resolves the topic to a real document, loads it as that user under the
+    connection's org, and authorizes the `:autosave` **write** — not the read,
+    which is the wider scope and would have let a reader author, since the
+    checkpoint persists with `authorize?: false`. The socket resolves its tenant
+    from the connect URI, so it is inside `TENANT_STRICT_HOST` like the other
+    two; the doc key is rebuilt from the resolved record rather than the client's
+    topic string; and `Collab.Crdt.Checkpoint` writes back under the document's
+    own org rather than `default_org_id/0`. Every refusal reports the same "not
+    found", so the channel answers no question a caller could not already answer
+    over HTTP.
+
+    **Still open, and general to every socket:** authorization runs at connect
+    and join and is never revisited. Nothing calls `Endpoint.disconnect/1`, so
+    deleting an account, demoting it, or narrowing its scopes does not evict a
+    live session — it keeps what it was granted until the socket drops (at most
+    the token's 24 hours, in practice as long as the tab stays open).
 
 ## Operating the dependency audit
 

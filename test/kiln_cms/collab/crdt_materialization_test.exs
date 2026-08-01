@@ -105,7 +105,7 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     page = draft_page!(actor)
     block_id = rich_block(page).id
 
-    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}")
+    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}", page.org_id)
     leave = attach_client(server)
 
     {initial, _n} = Crdt.attach(server)
@@ -138,7 +138,7 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     page = draft_page!(actor)
     block_id = rich_block(page).id
 
-    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}")
+    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}", page.org_id)
     leave = attach_client(server)
 
     {initial, _n} = Crdt.state_update(server) |> then(&{&1, nil})
@@ -157,7 +157,7 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     actor = admin()
     page = draft_page!(actor)
 
-    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}")
+    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}", page.org_id)
     leave = attach_client(server)
     # No updates at all — nothing dirty, nothing written.
     leave.()
@@ -166,13 +166,45 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     assert rich_block(CMS.get_page!(page.id, actor: actor)).legacy_html == "<p>stored</p>"
   end
 
+  test "the write-back lands on a document outside the default org (#655)" do
+    actor = admin()
+    other = KilnCMS.OrgFixtures.org("collab-mat")
+
+    page =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Theirs",
+        slug: "theirs-#{System.unique_integer([:positive])}",
+        org_id: other.id,
+        state: :draft,
+        blocks: [
+          %{"_type" => "rich_text", "id" => Ash.UUID.generate(), "legacy_html" => "<p>stored</p>"}
+        ]
+      })
+
+    block_id = rich_block(page).id
+
+    # The checkpoint used to resolve `default_org_id/0` unconditionally, so on
+    # any site but the default one it looked the document up in the wrong tenant
+    # and silently wrote nothing — the converged text was simply lost.
+    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}", page.org_id)
+    leave = attach_client(server)
+
+    {initial, _n} = Crdt.attach(server)
+    :ok = Crdt.apply_update(server, typed_paragraph_update(initial, "block-#{block_id}"))
+    leave.()
+    :ok = GenServer.stop(server)
+
+    reloaded = CMS.get_page!(page.id, actor: actor, tenant: other.id)
+    assert rich_block(reloaded).legacy_html =~ "typed"
+  end
+
   test "published content is never written by the server" do
     actor = admin()
     page = draft_page!(actor)
     page = CMS.publish_page!(page, %{}, actor: actor)
     block_id = rich_block(page).id
 
-    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}")
+    {:ok, server} = Crdt.ensure_server("collab:page:#{page.id}", page.org_id)
     leave = attach_client(server)
 
     {initial, _} = {Crdt.state_update(server), nil}

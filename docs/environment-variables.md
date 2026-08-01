@@ -84,18 +84,17 @@ One deployment can serve many organizations, each on its own host. The request's
 | `TENANT_BASE_HOST` | `PHX_HOST` | The apex tenant subdomains are carved from. Set it only when tenant subdomains live under a different apex than the canonical URL host. | [`config/runtime.exs:443`](../config/runtime.exs#L443) |
 | `TENANT_STRICT_HOST` | `false` | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Recommended for every multi-tenant deployment** (#563) — without it a bare hostname, an IP literal, `localhost` or an attacker-supplied `Host` is served the default site's content, branding and analytics. Leave it off for a single-host install, where the bare host and an IP legitimately arrive unmatched and would start 404ing. The app logs a warning at boot if it is off on a deployment with more than one org. | [`config/runtime.exs:457`](../config/runtime.exs#L457) |
 
-**What it covers.** Everything the router serves, plus LiveView mounts and the
-GraphQL (`/ws/gql`) and visual-editing (`/ws/bridge`) sockets — each resolves
-its tenant from its own connect URI and refuses rather than falling back. Two
-things sit outside it, neither of which performs org-scoped reads:
+**What it covers.** Everything the router serves, plus LiveView mounts and all
+three sockets — GraphQL (`/ws/gql`), visual editing (`/ws/bridge`) and
+collaborative editing (`/ws/collab`, since #655) — each resolving its tenant
+from its own connect URI and refusing rather than falling back. One thing sits
+outside it, and it performs no org-scoped reads:
 
 - **Static files**, including `/uploads` under the local storage adapter. Both
   `Plug.Static` mounts run earlier in the endpoint and halt on a match, so an
   asset URL answers on any `Host`. Keys are unguessable UUIDs, and putting
   tenant resolution ahead of static would add two DB lookups to every asset
   request; treat media URLs as host-agnostic, as they would be behind a CDN.
-- **`/ws/collab`**, the collaborative-editing socket, which resolves no host at
-  all and is authorized by a signed per-document token.
 
 **What stays reachable.** Two controllers are exempt, because both are
 deliberately host-independent and neither reads the ambient tenant:
