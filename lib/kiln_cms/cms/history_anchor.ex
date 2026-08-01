@@ -42,6 +42,7 @@ defmodule KilnCMS.CMS.HistoryAnchor do
         :chain_hash,
         :version_count,
         :last_version_id,
+        :last_version_at,
         :published_version_id,
         :signature,
         :key_id,
@@ -98,7 +99,22 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # (ascending), and the last version it covers.
     attribute :chain_hash, :string, allow_nil?: false, public?: true
     attribute :version_count, :integer, allow_nil?: false, public?: true
+
+    # Where the next incremental fold resumes (#598): the full sort key of the
+    # last version this anchor covered, in the `(version_inserted_at, id)` order
+    # the chain folds in. The timestamp is stored rather than looked up from the
+    # id because version rows are legitimately deleted in ordinary operation —
+    # `KilnCMS.CMS.Changes.CoalesceAutosaveVersions` destroys superseded
+    # autosave rows on every debounced save — and a boundary that evaporates
+    # with its row would send the fold back to the count-based resume the whole
+    # of #598 is about.
+    #
+    # `last_version_at` is inside the SIGNED anchor payload, and its presence is
+    # what selects the v3 payload shape, so it cannot be repointed to steer a
+    # later fold without breaking the signature. Null only on anchors minted
+    # before #598 and on a document with no versions at all.
     attribute :last_version_id, :uuid, public?: true
+    attribute :last_version_at, :utc_datetime_usec, public?: true
 
     # The publish snapshot this anchor was minted with (#338 linkage).
     attribute :published_version_id, :uuid, public?: true

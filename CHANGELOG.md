@@ -242,6 +242,47 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **History anchoring no longer resumes its incremental fold with a SQL
+  `OFFSET`.** `KilnCMS.Governance.Chain` folded "everything since the last
+  anchor" by skipping `version_count` rows, which means "skip the first n rows
+  of the *current* result set" — the anchored prefix only while no row ever
+  becomes visible below the boundary afterwards. Two ordinary things break
+  that: concurrent writes whose version rows commit out of stamp order, and
+  wall-clock skew between app nodes, since `version_inserted_at` is stamped by
+  whichever node performs the write. Either one made the fold skip the row it
+  was meant to cover and fold the boundary row a second time, minting a
+  correctly-signed anchor whose hash covers a sequence that never existed and
+  whose `version_count` is one too high. Anchors now record the full sort key of
+  the last version they covered (`last_version_at` alongside `last_version_id`)
+  and the next fold resumes strictly after it — a position rather than a
+  cardinality, stable under any commit order.
+
+  **This does not clear the verdict, and #598 stays open for that.** A document
+  that took a below-boundary row read `{:tampered, …}` before this change and
+  reads it after: an earlier anchor committed to an ordering the version table
+  no longer holds, so it can never reproduce, and verification recomputes from
+  genesis. What changes is that the chain no longer records fabricated state,
+  that anchoring logs an error the moment an uncovered row appears instead of
+  it surfacing months later at an audit, and that the verdict now says how many
+  rows sort inside the anchored range rather than reporting a bare hash
+  mismatch indistinguishable from doctored content. Actually closing it needs a
+  fold order assigned at write time rather than inferred from a wall clock,
+  which also decides whether such a row counts as tampering or as a latecomer —
+  a compliance-visible call, tracked separately.
+
+  The boundary is inside the **signed** anchor payload (`v: 3`), because it
+  steers which rows the next anchor covers. Without that, a single `UPDATE` to
+  an unsigned column could repoint the resume past every future version: the
+  fold would find nothing new, anchoring would silently stop, and the document
+  would keep reading `:verified` while its history was rewritten freely. Anchors
+  minted before this change carry no boundary and keep verifying under their
+  original payload shape; they resume by the old count until their next anchor.
+  The timestamp is stored rather than looked up from `last_version_id` because
+  version rows are deleted in ordinary operation — autosave coalescing destroys
+  superseded rows on every debounced save — and a boundary that vanished with
+  its row would have made the fix inert on exactly the every-write
+  configuration that needs it. (#598)
+
 - **Artifacts fired before a surface-shape change are now migrated instead of
   serving the old shape forever.** `@format_version` was bumped 1 → 2 when
   `:json` gained `custom_fields` and `:json_ld` gained `contentLocation` (#601),

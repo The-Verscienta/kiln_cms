@@ -82,6 +82,27 @@ Two properties are worth knowing:
   store). Until then, revoking `DELETE` on `history_anchors` for the application
   role is the defence that actually holds, and configuring a signing key is what
   makes any of the rest mean anything.
+- **The incremental fold resumes by position, not by count** (#598). An anchor
+  records the sort key of the version it ended on, and the next fold takes the
+  rows sorting after *that key* — not `OFFSET version_count`, which means "skip
+  the first n rows of the current result set" and so quietly skips the wrong row
+  whenever one becomes visible below the boundary afterwards. Two ordinary ways
+  that happens: concurrent writes whose version rows commit out of stamp order,
+  and wall-clock skew between app nodes, since `version_inserted_at` is stamped
+  by the node doing the writing. The boundary is inside the signed payload,
+  because it decides which rows the next anchor covers — repointing it would
+  otherwise stop the chain while the verdict stayed green.
+
+  **A row that lands inside an already-anchored range is still fatal to that
+  anchor,** which committed to an order the table no longer holds; no later
+  anchor repairs it, and the document reads `tampered` either way. What changed
+  is that the chain records no fabricated state, that anchoring logs the
+  condition when it happens rather than leaving it for an audit months later,
+  and that the verdict names it instead of reporting a bare hash mismatch that
+  reads identically to doctored content. Making it *impossible* needs a fold
+  order assigned at write time instead of inferred from a wall clock — which
+  also settles whether such a row is tampering or a latecomer, so it is a
+  deliberate call rather than a detail.
 - **Every write can be anchored.** `config :kiln_cms,
   :audit_anchor_every_write, true` — or `KILN_AUDIT_ANCHOR_EVERY_WRITE=true`
   at runtime, so it can be turned off without a rebuild — extends the chain
