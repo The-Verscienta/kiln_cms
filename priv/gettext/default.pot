@@ -934,12 +934,12 @@ msgstr ""
 msgid "%{action}: %{count} updated, %{skipped} skipped"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:92
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:93
 #, elixir-autogen, elixir-format
 msgid "AshGraphql and AshJsonApi expose your content model to any frontend, with signed preview tokens for drafts."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:74
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:75
 #, elixir-autogen, elixir-format
 msgid "Block editor"
 msgstr ""
@@ -949,18 +949,18 @@ msgstr ""
 msgid "Embedded media"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:19
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:20
 #, elixir-autogen, elixir-format
 msgid "Headless CMS on Phoenix + Ash"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:15
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:90
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:16
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:91
 #, elixir-autogen, elixir-format
 msgid "Headless delivery"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:25
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:26
 #, elixir-autogen, elixir-format
 msgid "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
 msgstr ""
@@ -976,32 +976,32 @@ msgstr ""
 msgid "Live published"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:22
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:23
 #, elixir-autogen, elixir-format
 msgid "Model content once. Publish everywhere."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:36
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:37
 #, elixir-autogen, elixir-format
 msgid "Open editor"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:82
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:83
 #, elixir-autogen, elixir-format
 msgid "Policy-driven RBAC"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:84
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:85
 #, elixir-autogen, elixir-format
 msgid "Published content is world-readable; drafts stay editor-only. Admins bypass; hard deletes and webhooks are locked down."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:43
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:44
 #, elixir-autogen, elixir-format
 msgid "Sign in to edit"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:76
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:77
 #, elixir-autogen, elixir-format
 msgid "TipTap rich text, drag-and-drop blocks, live preview, and version restore — all in LiveView."
 msgstr ""
@@ -1016,7 +1016,7 @@ msgstr ""
 msgid "You are now signed out"
 msgstr ""
 
-#: lib/kiln_cms_web/live_user_auth.ex:87
+#: lib/kiln_cms_web/live_user_auth.ex:100
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr ""
@@ -1369,7 +1369,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/team_live.ex:42
 #: lib/kiln_cms_web/live/trash_live.ex:38
 #: lib/kiln_cms_web/live/webhook_live.ex:34
-#: lib/kiln_cms_web/live_user_auth.ex:110
+#: lib/kiln_cms_web/live_user_auth.ex:123
 #, elixir-autogen, elixir-format
 msgid "You need admin access to view that page."
 msgstr ""
@@ -1604,7 +1604,7 @@ msgstr ""
 msgid "GraphQL"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:49
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:50
 #, elixir-autogen, elixir-format
 msgid "GraphQL API"
 msgstr ""
@@ -1624,7 +1624,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:255
 #: lib/kiln_cms_web/components/layouts.ex:692
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:55
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:56
 #, elixir-autogen, elixir-format
 msgid "JSON:API"
 msgstr ""
@@ -1917,7 +1917,7 @@ msgstr ""
 msgid "Working…"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/home.html.heex:65
+#: lib/kiln_cms_web/controllers/page_html/home.html.heex:66
 #, elixir-autogen, elixir-format
 msgid "You're signed in as a viewer, which can read published content but not edit. Ask an administrator to upgrade your account to gain editor access."
 msgstr ""
@@ -2888,7 +2888,7 @@ msgstr ""
 msgid "6-digit code"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:97
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:98
 #, elixir-autogen, elixir-format
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
 msgstr ""
@@ -3104,7 +3104,7 @@ msgstr ""
 msgid "Audit trail, consent records, and point-in-time history for your content."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:82
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:83
 #, elixir-autogen, elixir-format
 msgid "Authentication"
 msgstr ""
@@ -3126,7 +3126,7 @@ msgstr ""
 msgid "Automation"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:84
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:85
 #, elixir-autogen, elixir-format
 msgid "Both surfaces work anonymously and return published content only. To read drafts, exchange editor credentials for a JWT and send it as a bearer token — admin-issued API keys go in the same header."
 msgstr ""
@@ -3477,8 +3477,8 @@ msgstr ""
 msgid "Delivery health"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_controller.ex:14
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:18
+#: lib/kiln_cms_web/controllers/page_controller.ex:22
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:19
 #, elixir-autogen, elixir-format
 msgid "Developer APIs"
 msgstr ""
@@ -3731,12 +3731,12 @@ msgstr ""
 msgid "Filter by path…"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:31
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:32
 #, elixir-autogen, elixir-format
 msgid "Filterable lists, metadata, relationships, and search over every content type, following the JSON:API specification. Block bodies are not included on this surface — fetch rendered bodies from the artifact endpoint below."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:53
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:54
 #, elixir-autogen, elixir-format
 msgid "Filtering reference"
 msgstr ""
@@ -3837,7 +3837,7 @@ msgstr ""
 msgid "Grantor"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:76
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:77
 #, elixir-autogen, elixir-format
 msgid "GraphQL API reference"
 msgstr ""
@@ -3867,7 +3867,7 @@ msgstr ""
 msgid "Heading text"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:125
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:126
 #, elixir-autogen, elixir-format
 msgid "Headless consumer guide"
 msgstr ""
@@ -3981,7 +3981,7 @@ msgstr ""
 msgid "Mon"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:104
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:105
 #, elixir-autogen, elixir-format
 msgid "More surfaces"
 msgstr ""
@@ -4137,7 +4137,7 @@ msgstr ""
 msgid "None yet."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:120
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:121
 #, elixir-autogen, elixir-format
 msgid "Not sure which surface to use? Start with the consumer guide:"
 msgstr ""
@@ -4192,7 +4192,7 @@ msgstr ""
 msgid "Open %{title}"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:41
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:42
 #, elixir-autogen, elixir-format
 msgid "Open Swagger UI"
 msgstr ""
@@ -4213,7 +4213,7 @@ msgstr ""
 msgid "Open the full editor"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:47
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:48
 #, elixir-autogen, elixir-format
 msgid "OpenAPI spec (JSON)"
 msgstr ""
@@ -5046,7 +5046,7 @@ msgstr ""
 msgid "This preview link has expired"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:21
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:22
 #, elixir-autogen, elixir-format
 msgid "This site publishes its content over two headless API surfaces — GraphQL and JSON:API — plus a rendered-artifact endpoint for full page bodies. Anonymous requests read published content; a bearer token unlocks drafts."
 msgstr ""
@@ -5119,7 +5119,7 @@ msgstr ""
 msgid "Two-factor authentication is on."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:61
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:62
 #, elixir-autogen, elixir-format
 msgid "Typed queries over published content — by-slug lookups, taxonomy, and keyword/semantic search. POST queries to the endpoint below (GET with a ?query= parameter also works). The interactive GraphiQL playground is available in development environments only."
 msgstr ""
@@ -5323,7 +5323,7 @@ msgstr ""
 msgid "hard bounce"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:112
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:113
 #, elixir-autogen, elixir-format
 msgid "hybrid keyword + semantic search across all content types."
 msgstr ""
@@ -5343,7 +5343,7 @@ msgstr ""
 msgid "last used %{date}"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:116
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:117
 #, elixir-autogen, elixir-format
 msgid "locale discovery for building language switchers."
 msgstr ""
@@ -5434,7 +5434,7 @@ msgstr ""
 msgid "target missing"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:108
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:109
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
 msgstr ""

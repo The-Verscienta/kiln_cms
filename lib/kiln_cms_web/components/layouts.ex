@@ -339,7 +339,7 @@ defmodule KilnCMSWeb.Layouts do
     role =
       KilnCMS.Accounts.Scoping.effective_tier(
         assigns[:current_user],
-        assigns[:current_org] || KilnCMSWeb.Tenant.current_org_id(%{assigns: assigns})
+        assigns[:current_org] || KilnCMSWeb.Tenant.current_org_id_or_default(%{assigns: assigns})
       )
 
     multi_locale? = length(KilnCMS.I18n.locales()) > 1

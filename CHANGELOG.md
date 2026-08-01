@@ -118,6 +118,42 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **`TENANT_STRICT_HOST` refuses requests whose `Host` matches no organization.**
+  Tenant resolution is by host, and an unrecognized one — a bare hostname, an IP
+  literal, `localhost`, or an attacker-supplied header — fell through to the
+  **default organization**. On a single-org install that is the intended
+  behaviour and is unchanged. On a multi-org one it means any request reaching
+  the app with an unknown `Host` is served the default org's content, branding
+  and analytics under a name that is not theirs. Set `TENANT_STRICT_HOST=true`
+  and those requests 404 instead. Both health probes (`/up`, `/ready`) stay
+  exempt so a load balancer or readiness gate checking by pod IP does not pull
+  the instance out of rotation; `TENANT_STRICT_HOST_EXEMPT_PATHS` overrides that
+  list. The refusal covers everything the router serves and the LiveView,
+  GraphQL and visual-editing bridge sockets — a socket is the one surface an
+  attacker-chosen host reaches without passing the plug, so each now refuses the
+  connection rather than falling back. It does **not** cover `Plug.Static`
+  (`/assets/*`, `/uploads/*`), which runs earlier in the endpoint and serves
+  deployment-global files. Off by default, because turning it on for a
+  single-host deployment whose `PHX_HOST` is misconfigured would take the site
+  down. (#563)
+- Host matching is now case-insensitive on the **configured** side too, and
+  tolerates a rooted FQDN's trailing dot. `PHX_HOST=Acme.Com` made every host
+  unresolvable — invisible while unknown hosts fell back to the default org, and
+  a total outage the moment strict mode was turned on. `Host: acme.example.com.`
+  (which browsers send verbatim for a fully-qualified spelling) likewise matched
+  nothing and quietly resolved to the default org. (#563)
+- The site header on `/` and `/developers` now renders the requesting org's logo
+  and name. Both templates dropped `current_org`, so `Layouts.app`'s nil default
+  fell through to the default org's branding on a tenant host. (#563)
+- **`KilnCMSWeb.Tenant.current_org/1` raises on a missing `:current_org` assign**
+  rather than returning the default org. `Plugs.SetTenant` sets the assign in the
+  endpoint for every HTTP request and the `:assign_current_org` on_mount for
+  every LiveView, so a caller reaching the fallback had bypassed both — and the
+  fallback turned that into a silent cross-tenant read that looked like a working
+  page. It is now a crash in test rather than another org's content in
+  production. Where the fallback is genuinely right, `current_org_or_default/1`
+  says so explicitly. This is a **behaviour change for overlay code** — see
+  Upgrading. (#563)
 - **Embeddable forms no longer default to `frame-ancestors *`.** `EMBED_ORIGINS`
   unset resolved to `:all`, so out of the box any site on the internet could
   iframe `/forms/:slug/embed`. The embed page carries no ambient credentials — a
@@ -190,6 +226,43 @@ migration, a rewritten column, a dropped config key).
   sighted and screen-reader users alike. The copyable media URL now says so too.
 
 ### Upgrading
+
+**Turn on `TENANT_STRICT_HOST` if you serve more than one organization.**
+Nothing breaks if you don't — the default is the old behaviour — but leaving it
+off means an unrecognized `Host` is served your default org's site.
+
+```
+TENANT_STRICT_HOST=true
+```
+
+Before you do, check that every hostname you actually serve resolves: each org's
+`<slug>.<TENANT_BASE_HOST>` subdomain or its `custom_domain`, plus `PHX_HOST`
+itself. Anything else — a staging alias, a legacy domain still in DNS, a CDN
+origin hostname — starts returning 404, so add it as a `custom_domain` first.
+Health checks are unaffected (`/up` and `/ready` are exempt — add to that list
+with `TENANT_STRICT_HOST_EXEMPT_PATHS` if something else probes by internal
+name), and the change is reversible by unsetting the variable and redeploying.
+
+Two limits worth knowing before you flip it. Static files (`/assets/*`,
+`/uploads/*`) are served by a plug that runs *before* this one, so they are not
+refused. And the refusal halts inside the endpoint, ahead of the router's rate
+limiter — a flood of distinct `Host` values costs one uncached org lookup each
+and is not metered, so keep unknown hosts terminated at the proxy where you can.
+
+**Overlay code calling `KilnCMSWeb.Tenant.current_org/1` or `current_org_id/1`
+now raises when the `:current_org` assign is absent**, where it used to return
+the default org. Every request and LiveView in the core sets that assign, so this
+only affects a call site that builds its own conn/socket-shaped map — a
+background job, a mailer, a test helper.
+
+```bash
+grep -rn 'current_org_id\|Tenant.current_org' projects/
+```
+
+Swap any hit that legitimately has no tenant to `current_org_or_default/1` (or
+`current_org_id_or_default/1`), which is the same behaviour under a name that
+says what it does. A hit that *should* have a tenant was reading the wrong org's
+data before and now tells you so.
 
 **Set `EMBED_ORIGINS` before deploying if you embed forms on other sites.**
 Until #562 the variable was unset on almost every deployment, because leaving it

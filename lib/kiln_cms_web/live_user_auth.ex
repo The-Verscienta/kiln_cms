@@ -42,7 +42,20 @@ defmodule KilnCMSWeb.LiveUserAuth do
         _ -> nil
       end
 
-    {:cont, assign(socket, :current_org, KilnCMSWeb.Tenant.resolve_org(host))}
+    case KilnCMSWeb.Tenant.fetch_org(host) do
+      {:ok, org} ->
+        {:cont, assign(socket, :current_org, org)}
+
+      # Strict host mode (#563). Sockets bypass the endpoint plug pipeline, so
+      # `Plugs.SetTenant` never saw this host — refuse the mount rather than
+      # falling back to the default org.
+      #
+      # Halted without a redirect on purpose: every path on an unresolvable host
+      # is refused, so sending the client to `/` would only navigate it into the
+      # plain-text 404. Halting closes the socket, which is the honest signal.
+      :error ->
+        {:halt, socket}
+    end
   end
 
   def on_mount(:live_user_optional, _params, _session, socket) do

@@ -36,9 +36,10 @@ defmodule KilnCMSWeb.BridgeSocket do
   @impl true
   def connect(%{params: params} = info) do
     with true <- KilnCMS.VisualEditing.enabled?(),
+         {:ok, org} <- resolve_org(info),
          {:ok, ct, id} <- fetch_target(params),
          actor <- authenticate(params["api_key"]),
-         :ok <- authorize_read(ct, id, actor, resolve_org(info)) do
+         :ok <- authorize_read(ct, id, actor, org) do
       {:ok, %{type: to_string(ct.type), id: id}}
     else
       _ -> :error
@@ -110,8 +111,14 @@ defmodule KilnCMSWeb.BridgeSocket do
   # Raw transports bypass the plug pipeline, so resolve the tenant from the
   # connect URI's host (the same source `SetTenant` uses). A missing host —
   # `connect_info` absent in tests — resolves to the default org.
+  #
+  # Under strict host mode this returns `:error` and the connection is refused
+  # (#563). A socket is the one surface an attacker-chosen host reaches without
+  # passing the plug that would 404 it, so leaving it on `resolve_org/1` would
+  # have kept the default-org fallback open on exactly the path with no other
+  # gate in front of it.
   defp resolve_org(info) do
-    KilnCMSWeb.Tenant.resolve_org(get_in(info, [:connect_info, :uri, Access.key(:host)]))
+    KilnCMSWeb.Tenant.fetch_org(get_in(info, [:connect_info, :uri, Access.key(:host)]))
   end
 
   defp excerpt(value) when is_binary(value), do: value

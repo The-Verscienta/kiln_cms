@@ -90,7 +90,9 @@ build if a resource is ever registered without that authorizer.
 - **Multi-tenancy** — `Plugs.SetTenant` resolves the org from the HTTP host
   (subdomain of `TENANT_BASE_HOST`, then custom domain) and sets it as the Ash
   tenant for the whole request, so tenant scoping applies to GraphQL and
-  JSON:API without resolver changes.
+  JSON:API without resolver changes. A host matching no org falls back to the
+  default org, or 404s under `TENANT_STRICT_HOST` (#563 — recommended for
+  multi-tenant deployments).
 - **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across eight
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`.
 - **CSP & secure headers** — `put_secure_browser_headers` plus a per-request
@@ -219,12 +221,14 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    **Remainder:** the allowlist is deployment-global while forms are org-scoped,
    so on a multi-org instance an origin added for one org may frame every org's
    forms. Tracked in #648.
-2. **Unknown `Host` headers resolve to the default organization.** A bare host,
-   an IP, `localhost`, or an unrecognized domain silently serves the default org
-   rather than erroring — deliberate single-host compatibility. On a
-   multi-tenant deployment, terminate unknown hosts at the proxy. Tracked in #563.
-   `Tenant.current_org_id/1` has the same default-org fallback when the
-   `:current_org` assign is missing.
+2. ~~**Unknown `Host` headers resolve to the default organization.**~~
+   **Closed in #563.** Still the default, for single-host compatibility, but
+   `TENANT_STRICT_HOST=true` now 404s a request whose host matches no org —
+   **set it on any multi-tenant deployment**. `/up` stays exempt so health
+   checks by pod IP keep working. `Tenant.current_org/1` no longer has the
+   matching default-org fallback either: a missing `:current_org` assign raises
+   instead of quietly reading the default org, with the fallback available as
+   the explicit `current_org_or_default/1`.
 3. **The OpenAPI spec and Swagger explorer are unauthenticated in every
    environment**, production included. They describe the write surface. This is
    a disclosure convenience; gate them at the proxy if that is not wanted.

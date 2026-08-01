@@ -125,6 +125,38 @@ if config_env() != :test do
   end
 end
 
+# ## Strict host → tenant resolution (#563)
+#
+# Off by default: an unrecognized Host (bare hostname, IP literal, `localhost`,
+# or an attacker-supplied header) resolves to the DEFAULT organization, which is
+# correct for a single-org install and wrong for a multi-org one — it serves one
+# tenant's content, branding and analytics under another's name. Set
+# TENANT_STRICT_HOST=true to 404 those requests instead; recommended for any
+# deployment serving more than one organization. `/up` stays exempt so a load
+# balancer health-checking by pod IP doesn't pull the instance from rotation.
+# See KilnCMSWeb.Tenant.
+#
+# `Env.fetch/1`, not `Env.flag/2`: this must only OVERRIDE config when the
+# operator actually set the variable. `flag/2` writes unconditionally, so an
+# unset variable would rewrite a project overlay's `config :kiln_cms,
+# :tenant_strict_host, true` back to false — silently, in production, on the
+# deployment most likely to have set it.
+if config_env() != :test do
+  with {:ok, strict_host?} <- Env.fetch("TENANT_STRICT_HOST") do
+    config :kiln_cms, :tenant_strict_host, strict_host?
+  end
+
+  # Exact request paths that skip the check. Defaults to both health probes;
+  # set this only to add something else addressed by an internal name rather
+  # than a site hostname. Replaces the default rather than extending it, so
+  # include /up and /ready if you still want them.
+  if exempt_paths = System.get_env("TENANT_STRICT_HOST_EXEMPT_PATHS") do
+    config :kiln_cms,
+           :tenant_strict_host_exempt_paths,
+           exempt_paths |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+  end
+end
+
 # ## Visual-editing bridge (#355) — the annotated preview read + `/bridge.js`
 #
 # Enabled by default. Set VISUAL_EDITING_ENABLED=false to switch the whole
