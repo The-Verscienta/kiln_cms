@@ -54,11 +54,12 @@ defmodule KilnCMSWeb.RateLimit do
   @doc "Returns `:allow` or `{:deny, retry_after_ms}` for the given bucket key."
   def check(bucket, remote_ip) when is_atom(bucket) and is_binary(remote_ip) do
     {limit, scale} = Map.fetch!(limits(), bucket)
-    key = "#{bucket}:#{remote_ip}"
 
-    case hit(key, scale, limit) do
+    case hit(bucket_key(bucket, remote_ip), scale, limit) do
       {:allow, _count} -> :allow
       {:deny, retry_after} -> {:deny, retry_after}
     end
   end
+
+  defp bucket_key(bucket, remote_ip), do: "#{bucket}:#{remote_ip}"
 end

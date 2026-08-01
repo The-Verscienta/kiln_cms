@@ -211,6 +211,54 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **`TENANT_STRICT_HOST` refusals no longer cost a database lookup every time.**
+  A refused request is halted in the endpoint, above the router — and every rate
+  limiter lives in a router *pipeline*, so turning strict host matching on took
+  that path out of the `:delivery` ceiling and left one uncached organization
+  lookup per request, metered by nothing. A scan across made-up `Host` headers
+  therefore cost a round trip each, and enabling a safety control made this
+  particular flood cheaper for the attacker than leaving it off.
+
+  Host → organization resolution moves to `KilnCMS.Cache.Hosts`, a cache of its
+  own, and unresolvable hosts are now cached as **misses**. They could not be
+  before: in the shared content cache a flood of invented hosts would have
+  inserted an entry each and evicted hot published pages, so a `nil` was
+  deliberately never committed. On a separate, separately-bounded cache a flood
+  evicts only other host entries. A repeated flood now costs one lookup per
+  distinct host per minute instead of one per request. The negative TTL is one
+  minute against the positive five, so a newly-configured host starts working
+  promptly.
+
+  A flood of *distinct* hosts still costs a lookup each, deliberately. The
+  alternative considered and rejected was a per-IP budget that refuses without
+  resolving: it cannot tell a flood from a legitimate request behind the same
+  NAT, CDN, or collapsed `X-Forwarded-For` (the default when `TRUSTED_PROXIES`
+  is unset), so it can 404 tenants that do exist — a worse failure than the
+  bounded indexed-lookup load it prevents. Terminate unknown hosts at the proxy
+  if that load matters.
+
+  Second effect, unrelated to the refusal path: tenant resolution no longer
+  evaporates whenever an editor saves a media item. `Cache.bust_published/0` is
+  a whole-cache clear, so one media write on one site dropped every site's host
+  resolution and made the next request for each of them pay a fresh lookup.
+  (#659)
+
+- **The strict-host 404 is documented as the tenant-name oracle it is.** An
+  unknown host gets a plain-text 404, a known host with an unmatched path gets
+  the branded HTML one, and the two are trivially distinguishable — so a
+  dictionary sweep enumerates which org slugs and `custom_domain`s exist.
+  `SetTenant`'s moduledoc claimed the 404 avoided "confirming which hostnames do
+  exist", which was true of the status code and not of the body.
+
+  Accepted rather than fixed, and now written down as such in the moduledoc and
+  `docs/environment-variables.md`: making the two identical means either showing
+  unknown hosts the branded page — reintroducing exactly the default-org leak
+  the control exists to prevent — or degrading every tenant's real 404 to plain
+  text, in order to hide names that are already public in DNS and in TLS
+  certificates. A deployment whose tenant list is genuinely confidential should
+  terminate unknown hosts at the proxy, which the deploy recipes already assume.
+  (#659)
+
 - **The collaborative-editing socket now authorizes every join against the
   document it names.** `CollabSocket` verifies a `Phoenix.Token` carrying a
   *user id* — minted once per editor session, valid for 24 hours — and

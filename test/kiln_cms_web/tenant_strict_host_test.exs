@@ -151,6 +151,66 @@ defmodule KilnCMSWeb.TenantStrictHostTest do
     end
   end
 
+  describe "host resolution caching (#659)" do
+    setup do
+      KilnCMS.Cache.Hosts.clear()
+      :ok
+    end
+
+    test "an unresolvable host is cached, so a repeat costs no lookup" do
+      strict!(true)
+      host = unknown_host()
+
+      assert :error = Tenant.fetch_org(host)
+
+      # The point of the whole change: before it, `nil` was never committed —
+      # deliberately, because the shared content cache would have been evicted by
+      # a flood of made-up hosts. On its own cache it can be, so a repeat flood
+      # stops costing a database round trip each, above every rate limiter.
+      assert {:ok, :unresolved} = Cachex.get(KilnCMS.Cache.Hosts.cache_name(), host)
+      assert :error = Tenant.fetch_org(host)
+    end
+
+    test "a negative entry never refuses a host the database would resolve" do
+      strict!(true)
+      o = org("cachepos")
+      host = "#{o.slug}.#{Tenant.base_host()}"
+
+      # A miss is only ever written from a lookup that really found nothing, so
+      # a real host cannot be poisoned into one by anybody probing it.
+      assert {:ok, resolved} = Tenant.fetch_org(host)
+      assert resolved.id == o.id
+      assert {:ok, %{id: _}} = Cachex.get(KilnCMS.Cache.Hosts.cache_name(), host)
+    end
+
+    test "resolution survives a content-cache bust" do
+      strict!(true)
+      o = org("cachebust")
+      host = "#{o.slug}.#{Tenant.base_host()}"
+      assert {:ok, _} = Tenant.fetch_org(host)
+
+      # `bust_published/0` is a whole-cache clear, and an editor saving a media
+      # item on ANY site calls it. While tenant resolution lived in that cache,
+      # one media save dropped every site's host resolution.
+      KilnCMS.Cache.bust_published()
+
+      assert {:ok, still} = Cachex.get(KilnCMS.Cache.Hosts.cache_name(), host)
+      assert still.id == o.id
+    end
+
+    test "a cached miss does not survive into strict mode being off" do
+      strict!(true)
+      host = unknown_host()
+      assert :error = Tenant.fetch_org(host)
+
+      # The cache stores resolution, not the verdict — so flipping the flag
+      # changes the answer immediately, with no stale refusal.
+      strict!(false)
+      assert {:ok, org} = Tenant.fetch_org(host)
+      assert org.id == Accounts.default_org_id()
+    end
+  end
+
   describe "SetTenant plug: health probes are exempt from strict matching" do
     setup do: strict!(true)
 

@@ -239,6 +239,21 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    billing events. `/ws/collab` was a fourth until #655 wired it through
    `Tenant.fetch_org/1` like the other two sockets.
 
+   **Two things about the refusal itself** (#659). It is halted above the router
+   and so above every rate limiter, which left one uncached organization lookup
+   per request; unresolvable hosts are now cached as misses (in a cache of their
+   own, so a flood cannot evict published content) rather than bounded by a
+   per-IP budget, which could not tell a flood from a legitimate request behind
+   the same NAT and so would have refused hosts that exist. And its plain-text
+   body is distinguishable
+   from the branded HTML 404 a *known* host gets for an unmatched path, so a
+   dictionary sweep enumerates configured org slugs and custom domains. That
+   second one is accepted rather than closed — the alternatives are showing
+   unknown hosts the branded page (the default-org leak this control exists to
+   prevent) or degrading every tenant's real 404, to hide names already public
+   in DNS and TLS certificates. Terminate unknown hosts at the proxy if your
+   tenant list is confidential.
+
    The quieter half is closed unconditionally: `Tenant.current_org_id/1` now
    **raises** when the `:current_org` assign is missing rather than reading the
    default org, so a forgotten `SetTenant` plug or `:assign_current_org`
