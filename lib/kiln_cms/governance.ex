@@ -234,13 +234,12 @@ defmodule KilnCMS.Governance do
 
   defp record_matches_type?(_ct, _record), do: true
 
-  # A document's versions, ascending — the same order the chain folds in.
-  # Tenant-scoped like every other read in `trail/3` (epic #336).
+  # A document's versions, ascending. Delegated rather than restated: this list
+  # is folded by `Chain.verify_loaded/4`, so its order has to be the chain's own
+  # definition of the fold order, not a second copy that can drift out of step
+  # (#598). Tenant-scoped like every other read in `trail/3` (epic #336).
   defp versions_asc(resource, id, org_id) do
-    Module.concat(resource, Version)
-    |> Ash.Query.filter(version_source_id == ^id)
-    |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    KilnCMS.Governance.Chain.versions_asc(resource, id, org_id)
   end
 
   # "Who" (#352): resolve the versions' acting users to display names in one

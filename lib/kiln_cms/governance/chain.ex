@@ -30,6 +30,49 @@ defmodule KilnCMS.Governance.Chain do
   It is also O(new versions) rather than O(history), which is what makes
   per-write anchoring affordable.
 
+  ## Resuming by position, not by count (#598)
+
+  "What is new since the previous anchor" is asked as *"the rows sorting after
+  the boundary the previous anchor ended on"* — the `(last_version_at,
+  last_version_id)` sort key it recorded — never as a SQL `OFFSET
+  version_count`.
+
+  `OFFSET n` means "skip the first n rows **of the current result set**", which
+  equals "skip the rows the previous anchor covered" only while no row ever
+  becomes visible *below* the boundary afterwards. Two ordinary ways that
+  breaks: concurrent writes whose version rows commit out of stamp order, and
+  wall-clock skew between app nodes, since `version_inserted_at` is stamped by
+  whichever node performs the write. Either one made the offset skip the row it
+  was meant to fold and fold the boundary row a second time, minting a
+  correctly-signed anchor whose hash covers a sequence that never existed and
+  whose `version_count` is one too high.
+
+  **Be exact about what this does and does not fix.** It removes the fabricated
+  chain state. It does **not** clear the verdict: an earlier anchor committed to
+  an ordering the version table no longer holds, so it can never reproduce, and
+  `verify/4` recomputes the prefix from genesis. A document that took a
+  below-boundary row reads `{:tampered, …}` before this change and after it.
+  What changes is that the anchor is now honest about what it covered, the
+  condition is logged when it happens instead of surfacing months later, and
+  the verdict names it rather than reporting a bare hash mismatch that reads
+  identically to doctored content.
+
+  Actually closing it needs a fold order **assigned** at write time rather than
+  inferred from a wall-clock timestamp, so that a late row appends instead of
+  landing mid-sequence. That is a compliance-visible policy change — it decides
+  whether a version row appearing inside an anchored range is tampering or a
+  latecomer — so it is tracked separately rather than settled here.
+
+  The boundary is signed. `last_version_at` is inside the anchor payload and
+  its presence is what selects the v3 payload shape, so an attacker with
+  `UPDATE` on `history_anchors` cannot repoint the resume position to freeze
+  anchoring — the column steers the fold, so it has to be attested, exactly
+  like `version_count` was when the fold resumed by count. It is stored rather
+  than looked up from `last_version_id`, because version rows are deleted in
+  ordinary operation (`KilnCMS.CMS.Changes.CoalesceAutosaveVersions` destroys
+  superseded autosave rows on every debounced save) and a boundary that
+  evaporated with its row would silently fall back to the count resume.
+
   ## What the chain does and does not guarantee (#597)
 
   Each anchor also records its predecessor's **id and a digest of its contents**,
@@ -106,12 +149,13 @@ defmodule KilnCMS.Governance.Chain do
   @doc """
   Fold the document's versions (ascending) into the chain — all of them, or
   only the first `count` (the prefix an earlier anchor covered). Returns
-  `%{chain_hash, version_count, last_version_id}`.
+  `%{chain_hash, version_count, last_version_id, last_version_at}`.
   """
   @spec compute(module(), Ash.UUID.t(), Ash.UUID.t(), :all | non_neg_integer()) :: %{
           chain_hash: String.t(),
           version_count: non_neg_integer(),
-          last_version_id: Ash.UUID.t() | nil
+          last_version_id: Ash.UUID.t() | nil,
+          last_version_at: DateTime.t() | nil
         }
   def compute(resource, source_id, org_id, count \\ :all) do
     resource |> versions(source_id, count, org_id) |> fold()
@@ -123,7 +167,11 @@ defmodule KilnCMS.Governance.Chain do
 
   @doc """
   Fold `versions` onto an existing chain head — `seed` being the previous
-  anchor's recorded `chain_hash` and `offset` the version count it covered.
+  anchor's recorded `chain_hash` and `base_count` the number of versions that
+  hash already covers.
+
+  `base_count` is a cardinality carried forward for bookkeeping only; where the
+  fold *starts* is a position, and the two are deliberately separate (#598).
 
   Folding all versions from genesis yields the same hash as folding the tail
   onto an honest prefix, so this is interchangeable with `fold/1` on intact
@@ -131,16 +179,19 @@ defmodule KilnCMS.Governance.Chain do
   (see the module docs).
   """
   @spec fold_from(String.t(), non_neg_integer(), [struct()]) :: map()
-  def fold_from(seed, offset, versions) do
+  def fold_from(seed, base_count, versions) do
     chain_hash =
       Enum.reduce(versions, seed, fn version, prev ->
         Canonical.digest(%{"prev" => prev, "item" => item_digest(version)})
       end)
 
+    last = List.last(versions)
+
     %{
       chain_hash: chain_hash,
-      version_count: offset + length(versions),
-      last_version_id: versions |> List.last() |> then(&(&1 && &1.id))
+      version_count: base_count + length(versions),
+      last_version_id: last && last.id,
+      last_version_at: last && last.version_inserted_at
     }
   end
 
@@ -180,19 +231,32 @@ defmodule KilnCMS.Governance.Chain do
   # re-blessing doctored history — see the module docs.
   defp mint(record, opts, allow_empty?) do
     type = to_string(KilnCMS.Firing.Engine.document_type(record))
+    scope = %{resource: record.__struct__, source_id: record.id, org_id: record.org_id}
     previous = latest_anchor(type, record.id, record.org_id)
-    {seed, offset} = seed(previous)
-    fresh = versions(record.__struct__, record.id, :all, record.org_id, offset)
+    {seed, base_count} = seed(previous)
+    fresh = versions(scope.resource, scope.source_id, :all, scope.org_id, resume_at(previous))
 
     # Nothing new to cover: a second anchor over the identical prefix would say
     # nothing. Publishes opt out — theirs carries `published_version_id`.
+    #
+    # After a versioned write, though, "nothing after the boundary" means the
+    # row this hook exists to fold landed BELOW it — the #598 skew. That costs
+    # nothing to notice here, and it is the only place the hot path pays for
+    # the check at all.
     if fresh == [] and not is_nil(previous) and not allow_empty? do
+      warn_on_skew(scope, type, previous, base_count)
       :ok
     else
-      computed = fold_from(seed, offset, fresh)
+      computed = fold_from(seed, base_count, fresh)
+      boundary = boundary(computed, previous)
       prev_digest = anchor_digest(previous)
 
-      {signature, key_id} = sign(anchor_payload(type, record.id, computed, previous, prev_digest))
+      # Publishes are the compliance-critical anchors and are rare, so they pay
+      # one count to check the same invariant even when they did fold something.
+      if allow_empty?, do: warn_on_skew(scope, type, previous, computed.version_count)
+
+      {signature, key_id} =
+        sign(anchor_payload(type, record.id, computed, previous, prev_digest, boundary))
 
       CMS.create_history_anchor!(
         %{
@@ -200,7 +264,8 @@ defmodule KilnCMS.Governance.Chain do
           source_id: record.id,
           chain_hash: computed.chain_hash,
           version_count: computed.version_count,
-          last_version_id: computed.last_version_id || previous_last_version_id(previous),
+          last_version_id: boundary.id,
+          last_version_at: boundary.at,
           published_version_id: Map.get(record, :published_version_id),
           signature: signature,
           key_id: key_id,
@@ -219,8 +284,46 @@ defmodule KilnCMS.Governance.Chain do
   defp seed(nil), do: {@genesis, 0}
   defp seed(anchor), do: {anchor.chain_hash, anchor.version_count}
 
-  defp previous_last_version_id(nil), do: nil
-  defp previous_last_version_id(anchor), do: anchor.last_version_id
+  # The sort key this anchor ends on: the last row it folded, or — when it
+  # folded nothing — the one its predecessor ended on, carried forward so the
+  # boundary never moves backwards.
+  defp boundary(%{last_version_id: nil}, previous),
+    do: %{id: previous && previous.last_version_id, at: previous && previous.last_version_at}
+
+  defp boundary(computed, _previous),
+    do: %{id: computed.last_version_id, at: computed.last_version_at}
+
+  # Where the incremental fold picks up (#598) — a pure function of the previous
+  # anchor, so nothing about it depends on a version row still existing.
+  #
+  # `{:offset, n}` is the pre-#598 count resume, reachable only for anchors
+  # minted before `last_version_at` existed. It is wrong in exactly the way this
+  # module documents, and it survives only until each document's next anchor
+  # records a boundary — folding the whole history onto a seed that already
+  # covers it would be worse.
+  defp resume_at(nil), do: :genesis
+  defp resume_at(%{last_version_at: nil, version_count: 0}), do: :genesis
+  defp resume_at(%{last_version_at: nil} = previous), do: {:offset, previous.version_count}
+  defp resume_at(%{last_version_at: at, last_version_id: id}), do: {:after, {at, id}}
+
+  # A version row this anchor did not cover is history rearranging itself under
+  # an anchor that already committed to the old order: that anchor can never
+  # reproduce, and no later anchor repairs it (see the module docs). Otherwise
+  # invisible until someone audits the document, which may be months later.
+  #
+  # Says what is true and stops — deliberately not "the document will verify as
+  # tampered", which is a consequence this function has not established.
+  defp warn_on_skew(scope, type, previous, covered) do
+    total = count_versions(scope)
+
+    if total > covered do
+      Logger.error(
+        "History chain skew on #{type} #{scope.source_id}: #{total - covered} version " <>
+          "row(s) are not covered by the chain that anchor #{previous.id} continues, " <>
+          "and no later anchor will cover them. See #598."
+      )
+    end
+  end
 
   @doc """
   Verify a document's history against its **latest** anchor:
@@ -258,7 +361,11 @@ defmodule KilnCMS.Governance.Chain do
             anchor,
             compute(resource, source_id, org_id, anchor.version_count),
             type,
-            source_id
+            source_id,
+            covered_by_query(
+              %{resource: resource, source_id: source_id, org_id: org_id},
+              anchor
+            )
           )
         end
     end
@@ -322,7 +429,13 @@ defmodule KilnCMS.Governance.Chain do
 
       [anchor | _] = all ->
         with :ok <- chain_intact(all) do
-          verdict(anchor, fold(Enum.take(versions, anchor.version_count)), type, source_id)
+          verdict(
+            anchor,
+            fold(Enum.take(versions, anchor.version_count)),
+            type,
+            source_id,
+            covered_loaded(versions, anchor)
+          )
         end
     end
   end
@@ -332,19 +445,91 @@ defmodule KilnCMS.Governance.Chain do
   def unanchored_tail(_versions, nil), do: 0
   def unanchored_tail(versions, anchor), do: max(length(versions) - anchor.version_count, 0)
 
-  defp verdict(anchor, computed, type, source_id) do
+  defp verdict(anchor, computed, type, source_id, covered) do
     cond do
       computed.version_count < anchor.version_count ->
         {:tampered, "anchored versions are missing"}
 
       computed.chain_hash != anchor.chain_hash ->
-        {:tampered, "anchored history does not reproduce the recorded chain hash"}
+        {:tampered, mismatch_reason(anchor, covered)}
 
       is_nil(anchor.signature) ->
         :unsigned
 
       true ->
         signature_verdict(anchor, type, source_id)
+    end
+  end
+
+  # Tampering either way — a row spliced into the anchored range is exactly what
+  # fabricated history looks like, so the verdict must not soften, and this says
+  # only what it counted. But "N rows sort inside the anchored range that the
+  # anchor never covered" is a fact an operator can go and check, where a bare
+  # hash mismatch is not: rearranged history and rewritten content produce the
+  # same permanent red, and nothing else distinguishes them.
+  @mismatch "anchored history does not reproduce the recorded chain hash"
+
+  defp mismatch_reason(anchor, covered) do
+    case covered.() do
+      n when is_integer(n) and n > anchor.version_count ->
+        "#{@mismatch}: #{n - anchor.version_count} version row(s) sort inside the " <>
+          "anchored range of #{anchor.version_count} but were never covered by it"
+
+      _ ->
+        @mismatch
+    end
+  end
+
+  # How many version rows now sit in the anchored range — everything at or
+  # before the anchor's recorded boundary. Deferred behind a closure because it
+  # costs two queries and only the mismatch branch of `verdict/5` ever asks, and
+  # rescued because unlike `anchor/2` and `extend/2` the read path has no
+  # blanket rescue: `mix kiln.audit.verify` walks every document in every org,
+  # and one unreadable count must not abort the run on the one verdict that
+  # matters most.
+  defp covered_by_query(scope, anchor) do
+    fn ->
+      case boundary_of(anchor) do
+        nil -> nil
+        key -> count_versions(scope) - count_after(scope, key)
+      end
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "History chain range count failed, reporting a bare mismatch: #{inspect(error)}"
+      )
+
+      fn -> nil end
+  end
+
+  # Same question against an already-loaded ASCENDING list — free, no query.
+  # The list must be the document's COMPLETE version set in the fold's order,
+  # which is what `KilnCMS.Governance.versions_asc/3` hands `verify_loaded/4`;
+  # a filtered or paginated list would silently answer a different question.
+  defp covered_loaded(versions, anchor) do
+    fn ->
+      case boundary_of(anchor) do
+        nil -> nil
+        {at, id} -> Enum.count(versions, &at_or_before?(&1, at, id))
+      end
+    end
+  end
+
+  defp boundary_of(%{last_version_at: at, last_version_id: id}) when not is_nil(at),
+    do: {at, id}
+
+  defp boundary_of(_anchor), do: nil
+
+  # The in-memory twin of `count_after/2`'s SQL predicate, negated. Comparing
+  # ids with `<=` matches Postgres because Ash renders uuids as canonical
+  # lowercase hex: hex digits order the same as their nibble values in ASCII and
+  # the dashes sit at fixed offsets, so the string order is the byte order.
+  defp at_or_before?(version, at, id) do
+    case DateTime.compare(version.version_inserted_at, at) do
+      :lt -> true
+      :eq -> version.id <= id
+      :gt -> false
     end
   end
 
@@ -371,26 +556,29 @@ defmodule KilnCMS.Governance.Chain do
 
   defp payload_candidates(anchor, type, source_id) do
     computed = %{chain_hash: anchor.chain_hash, version_count: anchor.version_count}
+    prev = anchor.prev_anchor_id && %{id: anchor.prev_anchor_id}
+    boundary = %{id: anchor.last_version_id, at: anchor.last_version_at}
 
-    v2 =
-      anchor_payload(
-        type,
-        source_id,
-        computed,
-        anchor.prev_anchor_id && %{id: anchor.prev_anchor_id},
-        anchor.prev_anchor_digest
-      )
+    v3 = anchor_payload(type, source_id, computed, prev, anchor.prev_anchor_digest, boundary)
 
-    # The v1 candidate is offered ONLY when both link columns are null, i.e. the
-    # anchor really could be pre-#597. Otherwise a v1 anchor — whose signature
-    # never covered those columns — could have a predecessor link written into it
-    # after the fact and still verify, letting an attacker manufacture a
-    # chain-broken verdict on an untouched document, or blank a link that a later
-    # anchor depends on.
-    if is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) do
-      [v2, legacy_anchor_payload(type, source_id, computed)]
-    else
-      [v2]
+    # An older-shape candidate is offered only when the columns it does NOT
+    # cover are null — otherwise an anchor signed at that shape could have those
+    # columns written into it after the fact and still verify. A newer-shape
+    # anchor is never at risk from the older candidates: the encoded payloads
+    # differ byte for byte, so its signature can only ever match its own shape.
+    #
+    # v2 is gated on `last_version_at` rather than on `last_version_id`, because
+    # `last_version_at` is what steers the fold (`resume_at/1`) and every v2
+    # anchor already carries a non-null `last_version_id`. So a v2 anchor's id
+    # can still be rewritten unnoticed — and does nothing, since without the
+    # timestamp the resume falls back to the count.
+    v2 = anchor_payload(type, source_id, computed, prev, anchor.prev_anchor_digest)
+    v1 = legacy_anchor_payload(type, source_id, computed)
+
+    cond do
+      not is_nil(anchor.last_version_at) -> [v3]
+      is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) -> [v3, v2, v1]
+      true -> [v3, v2]
     end
   end
 
@@ -430,18 +618,66 @@ defmodule KilnCMS.Governance.Chain do
   # ── internals ─────────────────────────────────────────────────────────────
 
   # Version twins are tenant-strict (#419) — the chain reads under the org.
-  # `offset` skips the prefix an earlier anchor already covered, so an
-  # incremental fold reads only what is new.
-  defp versions(resource, source_id, count, org_id, offset \\ 0) do
-    query =
-      Module.concat(resource, Version)
-      |> Ash.Query.filter(version_source_id == ^source_id)
-      |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
+  # `resume` skips the prefix an earlier anchor already covered, so an
+  # incremental fold reads only what is new. See `resume_at/1` for why the
+  # boundary is a position rather than a count (#598).
+  defp versions(resource, source_id, count, org_id, resume \\ :genesis) do
+    resource
+    |> version_scope(source_id)
+    |> resume_after(resume)
+    |> then(&if count == :all, do: &1, else: Ash.Query.limit(&1, count))
+    |> Ash.read!(authorize?: false, tenant: org_id)
+  end
 
-    query = if count == :all, do: query, else: Ash.Query.limit(query, count)
-    query = if offset > 0, do: Ash.Query.offset(query, offset), else: query
+  @doc """
+  A document's versions in the order the chain folds them — ascending
+  `(version_inserted_at, id)`.
 
-    Ash.read!(query, authorize?: false, tenant: org_id)
+  Public because `KilnCMS.Governance.trail/3` reads the same list once and hands
+  it to `verify_loaded/4`: the fold order has to be defined in one place, or the
+  trail and `verify/4` can reach different verdicts for the same document.
+  """
+  @spec versions_asc(module(), Ash.UUID.t(), Ash.UUID.t() | nil) :: [struct()]
+  def versions_asc(resource, source_id, org_id) do
+    versions(resource, source_id, :all, org_id)
+  end
+
+  defp version_scope(resource, source_id) do
+    Module.concat(resource, Version)
+    |> Ash.Query.filter(version_source_id == ^source_id)
+    |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
+  end
+
+  defp resume_after(query, :genesis), do: query
+  defp resume_after(query, {:offset, n}), do: Ash.Query.offset(query, n)
+
+  # Strictly after the boundary in the `(version_inserted_at, id)` sort order the
+  # fold uses — the row-valued comparison, spelled out because the expression
+  # language has no tuple form. `boundary_id` rather than `id`: the bare `id` on
+  # the left is a reference to the column, and giving the pinned value the same
+  # name reads as though one shadows the other.
+  defp resume_after(query, {:after, {at, boundary_id}}) do
+    Ash.Query.filter(
+      query,
+      version_inserted_at > ^at or (version_inserted_at == ^at and id > ^boundary_id)
+    )
+  end
+
+  defp count_versions(scope) do
+    scope.resource
+    |> version_scope(scope.source_id)
+    |> Ash.count!(authorize?: false, tenant: scope.org_id)
+  end
+
+  # Rows strictly after `key` — the same predicate the fold resumes with, so
+  # "how many rows are at or before the boundary" is `count_versions - this`
+  # rather than a second, independently-maintained comparison that could drift
+  # out of complement with it.
+  defp count_after(scope, key) do
+    scope.resource
+    |> version_scope(scope.source_id)
+    |> resume_after({:after, key})
+    |> Ash.count!(authorize?: false, tenant: scope.org_id)
   end
 
   # A version's canonical item digest: identity, action, and the tracked diff.
@@ -460,8 +696,28 @@ defmodule KilnCMS.Governance.Chain do
   # the link unforgeable: an attacker who deletes an anchor cannot mint a
   # replacement whose successor still verifies, not without the signing key.
   #
-  # `v: 2` because the shape changed (#597); `legacy_anchor_payload/3` keeps
-  # anchors minted at v1 verifying.
+  # So is the boundary (#598). Once the fold resumes from a position rather than
+  # from the signed `version_count`, that position is control flow: repoint it
+  # and the next anchor covers whatever rows the attacker chose. Anything that
+  # steers the fold has to be attested.
+  #
+  # `v: 3` because the shape changed again; `anchor_payload/5` and
+  # `legacy_anchor_payload/3` keep anchors minted at v2 and v1 verifying.
+  defp anchor_payload(type, source_id, computed, prev, prev_digest, boundary) do
+    Canonical.encode(%{
+      "v" => 3,
+      "type" => type,
+      "source_id" => source_id,
+      "chain_hash" => computed.chain_hash,
+      "version_count" => computed.version_count,
+      "prev_anchor_id" => prev && prev.id,
+      "prev_anchor_digest" => prev_digest,
+      "last_version_id" => boundary.id,
+      "last_version_at" => boundary.at && DateTime.to_iso8601(boundary.at)
+    })
+  end
+
+  # The pre-#598 signed shape.
   defp anchor_payload(type, source_id, computed, prev, prev_digest) do
     Canonical.encode(%{
       "v" => 2,

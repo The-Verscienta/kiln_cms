@@ -6,6 +6,7 @@ defmodule KilnCMS.Governance.ChainTest do
   use KilnCMS.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Page
@@ -49,6 +50,27 @@ defmodule KilnCMS.Governance.ChainTest do
       )
 
     CMS.publish_page!(page, %{}, actor: actor)
+  end
+
+  # A version row stamped BEFORE every row an existing anchor already covered —
+  # what a concurrent write whose row commits out of stamp order leaves behind,
+  # or a second app node whose wall clock runs behind (`version_inserted_at` is
+  # stamped by the node doing the writing). Seeded directly because DataCase
+  # shares ONE sandboxed connection, so genuinely concurrent transactions are
+  # not available to reproduce it — the row it leaves is, and that is what the
+  # fold actually sees.
+  #
+  # `at` defaults before every real row; pass one to place the row elsewhere.
+  defp backdated_version!(page, at \\ ~U[2000-01-01 00:00:00.000000Z]) do
+    Ash.Seed.seed!(Page.Version, %{
+      version_source_id: page.id,
+      org_id: page.org_id,
+      version_action_type: :update,
+      version_action_name: :update,
+      version_inserted_at: at,
+      version_updated_at: at,
+      changes: %{"title" => "Committed late"}
+    })
   end
 
   test "publishing mints a signed anchor and the chain verifies" do
@@ -344,6 +366,213 @@ defmodule KilnCMS.Governance.ChainTest do
       )
 
     assert {"title", {"Anchored", "Renamed"}} in rename.diffs
+  end
+
+  describe "resuming the fold by position (#598)" do
+    test "a row that lands below the boundary is not skipped, nor the boundary re-folded" do
+      page = published_page(admin())
+      before = Chain.latest_anchor("page", page.id, page.org_id)
+      assert before.version_count >= 1
+
+      backdated_version!(page)
+
+      # The seeded row has to actually be visible to the chain's own queries, or
+      # every assertion below holds for the trivial reason that nothing changed
+      # and this stops being a regression test at all.
+      assert Chain.compute(Page, page.id, page.org_id).version_count ==
+               before.version_count + 1
+
+      capture_log(fn -> :ok = Chain.anchor(page) end)
+      now = Chain.latest_anchor("page", page.id, page.org_id)
+
+      # Nothing sorts after the boundary, so the new anchor must cover exactly
+      # what the old one did. Resuming by `OFFSET version_count` instead skips
+      # the back-dated row — the very row it means to fold — and folds the
+      # boundary row a second time, minting a hash over a sequence that never
+      # existed and a count one too high.
+      refute now.id == before.id
+      assert now.version_count == before.version_count
+      assert now.chain_hash == before.chain_hash
+      assert now.last_version_id == before.last_version_id
+      assert now.last_version_at == before.last_version_at
+    end
+
+    test "a row appended after the boundary is still folded in" do
+      actor = admin()
+      page = published_page(actor)
+      before = Chain.latest_anchor("page", page.id, page.org_id)
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      # The other side of the same filter: a boundary that excluded real new
+      # rows would freeze the chain silently, and every test above would pass.
+      now = Chain.latest_anchor("page", page.id, page.org_id)
+      assert now.version_count == before.version_count + 1
+      refute now.chain_hash == before.chain_hash
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "a below-boundary row does not stop later rows being folded" do
+      actor = admin()
+      page = published_page(actor)
+      before = Chain.latest_anchor("page", page.id, page.org_id)
+
+      # Both directions of the predicate in one document. With only the two
+      # tests above, a filter that returned nothing whenever a below-boundary
+      # row existed would pass both — and would silently stop anchoring.
+      backdated_version!(page)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      capture_log(fn -> :ok = Chain.anchor(page) end)
+
+      now = Chain.latest_anchor("page", page.id, page.org_id)
+      assert now.version_count == before.version_count + 1
+      refute now.last_version_id == before.last_version_id
+    end
+
+    test "a row tying the boundary's timestamp is ordered by id, not dropped" do
+      actor = admin()
+      page = published_page(actor)
+      before = Chain.latest_anchor("page", page.id, page.org_id)
+
+      # `version_inserted_at` is not unique, so the fold's tiebreak is the id.
+      # A row sharing the boundary's timestamp must be folded when its id sorts
+      # after the boundary's, and skipped when it sorts before — dropping the
+      # tiebreak entirely leaves the plain cases above green.
+      after_id = backdated_version!(page, before.last_version_at)
+      capture_log(fn -> :ok = Chain.anchor(page) end)
+      now = Chain.latest_anchor("page", page.id, page.org_id)
+
+      if after_id.id > before.last_version_id do
+        assert now.version_count == before.version_count + 1
+        assert now.last_version_id == after_id.id
+      else
+        assert now.version_count == before.version_count
+        assert now.last_version_id == before.last_version_id
+      end
+    end
+
+    test "minting says so out loud instead of leaving it for a later audit" do
+      page = published_page(admin())
+      backdated_version!(page)
+
+      log = capture_log(fn -> :ok = Chain.anchor(page) end)
+
+      assert log =~ "History chain skew"
+      assert log =~ page.id
+      # The count is the actionable part of the message; the prose around it is
+      # not, so pin the number rather than only the wording.
+      assert log =~ "1 version row(s)"
+    end
+
+    # The earlier anchor committed to an order the table no longer holds, so it
+    # can never reproduce — unfixable by any resume strategy, and the verdict
+    # stays red. What it must not be is a bare "hash mismatch" an operator
+    # cannot tell apart from doctored content.
+    test "verification names the rows that appeared inside the anchored range" do
+      page = published_page(admin())
+      backdated_version!(page)
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "1 version row(s) sort inside the anchored range"
+
+      # `verify_loaded/4` answers from a loaded list rather than a count query.
+      # The two must agree, or the trail and `mix kiln.audit.verify` report
+      # different reasons for the same document.
+      trail = KilnCMS.Governance.trail("page", page.id, page.org_id)
+      assert {:tampered, ^reason} = trail.chain
+    end
+
+    test "ordinary content tampering is NOT relabelled as a range skew" do
+      page = published_page(admin())
+
+      KilnCMS.Repo.update_all(
+        from(v in "pages_versions",
+          where: v.version_source_id == type(^page.id, :binary_id),
+          update: [set: [changes: type(^%{"title" => "Doctored"}, :map)]]
+        ),
+        []
+      )
+
+      # Doctored content and a spliced row are both tampering, but they call for
+      # different investigations. Reporting the wrong one is worse than the bare
+      # message this diagnostic replaced.
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      refute reason =~ "sort inside the anchored range"
+    end
+
+    test "the boundary survives its own version row being deleted" do
+      actor = admin()
+      page = published_page(actor)
+      before = Chain.latest_anchor("page", page.id, page.org_id)
+
+      # `CoalesceAutosaveVersions` destroys superseded autosave rows on every
+      # debounced save, so the row an anchor ended on routinely stops existing.
+      # Resolving the boundary through `last_version_id` would drop straight back
+      # to the count resume here — on the every-write configuration, the fix
+      # would be inert exactly where it is needed.
+      KilnCMS.Repo.delete_all(
+        from(v in "pages_versions",
+          where: v.id == type(^before.last_version_id, :binary_id)
+        )
+      )
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      now = Chain.latest_anchor("page", page.id, page.org_id)
+      assert now.version_count == before.version_count + 1
+      refute now.last_version_id == before.last_version_id
+    end
+
+    test "an anchor with no recorded boundary still resumes by count" do
+      actor = admin()
+      page = published_page(actor)
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+
+      # Anchors minted before #598 carry no boundary timestamp, so there is no
+      # position to resume from and the fold falls back to the pre-#598 count
+      # offset rather than re-folding the whole history onto a seed that already
+      # covers it. Survives only until each document's next anchor.
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+        set: [last_version_at: nil]
+      )
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      now = Chain.latest_anchor("page", page.id, page.org_id)
+      assert now.version_count == anchor.version_count + 1
+      assert now.last_version_at
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # The boundary steers which rows the next anchor covers, so it is signed.
+    # Without that, one UPDATE to an unsigned column repoints the resume past
+    # every future version: `fresh` stays empty, the chain freezes, and the
+    # document keeps reading :verified while its history is rewritten freely.
+    for {column, label} <- [last_version_at: "timestamp", last_version_id: "id"] do
+      test "repointing the boundary #{label} breaks the anchor signature" do
+        page = published_page(admin())
+        anchor = Chain.latest_anchor("page", page.id, page.org_id)
+        assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+        value =
+          case unquote(column) do
+            :last_version_at -> ~U[3000-01-01 00:00:00.000000Z]
+            :last_version_id -> Ecto.UUID.dump!(Ecto.UUID.generate())
+          end
+
+        KilnCMS.Repo.update_all(
+          from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+          set: [{unquote(column), value}]
+        )
+
+        assert {:tampered, "anchor signature does not verify"} =
+                 Chain.verify(Page, "page", page.id, page.org_id)
+      end
+    end
   end
 
   describe "anchor-to-anchor chaining (#597)" do
