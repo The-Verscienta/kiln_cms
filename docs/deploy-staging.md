@@ -57,7 +57,7 @@ Full flow, recipe, and the serve step live in
 - [ ] `STAGING_DATABASE_URL`'s database **name looks ephemeral** (contains
       `staging` / `preview` / `ephemeral` / `tmp` / `scratch`) — the scrub refuses
       otherwise, which is the seat-belt against scrubbing prod. (`--force` /
-      `KILN_STAGING_FORCE=1` overrides, so don't set those casually.)
+      `KILN_STAGING_FORCE=true` overrides, so don't set those casually.)
 - [ ] Run `./scripts/staging.sh up` (dump → restore → migrate → **scrub**).
 - [ ] Confirm the scrub summary printed non-zero `users anonymized` and, if you
       set the admin vars, `staging admin: <email>`.

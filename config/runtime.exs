@@ -35,7 +35,16 @@ alias KilnCMS.Config.Env
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
-if System.get_env("PHX_SERVER") do
+#
+# `truthy?/1`, not `flag/2`: this is the one variable documented as "any truthy
+# value", so a blank or unrecognized value must keep starting the server exactly
+# as the generator's bare `if System.get_env(...)` did. It is also the one
+# variable the generator's form got wrong in the dangerous direction —
+# `PHX_SERVER=false` started the server anyway, because every string is truthy
+# in Elixir. Nothing catches that: the release boots, runs migrations, answers
+# `bin/kiln_cms rpc`, so the Docker healthcheck stays green, and it serves no
+# HTTP at all.
+if Env.truthy?("PHX_SERVER") do
   config :kiln_cms, KilnCMSWeb.Endpoint, server: true
 end
 
@@ -250,9 +259,14 @@ if config_env() == :prod do
   # disables TLS now; anything unreadable keeps it on.
   database_ssl? = Env.flag("DATABASE_SSL", true)
 
+  # A blank value counts as unset, like every flag above. Matching only `nil`
+  # sent `DATABASE_SSL_CACERTFILE=` — a routine .env/compose artifact — to the
+  # verify_peer branch with an empty path; :ssl then fails to read the bundle
+  # and every connection dies at boot, which is the opposite of the fallback
+  # this case exists to provide.
   database_ssl_opts =
-    case System.get_env("DATABASE_SSL_CACERTFILE") do
-      nil ->
+    case String.trim(System.get_env("DATABASE_SSL_CACERTFILE", "")) do
+      "" ->
         [verify: :verify_none]
 
       cacertfile ->

@@ -34,9 +34,18 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   # rather than inheriting the developer's shell or a previous case — and, just
   # as importantly, so the suite that runs after them does too. The file this
   # replaced set @prod_env and never restored it.
+  #
+  # KILN_UPDATE_REPO/RELEASES_URL/PIN_PATH are listed although no case sets
+  # them: they write into the *same* `Kiln.Updates` keyword the update-check
+  # cases assert on, and `Config` deep-merges — so a fork maintainer, whom
+  # docs/environment-variables.md instructs to set KILN_UPDATE_REPO, would
+  # otherwise get a red suite for a reason unrelated to what is asserted.
   @vars ~w(
-            DATABASE_SSL ECTO_IPV6 VISUAL_EDITING_ENABLED KILN_UPDATE_CHECK
+            DATABASE_SSL DATABASE_SSL_CACERTFILE ECTO_IPV6 PHX_SERVER
+            VISUAL_EDITING_ENABLED KILN_UPDATE_CHECK
             KILN_AUDIT_ANCHOR_EVERY_WRITE
+            KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
+            MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -60,6 +69,11 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   # only observable difference between "kept the default because unset" and
   # "kept the default because the value made no sense".
   defp eval_io(vars, env) do
+    # Clear first, so each evaluation sees exactly `vars` and nothing else. The
+    # setup block restores the developer's shell afterwards, but during a case
+    # an exported `DATABASE_SSL=require` would otherwise add its own warning to
+    # the captured stderr that another case's assertion reads.
+    Enum.each(@vars, &System.delete_env/1)
     Enum.each(@prod_env, fn {k, v} -> System.put_env(k, v) end)
 
     Enum.each(vars, fn
@@ -123,6 +137,61 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       off = eval(%{"DATABASE_SSL" => "false"}) |> get_in([:kiln_cms, KilnCMS.Repo])
       assert off[:ssl] == false
       refute Keyword.has_key?(off, :ssl_opts)
+    end
+  end
+
+  describe "DATABASE_SSL_CACERTFILE" do
+    defp ssl_opts(vars), do: vars |> eval() |> get_in([:kiln_cms, KilnCMS.Repo, :ssl_opts])
+
+    test "a path switches on peer verification" do
+      opts = ssl_opts(%{"DATABASE_SSL_CACERTFILE" => "/etc/ssl/ca.pem"})
+
+      assert opts[:verify] == :verify_peer
+      assert opts[:cacertfile] == "/etc/ssl/ca.pem"
+    end
+
+    test "unset falls back to encrypted-but-unverified" do
+      assert ssl_opts(%{}) == [verify: :verify_none]
+    end
+
+    test "a blank value falls back too, rather than verifying against an empty path" do
+      # `DATABASE_SSL_CACERTFILE=` is a routine .env/compose artifact. Matching
+      # only `nil` sent it to verify_peer with `cacertfile: ""`, so :ssl failed
+      # to read the bundle and every connection died at boot — the opposite of
+      # the fallback this branch exists to provide.
+      for blank <- ["", " ", "\t"] do
+        assert ssl_opts(%{"DATABASE_SSL_CACERTFILE" => blank}) == [verify: :verify_none],
+               "DATABASE_SSL_CACERTFILE=#{inspect(blank)} must read as unset"
+      end
+    end
+  end
+
+  describe "PHX_SERVER" do
+    defp serves?(value) do
+      %{"PHX_SERVER" => value} |> eval() |> get_in([:kiln_cms, KilnCMSWeb.Endpoint, :server])
+    end
+
+    test "an explicit off-spelling does not start the server" do
+      # The regression: every string is truthy in Elixir, so the generator's
+      # bare `if System.get_env("PHX_SERVER")` started the server on `false`.
+      # Nothing catches it either way — the release boots, migrates, and answers
+      # `bin/kiln_cms rpc`, which is all the Docker healthcheck checks.
+      for value <- ["false", "False", "FALSE", "0", "no", "off", " OFF "] do
+        refute serves?(value), "PHX_SERVER=#{inspect(value)} must not start the server"
+      end
+    end
+
+    test "any other value starts it, including blank and unrecognized" do
+      # Documented as "any truthy value", and blank is truthy: reading
+      # `PHX_SERVER=` as "do not serve HTTP" would be a silent outage on
+      # upgrade for anyone whose manifest declares the variable empty.
+      for value <- ["true", "1", "yes", "on", "please", "", " "] do
+        assert serves?(value) == true, "PHX_SERVER=#{inspect(value)} must start the server"
+      end
+    end
+
+    test "unset does not start it" do
+      refute serves?(nil)
     end
   end
 
