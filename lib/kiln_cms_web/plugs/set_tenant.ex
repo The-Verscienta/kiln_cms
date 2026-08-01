@@ -22,11 +22,47 @@ defmodule KilnCMSWeb.Plugs.SetTenant do
   error renderer, for two reasons. The 404 template renders `Layouts.public`,
   which brands itself from the default org when it has none — so the "unknown
   hosts get nothing of the default site" guarantee would leak the default site's
-  name and logo through its own rejection page. And the rejection sits *above*
-  every rate limiter (those live in router pipelines), so it has to stay cheap:
-  a scan across ten thousand made-up `Host` headers should not each render a
-  HEEx page. `KilnCMSWeb.Tenant.UnknownHostError` still exists for the LiveView
-  mount path, where raising is the only way to refuse.
+  name and logo through its own rejection page. And a scan across ten thousand
+  made-up `Host` headers should not each render a HEEx page.
+  `KilnCMSWeb.Tenant.UnknownHostError` still exists for the LiveView mount path,
+  where raising is the only way to refuse.
+
+  ## The refusal no longer costs a query every time (#659)
+
+  A refused request is halted here, above the router — and every rate limiter
+  lives in a router *pipeline*, so turning strict matching on took this path out
+  of `:delivery`'s ceiling and left one uncached organization lookup per request,
+  metered by nothing.
+
+  Unresolvable hosts are now **cached as misses**, in `KilnCMS.Cache.Hosts` —
+  a cache of their own, precisely so they can be: in the shared content cache a
+  flood of invented hosts would have evicted hot published pages, which is why
+  `nil` was never committed there. A repeated flood now costs one lookup per
+  distinct host per minute instead of one per request.
+
+  A flood of *distinct* hosts still costs a lookup each, and deliberately so.
+  Bounding that needs a per-IP budget that refuses without resolving — which
+  cannot tell a flood from a legitimate request behind the same NAT, CDN or
+  collapsed `X-Forwarded-For`, and so would refuse hosts that do exist. Trading
+  a bounded amount of indexed-lookup load for the ability to 404 real tenants is
+  the wrong trade; terminate unknown hosts at the proxy if the load matters.
+
+  ## What the refusal still reveals
+
+  An unknown host gets this plain-text 404; a **known** host with an unmatched
+  path gets the branded HTML 404 from `KilnCMSWeb.ErrorHTML`. The two are
+  distinguishable, so a dictionary sweep of `<candidate>.<base host>` enumerates
+  which org slugs exist — and against apex names, which `custom_domain`s are
+  configured. The status code is identical; the body is not.
+
+  This is **accepted, not fixed** (#659). Making the two identical means either
+  serving the branded page to unknown hosts — which reintroduces exactly the
+  default-org leak this control exists to prevent — or serving the plain page to
+  everybody, which degrades a real 404 for every tenant to close an oracle over
+  names that are already public in DNS and in TLS certificates. A deployment
+  whose tenant list is genuinely confidential should terminate unknown hosts at
+  the proxy, where one uniform response covers both cases; the deploy recipes in
+  `docs/` already assume that arrangement.
 
   Two controllers are exempt from the rejection because they are deliberately
   host-independent — see `@host_agnostic_controllers`. Neither reads the ambient

@@ -114,6 +114,31 @@ router.
 > apex itself (it resolves to the default org, and is never refused even if the
 > database is briefly unreachable). Anything else now gets a 404.
 
+**The refusal no longer costs a query every time** (#659). A refused request is
+halted before the router, and every rate limiter lives in a router pipeline — so
+turning this on originally took the path out of the `:delivery` ceiling and left
+one uncached organization lookup per request, metered by nothing. Unresolvable
+hosts are now cached as misses, in a cache of their own (`KilnCMS.Cache.Hosts`,
+one-minute negative TTL) so that a flood of invented hosts cannot evict hot
+published pages the way it would have in the shared content cache. A repeated
+flood costs one lookup per distinct host per minute rather than one per request;
+a flood of *distinct* hosts still costs a lookup each, which is the price of
+never refusing a host that does exist. Terminate unknown hosts at the proxy if
+that load matters. As a side effect, tenant resolution no longer evaporates when
+an editor saves a media item — it used to live in the cache that a content bust
+clears wholesale.
+
+**What the refusal reveals.** An unknown host gets a plain-text 404; a known
+host with an unmatched path gets the branded HTML 404. The two are
+distinguishable, so a dictionary sweep of `<candidate>.<base host>` will
+enumerate which org slugs exist, and which `custom_domain`s are configured. This
+is accepted rather than fixed: making them identical means either showing
+unknown hosts the branded page — the default-org leak this control exists to
+prevent — or degrading every tenant's real 404 to plain text, to hide names that
+are already public in DNS and in TLS certificates. If your tenant list is itself
+confidential, terminate unknown hosts at the proxy, where one uniform response
+covers both cases.
+
 ## Optional — database TLS
 
 | Variable | Default | Purpose | Where it's read |

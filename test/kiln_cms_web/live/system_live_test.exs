@@ -306,9 +306,17 @@ defmodule KilnCMSWeb.SystemLiveTest do
       html = lv |> element("button[phx-click='flush-cache']") |> render_click()
 
       # Not just "Dropped" — that renders for a zero flush too, so it would pass
-      # against a no-op.
-      assert html =~ "1 artifact entries" or html =~ "1 published"
-      refute html =~ "0 published entries and 0 artifact entries"
+      # against a no-op. Both caches are process-global and every other test in
+      # the run writes to them, so assert the counts are non-zero rather than
+      # exactly the two entries this test warmed: pinning "1" makes the test a
+      # hostage to whatever else happened to be cached at that instant.
+      assert [published, artifacts] =
+               Regex.run(~r/Dropped (\d+) published entr\w+ and (\d+) artifact entries/, html,
+                 capture: :all_but_first
+               )
+
+      assert String.to_integer(published) >= 1
+      assert String.to_integer(artifacts) >= 1
     end
 
     test "an editor cannot reach the page at all" do

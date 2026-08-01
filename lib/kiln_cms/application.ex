@@ -38,6 +38,9 @@ defmodule KilnCMS.Application do
       {KilnCMS.LLM.Budget, clean_period: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
+      # Host→org resolution, on its own eviction schedule and the only cache
+      # that remembers a miss (#659).
+      KilnCMS.Cache.Hosts,
       # Small dedicated store for in-flight WebAuthn challenges (#331) —
       # TTL-only, isolated from the content cache's busts/eviction pressure.
       {Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},

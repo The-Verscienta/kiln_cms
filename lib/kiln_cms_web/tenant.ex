@@ -80,10 +80,6 @@ defmodule KilnCMSWeb.Tenant do
     def exception(message) when is_binary(message), do: %__MODULE__{message: message}
   end
 
-  # How long a host→org resolution is cached. Short enough that a slug/custom-domain
-  # change (rare, admin-only) is picked up promptly.
-  @cache_ttl :timer.minutes(5)
-
   @doc "The current organization id from a conn/socket assign. Raises if unresolved."
   @spec current_org_id(map()) :: Ash.UUID.t()
   def current_org_id(assigns), do: current_org(assigns).id
@@ -279,7 +275,7 @@ defmodule KilnCMSWeb.Tenant do
   defp normalize(host), do: host |> String.trim_trailing(".") |> String.downcase()
 
   defp resolve_cached(host) do
-    KilnCMS.Cache.fetch({:tenant_host, host}, @cache_ttl, fn -> resolve_known(host) end)
+    KilnCMS.Cache.Hosts.fetch(host, fn -> resolve_known(host) end)
   end
 
   # A real org (by subdomain slug or custom domain), or the default org when the
