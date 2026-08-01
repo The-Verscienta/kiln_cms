@@ -68,11 +68,17 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # Requires a signed-in user whose EFFECTIVE tier on this org is editor or
   # admin (#419). Mirrors the RBAC content policies so non-editors can't
   # reach authoring UIs — including org-demoted global editors.
+  #
+  # Also assigns `:pwa`, which the root layout keys the web app manifest and
+  # iOS meta tags off (#65). Setting it *here*, rather than as its own on_mount
+  # entry on the authoring live_sessions, keeps the install prompt and the
+  # service worker attached to the same condition that authorises the editor UI
+  # in the first place — a page that fails this check never advertises the app.
   def on_mount(:live_editor_required, _params, _session, socket) do
     case socket.assigns[:current_user] do
       %{} ->
         if effective_tier(socket) in [:editor, :admin] do
-          {:cont, socket}
+          {:cont, assign(socket, :pwa, true)}
         else
           {:halt,
            socket
@@ -95,7 +101,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
     case socket.assigns[:current_user] do
       %{} ->
         if effective_tier(socket) == :admin do
-          {:cont, socket}
+          {:cont, assign(socket, :pwa, true)}
         else
           {:halt,
            socket
