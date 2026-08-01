@@ -30,12 +30,10 @@ defmodule KilnCMS.Seo do
 
   require Logger
 
-  alias KilnCMS.Seo.Budget
+  alias KilnCMS.LLM
+  alias KilnCMS.LLM.Budget
   alias KilnCMS.Seo.Document
   alias KilnCMS.Seo.Draft
-
-  # Providers that run inside the deployment. Anything else is egress.
-  @local_providers ~w(ollama vllm)
 
   @doc "Whether LLM drafting is configured. False on a default install."
   @spec enabled?() :: boolean()
@@ -52,104 +50,24 @@ defmodule KilnCMS.Seo do
   The configured provider name, from the `"provider:model"` spec.
   """
   @spec provider() :: String.t() | nil
-  def provider do
-    case model() do
-      nil -> nil
-      spec -> spec |> to_string() |> String.split(":", parts: 2) |> hd()
-    end
-  end
+  def provider, do: LLM.provider(model())
 
   @doc """
   Whether the configured provider sends content outside the deployment.
 
-  Resolved from the endpoint's **host**, not the provider's name. Keying on the
-  name alone was wrong in the one direction that matters: `req_llm` lets any
-  provider's `base_url` be overridden — the very mechanism this module
-  recommends for on-prem — so `ollama:` pointed at a remote host reported "no
-  egress" while every page body left the deployment, silencing both the boot
-  warning and the editor's standing notice.
-
-  `false` only when the resolved host is loopback or a private address.
-  Anything unrecognized reads as egress: over-warning is cheap, and quietly
-  promising an operator their content stayed home is not.
+  Resolved from the endpoint's **host**, not the provider's name — see
+  `KilnCMS.LLM.egress?/2`, which both this and `KilnCMS.Assist` delegate to so
+  the two features can never disagree about what leaves the box.
   """
   @spec egress?() :: boolean()
-  def egress? do
-    enabled?() and not local_endpoint?()
-  end
+  def egress?, do: enabled?() and LLM.egress?(model(), cfg(:base_url, nil))
 
   @doc """
   The endpoint host drafting would talk to, as configured. `nil` when the
   provider's default is in use and we can't see it from here.
   """
   @spec endpoint_host() :: String.t() | nil
-  def endpoint_host do
-    with nil <- host_from(cfg(:base_url, nil)),
-         nil <- host_from(provider_base_url()) do
-      default_host_for(provider())
-    end
-  end
-
-  defp local_endpoint? do
-    case endpoint_host() do
-      nil -> false
-      host -> loopback?(host) or private?(host)
-    end
-  end
-
-  # An operator may override the endpoint either in our config or in req_llm's.
-  #
-  # Matched by comparing existing key names rather than interpolating an atom
-  # (`:"#{name}_base_url"`): the provider name comes from config, and minting
-  # atoms from configurable input is the pattern sobelow's DOS.BinToAtom check
-  # exists to stop.
-  defp provider_base_url do
-    case provider() do
-      nil -> nil
-      name -> name |> configured_base_url() |> normalize_url()
-    end
-  end
-
-  defp configured_base_url(name) do
-    wanted = name <> "_base_url"
-
-    :req_llm
-    |> Application.get_all_env()
-    |> Enum.find_value(&matching_env(&1, wanted))
-  end
-
-  defp matching_env({key, value}, wanted) do
-    if Atom.to_string(key) == wanted, do: value
-  end
-
-  defp normalize_url(url) when is_binary(url), do: url
-  defp normalize_url(_url), do: nil
-
-  defp host_from(nil), do: nil
-
-  defp host_from(url) do
-    case URI.parse(url) do
-      %URI{host: host} when is_binary(host) and host != "" -> host
-      _ -> nil
-    end
-  end
-
-  # With no override, the on-prem providers default to a local daemon; every
-  # other provider defaults to its own cloud API.
-  defp default_host_for(name) when name in @local_providers, do: "localhost"
-  defp default_host_for(_name), do: nil
-
-  defp loopback?(host), do: host in ~w(localhost 127.0.0.1 ::1 0.0.0.0)
-
-  defp private?(host) do
-    case :inet.parse_address(String.to_charlist(host)) do
-      {:ok, {10, _, _, _}} -> true
-      {:ok, {192, 168, _, _}} -> true
-      {:ok, {172, b, _, _}} when b >= 16 and b <= 31 -> true
-      {:ok, {127, _, _, _}} -> true
-      _ -> String.ends_with?(host, ".local") or String.ends_with?(host, ".internal")
-    end
-  end
+  def endpoint_host, do: LLM.endpoint_host(model(), cfg(:base_url, nil))
 
   @spec title_max() :: pos_integer()
   def title_max, do: cfg(:title_max, 60)
@@ -170,7 +88,14 @@ defmodule KilnCMS.Seo do
       max_tokens: cfg(:max_tokens, 700),
       receive_timeout: cfg(:timeout_ms, 20_000)
     ]
+    |> put_base_url(cfg(:base_url, nil))
   end
+
+  # `base_url` has to reach the request, not just `egress?/0`. Read only by the
+  # classifier it would be a key that silences the egress warning without
+  # moving a single byte — see the twin in `KilnCMS.Assist.request_opts/0`.
+  defp put_base_url(opts, nil), do: opts
+  defp put_base_url(opts, base_url), do: Keyword.put(opts, :base_url, base_url)
 
   @doc """
   The minimum body length worth drafting from.
@@ -196,12 +121,19 @@ defmodule KilnCMS.Seo do
   def draft(%Document{} = document, opts \\ []) do
     with :ok <- check_enabled(),
          :ok <- check_length(document),
-         :ok <- Budget.check(opts[:org_id], opts[:user_id]) do
+         :ok <- Budget.check("seo", opts[:org_id], opts[:user_id], budget_limits()) do
       run(document, opts)
     end
   end
 
   defp check_enabled, do: if(enabled?(), do: :ok, else: {:error, :disabled})
+
+  defp budget_limits do
+    [
+      per_user: cfg(:per_user_limit, {20, :timer.minutes(1)}),
+      per_org: cfg(:per_org_limit, {200, :timer.hours(1)})
+    ]
+  end
 
   defp check_length(document) do
     words = document.body_text |> String.split(~r/\s+/u, trim: true) |> length()

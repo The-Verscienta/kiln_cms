@@ -187,6 +187,32 @@ config :kiln_cms, KilnCMS.Seo,
   per_user_limit: {20, :timer.minutes(1)},
   per_org_limit: {200, :timer.hours(1)}
 
+# Block-level AI assist in the content editor (#60) — draft, continue,
+# summarize, rewrite, shorten or expand one rich-text block.
+#
+# A SEPARATE switch from KilnCMS.Seo above, deliberately. That one sends a
+# page's text and gets three short metadata strings back; this one also sends
+# the editor's typed instruction and returns prose for the page body. An
+# operator who accepted the first has not thereby accepted the second.
+#
+# Off by default: with `generator: nil` the editor renders no assist control
+# and nothing leaves the deployment. See docs/ai-assist.md.
+config :kiln_cms, KilnCMS.Assist,
+  generator: nil,
+  model: nil,
+  # Warmer than SEO drafting: that path wants the most predictable phrasing of
+  # a fixed fact, this one drafts prose a person will edit.
+  temperature: 0.6,
+  max_tokens: 1_200,
+  timeout_ms: 45_000,
+  max_input_chars: 8_000,
+  max_instruction_chars: 500,
+  max_output_chars: 6_000,
+  # Tighter than SEO drafting on both counts. A generation here is many more
+  # tokens than three metadata strings, so the same click costs more.
+  per_user_limit: {10, :timer.minutes(1)},
+  per_org_limit: {150, :timer.hours(1)}
+
 # Optional Meilisearch backend — typo-tolerant, faceted keyword search over
 # published content (Project Plan Phase 6). Disabled by default: with
 # `enabled: false` no content write or publish ever talks to Meilisearch, so the

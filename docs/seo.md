@@ -9,6 +9,10 @@ Kiln's SEO support has two halves, and they are deliberately independent.
 | Network | None | Whatever provider you point it at |
 | Availability | Every install | Only when configured |
 
+Drafting here proposes *metadata*. Writing help for the page **body** —
+draft, summarize, rewrite a block — is a separate feature with its own switch;
+see [AI block assist in the editor](ai-assist.md).
+
 **The analysis is always on.** It needs no configuration, no model and no
 network, and it is what most of the value lives in — the traffic light, the
 length checks, the keyphrase and readability advice. If you never read past

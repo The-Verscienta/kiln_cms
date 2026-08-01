@@ -266,6 +266,10 @@ const Hooks = {
       this._destroyed = true
       this.slash && this.slash.destroy()
       this.editor && this.editor.destroy()
+      // Rich-text hosts remount on every conflict reload / version restore, so
+      // a handler left registered would accumulate one dead listener per
+      // remount for the life of the session.
+      this._assistRef && this.removeHandleEvent(this._assistRef)
       // Collab prototype: drop this block's claim on the shared Y.Doc (the
       // channel is left once the last block releases it).
       this.collab && this.collab.release()

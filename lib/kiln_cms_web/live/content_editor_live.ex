@@ -128,6 +128,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:seo_drafting?, false)
          |> assign(:seo_drafts, nil)
          |> assign(:seo_dismissed, MapSet.new())
+         # Block-level AI assist (#60) — the body-copy twin of the metadata
+         # drafting above, and a separate switch, so a deployment can run one
+         # without the other. Read once at mount for the same reason.
+         # `assist_block` is the id of the block whose panel is open (nil =
+         # closed); only one is ever open, so one suggestion is ever in flight.
+         |> assign(:assist_enabled?, KilnCMS.Assist.enabled?())
+         |> assign(:assist_egress?, KilnCMS.Assist.egress?())
+         |> assign(:assist_provider, KilnCMS.Assist.provider())
+         |> assign(:assist_block, nil)
+         |> assign(:assist_action, :rewrite)
+         |> assign(:assist_instruction, nil)
+         |> assign(:assist_running?, false)
+         |> assign(:assist_result, nil)
          # Internal-link suggestions (#377). `nil` = never opened; loading is
          # deferred to first open because it costs a pgvector query plus a
          # record read per neighbour, which no page-load should pay.
@@ -285,6 +298,41 @@ defmodule KilnCMSWeb.ContentEditorLive do
      socket
      |> assign(:seo_drafting?, false)
      |> put_flash(:error, gettext("Couldn't generate suggestions. Please try again."))}
+  end
+
+  # Block assist results (#60). Same double wrap as `:seo_draft`, and one extra
+  # stamp: the *block id* the request was made for. `editor_version` catches a
+  # conflict reload; the block id catches the author closing the panel and
+  # opening another block's while the first was still running, which would
+  # otherwise offer block A's prose under block B's Insert button.
+  def handle_async(:assist, {:ok, {version, block_id, result}}, socket) do
+    socket = assign(socket, :assist_running?, false)
+
+    if version != socket.assigns.editor_version or block_id != socket.assigns.assist_block do
+      # Silent, deliberately. Closing the panel or opening another block's
+      # cancels the task (`cancel_assist/1`), so reaching here at all means the
+      # generator reported inside the race window of an action the author took
+      # on purpose. A flash would appear or not depending on timing.
+      {:noreply, socket}
+    else
+      case result do
+        {:ok, suggestion} -> {:noreply, assign(socket, :assist_result, suggestion)}
+        {:error, reason} -> {:noreply, put_flash(socket, :error, assist_error_message(reason))}
+      end
+    end
+  end
+
+  # A run the author walked away from — see `cancel_assist/1`. Nothing to
+  # report: they closed the panel, and `assist_running?` is already false.
+  def handle_async(:assist, {:exit, {:shutdown, :cancel}}, socket), do: {:noreply, socket}
+
+  def handle_async(:assist, {:exit, reason}, socket) do
+    Logger.warning("Block assist task exited: #{inspect(reason)}")
+
+    {:noreply,
+     socket
+     |> assign(:assist_running?, false)
+     |> put_flash(:error, gettext("Couldn't generate text. Please try again."))}
   end
 
   defp assign_record(socket, record) do
@@ -964,6 +1012,125 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, flash_outcomes(socket, Enum.reverse(outcomes))}
   end
 
+  # ── Block-level AI assist (#60) ───────────────────────────────────────────
+  #
+  # Two rules hold for every clause below.
+  #
+  # First, anything that can reach the provider or write to the document
+  # re-checks `assist_enabled?` and the edit guards. The controls aren't
+  # rendered when the feature is off, but "not rendered" is a client-side fact
+  # and these are plain pushed events. (The panel-state clauses — close,
+  # action, instruction, dismiss — deliberately don't: they only move socket
+  # state that nothing renders while the feature is off, and guarding them
+  # would suggest they were a boundary.)
+  #
+  # Second, every clause has a catch-all behind it. A pushed event missing its
+  # key would otherwise raise FunctionClauseError, which takes the LiveView —
+  # and the author's unsaved work — down with it.
+
+  def handle_event("assist_open", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "" do
+    if socket.assigns.assist_enabled? do
+      # `close_assist/1` rather than three inline assigns: the previous block's
+      # suggestion describes content this block doesn't contain, and its Insert
+      # button would put it somewhere it was never generated for. Sharing the
+      # reset means a later assign can't be dropped from one path only.
+      {:noreply, socket |> close_assist() |> assign(:assist_block, block_id)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("assist_open", _params, socket), do: {:noreply, socket}
+
+  def handle_event("assist_close", _params, socket), do: {:noreply, close_assist(socket)}
+
+  def handle_event("assist_action", %{"action" => action}, socket) do
+    case KilnCMS.Assist.Action.fetch(action) do
+      {:ok, %{id: id}} -> {:noreply, assign(socket, :assist_action, id)}
+      # Never mints an atom from the pushed string; an unknown id is simply
+      # ignored rather than becoming a selected action nothing can render.
+      :error -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("assist_action", _params, socket), do: {:noreply, socket}
+
+  # The instruction box lives inside the main content <form>, so LiveView
+  # serializes that form alongside it. Only this one top-level key is read —
+  # `validate` owns everything under "form" and is not fired by this binding.
+  def handle_event("assist_instruction", params, socket) do
+    instruction =
+      case params["assist_instruction"] do
+        # Clamped *here*, not only in `Request.new/1`. That clamp bounds what
+        # reaches the provider; this bounds what the server holds. Without it a
+        # crafted push parks an arbitrarily large string in socket assigns for
+        # the life of the session — `maxlength` on the input is client-side.
+        value when is_binary(value) ->
+          value |> String.slice(0, KilnCMS.Assist.max_instruction_chars()) |> String.trim()
+
+        _ ->
+          ""
+      end
+
+    {:noreply,
+     assign(socket, :assist_instruction, if(instruction == "", do: nil, else: instruction))}
+  end
+
+  def handle_event("assist_run", %{"bid" => block_id}, socket) when is_binary(block_id) do
+    # Ignore a re-click while a run is in flight: the disabled attribute is
+    # client-side only, so a fast double-click (or a replayed event) would
+    # otherwise start a second generation and bill for it. The block id must
+    # match the open panel, and must actually name a block on this form —
+    # an unknown id degrades to an empty passage, which `:draft` accepts, so
+    # without this check a crafted push buys a billed generation for nothing.
+    if assist_runnable?(socket, block_id) do
+      request = assist_request(socket, block_id)
+      org_id = org_id(socket.assigns.current_org)
+      actor_id = socket.assigns.actor.id
+      version = socket.assigns.editor_version
+
+      {:noreply,
+       socket
+       |> assign(:assist_running?, true)
+       |> assign(:assist_result, nil)
+       |> start_async(:assist, fn ->
+         # Captures plain data only — never the socket or the form struct,
+         # both of which are stale the moment an autosave rebuilds the form.
+         {version, block_id, KilnCMS.Assist.run(request, org_id: org_id, user_id: actor_id)}
+       end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("assist_run", _params, socket), do: {:noreply, socket}
+
+  def handle_event("assist_dismiss", _params, socket),
+    do: {:noreply, assign(socket, :assist_result, nil)}
+
+  # Hand the suggestion to the block's TipTap editor as a client-side command.
+  #
+  # Deliberately NOT a server-side write to the block tree: rich text lives
+  # under `phx-update="ignore"` with a shared Y.Doc, so writing prose into the
+  # form here would force the document back into the editor, discarding the
+  # author's cursor and undo stack and desynchronizing collaborators. The hook
+  # applies it as an ordinary editor transaction — undoable, and correct under
+  # collaboration — then pushes the new body back the usual way.
+  def handle_event("assist_apply", %{"mode" => mode}, socket)
+      when mode in ~w(insert replace) do
+    case {socket.assigns.assist_result, socket.assigns.assist_block} do
+      {%KilnCMS.Assist.Suggestion{} = suggestion, block_id} when is_binary(block_id) ->
+        apply_assist(socket, block_id, mode, suggestion)
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  # A mode outside insert/replace is ignored, not left to fall through.
+  def handle_event("assist_apply", _params, socket), do: {:noreply, socket}
+
   def handle_event("close_picker", _params, socket),
     do: {:noreply, reset_picker(socket)}
 
@@ -1395,6 +1562,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> update(:editor_version, &(&1 + 1))
     |> clear_seo_suggestions()
+    |> close_assist()
     |> assign(:seo_links, nil)
   end
 
@@ -1403,6 +1571,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:seo_drafts, nil)
     |> assign(:seo_dismissed, MapSet.new())
   end
+
+  # Same reasoning as the SEO clear above, one step further: the remount gives
+  # every rich-text block a new element id, so a suggestion left on screen would
+  # target a hook that no longer exists — the Insert click would silently do
+  # nothing.
+  defp close_assist(socket) do
+    socket
+    |> cancel_assist()
+    |> assign(:assist_block, nil)
+    |> assign(:assist_result, nil)
+    |> assign(:assist_instruction, nil)
+  end
+
+  # `assist_running?` is one flag for the whole view, so an abandoned run would
+  # otherwise refuse every other block's Generate click for the length of the
+  # timeout — 45s by default — with no message and a spinner the author never
+  # started. Closing the panel means the result has nowhere to land, so drop
+  # the task rather than wait it out.
+  defp cancel_assist(%{assigns: %{assist_running?: true}} = socket),
+    do: socket |> cancel_async(:assist) |> assign(:assist_running?, false)
+
+  defp cancel_assist(socket), do: socket
 
   defp run_workflow(socket, action)
        when action in ~w(submit return publish unpublish archive unarchive) do
@@ -2280,6 +2470,176 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp seo_error_message(_reason),
     do: gettext("Couldn't generate suggestions. Please try again.")
 
+  # ── Block-level AI assist (#60) ───────────────────────────────────────────
+
+  # The conflict and field-lock checks are re-run *here*, not just on the
+  # button, for the same reason `apply_suggestion/2` and `put_seo_image/2` do
+  # it: a stale DOM or a replayed event beats a rendered `disabled`, and
+  # "replace" wipes the shared Y.Doc fragment under whoever else is in it.
+  defp apply_assist(socket, block_id, mode, suggestion) do
+    cond do
+      socket.assigns.conflict ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext("This content changed elsewhere. Reload before applying suggestions.")
+         )}
+
+      assist_block_locked?(socket, block_id) ->
+        {:noreply,
+         put_flash(socket, :info, gettext("Another editor is editing this block right now."))}
+
+      true ->
+        {:noreply,
+         socket
+         |> push_event("assist:apply", %{
+           block_id: block_id,
+           mode: mode,
+           paragraphs: suggestion.paragraphs
+         })
+         |> close_assist()
+         |> mark_dirty()}
+    end
+  end
+
+  # Whether a run may start: the feature on, nothing already in flight, the id
+  # matching the open panel, and the id naming a rich-text block on this form.
+  defp assist_runnable?(socket, block_id) do
+    socket.assigns.assist_enabled? and
+      not socket.assigns.assist_running? and
+      socket.assigns.assist_block == block_id and
+      not is_nil(assist_block_form(socket.assigns.form, block_id))
+  end
+
+  # The block's own `body` field is the one a peer locks, so that is the lock
+  # this checks — the same field name the rich-text host renders its lock ring
+  # from.
+  defp assist_block_locked?(socket, block_id) do
+    case assist_block_form(socket.assigns.form, block_id) do
+      nil ->
+        false
+
+      subform ->
+        # Built from the sub-form's own name rather than `subform[:body].name`:
+        # these come from `AshPhoenix.Form.value/2`, not `inputs_for`, so they
+        # are raw `%AshPhoenix.Form{}` structs that Access refuses. Same string
+        # either way — it is what the rich-text host renders its lock ring from.
+        field_locked?(locked_fields(socket), subform.name <> "[body]")
+    end
+  end
+
+  # The one **rich-text** sub-form carrying `block_id`.
+  #
+  # Scoped to the form being edited, so a pushed id can only ever name a block
+  # of this record — and to rich text, because that is the only type that
+  # renders a panel and mounts a hook to deliver to. Without the type check an
+  # image block's id passed every guard: it bought a billed generation over the
+  # block's caption, then pushed the result at a `data-block-id` no hook owns,
+  # so nothing was inserted and the record was marked dirty anyway.
+  defp assist_block_form(form, block_id) do
+    case AshPhoenix.Form.value(form, :blocks) do
+      forms when is_list(forms) ->
+        Enum.find(
+          forms,
+          &(AshPhoenix.Form.value(&1, :id) == block_id and rich_text_subform?(&1))
+        )
+
+      _ ->
+        nil
+    end
+  end
+
+  # The same helper the template gates the panel on, so the two can't disagree.
+  defp rich_text_subform?(subform), do: block_type_string(subform) == "rich_text"
+
+  # The projection handed to the generator, built from the *live* form so an
+  # unsaved block can be worked on.
+  #
+  # Only the named block's text is sent. The page's title, excerpt and headings
+  # go too — they are what keeps the generated voice consistent with the rest of
+  # the page — but no other block's prose does, so a fifty-block page ships one
+  # block, not fifty.
+  #
+  # `BlockText.to_text/1` over the single block, not `Body.compute/1`: that
+  # computes twelve facts (syllables, sentences, link paths, alt-text gaps) and
+  # keeps one, and it runs synchronously in the LiveView process before
+  # `start_async` — i.e. it blocks the author's own keystrokes. `:text` is
+  # literally `BlockText.to_text/1` (see `Kiln.Advisory.Body.from_typed/1`), so
+  # the output is identical.
+  defp assist_request(socket, block_id) do
+    form = socket.assigns.form
+
+    text =
+      form
+      |> assist_block_form(block_id)
+      |> List.wrap()
+      |> Enum.map(&block_full_map/1)
+      |> KilnCMS.CMS.BlockText.to_text()
+
+    KilnCMS.Assist.Request.new(%{
+      action: socket.assigns.assist_action,
+      instruction: socket.assigns.assist_instruction,
+      text: text,
+      title: AshPhoenix.Form.value(form, :title),
+      excerpt: socket.assigns.has_excerpt && AshPhoenix.Form.value(form, :excerpt),
+      headings: Enum.map(socket.assigns.seo_body_stats.headings, & &1.text),
+      content_type: socket.assigns.content_type.label,
+      # The *record's* locale, not the admin UI's — otherwise a French page
+      # gets English prose because the editor was browsing in English.
+      locale: AshPhoenix.Form.value(form, :locale)
+    })
+  end
+
+  defp assist_action_label(:draft), do: gettext("Draft")
+  defp assist_action_label(:continue), do: gettext("Continue")
+  defp assist_action_label(:summarize), do: gettext("Summarize")
+  defp assist_action_label(:rewrite), do: gettext("Improve")
+  defp assist_action_label(:shorten), do: gettext("Shorten")
+  defp assist_action_label(:expand), do: gettext("Expand")
+
+  defp assist_action_hint(:draft),
+    do: gettext("Writes new prose from your instruction. Describe what this section should say.")
+
+  defp assist_action_hint(:continue),
+    do: gettext("Carries on from where this block stops, in the same voice.")
+
+  defp assist_action_hint(:summarize),
+    do: gettext("Condenses this block into a single short paragraph.")
+
+  defp assist_action_hint(:rewrite),
+    do: gettext("Rewrites this block more clearly, keeping every fact and roughly the length.")
+
+  defp assist_action_hint(:shorten), do: gettext("Cuts this block to about half its length.")
+
+  defp assist_action_hint(:expand),
+    do: gettext("Adds detail drawn from this block and the rest of the page.")
+
+  defp assist_action_hint(_action), do: ""
+
+  defp assist_error_message(:too_short),
+    do:
+      gettext("This block needs at least %{count} characters to work from.",
+        count: KilnCMS.Assist.Request.min_text_chars()
+      )
+
+  defp assist_error_message(:no_instruction),
+    do: gettext("Describe what this section should say, then try again.")
+
+  defp assist_error_message(:disabled), do: gettext("AI assist isn't configured.")
+
+  defp assist_error_message(:empty),
+    do: gettext("The model returned nothing usable. Try again, or rephrase your instruction.")
+
+  defp assist_error_message({:rate_limited, retry_after_ms}),
+    do:
+      gettext("Too many requests. Try again in %{seconds}s.",
+        seconds: max(div(retry_after_ms, 1000), 1)
+      )
+
+  defp assist_error_message(_reason),
+    do: gettext("Couldn't generate text. Please try again.")
+
   # Write `seo_image` from a server-side action (picker / featured-image copy).
   #
   # The advisory field lock is re-checked *here*, not just on the button: the
@@ -2881,6 +3241,179 @@ defmodule KilnCMSWeb.ContentEditorLive do
       "seo_description" -> "#{length}/#{KilnCMS.Seo.description_max()}"
       _ -> ""
     end
+  end
+
+  attr :block_id, :string, required: true
+  attr :open?, :boolean, required: true
+  attr :action, :atom, required: true
+  attr :running?, :boolean, required: true
+  attr :result, :any, default: nil
+  attr :egress?, :boolean, required: true
+  attr :provider, :string, default: nil
+  attr :conflict, :boolean, required: true
+
+  # Per-block AI assist (#60): the second half of this issue, the first being
+  # the metadata drafting in the SEO panel.
+  #
+  # Sits *outside* the block's `phx-update="ignore"` host — LiveView cannot
+  # patch inside one, so a panel rendered in there would never update. The
+  # suggestion is shown as plain paragraphs and applied only by a human click,
+  # which is the primary control on generated prose reaching a published page.
+  defp assist_panel(assigns) do
+    ~H"""
+    <div class="mt-2">
+      <%!-- `type="button"` is mandatory: this sits inside the main <.form>, so
+            the default type would submit it. --%>
+      <button
+        type="button"
+        phx-click={if @open?, do: "assist_close", else: "assist_open"}
+        phx-value-bid={@block_id}
+        aria-expanded={to_string(@open?)}
+        class="inline-flex items-center gap-1 rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+      >
+        <.icon name="hero-sparkles" class="size-3.5" />{gettext("AI assist")}
+      </button>
+
+      <div
+        :if={@open?}
+        class="mt-2 space-y-2 rounded border border-base-content/15 bg-base-200/40 p-2"
+      >
+        <div
+          role="group"
+          aria-label={gettext("What should the model do?")}
+          class="flex flex-wrap gap-1"
+        >
+          <button
+            :for={action <- KilnCMS.Assist.Action.all()}
+            type="button"
+            phx-click="assist_action"
+            phx-value-action={action.id}
+            aria-pressed={to_string(@action == action.id)}
+            class={[
+              "rounded border px-2 py-0.5 text-xs",
+              if(@action == action.id,
+                do: "border-primary bg-primary text-primary-content",
+                else: "border-base-content/20 hover:bg-base-200"
+              )
+            ]}
+          >
+            {assist_action_label(action.id)}
+          </button>
+        </div>
+
+        <p class="text-xs text-base-content/70">{assist_action_hint(@action)}</p>
+
+        <%!-- Unprefixed name, so the main form's `validate` (which reads only
+              "form") never sees it; its own phx-change keeps typing here from
+              marking the record dirty.
+
+              `phx-debounce="blur"`, not a millisecond value: this input sits
+              inside the main content form, and LiveView serializes the WHOLE
+              enclosing form on every change — title, every SEO field, every
+              block's inputs. On a timer that is the entire form uploaded every
+              few hundred milliseconds so the server can read one key. Clicking
+              Generate blurs the input first, so the value still lands before
+              the run.
+
+              The value is deliberately NOT fed back: the browser owns the text
+              (the panel is freshly mounted each time it opens, always empty),
+              which keeps `@assist_instruction` out of the block comprehension —
+              reading it there re-rendered and re-sent every block on the page
+              per keystroke — and keeps the server from fighting the caret. --%>
+        <%!-- A textarea, not a text input: a single-line input inside a form
+              that has a submit button submits it on Enter, so typing an
+              instruction and pressing Enter saved the record — publishing to
+              the live URL — instead of generating anything. --%>
+        <textarea
+          name="assist_instruction"
+          rows="2"
+          phx-change="assist_instruction"
+          phx-debounce="blur"
+          maxlength={KilnCMS.Assist.max_instruction_chars()}
+          aria-label={gettext("Instruction for the model")}
+          placeholder={gettext("Optional: what should it say? (required for Draft)")}
+          class="field-input text-xs"
+        ></textarea>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            phx-click="assist_run"
+            phx-value-bid={@block_id}
+            disabled={@running? or @conflict}
+            class="btn btn-sm btn-default"
+          >
+            {gettext("Generate")}
+            <.icon
+              :if={@running?}
+              name="hero-arrow-path"
+              class="ml-1 size-3 motion-safe:animate-spin"
+            />
+          </button>
+          <button
+            type="button"
+            phx-click="assist_close"
+            class="text-xs text-base-content/60 underline hover:text-base-content"
+          >
+            {gettext("Close")}
+          </button>
+        </div>
+
+        <%!-- Standing, non-dismissible: the operator chose a third-party
+              provider, the editor clicking didn't. --%>
+        <p :if={@egress?} class="text-xs text-warning">
+          {gettext(
+            "Text is generated by %{provider}. This block's content, the page's title and headings, and your instruction are sent to that provider.",
+            provider: @provider
+          )}
+        </p>
+
+        <div :if={@result} class="rounded border border-base-content/15 bg-base-100 p-2">
+          <p class="text-xs font-medium text-base-content/60">
+            {gettext("Suggestion")} · {ngettext("%{count} word", "%{count} words", @result.word_count,
+              count: @result.word_count
+            )}
+          </p>
+          <%!-- Rendered as text nodes, never raw: a model talked into emitting
+                markup shows the markup, which nobody clicks Insert on. --%>
+          <p :for={paragraph <- @result.paragraphs} class="mt-1 text-xs break-words">
+            {paragraph}
+          </p>
+          <p :if={@result.truncated?} class="mt-1 text-xs text-base-content/50">
+            {gettext("Cut to fit the length limit.")}
+          </p>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              phx-click="assist_apply"
+              phx-value-mode="insert"
+              class="btn btn-sm btn-default"
+            >
+              {gettext("Insert at cursor")}
+            </button>
+            <button
+              type="button"
+              phx-click="assist_apply"
+              phx-value-mode="replace"
+              data-confirm={
+                gettext("Replace everything in this block? You can undo it in the editor.")
+              }
+              class="rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
+            >
+              {gettext("Replace block")}
+            </button>
+            <button
+              type="button"
+              phx-click="assist_dismiss"
+              class="text-xs text-base-content/60 underline hover:text-base-content"
+            >
+              {gettext("Dismiss")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
   end
 
   attr :form, :any, required: true
@@ -4138,6 +4671,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         name={bf[:legacy_html].name}
                         value={bf[:legacy_html].value}
                         data-input
+                      />
+                      <%!-- Only for a block that already has its stable id: the
+                            suggestion is delivered by a `push_event` the hook
+                            matches on `data-block-id`, so a block without one
+                            has nothing to deliver to. --%>
+                      <.assist_panel
+                        :if={@assist_enabled? and bf[:id].value}
+                        block_id={bf[:id].value}
+                        open?={@assist_block == bf[:id].value}
+                        action={@assist_action}
+                        running?={@assist_running?}
+                        result={@assist_result}
+                        egress?={@assist_egress?}
+                        provider={@assist_provider}
+                        conflict={@conflict}
                       />
                     </div>
                     <div :if={block_type_string(bf) == "image"} class="space-y-2">

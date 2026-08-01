@@ -457,6 +457,29 @@ if config_env() == :prod do
     config :kiln_cms, KilnCMS.Seo, model: seo_model, generator: seo_generator
   end
 
+  # ## AI block assist in the editor (optional)
+  #
+  # The body-copy twin of SEO_MODEL, and a deliberately separate switch: this
+  # one sends a block's prose *and the editor's typed instruction* on each
+  # request, and returns text bound for the page body. Setting SEO_MODEL alone
+  # leaves it off; the per-block "AI" control never renders.
+  #
+  #     ASSIST_MODEL=ollama:llama3.1           # on-prem, no egress
+  #     ASSIST_MODEL=anthropic:claude-sonnet-5 # hosted; also needs ANTHROPIC_API_KEY
+  #
+  # Provider API keys are read by `req_llm` from its own environment variables
+  # — Kiln never reads or stores them. ASSIST_GENERATOR overrides the adapter
+  # module for a bespoke implementation. See docs/ai-assist.md.
+  if assist_model = System.get_env("ASSIST_MODEL") do
+    assist_generator =
+      case System.get_env("ASSIST_GENERATOR") do
+        nil -> KilnCMS.Assist.Generator.ReqLLM
+        module -> Module.concat([module])
+      end
+
+    config :kiln_cms, KilnCMS.Assist, model: assist_model, generator: assist_generator
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key
