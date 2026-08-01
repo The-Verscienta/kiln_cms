@@ -125,7 +125,7 @@ defmodule KilnCMSWeb.GovernanceLive do
         class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
       >
         {gettext(
-          "History intact; signed by a key we no longer hold — register its public half in :retired_keys to re-check"
+          "History intact; signed by a key we no longer hold — add its public half to KILN_PROVENANCE_RETIRED_KEY_FILES to re-check"
         )}
       </span>
       <span

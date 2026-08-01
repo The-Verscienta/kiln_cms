@@ -30,6 +30,40 @@ defmodule KilnCMS.Provenance do
   @spec enabled?() :: boolean()
   def enabled?, do: Keyword.get(config(), :enabled, false)
 
+  @doc """
+  Parse a comma-separated list of PEM **file paths**, for
+  `KILN_PROVENANCE_RETIRED_KEY_FILES` (#608). Returns the paths, which
+  `KilnCMS.Provenance.KeyRegistry` reads as `:retired_key_files`.
+
+  Retired keys could only be listed in `config/config.exs`, which a released
+  image cannot edit — so an operator who rotated and followed the docs' advice
+  to destroy the outgoing private half could permanently lose the ability to
+  verify everything signed before the rotation. This is the runtime route.
+
+  Paths only, deliberately: a key is a multi-line PEM and `.env` parsers do not
+  carry embedded newlines, which is the same reason the signing key itself is
+  better mounted than exported. Blank entries are dropped, so a trailing comma
+  is harmless. Unreadable paths are logged and skipped at *use* time by
+  `KeyRegistry` — one bad path must not blind the rest.
+
+  Plain paths rather than the `{:file, %{"path" => …}}` provider tuples they
+  become, because a list of those tuples *is* a keyword list, and `Config`
+  deep-merges keyword lists: setting the env var would then `Keyword.merge`
+  into a `:retired_keys` configured in source and silently delete every
+  `:file` entry already there. A list of binaries is not a keyword list, so it
+  replaces `:retired_key_files` cleanly, and `KeyRegistry` unions that with
+  `:retired_keys` — so the env var cannot make a source-registered key stop
+  verifying. That holds because `:retired_key_files` has exactly one writer;
+  source config belongs in `:retired_keys`.
+  """
+  @spec parse_key_files(String.t()) :: [String.t()]
+  def parse_key_files(value) when is_binary(value) do
+    value
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
   @doc "The human-readable signer identity embedded in every manifest."
   @spec signer() :: String.t()
   def signer do

@@ -131,6 +131,37 @@ defmodule KilnCMS.ProvenanceTest do
     end
   end
 
+  describe "parse_key_files/1" do
+    test "splits a comma-separated list of paths" do
+      assert Provenance.parse_key_files("/etc/kiln/2025.pub.pem,/etc/kiln/2024.pub.pem") ==
+               ["/etc/kiln/2025.pub.pem", "/etc/kiln/2024.pub.pem"]
+    end
+
+    test "trims surrounding whitespace on each path" do
+      assert Provenance.parse_key_files(" /etc/kiln/2025.pub.pem , /etc/kiln/2024.pub.pem ") ==
+               ["/etc/kiln/2025.pub.pem", "/etc/kiln/2024.pub.pem"]
+    end
+
+    test "drops blank entries so a trailing comma is harmless" do
+      assert Provenance.parse_key_files("/etc/kiln/2025.pub.pem, ,") == ["/etc/kiln/2025.pub.pem"]
+    end
+
+    test "an all-blank value is an empty list, not a bogus entry" do
+      # runtime.exs skips the empty string before calling this, but a value of
+      # "," or "  ,  " must not register a key whose path is "".
+      assert Provenance.parse_key_files("") == []
+      assert Provenance.parse_key_files("  ,  ") == []
+    end
+
+    test "the result is not a keyword list, so Config cannot deep-merge it" do
+      # The reason these are paths and not {:file, %{…}} tuples: a list of those
+      # tuples IS a keyword list, so a runtime `config … retired_keys: [...]`
+      # would Keyword.merge into a source-configured :retired_keys and delete
+      # every :file entry there. Guarding the property, not the implementation.
+      refute Keyword.keyword?(Provenance.parse_key_files("/a.pem,/b.pem"))
+    end
+  end
+
   describe "verify/2" do
     test "a genuine manifest verifies against the unaltered artifact" do
       {page, artifact} = fired_artifact(:json)
@@ -196,6 +227,96 @@ defmodule KilnCMS.ProvenanceTest do
                Provenance.verify(manifest, artifact.body)
     end
 
+    test "a retired key registered by FILE PATH still verifies (#608)" do
+      {page, artifact} = fired_artifact(:json)
+      {:ok, manifest} = Provenance.manifest_for(artifact, page)
+
+      # The route KILN_PROVENANCE_RETIRED_KEY_FILES takes: a comma-separated
+      # list of paths, parsed into :file provider tuples. Before #608 this
+      # shape was reachable only by editing config/config.exs and rebuilding,
+      # so an operator who rotated on a released image and destroyed the
+      # outgoing private half could never verify pre-rotation signatures again.
+      rotate!(retired: :previous_as_file)
+
+      assert {:ok, %{"verified" => true, "authentic" => true, "unaltered" => true}} =
+               Provenance.verify(manifest, artifact.body)
+    end
+
+    test "an unreadable retired path is skipped, not fatal to the keys that resolve" do
+      {page, artifact} = fired_artifact(:json)
+      {:ok, manifest} = Provenance.manifest_for(artifact, page)
+
+      # A stale path in the list (a secret unmounted, a typo) must not blind
+      # verification for the key that IS readable — the whole point of
+      # KeyRegistry skipping unresolvable entries.
+      rotate!(retired: :previous_as_file, extra_paths: ["/nonexistent/kiln-retired.pub.pem"])
+
+      assert {:ok, %{"verified" => true, "authentic" => true}} =
+               Provenance.verify(manifest, artifact.body)
+    end
+
+    test "retired_key_files unions with retired_keys rather than replacing it" do
+      {page, artifact} = fired_artifact(:json)
+      {:ok, manifest} = Provenance.manifest_for(artifact, page)
+
+      # A key registered in source and one registered from the environment must
+      # both verify. The env route adding keys is fine; it removing one an
+      # operator configured in source would be the bug #608 is about.
+      unrelated = KilnCMS.Keys.generate_rsa_pem()
+      {:ok, unrelated_key} = KilnCMS.Keys.rsa_private_key(unrelated)
+
+      rotate!(retired: :previous_as_file)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Provenance,
+        Keyword.put(
+          Application.get_env(:kiln_cms, KilnCMS.Provenance),
+          :retired_keys,
+          [KilnCMS.Keys.rsa_public_key_pem(unrelated_key)]
+        )
+      )
+
+      assert {:ok, %{"verified" => true}} = Provenance.verify(manifest, artifact.body)
+
+      {:ok, info} = Provenance.Signer.public_key_info()
+      assert length(info["keys"]) == 3
+    end
+
+    test "a malformed :retired_key_files entry is skipped, not raised" do
+      {page, artifact} = fired_artifact(:json)
+      {:ok, manifest} = Provenance.manifest_for(artifact, page)
+
+      # `:retired_key_files` holds bare paths, but the two keys sit next to each
+      # other in config and an operator can easily put a provider tuple (or
+      # anything else) here. Wrapping every entry as `{:file, %{"path" => entry}}`
+      # unconditionally made File.read raise, which took down verification for
+      # every key — the opposite of the log-and-skip contract.
+      rotate!(retired: :previous_as_file, extra_entries: [{:file, %{"path" => "/nope.pem"}}, 42])
+
+      assert {:ok, %{"verified" => true, "authentic" => true}} =
+               Provenance.verify(manifest, artifact.body)
+    end
+
+    test "the same key registered both ways is published once" do
+      # The transitional state of the migration the docs prescribe: a retired key
+      # listed in source AND in KILN_PROVENANCE_RETIRED_KEY_FILES. Publishing it
+      # twice on /api/provenance/public-key tells consumers we hold a key we don't.
+      rotate!(retired: :previous_as_file)
+
+      config = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+      [path] = Keyword.fetch!(config, :retired_key_files)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Provenance,
+        Keyword.put(config, :retired_keys, [{:file, %{"path" => path}}])
+      )
+
+      {:ok, info} = Provenance.Signer.public_key_info()
+      assert [%{"status" => "active"}, %{"status" => "retired"}] = info["keys"]
+    end
+
     test "public_key_info lists the active key plus every retired one" do
       rotate!(retired: :previous)
 
@@ -210,8 +331,11 @@ defmodule KilnCMS.ProvenanceTest do
   end
 
   # Rotate to a fresh signing key. `retired: :previous` publishes the outgoing
-  # key's public half so historical signatures keep verifying; `retired: []`
-  # simulates an operator who rotated without registering anything.
+  # key's public half inline; `:previous_as_file` writes it to disk and goes
+  # through `parse_key_files/1`, the KILN_PROVENANCE_RETIRED_KEY_FILES route;
+  # `retired: []` simulates an operator who rotated without registering
+  # anything. `:extra_paths` appends paths to the parsed list; `:extra_entries`
+  # appends raw (possibly malformed) entries after parsing.
   defp rotate!(opts) do
     cfg = Application.get_env(:kiln_cms, KilnCMS.Provenance)
     {:env, %{"var" => var}} = Keyword.fetch!(cfg, :signing_key)
@@ -221,16 +345,49 @@ defmodule KilnCMS.ProvenanceTest do
     System.put_env(rotated_var, KilnCMS.Keys.generate_rsa_pem())
     on_exit(fn -> System.delete_env(rotated_var) end)
 
-    retired =
+    rotated = [signing_key: {:env, %{"var" => rotated_var}}]
+
+    registration =
       case Keyword.fetch!(opts, :retired) do
-        :previous -> [KilnCMS.Keys.rsa_public_key_pem(outgoing)]
-        list when is_list(list) -> list
+        :previous ->
+          [retired_keys: [KilnCMS.Keys.rsa_public_key_pem(outgoing)]]
+
+        :previous_as_file ->
+          paths = [write_public_pem!(outgoing) | Keyword.get(opts, :extra_paths, [])]
+
+          [
+            retired_key_files:
+              (paths |> Enum.join(",") |> Provenance.parse_key_files()) ++
+                Keyword.get(opts, :extra_entries, [])
+          ]
+
+        list when is_list(list) ->
+          [retired_keys: list]
       end
 
     Application.put_env(
       :kiln_cms,
       KilnCMS.Provenance,
-      Keyword.merge(cfg, signing_key: {:env, %{"var" => rotated_var}}, retired_keys: retired)
+      cfg
+      |> Keyword.merge(retired_keys: [], retired_key_files: [])
+      |> Keyword.merge(rotated ++ registration)
     )
+  end
+
+  defp write_public_pem!(private_key) do
+    # System.unique_integer/1 is per-node, so two concurrent `mix test` VMs
+    # sharing /tmp would collide — and the loser would read back a different but
+    # perfectly valid public key, surfacing as an inscrutable `verified: false`
+    # rather than a file error. The OS pid disambiguates them.
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "kiln-test-retired-#{System.pid()}-#{System.unique_integer([:positive])}.pub.pem"
+      )
+
+    File.write!(path, KilnCMS.Keys.rsa_public_key_pem(private_key))
+    on_exit(fn -> File.rm(path) end)
+
+    path
   end
 end

@@ -54,10 +54,17 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
   defp line(type, record, verdict) do
     status =
       case verdict do
-        :verified -> "VERIFIED"
-        :unsigned -> "intact (unsigned)"
-        :unverifiable -> "intact (signed by an unregistered key — see :retired_keys)"
-        {:tampered, reason} -> "TAMPERED — #{reason}"
+        :verified ->
+          "VERIFIED"
+
+        :unsigned ->
+          "intact (unsigned)"
+
+        :unverifiable ->
+          "intact (signed by an unregistered key — see KILN_PROVENANCE_RETIRED_KEY_FILES)"
+
+        {:tampered, reason} ->
+          "TAMPERED — #{reason}"
       end
 
     Mix.shell().info("#{type}/#{record.slug} (#{record.id}): #{status}")

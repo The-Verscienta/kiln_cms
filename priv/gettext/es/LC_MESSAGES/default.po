@@ -6772,11 +6772,6 @@ msgstr "Tu suscripción al boletín está activa."
 msgid "You've been unsubscribed."
 msgstr "Se ha tramitado tu baja."
 
-#: lib/kiln_cms_web/live/governance_live.ex:127
-#, elixir-autogen, elixir-format
-msgid "History intact; signed by a key we no longer hold — register its public half in :retired_keys to re-check"
-msgstr "Historial intacto; firmado con una clave que ya no conservamos: registre su mitad pública en :retired_keys para reverificar"
-
 #: lib/kiln_cms_web/live/system_live.ex:206
 #, elixir-autogen, elixir-format
 msgid "Apply it from your project's Kiln checkout, then rebuild and redeploy:"
@@ -6955,3 +6950,8 @@ msgstr "¿Qué debe hacer el modelo?"
 #, elixir-autogen, elixir-format
 msgid "Writes new prose from your instruction. Describe what this section should say."
 msgstr "Redacta texto nuevo a partir de tu instrucción. Describe qué debe decir esta sección."
+
+#: lib/kiln_cms_web/live/governance_live.ex:127
+#, elixir-autogen, elixir-format
+msgid "History intact; signed by a key we no longer hold — add its public half to KILN_PROVENANCE_RETIRED_KEY_FILES to re-check"
+msgstr "Historial intacto; firmado con una clave que ya no conservamos: añada su mitad pública a KILN_PROVENANCE_RETIRED_KEY_FILES para reverificar"

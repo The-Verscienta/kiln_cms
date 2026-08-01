@@ -163,6 +163,88 @@ if config_env() != :test do
   end
 end
 
+# ## Signed provenance / C2PA-style content manifests (#340)
+#
+# `KilnCMS.Provenance` was configured in `config/config.exs` alone, which is
+# compile time — so on a prebuilt image the only settable knob was the default
+# `KILN_PROVENANCE_PRIVATE_KEY` binding, and `enabled`, a file-mounted signing
+# key and `retired_keys` all needed a source edit and a rebuild (#608). Each of
+# those is something the docs tell operators to do, so each gets a var here.
+#
+# Skipped under :test for the same reason as KILN_AUDIT_ANCHOR_EVERY_WRITE
+# above: whether provenance is on decides between a 404 and a signed manifest on
+# every /api/provenance/* route, and the suite must not depend on what happens
+# to be exported in the developer's shell. The provenance tests drive the config
+# explicitly instead.
+if config_env() != :test do
+  # Whether manifests are produced at all. The compiled default is `false` and
+  # there was no runtime override, so every /api/provenance/* route 404s on a
+  # released image no matter what key the operator configures — they set the
+  # key, get signed anchors, and then get a 404 from the endpoint the docs point
+  # them at, with nothing to change.
+  #
+  # `Env.fetch/1` rather than a sixth bespoke parser (#607): unset and
+  # unrecognized both leave the compiled default alone, which matters in both
+  # directions here — a deployment publishing manifests to consumers must not
+  # stop because someone wrote `On`, and one that has never enabled provenance
+  # must not start signing because of a typo.
+  with {:ok, provenance?} <- Env.fetch("KILN_PROVENANCE_ENABLED") do
+    config :kiln_cms, KilnCMS.Provenance, enabled: provenance?
+  end
+
+  # Mount the signing key as a file instead of exporting it. The key is a
+  # multi-line PKCS#1 PEM and most .env parsers (docker-compose included) do not
+  # carry embedded newlines, so a file is the route .env.example already
+  # recommends — it just had no way to say so without editing config.
+  #
+  # Overrides the compiled `{:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}`
+  # default when set, so an operator migrating from the env var can mount the
+  # file first and unset the var afterwards.
+  provenance_key_file = "KILN_PROVENANCE_KEY_FILE" |> System.get_env("") |> String.trim()
+
+  if provenance_key_file != "" do
+    config :kiln_cms, KilnCMS.Provenance, signing_key: {:file, %{"path" => provenance_key_file}}
+  end
+
+  # Public halves of keys that no longer sign but must still VERIFY — a
+  # comma-separated list of PEM paths. Manifests (#340) and history anchors
+  # (#356) record the key_id that signed them, so without this a rotation blinds
+  # everything signed before it, and the outgoing private half cannot safely be
+  # destroyed.
+  #
+  # Writes :retired_key_files (paths), NOT :retired_keys (provider tuples), and
+  # KeyRegistry.retired/0 unions the two. A list of `{:file, %{…}}` tuples is a
+  # keyword list, and Config deep-merges keyword lists — so writing :retired_keys
+  # here would Keyword.merge into any :retired_keys set in source and silently
+  # delete every :file entry already there. Losing a verification key is the one
+  # outcome this must never produce. :retired_key_files is the runtime channel
+  # and this is its only writer; source config belongs in :retired_keys.
+  # See KilnCMS.Provenance.KeyRegistry.
+  #
+  # A value that parses to NO paths warns and writes nothing rather than writing
+  # `[]`. `KILN_PROVENANCE_RETIRED_KEY_FILES=","` — or a shell expanding an unset
+  # variable into a bare separator — otherwise clears the list, and silently
+  # deregistering every retired key is precisely the failure this feature exists
+  # to prevent.
+  retired_key_files =
+    "KILN_PROVENANCE_RETIRED_KEY_FILES" |> System.get_env("") |> String.trim()
+
+  case KilnCMS.Provenance.parse_key_files(retired_key_files) do
+    [] when retired_key_files != "" ->
+      IO.warn("""
+      KILN_PROVENANCE_RETIRED_KEY_FILES is set to #{inspect(retired_key_files)}, \
+      which contains no paths; keeping the configured default. Expected a \
+      comma-separated list of PEM file paths.\
+      """)
+
+    [] ->
+      :ok
+
+    paths ->
+      config :kiln_cms, KilnCMS.Provenance, retired_key_files: paths
+  end
+end
+
 # ## Presentation console (#355) — where the external front end serves content
 #
 # The Kiln-hosted side-by-side editing console iframes the external front end.

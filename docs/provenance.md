@@ -22,6 +22,20 @@ C2PA compliance for a webpage; the manifest shape below is Kiln's own.
 
 With `enabled: false` (the default) no manifest is produced and every
 `/api/provenance/*` endpoint returns `404` — the lean install pays nothing.
+Configuring a signing key does **not** turn it on: the key by itself signs
+history anchors (#356), and the provenance endpoints stay `404` until `enabled`
+is set. That surprise is why the switch is reachable from the environment.
+
+On a released image, set the environment (see
+[environment-variables.md](environment-variables.md)):
+
+```bash
+KILN_PROVENANCE_ENABLED=true
+KILN_PROVENANCE_KEY_FILE=/run/secrets/kiln-provenance.pem
+KILN_PROVENANCE_RETIRED_KEY_FILES=/etc/kiln/keys/2025.pub.pem
+```
+
+From source, the same knobs plus the claim fields:
 
 ```elixir
 # config/runtime.exs (production)
@@ -33,6 +47,10 @@ config :kiln_cms, KilnCMS.Provenance,
   # Reuse the DKIM key (:dkim), or point at a dedicated content-signing key:
   signing_key: {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}
 ```
+
+`signer`, `origin` and `ai_disclosure` are still source-only; they default to
+`:site_name`, `:public_base_url` and `:human`, which is a reasonable deployment
+on its own.
 
 `signing_key` is resolved through `KilnCMS.Keys` (the same provider mechanism as
 DKIM): `:dkim` reuses the mail signing key; `{:env, %{"var" => …}}` and
@@ -119,7 +137,14 @@ never "whatever is signing today". Rotating the signing key would otherwise
 blind everything signed before the rotation, which is the opposite of what an
 audit trail is for.
 
-So when you rotate, register the outgoing key's **public half**:
+So when you rotate, register the outgoing key's **public half** — from the
+environment:
+
+```bash
+KILN_PROVENANCE_RETIRED_KEY_FILES=/etc/kiln/keys/2025-provenance.pub.pem,/etc/kiln/keys/2024.pub.pem
+```
+
+or, from source, with the full provider vocabulary:
 
 ```elixir
 config :kiln_cms, KilnCMS.Provenance,
@@ -130,9 +155,17 @@ config :kiln_cms, KilnCMS.Provenance,
   ]
 ```
 
-Entries are `KilnCMS.Keys` provider tuples (`:env` / `:file`) or a raw PEM.
-The public half is all verification needs, so **the retired private key can be
-destroyed** — that is the point of registering the public one. A private key
+`retired_keys` entries are `KilnCMS.Keys` provider tuples (`:env` / `:file`) or
+a raw PEM. The env var is paths only, because a PEM is multi-line and `.env`
+parsers generally are not; it lands in a separate `retired_key_files` key that
+`KeyRegistry.retired/0` **unions** with `retired_keys`, so setting it can only
+add verification keys — never silently drop one configured in source.
+
+The public half is all verification needs, so once it is registered **the
+retired private key can be destroyed** — that is the point of registering the
+public one. Register first, destroy second: until the public half is registered
+those old signatures resolve to `{:error, {:unknown_key_id, …}}`, and with the
+private half already gone there is nothing left to derive it from. A private key
 PEM is accepted too (public half derived), but publishing the public half is
 the better habit. Get the public half of a key you still hold with:
 

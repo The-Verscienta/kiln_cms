@@ -462,6 +462,12 @@ config :kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Local
 # mail signing key, or point at a dedicated content-signing key with
 # `{:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}` / `{:file, %{"path" => …}}`
 # (PKCS#1 RSA PEM, like DKIM). Configure the key source in runtime.exs for prod.
+#
+# `enabled`, `signing_key` and `retired_keys` are ALSO settable from the
+# environment — KILN_PROVENANCE_ENABLED / _KEY_FILE / _RETIRED_KEY_FILES in
+# runtime.exs (#608) — so a released image can turn provenance on, mount a key
+# and register a rotated-out key without a rebuild. Values set there override
+# the defaults below.
 config :kiln_cms, KilnCMS.Provenance,
   enabled: false,
   # Human-readable signer identity; defaults to :site_name when unset.
@@ -478,6 +484,14 @@ config :kiln_cms, KilnCMS.Provenance,
   # **public half** — that is all verification needs, so the old private key
   # can be destroyed. Same provider tuples as `signing_key`, or a raw PEM.
   #   retired_keys: [{:file, %{"path" => "/etc/kiln/keys/2025.pub.pem"}}]
+  #
+  # This is the key to use HERE. KILN_PROVENANCE_RETIRED_KEY_FILES writes a
+  # separate `:retired_key_files` (bare paths) that KeyRegistry.retired/0 unions
+  # with this one, so the env var can only ADD verification keys — it is a second
+  # key because Config deep-merges keyword lists and a list of `{:file, %{…}}`
+  # tuples is one, so a runtime write to :retired_keys would Keyword.merge into
+  # this list and silently drop its :file entries. Do not set :retired_key_files
+  # here: it has one writer (runtime.exs) and a runtime write REPLACES it.
   retired_keys: []
 
 # Configure esbuild (the version is required)
