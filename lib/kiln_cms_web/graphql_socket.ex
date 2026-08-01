@@ -19,7 +19,7 @@ defmodule KilnCMSWeb.GraphqlSocket do
     # unresolvable: normally the default org, and under `TENANT_STRICT_HOST` a
     # refused connection rather than a socket silently scoped to the wrong site
     # (#563).
-    case KilnCMSWeb.Tenant.fetch_org(get_in(connect_info, [:uri, Access.key(:host)])) do
+    case KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
       {:ok, org} ->
         context = params |> actor_context() |> Map.put(:tenant, org.id)
         {:ok, Absinthe.Phoenix.Socket.put_options(socket, context: context)}

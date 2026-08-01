@@ -243,7 +243,7 @@ client over the channel). Where it lives:
 | Piece | Where |
 |---|---|
 | Authoritative Y.Doc per document | `KilnCMS.Collab.Crdt.DocServer` (Registry + DynamicSupervisor; idle shutdown) |
-| Transport | `KilnCMSWeb.CollabChannel` over `/ws/collab` (`CollabSocket`, Phoenix.Token-gated, editor-minted) |
+| Transport | `KilnCMSWeb.CollabChannel` over `/ws/collab` (`CollabSocket`, Phoenix.Token-gated, editor-minted; every join additionally authorizes the document as the token's user under the connection's org — #655) |
 | Client | `assets/js/collab.js` (one shared Y.Doc + channel per document; ~70 LOC provider) + TipTap `Collaboration` per rich-text block, one `XmlFragment` per block |
 | Flag | `config :kiln_cms, :collab_prototype` — on in dev/test, off in prod; joins refuse when off |
 

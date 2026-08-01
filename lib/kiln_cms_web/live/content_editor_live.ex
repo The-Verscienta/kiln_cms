@@ -187,7 +187,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # CRDT collab prototype: when enabled, rich-text blocks sync live
          # between editors over the collab channel (see KilnCMS.Collab.Crdt).
          |> assign(:collab_token, collab_token(actor))
-         |> assign(:collab_topic, "collab:#{kind}:#{id}")
+         # From `record.id`, not the route param: the channel rebuilds the doc
+         # key from the record it resolves, and a differently-cased id in the
+         # URL would otherwise name the same document under a different key
+         # (#655).
+         |> assign(:collab_topic, "collab:#{kind}:#{record.id}")
          |> assign(:siblings, siblings(kind, id, actor, org))
          |> assign_record(record)}
     end

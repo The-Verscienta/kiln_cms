@@ -113,7 +113,8 @@ defmodule KilnCMSWeb.BridgeSocket do
   # `connect_info` absent in tests — resolves to the default org, or refuses the
   # connection under `TENANT_STRICT_HOST` (#563).
   defp fetch_org(info) do
-    KilnCMSWeb.Tenant.fetch_org(get_in(info, [:connect_info, :uri, Access.key(:host)]))
+    # A raw transport nests connect_info one level deeper than a Phoenix.Socket.
+    KilnCMSWeb.Tenant.fetch_org_from_connect_info(info[:connect_info] || %{})
   end
 
   defp excerpt(value) when is_binary(value), do: value
