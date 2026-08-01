@@ -14,6 +14,30 @@
       phx-no-format
     >{assigns[:page_title]}</.live_title>
     <link rel="icon" href={KilnCMS.Branding.for_org(assigns[:current_org]).favicon_url} />
+    <%!-- Installable editor PWA (#65). `assigns[:pwa]` is set by the
+          `:live_editor_required` / `:live_admin_required` on_mount hooks, so
+          these tags appear on authoring pages ONLY — a public reader is never
+          offered an install prompt for the admin app, and app.js keys service
+          worker registration off this same manifest link. --%>
+    <link :if={assigns[:pwa]} rel="manifest" href={~p"/manifest.webmanifest"} />
+    <%!-- iOS ignores the manifest: standalone mode, the home-screen name and the
+          icon are all `<meta>`/`<link>`-driven there.
+
+          No `apple-mobile-web-app-status-bar-style`. The interesting value,
+          `black-translucent`, makes the web view full-bleed and lets the status
+          bar OVERLAY the page — which needs `viewport-fit=cover` plus
+          `env(safe-area-inset-top)` padding throughout, or the editor's header
+          sits under the notch. Omitting the tag keeps iOS's default opaque bar
+          with content laid out below it, which is correct with no layout work.
+          Revisit alongside safe-area padding, not before. --%>
+    <meta :if={assigns[:pwa]} name="mobile-web-app-capable" content="yes" />
+    <meta :if={assigns[:pwa]} name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      :if={assigns[:pwa]}
+      name="apple-mobile-web-app-title"
+      content={Layouts.brand_name(assigns[:current_org])}
+    />
+    <link :if={assigns[:pwa]} rel="apple-touch-icon" href={~p"/images/apple-touch-icon.png"} />
     <meta :if={assigns[:meta_description]} name="description" content={@meta_description} />
     <meta :if={assigns[:meta_keywords]} name="keywords" content={@meta_keywords} />
     <link :if={assigns[:canonical_url]} rel="canonical" href={@canonical_url} />

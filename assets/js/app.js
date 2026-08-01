@@ -677,6 +677,18 @@ liveSocket.connect()
 // no-op on other pages and on browsers without WebAuthn.
 initPasskeySignIn()
 
+// Installable editor PWA (#65). Gated on the manifest link, which the root
+// layout emits only for authorised editors/admins — so a public reader browsing
+// delivered content never registers a service worker. Failure is silent by
+// design: the worker only adds an offline fallback and the install prompt, and
+// neither is worth a console error on a browser that refuses (private mode,
+// disabled storage, insecure origin).
+if ("serviceWorker" in navigator && document.querySelector('link[rel="manifest"]')) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {})
+  })
+}
+
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session

@@ -304,7 +304,7 @@ These patterns elevate KilnCMS from “another CMS” to a **modern, delightful,
 - Headless + traditional hybrid rendering options
 - Integration with Verscienta Health (TCM content, patient education, etc.)
 - Robust plugin/extension system (plug-and-play custom modules)
-- Mobile admin app (LiveView Native?)
+- Mobile admin app (LiveView Native?) — answered: installable PWA, not native (`docs/mobile-admin-spike.md`)
 
 ---
 
@@ -334,7 +334,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 
 **GitHub tracking:** Remaining work is filed as issues labeled `roadmap` (phases `phase-0` … `phase-9`, `stretch`). Master checklist: [#67](https://github.com/The-Verscienta/kiln_cms/issues/67). Project board: [KilnCMS Roadmap](https://github.com/users/The-Verscienta/projects/1). Regenerate with `scripts/create_roadmap_issues.sh` (idempotent only for new items — edit existing issues by hand).
 
-> **Checklist reconciled against main, 2026-07-19.** Caution on issue history: PR #106 ("complete remaining roadmap issues") merged **prematurely with only its first commit** (#46, notification prefs) — the other ~19 issue commits never reached main, though several were independently rebuilt later (plugins #262/#263, static export, a11y audits, localization #272). Issues whose scope is still genuinely missing were **reopened**: #42, #45, #48, #51, #53, #56, #57, #59, #60, #62, #65. **Since rebuilt on main and closed again** (2026-07/08): #42, #45, #48, #51, #53, #56, #57 — #59, #60 and #65 remain open, and #62 is closed by the design doc it asked for (`docs/advanced-analytics-plan.md`), whose implementation phases are tracked separately.
+> **Checklist reconciled against main, 2026-07-19.** Caution on issue history: PR #106 ("complete remaining roadmap issues") merged **prematurely with only its first commit** (#46, notification prefs) — the other ~19 issue commits never reached main, though several were independently rebuilt later (plugins #262/#263, static export, a11y audits, localization #272). Issues whose scope is still genuinely missing were **reopened**: #42, #45, #48, #51, #53, #56, #57, #59, #60, #62, #65. **Since rebuilt on main and closed again** (2026-07/08): #42, #45, #48, #51, #53, #56, #57 — #59 and #60 remain open. #62 is closed by the design doc it asked for (`docs/advanced-analytics-plan.md`), whose implementation phases are tracked separately, and #65 by the spike in `docs/mobile-admin-spike.md` plus the PWA it recommends.
 
 ### Phase 0: Project Bootstrap & Environment (P0)
 - [x] Create GitHub repo + initial `mix phx.new kiln_cms --live --database postgres` (generated in-place)
@@ -432,7 +432,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [~] Advanced reporting / content analytics — governance dashboard shipped (`docs/governance-dashboard.md`); time-series trends + view telemetry shipped (#45). **Referrer attribution, funnels and an analytics export are designed but unbuilt** — see `docs/advanced-analytics-plan.md` (#62); the six implementation phases are tracked as #618–#623.
 - [x] Robust **Plugin / Module System** — `Kiln.Plugin` (D18) complete incl. the custom field-type registry (`Kiln.FieldType`, #266); marketplace / runtime discovery tracked in #333.
 - [~] Verscienta Health specific modules — largely superseded: **dynamic content types** let TCM types (Herb, Condition, …) be defined at runtime without first-party modules (#64 stays closed with a supersession note).
-- [ ] Mobile admin (LiveView Native) — **still open** (#65 reopened; the spike doc was lost in #106).
+- [~] Mobile admin — spiked and answered (#65). LiveView Native is **blocked**: its newest release (0.4.0-rc.1, March 2025) pins `phoenix ~> 1.7` / `phoenix_live_view ~> 1.0`, and there is no Android client on hex. Shipped instead: `/editor` is an installable PWA (per-org manifest, offline fallback, `standalone` launch) — see `docs/mobile-admin-spike.md`.
 - [x] Static site generation export — `mix kiln.export.static` rebuilt on the v2 firing layer (`docs/static-export.md`; org-explicit since strict tenancy).
 
 ---

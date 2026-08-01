@@ -525,6 +525,12 @@ defmodule KilnCMSWeb.Router do
     # LLM content index (llmstxt.org convention) — the GEO analogue of the sitemap.
     get "/llms.txt", LlmsController, :index
 
+    # Web app manifest for the installable editor PWA (#65). Per-org, so it's a
+    # controller rather than a `priv/static` file. Unauthenticated by necessity
+    # (the browser fetches it as a page subresource) and cheap — a cached
+    # branding lookup — so `:probe` is the right ceiling.
+    get "/manifest.webmanifest", ManifestController, :show
+
     # Liveness probe for load balancers / uptime monitors / Coolify.
     get "/up", HealthController, :show
     # Readiness probe with DB + Oban queue-depth payload for monitoring.

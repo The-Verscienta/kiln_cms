@@ -1016,7 +1016,7 @@ msgstr "Mis à jour."
 msgid "You are now signed out"
 msgstr "Vous êtes maintenant déconnecté"
 
-#: lib/kiln_cms_web/live_user_auth.ex:81
+#: lib/kiln_cms_web/live_user_auth.ex:87
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
@@ -1369,7 +1369,7 @@ msgstr "Vous vous êtes déjà connecté d'une autre manière, mais vous n'avez 
 #: lib/kiln_cms_web/live/team_live.ex:42
 #: lib/kiln_cms_web/live/trash_live.ex:38
 #: lib/kiln_cms_web/live/webhook_live.ex:34
-#: lib/kiln_cms_web/live_user_auth.ex:104
+#: lib/kiln_cms_web/live_user_auth.ex:110
 #, elixir-autogen, elixir-format
 msgid "You need admin access to view that page."
 msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
@@ -1864,7 +1864,7 @@ msgstr "Les recherches sont journalisées anonymement — sans identifiant utili
 msgid "Select %{title}"
 msgstr "Sélectionner %{title}"
 
-#: lib/kiln_cms_web/components/layouts/root.html.heex:96
+#: lib/kiln_cms_web/components/layouts/root.html.heex:120
 #, elixir-autogen, elixir-format
 msgid "Skip to main content"
 msgstr "Aller au contenu principal"

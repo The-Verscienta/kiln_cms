@@ -21,8 +21,13 @@ defmodule KilnCMSWeb do
   # the environment's sitemap URL). `embed.js` (host-page snippet),
   # `embed-frame.js` (iframe height reporter) and `bridge.js` (the visual-editing
   # overlay SDK, #355) are hand-written and live at `priv/static/`, outside the
-  # gitignored `assets/` build output.
-  def static_paths, do: ~w(assets fonts images favicon.ico embed.js embed-frame.js bridge.js)
+  # gitignored `assets/` build output. `sw.js` and `offline.html` are the editor
+  # PWA's service worker and its offline fallback (#65) — `sw.js` MUST stay at
+  # the root, since a service worker's default scope is its own directory and
+  # the app spans `/editor`, `/media` and `/sign-in`. The manifest itself is
+  # per-org and served by `KilnCMSWeb.ManifestController`, not from here.
+  def static_paths,
+    do: ~w(assets fonts images favicon.ico embed.js embed-frame.js bridge.js sw.js offline.html)
 
   def router do
     quote do
