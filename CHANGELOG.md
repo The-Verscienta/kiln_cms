@@ -213,6 +213,36 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **Artifacts fired before a surface-shape change are now migrated instead of
+  serving the old shape forever.** `@format_version` was bumped 1 → 2 when
+  `:json` gained `custom_fields` and `:json_ld` gained `contentLocation` (#601),
+  but nothing read the field and nothing re-fired — so every document published
+  before that deploy kept serving the v1 shape indefinitely while everything
+  published after served v2, and a consumer could not tell which, because the
+  field that would say so was never consulted. Meanwhile
+  `docs/headless-consumer-guide.md` documented those keys as present on every
+  surface. The bump was decorative, which is worse than not bumping: it looks
+  like a migration happened. `Engine.read/4` and `Firing.Delivery.read_artifact/4`
+  now compare a fetched row's version against the one the build writes; an older
+  row is served **once** more and a re-fire is enqueued behind the request, so
+  the second read has the new shape. That makes the field load-bearing, so the
+  next bump of an **existing** surface needs only the bump — no deploy step for
+  anyone to forget. A bump that *adds* a surface is still a `mix kiln.refire_all`
+  job: there is no row for the new surface, so nothing is stale to detect.
+  Convergence is eventual rather than next-request — the stale body is cached for
+  up to an hour, so reads in between are cache hits on the old shape until the
+  job lands. All three artifact readers migrate (delivery, the engine read, and
+  the provenance manifest), so a document read through only one of them still
+  converges. A row whose document can no longer be fired at all (an orphan left
+  by a failed unpublish purge) re-enqueues a futile job per cache expiry —
+  bounded and logged, tracked in #664.
+  Enqueueing is best-effort and deduplicated by `FireWorker`'s existing unique
+  window, so it can neither fail a read (delivery is expected to survive a
+  database outage) nor turn a cache stampede into a firing stampede.
+  `mix kiln.refire_all` still exists for an operator who would rather migrate a
+  whole corpus at once — the lazy path only reaches documents that are read.
+  (#615)
+
 - **`KilnCMSWeb.Tenant.current_org_id/1` raises on a missing `:current_org`
   assign** instead of quietly returning the default org (#563). It is the
   quieter half of the same defect: the assign comes from `Plugs.SetTenant`

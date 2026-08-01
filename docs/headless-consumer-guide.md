@@ -56,6 +56,16 @@ and the artifact always carries a freshly recomputed value. Per-type typed
 GraphQL/JSON:API schemas are deliberately not generated at runtime — promote
 the type to a compiled one when you need them.
 
+> **After an upgrade that changes a surface's shape**, a document last published
+> before it keeps its old artifact until something reads it. The first read
+> serves the old shape and enqueues a re-fire behind the request; reads in
+> between are served from cache, so the new shape appears once that background
+> job lands — usually seconds, longer if the firing queue is backed up (#615).
+> Treat the transition as eventual, not next-request: **read
+> `format_version` if you need to know which shape you have** rather than
+> assuming the keys are present. An operator can migrate a whole corpus up front
+> with `mix kiln.refire_all` instead of waiting for reads to drive it.
+
 ## Why three different block shapes?
 
 | Surface | Blocks field | Shape |

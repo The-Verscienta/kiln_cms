@@ -11,6 +11,8 @@ defmodule KilnCMS.Firing.Engine do
   `read/4` is the delivery path: cache → artifact table, **never** the live tree.
   Every read/write is scoped to the document's `org_id` tenant (epic #336).
   """
+  require Logger
+
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing
@@ -21,6 +23,10 @@ defmodule KilnCMS.Firing.Engine do
   # Bumped when a surface's serialized shape changes (decision A2). v2 added
   # `custom_fields` to `:json` and `contentLocation` to `:json_ld` (#428/#429).
   @format_version 2
+
+  @enqueue_log_key {__MODULE__, :last_refire_enqueue_failure_ms}
+  @future_log_key {__MODULE__, :last_future_artifact_ms}
+  @log_every_ms :timer.minutes(1)
 
   @doc "Fire a document. Returns `{:ok, %{surface => body}}`."
   @spec fire(struct(), keyword()) :: {:ok, %{atom() => map()}}
@@ -79,14 +85,153 @@ defmodule KilnCMS.Firing.Engine do
 
       :miss ->
         case Firing.get_artifact(type, id, surface, authorize?: false, tenant: org_id) do
-          {:ok, %{body: body}} ->
+          {:ok, %{body: body} = artifact} ->
+            # Cache BEFORE enqueuing: a job cannot start before its insert
+            # returns, so this ordering guarantees the re-fire's fresh body is
+            # written after ours rather than being clobbered by it.
             Cache.put(org_id, type, id, surface, body)
+            migrate_if_stale(org_id, type, id, artifact)
             {:ok, body}
 
           _ ->
             :error
         end
     end
+  end
+
+  @doc """
+  The serialized shape version this build writes (decision A2).
+
+  Bumped whenever a surface's shape changes. v2 added `custom_fields` to `:json`
+  and `contentLocation` to `:json_ld` (#428/#429).
+  """
+  @spec format_version() :: pos_integer()
+  def format_version, do: @format_version
+
+  @doc """
+  Whether a stored artifact predates the shape this build writes.
+
+  `nil` and a missing key read as current: a row that cannot say what it is
+  should not be re-fired on every read.
+  """
+  @spec stale?(term()) :: boolean()
+  def stale?(%{format_version: version}) when is_integer(version), do: version < @format_version
+  def stale?(_artifact), do: false
+
+  @doc """
+  Enqueue a re-fire when `artifact` predates the current shape (#615).
+
+  ## Why lazy, rather than a sweep
+
+  Bumping `@format_version` used to be **decorative**: nothing read the field and
+  nothing re-fired, so after a shape change every document published before the
+  deploy kept serving the old shape indefinitely while everything published after
+  served the new one — and a consumer could not tell which, because the field that
+  would say so was never consulted. Meanwhile the headless guide documented the
+  new keys as present on every surface.
+
+  Reading it here makes the field load-bearing: a bump to an **existing** surface
+  is handled by the same branch, with no deploy step for anyone to forget.
+
+  ## What this does not cover
+
+  A bump that **adds a surface** is not detectable here: there is no row for the
+  new surface, so the read is a plain not-found and `stale?/1` is never reached.
+  `mix kiln.refire_all` is still required for that case, and remains the faster
+  option for any large corpus — this path only reaches documents that are read.
+
+  Convergence is **eventual, not next-request**. The stale body is served this
+  time and cached (`Cache`'s TTL is an hour), so reads in between are cache hits
+  on the old shape until the job lands and overwrites both the row and the cache.
+
+  Enqueueing is best-effort: a failure here must not fail the read, which is the
+  delivery path and is expected to survive a database outage (#341).
+  """
+  @spec migrate_if_stale(Ash.UUID.t(), atom(), Ash.UUID.t(), term()) :: :ok
+  def migrate_if_stale(org_id, type, id, artifact) do
+    cond do
+      stale?(artifact) -> enqueue_refire(org_id, type, id)
+      from_future?(artifact) -> warn_future_artifact(type, id, artifact)
+      true -> :ok
+    end
+  end
+
+  # A row stamped NEWER than this build wrote it means the release was rolled
+  # back after firing. Re-firing would silently DOWNGRADE the served body, so it
+  # is left alone — but it is served verbatim by a build whose own serializers
+  # would not produce it, which is worth one line rather than nothing at all.
+  defp from_future?(%{format_version: version}) when is_integer(version),
+    do: version > @format_version
+
+  defp from_future?(_artifact), do: false
+
+  defp warn_future_artifact(type, id, %{format_version: version}) do
+    throttled(@future_log_key, fn ->
+      Logger.warning(
+        "Artifact for #{type} #{inspect(id)} was fired at format_version #{version}, " <>
+          "newer than this build's #{@format_version} — most likely a rolled-back " <>
+          "release. It is served as stored rather than downgraded; run " <>
+          "`mix kiln.refire_all` if you intend this build's shape to win. " <>
+          "Logged at most once a minute."
+      )
+    end)
+  end
+
+  defp enqueue_refire(org_id, type, id) do
+    # `FireWorker`'s `unique` window collapses concurrent enqueues into one JOB —
+    # but not into one INSERT: each caller still pays a round-trip and an advisory
+    # lock for the uniqueness check. So the cost of a popular stale document under
+    # a cold cache is one write per cache miss until the re-fire lands, not one
+    # write total. Bounded, and only until the document stops being stale.
+    %{org_id: org_id, type: to_string(type), id: id}
+    |> KilnCMS.Firing.FireWorker.new()
+    |> Oban.insert()
+    |> case do
+      {:ok, _job} -> :ok
+      # A rejected changeset is not an exception, so it would otherwise vanish.
+      {:error, reason} -> log_enqueue_failure(type, id, inspect(reason))
+    end
+  rescue
+    # A read-only replica or a downed pool raises rather than returning an error
+    # tuple. The read has already succeeded by this point, so swallow it: failing
+    # the request over a background-migration enqueue would trade a served page
+    # for an error page.
+    error -> log_enqueue_failure(type, id, Exception.message(error))
+  end
+
+  # Throttled for the same reason the enqueue is best-effort: on a read-only
+  # replica EVERY delivery cache miss fails here, and an unthrottled line would
+  # turn a degraded database into log amplification on the one path documented to
+  # stay quiet through an outage.
+  defp log_enqueue_failure(type, id, reason) do
+    throttled(@enqueue_log_key, fn ->
+      Logger.warning(
+        "Could not enqueue a format-version re-fire for #{type} #{inspect(id)}: #{reason}. " <>
+          "Artifacts stay on their stored shape until this succeeds or " <>
+          "`mix kiln.refire_all` is run. Logged at most once a minute."
+      )
+    end)
+  end
+
+  @doc false
+  # Exposed so tests can start from a known throttle state — otherwise the first
+  # warning in a run silences every later one for a minute, making any test that
+  # asserts on these lines order-dependent.
+  def reset_log_throttles do
+    Enum.each([@enqueue_log_key, @future_log_key], &:persistent_term.erase/1)
+    :ok
+  end
+
+  defp throttled(key, fun) do
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get(key, nil)
+
+    if is_nil(last) or now - last >= @log_every_ms do
+      :persistent_term.put(key, now)
+      fun.()
+    end
+
+    :ok
   end
 
   @doc "Delete every fired artifact for a document and evict the cache (unpublish)."

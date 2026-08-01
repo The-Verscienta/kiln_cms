@@ -583,7 +583,7 @@ deferred to a later increment.)
 > module), `upcast_block_map/1` (lazy-read, resolves module by `_type`),
 > `upcast_all/1` (eager backfill) — idempotent at head version. `Heading` is bumped
 > to v2 with a real `1→2` migration as the worked example. Fired-artifact strategy
-> on a bump = re-fire affected types (H1). **17 new tests incl. a StreamData
+> on a bump = lazy-migrate on read (H1, settled in #615; this box predates it). **17 new tests incl. a StreamData
 > property test (upcast is total over generated v1 maps); full suite 436 green;
 > precommit clean.**
 >
@@ -611,9 +611,14 @@ can choose re-fire vs. lazy migrate for published artifacts.
    cast/load path so every read path benefits.
 3. **Eager backfill**: an Oban worker that scans documents, upcasts stale blocks,
    and persists. Idempotent; resumable.
-4. **Artifact strategy** (decide + document): for already-fired artifacts on a
-   schema bump — **re-fire** (default, simplest given Phase D), keep old
-   `format_version`, or lazy-migrate. Recommend re-fire of affected types.
+4. **Artifact strategy** — **decided (#615): lazy-migrate.** `Engine.read/4` and
+   `Firing.Delivery.read_artifact/4` compare a fetched row's `format_version`
+   against the one this build writes; an older row is served once more and a
+   re-fire is enqueued behind the request. So bumping `@format_version` is
+   sufficient on its own — no deploy step, and the next shape change is handled
+   by the same branch. `mix kiln.refire_all` remains for an operator who would
+   rather do a corpus at once; the lazy path only reaches documents that are
+   actually read.
 5. **Property test** upcasts: StreamData generates v1 blocks; assert upcast to v2
    is valid and total.
 
@@ -790,7 +795,12 @@ property-tested.
   interchange layer converted at the editor boundary (`PortableText.from_tiptap/1` /
   `to_html/1`). Stored truth is PT; unlocks structured marks, JSON-LD, and serializer property tests.
 - **D1 — Cache tiers:** ETS default; Redis optional behind behaviour.
-- **H1 — Fired-artifact evolution on schema bump:** _TBD_ (recommend re-fire affected types).
+- **H1 — Fired-artifact evolution on schema bump: lazy-migrate (#615).** The
+  artifact read compares a row's `format_version` against the one the build
+  writes; an older row is served once more and re-fired behind the request. A
+  bump therefore needs no deploy step. `mix kiln.refire_all` remains the way
+  to migrate a whole corpus at once, and is still **required** when a bump
+  *adds a surface* — there is no row for it, so nothing is stale to detect.
 
 ## 4. Open questions for the team
 
