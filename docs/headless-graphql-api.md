@@ -169,6 +169,37 @@ create/update/submit; **publish, unpublish and delete require an `:admin`**
 account. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
 
+### Writing tags — replace vs merge
+
+`updatePost` accepts three tag inputs (#521). `tagIds` is the **complete** set,
+so a partial update detaches every tag it omits; `addTagIds` and `removeTagIds`
+merge against the current links instead and are the right choice for any client
+that doesn't already hold the full list.
+
+```graphql
+mutation ($id: ID!, $input: UpdatePostInput!) {
+  updatePost(id: $id, input: $input) { result { id } errors { message } }
+}
+```
+
+```json
+{ "id": "<uuid>", "input": { "addTagIds": ["<tag-uuid>"] } }
+```
+
+Adding an attached tag and removing an unattached one are both no-ops, so
+retries are safe; a repeated id in one list is de-duplicated. An unknown id is
+asymmetric — `addTagIds` fails the mutation, `removeTagIds` swallows it.
+
+Sending `tagIds` together with either merge verb, or the same id in both
+`addTagIds` and `removeTagIds`, is rejected. `tagIds: null` counts as sending it
+(the field is nullable and `null` **clears** the set, so generated clients that
+populate every input field must omit it rather than null it); empty merge lists
+do not count and are simply ignored.
+
+The merge verbs are on `update*` only — `create*` has nothing to merge against
+and takes `tagIds` alone. `relatedPostIds` and the other relationship arrays
+still replace.
+
 ### Writing body content — the `blockTree` argument
 
 The typed `blocks` union is not on the GraphQL surface (it can't render cleanly

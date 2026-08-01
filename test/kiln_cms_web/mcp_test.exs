@@ -111,6 +111,78 @@ defmodule KilnCMSWeb.McpTest do
            "listed in config :kiln_cms, :mcp_tools but not declared on KilnCMS.CMS"
   end
 
+  # #521 — the MCP surface is the sharpest case: a model asked to "tag this as
+  # Elixir" sends the one id it knows. The merge verbs have to be in the tool's
+  # input schema, and the description has to point at them, or the model keeps
+  # reaching for the replacing `tag_ids`.
+  test "update_* tools offer the tag merge verbs and say so", %{conn: conn} do
+    plaintext = mint(user(:editor), :read_write)
+
+    conn = rpc(conn, plaintext, "tools/list")
+    %{"result" => %{"tools" => tools}} = json_response(conn, 200)
+
+    # Derived, not a literal list: the file already learned this lesson for the
+    # declared-vs-served check below — a hand-kept list only proves the names
+    # someone remembered, so a future `update_<type>` tool would ship without
+    # the hint and stay green.
+    update_tools =
+      KilnCMS.CMS
+      |> AshAi.Info.tools()
+      |> Enum.filter(&(&1.action == :update))
+      |> Enum.map(&to_string(&1.name))
+
+    assert length(update_tools) >= 3
+
+    for name <- update_tools do
+      tool = Enum.find(tools, &(&1["name"] == name))
+      assert tool, "expected tool #{name} to be exposed"
+
+      properties = get_in(tool, ["inputSchema", "properties", "input", "properties"]) || %{}
+
+      for arg <- ~w(tag_ids add_tag_ids remove_tag_ids) do
+        assert Map.has_key?(properties, arg), "#{name} is missing the #{arg} input"
+      end
+
+      assert tool["description"] =~ "add_tag_ids"
+      assert tool["description"] =~ "REPLACES"
+    end
+  end
+
+  # The schema/description assertions above pass even if the manage does
+  # nothing, so drive a real merge through tools/call.
+  test "update_post over MCP merges tags instead of replacing them", %{conn: conn} do
+    editor = user(:editor)
+    plaintext = mint(editor, :read_write)
+    admin = user(:admin)
+
+    a =
+      KilnCMS.CMS.create_tag!(%{name: "a", slug: "mcp-a-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    b =
+      KilnCMS.CMS.create_tag!(%{name: "b", slug: "mcp-b-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{title: "Tagged", slug: "mcp-p-#{System.unique_integer([:positive])}", tag_ids: [a.id]},
+        actor: editor
+      )
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{add_tag_ids: [b.id]}}
+      })
+
+    assert %{"result" => %{"isError" => false}} = json_response(conn, 200)
+
+    reloaded = KilnCMS.CMS.get_post!(post.id, actor: admin, load: [:tags])
+    assert MapSet.new(reloaded.tags, & &1.id) == MapSet.new([a.id, b.id])
+  end
+
   test "a :read_write key on an editor account can create a draft page", %{conn: conn} do
     plaintext = mint(user(:editor), :read_write)
     slug = "mcp-#{System.unique_integer([:positive])}"

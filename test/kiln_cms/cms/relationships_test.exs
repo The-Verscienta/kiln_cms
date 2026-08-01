@@ -21,6 +21,11 @@ defmodule KilnCMS.CMS.RelationshipsTest do
 
   defp slug, do: "rel-#{System.unique_integer([:positive])}"
 
+  defp tag_ids(record), do: MapSet.new(record.tags, & &1.id)
+
+  defp current_tags(post, actor),
+    do: post.id |> CMS.get_post!(actor: actor, load: [:tags]) |> tag_ids()
+
   describe "category (many-to-one / one-to-many)" do
     test "a post belongs to a category, and the category has_many posts" do
       editor = user(:editor)
@@ -69,7 +74,7 @@ defmodule KilnCMS.CMS.RelationshipsTest do
           load: [:tags]
         )
 
-      assert MapSet.new(post.tags, & &1.id) == MapSet.new([t1.id, t2.id])
+      assert tag_ids(post) == MapSet.new([t1.id, t2.id])
 
       # Inverse from the tag side.
       loaded_tag = CMS.get_tag!(t1.id, load: [:posts], actor: editor)
@@ -87,6 +92,206 @@ defmodule KilnCMS.CMS.RelationshipsTest do
       updated = CMS.update_post!(post, %{tag_ids: [t2.id]}, actor: editor, load: [:tags])
       assert [%{id: only}] = updated.tags
       assert only == t2.id
+    end
+  end
+
+  # #521: `tag_ids` is the complete set, so every partial-update caller
+  # (REST/GraphQL/MCP) detaches by omission. These two merge instead.
+  describe "add_tag_ids / remove_tag_ids (merge semantics, #521)" do
+    setup do
+      editor = user(:editor)
+      a = CMS.create_tag!(%{name: "a", slug: slug()}, actor: editor)
+      b = CMS.create_tag!(%{name: "b", slug: slug()}, actor: editor)
+      c = CMS.create_tag!(%{name: "c", slug: slug()}, actor: editor)
+
+      post =
+        CMS.create_post!(%{title: "P", slug: slug(), tag_ids: [a.id, b.id]}, actor: editor)
+
+      %{editor: editor, a: a, b: b, c: c, post: post}
+    end
+
+    test "add_tag_ids attaches without detaching the rest", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_tag_ids: [ctx.c.id]},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
+    end
+
+    test "add_tag_ids is idempotent for an already-attached tag", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_tag_ids: [ctx.a.id]},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "add_tag_ids rejects an unknown id rather than silently dropping it", ctx do
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.update_post(ctx.post, %{add_tag_ids: [Ash.UUID.generate()]}, actor: ctx.editor)
+    end
+
+    test "remove_tag_ids detaches only what is listed", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{remove_tag_ids: [ctx.a.id]},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.b.id])
+    end
+
+    test "remove_tag_ids is a no-op for a tag that is not attached", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{remove_tag_ids: [ctx.c.id]},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    # The load-bearing version of the two idempotency tests above: a mixed list
+    # has to detach the attached id and skip the rest, which an implementation
+    # that simply ignored the argument could not fake.
+    test "remove_tag_ids applies the attached ids and skips the rest", ctx do
+      updated =
+        CMS.update_post!(
+          ctx.post,
+          %{remove_tag_ids: [ctx.a.id, ctx.c.id, Ash.UUID.generate()]},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.b.id])
+    end
+
+    test "a repeated id in one list is de-duplicated, not a constraint error", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_tag_ids: [ctx.c.id, ctx.c.id]},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
+    end
+
+    test "add and remove apply together in one write", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_tag_ids: [ctx.c.id], remove_tag_ids: [ctx.a.id]},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.b.id, ctx.c.id])
+    end
+
+    test "a metadata-only update still leaves tags untouched", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{title: "Retitled"}, actor: ctx.editor, load: [:tags])
+
+      assert tag_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "combining tag_ids with a merge verb is refused", ctx do
+      for params <- [
+            %{tag_ids: [ctx.a.id], add_tag_ids: [ctx.c.id]},
+            %{tag_ids: [ctx.a.id], remove_tag_ids: [ctx.b.id]},
+            %{tag_ids: [], add_tag_ids: [ctx.c.id]}
+          ] do
+        assert {:error, error} = CMS.update_post(ctx.post, params, actor: ctx.editor)
+        assert Exception.message(error) =~ "cannot be combined", inspect(params)
+      end
+
+      # Still attached — the refusal is a validation, not a partial write.
+      assert current_tags(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    # The regression this whole describe exists for. `tag_ids: nil` is NOT
+    # "omitted": Ash `List.wrap`s it to `[]` and `:append_and_remove` clears
+    # the set — so reading null as absent would let the guard pass and detach
+    # everything, which is exactly the #521 bug arriving through its own fix.
+    # A generated client that serializes unset fields as null sends this shape.
+    test "an explicit tag_ids: nil counts as combining, and changes nothing", ctx do
+      assert {:error, error} =
+               CMS.update_post(ctx.post, %{tag_ids: nil, add_tag_ids: [ctx.c.id]},
+                 actor: ctx.editor
+               )
+
+      assert Exception.message(error) =~ "cannot be combined"
+      assert current_tags(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    # The mirror of the above: empty merge lists carry no intent, so a client
+    # that always serializes all three keys must still reach the replace path.
+    test "empty merge lists do not conflict with tag_ids", ctx do
+      updated =
+        CMS.update_post!(
+          ctx.post,
+          %{tag_ids: [ctx.c.id], add_tag_ids: [], remove_tag_ids: []},
+          actor: ctx.editor,
+          load: [:tags]
+        )
+
+      assert tag_ids(updated) == MapSet.new([ctx.c.id])
+    end
+
+    test "listing the same id in both verbs is refused", ctx do
+      assert {:error, error} =
+               CMS.update_post(ctx.post, %{add_tag_ids: [ctx.c.id], remove_tag_ids: [ctx.c.id]},
+                 actor: ctx.editor
+               )
+
+      assert Exception.message(error) =~ "same tag"
+      assert current_tags(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    # `Exception.message/1` is what AshAi hands back to a model on a rejected
+    # MCP tool call, so a stray `nil` from an unset `value:` lands in the LLM's
+    # context as if it were part of the explanation.
+    test "the refusal message carries no stray inspect output", ctx do
+      assert {:error, error} =
+               CMS.update_post(ctx.post, %{tag_ids: [ctx.a.id], add_tag_ids: [ctx.c.id]},
+                 actor: ctx.editor
+               )
+
+      refute Exception.message(error) =~ ~r/\bnil\b/
+    end
+
+    test "the merge verbs are on pages too, not just posts", ctx do
+      page =
+        CMS.create_page!(%{title: "Pg", slug: slug(), tag_ids: [ctx.a.id]}, actor: ctx.editor)
+
+      updated =
+        CMS.update_page!(page, %{add_tag_ids: [ctx.b.id]}, actor: ctx.editor, load: [:tags])
+
+      assert tag_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    # The dynamic tier (D17) shares the macro but has its own generic API and
+    # MCP surface, and `cms.ex` advertises `update_entry`'s merge verbs — so it
+    # needs its own assertion rather than riding on the compiled types'.
+    test "the merge verbs reach the dynamic entry tier", ctx do
+      admin = user(:admin)
+
+      type =
+        CMS.create_type_definition!(
+          %{name: "recipe_#{System.unique_integer([:positive])}", label: "Recipe"},
+          actor: admin
+        )
+
+      entry =
+        CMS.create_entry!(
+          %{title: "E", slug: slug(), type_definition_id: type.id, tag_ids: [ctx.a.id]},
+          actor: admin
+        )
+
+      updated = CMS.update_entry!(entry, %{add_tag_ids: [ctx.b.id]}, actor: admin, load: [:tags])
+      assert tag_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id])
     end
   end
 

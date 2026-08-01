@@ -381,6 +381,36 @@ curl -s http://localhost:4000/api/json/posts \
 `custom_fields` / scheduling attributes are all writable. Relationship arrays
 (`tag_ids`, `related_post_ids`) are passed as attributes.
 
+### Writing tags — replace vs merge
+
+`tag_ids` is the content's **complete** tag set (append-and-remove), so a
+`PATCH` carrying a partial list detaches everything omitted. A partial writer
+should use the merge verbs on `PATCH /:id` instead (#521):
+
+| Attribute | Semantics |
+|---|---|
+| `add_tag_ids` | Attaches the listed tags and leaves the others alone. Re-adding an attached tag is a no-op; a repeated id is de-duplicated; an id that matches no tag is a `404` (`not_found`, no field pointer — the lookup, not the record, is what failed). |
+| `remove_tag_ids` | Detaches the listed tags and leaves the others alone. Removing a tag that isn't attached — or an id that matches no tag at all — is a silent no-op, so retries are safe and a wrong id is *not* reported. |
+| `tag_ids` | **Replaces** the set. Omitting it leaves tags untouched; both `[]` and `null` clear them. |
+
+```bash
+curl -X PATCH http://localhost:4000/api/json/posts/<uuid> \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -H 'content-type: application/vnd.api+json' \
+  -d '{"data":{"type":"post","id":"<uuid>","attributes":{"add_tag_ids":["<tag-uuid>"]}}}'
+```
+
+`tag_ids` may not be sent alongside either merge verb, and an id may not appear
+in both `add_tag_ids` and `remove_tag_ids` — both are rejected with a `400`
+rather than resolved in some arbitrary order. "Alongside" includes
+`"tag_ids": null`, which clears rather than being ignored; an empty
+`add_tag_ids`/`remove_tag_ids` carries no intent and is not a conflict, so a
+client that always serializes all three keys still gets the replace path. The same three attributes exist on
+GraphQL's `updatePost` (`addTagIds` / `removeTagIds`) and on the MCP `update_*`
+tools. They are **update-only** — `POST` has no existing links to merge against,
+so a create takes `tag_ids` alone. `related_post_ids` and the other relationship
+arrays still replace on both verbs; they have no merge verbs yet.
+
 ### Writing body content — the `block_tree` attribute
 
 The typed `blocks` union isn't exposed on the auto API (it isn't `public?`), so
