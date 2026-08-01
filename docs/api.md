@@ -288,15 +288,17 @@ embed page's CSP `frame-ancestors`:
 
 | `EMBED_ORIGINS`                        | Effect                                             |
 |----------------------------------------|----------------------------------------------------|
-| *(unset — the default)*                | `*` — any site may embed the form.                 |
-| `https://a.example,https://b.example`  | Only these parents may frame it.                   |
-| *(blank)*                              | `'self'` — same-origin only; embedding is off.     |
+| *(unset or blank — the default)*       | `'self'` — same-origin only; cross-site embedding is off. |
+| `https://a.example,https://b.example`  | `'self'` plus these parents may frame it.          |
+| `*`                                    | Any site may embed the form.                       |
 
-Defaulting to `*` is safe here: the embed page is an anonymous public form and a
-cross-site iframe never receives the `SameSite=Lax` session cookie, so there are
-no ambient credentials to clickjack. Submissions remain bounded by the honeypot
-and the tight `form` rate bucket. Lock it down with `EMBED_ORIGINS` if you'd
-rather forms only render on sites you control.
+**The default is closed** (#562) — paste the snippet on an external site before
+setting `EMBED_ORIGINS` and you get a blank iframe plus a CSP violation in that
+site's console. The embed page carries no ambient credentials (an anonymous
+public form; a cross-site iframe never receives the `SameSite=Lax` session
+cookie), but framing is itself the attack: with `*`, any site can overlay the
+form invisibly and harvest into your submissions table under your branding, and
+submission is deliberately CSRF-free. See [forms.md](forms.md#embedding-on-another-site).
 
 Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
 rather than a blank iframe.

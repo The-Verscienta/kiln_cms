@@ -7,30 +7,109 @@ defmodule KilnCMSWeb.Embed do
   `frame-ancestors 'self'`, which would block exactly that, so the embed route
   serves its own policy built here.
 
-  Which parents may frame it comes from `:embed_origins` config, resolved **per
-  request** so `EMBED_ORIGINS` can be set at runtime (see `config/runtime.exs`):
+  Which parents may frame it comes from `:embed_origins` config, read on each
+  request from what `config/runtime.exs` resolved `EMBED_ORIGINS` to at boot:
 
-    * `:all` (the default) — any site may embed the form. Safe because the embed
-      page carries **no ambient credentials**: it's an anonymous, public form,
-      and a cross-site iframe never receives the `SameSite=Lax` session cookie.
-      There is nothing to clickjack — submissions are already unauthenticated and
-      bounded by the honeypot plus the `:form` rate bucket.
-    * `[origin, …]` — an allowlist of parent origins, e.g.
-      `EMBED_ORIGINS=https://acme.com,https://blog.acme.com`.
-    * `[]` — same-origin only (`'self'`), i.e. embedding effectively off.
+    * `[]` (**the default**, i.e. `EMBED_ORIGINS` unset) — same-origin only
+      (`'self'`), so cross-site embedding is off until an operator opts in.
+    * `[origin, …]` — an allowlist, e.g.
+      `EMBED_ORIGINS=https://acme.com,https://blog.acme.com`. The rendered
+      policy **keeps `'self'`** alongside the allowlist, so opting a partner
+      site in never takes same-origin framing away.
+    * `:all` (`EMBED_ORIGINS=*`) — any site may embed the form.
+
+  ## Why the default is closed (#562)
+
+  It used to be `:all`, on the reasoning that the embed page carries no ambient
+  credentials: it is an anonymous public form, and a cross-site iframe never
+  receives the `SameSite=Lax` session cookie. That much is still true — there is
+  no session to steal here.
+
+  What it misses is that framing is itself the attack. `frame-ancestors *` lets
+  any site overlay the form invisibly and harvest into *your* submissions table
+  under *your* org's branding, and form submission is deliberately CSRF-free
+  (bounded only by the honeypot and the `:form` bucket), so nothing else stands
+  behind it. A closed default costs an allowlist entry; an open one is a control
+  that has to be remembered rather than one that holds by default.
+
+  ## Malformed settings close, they never widen
+
+  `frame-ancestors` is the last directive `content_security_policy/0` emits, so
+  a source carrying a `;` would append arbitrary directives to the header, and
+  one carrying whitespace would smuggle in extra sources. A bare `*` among
+  otherwise sensible entries — the shape an operator reaches for when reading
+  "the default used to be `*`" — would re-open the policy completely while
+  looking like an allowlist.
+
+  So an allowlist is **all-or-nothing**: every entry must look like a CSP host
+  source (`valid_source?/1`), and if any does not, the whole setting is
+  discarded for `'self'` rather than partially applied. `parse_env/1` catches
+  the same thing at boot and warns on stderr naming the offending entries, so
+  the operator learns from a log line rather than from a blank iframe.
+
+  ## Scope
+
+  `:embed_origins` is **deployment-global**, while forms are org-scoped. On a
+  multi-org deployment one allowlist governs every org's embed page — see #648.
 
   Scripts on the embed page are external files under `script-src 'self'`
   (`/embed-frame.js`), so no nonce or `unsafe-inline` is needed.
   """
 
+  # Same-origin only. Cross-site embedding is opt-in via EMBED_ORIGINS (#562).
+  @default_origins []
+
+  # A CSP host source: scheme, host (optionally wildcarded), port, path. Kept
+  # deliberately narrow — see "Malformed settings close" above. `'self'` and
+  # friends are not accepted here; `frame_ancestors/1` always prepends `'self'`.
+  @source_pattern ~r{^[A-Za-z0-9.\-*:/\[\]]+$}
+
   @doc "The `frame-ancestors` source list for the embed page's CSP."
   @spec frame_ancestors() :: String.t()
-  def frame_ancestors do
-    case Application.get_env(:kiln_cms, :embed_origins, :all) do
+  def frame_ancestors, do: frame_ancestors(configured_origins())
+
+  @doc """
+  The `frame-ancestors` source list for a given `:embed_origins` setting.
+
+  An allowlist renders as `'self'` plus its entries. Anything unrecognised —
+  a non-list, an empty list, or a list with even one entry that is not a valid
+  host source — falls back to `'self'`: a malformed setting must not widen the
+  policy, and must not be silently applied in part.
+  """
+  @spec frame_ancestors(:all | [String.t()]) :: String.t()
+  def frame_ancestors(:all), do: "*"
+
+  def frame_ancestors(origins) when is_list(origins) do
+    if origins != [] and Enum.all?(origins, &valid_source?/1) do
+      Enum.join(["'self'" | origins], " ")
+    else
+      "'self'"
+    end
+  end
+
+  def frame_ancestors(_other), do: "'self'"
+
+  @doc """
+  Whether any site other than the embed page's own origin may frame it.
+
+  Derived from the rendered policy rather than the raw setting, so a malformed
+  `EMBED_ORIGINS` — which `frame_ancestors/1` closes — reports as closed here
+  too. Note this is the *deployment* answer; it cannot tell an admin whether
+  their particular org's site is on the list (#648).
+  """
+  @spec cross_site?() :: boolean()
+  def cross_site?, do: frame_ancestors() != "'self'"
+
+  @doc """
+  The configured allowlist as a display string, or `nil` when embedding is
+  closed. For admin UI that needs to show *which* origins are permitted.
+  """
+  @spec allowed_origins_label() :: String.t() | nil
+  def allowed_origins_label do
+    case configured_origins() do
       :all -> "*"
-      [] -> "'self'"
-      origins when is_list(origins) -> Enum.join(origins, " ")
-      _ -> "'self'"
+      origins when is_list(origins) and origins != [] -> Enum.join(origins, ", ")
+      _ -> nil
     end
   end
 
@@ -51,10 +130,17 @@ defmodule KilnCMSWeb.Embed do
   end
 
   @doc """
-  Parses an `EMBED_ORIGINS` env value. `"*"` → `:all`; a comma-separated list →
-  an allowlist; blank → `[]` (same-origin only).
+  Parses an `EMBED_ORIGINS` env value. A lone `"*"` → `:all`; a comma-separated
+  list → an allowlist; blank or unset → `[]` (same-origin only).
+
+  Entries that are not valid CSP host sources — including a `*` mixed into a
+  list, which would re-open the policy — discard the whole value for `[]` and
+  warn on stderr, following the fail-to-default-and-say-so rule
+  `KilnCMS.Config.Env` sets for the boolean variables.
   """
-  @spec parse_env(String.t()) :: :all | [String.t()]
+  @spec parse_env(String.t() | nil) :: :all | [String.t()]
+  def parse_env(nil), do: []
+
   def parse_env(value) when is_binary(value) do
     case String.trim(value) do
       "*" ->
@@ -68,6 +154,41 @@ defmodule KilnCMSWeb.Embed do
         |> String.split(",", trim: true)
         |> Enum.map(&String.trim/1)
         |> Enum.reject(&(&1 == ""))
+        |> reject_invalid(value)
     end
   end
+
+  defp reject_invalid(origins, raw) do
+    case Enum.reject(origins, &valid_source?/1) do
+      [] ->
+        origins
+
+      invalid ->
+        IO.warn(
+          """
+          EMBED_ORIGINS contains #{Enum.map_join(invalid, ", ", &inspect/1)}, which \
+          #{if length(invalid) == 1, do: "is not a valid", else: "are not valid"} \
+          frame-ancestors source#{if length(invalid) == 1, do: "", else: "s"}; \
+          keeping the default (same-origin only) rather than applying \
+          #{inspect(raw)} in part. Use a comma-separated list of origins, e.g. \
+          https://acme.com,https://blog.acme.com — or exactly `*` on its own to \
+          allow every site.\
+          """,
+          []
+        )
+
+        []
+    end
+  end
+
+  # A bare `*` is rejected here on purpose: as a lone value `parse_env/1` has
+  # already turned it into `:all`, so reaching this means it was mixed into a
+  # list, where joining it would silently grant every site.
+  defp valid_source?(source) when is_binary(source) do
+    source != "*" and Regex.match?(@source_pattern, source)
+  end
+
+  defp valid_source?(_source), do: false
+
+  defp configured_origins, do: Application.get_env(:kiln_cms, :embed_origins, @default_origins)
 end

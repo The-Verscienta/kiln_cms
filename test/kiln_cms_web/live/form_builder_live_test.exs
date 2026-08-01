@@ -252,6 +252,13 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert html =~ "/embed.js"
     assert html =~ "data-kiln-form=&quot;#{form.slug}&quot;"
     assert lv |> render_hook("copied", %{}) =~ "Embed code copied to clipboard."
+
+    # `config/test.exs` configures an allowlist, so the panel names it and the
+    # closed-default warning stays hidden. Pins the polarity of the `:if` — an
+    # inverted guard would otherwise tell every correctly-configured operator
+    # that cross-site embedding is off (#562).
+    assert html =~ "https://embedder.test"
+    refute html =~ "Cross-site embedding is off"
   end
 
   test "the embed snippet points at the org's own host on a tenant subdomain (#557)",

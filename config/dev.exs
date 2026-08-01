@@ -114,3 +114,8 @@ config :kiln_cms, :i18n, default_locale: "en", locales: ["en", "fr", "es"]
 # frontend (e.g. the Phoenix showcase on :4002, or a browser SPA) can consume it
 # without extra setup. Prod stays same-origin-only unless CORS_ORIGINS is set.
 config :kiln_cms, :cors_origins, :all
+
+# Same reasoning for embeddable forms (#562): let a locally-served scratch page
+# frame `/forms/:slug/embed` without setting EMBED_ORIGINS first, so the feature
+# can be exercised in dev. Prod is same-origin only unless EMBED_ORIGINS is set.
+config :kiln_cms, :embed_origins, :all

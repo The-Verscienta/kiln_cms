@@ -116,6 +116,30 @@ migration, a rewritten column, a dropped config key).
   nosniff` **cannot** be set as S3 object metadata and remains an operator
   task; `docs/media-pipeline.md` now documents it per CDN.
 
+### Security
+
+- **Embeddable forms no longer default to `frame-ancestors *`.** `EMBED_ORIGINS`
+  unset resolved to `:all`, so out of the box any site on the internet could
+  iframe `/forms/:slug/embed`. The embed page carries no ambient credentials — a
+  cross-site iframe never receives the `SameSite=Lax` session cookie — but
+  framing is itself the attack: any site could overlay the form invisibly and
+  harvest into the org's own submissions table under its own branding, and form
+  submission is deliberately CSRF-free, so nothing stood behind it. Unset now
+  means same-origin only and cross-site embedding is opt-in. **Deployments that
+  rely on embedding must set `EMBED_ORIGINS` — see Upgrading below.** (#562)
+- A malformed `EMBED_ORIGINS` now closes the policy instead of widening it.
+  Entries are validated as CSP host sources, and the whole value is discarded
+  for the same-origin default — with a warning on stderr naming the offending
+  entries — rather than applied in part. Two shapes mattered: a `*` mixed into a
+  list (`EMBED_ORIGINS=*,https://acme.com`) used to render `frame-ancestors *
+  https://acme.com`, i.e. wide open while looking like an allowlist; and an
+  entry containing `;` used to append arbitrary directives to the header, since
+  `frame-ancestors` is the last one emitted. (#562)
+- An allowlist now keeps `'self'`. `EMBED_ORIGINS=https://acme.com` used to
+  render `frame-ancestors https://acme.com`, silently withdrawing same-origin
+  framing; it now renders `frame-ancestors 'self' https://acme.com`, so opting a
+  partner site in never takes the CMS's own host out. (#562)
+
 ### Fixed
 
 - **`DATABASE_SSL=True` no longer disables Postgres TLS.** The value was matched
@@ -166,6 +190,40 @@ migration, a rewritten column, a dropped config key).
   sighted and screen-reader users alike. The copyable media URL now says so too.
 
 ### Upgrading
+
+**Set `EMBED_ORIGINS` before deploying if you embed forms on other sites.**
+Until #562 the variable was unset on almost every deployment, because leaving it
+unset meant "any site may embed" and the feature worked out of the box. It now
+means "same-origin only", so an instance handing out the Embed-tab snippet will
+serve iframes the browser discards the moment this release goes live. Nothing
+errors: the CMS logs a healthy 200, and the only signal is a CSP violation in
+your embedder's browser console.
+
+```bash
+grep -rn 'EMBED_ORIGINS' .env docker-compose.yml 2>/dev/null
+```
+
+No output means you are on the old open default. If any third-party site frames
+one of your forms, list those sites before you redeploy:
+
+```
+EMBED_ORIGINS=https://acme.com,https://blog.acme.com
+```
+
+`EMBED_ORIGINS=*` restores the old behaviour exactly, if you would rather take
+the change in a later window. Setting it is reversible either way — it is read
+at boot, so a redeploy applies it, and no data changes.
+
+Two related tightenings can reject a value that used to be accepted, in both
+cases closing the policy to same-origin and warning on stderr: an entry that is
+not a valid CSP host source (anything with a space, a quote, a `;` or a comma
+surviving the split), and a bare `*` mixed into a list — write `EMBED_ORIGINS=*`
+on its own if you mean "any site". Check `docker logs` after the first boot for
+a line naming `EMBED_ORIGINS`.
+
+On a multi-org deployment note the list is **deployment-wide**, not per-org, so
+it must be the union of every org's embedder sites — and that union is also what
+each org's forms become framable by (#648).
 
 **Check `DATABASE_SSL` before deploying, if you set it at all.** Tightening
 #606 means an unrecognized value now keeps TLS *on* where it used to silently

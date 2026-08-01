@@ -197,6 +197,14 @@ defmodule KilnCMSWeb.FormBuilderLive do
     ~s(<script src="#{KilnCMSWeb.Tenant.base_url(org)}/embed.js" data-kiln-form="#{slug}"></script>)
   end
 
+  # Since #562 the shipped default is same-origin only, so a copied snippet on a
+  # third-party page renders blank until EMBED_ORIGINS names it. Say so here —
+  # otherwise the only signal is a console CSP violation on someone else's site.
+  # Both of these are deployment-wide, not per-org (#648), so the panel names
+  # the allowlist rather than claiming this org's site is on it.
+  defp cross_site_embedding?, do: KilnCMSWeb.Embed.cross_site?()
+  defp allowed_embed_origins, do: KilnCMSWeb.Embed.allowed_origins_label()
+
   # --- data --------------------------------------------------------------------
 
   defp copy_field(socket, field, fields) do
@@ -726,6 +734,16 @@ defmodule KilnCMSWeb.FormBuilderLive do
             )}
           </p>
 
+          <p :if={!cross_site_embedding?()} class="text-xs text-warning">
+            {gettext(
+              "Cross-site embedding is off: this form may only be framed by pages on its own site. Set the EMBED_ORIGINS environment variable to the sites that should be allowed to embed it."
+            )}
+          </p>
+
+          <p :if={cross_site_embedding?()} class="text-xs text-base-content/60">
+            {gettext("Sites allowed to embed: %{origins}", origins: allowed_embed_origins())}
+          </p>
+
           <div class="flex items-center gap-2">
             <input
               type="text"
@@ -747,7 +765,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
           <p class="text-xs text-base-content/60">
             {gettext(
-              "The iframe sizes itself to the form. Restrict which sites may embed it with the EMBED_ORIGINS environment variable."
+              "The iframe sizes itself to the form. Which sites may embed it is set by the EMBED_ORIGINS environment variable."
             )}
           </p>
         </section>
