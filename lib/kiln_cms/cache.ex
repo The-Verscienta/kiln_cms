@@ -237,6 +237,38 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
+  @doc """
+  Drop **every** delivery cache: this instance and the fired-artifact cache
+  (`KilnCMS.Firing.Cache`). The operator-facing purge behind `mix
+  kiln.cache.flush` and the admin button (#483).
+
+  Both instances feed delivery, so clearing one and not the other leaves the
+  site serving half-stale — the published-record lookups repopulate from the
+  database while the fired bodies keep whatever they had. Nothing on a write
+  path should call this: writes invalidate precisely, and a full flush means
+  every subsequent request re-reads the database until the caches warm again.
+
+  It exists for the states precise invalidation cannot reach — a config change,
+  a template deploy, an external data source feeding a custom block — where the
+  alternative was an IEx shell on production.
+
+  Returns the number of entries dropped from each, for the operator to see that
+  something happened. A disabled cache reports `0` rather than failing.
+  """
+  @spec flush_delivery() :: %{published: non_neg_integer(), artifacts: non_neg_integer()}
+  def flush_delivery do
+    %{published: clear_published(), artifacts: KilnCMS.Firing.Cache.clear()}
+  end
+
+  defp clear_published do
+    with true <- enabled?(),
+         {:ok, count} when is_integer(count) <- Cachex.clear(@cache) do
+      count
+    else
+      _ -> 0
+    end
+  end
+
   # Fallback result for `Cachex.fetch`: cache non-nil values with a TTL; a nil
   # (not found) is ignored, never cached, so newly published content appears
   # immediately.

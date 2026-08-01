@@ -28,6 +28,18 @@ These are origin-side targets (excluding network/CDN). The delivery path is desi
   stale-while-revalidate=300`, a content `ETag` (→ `304` on `If-None-Match`), and
   `Vary: Accept-Language`. 404s send `Cache-Control: no-store`. The in-BEAM cache is
   single-node, so a CDN in front is what absorbs a viral spike.
+- **Flushing by hand.** Invalidation is automatic and precise on writes, so a
+  manual purge is not part of publishing. For the states precise invalidation
+  cannot see — a config change, a template deploy, an external source feeding a
+  custom block — there is a **Flush delivery cache** button on `/editor/system`
+  (admin-only) and `mix kiln.cache.flush` for local use (#483). Both clear the
+  published-record cache *and* the fired-artifact cache: clearing one leaves the
+  site serving half-stale. Every request re-reads the database until the caches
+  warm again, and because these are in-process with no shared tier, a flush
+  covers **one node** — run it on each, or restart them. On a release use
+  `bin/kiln_cms rpc "KilnCMS.Cache.flush_delivery()"` — the `mix` task boots a
+  second node that would clear its own empty caches and start draining
+  production Oban queues on the way.
 - **Publish returns before firing.** The publish transition enqueues a `Firing.FireWorker`
   (queue `:firing`) instead of rendering 3 surfaces inline, so the publish response isn't
   blocked on firing. Delivery falls back to a live render on miss; the artifact API answers
