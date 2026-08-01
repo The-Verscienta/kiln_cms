@@ -161,7 +161,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       {lv, _html} = open_editor(conn, editor, page(editor))
 
       render_click(lv, "seo_suggest", %{})
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
 
       assert html =~ "SEO: Understanding kiln firing"
       assert html =~ "Suggestions"
@@ -192,7 +192,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       {lv, _html} = open_editor(conn, editor, thin)
 
       render_click(lv, "seo_suggest", %{})
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
 
       assert html =~ "isn&#39;t enough content yet"
       refute html =~ "SEO: Understanding"
@@ -206,7 +206,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       {lv, _html} = open_editor(conn, editor, page(editor))
 
       render_click(lv, "seo_suggest", %{})
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
 
       assert html =~ "Couldn&#39;t generate suggestions"
       assert field_value(lv, "seo_title") == ""
@@ -223,7 +223,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       {lv, _html} = open_editor(conn, editor, page(editor))
 
       render_click(lv, "seo_suggest", %{})
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
 
       assert html =~ "Couldn&#39;t generate suggestions"
       assert render(lv) =~ "SEO &amp; scheduling"
@@ -239,7 +239,7 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
     defp suggest(conn, editor, record) do
       {lv, _html} = open_editor(conn, editor, record)
       render_click(lv, "seo_suggest", %{})
-      render_async(lv)
+      render_async(lv, 2_000)
       lv
     end
 

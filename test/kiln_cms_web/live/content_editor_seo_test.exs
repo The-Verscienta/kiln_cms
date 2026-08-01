@@ -435,7 +435,9 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       refute html =~ "No related pages"
 
       render_click(lv, "seo_links_refresh", %{})
-      loaded = render_async(lv)
+      # Explicit timeout: the suggest run is a vector query plus a read per
+      # neighbour, which outruns render_async/1's 100ms default on a busy machine.
+      loaded = render_async(lv, 2_000)
 
       assert loaded =~ "Refresh"
     end
@@ -446,7 +448,7 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       {lv, _html} = open_editor(conn, editor, page)
 
       render_click(lv, "seo_links_refresh", %{})
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
 
       # This draft was never published, so it was never indexed — say so
       # instead of leaving the author staring at nothing.
