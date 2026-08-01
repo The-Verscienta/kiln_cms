@@ -476,7 +476,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
       lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
 
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
       assert html =~ "unsplash-abc123"
       assert html =~ "dried herbs on a table"
       assert html =~ "Jane Lens"
@@ -490,7 +490,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
       lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
-      render_async(lv)
+      render_async(lv, 2_000)
 
       lv
       |> element(~s(button[phx-click="unsplash_import"][phx-value-id="abc123"]))
@@ -534,7 +534,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       lv |> element(~s(button[phx-click="show_unsplash"])) |> render_click()
       lv |> form("#unsplash-search", %{q: "herbs"}) |> render_submit()
-      render_async(lv)
+      render_async(lv, 2_000)
 
       lv
       |> element(~s(button[phx-click="unsplash_import"][phx-value-id="abc123"]))

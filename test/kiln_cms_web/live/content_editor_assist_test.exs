@@ -157,7 +157,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       html = render_click(lv, "assist_run", %{"bid" => block_id(target)})
 
       refute html =~ "Suggestion"
-      assert render_async(lv) =~ "Understanding kiln firing"
+      assert render_async(lv, 2_000) =~ "Understanding kiln firing"
     end
   end
 
@@ -204,7 +204,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
     test "a suggestion appears after the async run completes", ctx do
       open_panel(ctx.lv, ctx.page)
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page)})
-      html = render_async(ctx.lv)
+      html = render_async(ctx.lv, 2_000)
 
       assert html =~ "Suggestion"
       # The stub echoes the request, so this also proves the block's own text
@@ -218,7 +218,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       render_click(ctx.lv, "assist_action", %{"action" => "summarize"})
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page)})
 
-      assert render_async(ctx.lv) =~ "Generated for summarize"
+      assert render_async(ctx.lv, 2_000) =~ "Generated for summarize"
     end
 
     test "an unknown action id is ignored rather than selected", ctx do
@@ -227,7 +227,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page)})
 
       # Still the default action, not a request built from the pushed string.
-      assert render_async(ctx.lv) =~ "Generated for rewrite"
+      assert render_async(ctx.lv, 2_000) =~ "Generated for rewrite"
     end
 
     test "the typed instruction travels with the request", ctx do
@@ -235,7 +235,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       render_change(ctx.lv, "assist_instruction", %{"assist_instruction" => "Mention cone ten"})
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page)})
 
-      assert render_async(ctx.lv) =~ "Mention cone ten"
+      assert render_async(ctx.lv, 2_000) =~ "Mention cone ten"
     end
 
     test "draft on an empty instruction reports why instead of calling out", ctx do
@@ -243,13 +243,13 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       render_click(ctx.lv, "assist_action", %{"action" => "draft"})
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page)})
 
-      assert render_async(ctx.lv) =~ "Describe what this section should say"
+      assert render_async(ctx.lv, 2_000) =~ "Describe what this section should say"
     end
 
     test "opening a different block drops the previous block's suggestion", ctx do
       open_panel(ctx.lv, ctx.page, 0)
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page, 0)})
-      assert render_async(ctx.lv) =~ "Suggestion"
+      assert render_async(ctx.lv, 2_000) =~ "Suggestion"
 
       # A genuinely different block: the prose describes content it doesn't
       # contain, and its Insert button would land it in the wrong place.
@@ -271,7 +271,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       open_panel(lv, target)
       render_click(lv, "assist_run", %{"bid" => block_id(target)})
 
-      refute render_async(lv) =~ "Suggestion"
+      refute render_async(lv, 2_000) =~ "Suggestion"
     end
 
     test "events missing their params are ignored, not fatal", ctx do
@@ -290,7 +290,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       })
 
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page)})
-      html = render_async(ctx.lv)
+      html = render_async(ctx.lv, 2_000)
 
       # The stub echoes the instruction it received; the panel must not be
       # holding — or re-rendering — 50 KB of it.
@@ -302,7 +302,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       # looking at, or a replayed event could generate against another block.
       render_click(ctx.lv, "assist_run", %{"bid" => block_id(ctx.page)})
 
-      refute render_async(ctx.lv) =~ "Suggestion"
+      refute render_async(ctx.lv, 2_000) =~ "Suggestion"
     end
   end
 
@@ -314,7 +314,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       {lv, _html} = open_editor(conn, editor, target)
       open_panel(lv, target)
       render_click(lv, "assist_run", %{"bid" => block_id(target)})
-      render_async(lv)
+      render_async(lv, 2_000)
       %{lv: lv, page: target, editor: editor}
     end
 
@@ -390,7 +390,7 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
       open_panel(lv, ctx.page)
       render_click(lv, "assist_run", %{"bid" => block_id(ctx.page)})
 
-      assert render_async(lv) =~ "Couldn&#39;t generate text"
+      assert render_async(lv, 2_000) =~ "Couldn&#39;t generate text"
     end
 
     test "a second click while one is in flight does not start a second run", ctx do

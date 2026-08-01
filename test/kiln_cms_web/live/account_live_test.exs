@@ -225,9 +225,10 @@ defmodule KilnCMSWeb.AccountLiveTest do
 
       conn = log_in(conn, victim)
       {:ok, view, _html} = live(conn, ~p"/account?checkout=success&session_id=cs_evil")
-      # `start_async` completes after mount returns; `render_async/1` is the API
-      # that awaits it (plain `render/1` does not).
-      render_async(view)
+      # `start_async` completes after mount returns; `render_async` is the API
+      # that awaits it (plain `render/1` does not). The explicit timeout beats
+      # the 100ms default, which a loaded machine outruns.
+      render_async(view, 2_000)
 
       {:ok, reloaded} = Billing.get_membership(m.id, authorize?: false, tenant: m.org_id)
       assert reloaded.status == :incomplete
@@ -255,7 +256,7 @@ defmodule KilnCMSWeb.AccountLiveTest do
 
       conn = log_in(conn, user)
       {:ok, view, _html} = live(conn, ~p"/account?checkout=success&session_id=cs_ok")
-      render_async(view)
+      render_async(view, 2_000)
 
       {:ok, reloaded} = Billing.get_membership(m.id, authorize?: false, tenant: m.org_id)
       assert reloaded.status == :active

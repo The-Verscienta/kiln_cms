@@ -158,7 +158,7 @@ defmodule KilnCMSWeb.MailSettingsLiveTest do
       lv |> element(~s{button[phx-click="generate"]}) |> render_click()
 
       lv |> element(~s{button[phx-click="verify"]}) |> render_click()
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
 
       assert html =~ "no SPF record found"
       assert html =~ "no DKIM record found"
@@ -175,7 +175,7 @@ defmodule KilnCMSWeb.MailSettingsLiveTest do
       {lv, _html} = mount_as_admin(conn)
 
       lv |> element(~s{button[phx-click="preflight"]}) |> render_click()
-      html = render_async(lv)
+      html = render_async(lv, 2_000)
 
       assert html =~ "blocks outbound SMTP"
       assert html =~ "MAIL_MODE=smtp"
@@ -188,7 +188,7 @@ defmodule KilnCMSWeb.MailSettingsLiveTest do
       |> form(~s{form[phx-submit="send_test"]}, test: %{to: "probe@example.com"})
       |> render_submit()
 
-      render_async(lv)
+      render_async(lv, 2_000)
       # Test adapter accepts everything — the point is the outcome rendering.
       assert lv |> element(~s{[data-test-result="ok"]}) |> has_element?()
     end
