@@ -187,9 +187,18 @@ mutation ($id: ID!, $input: UpdatePostInput!) {
 ```
 
 Adding an attached tag and removing an unattached one are both no-ops, so
-retries are safe. Sending `tagIds` together with either merge verb, or the same
-id in both `addTagIds` and `removeTagIds`, is rejected. `relatedPostIds` and the
-other relationship arrays still replace.
+retries are safe; a repeated id in one list is de-duplicated. An unknown id is
+asymmetric — `addTagIds` fails the mutation, `removeTagIds` swallows it.
+
+Sending `tagIds` together with either merge verb, or the same id in both
+`addTagIds` and `removeTagIds`, is rejected. `tagIds: null` counts as sending it
+(the field is nullable and `null` **clears** the set, so generated clients that
+populate every input field must omit it rather than null it); empty merge lists
+do not count and are simply ignored.
+
+The merge verbs are on `update*` only — `create*` has nothing to merge against
+and takes `tagIds` alone. `relatedPostIds` and the other relationship arrays
+still replace.
 
 ### Writing body content — the `blockTree` argument
 

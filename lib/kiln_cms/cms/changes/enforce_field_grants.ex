@@ -22,8 +22,9 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
     * `restore_version` rewrites the whole document from a snapshot via
       force-changes that param inspection cannot see — a field-granted editor
       is refused the verb outright rather than silently bypassing the grant.
-    * Relationship arguments (`tag_ids`, related links) are curation, not
-      attributes — ungoverned here (documented in docs/granular-rbac.md).
+    * Relationship arguments (`tag_ids`, its `add_`/`remove_` merge verbs, and
+      related links) are curation, not attributes — ungoverned here
+      (documented in docs/granular-rbac.md).
     * Creates are ungoverned: authoring a *new* document is gated by
       `editable_types`; field grants refine stewardship of existing content.
     * Admins (and system/actor-less writes) are exempt, mirroring the policy

@@ -70,7 +70,17 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 >
 > `tag_ids` cannot be combined with either merge verb in one call, and the same
 > id cannot appear in both `add_tag_ids` and `remove_tag_ids`; either is
-> rejected rather than silently resolved.
+> rejected rather than silently resolved. A repeated id inside one list is
+> de-duplicated rather than rejected.
+>
+> The merge verbs are **update-only**. `create_page` / `create_post` /
+> `create_entry` have no existing tags to merge against and take `tag_ids`
+> alone; sending `add_tag_ids` to a create is an error.
+>
+> One asymmetry to plan around: `add_tag_ids` fails loudly on an id that
+> matches no tag, but `remove_tag_ids` swallows it. A successful `update_*` is
+> therefore not evidence a removal matched anything — call `read_tags` (or
+> re-read the record) if the outcome matters.
 
 The tool set lives in the `tools` block on `KilnCMS.CMS` and the
 `config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile

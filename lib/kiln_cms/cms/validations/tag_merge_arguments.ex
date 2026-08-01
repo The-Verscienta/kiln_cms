@@ -11,10 +11,26 @@ defmodule KilnCMS.CMS.Validations.TagMergeArguments do
       same reason: the manages run in declaration order, so the answer would
       be "removed", which is not obviously what the caller meant.
 
+  The two sides read presence differently, and the asymmetry is the whole
+  point of `replacing?/1` vs `merging/2`:
+
+    * `tag_ids` is **replacing** whenever it was supplied *at all*, explicit
+      `null` included. Ash's `manage_relationship` treats `{:ok, nil}` as the
+      supplied branch and `List.wrap`s it to `[]`, so `tag_ids: null` clears
+      every tag exactly like `tag_ids: []` does. Reading `null` as "absent"
+      here would let the single most common client shape — a generated
+      SDK that serializes unset fields as `null` — walk past this guard and
+      silently detach, which is precisely the bug #521 exists to close.
+    * A merge verb is only **merging** when it carries at least one id. `null`
+      and `[]` are both no-ops with nothing to conflict with, so a client that
+      fills every field in the input schema (equally common) is not locked out
+      of the replace path by two empty arrays.
+
   Nothing else is checked here — an unknown id in `add_tag_ids` is rejected by
   `manage_relationship`'s own lookup (`on_no_match: :error`), and an id in
   `remove_tag_ids` that is not currently attached is deliberately a no-op so
-  removal stays idempotent.
+  removal stays idempotent. Repeated ids within one list are de-duplicated
+  upstream by `KilnCMS.CMS.Changes.NormalizeTagArguments`, not rejected here.
   """
   use Ash.Resource.Validation
 
@@ -22,43 +38,50 @@ defmodule KilnCMS.CMS.Validations.TagMergeArguments do
 
   @impl true
   def validate(changeset, _opts, _context) do
-    add = supplied(changeset, :add_tag_ids)
-    remove = supplied(changeset, :remove_tag_ids)
+    add = merging(changeset, :add_tag_ids)
+    remove = merging(changeset, :remove_tag_ids)
 
     cond do
-      is_nil(add) and is_nil(remove) ->
+      add == [] and remove == [] ->
         :ok
 
-      not is_nil(supplied(changeset, :tag_ids)) ->
-        {:error,
-         InvalidArgument.exception(
-           field: :tag_ids,
-           message: "cannot be combined with add_tag_ids or remove_tag_ids"
-         )}
+      replacing?(changeset) ->
+        error(:tag_ids, add, remove, "cannot be combined with #{verbs(add, remove)}")
+
+      not MapSet.disjoint?(MapSet.new(add), MapSet.new(remove)) ->
+        error(:remove_tag_ids, add, remove, "cannot list the same tag as add_tag_ids")
 
       true ->
-        overlap(add || [], remove || [])
+        :ok
     end
   end
 
-  defp overlap(add, remove) do
-    if MapSet.disjoint?(MapSet.new(add), MapSet.new(remove)) do
-      :ok
-    else
-      {:error,
-       InvalidArgument.exception(
-         field: :remove_tag_ids,
-         message: "cannot list the same tag as add_tag_ids"
-       )}
-    end
+  # `value:` is not decoration: `InvalidArgument.message/1` interpolates it
+  # unconditionally, so omitting it appends a bare "nil" to the rendered
+  # message — and `Exception.message/1` is what AshAi hands back to the model
+  # on a rejected MCP tool call, the surface this whole change is written for.
+  defp error(field, add, remove, message) do
+    {:error,
+     InvalidArgument.exception(
+       field: field,
+       value: %{add_tag_ids: add, remove_tag_ids: remove},
+       message: message
+     )}
   end
 
-  # An omitted argument and an explicit `null` are both "not supplied" for the
-  # purpose of this check; `[]` is supplied (it means "clear" on `tag_ids`).
-  defp supplied(changeset, argument) do
+  defp verbs([], _remove), do: "remove_tag_ids"
+  defp verbs(_add, []), do: "add_tag_ids"
+  defp verbs(_add, _remove), do: "add_tag_ids or remove_tag_ids"
+
+  # Supplied at all — including an explicit `null`, which clears.
+  defp replacing?(changeset),
+    do: match?({:ok, _}, Ash.Changeset.fetch_argument(changeset, :tag_ids))
+
+  # Carrying at least one id; `null` and `[]` are no-ops.
+  defp merging(changeset, argument) do
     case Ash.Changeset.fetch_argument(changeset, argument) do
-      {:ok, value} -> value
-      :error -> nil
+      {:ok, ids} when is_list(ids) -> ids
+      _ -> []
     end
   end
 end

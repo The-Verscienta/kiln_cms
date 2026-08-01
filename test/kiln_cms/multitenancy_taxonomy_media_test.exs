@@ -152,6 +152,35 @@ defmodule KilnCMS.MultitenancyTaxonomyMediaTest do
       end
     end
 
+    # #521's merge verbs go through a second `manage_relationship` with its own
+    # opts, so the tenant guard above does not automatically cover them.
+    test "add_tag_ids in org A cannot attach a tag from org B",
+         %{a: a, b: b, actor: actor} do
+      tag_a = CMS.create_tag!(%{name: uniq("A"), slug: uniq("a")}, actor: actor, tenant: a)
+      tag_b = CMS.create_tag!(%{name: uniq("B"), slug: uniq("b")}, actor: actor, tenant: b)
+
+      page =
+        CMS.create_page!(
+          %{title: "A page", slug: uniq("a"), blocks: [], tag_ids: [tag_a.id]},
+          actor: actor,
+          tenant: a
+        )
+
+      result = CMS.update_page(page, %{add_tag_ids: [tag_b.id]}, actor: actor, tenant: a)
+
+      case result do
+        {:ok, updated} ->
+          updated = Ash.load!(updated, :tags, tenant: a, authorize?: false)
+          refute tag_b.id in Enum.map(updated.tags, & &1.id)
+          # A's own tag survives the refused merge.
+          assert tag_a.id in Enum.map(updated.tags, & &1.id)
+
+        {:error, _} ->
+          # An outright rejection is also an acceptable guard.
+          assert true
+      end
+    end
+
     test "a page in org A tags itself with A's own tag", %{a: a, actor: actor} do
       tag_a = CMS.create_tag!(%{name: uniq("A"), slug: uniq("a")}, actor: actor, tenant: a)
 

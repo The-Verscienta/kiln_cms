@@ -22,6 +22,11 @@ defmodule KilnCMS.CMS do
                     "without disturbing the others; tag_ids REPLACES the whole " <>
                     "set (send it only to set the complete list)."
 
+  # Creates have nothing to merge against, so they take `tag_ids` alone —
+  # without this the merge verbs named on every update tool read as universal
+  # and a model sends `add_tag_ids` to a create, which Ash rejects outright.
+  @create_tag_hint "Tags: pass tag_ids (the merge verbs are update-only)."
+
   # LLM-facing tools, served over the `/mcp` endpoint (see docs/mcp.md and
   # `KilnCMSWeb.Router`). Every call runs as the API-key's owning user through
   # the same policies as any other caller: reads are role/state/audience-scoped,
@@ -51,7 +56,7 @@ defmodule KilnCMS.CMS do
     end
 
     tool :read_tags, KilnCMS.CMS.Tag, :read do
-      description "List/filter tags (attach via add_tag_ids on content updates)."
+      description "List/filter tags (attach via tag_ids on create, add_tag_ids on update)."
     end
 
     tool :read_categories, KilnCMS.CMS.Category, :read do
@@ -64,7 +69,7 @@ defmodule KilnCMS.CMS do
 
     # Authoring — requires a read-write API key on an editor (or admin) account.
     tool :create_page, KilnCMS.CMS.Page, :create do
-      description "Create a page as a draft."
+      description "Create a page as a draft. #{@create_tag_hint}"
     end
 
     tool :update_page, KilnCMS.CMS.Page, :update do
@@ -76,7 +81,7 @@ defmodule KilnCMS.CMS do
     end
 
     tool :create_post, KilnCMS.CMS.Post, :create do
-      description "Create a blog post as a draft."
+      description "Create a blog post as a draft. #{@create_tag_hint}"
     end
 
     tool :update_post, KilnCMS.CMS.Post, :update do
@@ -88,7 +93,7 @@ defmodule KilnCMS.CMS do
     end
 
     tool :create_entry, KilnCMS.CMS.Entry, :create do
-      description "Create a dynamic-type entry as a draft (requires type_definition_id)."
+      description "Create a dynamic-type entry as a draft (requires type_definition_id). #{@create_tag_hint}"
     end
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do

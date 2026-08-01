@@ -336,68 +336,88 @@ defmodule KilnCMSWeb.WriteApiTest do
       key = mint(admin, :read_write)
       a = CMS.create_tag!(%{name: "a", slug: slug()}, actor: admin)
       b = CMS.create_tag!(%{name: "b", slug: slug()}, actor: admin)
-      post = CMS.create_post!(%{title: "T", slug: slug(), tag_ids: [a.id]}, actor: admin)
-      %{admin: admin, key: key, a: a, b: b, post: post}
+      c = CMS.create_tag!(%{name: "c", slug: slug()}, actor: admin)
+      post = CMS.create_post!(%{title: "T", slug: slug(), tag_ids: [a.id, b.id]}, actor: admin)
+      %{admin: admin, key: key, a: a, b: b, c: c, post: post}
+    end
+
+    defp patch_tags(ctx, attrs) do
+      patch_json("/api/json/posts/#{ctx.post.id}", ctx.post.id, attrs,
+        type: "post",
+        bearer: ctx.key
+      )
     end
 
     test "PATCH with tag_ids alone still replaces (unchanged contract)", ctx do
-      assert {200, _} =
-               patch_json("/api/json/posts/#{ctx.post.id}", ctx.post.id, %{tag_ids: [ctx.b.id]},
-                 type: "post",
-                 bearer: ctx.key
-               )
-
-      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.b.id])
+      assert {200, _} = patch_tags(ctx, %{tag_ids: [ctx.c.id]})
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.c.id])
     end
 
     test "PATCH with add_tag_ids merges instead of replacing", ctx do
-      assert {200, _} =
-               patch_json(
-                 "/api/json/posts/#{ctx.post.id}",
-                 ctx.post.id,
-                 %{add_tag_ids: [ctx.b.id]},
-                 type: "post",
-                 bearer: ctx.key
-               )
+      assert {200, _} = patch_tags(ctx, %{add_tag_ids: [ctx.c.id]})
 
-      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
+      assert current_tags(ctx.post.id, ctx.admin) ==
+               MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
     end
 
     test "PATCH with remove_tag_ids detaches only what is listed", ctx do
-      assert {200, _} =
-               patch_json(
-                 "/api/json/posts/#{ctx.post.id}",
-                 ctx.post.id,
-                 %{add_tag_ids: [ctx.b.id]},
-                 type: "post",
-                 bearer: ctx.key
-               )
-
-      assert {200, _} =
-               patch_json(
-                 "/api/json/posts/#{ctx.post.id}",
-                 ctx.post.id,
-                 %{remove_tag_ids: [ctx.a.id]},
-                 type: "post",
-                 bearer: ctx.key
-               )
-
+      assert {200, _} = patch_tags(ctx, %{remove_tag_ids: [ctx.a.id]})
       assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.b.id])
     end
 
     test "PATCH combining tag_ids with a merge verb is rejected, tags untouched", ctx do
-      assert {status, body} =
-               patch_json(
-                 "/api/json/posts/#{ctx.post.id}",
-                 ctx.post.id,
-                 %{tag_ids: [ctx.b.id], add_tag_ids: [ctx.b.id]},
-                 type: "post",
-                 bearer: ctx.key
-               )
+      assert {status, body} = patch_tags(ctx, %{tag_ids: [ctx.c.id], add_tag_ids: [ctx.c.id]})
 
       assert status == 400
       assert Enum.any?(body["errors"], &(&1["detail"] =~ "cannot be combined"))
-      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id])
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    # `"tag_ids": null` is legal JSON that a client serializing its whole model
+    # emits without meaning anything by it — and it CLEARS the set. If the guard
+    # read null as "absent", this request would 200 and detach a and b, which is
+    # the exact #521 data loss reappearing through the fix for it.
+    test "PATCH with tag_ids: null alongside a merge verb is rejected", ctx do
+      assert {status, body} = patch_tags(ctx, %{tag_ids: nil, add_tag_ids: [ctx.c.id]})
+
+      assert status == 400
+      assert Enum.any?(body["errors"], &(&1["detail"] =~ "cannot be combined"))
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    # The mirror: a client that fills every attribute in the schema sends empty
+    # merge lists on a plain replace, and must not be locked out by them.
+    test "PATCH with empty merge lists still takes the replace path", ctx do
+      assert {200, _} =
+               patch_tags(ctx, %{tag_ids: [ctx.c.id], add_tag_ids: [], remove_tag_ids: []})
+
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.c.id])
+    end
+
+    # Documented in docs/json-api.md as a 404 rather than a 400 — it is the tag
+    # lookup that fails, and the status is worth pinning because it is easy to
+    # misread as "the post does not exist".
+    test "PATCH with an unknown add_tag_ids id is a 404 and changes nothing", ctx do
+      assert {status, _body} = patch_tags(ctx, %{add_tag_ids: [Ash.UUID.generate()]})
+
+      assert status == 404
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "a read-only key cannot reach the merge verbs", ctx do
+      key = mint(user(:editor), :read)
+
+      assert {status, _} =
+               patch_json(
+                 "/api/json/posts/#{ctx.post.id}",
+                 ctx.post.id,
+                 %{add_tag_ids: [ctx.c.id]},
+                 type: "post",
+                 bearer: key
+               )
+
+      assert status in [403, 404]
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
     end
 
     test "updatePost exposes addTagIds/removeTagIds on the GraphQL input", ctx do
@@ -408,11 +428,19 @@ defmodule KilnCMSWeb.WriteApiTest do
       """
 
       body =
-        gql(query, %{id: ctx.post.id, input: %{addTagIds: [ctx.b.id]}}, bearer: ctx.key)
+        gql(query, %{id: ctx.post.id, input: %{addTagIds: [ctx.c.id]}}, bearer: ctx.key)
 
       assert body["errors"] == nil, inspect(body["errors"])
       assert body["data"]["updatePost"]["errors"] == []
-      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
+
+      assert current_tags(ctx.post.id, ctx.admin) ==
+               MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
+
+      body =
+        gql(query, %{id: ctx.post.id, input: %{removeTagIds: [ctx.a.id]}}, bearer: ctx.key)
+
+      assert body["data"]["updatePost"]["errors"] == []
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.b.id, ctx.c.id])
     end
   end
 
