@@ -215,13 +215,22 @@ configured. See [editorial-consent.md](editorial-consent.md) and
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `KILN_AUDIT_ANCHOR_EVERY_WRITE` | `false` | Set to `true`/`1`/`yes`/`on` to anchor **every** versioned write, not just publishes — #356's "sign every version, not just published artifacts". Closes the window between two publishes, at the cost of one signature and one `history_anchors` row per save. A regulated deployment wants this; a blog does not. Read at runtime so it can be turned off without rebuilding the image — note this only governs the per-write extension; the `:audit_anchors_enabled` master switch is still compile-time. Only a recognized spelling writes config, so an unrecognized value keeps the configured default rather than being read as "off" — silently not signing is the dangerous direction. Ignored under `MIX_ENV=test` so the suite stays deterministic. | [`config/runtime.exs:152`](../config/runtime.exs#L152) |
-| `KILN_PROVENANCE_PRIVATE_KEY` | unset | PKCS#1 RSA private key PEM (`BEGIN RSA PRIVATE KEY`) used to sign history anchors and C2PA-*style* content manifests (#340). Unset ⇒ anchors are stored **unsigned** — still an integrity checksum, but the anchor row itself is no longer tamper-proof, and `verify` reports `:unsigned` rather than `:verified`. The key source is configurable (`config :kiln_cms, KilnCMS.Provenance, signing_key:`); this var is the default `{:env, …}` binding. PKCS#8 is rejected — convert with `openssl rsa -in key.pem -traditional`. | [`config/config.exs:429`](../config/config.exs#L429) |
+| `KILN_PROVENANCE_PRIVATE_KEY` | unset | PKCS#1 RSA private key PEM (`BEGIN RSA PRIVATE KEY`) used to sign history anchors and C2PA-*style* content manifests (#340). Unset ⇒ anchors are stored **unsigned** — still an integrity checksum, but the anchor row itself is no longer tamper-proof, and `verify` reports `:unsigned` rather than `:verified`. This is a multi-line value and most `.env` parsers do not carry embedded newlines; prefer `KILN_PROVENANCE_KEY_FILE`. PKCS#8 is rejected — convert with `openssl rsa -in key.pem -traditional`. | [`config/config.exs:465`](../config/config.exs#L465) |
+| `KILN_PROVENANCE_KEY_FILE` | unset | Path to the same PEM, mounted as a file (Docker/K8s secret). **Overrides** `KILN_PROVENANCE_PRIVATE_KEY` when set, so a migration can mount the file first and unset the var after. Sets `signing_key: {:file, …}` at runtime — before #608 this shape existed only in `config/config.exs`, i.e. only with a rebuild. | [`config/runtime.exs:209`](../config/runtime.exs#L209) |
+| `KILN_PROVENANCE_RETIRED_KEY_FILES` | unset | Comma-separated **paths** to the public halves of keys that no longer sign but must still verify. Sets `:retired_key_files`, which `KeyRegistry.retired/0` **unions** with any `:retired_keys` configured in source — the env route can only add verification keys, never drop one. Blank entries are ignored, so a trailing comma is harmless; an unreadable path is logged and skipped rather than blinding the keys that do resolve. Paths only — a public key is multi-line too. | [`config/runtime.exs:229`](../config/runtime.exs#L229) |
+| `KILN_PROVENANCE_ENABLED` | `false` | Set to `true`/`1`/`yes`/`on` to produce signed manifests for fired artifacts and serve `/api/provenance/*`. **A signing key alone is not enough**: with this unset, the key signs history anchors and every provenance endpoint still returns `404`. Same spellings and warn-on-unrecognized behaviour as `KILN_AUDIT_ANCHOR_EVERY_WRITE`. Ignored under `MIX_ENV=test`. See [provenance.md](provenance.md). | [`config/runtime.exs:181`](../config/runtime.exs#L181) |
 
-> Rotating the signing key does **not** invalidate existing anchors or
-> manifests: verification resolves the key named by each signature's `key_id`.
-> Register the outgoing key's **public half** under `retired_keys` so
-> pre-rotation signatures keep verifying — the private half can then be
-> destroyed. See [`KilnCMS.Provenance.KeyRegistry`](../lib/kiln_cms/provenance/key_registry.ex).
+> **Rotating the signing key.** Verification resolves the key named by each
+> signature's `key_id`, so pre-rotation anchors and manifests keep verifying —
+> **once** the outgoing key's public half is registered
+> (`KILN_PROVENANCE_RETIRED_KEY_FILES`, or `retired_keys` in source).
+> Register it **before** destroying the
+> outgoing private half: until it is registered, those signatures resolve to
+> `{:error, {:unknown_key_id, …}}`, and with the private half gone there is no
+> way to re-derive the public one. Order matters — export the public half,
+> point the var at it, restart, confirm an old anchor still verifies, and only
+> then destroy the private key. See
+> [`KilnCMS.Provenance.KeyRegistry`](../lib/kiln_cms/provenance/key_registry.ex).
 
 ## Optional — upstream update check
 

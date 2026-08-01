@@ -19,11 +19,19 @@ defmodule KilnCMS.Provenance.KeyRegistry do
           {:env, %{"var" => "KILN_PROVENANCE_RETIRED_2024"}}
         ]
 
-  Each entry is a `KilnCMS.Keys` provider tuple (`:env` / `:file`) or a raw PEM
-  binary. Registering the **public half alone** is enough — that is all
-  verification needs — so a rotated-out private key can be destroyed and the
-  historical trail still verifies. A private key PEM is accepted too (its
-  public half is derived), but publishing the public half is the better habit.
+  Each `:retired_keys` entry is a `KilnCMS.Keys` provider tuple (`:env` /
+  `:file`) or a raw PEM binary. On a released image, where editing the config
+  above means a rebuild, set `KILN_PROVENANCE_RETIRED_KEY_FILES` instead — a
+  comma-separated list of PEM paths, parsed by
+  `KilnCMS.Provenance.parse_key_files/1` into `:retired_key_files`, which
+  `retired/0` unions with `:retired_keys`.
+
+  Registering the **public half alone** is enough — that is all verification
+  needs — so a rotated-out private key can be destroyed, but only *after* the
+  public half is registered: until then those signatures resolve to
+  `{:error, {:unknown_key_id, …}}`, and a destroyed private key cannot be asked
+  for its public one. A private key PEM is accepted too (its public half is
+  derived), but publishing the public half is the better habit.
 
   Entries that can't be resolved are logged and skipped: one unreadable path
   must not take down verification for the keys that *are* readable.
@@ -58,15 +66,27 @@ defmodule KilnCMS.Provenance.KeyRegistry do
   end
 
   @doc """
-  Every configured retired key, in config order. Unresolvable entries are
-  logged and omitted rather than raising.
+  Every configured retired key, in config order: `:retired_keys` first, then
+  the paths in `:retired_key_files` (what `KILN_PROVENANCE_RETIRED_KEY_FILES`
+  sets). The two are a **union** — the env route adds verification keys and
+  can never remove one configured in source, because a rotation losing a key it
+  used to hold is the failure this whole registry exists to prevent.
+
+  Unresolvable entries are logged and omitted rather than raising.
   """
   @spec retired() :: [entry()]
   def retired do
-    :kiln_cms
-    |> Application.get_env(KilnCMS.Provenance, [])
-    |> Keyword.get(:retired_keys, [])
-    |> Enum.map(&resolve/1)
+    config = Application.get_env(:kiln_cms, KilnCMS.Provenance, [])
+
+    tuples = Enum.map(Keyword.get(config, :retired_keys, []), &{:retired_keys, &1})
+
+    files =
+      config
+      |> Keyword.get(:retired_key_files, [])
+      |> Enum.map(&{:retired_key_files, {:file, %{"path" => &1}}})
+
+    (tuples ++ files)
+    |> Enum.map(fn {from, source} -> resolve(from, source) end)
     |> Enum.reject(&is_nil/1)
   end
 
@@ -120,15 +140,17 @@ defmodule KilnCMS.Provenance.KeyRegistry do
     }
   end
 
-  # A config entry is a provider tuple or the PEM itself.
-  defp resolve(source) do
+  # A config entry is a provider tuple or the PEM itself. `from` names the
+  # config key it came from, so the warning points at the thing to go fix —
+  # a path from KILN_PROVENANCE_RETIRED_KEY_FILES is not in :retired_keys.
+  defp resolve(from, source) do
     with {:ok, pem} <- fetch_source(source),
          {:ok, public_key} <- Keys.rsa_public_key_from_pem(pem) do
       describe(public_key)
     else
       {:error, reason} ->
         Logger.warning(
-          "Skipping unreadable :retired_keys entry #{inspect(source)}: " <>
+          "Skipping unreadable #{inspect(from)} entry #{inspect(source)}: " <>
             Keys.describe_error(reason)
         )
 
