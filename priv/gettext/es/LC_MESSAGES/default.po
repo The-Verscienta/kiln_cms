@@ -131,7 +131,7 @@ msgstr "Eliminar"
 
 #: lib/kiln_cms_web/live/automation_live.ex:288
 #: lib/kiln_cms_web/live/billing_live.ex:549
-#: lib/kiln_cms_web/live/content_editor_live.ex:5464
+#: lib/kiln_cms_web/live/content_editor_live.ex:5468
 #: lib/kiln_cms_web/live/editor_live.ex:769
 #: lib/kiln_cms_web/live/field_definition_live.ex:450
 #: lib/kiln_cms_web/live/taxonomy_live.ex:490
@@ -186,7 +186,7 @@ msgstr "Nada coincide con el filtro actual."
 msgid "Privacy-first content views — aggregate counts only, no visitor tracking."
 msgstr "Visualizaciones de contenido que respetan la privacidad — solo recuentos agregados, sin seguimiento de visitantes."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5522
+#: lib/kiln_cms_web/live/content_editor_live.ex:5526
 #: lib/kiln_cms_web/live/editor_live.ex:361
 #: lib/kiln_cms_web/live/editor_live.ex:376
 #: lib/kiln_cms_web/live/editor_live.ex:733
@@ -249,7 +249,7 @@ msgstr "Papelera"
 msgid "Type"
 msgstr "Tipo"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5548
+#: lib/kiln_cms_web/live/content_editor_live.ex:5552
 #: lib/kiln_cms_web/live/editor_live.ex:362
 #: lib/kiln_cms_web/live/editor_live.ex:370
 #: lib/kiln_cms_web/live/editor_live.ex:377
@@ -263,17 +263,17 @@ msgstr "Despublicar"
 msgid "Views"
 msgstr "Visualizaciones"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5397
+#: lib/kiln_cms_web/live/content_editor_live.ex:5401
 #, elixir-autogen, elixir-format
 msgid " (you)"
 msgstr " (usted)"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5406
+#: lib/kiln_cms_web/live/content_editor_live.ex:5410
 #, elixir-autogen, elixir-format
 msgid "%{count} editing"
 msgstr "%{count} editando"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5426
+#: lib/kiln_cms_web/live/content_editor_live.ex:5430
 #, elixir-autogen, elixir-format
 msgid "%{name} is editing this field"
 msgstr "%{name} está editando este campo"
@@ -599,7 +599,7 @@ msgid "Please fix the errors below."
 msgstr "Corrija los errores a continuación."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4419
-#: lib/kiln_cms_web/live/content_editor_live.ex:5316
+#: lib/kiln_cms_web/live/content_editor_live.ex:5320
 #: lib/kiln_cms_web/live/form_builder_live.ex:365
 #: lib/kiln_cms_web/live/token_preview_live.ex:55
 #: lib/kiln_cms_web/live/token_preview_live.ex:60
@@ -669,7 +669,7 @@ msgid "SEO title"
 msgstr "Título SEO"
 
 #: lib/kiln_cms_web/live/automation_live.ex:324
-#: lib/kiln_cms_web/live/content_editor_live.ex:5283
+#: lib/kiln_cms_web/live/content_editor_live.ex:5289
 #: lib/kiln_cms_web/live/field_definition_live.ex:520
 #: lib/kiln_cms_web/live/form_builder_live.ex:686
 #: lib/kiln_cms_web/live/form_builder_live.ex:706
@@ -690,7 +690,7 @@ msgstr "Guardar"
 msgid "Save details"
 msgstr "Guardar detalles"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5485
+#: lib/kiln_cms_web/live/content_editor_live.ex:5489
 #, elixir-autogen, elixir-format
 msgid "Saved"
 msgstr "Guardado"
@@ -747,7 +747,7 @@ msgstr "Contenido eliminado de forma reversible. Restaurar lo devuelve a donde e
 msgid "State:"
 msgstr "Estado:"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5512
+#: lib/kiln_cms_web/live/content_editor_live.ex:5516
 #, elixir-autogen, elixir-format
 msgid "Submit for review"
 msgstr "Enviar a revisión"
@@ -804,7 +804,7 @@ msgstr "URL"
 msgid "URL copied to clipboard."
 msgstr "URL copiada al portapapeles."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5493
+#: lib/kiln_cms_web/live/content_editor_live.ex:5497
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:600
 #: lib/kiln_cms_web/live/presentation_live.ex:424
 #, elixir-autogen, elixir-format
@@ -896,17 +896,17 @@ msgstr "…o pegue una URL"
 msgid "Approve"
 msgstr "Aprobar"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5522
+#: lib/kiln_cms_web/live/content_editor_live.ex:5526
 #, elixir-autogen, elixir-format
 msgid "Approve & publish"
 msgstr "Aprobar y publicar"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5538
+#: lib/kiln_cms_web/live/content_editor_live.ex:5542
 #, elixir-autogen, elixir-format
 msgid "Awaiting admin approval"
 msgstr "En espera de aprobación del administrador"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5532
+#: lib/kiln_cms_web/live/content_editor_live.ex:5536
 #, elixir-autogen, elixir-format
 msgid "Request changes"
 msgstr "Solicitar cambios"
@@ -1316,7 +1316,7 @@ msgstr "Título de sección"
 #: lib/kiln_cms_web/components/layouts.ex:470
 #: lib/kiln_cms_web/components/layouts.ex:479
 #: lib/kiln_cms_web/components/layouts.ex:730
-#: lib/kiln_cms_web/live/content_editor_live.ex:5317
+#: lib/kiln_cms_web/live/content_editor_live.ex:5321
 #: lib/kiln_cms_web/live/settings_live.ex:20
 #: lib/kiln_cms_web/live/settings_live.ex:309
 #, elixir-autogen, elixir-format
@@ -1471,7 +1471,7 @@ msgstr "Confirmar nueva contraseña"
 msgid "Content type"
 msgstr "Tipo de contenido"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5491
+#: lib/kiln_cms_web/live/content_editor_live.ex:5495
 #, elixir-autogen, elixir-format
 msgid "Couldn't autosave — check for errors"
 msgstr "No se pudo guardar automáticamente — compruebe si hay errores"
@@ -1783,12 +1783,12 @@ msgstr "Perfil actualizado."
 msgid "Published"
 msgstr "Publicado"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5519
+#: lib/kiln_cms_web/live/content_editor_live.ex:5523
 #, elixir-autogen, elixir-format
 msgid "Publishing…"
 msgstr "Publicando…"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5281
+#: lib/kiln_cms_web/live/content_editor_live.ex:5287
 #, elixir-autogen, elixir-format
 msgid "Reload to resolve the edit conflict before saving."
 msgstr "Recargue para resolver el conflicto de edición antes de guardar."
@@ -1813,8 +1813,8 @@ msgstr "Obligatorio"
 msgid "Save profile"
 msgstr "Guardar perfil"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5280
-#: lib/kiln_cms_web/live/content_editor_live.ex:5483
+#: lib/kiln_cms_web/live/content_editor_live.ex:5286
+#: lib/kiln_cms_web/live/content_editor_live.ex:5487
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:599
 #, elixir-autogen, elixir-format
 msgid "Saving…"
@@ -1869,7 +1869,7 @@ msgstr "Seleccionar %{title}"
 msgid "Skip to main content"
 msgstr "Saltar al contenido principal"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5509
+#: lib/kiln_cms_web/live/content_editor_live.ex:5513
 #, elixir-autogen, elixir-format
 msgid "Submitting…"
 msgstr "Enviando…"
@@ -1910,9 +1910,9 @@ msgstr "Usar tema del sistema"
 msgid "We couldn't find the page you were looking for — it may have been moved or deleted."
 msgstr "No pudimos encontrar la página que buscaba — puede que se haya movido o eliminado."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5529
-#: lib/kiln_cms_web/live/content_editor_live.ex:5545
-#: lib/kiln_cms_web/live/content_editor_live.ex:5555
+#: lib/kiln_cms_web/live/content_editor_live.ex:5533
+#: lib/kiln_cms_web/live/content_editor_live.ex:5549
+#: lib/kiln_cms_web/live/content_editor_live.ex:5559
 #, elixir-autogen, elixir-format
 msgid "Working…"
 msgstr "Procesando…"
@@ -2332,7 +2332,7 @@ msgstr "Segmento de URL"
 msgid "URL segment (defaults to machine name + \"s\")"
 msgstr "Segmento de URL (por defecto, nombre interno + \"s\")"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5558
+#: lib/kiln_cms_web/live/content_editor_live.ex:5562
 #: lib/kiln_cms_web/live/editor_live.ex:364
 #: lib/kiln_cms_web/live/editor_live.ex:372
 #: lib/kiln_cms_web/live/editor_live.ex:379
@@ -2685,7 +2685,7 @@ msgstr "Algo salió mal."
 msgid "Status"
 msgstr "Estado"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5489
+#: lib/kiln_cms_web/live/content_editor_live.ex:5493
 #, elixir-autogen, elixir-format
 msgid "Synced live — co-editor saves"
 msgstr "Sincronizado en vivo — guardados de coeditores"
@@ -5527,7 +5527,7 @@ msgstr "Agrupaciones en las que se archivan las etiquetas, para que el selector 
 msgid "Duplicate block"
 msgstr "Duplicar bloque"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5462
+#: lib/kiln_cms_web/live/content_editor_live.ex:5466
 #, elixir-autogen, elixir-format
 msgid "Edit this block on the page"
 msgstr "Editar este bloque en la página"
@@ -5547,7 +5547,7 @@ msgstr "Filtrar etiquetas…"
 msgid "Group"
 msgstr "Grupo"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5318
+#: lib/kiln_cms_web/live/content_editor_live.ex:5322
 #, elixir-autogen, elixir-format
 msgid "History"
 msgstr "Historial"
@@ -5577,7 +5577,7 @@ msgstr "Insertar una imagen"
 msgid "Insert block here"
 msgstr "Insertar bloque aquí"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5310
+#: lib/kiln_cms_web/live/content_editor_live.ex:5314
 #, elixir-autogen, elixir-format
 msgid "Inspector"
 msgstr "Inspector"
@@ -5617,7 +5617,7 @@ msgstr "Solo: %{types}"
 msgid "Overrides the title in search results and browser tabs. Falls back to the title."
 msgstr "Sustituye al título en los resultados de búsqueda y en las pestañas del navegador. Si se deja vacío, se usa el título."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5226
+#: lib/kiln_cms_web/live/content_editor_live.ex:5236
 #, elixir-autogen, elixir-format
 msgid "Publishes"
 msgstr "Se publica el"
@@ -5642,7 +5642,7 @@ msgstr "La URL preferida, si este contenido es accesible en más de una direcci�
 msgid "The snippet shown under the title in search results (aim for ~155 characters)."
 msgstr "El fragmento que se muestra bajo el título en los resultados de búsqueda (apunte a unos 155 caracteres)."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5337
+#: lib/kiln_cms_web/live/content_editor_live.ex:5341
 #, elixir-autogen, elixir-format
 msgid "This panel has validation errors"
 msgstr "Este panel tiene errores de validación"
@@ -5658,7 +5658,7 @@ msgstr "Escriba / para dar formato a este texto o insertar un bloque abajo."
 msgid "Ungrouped"
 msgstr "Sin grupo"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5238
+#: lib/kiln_cms_web/live/content_editor_live.ex:5248
 #, elixir-autogen, elixir-format
 msgid "Unpublishes"
 msgstr "Se despublica el"
@@ -6789,7 +6789,7 @@ msgid "Formula"
 msgstr "Fórmula"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:3373
-#: lib/kiln_cms_web/live/content_editor_live.ex:5261
+#: lib/kiln_cms_web/live/content_editor_live.ex:5267
 #, elixir-autogen, elixir-format
 msgid "%{count} word"
 msgid_plural "%{count} words"
@@ -6967,14 +6967,14 @@ msgstr "La incrustación entre sitios está desactivada: este formulario solo pu
 msgid "Sites allowed to embed: %{origins}"
 msgstr "Sitios autorizados a incrustarlo: %{origins}"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5261
+#: lib/kiln_cms_web/live/content_editor_live.ex:5267
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgid_plural "%{count} min read"
 msgstr[0] "%{count} min de lectura"
 msgstr[1] "%{count} min de lectura"
 
-#: lib/kiln_cms_web/live/content_editor_live.ex:5255
+#: lib/kiln_cms_web/live/content_editor_live.ex:5264
 #, elixir-autogen, elixir-format
 msgid "Reading time is an estimate at %{wpm} words per minute."
 msgstr "El tiempo de lectura es una estimación a %{wpm} palabras por minuto."
