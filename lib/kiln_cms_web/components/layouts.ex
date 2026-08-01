@@ -335,11 +335,18 @@ defmodule KilnCMSWeb.Layouts do
     # Effective capability tier on the CURRENT site (#419) — a global editor
     # demoted (or promoted) by an org membership sees the nav for that tier.
     # Resolve against the passed `current_org` (falling back to the default org
-    # only when absent), NOT the default org unconditionally.
+    # only when absent), NOT the default org unconditionally. The fallback is
+    # spelled out rather than routed through `Tenant.current_org_id/1`, which
+    # now raises on a missing assign (#563): `console/1` declares
+    # `attr :current_org, :map, default: nil`, so nil is inside the component's
+    # own contract and is the component's to resolve, not the tenant resolver's.
+    # The tier only picks which nav links render — every action behind them
+    # re-authorizes against the real org — so a default-org tier here is a
+    # cosmetic wrong answer, not an access-control one.
     role =
       KilnCMS.Accounts.Scoping.effective_tier(
         assigns[:current_user],
-        assigns[:current_org] || KilnCMSWeb.Tenant.current_org_id(%{assigns: assigns})
+        assigns[:current_org] || KilnCMS.Accounts.default_org_id()
       )
 
     multi_locale? = length(KilnCMS.I18n.locales()) > 1

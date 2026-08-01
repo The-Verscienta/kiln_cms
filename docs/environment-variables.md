@@ -71,6 +71,49 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 > on `PORT`. The expected topology is a TLS-terminating reverse proxy on 443
 > forwarding to the app on `PORT`.
 
+## Optional — multi-tenancy (#336)
+
+One deployment can serve many organizations, each on its own host. The request's
+`Host` picks the org: a subdomain of `TENANT_BASE_HOST` (`acme.example.com` → org
+`acme`), else an exact `custom_domain` on an org, else the default org. See
+[`KilnCMSWeb.Tenant`](../lib/kiln_cms_web/tenant.ex).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `TENANT_BASE_HOST` | `PHX_HOST` | The apex tenant subdomains are carved from. Set it only when tenant subdomains live under a different apex than the canonical URL host. | [`config/runtime.exs:443`](../config/runtime.exs#L443) |
+| `TENANT_STRICT_HOST` | `false` | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Recommended for every multi-tenant deployment** (#563) — without it a bare hostname, an IP literal, `localhost` or an attacker-supplied `Host` is served the default site's content, branding and analytics. Leave it off for a single-host install, where the bare host and an IP legitimately arrive unmatched and would start 404ing. The app logs a warning at boot if it is off on a deployment with more than one org. | [`config/runtime.exs:450`](../config/runtime.exs#L450) |
+
+**What it covers.** Everything the router serves, plus LiveView mounts and the
+GraphQL (`/ws/gql`) and visual-editing (`/ws/bridge`) sockets — each resolves
+its tenant from its own connect URI and refuses rather than falling back. Two
+things sit outside it, neither of which performs org-scoped reads:
+
+- **Static files**, including `/uploads` under the local storage adapter. Both
+  `Plug.Static` mounts run earlier in the endpoint and halt on a match, so an
+  asset URL answers on any `Host`. Keys are unguessable UUIDs, and putting
+  tenant resolution ahead of static would add two DB lookups to every asset
+  request; treat media URLs as host-agnostic, as they would be behind a CDN.
+- **`/ws/collab`**, the collaborative-editing socket, which resolves no host at
+  all and is authorized by a signed per-document token.
+
+**What stays reachable.** Two controllers are exempt, because both are
+deliberately host-independent and neither reads the ambient tenant:
+
+- **The liveness and readiness probes** (`/up`, `/ready`), so a load balancer or
+  orchestrator sending the container's IP as `Host` keeps getting a 200 —
+  turning this on will not mark a healthy deployment unhealthy.
+- **The payment-provider webhook** (`POST /billing/webhooks/stripe`), which
+  arrives at whatever host the endpoint was registered with, is authorized by an
+  HMAC over the raw body, and resolves its organization from the event payload.
+
+The exemption keys on the controller, not on a path list, so it tracks the
+router.
+
+> **Before turning it on**, confirm every host that must reach the app is
+> accounted for: each org's subdomain or `custom_domain`, and the `PHX_HOST`
+> apex itself (it resolves to the default org, and is never refused even if the
+> database is briefly unreachable). Anything else now gets a 404.
+
 ## Optional — database TLS
 
 | Variable | Default | Purpose | Where it's read |

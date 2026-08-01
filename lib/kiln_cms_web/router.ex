@@ -477,7 +477,12 @@ defmodule KilnCMSWeb.Router do
   scope "/preview", KilnCMSWeb do
     pipe_through [:browser, :preview_page]
 
-    live_session :token_preview do
+    # `:assign_current_org` so the preview resolves the tenant it is served from
+    # (#563) — without it the LiveView has no `:current_org` assign and any
+    # `Tenant.current_org_id/1` reached from it raises rather than silently
+    # reading the default org.
+    live_session :token_preview,
+      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}] do
       live "/:token/live", TokenPreviewLive, :show
     end
   end

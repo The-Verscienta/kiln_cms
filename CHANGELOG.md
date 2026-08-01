@@ -29,6 +29,31 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- `TENANT_STRICT_HOST=true` rejects a request whose `Host` matches no
+  organization instead of serving it the default org (#563). Tenant resolution
+  is by host — a subdomain of `TENANT_BASE_HOST`, then an org's `custom_domain`
+  — and anything else has always fallen through to the default org, which is
+  what makes a single-host install work and is the wrong answer on a
+  multi-tenant one: a bare hostname, an IP literal, `localhost` or an
+  attacker-supplied `Host` was served the default site's content, branding and
+  analytics. With the flag on, an unresolvable host gets a bare 404 from the
+  endpoint — across everything the router serves, plus LiveView mounts and the
+  GraphQL and visual-editing sockets, which each resolve the tenant from their
+  own connect URI and now refuse rather than silently scoping to the default
+  org. The rejection is answered in the plug rather than raised for the error
+  renderer, because the 404 template brands itself from the default org (which
+  would leak the site name and logo through the rejection page itself) and
+  because the rejection sits above every rate limiter and has to stay cheap.
+  Static files and `/ws/collab` are outside the control by design — see
+  `docs/environment-variables.md`, which has the reasoning and a new
+  multi-tenancy section. The health probes and the payment-provider webhook are
+  exempt, keyed on the controller rather than a path list, so turning this on
+  cannot fail a deployment's own liveness check or silently drop billing events.
+  The deployment's own apex is never refused either, so a missing default-org
+  seed row or a Postgres restart caught mid-request cannot 404 the whole site.
+  Off by default so no existing deployment changes; the app now logs a warning
+  at boot when it is off and more than one organization exists.
+
 - Content updates take `add_tag_ids` and `remove_tag_ids` alongside the existing
   `tag_ids` (#521). `tag_ids` has always been the *complete* tag set, so a
   partial write over `PATCH /api/json/<type>/:id`, GraphQL `update<Type>`, or
@@ -142,6 +167,15 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **`KilnCMSWeb.Tenant.current_org_id/1` raises on a missing `:current_org`
+  assign** instead of quietly returning the default org (#563). It is the
+  quieter half of the same defect: the assign comes from `Plugs.SetTenant`
+  (endpoint-level, so ahead of every pipeline) or the `:assign_current_org`
+  on_mount hook, and any path that skipped both read the default org's data on a
+  tenant's site with nothing to show for it. It now fails where such a path is
+  cheapest to find — in test. `live_session :token_preview` was the one route
+  group missing the hook and now carries it.
+
 - **`DATABASE_SSL=True` no longer disables Postgres TLS.** The value was matched
   raw against `~w(true 1)`, so any capitalized or space-padded spelling missed
   and fell through to `false` — an operator explicitly asking for TLS got a
@@ -225,6 +259,22 @@ On a multi-org deployment note the list is **deployment-wide**, not per-org, so
 it must be the union of every org's embedder sites — and that union is also what
 each org's forms become framable by (#648).
 
+**Overlays that call `KilnCMSWeb.Tenant.current_org_id/1` or `current_org/1`
+outside a request now raise.** The default-org fallback is gone (#563). Inside a
+controller, or a LiveView in a `live_session` that mounts `:assign_current_org`,
+nothing changes — the assign is there. A background job, a mix task, a test
+helper or a component rendered outside a request that passed a hand-built map to
+get "some org" should say `KilnCMS.Accounts.default_org/0` explicitly instead.
+
+```bash
+grep -rn 'Tenant.current_org' projects/
+```
+
+`TENANT_STRICT_HOST` itself needs no action: it defaults to off and every
+deployment keeps its current behaviour. Before turning it on, check that every
+host reaching the app is an org subdomain, an org `custom_domain`, or the
+`PHX_HOST` apex. Health checks need no special handling — `/up` and `/ready`
+are exempt.
 **Check `DATABASE_SSL` before deploying, if you set it at all.** Tightening
 #606 means an unrecognized value now keeps TLS *on* where it used to silently
 turn it off. A deployment that reached for a libpq `sslmode` spelling —

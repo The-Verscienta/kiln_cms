@@ -442,6 +442,13 @@ if config_env() == :prod do
   # canonical URL host.
   config :kiln_cms, :tenant_base_host, System.get_env("TENANT_BASE_HOST") || host
 
+  # Reject requests whose Host matches no organization instead of serving them
+  # the default org (#563). Recommended for any multi-tenant deployment; leave
+  # off for a single-host install, where the bare host / an IP / the load
+  # balancer's health-check Host all legitimately arrive unmatched and would
+  # start 404ing.
+  config :kiln_cms, :tenant_strict_host, KilnCMS.Config.Env.flag("TENANT_STRICT_HOST", false)
+
   # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer
   # beneath each site's own editor-managed row. Unset vars fall through to the
   # stock KilnCMS defaults. BRAND_PRIMARY_COLOR must be a hex colour (`#1d4ed8`);
