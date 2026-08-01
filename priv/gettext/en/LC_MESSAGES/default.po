@@ -241,7 +241,7 @@ msgid "Trash"
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex:274
-#: lib/kiln_cms_web/live/form_builder_live.ex:536
+#: lib/kiln_cms_web/live/form_builder_live.ex:544
 #: lib/kiln_cms_web/live/media_live.ex:1159
 #: lib/kiln_cms_web/live/slug_regen_live.ex:225
 #: lib/kiln_cms_web/live/translations_live.ex:163
@@ -370,7 +370,7 @@ msgid "Content can carry any number of tags."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:5070
-#: lib/kiln_cms_web/live/form_builder_live.ex:744
+#: lib/kiln_cms_web/live/form_builder_live.ex:762
 #: lib/kiln_cms_web/live/media_live.ex:1215
 #, elixir-autogen, elixir-format
 msgid "Copy"
@@ -435,7 +435,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live.ex:372
 #: lib/kiln_cms_web/live/billing_live.ex:581
-#: lib/kiln_cms_web/live/form_builder_live.ex:651
+#: lib/kiln_cms_web/live/form_builder_live.ex:659
 #: lib/kiln_cms_web/live/taxonomy_live.ex:405
 #: lib/kiln_cms_web/live/taxonomy_live.ex:523
 #: lib/kiln_cms_web/live/team_live.ex:501
@@ -529,7 +529,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex:349
 #: lib/kiln_cms_web/live/billing_live.ex:525
 #: lib/kiln_cms_web/live/billing_live.ex:579
-#: lib/kiln_cms_web/live/form_builder_live.ex:631
+#: lib/kiln_cms_web/live/form_builder_live.ex:639
 #: lib/kiln_cms_web/live/form_live.ex:175
 #: lib/kiln_cms_web/live/newsletter_live.ex:342
 #: lib/kiln_cms_web/live/taxonomy_live.ex:392
@@ -600,7 +600,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4419
 #: lib/kiln_cms_web/live/content_editor_live.ex:5284
-#: lib/kiln_cms_web/live/form_builder_live.ex:357
+#: lib/kiln_cms_web/live/form_builder_live.ex:365
 #: lib/kiln_cms_web/live/token_preview_live.ex:55
 #: lib/kiln_cms_web/live/token_preview_live.ex:60
 #, elixir-autogen, elixir-format
@@ -671,9 +671,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex:324
 #: lib/kiln_cms_web/live/content_editor_live.ex:5259
 #: lib/kiln_cms_web/live/field_definition_live.ex:520
-#: lib/kiln_cms_web/live/form_builder_live.ex:678
-#: lib/kiln_cms_web/live/form_builder_live.ex:698
-#: lib/kiln_cms_web/live/form_builder_live.ex:716
+#: lib/kiln_cms_web/live/form_builder_live.ex:686
+#: lib/kiln_cms_web/live/form_builder_live.ex:706
+#: lib/kiln_cms_web/live/form_builder_live.ex:724
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:449
 #: lib/kiln_cms_web/live/presentation_live.ex:373
 #: lib/kiln_cms_web/live/taxonomy_live.ex:532
@@ -728,7 +728,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex:580
 #: lib/kiln_cms_web/live/content_editor_live.ex:4458
-#: lib/kiln_cms_web/live/form_builder_live.ex:641
+#: lib/kiln_cms_web/live/form_builder_live.ex:649
 #: lib/kiln_cms_web/live/form_live.ex:179
 #: lib/kiln_cms_web/live/newsletter_live.ex:343
 #: lib/kiln_cms_web/live/taxonomy_live.ex:397
@@ -918,8 +918,8 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/block_components.ex:162
 #: lib/kiln_cms_web/live/editor_live.ex:723
-#: lib/kiln_cms_web/live/form_builder_live.ex:475
-#: lib/kiln_cms_web/live/form_builder_live.ex:662
+#: lib/kiln_cms_web/live/form_builder_live.ex:483
+#: lib/kiln_cms_web/live/form_builder_live.ex:670
 #, elixir-autogen, elixir-format
 msgid "Submit"
 msgstr ""
@@ -1408,8 +1408,8 @@ msgid "(opens in a new tab)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex:310
-#: lib/kiln_cms_web/live/form_builder_live.ex:381
-#: lib/kiln_cms_web/live/form_builder_live.ex:383
+#: lib/kiln_cms_web/live/form_builder_live.ex:389
+#: lib/kiln_cms_web/live/form_builder_live.ex:391
 #, elixir-autogen, elixir-format
 msgid "Add a field"
 msgstr ""
@@ -1510,7 +1510,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex:381
 #: lib/kiln_cms_web/live/field_definition_live.ex:507
-#: lib/kiln_cms_web/live/form_builder_live.ex:600
+#: lib/kiln_cms_web/live/form_builder_live.ex:608
 #, elixir-autogen, elixir-format
 msgid "Default value"
 msgstr ""
@@ -1575,7 +1575,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:395
 #: lib/kiln_cms_web/components/layouts.ex:730
-#: lib/kiln_cms_web/live/form_builder_live.ex:317
+#: lib/kiln_cms_web/live/form_builder_live.ex:325
 #, elixir-autogen, elixir-format
 msgid "Fields"
 msgstr ""
@@ -1611,7 +1611,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex:368
 #: lib/kiln_cms_web/live/field_definition_live.ex:491
-#: lib/kiln_cms_web/live/form_builder_live.ex:614
+#: lib/kiln_cms_web/live/form_builder_live.ex:622
 #, elixir-autogen, elixir-format
 msgid "Help text"
 msgstr ""
@@ -1631,7 +1631,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex:353
 #: lib/kiln_cms_web/live/field_definition_live.ex:481
-#: lib/kiln_cms_web/live/form_builder_live.ex:510
+#: lib/kiln_cms_web/live/form_builder_live.ex:518
 #, elixir-autogen, elixir-format
 msgid "Label"
 msgstr ""
@@ -1642,7 +1642,7 @@ msgid "Latest posts."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex:356
-#: lib/kiln_cms_web/live/form_builder_live.ex:521
+#: lib/kiln_cms_web/live/form_builder_live.ex:529
 #: lib/kiln_cms_web/live/type_definition_live.ex:197
 #, elixir-autogen, elixir-format
 msgid "Machine name"
@@ -1803,7 +1803,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex:564
 #: lib/kiln_cms_web/live/field_definition_live.ex:391
 #: lib/kiln_cms_web/live/field_definition_live.ex:517
-#: lib/kiln_cms_web/live/form_builder_live.ex:572
+#: lib/kiln_cms_web/live/form_builder_live.ex:580
 #, elixir-autogen, elixir-format
 msgid "Required"
 msgstr ""
@@ -2668,7 +2668,7 @@ msgid "Server public IP (for the SPF and reverse-DNS checks)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex:289
-#: lib/kiln_cms_web/live/form_builder_live.ex:315
+#: lib/kiln_cms_web/live/form_builder_live.ex:323
 #: lib/kiln_cms_web/live/form_live.ex:144
 #: lib/kiln_cms_web/live/mail_settings_live.ex:325
 #, elixir-autogen, elixir-format
@@ -2952,7 +2952,7 @@ msgstr ""
 msgid "Action config must be valid JSON."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:675
+#: lib/kiln_cms_web/live/form_builder_live.ex:683
 #, elixir-autogen, elixir-format
 msgid "Active (accepting submissions)"
 msgstr ""
@@ -3054,7 +3054,7 @@ msgstr ""
 msgid "All content types"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:340
+#: lib/kiln_cms_web/live/form_builder_live.ex:348
 #, elixir-autogen, elixir-format
 msgid "All forms"
 msgstr ""
@@ -3174,7 +3174,7 @@ msgstr ""
 msgid "Click a highlighted region in your site to edit it here."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:495
+#: lib/kiln_cms_web/live/form_builder_live.ex:503
 #, elixir-autogen, elixir-format
 msgid "Close field settings"
 msgstr ""
@@ -3200,7 +3200,7 @@ msgstr ""
 msgid "Confirm"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:320
+#: lib/kiln_cms_web/live/form_builder_live.ex:328
 #, elixir-autogen, elixir-format
 msgid "Confirmations"
 msgstr ""
@@ -3402,7 +3402,7 @@ msgstr ""
 msgid "Date"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:456
+#: lib/kiln_cms_web/live/form_builder_live.ex:464
 #, elixir-autogen, elixir-format
 msgid "Delete field %{label}"
 msgstr ""
@@ -3427,12 +3427,12 @@ msgstr ""
 msgid "Delete rule"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:778
+#: lib/kiln_cms_web/live/form_builder_live.ex:796
 #, elixir-autogen, elixir-format
 msgid "Delete submission"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:455
+#: lib/kiln_cms_web/live/form_builder_live.ex:463
 #, elixir-autogen, elixir-format
 msgid "Delete this field?"
 msgstr ""
@@ -3462,7 +3462,7 @@ msgstr ""
 msgid "Delete this segment?"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:777
+#: lib/kiln_cms_web/live/form_builder_live.ex:795
 #, elixir-autogen, elixir-format
 msgid "Delete this submission?"
 msgstr ""
@@ -3512,7 +3512,7 @@ msgstr ""
 msgid "Dropdown"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:446
+#: lib/kiln_cms_web/live/form_builder_live.ex:454
 #, elixir-autogen, elixir-format
 msgid "Duplicate field %{label}"
 msgstr ""
@@ -3527,12 +3527,12 @@ msgstr ""
 msgid "Each code signs you in once if you lose your authenticator."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:695
+#: lib/kiln_cms_web/live/form_builder_live.ex:703
 #, elixir-autogen, elixir-format
 msgid "Each submission is mailed here. Leave blank for no notification."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:425
+#: lib/kiln_cms_web/live/form_builder_live.ex:433
 #, elixir-autogen, elixir-format
 msgid "Edit field %{label}"
 msgstr ""
@@ -3589,7 +3589,7 @@ msgstr ""
 msgid "Email"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:321
+#: lib/kiln_cms_web/live/form_builder_live.ex:329
 #, elixir-autogen, elixir-format
 msgid "Embed"
 msgstr ""
@@ -3599,7 +3599,7 @@ msgstr ""
 msgid "Embed URL"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:734
+#: lib/kiln_cms_web/live/form_builder_live.ex:752
 #, elixir-autogen, elixir-format
 msgid "Embed code"
 msgstr ""
@@ -3609,7 +3609,7 @@ msgstr ""
 msgid "Embed code copied to clipboard."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:721
+#: lib/kiln_cms_web/live/form_builder_live.ex:729
 #, elixir-autogen, elixir-format
 msgid "Embed on another site"
 msgstr ""
@@ -3649,7 +3649,7 @@ msgstr ""
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:322
+#: lib/kiln_cms_web/live/form_builder_live.ex:330
 #, elixir-autogen, elixir-format
 msgid "Entries"
 msgstr ""
@@ -3720,8 +3720,8 @@ msgstr ""
 msgid "Field grants must be a JSON object."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:481
-#: lib/kiln_cms_web/live/form_builder_live.ex:490
+#: lib/kiln_cms_web/live/form_builder_live.ex:489
+#: lib/kiln_cms_web/live/form_builder_live.ex:498
 #, elixir-autogen, elixir-format
 msgid "Field settings"
 msgstr ""
@@ -3771,7 +3771,7 @@ msgstr ""
 msgid "Form duplicated (inactive until you activate it)."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:398
+#: lib/kiln_cms_web/live/form_builder_live.ex:406
 #, elixir-autogen, elixir-format
 msgid "Form preview"
 msgstr ""
@@ -3805,7 +3805,7 @@ msgstr ""
 msgid "Front-end preview"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:551
+#: lib/kiln_cms_web/live/form_builder_live.ex:559
 #, elixir-autogen, elixir-format
 msgid "Full"
 msgstr ""
@@ -3815,7 +3815,7 @@ msgstr ""
 msgid "Full editor"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:318
+#: lib/kiln_cms_web/live/form_builder_live.ex:326
 #, elixir-autogen, elixir-format
 msgid "General"
 msgstr ""
@@ -3857,7 +3857,7 @@ msgstr ""
 msgid "HTTP"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:554
+#: lib/kiln_cms_web/live/form_builder_live.ex:562
 #, elixir-autogen, elixir-format
 msgid "Half"
 msgstr ""
@@ -3902,7 +3902,7 @@ msgstr ""
 msgid "Importing…"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:345
+#: lib/kiln_cms_web/live/form_builder_live.ex:353
 #: lib/kiln_cms_web/live/form_live.ex:207
 #, elixir-autogen, elixir-format
 msgid "Inactive"
@@ -3923,7 +3923,7 @@ msgstr ""
 msgid "Keys"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:530
+#: lib/kiln_cms_web/live/form_builder_live.ex:538
 #, elixir-autogen, elixir-format
 msgid "Keys this field's value in submissions — renaming orphans old entries."
 msgstr ""
@@ -4076,7 +4076,7 @@ msgstr ""
 msgid "No deliveries yet."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:407
+#: lib/kiln_cms_web/live/form_builder_live.ex:415
 #, elixir-autogen, elixir-format
 msgid "No fields yet — add one from the palette."
 msgstr ""
@@ -4132,7 +4132,7 @@ msgstr ""
 msgid "No versions recorded."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:757
+#: lib/kiln_cms_web/live/form_builder_live.ex:775
 #, elixir-autogen, elixir-format
 msgid "None yet."
 msgstr ""
@@ -4157,12 +4157,12 @@ msgstr ""
 msgid "Nothing to rename"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:319
+#: lib/kiln_cms_web/live/form_builder_live.ex:327
 #, elixir-autogen, elixir-format
 msgid "Notifications"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:686
+#: lib/kiln_cms_web/live/form_builder_live.ex:694
 #, elixir-autogen, elixir-format
 msgid "Notify email"
 msgstr ""
@@ -4219,13 +4219,13 @@ msgid "OpenAPI spec (JSON)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex:98
-#: lib/kiln_cms_web/live/form_builder_live.ex:300
+#: lib/kiln_cms_web/live/form_builder_live.ex:308
 #, elixir-autogen, elixir-format
 msgid "Option 1"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex:98
-#: lib/kiln_cms_web/live/form_builder_live.ex:300
+#: lib/kiln_cms_web/live/form_builder_live.ex:308
 #, elixir-autogen, elixir-format
 msgid "Option 2"
 msgstr ""
@@ -4236,7 +4236,7 @@ msgstr ""
 msgid "Optional"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:577
+#: lib/kiln_cms_web/live/form_builder_live.ex:585
 #, elixir-autogen, elixir-format
 msgid "Options — one per line"
 msgstr ""
@@ -4322,7 +4322,7 @@ msgstr ""
 msgid "Ping"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:589
+#: lib/kiln_cms_web/live/form_builder_live.ex:597
 #, elixir-autogen, elixir-format
 msgid "Placeholder"
 msgstr ""
@@ -4544,7 +4544,7 @@ msgstr ""
 msgid "Renaming a published slug records one automatically."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:437
+#: lib/kiln_cms_web/live/form_builder_live.ex:445
 #, elixir-autogen, elixir-format
 msgid "Reorder field %{label}"
 msgstr ""
@@ -4689,7 +4689,7 @@ msgstr ""
 msgid "Segments"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:484
+#: lib/kiln_cms_web/live/form_builder_live.ex:492
 #, elixir-autogen, elixir-format
 msgid "Select a field on the canvas to edit it, or add one from the palette."
 msgstr ""
@@ -4749,7 +4749,7 @@ msgstr ""
 msgid "Showing the first %{cap} of %{total} renames — applying covers all of them."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:713
+#: lib/kiln_cms_web/live/form_builder_live.ex:721
 #, elixir-autogen, elixir-format
 msgid "Shown on the thank-you page after a successful submission."
 msgstr ""
@@ -4852,7 +4852,7 @@ msgstr ""
 msgid "Subject (optional — defaults to the post title)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:656
+#: lib/kiln_cms_web/live/form_builder_live.ex:664
 #, elixir-autogen, elixir-format
 msgid "Submit button label"
 msgstr ""
@@ -4882,7 +4882,7 @@ msgstr ""
 msgid "Subscription confirmed"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:705
+#: lib/kiln_cms_web/live/form_builder_live.ex:713
 #, elixir-autogen, elixir-format
 msgid "Success message"
 msgstr ""
@@ -4975,11 +4975,6 @@ msgstr ""
 msgid "The focus keyphrase doesn't appear in the title or SEO title."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:749
-#, elixir-autogen, elixir-format
-msgid "The iframe sizes itself to the form. Restrict which sites may embed it with the EMBED_ORIGINS environment variable."
-msgstr ""
-
 #: lib/kiln_cms_web/live/redirect_live.ex:162
 #, elixir-autogen, elixir-format
 msgid "The path must start with /."
@@ -5016,7 +5011,7 @@ msgstr ""
 msgid "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:557
+#: lib/kiln_cms_web/live/form_builder_live.ex:565
 #, elixir-autogen, elixir-format
 msgid "Third"
 msgstr ""
@@ -5036,7 +5031,7 @@ msgstr ""
 msgid "This field isn't inline-editable here."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:724
+#: lib/kiln_cms_web/live/form_builder_live.ex:732
 #, elixir-autogen, elixir-format
 msgid "This form is inactive — the embed shows “Form not found” until you activate it."
 msgstr ""
@@ -5166,7 +5161,7 @@ msgstr ""
 msgid "Updated"
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:609
+#: lib/kiln_cms_web/live/form_builder_live.ex:617
 #, elixir-autogen, elixir-format
 msgid "Use \"true\" to pre-check the box."
 msgstr ""
@@ -5226,7 +5221,7 @@ msgstr ""
 msgid "Who can author what on this site: members, their capability tier, and granular scope — assigned directly or through a custom role."
 msgstr ""
 
-#: lib/kiln_cms_web/live/form_builder_live.ex:548
+#: lib/kiln_cms_web/live/form_builder_live.ex:556
 #, elixir-autogen, elixir-format
 msgid "Width"
 msgstr ""
@@ -6954,4 +6949,19 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex:127
 #, elixir-autogen, elixir-format
 msgid "History intact; signed by a key we no longer hold — add its public half to KILN_PROVENANCE_RETIRED_KEY_FILES to re-check"
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex:767
+#, elixir-autogen, elixir-format
+msgid "The iframe sizes itself to the form. Which sites may embed it is set by the EMBED_ORIGINS environment variable."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex:738
+#, elixir-autogen, elixir-format
+msgid "Cross-site embedding is off: this form may only be framed by pages on its own site. Set the EMBED_ORIGINS environment variable to the sites that should be allowed to embed it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex:744
+#, elixir-autogen, elixir-format
+msgid "Sites allowed to embed: %{origins}"
 msgstr ""

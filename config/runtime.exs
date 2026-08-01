@@ -114,12 +114,15 @@ end
 
 # ## Embeddable forms — which parents may iframe `/forms/:slug/embed`
 #
-# Defaults to `*` (any site), which is safe: the embed page is an anonymous
-# public form and a cross-site iframe never receives the SameSite=Lax session
-# cookie. Set EMBED_ORIGINS to an allowlist to lock it down, or to a blank value
-# for same-origin only. See KilnCMSWeb.Embed.
-if embed_origins = System.get_env("EMBED_ORIGINS") do
-  config :kiln_cms, :embed_origins, KilnCMSWeb.Embed.parse_env(embed_origins)
+# Defaults to same-origin only (#562): cross-site embedding is OFF until you set
+# EMBED_ORIGINS to your allowlist, e.g. `https://acme.com,https://blog.acme.com`.
+# `*` re-opens it to any site — the old default, and a clickjacking surface,
+# since form submission is deliberately CSRF-free. See KilnCMSWeb.Embed. Skipped
+# in test so the suite never depends on what is exported in a developer's shell.
+if config_env() != :test do
+  if embed_origins = System.get_env("EMBED_ORIGINS") do
+    config :kiln_cms, :embed_origins, KilnCMSWeb.Embed.parse_env(embed_origins)
+  end
 end
 
 # ## Visual-editing bridge (#355) — the annotated preview read + `/bridge.js`

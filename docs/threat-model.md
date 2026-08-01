@@ -168,7 +168,8 @@ build if a resource is ever registered without that authorizer.
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a
   tripped honeypot returns success so a bot cannot distinguish rejection.
 - **Framing** — the embed route sets its own `frame-ancestors` from
-  `EMBED_ORIGINS`. See residual risk 1: the default is permissive.
+  `EMBED_ORIGINS`, which defaults to same-origin only (#562), so cross-site
+  embedding is opt-in.
 - **Submission contents** — treat as untrusted PII; retention is covered in
   [`data-flows.md`](data-flows.md).
 
@@ -210,9 +211,14 @@ amplification surface.
 Known and accepted, in rough order of how much they should worry an operator.
 Each is a deliberate trade-off, not an oversight — but each is worth revisiting.
 
-1. **Form embeds default to `frame-ancestors *`.** `EMBED_ORIGINS` unset means
-   `:all`, so any site may frame `/forms/:slug/embed` out of the box. Set
-   `EMBED_ORIGINS` to your allowlist in production. Tracked in #562.
+1. ~~**Form embeds default to `frame-ancestors *`.**~~ **Closed in #562.**
+   `EMBED_ORIGINS` unset now means same-origin only, so cross-site embedding is
+   opt-in, and a malformed value closes the policy rather than widening it.
+   `EMBED_ORIGINS=*` restores the old any-site behaviour if a deployment
+   genuinely wants it. See [forms.md](forms.md#embedding-on-another-site).
+   **Remainder:** the allowlist is deployment-global while forms are org-scoped,
+   so on a multi-org instance an origin added for one org may frame every org's
+   forms. Tracked in #648.
 2. **Unknown `Host` headers resolve to the default organization.** A bare host,
    an IP, `localhost`, or an unrecognized domain silently serves the default org
    rather than erroring — deliberate single-host compatibility. On a

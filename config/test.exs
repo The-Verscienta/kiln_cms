@@ -139,6 +139,17 @@ config :kiln_cms, :plugins, [KilnCMS.FixturePlugin]
 # denied paths deterministically (prod default is `[]` / same-origin only).
 config :kiln_cms, :cors_origins, ["https://frontend.test"]
 
+# Same idea for embeddable forms (#562): a fixed allowlist so the route tests
+# assert a real configured policy rather than the shipped default, which is
+# same-origin only. Because this override is global, the shipped default is NOT
+# covered by anything in an async test — that is what
+# `test/kiln_cms_web/controllers/form_embed_default_test.exs` and
+# `test/kiln_cms_web/live/form_builder_embed_warning_test.exs` are for: both are
+# `async: false` and clear this key, so the zero-config path #562 is about is
+# exercised through the real request pipeline rather than by passing a setting
+# as an argument.
+config :kiln_cms, :embed_origins, ["https://embedder.test"]
+
 # OIDC SSO (#331): enabled in test with placeholder settings so the strategy,
 # its routes, and the register action compile and are testable. No live IdP is
 # contacted — tests drive the register action directly.
