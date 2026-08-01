@@ -96,8 +96,18 @@ defmodule KilnCMSWeb.ProvenanceController do
 
     # `record.org_id` is the request tenant (resolved through Delivery.published/4).
     case Firing.get_artifact(type, record.id, surface, authorize?: false, tenant: record.org_id) do
-      {:ok, %_{} = artifact} -> {:ok, artifact}
-      _ -> :error
+      {:ok, %_{} = artifact} ->
+        # The third artifact reader, and it migrates like the other two (#615).
+        # Without this, a document read only through provenance never converges:
+        # its manifest would keep attesting to an old shape while /api/content
+        # serves the new one for the same document. The manifest returned by THIS
+        # request still describes the body just read, which is the body currently
+        # served — the re-fire lands behind it, as on the delivery path.
+        Engine.migrate_if_stale(record.org_id, type, record.id, artifact)
+        {:ok, artifact}
+
+      _ ->
+        :error
     end
   end
 

@@ -17,6 +17,11 @@ defmodule KilnCMS.Firing.Delivery do
       is unaffected (it never reaches the DB), and a *cold* request degrades
       gracefully to `:unavailable` (a 503) instead of crashing.
 
+  One database **write** shares the cold path: a row fired before the current
+  `@format_version` enqueues a re-fire (#615). It is best-effort and rescued, so
+  it cannot turn a served page into an error page, and it never runs on a warm
+  request — the guarantee above is unchanged.
+
   So through a full Postgres outage, delivery keeps answering for any content
   whose record + artifact are warm in cache — a reliability guarantee a
   request-per-query CMS structurally can't match (the BEAM keeps the cache and
@@ -27,6 +32,7 @@ defmodule KilnCMS.Firing.Delivery do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Cache
+  alias KilnCMS.Firing.Engine
 
   # Exceptions that mean "the query didn't reach a healthy database": a real
   # production outage (`DBConnection.ConnectionError`) or a downed/absent pool
@@ -107,8 +113,14 @@ defmodule KilnCMS.Firing.Delivery do
 
   defp fetch_artifact(org_id, type, id, surface) do
     case Firing.get_artifact(type, id, surface, authorize?: false, tenant: org_id) do
-      {:ok, %{body: body}} ->
+      {:ok, %{body: body} = artifact} ->
+        # A row written before the current `@format_version` is served once more
+        # and re-fired in the background (#615) — see `Engine.migrate_if_stale/4`.
+        # Best-effort by design: this is the delivery path, which must survive an
+        # outage that would also make the enqueue fail.
+        # Cache before enqueuing — see `Engine.read/4` for why the order matters.
         Cache.put(org_id, type, id, surface, body)
+        Engine.migrate_if_stale(org_id, type, id, artifact)
         {:ok, body}
 
       {:error, error} ->
