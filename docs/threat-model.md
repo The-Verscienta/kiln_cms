@@ -249,7 +249,12 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    Tracked in #567.
 4. **Rate limiting keys on `remote_ip`.** Behind a proxy with `TRUSTED_PROXIES`
    unset, every request shares one bucket — which throttles all clients together
-   and makes per-IP limits meaningless. Set `TRUSTED_PROXIES`. Tracked in #564.
+   and makes per-IP limits meaningless. Set `TRUSTED_PROXIES`. **No longer
+   silent (#564):** the app logs a warning, once per node, the first time a
+   request arrives carrying a forwarding header (`Forwarded`, `X-Forwarded-For`,
+   `X-Client-IP` or `X-Real-IP`) while no proxies are trusted. The
+   trap itself remains — honouring the header without a trusted-proxy list would
+   be worse, since it is spoofable — so this is detection, not a fix.
 5. **Preview tokens bypass authorization and tenancy.** `PreviewController`
    loads with `authorize?: false` and no tenant. Token validity and expiry are
    the whole control. (`live_session :token_preview` does now carry

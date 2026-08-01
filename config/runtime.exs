@@ -432,9 +432,17 @@ if config_env() == :prod do
   # "10.0.0.0/8,172.16.0.0/12"), KilnCMSWeb.Plugs.ClientIp rewrites remote_ip from
   # X-Forwarded-For so rate limiting keys on the real client. Leave unset when the
   # app is internet-facing directly (X-Forwarded-For would be spoofable).
+  # Entries are trimmed, matching CHECK_ORIGINS above: `split(trim: true)` drops
+  # empty segments but not whitespace, so `10.0.0.0/8, 172.16.0.0/12` (a space
+  # after the comma) or a trailing newline from a mounted secret file would reach
+  # `RemoteIp.init/1` as a malformed CIDR — which raises.
   config :kiln_cms,
          :trusted_proxies,
-         "TRUSTED_PROXIES" |> System.get_env("") |> String.split(",", trim: true)
+         "TRUSTED_PROXIES"
+         |> System.get_env("")
+         |> String.split(",", trim: true)
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == ""))
 
   # The base host multi-tenant subdomains are carved from (epic #336): a request
   # to `<org>.<TENANT_BASE_HOST>` resolves to that org. Defaults to PHX_HOST — set
@@ -447,7 +455,15 @@ if config_env() == :prod do
   # off for a single-host install, where the bare host / an IP / the load
   # balancer's health-check Host all legitimately arrive unmatched and would
   # start 404ing.
-  config :kiln_cms, :tenant_strict_host, KilnCMS.Config.Env.flag("TENANT_STRICT_HOST", false)
+  #
+  # `fetch/1`, not `flag/2`: this must only OVERRIDE config when the operator
+  # actually set the variable. `flag/2` writes unconditionally, so an unset
+  # variable would rewrite a project overlay's `config :kiln_cms,
+  # :tenant_strict_host, true` back to false — silently, in production, on the
+  # multi-org deployment most likely to have set it. See `KilnCMS.Config.Env`.
+  with {:ok, strict_host?} <- KilnCMS.Config.Env.fetch("TENANT_STRICT_HOST") do
+    config :kiln_cms, :tenant_strict_host, strict_host?
+  end
 
   # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer
   # beneath each site's own editor-managed row. Unset vars fall through to the
