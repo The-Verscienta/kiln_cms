@@ -125,6 +125,27 @@ if config_env() != :test do
   end
 end
 
+# ## Reading time (#492) — words per minute for `reading_time_minutes`
+#
+# 230 is the usual mid-range figure for adult silent reading of English prose.
+# An unparseable or non-positive value keeps the default and warns rather than
+# being interpreted — see KilnCMS.CMS.Calculations.ReadingTime. A release only
+# evaluates this file, so without this block the documented config key would be
+# unreachable on a Docker deployment.
+if wpm = System.get_env("KILN_READING_TIME_WPM") do
+  case Integer.parse(String.trim(wpm)) do
+    {parsed, ""} when parsed > 0 ->
+      config :kiln_cms, :reading_time_wpm, parsed
+
+    _ ->
+      IO.warn(
+        "KILN_READING_TIME_WPM must be a positive integer (got #{inspect(wpm)}); " <>
+          "keeping the default.",
+        []
+      )
+  end
+end
+
 # ## Visual-editing bridge (#355) — the annotated preview read + `/bridge.js`
 #
 # Enabled by default. Set VISUAL_EDITING_ENABLED=false to switch the whole

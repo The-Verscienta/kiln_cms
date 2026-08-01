@@ -287,6 +287,7 @@ query GetPost($slug: String!, $locale: String!) {
     publishedAt
     published
     wordCount
+    readingTimeMinutes
     category { name slug }
     tags { name slug }
     featuredImage { alt width height }

@@ -20,12 +20,25 @@ defmodule KilnCMS.CMS.BlockText do
     |> Enum.join(" ")
   end
 
-  @doc "Word count across `blocks`."
+  @doc """
+  Word count across `blocks`.
+
+  The `u` modifier is load-bearing: without it `\\s` matches only ASCII
+  whitespace, so a non-breaking space — which is what `&nbsp;` decodes to, and
+  what every paste from Word or Google Docs is full of — does not split words.
+  `alpha&nbsp;beta gamma&nbsp;delta` counted as **two** words, not four.
+
+  `Kiln.Advisory.Body` has always split with `u`, so before #492 the editor's
+  advisory panel and this calculation disagreed on the same content. That was
+  invisible while nothing surfaced both numbers; `reading_time_minutes` surfaces
+  one of them next to the other, and two counters is the problem #492 exists to
+  remove rather than reproduce.
+  """
   @spec word_count([term()] | nil) :: non_neg_integer()
   def word_count(blocks) do
     blocks
     |> to_text()
-    |> String.split(~r/\s+/, trim: true)
+    |> String.split(~r/\s+/u, trim: true)
     |> length()
   end
 end
