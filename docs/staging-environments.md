@@ -124,7 +124,7 @@ the guards exist so a mistyped `DATABASE_URL` can't scrub production:
   (release). Without it the task prints the target and stops.
 - **The target database name must look ephemeral** — it must contain `staging`,
   `preview`, `ephemeral`, `tmp`, or `scratch`. Override a deliberately-named clone with
-  `--force` / `KILN_STAGING_FORCE=1`, but the name check is your seat-belt.
+  `--force` / `KILN_STAGING_FORCE=true`, but the name check is your seat-belt.
 - **The target is always printed first** (`database@host`) so you can see what you're
   about to scrub before it happens.
 

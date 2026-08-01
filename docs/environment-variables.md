@@ -17,7 +17,7 @@ compilation and before the system starts.
 
 Every boolean variable in this document is parsed by one shared function,
 [`KilnCMS.Config.Env`](../lib/kiln_cms/config/env.ex), so the rules below hold
-for all of them (`PHX_SERVER` is the sole exception — see its row):
+for all of them (`PHX_SERVER` is a partial exception — see its row):
 
 * **Accepted spellings.** `true` / `1` / `yes` / `on` and `false` / `0` / `no` /
   `off`. Values are trimmed and lower-cased first, so `TRUE`, `On` and
@@ -44,7 +44,7 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 
 | Variable | Purpose | Where it's read |
 |----------|---------|-----------------|
-| `PHX_SERVER` | Set to start the web server in a release; without it the release boots but does not serve HTTP. The generated `bin/server` script sets this for you. **Presence-checked, not parsed** — the one exception to the on/off rules above, kept as Phoenix generates it. *Any* value starts the server, including `PHX_SERVER=false` and a blank `PHX_SERVER=`; to keep it off, leave the variable unset entirely. | [`config/runtime.exs:38`](../config/runtime.exs#L38) |
+| `PHX_SERVER` | Set to start the web server in a release; without it the release boots but does not serve HTTP. The generated `bin/server` script sets this for you. **Presence-checked, not parsed** — the partial exception to the on/off rules above. *Any* value starts the server, including a blank `PHX_SERVER=` and an unrecognized one, because Phoenix documents this as "any truthy value" and reading a declared-but-empty variable as "serve nothing" is a silent outage. The one rule it does honour is the off-spellings: `false`/`0`/`no`/`off` keep the server off, where they used to start it anyway. | [`config/runtime.exs:47`](../config/runtime.exs#L47) |
 | `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime.exs:75`](../config/runtime.exs#L75) |
 | `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime.exs:120`](../config/runtime.exs#L120) |
 | `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime.exs:192`](../config/runtime.exs#L192) |
@@ -76,7 +76,7 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `DATABASE_SSL` | `true` | Encrypt the Postgres connection. Set to an off-spelling only for a provider that genuinely cannot offer TLS — an unrecognized value keeps TLS on rather than silently downgrading to plaintext (#606). | [`config/runtime.exs:251`](../config/runtime.exs#L251) |
-| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`); otherwise the connection is still encrypted but uses `verify_none`. | [`config/runtime.exs:254`](../config/runtime.exs#L254) |
+| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`); unset — or blank, like every variable above — leaves the connection encrypted but `verify_none`. | [`config/runtime.exs:267`](../config/runtime.exs#L267) |
 
 ## Optional — object storage (S3-compatible)
 

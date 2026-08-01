@@ -88,6 +88,49 @@ defmodule KilnCMS.Config.EnvTest do
       put("true")
       assert capture_io(:stderr, fn -> Env.fetch(@var) end) == ""
     end
+
+    test "the warning quotes what the operator typed, not the normalized form" do
+      # The trimming and downcasing are exactly what caused the mismatch, so
+      # echoing "enabled" for a typed " Enabled " hides the only actionable
+      # clue: the operator greps their compose file for it and finds nothing.
+      put(" Enabled ")
+
+      assert capture_io(:stderr, fn -> Env.fetch(@var) end) =~ ~s(" Enabled ")
+    end
+  end
+
+  describe "truthy?/1" do
+    test "an explicit off-spelling disables, whatever the case or padding" do
+      # The only thing this changes from a bare presence check — and the one
+      # reading no operator intends.
+      for value <- ["false", "False", "FALSE", "0", "no", "off", " OFF "] do
+        put(value)
+        assert Env.truthy?(@var) == false, "expected #{inspect(value)} to disable"
+      end
+    end
+
+    test "presence enables, including blank and unrecognized values" do
+      # `truthy?/1` exists precisely so nil and "" stay distinguishable: `""` is
+      # truthy in Elixir, so a declared-but-empty PHX_SERVER= started the server
+      # before, and collapsing it into "unset" would be a silent outage.
+      for value <- ["true", "1", "yes", "on", "please", ~s("true"), "", " ", "\t"] do
+        put(value)
+        assert Env.truthy?(@var) == true, "expected #{inspect(value)} to enable"
+      end
+    end
+
+    test "only an absent variable disables by absence" do
+      put(nil)
+      assert Env.truthy?(@var) == false
+    end
+
+    test "does not warn on an unrecognized value" do
+      # Unlike fetch/1, every non-false value is meaningful here. Matched rather
+      # than compared to "": :stderr is a VM-global device.
+      put("please")
+
+      refute capture_io(:stderr, fn -> Env.truthy?(@var) end) =~ "unrecognized"
+    end
   end
 
   describe "flag/2" do

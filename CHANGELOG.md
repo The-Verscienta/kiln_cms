@@ -136,11 +136,29 @@ migration, a rewritten column, a dropped config key).
   `DATABASE_SSL` this fixes `VISUAL_EDITING_ENABLED=False`, which used to leave
   the bridge on, contradicting the documentation. `ECTO_IPV6`,
   `KILN_UPDATE_CHECK`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, `SMTP_TLS` and
-  `SMTP_TLS_VERIFY` all gain the wider spellings. Two deliberate exclusions:
-  `PHX_SERVER` stays presence-checked as Phoenix generates it (parsing it would
-  turn a typo into a silent outage), and `config/test.exs`'s `KILN_STRICT_TEST`
-  cannot use the parser at all — compile-time config files are evaluated before
-  any project module is on the code path. (#607)
+  `SMTP_TLS_VERIFY` all gain the wider spellings. One exclusion remains:
+  `config/test.exs`'s `KILN_STRICT_TEST` cannot use the parser at all —
+  compile-time config files are evaluated before any project module is on the
+  code path. (#607)
+- **`PHX_SERVER=false` no longer starts the web server.** Every string is truthy
+  in Elixir, so the Phoenix generator's `if System.get_env("PHX_SERVER")` read an
+  explicit `false`/`0`/`no`/`off` as a request to serve. It now honours those
+  four spellings. Presence still enables — a blank `PHX_SERVER=` and an
+  unrecognized value both start the server as before, because the variable is
+  documented as "any truthy value" and reading a declared-but-empty one as
+  "serve nothing" would be a silent outage. `KilnCMS.Config.Env.truthy?/1` is
+  the one function with those semantics; everything else uses `flag/2` or
+  `fetch/1`.
+- A blank `DATABASE_SSL_CACERTFILE=` configured `verify_peer` against an empty
+  path, so `:ssl` could not read the bundle and **every database connection
+  failed at boot** — the opposite of the "encrypt but skip verification"
+  fallback that branch exists to provide. Blank now reads as unset, like every
+  other variable.
+- `KILN_STAGING_FORCE` accepted only the literal `1`, so
+  `KILN_STAGING_FORCE=true` read as *not* forced. It now uses the shared
+  spelling table. `KILN_STAGING_SCRUB` is unchanged and deliberately still a
+  sentinel word (`confirm`): typing `true` must not confirm a destructive
+  scrub.
 - The media library's responsive-variant list previews each variant inline
   instead of linking to it. The old per-variant "open" link announced itself as
   opening in a new tab, but media carries `Content-Disposition: attachment` on
@@ -169,6 +187,23 @@ The same tightening applies to `VISUAL_EDITING_ENABLED` (an unrecognized value
 no longer leaves the bridge on by accident of parsing) and to `SMTP_TLS` /
 `SMTP_TLS_VERIFY` (`0`/`no`/`off`/`False` now disable, where only the exact
 string `false` did before). Neither can break a boot.
+
+**Check `PHX_SERVER` too, if you set it to something false-looking.**
+`PHX_SERVER=false` (and `0`/`no`/`off`) used to start the web server anyway;
+they now do what they say. If a deployment has been relying on that — the
+variable set to a false spelling while still expecting HTTP — the release will
+boot, migrate, and serve nothing, and the Docker healthcheck cannot tell the
+difference. Set it to `true`, or leave it to `bin/server`. A blank
+`PHX_SERVER=` still starts the server, unchanged.
+
+```bash
+grep -rn 'PHX_SERVER\|KILN_STAGING_FORCE' .env docker-compose.yml 2>/dev/null
+```
+
+`KILN_STAGING_FORCE` now accepts the full spelling table, so a value that was
+previously ignored (`true`, `yes`, `on`) now genuinely skips the
+ephemeral-name check on `mix kiln.staging.scrub`. It still cannot scrub
+anything on its own — `KILN_STAGING_SCRUB=confirm` is required either way.
 
 ## [0.1.0]
 

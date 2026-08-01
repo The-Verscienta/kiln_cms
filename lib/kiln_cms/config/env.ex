@@ -106,6 +106,45 @@ defmodule KilnCMS.Config.Env do
   end
 
   @doc """
+  Whether `var` is **present** and not set to a recognized "off" spelling.
+
+  The permissive counterpart to `flag/2`, for a variable documented as "set to
+  any truthy value" — `PHX_SERVER` is the only one, and it is the only flag here
+  that should not go through `flag/2` or `fetch/1`.
+
+  Presence is what enables. A blank `PHX_SERVER=` still starts the server, and
+  so does an unrecognized value, exactly as the upstream Phoenix form
+  (`if System.get_env("PHX_SERVER")`) did — an empty string is truthy in Elixir.
+  Reading either as "do not serve HTTP" would take a release that boots, runs
+  migrations and answers `bin/kiln_cms rpc` — so the container healthcheck stays
+  green — and leave it serving nothing.
+
+  The single behavioural change from upstream is that an explicit
+  `false`/`0`/`no`/`off` now disables rather than enabling, which is the one
+  reading no operator intends.
+
+  Unrecognized values do not warn: every non-false value is meaningful here.
+
+      iex> System.put_env("KILN_TRUTHY_DOCTEST", "please")
+      iex> KilnCMS.Config.Env.truthy?("KILN_TRUTHY_DOCTEST")
+      true
+
+      iex> System.put_env("KILN_TRUTHY_DOCTEST", "OFF")
+      iex> KilnCMS.Config.Env.truthy?("KILN_TRUTHY_DOCTEST")
+      false
+  """
+  @spec truthy?(String.t()) :: boolean()
+  def truthy?(var) when is_binary(var) do
+    # Branches on `System.get_env/1` rather than on the normalized string, so
+    # nil and "" stay distinguishable — collapsing them is precisely the bug
+    # this function exists to avoid.
+    case System.get_env(var) do
+      nil -> false
+      raw -> String.downcase(String.trim(raw)) not in @false_values
+    end
+  end
+
+  @doc """
   Reads `var` as a boolean without supplying a default.
 
   Returns `{:ok, boolean}` only when the operator set a recognized value, so a
@@ -115,7 +154,9 @@ defmodule KilnCMS.Config.Env do
   """
   @spec fetch(String.t()) :: fetched()
   def fetch(var) when is_binary(var) do
-    case var |> System.get_env("") |> String.trim() |> String.downcase() do
+    raw = System.get_env(var, "")
+
+    case raw |> String.trim() |> String.downcase() do
       "" ->
         :unset
 
@@ -125,10 +166,14 @@ defmodule KilnCMS.Config.Env do
       value when value in @false_values ->
         {:ok, false}
 
-      other ->
+      _other ->
+        # `raw`, not the normalized form: the trimming and downcasing are
+        # exactly what caused the mismatch, so reporting `"enabled"` when the
+        # operator wrote `" Enabled "` hides the only clue they can act on —
+        # they grep their compose file for the echoed string and find nothing.
         IO.warn(
           """
-          #{var} is set to an unrecognized value (#{inspect(other)}); keeping \
+          #{var} is set to an unrecognized value (#{inspect(raw)}); keeping \
           the configured default. Use one of: #{Enum.join(@true_values, "/")}, \
           #{Enum.join(@false_values, "/")}.\
           """,

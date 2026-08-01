@@ -32,7 +32,8 @@ defmodule KilnCMS.Staging do
 
     * `:confirm?` — must be truthy, or set `KILN_STAGING_SCRUB=confirm`. Without
       it the target is printed and nothing is changed.
-    * `:force?` — skip the ephemeral-name check (or `KILN_STAGING_FORCE=1`).
+    * `:force?` — skip the ephemeral-name check (or `KILN_STAGING_FORCE=true`;
+      accepts any spelling `KilnCMS.Config.Env` recognizes).
     * `:admin_email` / `:admin_password` — provision one usable admin. Default to
       `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD`.
     * `:shell` — 1-arity logger for human output (default `&IO.puts/1`).
@@ -42,8 +43,15 @@ defmodule KilnCMS.Staging do
     shell = Keyword.get(opts, :shell, &IO.puts/1)
     {host, database} = target()
 
-    confirmed? = Keyword.get(opts, :confirm?) || env_flag?("KILN_STAGING_SCRUB", "confirm")
-    forced? = Keyword.get(opts, :force?) || env_flag?("KILN_STAGING_FORCE", "1")
+    # KILN_STAGING_SCRUB is a sentinel word, not a boolean — typing `true` must
+    # not confirm a destructive scrub. KILN_STAGING_FORCE *is* a boolean, so it
+    # goes through the shared spelling table (#606/#607): it used to accept only
+    # the literal `1`, so `KILN_STAGING_FORCE=true` read as "not forced" — the
+    # same you-get-the-opposite-of-what-you-typed defect, failing loudly here
+    # rather than silently. It only relaxes the ephemeral-name check; the
+    # sentinel above is still required either way.
+    confirmed? = Keyword.get(opts, :confirm?) || env_sentinel?("KILN_STAGING_SCRUB", "confirm")
+    forced? = Keyword.get(opts, :force?) || KilnCMS.Config.Env.flag("KILN_STAGING_FORCE", false)
 
     admin_email = opts[:admin_email] || System.get_env("STAGING_ADMIN_EMAIL")
     admin_password = opts[:admin_password] || System.get_env("STAGING_ADMIN_PASSWORD")
@@ -66,7 +74,7 @@ defmodule KilnCMS.Staging do
 
       A staging database name should contain one of: #{Enum.join(@ephemeral_markers, ", ")}.
       If this really is a throwaway clone, re-run with `--force`
-      (mix) or `KILN_STAGING_FORCE=1` (release).
+      (mix) or `KILN_STAGING_FORCE=true` (release).
       """
     end
 
@@ -119,7 +127,7 @@ defmodule KilnCMS.Staging do
     Enum.any?(@ephemeral_markers, &String.contains?(down, &1))
   end
 
-  defp env_flag?(var, expected) do
+  defp env_sentinel?(var, expected) do
     case System.get_env(var) do
       nil -> false
       value -> String.downcase(String.trim(value)) == expected
