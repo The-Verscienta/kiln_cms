@@ -295,6 +295,14 @@ config :kiln_cms, :multitenancy_enabled, true
 # build. Set `false` only to restore the legacy fail-open rollout behavior.
 config :kiln_cms, :strict_tenancy, true
 
+# Strict host→tenant matching (#563). Unrelated to `:strict_tenancy` above:
+# that one is compile-time and about resources requiring a tenant, this one is
+# RUNTIME (`TENANT_STRICT_HOST`) and about which tenant an unrecognized request
+# `Host` resolves to. Off ⇒ the default org, which is right for a single-host
+# install and wrong for a multi-tenant one, where it serves the default site's
+# content to anyone with an unmatched Host. See `KilnCMSWeb.Tenant`.
+config :kiln_cms, :tenant_strict_host, false
+
 # Tamper-evident history anchors (#356): at every publish, the document's full
 # PaperTrail version chain is folded into a canonical hash and recorded
 # (RSA-signed when a provenance signing key is configured — see

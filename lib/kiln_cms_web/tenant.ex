@@ -9,35 +9,131 @@ defmodule KilnCMSWeb.Tenant do
     3. else the **default org** (bare base host / `localhost` / IP / unknown) — so
        an existing single-host install keeps serving the default org unchanged.
 
-  `resolve_org/1` is the single resolver, shared by `KilnCMSWeb.Plugs.SetTenant`
-  (from `conn.host`) and the LiveView `:assign_current_org` on_mount hook (from the
-  socket's `host_uri`). Lookups are Cachex-cached so resolution isn't a DB hit per
-  request. `current_org_id/1` reads the resolved org back off a conn/socket's
-  `:current_org` assign.
+  Step 3 is the single-host convenience, and on a multi-tenant deployment it is
+  the wrong answer: any request carrying an unrecognised `Host` gets the default
+  org's content, branding and analytics. `TENANT_STRICT_HOST=true` (#563) drops
+  that fallback — an unresolvable host is refused instead. It is off by default
+  so an existing single-host install is unaffected, and recommended for every
+  multi-tenant one.
+
+  `fetch_org/1` is the single resolver — `{:ok, org}` or `:error` under strict
+  matching — shared by `KilnCMSWeb.Plugs.SetTenant` (from `conn.host`), the
+  LiveView `:assign_current_org` on_mount hook (from the socket's `host_uri`)
+  and the two raw sockets (`GraphqlSocket`, `BridgeSocket`, from the connect
+  URI). `resolve_org/1` is the never-failing form, for callers with no way to
+  reject a request. Lookups are Cachex-cached so resolution isn't a DB hit per
+  request.
+
+  ## What strict matching does not cover
+
+  It gates what the **router** serves, plus the sockets listed above. Two things
+  sit outside it by design, and neither carries org-scoped reads:
+
+    * `Plug.Static` — both static mounts (including `/uploads` under the local
+      storage adapter) run earlier in the endpoint and halt on a match, so an
+      asset URL answers on any host. Asset keys are unguessable UUIDs, and
+      putting tenant resolution ahead of static would buy two DB lookups per
+      asset request; treat media URLs as host-agnostic, as they would be behind
+      a CDN.
+    * `/ws/collab` — the collaborative-editing socket resolves no host at all.
+      Its `Phoenix.Token` is per **editor session**, not per document, and the
+      channel's join checks only that the CRDT prototype is enabled and the
+      client bundle is current — so the topic, not tenancy, is what scopes it.
+      Strict host matching does not change that either way; it is called out
+      here so this list is not read as a clean bill of health. See residual risk
+      13 in `docs/threat-model.md`.
+
+  ## The `:current_org` assign
+
+  `current_org_id/1` reads the resolved org back off a conn/socket's
+  `:current_org` assign, and **raises** when that assign is missing rather than
+  quietly reading the default org — see `current_org/1`.
   """
   alias KilnCMS.Accounts
 
   require Logger
 
+  defmodule UnknownHostError do
+    @moduledoc """
+    Raised when a request's `Host` matches no organization and strict host
+    matching is on (`TENANT_STRICT_HOST`, #563).
+
+    Used on the LiveView mount path, where raising is the only way to refuse:
+    `plug_status: 404` puts it in the range LiveView's channel turns
+    into a client reload rather than a process crash, and on a disconnected
+    mount `render_errors` turns it into a plain not-found rather than a 500.
+    `KilnCMSWeb.Plugs.SetTenant` answers HTTP requests directly instead of
+    raising — see its moduledoc for why.
+
+    The offending host is kept on the struct (and in the message) so the
+    operator configuring a new tenant can see which host missed.
+    """
+    defexception [:host, :message, plug_status: 404]
+
+    @impl true
+    def exception(opts) when is_list(opts) do
+      host = opts[:host]
+
+      opts
+      |> Keyword.put_new(:message, "no organization is configured for host #{inspect(host)}")
+      |> then(&struct!(__MODULE__, &1))
+    end
+
+    def exception(message) when is_binary(message), do: %__MODULE__{message: message}
+  end
+
   # How long a host→org resolution is cached. Short enough that a slug/custom-domain
   # change (rare, admin-only) is picked up promptly.
   @cache_ttl :timer.minutes(5)
 
-  @doc "The current organization id from a conn/socket assign, or the default org id."
+  @doc "The current organization id from a conn/socket assign. Raises if unresolved."
   @spec current_org_id(map()) :: Ash.UUID.t()
   def current_org_id(assigns), do: current_org(assigns).id
 
   @doc """
-  The current org struct from a conn/socket assign, or the default org. Never
-  `nil` — `Accounts.default_org/0` reads the seed row, which can miss on a
-  broken/uninitialized install, so a synthetic default-id-only struct is the
-  final fallback rather than propagating a `nil` for callers to crash on.
+  The current org struct from a conn/socket's `:current_org` assign.
+
+  Raises `ArgumentError` when the assign is absent. It used to fall back to the
+  default org, which made a forgotten `SetTenant` plug or `:assign_current_org`
+  on_mount into a silent wrong-tenant read in production instead of a loud
+  failure in test (#563). Every conn that reaches a controller has the assign —
+  `SetTenant` runs in the endpoint, ahead of the router — and so does every
+  `live_session` under `KilnCMSWeb.Router` that mounts the hook.
+
+  It is **not** universal, and callers outside a resolved request must not reach
+  for this: a function component rendered from an error page or a mailer
+  preview, a `live_isolated/3` test, an AshAdmin route under `dev_routes`. Those
+  want `KilnCMS.Accounts.default_org/0` explicitly — see the fallback spelled
+  out in `KilnCMSWeb.Layouts`'s console nav.
   """
   @spec current_org(map()) :: Accounts.Organization.t()
   def current_org(%{assigns: %{current_org: %Accounts.Organization{} = org}}), do: org
 
-  def current_org(_),
-    do: Accounts.default_org() || %Accounts.Organization{id: Accounts.default_org_id()}
+  def current_org(other) do
+    raise ArgumentError, """
+    KilnCMSWeb.Tenant.current_org/1 called without a resolved :current_org assign.
+
+    Got: #{describe(other)}
+
+    A conn gets the assign from KilnCMSWeb.Plugs.SetTenant (endpoint-level, so
+    it precedes every pipeline); a LiveView socket gets it from the
+    {KilnCMSWeb.LiveUserAuth, :assign_current_org} on_mount hook, which every
+    live_session must list. Add the missing hook rather than defaulting — a
+    default-org read on a tenant site serves the wrong site's content (#563).
+
+    If this caller genuinely has no request context, use
+    KilnCMS.Accounts.default_org/0 explicitly.
+    """
+  end
+
+  # Enough to identify the caller, and nothing more. The argument is normally a
+  # conn or a socket, whose `inspect/1` prints request headers — so this message,
+  # which ends up in logs and in Sentry, must never carry the value itself.
+  defp describe(%{assigns: assigns}) when is_map(assigns),
+    do: "a conn/socket whose assigns are #{inspect(Map.keys(assigns))}"
+
+  defp describe(%{__struct__: mod}), do: "a #{inspect(mod)} with no :assigns"
+  defp describe(_), do: "a value with no :assigns, so not a conn or socket"
 
   @doc """
   The given org's own absolute base URL (scheme + host [+ port]), for building
@@ -83,27 +179,91 @@ defmodule KilnCMSWeb.Tenant do
     do: base_url |> URI.parse() |> Map.put(:host, host) |> URI.to_string()
 
   @doc """
-  Resolve the organization for a request host. Always returns an org struct
-  (falls back to the default org), so callers never have to handle `nil`.
-  """
-  @spec resolve_org(String.t() | nil) :: KilnCMS.Accounts.Organization.t()
-  def resolve_org(host) when is_binary(host) and host != "" do
-    # Hostnames are case-insensitive (RFC 3986) and `socket.host_uri`/`conn.host`
-    # aren't normalized, so downcase before matching/caching — otherwise
-    # `Acme.Example.com` fails the suffix/slug match and mis-resolves to the
-    # default org, and case variants fragment the cache (#336 review).
-    host = String.downcase(host)
+  Whether an unresolvable request host is rejected rather than served the
+  default org (`TENANT_STRICT_HOST`, #563).
 
-    # Only KNOWN hosts (the base host + real org subdomains/custom domains) are
-    # cached; an unknown/unresolved host returns `nil` here (uncached) and the
-    # caller supplies the default org. This keeps a flood of distinct attacker
-    # Host headers under `*.<base>` from inserting per-host entries into the
-    # shared, size-capped content cache and evicting hot published pages (#336
-    # review, resolution-cache DoS).
-    resolve_cached(host) || Accounts.default_org()
+  Read at request time, not compile time, so a release flips it with a restart
+  and no rebuild. Defaults to `false`: a single-host install is served entirely
+  through the "unknown host → default org" path (bare `localhost`, an IP, the
+  load balancer's health-check host), and turning this on there would 404 the
+  whole site.
+  """
+  @spec strict_host?() :: boolean()
+  def strict_host?, do: Application.get_env(:kiln_cms, :tenant_strict_host, false)
+
+  @doc """
+  Resolve the organization for a request host.
+
+  `{:ok, org}` for a host that matches an org (subdomain, custom domain, or the
+  canonical base host). For anything else — a bare hostname, `localhost`, an IP
+  literal, an attacker-supplied `Host` — this is `{:ok, default_org}` normally
+  and `:error` when `strict_host?/0` is on.
+
+  The canonical base host is never refused, even under strict matching — the
+  deployment must always answer on its own name. Every lookup below collapses a
+  failed read to `nil`, so without this clause a default org whose seed row is
+  missing, or a Postgres restart caught mid-request, would 404 the apex. Note
+  the clause covers *only* the apex: a tenant subdomain or custom domain during
+  the same outage still gets `:error`, since nothing here can tell "no such org"
+  apart from "could not ask".
+
+  Callers that can reject the request should use this and turn `:error` into a
+  404 or a refused socket; `resolve_org/1` is the never-failing form for those
+  that cannot.
+  """
+  @spec fetch_org(String.t() | nil) :: {:ok, Accounts.Organization.t()} | :error
+  def fetch_org(host) do
+    cond do
+      org = known_org(host) -> {:ok, org}
+      strict_host?() and not canonical_host?(host) -> :error
+      true -> {:ok, default_org()}
+    end
   end
 
-  def resolve_org(_), do: Accounts.default_org()
+  defp canonical_host?(host) when is_binary(host), do: normalize(host) == base_host()
+  defp canonical_host?(_), do: false
+
+  @doc """
+  Resolve the organization for a request host, always returning an org struct
+  (falls back to the default org even under `strict_host?/0`), so callers never
+  have to handle `nil`.
+  """
+  @spec resolve_org(String.t() | nil) :: Accounts.Organization.t()
+  def resolve_org(host), do: known_org(host) || default_org()
+
+  # `Accounts.default_org/0` reads the seed row, which can miss on a
+  # broken/uninitialized install, so a synthetic default-id-only struct is the
+  # final fallback rather than propagating a `nil` for callers to crash on.
+  defp default_org,
+    do: Accounts.default_org() || %Accounts.Organization{id: Accounts.default_org_id()}
+
+  # The org this host names, or `nil` if it names none.
+  #
+  # Only KNOWN hosts (the base host + real org subdomains/custom domains) are
+  # cached; an unknown/unresolved host returns `nil` here (uncached). This keeps
+  # a flood of distinct attacker Host headers under `*.<base>` from inserting
+  # per-host entries into the shared, size-capped content cache and evicting hot
+  # published pages (#336 review, resolution-cache DoS).
+  defp known_org(host) when is_binary(host) do
+    case normalize(host) do
+      "" -> nil
+      host -> resolve_cached(host)
+    end
+  end
+
+  defp known_org(_), do: nil
+
+  # Hostnames are case-insensitive (RFC 3986) and `socket.host_uri`/`conn.host`
+  # aren't normalized, so downcase before matching/caching — otherwise
+  # `Acme.Example.com` fails the suffix/slug match and mis-resolves to the
+  # default org, and case variants fragment the cache (#336 review).
+  #
+  # The trailing dot of a rooted FQDN goes too. `acme.example.com.` is what a
+  # browser sends when the user types the rooted form, and it names exactly the
+  # same host — but it fails every suffix and equality test below, so without
+  # this it resolves to the default org (before #563) or 404s the tenant on
+  # their own domain (after).
+  defp normalize(host), do: host |> String.trim_trailing(".") |> String.downcase()
 
   defp resolve_cached(host) do
     KilnCMS.Cache.fetch({:tenant_host, host}, @cache_ttl, fn -> resolve_known(host) end)
@@ -154,11 +314,18 @@ defmodule KilnCMSWeb.Tenant do
   @doc """
   The base host subdomains are carved from. Defaults to the endpoint's canonical
   `url[:host]` (i.e. `PHX_HOST`); override with `config :kiln_cms, :tenant_base_host`.
+
+  Normalized the same way an incoming host is, because it is compared against
+  one. `runtime.exs` strips a scheme and trailing slash off `PHX_HOST` but not
+  case, so `PHX_HOST=Example.com` would otherwise match no host at all: with
+  strict matching off that is invisible (everything lands on the default org),
+  and with it on the apex and every tenant subdomain 404.
   """
   @spec base_host() :: String.t()
   def base_host do
-    Application.get_env(:kiln_cms, :tenant_base_host) ||
-      get_in(Application.get_env(:kiln_cms, KilnCMSWeb.Endpoint, []), [:url, :host]) ||
-      "localhost"
+    (Application.get_env(:kiln_cms, :tenant_base_host) ||
+       get_in(Application.get_env(:kiln_cms, KilnCMSWeb.Endpoint, []), [:url, :host]) ||
+       "localhost")
+    |> normalize()
   end
 end

@@ -90,7 +90,9 @@ build if a resource is ever registered without that authorizer.
 - **Multi-tenancy** — `Plugs.SetTenant` resolves the org from the HTTP host
   (subdomain of `TENANT_BASE_HOST`, then custom domain) and sets it as the Ash
   tenant for the whole request, so tenant scoping applies to GraphQL and
-  JSON:API without resolver changes.
+  JSON:API without resolver changes. A host matching neither falls back to the
+  default org unless `TENANT_STRICT_HOST=true`, which 404s it instead — see
+  residual risk 2.
 - **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across eight
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`.
 - **CSP & secure headers** — `put_secure_browser_headers` plus a per-request
@@ -219,13 +221,29 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    **Remainder:** the allowlist is deployment-global while forms are org-scoped,
    so on a multi-org instance an origin added for one org may frame every org's
    forms. Tracked in #648.
-2. **Unknown `Host` headers resolve to the default organization.** A bare host,
-   an IP, `localhost`, or an unrecognized domain silently serves the default org
-   rather than erroring — deliberate single-host compatibility. On a
-   multi-tenant deployment, terminate unknown hosts at the proxy. Tracked in #563.
-   `Tenant.current_org_id/1` has the same default-org fallback when the
-   `:current_org` assign is missing.
-3. **The OpenAPI spec and Swagger explorer are unauthenticated in every
+2. **Unknown `Host` headers resolve to the default organization — unless
+   `TENANT_STRICT_HOST` is set.** #563 added the control; it ships **off**, so
+   an existing deployment is exactly as exposed as before until an operator
+   turns it on. Do that on any multi-tenant deployment: an unresolvable `Host`
+   is then refused with a bare 404 rather than served the default org, across
+   everything the router serves plus LiveView mounts and the GraphQL and
+   visual-editing sockets. The app logs a warning at boot when it is off and
+   more than one org exists. Terminating unknown hosts at the proxy is still
+   worth doing as well.
+
+   Surfaces outside the control, none of which reads the ambient tenant:
+   `Plug.Static` (both mounts, including `/uploads` under the local storage
+   adapter — UUID-keyed assets answer on any host, as they would behind a CDN);
+   `/ws/collab` (resolves no host, and see residual risk 13); the health probes
+   and the payment-provider webhook, both deliberately exempt so the control
+   cannot fail a deployment's own liveness check or silently drop billing
+   events.
+
+   The quieter half is closed unconditionally: `Tenant.current_org_id/1` now
+   **raises** when the `:current_org` assign is missing rather than reading the
+   default org, so a forgotten `SetTenant` plug or `:assign_current_org`
+   on_mount fails loudly in test instead of serving the wrong tenant in
+   production.3. **The OpenAPI spec and Swagger explorer are unauthenticated in every
    environment**, production included. They describe the write surface. This is
    a disclosure convenience; gate them at the proxy if that is not wanted.
    Tracked in #567.
@@ -233,9 +251,10 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    unset, every request shares one bucket — which throttles all clients together
    and makes per-IP limits meaningless. Set `TRUSTED_PROXIES`. Tracked in #564.
 5. **Preview tokens bypass authorization and tenancy.** `PreviewController`
-   loads with `authorize?: false` and no tenant, and `live_session
-   :token_preview` carries no `on_mount` hooks, so the preview LiveView has no
-   `:current_org`. Token validity and expiry are the whole control.
+   loads with `authorize?: false` and no tenant. Token validity and expiry are
+   the whole control. (`live_session :token_preview` does now carry
+   `:assign_current_org`, added in #563, so the preview LiveView resolves the
+   host it is served from — but the token lookup itself is still tenant-less.)
 6. ~~**Four resources are world-readable by policy.**~~ **Closed in #565.**
    `Firing.PublishedArtifact`, `Firing.ReferenceEdge`, `CMS.FormField` and
    `Search.BlockEmbedding` no longer declare `authorize_if always()` on reads:
@@ -278,6 +297,16 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 12. **Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
     `TOKEN_SIGNING_SECRET`, S3 keys) is not written down; pairs with
     [`backups.md`](backups.md).
+13. **The collaborative-editing socket is scoped by topic, not by tenancy.**
+    `CollabSocket` verifies a `Phoenix.Token` carrying a *user id*, minted once
+    per editor session and valid for 24 hours; `CollabChannel.join/3` then
+    checks only that the CRDT prototype is enabled and the client bundle is
+    current. So any signed-in editor's token joins `collab:<kind>:<id>` for any
+    document in any org, and `Collab.Crdt.Checkpoint` writes back under
+    `Accounts.default_org_id()` unconditionally. Gated behind the
+    `:collab_prototype` flag and editor sign-in, so this is not an anonymous
+    surface — but it is the one socket `TENANT_STRICT_HOST` does not reach.
+    Surfaced during the #563 review.
 
 ## Operating the dependency audit
 

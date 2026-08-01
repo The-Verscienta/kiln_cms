@@ -49,9 +49,39 @@ defmodule KilnCMSWeb.TenantTest do
       assert Tenant.current_org(%{assigns: %{current_org: o}}).id == o.id
     end
 
-    test "falls back to the default org when the assign is absent" do
-      assert Tenant.current_org(%{assigns: %{}}).id == Accounts.default_org_id()
-      assert Tenant.current_org(%{}).id == Accounts.default_org_id()
+    test "raises when the assign is absent rather than reading the default org" do
+      # #563: the old default-org fallback turned a forgotten SetTenant plug or
+      # :assign_current_org on_mount into a silent wrong-tenant read in
+      # production. Callers that genuinely have no request context are expected
+      # to say `Accounts.default_org/0` themselves.
+      assert_raise ArgumentError, ~r/without a resolved :current_org assign/, fn ->
+        Tenant.current_org(%{assigns: %{}})
+      end
+
+      assert_raise ArgumentError, ~r/without a resolved :current_org assign/, fn ->
+        Tenant.current_org(%{})
+      end
+
+      # Built through `Map.new/1` so the type checker doesn't reject the literal
+      # against `current_org/1`'s narrowed head — a `nil` assign is exactly the
+      # shape a half-wired caller produces at runtime.
+      assert_raise ArgumentError, ~r/without a resolved :current_org assign/, fn ->
+        Tenant.current_org_id(Map.new(assigns: %{current_org: nil}))
+      end
+    end
+
+    test "the message names the assigns present but never dumps the conn" do
+      # The message reaches logs and Sentry, and `inspect/1` on a conn prints
+      # request headers — Cookie included. It must describe, not dump.
+      conn = %{Phoenix.ConnTest.build_conn() | host: "example.test"}
+      conn = Plug.Conn.put_req_header(conn, "cookie", "_kiln_key=super-secret")
+
+      error = assert_raise(ArgumentError, fn -> Tenant.current_org(conn) end)
+      message = Exception.message(error)
+
+      assert message =~ "assigns are []"
+      refute message =~ "super-secret"
+      refute message =~ "cookie"
     end
   end
 end

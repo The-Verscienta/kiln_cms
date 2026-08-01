@@ -80,12 +80,18 @@ defmodule KilnCMS.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: KilnCMS.Supervisor]
 
-    Supervisor.start_link(
-      children ++
-        subscription_batcher() ++
-        embedding_children() ++ reranker_children() ++ Kiln.Plugins.children(),
-      opts
-    )
+    with {:ok, pid} <-
+           Supervisor.start_link(
+             children ++
+               subscription_batcher() ++
+               embedding_children() ++ reranker_children() ++ Kiln.Plugins.children(),
+             opts
+           ) do
+      # Needs the Repo, so it runs after the tree is up rather than alongside
+      # the config-only warnings at the top of start/2.
+      warn_if_multi_tenant_without_strict_host()
+      {:ok, pid}
+    end
   end
 
   # The core Oban config with plugin queues merged in (D18) — plugins declare
@@ -164,6 +170,43 @@ defmodule KilnCMS.Application do
           "but never delivered. Set MAIL_MODE=smtp (with SMTP_HOST) or MAIL_MODE=direct."
       )
     end
+  end
+
+  # A multi-tenant deployment that leaves `TENANT_STRICT_HOST` off serves the
+  # DEFAULT org's content, branding and analytics to any request carrying an
+  # unrecognized Host (#563). That is the correct behaviour for the single-host
+  # install the fallback exists for, so it can't just be flipped — but on a
+  # deployment that has actually created a second org it is a live misconfig,
+  # and the operator should hear it from a log line rather than from an
+  # incident. Counted at boot, not per request: this runs once, and a
+  # single-org install stays silent.
+  #
+  # Logger (not stderr like the config providers) so it reaches Sentry and
+  # whatever ships the container's logs — see #634.
+  defp warn_if_multi_tenant_without_strict_host do
+    if Application.get_env(:kiln_cms, :multitenancy_enabled, false) and
+         not KilnCMSWeb.Tenant.strict_host?() and multiple_orgs?() do
+      require Logger
+
+      Logger.warning(
+        "TENANT_STRICT_HOST is off on a deployment with more than one organization. " <>
+          "A request whose Host matches no org — a bare hostname, an IP, or an " <>
+          "attacker-supplied header — is served the DEFAULT org's content, branding " <>
+          "and analytics. Set TENANT_STRICT_HOST=true to reject those instead; see " <>
+          "docs/environment-variables.md."
+      )
+    end
+  end
+
+  # Best-effort: a DB that isn't up yet at boot must not take the app with it,
+  # and a failed read is not evidence of a misconfiguration.
+  defp multiple_orgs? do
+    case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
+      {:ok, n} when n > 1 -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 
   # Enabling SEO drafting against a hosted provider means page content leaves

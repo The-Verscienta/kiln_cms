@@ -35,14 +35,35 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # (LiveViews mount in their own process, so the plug's assign doesn't carry
   # over). Editor LiveViews pass it as the `tenant:` on authoring writes, so
   # authoring on a site's subdomain stamps content with that org.
+  #
+  # Under `TENANT_STRICT_HOST` a host that resolves to no org is refused with the
+  # same 404 the `SetTenant` plug answers with (#563). `Phoenix.LiveView.Channel`
+  # turns a 4xx `Plug.Exception` raised during mount into a client reload rather
+  # than a crash, so this costs no crash report per rejected connect.
+  #
+  # On a CONNECTED mount `host_uri` comes from the client's join payload, not
+  # from a validated `Host` header, and `check_origin` admits every subdomain of
+  # the base host — so this check is not equivalent to the plug's and does not
+  # by itself pin a socket to the org its page was served from. Per-org
+  # authorization (`KilnCMS.Accounts.Scoping.effective_tier/2`, fail-closed on a
+  # foreign org) is what holds there.
+  #
+  # A socket with NO host to judge is a different case from one whose host
+  # didn't match: `host_uri` is `:not_mounted_at_router` for a `live_render/3`
+  # child or a `live_isolated/3` test, and those are not host-scoped requests at
+  # all. They keep the lenient default rather than being refused for a host
+  # nobody claimed.
   def on_mount(:assign_current_org, _params, _session, socket) do
-    host =
-      case socket.host_uri do
-        %URI{host: h} -> h
-        _ -> nil
-      end
+    case socket.host_uri do
+      %URI{host: host} when is_binary(host) and host != "" ->
+        case KilnCMSWeb.Tenant.fetch_org(host) do
+          {:ok, org} -> {:cont, assign(socket, :current_org, org)}
+          :error -> raise KilnCMSWeb.Tenant.UnknownHostError, host: host
+        end
 
-    {:cont, assign(socket, :current_org, KilnCMSWeb.Tenant.resolve_org(host))}
+      _not_host_scoped ->
+        {:cont, assign(socket, :current_org, KilnCMSWeb.Tenant.resolve_org(nil))}
+    end
   end
 
   def on_mount(:live_user_optional, _params, _session, socket) do
