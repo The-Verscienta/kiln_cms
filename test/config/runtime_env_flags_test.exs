@@ -253,14 +253,18 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
         assert written == :not_written,
                "#{inspect(value)} must not be interpreted — it should keep the default"
 
-        assert stderr =~ "unrecognized value",
+        # Named, not just "unrecognized value": this evaluates the whole
+        # runtime.exs, and the sibling KILN_PROVENANCE_ENABLED block emits the
+        # same phrase — so a garbage value exported for that var would otherwise
+        # satisfy this assertion, or fail the one below.
+        assert stderr =~ "KILN_AUDIT_ANCHOR_EVERY_WRITE is set to an unrecognized value",
                "#{inspect(value)} should warn rather than be silently swallowed"
       end
     end
 
     test "a recognized value warns about nothing" do
       {_written, stderr} = anchor_every_write("true")
-      refute stderr =~ "unrecognized value"
+      refute stderr =~ "KILN_AUDIT_ANCHOR_EVERY_WRITE is set to an unrecognized value"
     end
 
     test "the block is skipped under :test so the suite is deterministic" do

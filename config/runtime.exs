@@ -174,29 +174,13 @@ if config_env() != :test do
   # key, get signed anchors, and then get a 404 from the endpoint the docs point
   # them at, with nothing to change.
   #
-  # Spellings and the warn-on-unrecognized behaviour match
-  # KILN_AUDIT_ANCHOR_EVERY_WRITE, and for the same reason in reverse: a
-  # deployment that publishes manifests to consumers must not stop publishing
-  # them because someone wrote `On`.
-  provenance_enabled =
-    "KILN_PROVENANCE_ENABLED" |> System.get_env("") |> String.trim() |> String.downcase()
-
-  cond do
-    provenance_enabled == "" ->
-      :ok
-
-    provenance_enabled in ~w(true 1 yes on) ->
-      config :kiln_cms, KilnCMS.Provenance, enabled: true
-
-    provenance_enabled in ~w(false 0 no off) ->
-      config :kiln_cms, KilnCMS.Provenance, enabled: false
-
-    true ->
-      IO.warn("""
-      KILN_PROVENANCE_ENABLED is set to an unrecognized value \
-      (#{inspect(provenance_enabled)}); keeping the configured default. \
-      Use one of: true/1/yes/on, false/0/no/off.\
-      """)
+  # `Env.fetch/1` rather than a sixth bespoke parser (#607): unset and
+  # unrecognized both leave the compiled default alone, which matters in both
+  # directions here — a deployment publishing manifests to consumers must not
+  # stop because someone wrote `On`, and one that has never enabled provenance
+  # must not start signing because of a typo.
+  with {:ok, provenance?} <- Env.fetch("KILN_PROVENANCE_ENABLED") do
+    config :kiln_cms, KilnCMS.Provenance, enabled: provenance?
   end
 
   # Mount the signing key as a file instead of exporting it. The key is a
