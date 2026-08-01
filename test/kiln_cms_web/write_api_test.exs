@@ -56,6 +56,13 @@ defmodule KilnCMSWeb.WriteApiTest do
 
   defp slug, do: "w-#{System.unique_integer([:positive])}"
 
+  defp current_tags(post_id, admin) do
+    post_id
+    |> CMS.get_post!(actor: admin, load: [:tags])
+    |> Map.fetch!(:tags)
+    |> MapSet.new(& &1.id)
+  end
+
   # --- JSON:API request helpers -------------------------------------------
 
   defp req(method, path, opts) do
@@ -317,6 +324,95 @@ defmodule KilnCMSWeb.WriteApiTest do
         worker: KilnCMS.Firing.FireWorker,
         args: %{"type" => "post", "id" => draft.id}
       )
+    end
+  end
+
+  # #521 — `tag_ids` is the complete set, so a partial PATCH detaches by
+  # omission. The merge verbs have to be reachable over the wire, not just from
+  # the code interface, because the API is where partial writers live.
+  describe "JSON:API / GraphQL — tag merge verbs (#521)" do
+    setup do
+      admin = user(:admin)
+      key = mint(admin, :read_write)
+      a = CMS.create_tag!(%{name: "a", slug: slug()}, actor: admin)
+      b = CMS.create_tag!(%{name: "b", slug: slug()}, actor: admin)
+      post = CMS.create_post!(%{title: "T", slug: slug(), tag_ids: [a.id]}, actor: admin)
+      %{admin: admin, key: key, a: a, b: b, post: post}
+    end
+
+    test "PATCH with tag_ids alone still replaces (unchanged contract)", ctx do
+      assert {200, _} =
+               patch_json("/api/json/posts/#{ctx.post.id}", ctx.post.id, %{tag_ids: [ctx.b.id]},
+                 type: "post",
+                 bearer: ctx.key
+               )
+
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.b.id])
+    end
+
+    test "PATCH with add_tag_ids merges instead of replacing", ctx do
+      assert {200, _} =
+               patch_json(
+                 "/api/json/posts/#{ctx.post.id}",
+                 ctx.post.id,
+                 %{add_tag_ids: [ctx.b.id]},
+                 type: "post",
+                 bearer: ctx.key
+               )
+
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "PATCH with remove_tag_ids detaches only what is listed", ctx do
+      assert {200, _} =
+               patch_json(
+                 "/api/json/posts/#{ctx.post.id}",
+                 ctx.post.id,
+                 %{add_tag_ids: [ctx.b.id]},
+                 type: "post",
+                 bearer: ctx.key
+               )
+
+      assert {200, _} =
+               patch_json(
+                 "/api/json/posts/#{ctx.post.id}",
+                 ctx.post.id,
+                 %{remove_tag_ids: [ctx.a.id]},
+                 type: "post",
+                 bearer: ctx.key
+               )
+
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.b.id])
+    end
+
+    test "PATCH combining tag_ids with a merge verb is rejected, tags untouched", ctx do
+      assert {status, body} =
+               patch_json(
+                 "/api/json/posts/#{ctx.post.id}",
+                 ctx.post.id,
+                 %{tag_ids: [ctx.b.id], add_tag_ids: [ctx.b.id]},
+                 type: "post",
+                 bearer: ctx.key
+               )
+
+      assert status == 400
+      assert Enum.any?(body["errors"], &(&1["detail"] =~ "cannot be combined"))
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id])
+    end
+
+    test "updatePost exposes addTagIds/removeTagIds on the GraphQL input", ctx do
+      query = """
+      mutation ($id: ID!, $input: UpdatePostInput!) {
+        updatePost(id: $id, input: $input) { result { id } errors { message } }
+      }
+      """
+
+      body =
+        gql(query, %{id: ctx.post.id, input: %{addTagIds: [ctx.b.id]}}, bearer: ctx.key)
+
+      assert body["errors"] == nil, inspect(body["errors"])
+      assert body["data"]["updatePost"]["errors"] == []
+      assert current_tags(ctx.post.id, ctx.admin) == MapSet.new([ctx.a.id, ctx.b.id])
     end
   end
 

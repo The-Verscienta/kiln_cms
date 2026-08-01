@@ -1273,6 +1273,26 @@ defmodule KilnCMS.CMS.Content do
           argument unquote(related_arg), {:array, :uuid}
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
 
+          # Non-destructive tag verbs (#521). `tag_ids` is the *complete* set,
+          # so a partial-update caller (REST/GraphQL/MCP) that only knows the
+          # one tag it cares about detaches every other tag by omission. These
+          # two merge against the current links instead: `add_tag_ids` relates
+          # what is listed and leaves the rest alone, `remove_tag_ids` unrelates
+          # what is listed and is a no-op for ids that aren't attached (so it
+          # stays idempotent). Declared *after* the replacing manage so the
+          # order is deterministic; combining them is refused outright by
+          # `TagMergeArguments` rather than resolved by declaration order.
+          argument :add_tag_ids, {:array, :uuid}
+          argument :remove_tag_ids, {:array, :uuid}
+          change manage_relationship(:add_tag_ids, :tags, type: :append)
+
+          change manage_relationship(:remove_tag_ids, :tags,
+                   on_lookup: :ignore,
+                   on_match: :unrelate,
+                   on_no_match: :ignore,
+                   on_missing: :ignore
+                 )
+
           change manage_relationship(unquote(related_arg), unquote(related_name),
                    type: :append_and_remove
                  )
@@ -1294,6 +1314,7 @@ defmodule KilnCMS.CMS.Content do
           # write-through, in-context editing) would leave the fired artifact
           # stale. `only_when: :published` keeps draft edits/autosaves silent.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          validate KilnCMS.CMS.Validations.TagMergeArguments
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls

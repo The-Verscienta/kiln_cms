@@ -13,6 +13,15 @@ defmodule KilnCMS.CMS do
     show? true
   end
 
+  # Appended to every update tool's description. A model asked to "tag this as
+  # Elixir" reaches for the argument it can name, and `tag_ids` is the complete
+  # set — sending one id detaches the rest (#521). Steering the model to the
+  # merge verbs is the fix that actually reaches the LLM; the validation on
+  # `:update` only stops it from sending contradictory arguments.
+  @tag_merge_hint "Tags: use add_tag_ids/remove_tag_ids to attach or detach " <>
+                    "without disturbing the others; tag_ids REPLACES the whole " <>
+                    "set (send it only to set the complete list)."
+
   # LLM-facing tools, served over the `/mcp` endpoint (see docs/mcp.md and
   # `KilnCMSWeb.Router`). Every call runs as the API-key's owning user through
   # the same policies as any other caller: reads are role/state/audience-scoped,
@@ -42,7 +51,7 @@ defmodule KilnCMS.CMS do
     end
 
     tool :read_tags, KilnCMS.CMS.Tag, :read do
-      description "List/filter tags (attach via tag_ids on content writes)."
+      description "List/filter tags (attach via add_tag_ids on content updates)."
     end
 
     tool :read_categories, KilnCMS.CMS.Category, :read do
@@ -59,7 +68,7 @@ defmodule KilnCMS.CMS do
     end
 
     tool :update_page, KilnCMS.CMS.Page, :update do
-      description "Update a page's content/metadata (state unchanged)."
+      description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint}"
     end
 
     tool :submit_page_for_review, KilnCMS.CMS.Page, :submit_for_review do
@@ -71,7 +80,7 @@ defmodule KilnCMS.CMS do
     end
 
     tool :update_post, KilnCMS.CMS.Post, :update do
-      description "Update a blog post's content/metadata (state unchanged)."
+      description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint}"
     end
 
     tool :submit_post_for_review, KilnCMS.CMS.Post, :submit_for_review do
@@ -83,7 +92,7 @@ defmodule KilnCMS.CMS do
     end
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do
-      description "Update a dynamic-type entry's content/metadata (state unchanged)."
+      description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint}"
     end
 
     tool :submit_entry_for_review, KilnCMS.CMS.Entry, :submit_for_review do

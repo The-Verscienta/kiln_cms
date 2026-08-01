@@ -29,6 +29,18 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- Content updates take `add_tag_ids` and `remove_tag_ids` alongside the existing
+  `tag_ids` (#521). `tag_ids` has always been the *complete* tag set, so a
+  partial write over `PATCH /api/json/<type>/:id`, GraphQL `update<Type>`, or
+  the MCP `update_*` tools detached every tag it omitted — the MCP case worst,
+  since a model asked to "tag this as Elixir" sends only the id it knows. The
+  two merge verbs union and subtract against the current links instead, and both
+  are idempotent (re-adding an attached tag and removing an unattached one are
+  no-ops). Sending `tag_ids` together with either verb, or the same id in both
+  verbs, is rejected rather than resolved by declaration order. The replace
+  semantics of `tag_ids` are unchanged, so nothing existing has to move; the
+  other relationship arrays (`related_post_ids`, …) still replace.
+
 - `mix docs` now builds a complete manual: the API reference for every module in
   `lib/`, the `mix kiln.*` task reference, and all 63 guides under `docs/`,
   grouped into a sidebar (Getting started, Authoring & editorial, APIs &

@@ -381,6 +381,32 @@ curl -s http://localhost:4000/api/json/posts \
 `custom_fields` / scheduling attributes are all writable. Relationship arrays
 (`tag_ids`, `related_post_ids`) are passed as attributes.
 
+### Writing tags — replace vs merge
+
+`tag_ids` is the content's **complete** tag set (append-and-remove), so a
+`PATCH` carrying a partial list detaches everything omitted. A partial writer
+should use the merge verbs on `PATCH /:id` instead (#521):
+
+| Attribute | Semantics |
+|---|---|
+| `add_tag_ids` | Attaches the listed tags and leaves the others alone. Re-adding an attached tag is a no-op; an id that matches no tag is a `400`. |
+| `remove_tag_ids` | Detaches the listed tags and leaves the others alone. Removing a tag that isn't attached is a no-op, so retries are safe. |
+| `tag_ids` | **Replaces** the set. Omitting it leaves tags untouched; `[]` clears them. |
+
+```bash
+curl -X PATCH http://localhost:4000/api/json/posts/<uuid> \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -H 'content-type: application/vnd.api+json' \
+  -d '{"data":{"type":"post","id":"<uuid>","attributes":{"add_tag_ids":["<tag-uuid>"]}}}'
+```
+
+`tag_ids` may not be sent alongside either merge verb, and an id may not appear
+in both `add_tag_ids` and `remove_tag_ids` — both are rejected with a `400`
+rather than resolved in some arbitrary order. The same three attributes exist on
+GraphQL's `updatePost` (`addTagIds` / `removeTagIds`) and on the MCP `update_*`
+tools. `related_post_ids` and the other relationship arrays still replace; they
+have no merge verbs yet.
+
 ### Writing body content — the `block_tree` attribute
 
 The typed `blocks` union isn't exposed on the auto API (it isn't `public?`), so

@@ -59,10 +59,18 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 `create_tag` takes an optional `tag_group_id` — discover the groups with
 `read_tag_groups`.
 
-> **Tag writes replace, they don't merge.** `update_page`/`update_post`/
-> `update_entry` take `tag_ids` as the content's *complete* tag set: sending one
-> id detaches every other tag. Read the current tags first and send the full
-> list.
+> **Tags: prefer `add_tag_ids` / `remove_tag_ids`.** `update_page` /
+> `update_post` / `update_entry` accept three tag arguments (#521):
+>
+> | Argument | Semantics |
+> |---|---|
+> | `add_tag_ids` | Attaches the listed tags, leaves the rest attached. Re-adding an already-attached tag is a no-op; an unknown id is an error. |
+> | `remove_tag_ids` | Detaches the listed tags, leaves the rest attached. Removing a tag that isn't attached is a no-op. |
+> | `tag_ids` | **Replaces** the whole set — sending one id detaches every other tag. Only use it to set the complete list, and read the current tags first. |
+>
+> `tag_ids` cannot be combined with either merge verb in one call, and the same
+> id cannot appear in both `add_tag_ids` and `remove_tag_ids`; either is
+> rejected rather than silently resolved.
 
 The tool set lives in the `tools` block on `KilnCMS.CMS` and the
 `config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile

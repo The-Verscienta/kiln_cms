@@ -111,6 +111,31 @@ defmodule KilnCMSWeb.McpTest do
            "listed in config :kiln_cms, :mcp_tools but not declared on KilnCMS.CMS"
   end
 
+  # #521 — the MCP surface is the sharpest case: a model asked to "tag this as
+  # Elixir" sends the one id it knows. The merge verbs have to be in the tool's
+  # input schema, and the description has to point at them, or the model keeps
+  # reaching for the replacing `tag_ids`.
+  test "update_* tools offer the tag merge verbs and say so", %{conn: conn} do
+    plaintext = mint(user(:editor), :read_write)
+
+    conn = rpc(conn, plaintext, "tools/list")
+    %{"result" => %{"tools" => tools}} = json_response(conn, 200)
+
+    for name <- ~w(update_page update_post update_entry) do
+      tool = Enum.find(tools, &(&1["name"] == name))
+      assert tool, "expected tool #{name} to be exposed"
+
+      properties = get_in(tool, ["inputSchema", "properties", "input", "properties"]) || %{}
+
+      for arg <- ~w(tag_ids add_tag_ids remove_tag_ids) do
+        assert Map.has_key?(properties, arg), "#{name} is missing the #{arg} input"
+      end
+
+      assert tool["description"] =~ "add_tag_ids"
+      assert tool["description"] =~ "REPLACES"
+    end
+  end
+
   test "a :read_write key on an editor account can create a draft page", %{conn: conn} do
     plaintext = mint(user(:editor), :read_write)
     slug = "mcp-#{System.unique_integer([:positive])}"
