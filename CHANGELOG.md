@@ -419,6 +419,28 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **`entries_versions` had no index on `version_source_id`.** When the version
+  tables' foreign keys were dropped, `pages_versions` and `posts_versions` got a
+  single-column index to replace the lookup the FK had been providing;
+  `entries_versions` — the table every **dynamic** content type shares — got
+  neither. Every per-document version read filters on that column: the
+  governance chain's fold and its keyset resume, the governance trail, autosave
+  coalescing on every debounced save, and the version-history UI. On the dynamic
+  tier those were sequential scans over every version of every entry in the
+  deployment, growing without bound.
+
+  All three tables now carry `(org_id, version_source_id, version_inserted_at,
+  id)`, which covers the sort as well as the filter — that is the exact order
+  the chain folds and pages in — and leads with the tenant column because every
+  one of those reads is tenant-scoped. Declared through the shared
+  `paper_trail` mixin, since AshPaperTrail generates the version resource's
+  `postgres` block itself. The pre-existing single-column indexes on
+  `pages_versions` and `posts_versions` are left in place: they are not a prefix
+  of the new one, so they still serve a tenant-less read.
+
+  Postgres truncates the generated index names to 63 characters and says so at
+  migration time; the three remain distinct. (#672)
+
 - **History anchoring no longer resumes its incremental fold with a SQL
   `OFFSET`.** `KilnCMS.Governance.Chain` folded "everything since the last
   anchor" by skipping `version_count` rows, which means "skip the first n rows
