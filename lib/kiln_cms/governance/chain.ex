@@ -83,30 +83,92 @@ defmodule KilnCMS.Governance.Chain do
   **This narrows the laundering route in #597; it does not close it.** Say what
   holds, precisely:
 
+    * **Every anchor's signature is verified**, not only the head's, and an
+      anchor that cannot be judged **floors the whole chain**. That is the
+      foundation the rest stands on. While only the baseline was checked, every
+      other anchor's attested columns were rewritable, and any invariant
+      computed over them was satisfiable. And merely *skipping* an unjudgeable
+      anchor was the same hole one column over: `anchor_digest/1` covers neither
+      `key_id` nor `sequence`, so nulling a non-head signature made that anchor
+      invisible to the sweep, after which it could be renumbered into the
+      baseline position with nothing objecting. So a chain containing an anchor
+      nobody can vouch for reads `:unsigned` or `:unverifiable` — never
+      `:verified`. That is also the honest answer for the benign cases it
+      covers: no key configured, or a rotation whose outgoing key was never
+      registered.
+
+      The floor never *softens* a verdict. The hash comparison needs no key at
+      all, so real tampering is still reported as `{:tampered, …}` on a keyless
+      deployment.
     * Deleting or rewriting a **middle** anchor is detected — its successor names
       it, and the digest covers the predecessor's hash, count, signature and its
       own link columns, so it cannot be repaired without the signing key.
-    * Deleting the **newest** anchors is **not** detected. Nothing points at the
-      newest anchor, so a shorter chain is indistinguishable from a younger one.
-      Since it is exactly the newest anchors that commit to the most recent
-      versions, an attacker who doctors version *k* deletes only the anchors with
-      `version_count >= k`, leaves the rest intact, and the next write re-anchors
-      from the surviving prefix over the doctored rows. Verdict: `:verified`.
-      Confirmed empirically, and characterised in the test suite.
+    * Deleting a middle anchor **together with its successor** is detected. On a
+      signed deployment the attacker must null the survivor's link columns to
+      make the remaining links resolve, and those are inside its signed payload.
+      On an **unsigned** one, where that is free, the per-document `sequence`
+      is what is left: the run reads `[4, 1]` and the hole is visible.
+
+      `prev_anchor_id` also carries `ON DELETE RESTRICT`, which is what forces
+      the attacker into that shape: a middle anchor cannot be removed on its own
+      while its successor survives. Be precise about what that does **not** buy —
+      Postgres checks the constraint after the statement's rows are gone, so a
+      `DELETE … WHERE source_id = …` that removes referrer and referent together
+      still succeeds. RESTRICT narrows the attack; it does not stop a wipe. Both
+      are characterised in the test suite.
+    * **Reordering** is detected. Anchors are read in `sequence` order, which is
+      `NOT NULL`, unique per document, and inside the signed payload from v4 on.
+      Before it, ordering was by `inserted_at` — written by the database,
+      attested by nothing — so `UPDATE … SET inserted_at = now()` on an older,
+      shorter anchor made it the verification baseline, putting the doctored
+      versions outside the anchored prefix with nothing deleted at all.
+
+      A nullable position would have been the same hole one column over, since
+      nothing attests an absent value; hence `NOT NULL`, backfilled. Anchors
+      backfilled by that migration were signed before the column existed, so
+      their position is *not* covered by their own signature — what holds them
+      in place is that `version_count` must rise with position — on columns the
+      signature sweep has established are attested, which is why that sweep has
+      to floor rather than skip. A short anchor cannot be promoted to the
+      baseline without violating it.
+    * Deleting the **newest** anchors is still **not** detected, and neither is
+      *hiding* them — `UPDATE … SET resource_type = 'page_x'` or a rewritten
+      `source_id` takes the newest anchors out of the set the query returns,
+      which is the same attack reached with `UPDATE` instead of `DELETE`. So
+      revoking `DELETE` on `history_anchors` narrows this less than it sounds.
+      A third variant only *weakens* a verdict rather than faking one, and is
+      worth knowing because an operator reads it as benign: `key_id` is in
+      neither the signed payload nor the digest — it cannot be, since the key it
+      names is what would check the signature covering it — so one `UPDATE` on
+      any anchor makes a corpus read `:unverifiable`, which looks exactly like a
+      rotation whose outgoing key was never registered.
+
+      Nothing points at the newest anchor, so a shorter chain is
+      indistinguishable from a younger one, and no amount of state inside the
+      document's own anchor set can tell them apart. Since it is exactly the newest anchors that commit to
+      the most recent versions, an attacker who doctors version *k* deletes only
+      the anchors with `version_count >= k` — newest-first, past the `RESTRICT`
+      — leaves the rest intact, and the next write re-anchors from the surviving
+      prefix over the doctored rows. Verdict: `:verified`. Confirmed
+      empirically, and characterised in the test suite.
     * Wiping **every** anchor returns the document to `:unanchored` and the next
       write anchors it afresh — indistinguishable from a document anchored for
-      the first time.
-    * Without a signing key (the default — `KILN_PROVENANCE_PRIVATE_KEY` unset),
-      none of this holds at all: the digest is computed from public columns, so
-      an attacker recomputes any link they like, and the verdict is `:unsigned`
-      either way. **The predecessor link is advisory on an unsigned deployment.**
+      the first time. Same shape as the truncation case, and same limit.
+    * Without a signing key (the default — `KILN_PROVENANCE_PRIVATE_KEY` unset)
+      the digest and the position are ordinary columns an attacker can recompute
+      and renumber, and the verdict is `:unsigned` regardless. The structural
+      checks still run and still report — `chain_intact/1` precedes the
+      `:unsigned` short-circuit — so a hole or an out-of-order run is named
+      rather than swallowed. But **treat them as advisory there**: they raise the
+      cost of a forgery, they do not attest anything.
 
-  Closing the truncation case needs state the document's own anchor set cannot
-  provide — a per-document monotonic sequence with an external witness, an
-  append-only store, or `ON DELETE RESTRICT` plus a signed head pointer. Tracked
-  in #666; #597 stays open until then. Revoking `DELETE` on `history_anchors`
-  for the application role remains the cheap defence in depth, and is orthogonal
-  to all of this.
+  Closing the truncation case needs a witness the database does not hold: the
+  head digest published periodically to an append-only log, object storage with
+  a retention lock, or a transparency log. That is the only option that survives
+  full database control, which is the threat model the feature exists for.
+  Tracked in #666; #597 covers everything above it. Revoking `DELETE` on
+  `history_anchors` for the application role remains worthwhile on top of the
+  `RESTRICT`, and is orthogonal to all of this.
 
   ## When anchors are minted
 
@@ -255,8 +317,10 @@ defmodule KilnCMS.Governance.Chain do
       # one count to check the same invariant even when they did fold something.
       if allow_empty?, do: warn_on_skew(scope, type, previous, computed.version_count)
 
+      sequence = next_sequence(previous)
+
       {signature, key_id} =
-        sign(anchor_payload(type, record.id, computed, previous, prev_digest, boundary))
+        sign(anchor_payload(type, record.id, computed, previous, prev_digest, boundary, sequence))
 
       CMS.create_history_anchor!(
         %{
@@ -271,7 +335,8 @@ defmodule KilnCMS.Governance.Chain do
           key_id: key_id,
           actor_id: opts[:actor_id],
           prev_anchor_id: previous && previous.id,
-          prev_anchor_digest: prev_digest
+          prev_anchor_digest: prev_digest,
+          sequence: sequence
         },
         authorize?: false,
         tenant: record.org_id
@@ -283,6 +348,19 @@ defmodule KilnCMS.Governance.Chain do
 
   defp seed(nil), do: {@genesis, 0}
   defp seed(anchor), do: {anchor.chain_hash, anchor.version_count}
+
+  # 1-based, assigned at write time (#666).
+  #
+  # A read-then-write, and `mint/3` runs in `after_transaction` — outside the
+  # document's own transaction — so two concurrent mints read the same
+  # predecessor and pick the same number. The UNIQUE index on
+  # `(org_id, resource_type, source_id, sequence)` is what makes that safe: the
+  # loser's insert fails and lands in `anchor/2`/`extend/2`'s rescue as a logged
+  # skip. Without it both rows land, the run reads `[2, 2, 1]`, and the document
+  # is permanently and falsely `{:tampered, …}` — anchors have no destroy
+  # action, so there is no repair.
+  defp next_sequence(nil), do: 1
+  defp next_sequence(%{sequence: n}), do: n + 1
 
   # The sort key this anchor ends on: the last row it folded, or — when it
   # folded nothing — the one its predecessor ended on, carried forward so the
@@ -356,7 +434,7 @@ defmodule KilnCMS.Governance.Chain do
         :unanchored
 
       [anchor | _] = all ->
-        with :ok <- chain_intact(all) do
+        with attested when is_atom(attested) <- chain_intact(all) do
           verdict(
             anchor,
             compute(resource, source_id, org_id, anchor.version_count),
@@ -367,24 +445,120 @@ defmodule KilnCMS.Governance.Chain do
               anchor
             )
           )
+          |> floor_to(attested)
         end
     end
   end
 
   @doc """
-  Whether a document's anchor sequence is unbroken (#597).
+  Whether a document's anchor chain is unbroken (#597, #666).
 
-  Takes the anchors newest-first. Every anchor but a document's first names its
-  predecessor and carries a digest of it, both inside the signed payload — so a
-  named predecessor that is **absent**, or present but digesting differently, is
-  a hole. That is exactly what deleting or rewriting an anchor row leaves behind.
+  Takes the document's **complete** anchor set, newest first. Complete is not a
+  nicety: the position check below requires the run to reach 1, so a truncated
+  or paginated list reads as a gap on a healthy chain. `anchors/4` takes a
+  `limit` for callers that only want the head — do not feed one of those here.
 
-  Returns `:ok`, or `{:tampered, reason}` naming the break.
+  Four things must hold, and they are load-bearing in this order:
+
+    * **Links resolve.** Every anchor but the first names its predecessor, and a
+      named predecessor that is absent is a hole.
+    * **Digests match.** The predecessor is also digested, so one that is present
+      but rewritten is a hole too.
+    * **Every anchor's signature verifies** — not just the head's. This is what
+      makes the two checks below mean anything: without it, an attacker rewrites
+      the attested columns of any anchor that is not currently the head, and
+      every invariant computed over them is satisfiable. Not holding the key
+      (rotation without registering the outgoing one) is never red, and an
+      unsigned anchor is skipped rather than judged — `verdict/5` reports
+      `:unsigned` for the deployment.
+    * **Positions are sane.** Contiguous down to 1, and `version_count`
+      non-decreasing along them.
+
+  Returns `{:tampered, reason}` naming the break, or the strongest thing that
+  can honestly be said about the chain's attestation: `:ok` when every anchor
+  verified, `:unsigned` when any carries no signature, `:unverifiable` when any
+  is signed with a key this deployment does not hold. `verify/4` uses that as a
+  **floor** — a chain containing an anchor nobody can vouch for never reads
+  `:verified`, whatever the hashes say.
+
+  The floor is deliberately not a short-circuit. The hash comparison is the one
+  check that needs no key at all, so it still runs and is still reported: real
+  tampering reads `{:tampered, …}` even on a keyless deployment.
+
+  Cost is one signature verification per anchor. On the publish-only default a
+  document has a handful; with `anchor_every_write` it has one per save, and
+  this runs on the governance page and in `mix kiln.audit.verify`. That is the
+  price of the property, and it is paid on audit paths only — nothing on the
+  delivery path verifies a chain.
   """
-  @spec chain_intact([struct()]) :: :ok | {:tampered, String.t()}
+  @spec chain_intact([struct()]) :: :ok | :unsigned | :unverifiable | {:tampered, String.t()}
   def chain_intact(anchors) do
     by_id = Map.new(anchors, &{&1.id, &1})
 
+    with :ok <- links_intact(anchors, by_id),
+         attested when is_atom(attested) <- signatures_intact(anchors),
+         :ok <- sequence_intact(anchors) do
+      attested
+    end
+  end
+
+  # `:verified` only survives a chain every anchor of which could be judged.
+  # A tamper verdict is never softened — it was reached on the hashes, which
+  # need no key.
+  defp floor_to({:tampered, _} = tampered, _attestation), do: tampered
+  defp floor_to(_verdict, :unsigned), do: :unsigned
+  defp floor_to(_verdict, :unverifiable), do: :unverifiable
+  defp floor_to(verdict, :ok), do: verdict
+
+  # Every anchor, not only the head (#666).
+  #
+  # `verify/4` only ever signature-checked the baseline, which left every other
+  # anchor's attested columns rewritable — and those columns are exactly what
+  # the position checks are computed from. An attacker who could renumber a
+  # non-head anchor, or lower its `version_count`, could satisfy contiguity and
+  # monotonicity while promoting a short, early anchor to the head, putting the
+  # doctored versions outside the anchored prefix.
+  #
+  # **An anchor that cannot be judged is not a pass.** Silently continuing past
+  # one was a hole in its own right, and a one-column one: `anchor_digest/1`
+  # covers neither `key_id` nor `sequence`, so `UPDATE … SET signature = NULL`
+  # (or a bogus `key_id`) on a non-head anchor made it unjudgeable, after which
+  # it could be renumbered into the baseline position with nothing objecting.
+  # So the weakest outcome across the chain wins, and it is the verdict the
+  # caller gets: a chain containing an anchor we cannot vouch for reads
+  # `:unsigned` or `:unverifiable`, never `:verified`.
+  #
+  # That is also the honest answer for the benign cases it covers — a deployment
+  # with no key, or one mid-rotation without the outgoing key registered. Both
+  # already read that way from the head; now the whole chain has to earn it.
+  # Returns the weakest judgement across the chain, or halts on the first
+  # tampered one. Both answers come out of a single sweep: the RSA verification
+  # is the expensive part of `chain_intact/1`, and walking twice to compute the
+  # floor separately would have doubled it.
+  defp signatures_intact(anchors) do
+    Enum.reduce_while(anchors, :ok, fn anchor, weakest ->
+      case anchor_signature(anchor) do
+        {:tampered, _} = broken -> {:halt, broken}
+        judged -> {:cont, weaker(weakest, judged)}
+      end
+    end)
+  end
+
+  # `:ok`/`:verified` is the strongest, then `:unsigned`, then `:unverifiable` —
+  # "signed with a key we do not hold" says less than "not signed at all",
+  # because the former is also what a tampered `key_id` looks like.
+  defp weaker(:unverifiable, _), do: :unverifiable
+  defp weaker(_, :unverifiable), do: :unverifiable
+  defp weaker(:unsigned, _), do: :unsigned
+  defp weaker(_, :unsigned), do: :unsigned
+  defp weaker(_, _), do: :ok
+
+  defp anchor_signature(%{signature: nil}), do: :unsigned
+
+  defp anchor_signature(anchor),
+    do: signature_verdict(anchor, anchor.resource_type, anchor.source_id)
+
+  defp links_intact(anchors, by_id) do
     anchors
     |> Enum.reject(&is_nil(&1.prev_anchor_id))
     |> Enum.reduce_while(:ok, fn anchor, :ok ->
@@ -393,6 +567,62 @@ defmodule KilnCMS.Governance.Chain do
         broken -> {:halt, broken}
       end
     end)
+  end
+
+  # Two invariants over the signed positions (#666). Both are only meaningful
+  # because `signatures_intact/1` above has already established that the columns
+  # they read are attested.
+  #
+  # **Contiguous down to 1.** The predecessor links catch a middle anchor removed
+  # while its successor survives. This catches the same removal when the
+  # successor is removed too: the run is `[7, 6, 3, 2, 1]` and the hole is
+  # visible even though every surviving link resolves.
+  #
+  # **`version_count` non-decreasing along them.** Contiguity alone is satisfied
+  # by any permutation, and a permutation is exactly what would promote a short,
+  # early anchor to the head — putting the doctored versions outside the anchored
+  # prefix, which is the whole object of the attack. Anchors only ever fold
+  # forward, so coverage rises with position by construction.
+  #
+  # Neither catches a clean truncation of the newest anchors: `[3, 2, 1]` after
+  # deleting 5 and 4 is indistinguishable from a document anchored only three
+  # times. Nothing inside the document's own anchor set can tell those apart —
+  # see the module docs and #666.
+  defp sequence_intact(anchors) do
+    with :ok <- contiguous(anchors), do: coverage_rises_with_position(anchors)
+  end
+
+  defp contiguous(anchors) do
+    sequenced = anchors |> Enum.map(& &1.sequence) |> Enum.sort(:desc)
+
+    if sequenced == Enum.to_list(length(sequenced)..1//-1) do
+      :ok
+    else
+      # Says what is true and stops. A run that is not contiguous has several
+      # causes — a removed anchor, a renumbering, two minted at one position —
+      # and naming only the first would send an operator looking for a deletion
+      # that may not have happened.
+      {:tampered,
+       "anchor sequence is not contiguous down to 1: #{inspect(sequenced)}. " <>
+         "An anchor was removed, renumbered, or duplicated."}
+    end
+  end
+
+  defp coverage_rises_with_position(anchors) do
+    anchors
+    |> Enum.sort_by(& &1.sequence)
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.find(fn [earlier, later] -> later.version_count < earlier.version_count end)
+    |> case do
+      nil ->
+        :ok
+
+      [earlier, later] ->
+        {:tampered,
+         "anchor sequence is out of order: position #{later.sequence} covers " <>
+           "#{later.version_count} versions but position #{earlier.sequence} " <>
+           "covers #{earlier.version_count}, and anchors only fold forward"}
+    end
   end
 
   defp link_intact(anchor, by_id) do
@@ -428,7 +658,7 @@ defmodule KilnCMS.Governance.Chain do
         :unanchored
 
       [anchor | _] = all ->
-        with :ok <- chain_intact(all) do
+        with attested when is_atom(attested) <- chain_intact(all) do
           verdict(
             anchor,
             fold(Enum.take(versions, anchor.version_count)),
@@ -436,6 +666,7 @@ defmodule KilnCMS.Governance.Chain do
             source_id,
             covered_loaded(versions, anchor)
           )
+          |> floor_to(attested)
         end
     end
   end
@@ -559,6 +790,17 @@ defmodule KilnCMS.Governance.Chain do
     prev = anchor.prev_anchor_id && %{id: anchor.prev_anchor_id}
     boundary = %{id: anchor.last_version_id, at: anchor.last_version_at}
 
+    v4 =
+      anchor_payload(
+        type,
+        source_id,
+        computed,
+        prev,
+        anchor.prev_anchor_digest,
+        boundary,
+        anchor.sequence
+      )
+
     v3 = anchor_payload(type, source_id, computed, prev, anchor.prev_anchor_digest, boundary)
 
     # An older-shape candidate is offered only when the columns it does NOT
@@ -576,9 +818,27 @@ defmodule KilnCMS.Governance.Chain do
     v1 = legacy_anchor_payload(type, source_id, computed)
 
     cond do
-      not is_nil(anchor.last_version_at) -> [v3]
-      is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) -> [v3, v2, v1]
-      true -> [v3, v2]
+      # v4 is offered on every branch, including the ones that predate the
+      # boundary column. `mint/3` signs v4 unconditionally, and it carries a nil
+      # boundary forward when its predecessor had one — so gating v4 on
+      # `last_version_at` made a freshly minted anchor unverifiable against its
+      # own signature, and since every anchor is now swept that would have been
+      # permanent, with no destroy action to repair it. An older shape can never
+      # match a v4 anchor anyway: the payloads differ byte for byte.
+      #
+      # Every anchor carries a `sequence`, but only those minted since #666 were
+      # SIGNED with one — the rest were backfilled by the migration that added
+      # the column. Nothing distinguishes the two by inspection, so both shapes
+      # are offered and each anchor matches exactly one: the payloads differ byte
+      # for byte, so a v4 anchor can only satisfy v4 and a v3 anchor only v3.
+      #
+      # The consequence, stated rather than glossed: a backfilled anchor's
+      # position is not covered by its own signature. What holds it in place is
+      # `chain_intact/1` — `version_count` rising with position, on columns that
+      # ARE covered, so a short early anchor cannot be promoted to the head.
+      not is_nil(anchor.last_version_at) -> [v4, v3]
+      is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) -> [v4, v3, v2, v1]
+      true -> [v4, v3, v2]
     end
   end
 
@@ -708,8 +968,17 @@ defmodule KilnCMS.Governance.Chain do
   # The read itself, with no kill-switch gate. `anchors/4` applies the gate;
   # `anchored_boundary/1` deliberately does not — see its docs.
   defp read_anchors(type, source_id, org_id, limit) do
-    # Newest first with an id tiebreak (same-microsecond anchors).
-    query = [sort: [inserted_at: :desc, id: :desc]]
+    # Newest first by the SIGNED `sequence` (#666) — not by `inserted_at`, which
+    # is attested by nothing and was therefore a way to change the verification
+    # baseline without deleting anything. `sequence` is `NOT NULL` and unique per
+    # document, so this is already a total order — no `id` tiebreak needed, and a
+    # backward scan of a plain btree serves it as a top-1 with no sort node.
+    #
+    # Restated here rather than left to `for_content`'s own
+    # `prepare build(sort: …)`: `Ash.Query.sort/3` APPENDS, so a `query:` sort
+    # that disagreed would become a tiebreak of the resource's rather than
+    # replacing it. Identical on purpose.
+    query = [sort: [sequence: :desc]]
     query = if limit, do: Keyword.put(query, :limit, limit), else: query
 
     CMS.list_history_anchors_for!(type, source_id,
@@ -805,8 +1074,26 @@ defmodule KilnCMS.Governance.Chain do
   # and the next anchor covers whatever rows the attacker chose. Anything that
   # steers the fold has to be attested.
   #
-  # `v: 3` because the shape changed again; `anchor_payload/5` and
-  # `legacy_anchor_payload/3` keep anchors minted at v2 and v1 verifying.
+  # `v: 4` adds `sequence`, for the same reason the boundary joined at v3: it
+  # steers verification — it is the order `for_content` reads in and therefore
+  # what picks the baseline — so it has to be attested (#666). The v3, v2 and v1
+  # shapes below keep anchors minted by earlier releases verifying.
+  defp anchor_payload(type, source_id, computed, prev, prev_digest, boundary, sequence) do
+    Canonical.encode(%{
+      "v" => 4,
+      "type" => type,
+      "source_id" => source_id,
+      "chain_hash" => computed.chain_hash,
+      "version_count" => computed.version_count,
+      "prev_anchor_id" => prev && prev.id,
+      "prev_anchor_digest" => prev_digest,
+      "last_version_id" => boundary.id,
+      "last_version_at" => boundary.at && DateTime.to_iso8601(boundary.at),
+      "sequence" => sequence
+    })
+  end
+
+  # The pre-#666 signed shape.
   defp anchor_payload(type, source_id, computed, prev, prev_digest, boundary) do
     Canonical.encode(%{
       "v" => 3,
