@@ -239,6 +239,18 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    billing events. `/ws/collab` was a fourth until #655 wired it through
    `Tenant.fetch_org/1` like the other two sockets.
 
+   A **connected** LiveView mount was outside it in a different way until #654,
+   and strict matching would not have closed it: the host was known, just not
+   the caller's. `socket.host_uri` is rebuilt from the client's join payload
+   rather than from a `Host` header, and `check_origin` admits every subdomain
+   of the base host, so a client served one org's page could join naming
+   another's and take its `:current_org` — the assign editor LiveViews pass as
+   the `tenant:` on authoring writes. `/live` now carries `connect_info: [:uri]`
+   like the other three sockets and resolves from the host it connected on,
+   refusing a claim that names a different org. Per-org authorization
+   (`Scoping.effective_tier/2`, fail-closed on a foreign org) is still what
+   authorizes the actions; this makes the assign mean what its callers assume.
+
    **Two things about the refusal itself** (#659). It is halted above the router
    and so above every rate limiter, which left one uncached organization lookup
    per request; unresolvable hosts are now cached as misses (in a cache of their

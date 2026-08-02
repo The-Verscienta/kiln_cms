@@ -22,9 +22,19 @@ defmodule KilnCMSWeb.Endpoint do
     secure: Application.compile_env(:kiln_cms, :secure_session_cookie, false)
   ]
 
+  # `connect_info: [:uri]` for the same reason the three sockets below carry it,
+  # and it is load-bearing here rather than convenient: a CONNECTED LiveView
+  # mount's `socket.host_uri` is rebuilt from the client's join payload, so
+  # without this the client names its own organization (#654). `:uri` is the
+  # handshake's own request URI — the `Host` header the browser sets from the
+  # page's origin, which is exactly the value `SetTenant` trusts over HTTP.
+  # `KilnCMSWeb.LiveUserAuth`'s `:assign_current_org` resolves from it and
+  # refuses a socket claiming a different org. Declared on both transports:
+  # longpoll builds `connect_info` from its own initial HTTP request the same
+  # way, so dropping it there would leave that transport unpinned.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:uri, session: @session_options]],
+    longpoll: [connect_info: [:uri, session: @session_options]]
 
   # `connect_info: [:uri]` so the socket can resolve its tenant from the
   # connecting host (epic #336) — a raw transport bypasses the SetTenant plug, so
