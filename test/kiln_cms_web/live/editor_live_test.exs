@@ -1838,7 +1838,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
         |> Enum.filter(&(&1.version_source_id == page.id))
         |> Enum.sort_by(& &1.version_inserted_at, DateTime)
 
-      lv |> element("button[phx-value-version_id='#{create_version.id}']") |> render_click()
+      # Scoped to the restore control: each row also carries a compare-picker
+      # toggle bound to the same version id (#467).
+      lv
+      |> element("button[phx-click='restore'][phx-value-version_id='#{create_version.id}']")
+      |> render_click()
 
       assert CMS.get_page!(page.id, authorize?: false).title == "Original"
     end

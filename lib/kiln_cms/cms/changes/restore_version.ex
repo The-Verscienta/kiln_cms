@@ -4,13 +4,16 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   PaperTrail version.
 
   Versions are tracked in `:changes_only` mode (each stores only what changed),
-  so the full state at the target version is reconstructed by replaying — i.e.
-  merging — every version's `changes` from creation up to and including the
-  target. Only content fields are restored (state/workflow and timestamps are
-  left as-is); the restore itself is captured as a new version.
+  so the full state at the target version is reconstructed by folding every
+  version's `changes` from creation up to and including the target —
+  `KilnCMS.CMS.VersionSnapshot`, shared with the version-compare UI (#467). Only
+  content fields are restored (state/workflow and timestamps are left as-is); the
+  restore itself is captured as a new version.
   """
   use Ash.Resource.Change
   require Ash.Query
+
+  alias KilnCMS.CMS.VersionSnapshot
 
   @restorable ~w(title slug blocks excerpt seo_title seo_description locale)
 
@@ -26,12 +29,14 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
     # Version twins are tenant-strict (#419) — reads carry the record org.
     org_id = changeset.data.org_id
 
-    case fetch_target(version_module, version_id, source_id, org_id) do
-      {:ok, target} ->
-        version_module
-        |> replay(source_id, target.version_inserted_at, org_id)
-        |> restore_fields(changeset)
-
+    with {:ok, target} <- fetch_target(version_module, version_id, source_id, org_id),
+         {:ok, state} <-
+           VersionSnapshot.at(version_module, source_id, target,
+             authorize?: false,
+             tenant: org_id
+           ) do
+      restore_fields(state, changeset)
+    else
       :error ->
         Ash.Changeset.add_error(changeset,
           field: :version_id,
@@ -48,16 +53,6 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
       {:ok, %{} = version} -> {:ok, version}
       _ -> :error
     end
-  end
-
-  # Merge every version's changes up to the target, in chronological order, to
-  # reconstruct the full attribute set at that point.
-  defp replay(version_module, source_id, up_to, org_id) do
-    version_module
-    |> Ash.Query.filter(version_source_id == ^source_id and version_inserted_at <= ^up_to)
-    |> Ash.Query.sort(version_inserted_at: :asc)
-    |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Enum.reduce(%{}, fn version, acc -> Map.merge(acc, version.changes) end)
   end
 
   defp restore_fields(state, changeset) do

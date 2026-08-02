@@ -20,9 +20,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   import Ash.Expr, only: [expr: 1]
   import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
+  import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.VersionDiff
+  alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.Slug
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
@@ -43,6 +46,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # can't create a pathological tree. The storage cast has its own depth guard.
   @max_columns 4
   @max_children_per_column 20
+
+  # Stands in for the working draft on the version-compare picker (#467). A
+  # version id is a UUID, so this can never collide with one.
+  @current_pick "current"
 
   # Bound the media picker window loaded on mount (newest first) so a large
   # library can't grow each open editor's heap without limit.
@@ -110,6 +117,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # restore) so rich-text blocks remount and reload TipTap from the new
          # content — `phx-update="ignore"` otherwise keeps the stale editor (#135).
          |> assign(:editor_version, 0)
+         # Version compare (#467): the (at most two) history entries picked in the
+         # version panel, and the computed diff while the modal is open. Restoring
+         # blind is the thing this replaces, so the modal offers Restore itself.
+         |> assign(:current_pick, @current_pick)
+         |> assign(:compare_pick, [])
+         |> assign(:compare, nil)
          # Right inspector rail (Theme A): which panel is showing. All panels stay
          # mounted (form fields must survive submit) — the tab only toggles CSS
          # visibility, never `:if`.
@@ -619,7 +632,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
       ]
     ]
 
-    assign(socket, :versions, list_versions(socket.assigns.kind, opts))
+    versions = list_versions(socket.assigns.kind, opts)
+
+    socket
+    |> assign(:versions, versions)
+    |> refresh_compare(versions)
+  end
+
+  # The record was re-read, so anything derived from it is stale. Two ways that
+  # bites an open comparison:
+  #
+  #   * A picked version can be *gone* — autosave coalescing prunes superseded
+  #     snapshots (#32) on every debounced save. Drop the pick, close the
+  #     comparison, and say why; silently emptying the panel reads as a bug.
+  #   * The "Current draft" side can have *moved* — a pending autosave firing
+  #     while the modal is open leaves it describing a document that no longer
+  #     exists, which is exactly what `build_compare/2` refuses to do elsewhere.
+  #     Recompute rather than close: the editor is mid-read.
+  defp refresh_compare(socket, versions) do
+    picks = socket.assigns.compare_pick
+    live = MapSet.new(versions, & &1.id)
+    kept = Enum.filter(picks, &(&1 == @current_pick or MapSet.member?(live, &1)))
+
+    cond do
+      kept != picks and socket.assigns.compare ->
+        socket
+        |> assign(:compare_pick, kept)
+        |> assign(:compare, nil)
+        |> put_flash(:info, gettext("A version you were comparing was superseded."))
+
+      kept != picks ->
+        assign(socket, :compare_pick, kept)
+
+      socket.assigns.compare ->
+        case build_compare(socket, picks) do
+          {:ok, compare} -> assign(socket, :compare, compare)
+          :error -> assign(socket, :compare, nil)
+        end
+
+      true ->
+        socket
+    end
   end
 
   defp build_form(record, actor) do
@@ -803,6 +856,82 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp restore_version(kind, record, vid, actor),
     do: ContentTypes.restore_version(kind, record, vid, actor: actor, tenant: record.org_id)
+
+  # ── Version compare (#467) ─────────────────────────────────────────────────
+
+  # Resolves the two picked history entries into snapshots and diffs them.
+  #
+  # Reads carry the actor, not `authorize?: false`: the diff exposes a version's
+  # whole `changes` payload, so it must be gated by the same version read policy
+  # as the history list itself (`KilnCMS.CMS.VersionPolicies`). A forbidden read
+  # raises rather than quietly diffing a partial history, which would render a
+  # confident-looking diff of the wrong document.
+  defp build_compare(socket, picks) do
+    record = socket.assigns.record
+    resource = record.__struct__
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    with [_, _] = resolved <- Enum.map(picks, &resolve_pick(socket, &1)),
+         false <- Enum.any?(resolved, &is_nil/1),
+         [left, right] <- Enum.sort(resolved, &pick_before?/2),
+         {:ok, old, new} <- snapshots(Module.concat(resource, Version), record, left, right, opts) do
+      {:ok,
+       %{
+         diff: VersionDiff.between(old, new, resource),
+         left: side(left),
+         right: side(right)
+       }}
+    else
+      _unusable -> :error
+    end
+  rescue
+    error ->
+      # `:error` level with the stacktrace, not `:warning`: Sentry's logger
+      # handler is registered at the default `:error` threshold, so a warning
+      # here would make every compare failure — a forbidden read, a broken
+      # snapshot, a dead connection — invisible outside the raw prod log.
+      Logger.error("version compare failed: #{Exception.format(:error, error, __STACKTRACE__)}")
+
+      :error
+  end
+
+  defp resolve_pick(_socket, @current_pick), do: {:current, nil}
+
+  defp resolve_pick(socket, version_id) do
+    case Enum.find(socket.assigns.versions, &(&1.id == version_id)) do
+      nil -> nil
+      version -> {:version, version}
+    end
+  end
+
+  defp snapshots(version_module, record, {:version, old}, {:version, new}, opts),
+    do: VersionSnapshot.pair(version_module, record.id, old, new, opts)
+
+  # The working draft is whatever the record holds now. The editor autosaves on a
+  # debounce, so that is the saved state, not the keystroke in flight.
+  defp snapshots(version_module, record, {:version, old}, {:current, _}, opts) do
+    with {:ok, snapshot} <- VersionSnapshot.at(version_module, record.id, old, opts) do
+      {:ok, snapshot, VersionSnapshot.current(record)}
+    end
+  end
+
+  defp snapshots(_version_module, _record, _left, _right, _opts), do: :error
+
+  # The draft is always the newer side, so a comparison reads before → after.
+  # Two saved versions defer to `VersionSnapshot.before?/2` rather than
+  # re-deriving the rule — it is the ordering authority for version history, and
+  # a second copy here could drift out of agreement with the fold itself.
+  defp pick_before?({:current, _}, _right), do: false
+  defp pick_before?(_left, {:current, _}), do: true
+  defp pick_before?({:version, left}, {:version, right}), do: VersionSnapshot.before?(left, right)
+
+  defp side({:current, _}), do: %{label: gettext("Current draft"), version_id: nil}
+  defp side({:version, version}), do: %{label: version_label(version), version_id: version.id}
+
+  defp version_label(version) do
+    "#{version.version_action_name} · " <>
+      Calendar.strftime(version.version_inserted_at, "%Y-%m-%d %H:%M")
+  end
 
   defp do_workflow(kind, verb, record, actor),
     do: ContentTypes.transition(kind, verb, record, actor: actor, tenant: record.org_id)
@@ -1529,6 +1658,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end
 
+  # ── Version compare (#467) ─────────────────────────────────────────────────
+
+  def handle_event("toggle_compare", %{"version_id" => version_id}, socket) do
+    picks = socket.assigns.compare_pick
+
+    picks =
+      cond do
+        version_id in picks -> List.delete(picks, version_id)
+        length(picks) < 2 -> picks ++ [version_id]
+        # Two is the comparison. Picking a third retires the older choice rather
+        # than making the editor clear the selection first.
+        true -> tl(picks) ++ [version_id]
+      end
+
+    {:noreply, assign(socket, :compare_pick, picks)}
+  end
+
+  def handle_event("open_compare", _params, socket) do
+    case build_compare(socket, socket.assigns.compare_pick) do
+      {:ok, compare} ->
+        {:noreply, assign(socket, :compare, compare)}
+
+      :error ->
+        {:noreply,
+         socket
+         |> assign(:compare, nil)
+         |> put_flash(:error, gettext("Couldn't compare those versions."))}
+    end
+  end
+
+  def handle_event("close_compare", _params, socket) do
+    {:noreply, assign(socket, :compare, nil)}
+  end
+
   def handle_event("restore", %{"version_id" => version_id}, socket) do
     result =
       restore_version(
@@ -1545,6 +1708,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign_record(record)
          |> reset_editors()
          |> assign(:save_state, :saved)
+         # Restore can be fired from inside the compare modal; the diff it was
+         # showing describes a document that no longer exists.
+         |> assign(:compare, nil)
+         |> assign(:compare_pick, [])
          |> put_flash(:info, gettext("Restored that version."))}
 
       _ ->
@@ -5152,34 +5319,59 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <p :if={@versions == []} class="text-sm text-base-content/60">
                   {gettext("No saved versions yet.")}
                 </p>
-                <ul :if={@versions != []} class="space-y-2">
-                  <li
-                    :for={version <- @versions}
-                    class="flex items-center justify-between gap-3 text-sm"
-                  >
-                    <span class="text-base-content/70">
-                      {version.version_action_name} · {Calendar.strftime(
-                        version.version_inserted_at,
-                        "%Y-%m-%d %H:%M"
-                      )}
-                      <span
-                        :if={version.id == @record.published_version_id}
-                        class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
-                      >
-                        {gettext("Live published")}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      phx-click="restore"
-                      phx-value-version_id={version.id}
-                      data-confirm={gettext("Restore content to this version?")}
-                      class="btn btn-sm btn-default"
+                <div :if={@versions != []}>
+                  <p class="mb-2 text-xs text-base-content/60">
+                    {gettext("Select two to see what changed between them.")}
+                  </p>
+                  <ul class="space-y-2">
+                    <li class="flex items-center gap-2 text-sm">
+                      <.compare_toggle
+                        pick={@current_pick}
+                        picked={@current_pick in @compare_pick}
+                        label={gettext("Current draft")}
+                      />
+                      <span class="text-base-content/70">{gettext("Current draft")}</span>
+                    </li>
+                    <li
+                      :for={version <- @versions}
+                      class="flex items-center justify-between gap-3 text-sm"
                     >
-                      {gettext("Restore")}
-                    </button>
-                  </li>
-                </ul>
+                      <span class="flex min-w-0 items-center gap-2">
+                        <.compare_toggle
+                          pick={version.id}
+                          picked={version.id in @compare_pick}
+                          label={version_label(version)}
+                        />
+                        <span class="text-base-content/70">
+                          {version_label(version)}
+                          <span
+                            :if={version.id == @record.published_version_id}
+                            class="ml-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success"
+                          >
+                            {gettext("Live published")}
+                          </span>
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        phx-click="restore"
+                        phx-value-version_id={version.id}
+                        data-confirm={gettext("Restore content to this version?")}
+                        class="btn btn-sm btn-default"
+                      >
+                        {gettext("Restore")}
+                      </button>
+                    </li>
+                  </ul>
+                  <button
+                    type="button"
+                    phx-click="open_compare"
+                    disabled={length(@compare_pick) != 2}
+                    class="btn btn-sm btn-default mt-3 disabled:opacity-50"
+                  >
+                    {gettext("Compare selected")}
+                  </button>
+                </div>
               </.inspector_section>
             </div>
           </div>
@@ -5193,7 +5385,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
         results={@picker_media}
         query={@media_query}
       />
+
+      <.version_compare
+        :if={@compare}
+        diff={@compare.diff}
+        left={@compare.left}
+        right={@compare.right}
+      />
     </Layouts.console>
+    """
+  end
+
+  # Pick-for-comparison toggle on a version-history row.
+  #
+  # A `<button>` with checkbox semantics rather than an `<input type="checkbox">`:
+  # this sits inside the main `<.form>`, where even an unnamed input's change
+  # event bubbles up and fires the form's `phx-change` (see the tag filter's note
+  # above), which would run validation and mark the draft dirty on every pick.
+  attr :pick, :string, required: true
+  attr :picked, :boolean, required: true
+  attr :label, :string, required: true
+
+  defp compare_toggle(assigns) do
+    ~H"""
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={to_string(@picked)}
+      aria-label={gettext("Compare %{version}", version: @label)}
+      phx-click="toggle_compare"
+      phx-value-version_id={@pick}
+      class={[
+        "flex size-4 shrink-0 items-center justify-center rounded border",
+        (@picked && "border-primary bg-primary text-primary-content") ||
+          "border-base-content/30 hover:border-base-content/60"
+      ]}
+    >
+      <.icon :if={@picked} name="hero-check" class="size-3" />
+    </button>
     """
   end
 
