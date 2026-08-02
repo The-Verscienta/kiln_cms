@@ -211,6 +211,44 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The session cookie is `__Host-`-prefixed in production.** It carried no
+  `Domain`, which makes it host-scoped for *reads* — but RFC 6265 puts no such
+  limit on *writes*. Every org is a sibling host under one registrable domain
+  (`<slug>.<base_host>`), so script running on any tenant origin could set
+  `_kiln_cms_key; Domain=.<base_host>`, and the browser would then send two
+  cookies of that name to a sibling.
+
+  Which one is honoured is not a race the victim might win. Plug builds its
+  cookie map so the **first** pair in the header survives, and RFC 6265 §5.4
+  sends longer `Path`s first — so `Domain=.<base_host>; Path=/editor` outranks
+  the victim's own `Path=/` cookie on exactly the authoring routes worth taking.
+  Planting the cookie in a browser with no session yet works just as well, and
+  survives sign-out, because the server only ever deletes a cookie it set
+  itself. The victim then browses another org inside a session the attacker
+  controls. The origins that can run script are not hypothetical — a stored XSS
+  on the attacker's own tenant, a dangling subdomain, and #490's per-org code
+  injection, which is *designed* to run an org admin's script there.
+
+  `__Host-` is the only mechanism that makes host-scoping structural rather than
+  conventional, and it closes the hole at the source rather than at the tie: the
+  browser refuses to *store* a cookie of that name unless it is `Secure`,
+  `Path=/`, and carries no `Domain`, so the sibling origin's write never
+  happens. That is already the shape Kiln configures, so the prefix costs
+  nothing except that it cannot be used without `Secure` — and dev, test and e2e
+  run over plain HTTP. It therefore rides the same `:secure_session_cookie` flag
+  as `Secure` itself, in one expression, so the two cannot drift apart and leave
+  the browser silently discarding every session.
+
+  The cookie's whole shape now lives in `KilnCMSWeb.SessionCookie` rather than
+  in the endpoint, because the production shape is the one no test build ever
+  emits: the suite constructs `options(true)` directly, drives it through
+  `Plug.Session`, and asserts the emitted `Set-Cookie` satisfies every
+  precondition the browser enforces — plus that `config/prod.exs` still asks for
+  the flag at all, read the way a release reads it. A non-boolean value raises
+  by name instead of being coerced, since `"false"` is truthy and would
+  otherwise pair `Secure` with the unprefixed name. Renaming the cookie signs
+  everyone out once — see **Upgrading**. (#686)
+
 - **The shared token preview wears the requesting site's branding too.** The
   same bare `<Layouts.public>` as the error templates below, on
   `/preview/<token>/live`: `current_org` defaults to `nil`, which resolves the
@@ -588,6 +626,43 @@ migration, a rewritten column, a dropped config key).
   sighted and screen-reader users alike. The copyable media URL now says so too.
 
 ### Upgrading
+
+**Everyone is signed out once on deploy.** The session cookie is renamed from
+`_kiln_cms_key` to `__Host-_kiln_cms_key` in production (#686). The browser
+treats that as a different cookie, so every logged-in session ends the moment
+the release goes live and editors sign in again. Nothing is lost — sessions hold
+no state beyond the identity — but tell your editors rather than letting them
+discover it, and avoid deploying mid-publish-window on a busy site.
+
+Expect one confusing minute rather than a clean cut. A LiveView that was already
+connected keeps running: it reconnects on its own signed token, which the rename
+does not touch. So an editor with `/editor/...` open sees a page that still
+works while every plain request from the same tab — an upload, a navigation, a
+form post — has no session behind it, and a stale form post fails CSRF as a 403
+rather than a redirect to sign-in. A reload fixes it.
+
+There is no config to set and nothing to roll forward. The rename is
+deliberately not a dual-read window: reading the old name alongside the new one
+would keep accepting exactly the shadowed cookie the prefix exists to reject.
+
+**Rolling the release back is not symmetric.** Nothing deletes the old
+`_kiln_cms_key` — Plug only ever writes or clears the name it is configured
+with — and signing out after the deploy revokes only the token in the *new*
+cookie. So a pre-deploy cookie can still be sitting in a browser, with a token
+that was never revoked, and a rollback starts honouring it again. On a shared or
+kiosk browser that means the next visitor can land in someone else's session.
+If you roll back, rotate `SECRET_KEY_BASE` in the same window: it invalidates
+every cookie of either name.
+
+Dev, test, and e2e are unaffected — they run over plain HTTP, where the prefix
+cannot be relied on (Safari and any non-localhost dev host reject a `Secure`
+cookie there), so they keep the bare name.
+
+One debugging trap worth knowing: a production build's cookie now *requires*
+HTTPS between the browser and whatever terminates TLS. If you port-forward into
+a prod container and open it over plain `http://localhost`, the page renders but
+signing in silently does nothing — the browser discards the cookie and there is
+no server-side error to grep for. Reach it through the real origin instead.
 
 **Set `EMBED_ORIGINS` before deploying if you embed forms on other sites.**
 Until #562 the variable was unset on almost every deployment, because leaving it

@@ -220,9 +220,11 @@ not impose one because it is jurisdiction- and policy-dependent.
 
 ## Transport & at-rest notes
 
-- **Session cookie** (`_kiln_cms_key`) is both **signed and encrypted** (#217), so
-  its contents are neither tamperable nor readable client-side. Both salts derive
-  keys from `secret_key_base`; rotating that invalidates existing sessions.
+- **Session cookie** (`__Host-_kiln_cms_key` in production, `_kiln_cms_key` in
+  dev, test and e2e over plain HTTP) is both **signed and encrypted** (#217), so its
+  contents are neither tamperable nor readable client-side. Both salts derive
+  keys from `secret_key_base`; rotating that invalidates existing sessions. The
+  `__Host-` prefix keeps a sibling org's origin from shadowing it (#686).
 - **Uploaded images are metadata-stripped on upload** (#215): EXIF/GPS, camera
   info, and the original client filename are removed from the stored original and
   every generated variant (`KilnCMS.ImageProcessor.strip_metadata/2`).
