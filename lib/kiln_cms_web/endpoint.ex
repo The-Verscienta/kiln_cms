@@ -5,22 +5,25 @@ defmodule KilnCMSWeb.Endpoint do
   # isn't allowed to see instead of erroring).
   use AshGraphql.Subscription.Endpoint
 
-  # The session is stored in the cookie, signed (tamper-proof) and encrypted
-  # (`encryption_salt`) so its contents aren't readable client-side either —
-  # defense-in-depth for anything we put in the session (#217). Both salts derive
-  # keys from `secret_key_base`; rotating that invalidates existing sessions.
-  @session_options [
-    store: :cookie,
-    key: "_kiln_cms_key",
-    signing_salt: "Dsoh9oKb",
-    encryption_salt: "8fso5iqxDfI",
-    same_site: "Lax",
-    http_only: true,
-    # Mark the cookie `Secure` in production (served over HTTPS via `force_ssl`);
-    # left off in dev/test/e2e, which run over plain HTTP where a Secure cookie
-    # would never be sent. Config-driven so each env opts in explicitly.
-    secure: Application.compile_env(:kiln_cms, :secure_session_cookie, false)
-  ]
+  # Mark the cookie `Secure` in production (served over HTTPS via `force_ssl`);
+  # left off in dev/test/e2e, which run over plain HTTP where a Secure cookie
+  # would never be sent. Config-driven so each env opts in explicitly. It also
+  # decides the cookie's `__Host-` prefix, which browsers honour only alongside
+  # `Secure` — one flag, so the two cannot disagree (#686).
+  @secure_session_cookie Application.compile_env(:kiln_cms, :secure_session_cookie, false)
+
+  # The session cookie's whole shape — name, salts, and the attributes the
+  # `__Host-` prefix depends on — lives in `KilnCMSWeb.SessionCookie`, so the
+  # production shape is constructible (and therefore assertable) from a
+  # non-production build. Evaluated at compile time; `plug Plug.Session` below
+  # and the `/live` socket's `connect_info` share the one list.
+  @session_options KilnCMSWeb.SessionCookie.options(@secure_session_cookie)
+
+  # Test hook: lets the suite assert that this endpoint takes its cookie from
+  # `KilnCMSWeb.SessionCookie` rather than restating it. Not endpoint API.
+  @doc false
+  @spec session_options() :: keyword()
+  def session_options, do: @session_options
 
   # `connect_info: [:uri]` for the same reason the three sockets below carry it,
   # and it is load-bearing here rather than convenient: a CONNECTED LiveView

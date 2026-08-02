@@ -111,7 +111,18 @@ build if a resource is ever registered without that authorizer.
 - **HTTPS / HSTS** — `force_ssl` with `x_forwarded_proto` rewriting in
   `config/prod.exs`.
 - **Session cookies** — signed *and* encrypted, `SameSite=Lax`, `http_only`, and
-  `secure` in production.
+  `secure` in production. Wherever `secure` is on, the cookie is also
+  **`__Host-`-prefixed** (`__Host-_kiln_cms_key`), which is what makes it
+  host-scoped for *writes* as well as reads: orgs are siblings under one
+  registrable domain, and RFC 6265 otherwise lets script on any tenant origin
+  set a same-named cookie for the parent domain. It would then outrank the
+  victim's own — Plug honours the header's *first* cookie of a name, and
+  RFC 6265 §5.4 sends longer `Path`s first, so `Domain=.<base_host>;
+  Path=/editor` wins on exactly the authoring routes. Browsers refuse to store
+  a `__Host-` cookie that is not `Secure`, `Path=/`, and `Domain`-less, so the
+  sibling's write is rejected at the source; the prefix rides the same flag as
+  `Secure`, and dev, test and e2e keep the bare name over plain HTTP
+  (`KilnCMSWeb.SessionCookie`, #686).
 - **SSRF protection on outbound webhooks** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard
