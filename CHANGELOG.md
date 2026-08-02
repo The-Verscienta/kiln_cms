@@ -211,6 +211,18 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The shared token preview wears the requesting site's branding too.** The
+  same bare `<Layouts.public>` as the error templates below, on
+  `/preview/<token>/live`: `current_org` defaults to `nil`, which resolves the
+  **default organization**, so an editor sharing a draft with an external
+  reviewer sent them their content wrapped in some other site's name and logo.
+  The assign was already populated by the route's `:assign_current_org` hook.
+
+  A preview link is designed to be forwarded, so branding it does reveal which
+  site a draft belongs to — the right trade against the alternative it replaces,
+  which was revealing a *different* site's identity. This was the last bare
+  `<Layouts.public>` in the codebase. (#680)
+
 - **Error pages now wear the requesting site's branding, not the default org's.**
   All three templates (403, 404, 500) opened with a bare `<Layouts.public>` and
   passed no `current_org`. That attr defaults to `nil`, and

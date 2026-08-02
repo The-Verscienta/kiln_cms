@@ -69,6 +69,34 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
     assert html =~ "Shared draft preview"
   end
 
+  test "the preview chrome carries the requesting site's brand, not the default org's",
+       %{conn: conn} do
+    o = KilnCMS.OrgFixtures.org("tpbrand")
+    Ash.Seed.seed!(KilnCMS.CMS.SiteBranding, %{org_id: o.id, site_name: "Acme Tenant"})
+    KilnCMS.Cache.bust_branding(o.id)
+
+    page =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Their Draft",
+        slug: "tp-#{System.unique_integer([:positive])}",
+        state: :draft,
+        org_id: o.id,
+        blocks: [%{type: :heading, content: "Theirs", data: %{"level" => 1}, order: 0}]
+      })
+
+    # `Layouts.public` used to be rendered bare here, and `Branding.for_org(nil)`
+    # resolves the DEFAULT org — so a shared preview of Acme's draft wore some
+    # other site's name and logo (#680).
+    {:ok, _lv, html} =
+      live(
+        %{conn | host: "#{o.slug}.#{KilnCMSWeb.Tenant.base_host()}"},
+        "/preview/#{PreviewToken.sign(page)}/live"
+      )
+
+    assert html =~ "Powered by Acme Tenant."
+    refute html =~ "Powered by KilnCMS."
+  end
+
   test "an invalid token shows a dead-link notice, never content", %{conn: conn} do
     {:ok, _lv, html} = live(conn, "/preview/garbage-token/live")
 
