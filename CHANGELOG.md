@@ -840,15 +840,19 @@ not heal it — the column comes back empty. Nothing else in the release depends
 on it, so if you need to roll back for an unrelated reason, roll back the
 application and leave this migration applied.
 
-The migration itself is safe to run on a live instance: the column is backfilled
-before the `NOT NULL` lands, and the new foreign key is added `NOT VALID` and
-validated separately, so neither step takes a lock that blocks traffic.
+The migration backfills the column before the `NOT NULL` lands, so it runs on a
+populated table. It does take an `ACCESS EXCLUSIVE` lock on `history_anchors`
+for its duration — brief on a publish-only deployment, longer on one running
+`audit_anchor_every_write`, which mints an anchor per save.
 
-One thing it can surface rather than cause: if validation fails, some anchor
-names a predecessor that no longer exists — the hole #597 exists to detect. The
-migration says so, prints the query that lists them, and the constraint is
-already protecting new writes; the existing rows are what it cannot vouch for.
-Restore them from a backup, or accept the hole and validate manually.
+**It will not stop your deployment coming up.** If some anchor names a
+predecessor that no longer exists — the hole #597 exists to detect — the foreign
+key is still added and still protects every new write, but as `NOT VALID`: the
+existing rows are what it cannot vouch for. The migration warns, names the count,
+and prints the query that lists them. Turning a detection into a failed boot is
+how detections get switched off, so it deliberately does not. Once the rows are
+accounted for, `ALTER TABLE history_anchors VALIDATE CONSTRAINT
+history_anchors_prev_anchor_id_fkey;` marks the constraint good.
 
 **Everyone is signed out once on deploy.** The session cookie is renamed from
 `_kiln_cms_key` to `__Host-_kiln_cms_key` in production (#686). The browser

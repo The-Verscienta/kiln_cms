@@ -136,6 +136,13 @@ defmodule KilnCMS.Governance.Chain do
       `source_id` takes the newest anchors out of the set the query returns,
       which is the same attack reached with `UPDATE` instead of `DELETE`. So
       revoking `DELETE` on `history_anchors` narrows this less than it sounds.
+      A third variant only *weakens* a verdict rather than faking one, and is
+      worth knowing because an operator reads it as benign: `key_id` is in
+      neither the signed payload nor the digest — it cannot be, since the key it
+      names is what would check the signature covering it — so one `UPDATE` on
+      any anchor makes a corpus read `:unverifiable`, which looks exactly like a
+      rotation whose outgoing key was never registered.
+
       Nothing points at the newest anchor, so a shorter chain is
       indistinguishable from a younger one, and no amount of state inside the
       document's own anchor set can tell them apart. Since it is exactly the newest anchors that commit to
@@ -427,7 +434,7 @@ defmodule KilnCMS.Governance.Chain do
         :unanchored
 
       [anchor | _] = all ->
-        with :ok <- chain_intact(all) do
+        with attested when is_atom(attested) <- chain_intact(all) do
           verdict(
             anchor,
             compute(resource, source_id, org_id, anchor.version_count),
@@ -438,7 +445,7 @@ defmodule KilnCMS.Governance.Chain do
               anchor
             )
           )
-          |> floor_to(attestation(all))
+          |> floor_to(attested)
         end
     end
   end
@@ -467,7 +474,16 @@ defmodule KilnCMS.Governance.Chain do
     * **Positions are sane.** Contiguous down to 1, and `version_count`
       non-decreasing along them.
 
-  Returns `:ok`, or `{:tampered, reason}` naming the break.
+  Returns `{:tampered, reason}` naming the break, or the strongest thing that
+  can honestly be said about the chain's attestation: `:ok` when every anchor
+  verified, `:unsigned` when any carries no signature, `:unverifiable` when any
+  is signed with a key this deployment does not hold. `verify/4` uses that as a
+  **floor** — a chain containing an anchor nobody can vouch for never reads
+  `:verified`, whatever the hashes say.
+
+  The floor is deliberately not a short-circuit. The hash comparison is the one
+  check that needs no key at all, so it still runs and is still reported: real
+  tampering reads `{:tampered, …}` even on a keyless deployment.
 
   Cost is one signature verification per anchor. On the publish-only default a
   document has a handful; with `anchor_every_write` it has one per save, and
@@ -475,39 +491,15 @@ defmodule KilnCMS.Governance.Chain do
   price of the property, and it is paid on audit paths only — nothing on the
   delivery path verifies a chain.
   """
-  @spec chain_intact([struct()]) :: :ok | {:tampered, String.t()}
+  @spec chain_intact([struct()]) :: :ok | :unsigned | :unverifiable | {:tampered, String.t()}
   def chain_intact(anchors) do
     by_id = Map.new(anchors, &{&1.id, &1})
 
     with :ok <- links_intact(anchors, by_id),
-         :ok <- signatures_intact(anchors) do
-      sequence_intact(anchors)
+         attested when is_atom(attested) <- signatures_intact(anchors),
+         :ok <- sequence_intact(anchors) do
+      attested
     end
-  end
-
-  @doc """
-  The strongest thing that can honestly be said about a chain's attestation.
-
-  `:ok` when every anchor's signature verified, `:unsigned` when any carries
-  none, `:unverifiable` when any is signed with a key this deployment does not
-  hold. `verify/4` uses it as a **floor**: a chain containing an anchor nobody
-  can vouch for never reads `:verified`, whatever the hashes say.
-
-  Separate from `chain_intact/1` on purpose. The hash comparison is the one
-  check that works without any key at all, so it has to run and be reported even
-  on an unsigned deployment — folding attestation into the structural verdict
-  would have replaced a real `{:tampered, …}` with a shrug.
-  """
-  @spec attestation([struct()]) :: :ok | :unsigned | :unverifiable
-  def attestation(anchors) do
-    Enum.reduce(anchors, :ok, fn anchor, weakest ->
-      case anchor_signature(anchor) do
-        # A tampered signature is `chain_intact/1`'s business, and it has
-        # already refused by the time this runs.
-        {:tampered, _} -> weakest
-        judged -> weaker(weakest, judged)
-      end
-    end)
   end
 
   # `:verified` only survives a chain every anchor of which could be judged.
@@ -539,11 +531,15 @@ defmodule KilnCMS.Governance.Chain do
   # That is also the honest answer for the benign cases it covers — a deployment
   # with no key, or one mid-rotation without the outgoing key registered. Both
   # already read that way from the head; now the whole chain has to earn it.
+  # Returns the weakest judgement across the chain, or halts on the first
+  # tampered one. Both answers come out of a single sweep: the RSA verification
+  # is the expensive part of `chain_intact/1`, and walking twice to compute the
+  # floor separately would have doubled it.
   defp signatures_intact(anchors) do
-    Enum.reduce_while(anchors, :ok, fn anchor, :ok ->
+    Enum.reduce_while(anchors, :ok, fn anchor, weakest ->
       case anchor_signature(anchor) do
         {:tampered, _} = broken -> {:halt, broken}
-        _judged -> {:cont, :ok}
+        judged -> {:cont, weaker(weakest, judged)}
       end
     end)
   end
@@ -662,7 +658,7 @@ defmodule KilnCMS.Governance.Chain do
         :unanchored
 
       [anchor | _] = all ->
-        with :ok <- chain_intact(all) do
+        with attested when is_atom(attested) <- chain_intact(all) do
           verdict(
             anchor,
             fold(Enum.take(versions, anchor.version_count)),
@@ -670,7 +666,7 @@ defmodule KilnCMS.Governance.Chain do
             source_id,
             covered_loaded(versions, anchor)
           )
-          |> floor_to(attestation(all))
+          |> floor_to(attested)
         end
     end
   end
@@ -822,6 +818,14 @@ defmodule KilnCMS.Governance.Chain do
     v1 = legacy_anchor_payload(type, source_id, computed)
 
     cond do
+      # v4 is offered on every branch, including the ones that predate the
+      # boundary column. `mint/3` signs v4 unconditionally, and it carries a nil
+      # boundary forward when its predecessor had one — so gating v4 on
+      # `last_version_at` made a freshly minted anchor unverifiable against its
+      # own signature, and since every anchor is now swept that would have been
+      # permanent, with no destroy action to repair it. An older shape can never
+      # match a v4 anchor anyway: the payloads differ byte for byte.
+      #
       # Every anchor carries a `sequence`, but only those minted since #666 were
       # SIGNED with one — the rest were backfilled by the migration that added
       # the column. Nothing distinguishes the two by inspection, so both shapes
@@ -833,8 +837,8 @@ defmodule KilnCMS.Governance.Chain do
       # `chain_intact/1` — `version_count` rising with position, on columns that
       # ARE covered, so a short early anchor cannot be promoted to the head.
       not is_nil(anchor.last_version_at) -> [v4, v3]
-      is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) -> [v3, v2, v1]
-      true -> [v3, v2]
+      is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) -> [v4, v3, v2, v1]
+      true -> [v4, v3, v2]
     end
   end
 

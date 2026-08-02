@@ -1071,6 +1071,33 @@ defmodule KilnCMS.Governance.ChainTest do
       assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
     end
 
+    test "an anchor minted with no boundary still verifies against its own signature" do
+      # `mint/3` signs the v4 payload unconditionally, but a fold that covers no
+      # version rows records no boundary — so gating the v4 candidate on
+      # `last_version_at` made a freshly minted anchor unverifiable against the
+      # signature it had just been given. Head-only checking hid that until the
+      # head moved past it; sweeping every anchor would have made it permanent,
+      # with no destroy action to repair it.
+      actor = admin()
+      page = published_page(actor)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.source_id == type(^page.id, :binary_id))
+      )
+
+      KilnCMS.Repo.delete_all(
+        from(v in "pages_versions", where: v.version_source_id == type(^page.id, :binary_id))
+      )
+
+      :ok = Chain.anchor(page)
+
+      minted = Chain.latest_anchor("page", page.id, page.org_id)
+      refute minted.last_version_at, "expected an anchor over no versions to record no boundary"
+      assert minted.signature
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
     test "an anchor signed with a key we do not hold floors it too" do
       actor = admin()
       page = four_anchor_page(admin: actor)

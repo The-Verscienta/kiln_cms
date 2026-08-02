@@ -14,17 +14,23 @@ defmodule KilnCMS.Repo.Migrations.AddAnchorSequence do
        per document in `(inserted_at, id)` order — the order the chain was
        written in — and only then made `NOT NULL`.
 
-    2. **Dangling predecessor links are reported before the foreign key is
-       added.** Adding the FK on a chain that already has a hole fails with a
-       bare `23503` and a UUID — and since migrations run on boot, that is a
-       container that will not start, over a finding rather than a fault. The
-       check runs first and says what it means.
+    2. **The foreign key is added `NOT VALID`, then validated separately, and a
+       validation failure warns rather than raising.** Added the ordinary way,
+       it fails with a bare `23503` and a UUID on any chain that already has a
+       hole — and since migrations run on boot, that is a container that will
+       not start, over a *finding* rather than a fault. Split, the constraint
+       lands unconditionally and protects every new write, the operator is told
+       which rows are dangling and what to do, and the deployment comes up.
+
+       Refusing to boot would also be the wrong trade on its own terms: the hole
+       is what #597's tamper-evidence exists to surface, and turning a detection
+       into an outage is how detections get switched off.
 
        It is an `execute/1` **closure**, not a string, and that is load-bearing:
        the string form only buffers the statement, and the buffer is flushed
        after `up/0` has already returned, so anything wrapped around it in this
-       function would never see the failure. The closure runs during the flush,
-       in order, and can raise.
+       function would never see the outcome. The closure runs during the flush,
+       in order, and can branch on what it finds.
 
   `down` is deliberately lossy and says so — see the CHANGELOG's Upgrading note.
   `sequence` is inside the v4 signed payload, so removing the column makes every
@@ -72,19 +78,7 @@ defmodule KilnCMS.Repo.Migrations.AddAnchorSequence do
 
     create index(:history_anchors, [:org_id, :resource_type, :source_id, :sequence], unique: true)
 
-    execute(&refuse_dangling_links/0, fn -> :ok end)
-
-    alter table(:history_anchors) do
-      modify :prev_anchor_id,
-             references(:history_anchors,
-               column: :id,
-               name: "history_anchors_prev_anchor_id_fkey",
-               type: :uuid,
-               prefix: "public",
-               on_delete: :restrict,
-               on_update: :restrict
-             )
-    end
+    execute(&add_prev_anchor_fkey/0, &drop_prev_anchor_fkey/0)
 
     create index(:history_anchors, [:org_id, :prev_anchor_id])
   end
@@ -92,11 +86,7 @@ defmodule KilnCMS.Repo.Migrations.AddAnchorSequence do
   def down do
     drop_if_exists index(:history_anchors, [:org_id, :prev_anchor_id])
 
-    drop constraint(:history_anchors, "history_anchors_prev_anchor_id_fkey")
-
-    alter table(:history_anchors) do
-      modify :prev_anchor_id, :uuid
-    end
+    execute(&drop_prev_anchor_fkey/0, &add_prev_anchor_fkey/0)
 
     drop_if_exists index(:history_anchors, [:org_id, :resource_type, :source_id, :sequence])
 
@@ -105,28 +95,47 @@ defmodule KilnCMS.Repo.Migrations.AddAnchorSequence do
     end
   end
 
-  defp refuse_dangling_links do
+  defp add_prev_anchor_fkey do
+    repo().query!("""
+    ALTER TABLE history_anchors
+      ADD CONSTRAINT history_anchors_prev_anchor_id_fkey
+      FOREIGN KEY (prev_anchor_id) REFERENCES history_anchors(id)
+      ON DELETE RESTRICT ON UPDATE RESTRICT
+      NOT VALID
+    """)
+
     case repo().query!(@dangling) do
       %{rows: []} ->
-        :ok
+        repo().query!(
+          "ALTER TABLE history_anchors VALIDATE CONSTRAINT history_anchors_prev_anchor_id_fkey"
+        )
 
       %{rows: rows} ->
-        raise """
+        IO.warn("""
         #{length(rows)} history anchor(s) name a predecessor that no longer exists.
 
-        This migration adds a foreign key on history_anchors.prev_anchor_id and
-        cannot do so while those rows are dangling. The rows are the finding, not
-        the problem: an anchor was deleted while its successor survived, which is
-        exactly what #597's tamper-evidence exists to detect.
+        The foreign key has been added and is protecting every new write, but it
+        is NOT VALID: the existing rows are what it cannot vouch for. They are a
+        finding, not a migration problem — an anchor was deleted while its
+        successor survived, which is what #597's tamper-evidence exists to
+        surface. `Chain.verify/4` reports those documents as tampered.
 
         List them with:
 
         #{String.trim(@dangling)}
 
-        Then either restore the missing anchors from a backup, or — having decided
-        the hole is accounted for — delete the successors that name them and run
-        the migration again.
-        """
+        Once they are accounted for — restored from a backup, or the successors
+        that name them removed — mark the constraint good:
+
+          ALTER TABLE history_anchors
+            VALIDATE CONSTRAINT history_anchors_prev_anchor_id_fkey;
+        """)
     end
+  end
+
+  defp drop_prev_anchor_fkey do
+    repo().query!(
+      "ALTER TABLE history_anchors DROP CONSTRAINT IF EXISTS history_anchors_prev_anchor_id_fkey"
+    )
   end
 end
