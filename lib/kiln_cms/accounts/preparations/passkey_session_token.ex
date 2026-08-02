@@ -33,6 +33,12 @@ defmodule KilnCMS.Accounts.Preparations.PasskeySessionToken do
   end
 
   defp mint_all(users) do
+    # A passkey is a strictly stronger proof of ownership than the password the
+    # per-account budget is protecting, so completing one releases it (#478) —
+    # the owner of an address someone is guessing at shouldn't have to wait out
+    # a window they didn't cause.
+    Enum.each(users, &KilnCMS.Accounts.AccountThrottle.forgive(to_string(&1.email)))
+
     users
     |> Enum.reduce_while({:ok, []}, fn user, {:ok, acc} ->
       case Jwt.token_for_user(user, %{"purpose" => "user"}) do

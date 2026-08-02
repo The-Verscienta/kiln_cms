@@ -253,6 +253,11 @@ defmodule KilnCMS.Accounts.User do
       # validates the provided email and password and generates a token
       prepare AshAuthentication.Strategy.Password.SignInPreparation
 
+      # Per-account budget on top of the per-IP `:auth` bucket (#478) — an
+      # attacker rotating IPs gets a fresh window per address otherwise.
+      # Refuses with the same `AuthenticationFailed` a wrong password produces.
+      prepare KilnCMS.Accounts.Preparations.ThrottleSignIn
+
       metadata :token, :string do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
@@ -379,6 +384,10 @@ defmodule KilnCMS.Accounts.User do
     end
 
     update :reset_password_with_token do
+      # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
+      # record's email), which an atomic update has no place to put.
+      require_atomic? false
+
       argument :reset_token, :string do
         allow_nil? false
         sensitive? true
@@ -408,6 +417,11 @@ defmodule KilnCMS.Accounts.User do
 
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
+
+      # Holding the emailed reset token proves the account is yours, so it
+      # releases the per-account sign-in budget (#478) — otherwise the remedy
+      # the throttle's own alert mail recommends leaves the owner still locked.
+      change KilnCMS.Accounts.Changes.ForgiveSignInThrottle
     end
 
     # --- Two-factor authentication (TOTP) self-service (issue #331) ---

@@ -31,6 +31,10 @@ defmodule KilnCMS.Application do
       # Cooldown bucket for the aggregated "relay unreachable" mail alert — one
       # fixed key, so the table stays tiny; a periodic clean keeps it honest.
       {KilnCMS.Mail.RelayAlert, clean_period: :timer.minutes(5)},
+      # Per-account auth budgets (#478). No `key_older_than`: the fixed-window
+      # algorithm's cleaner deletes strictly on `expires_at`, and never reads
+      # that option — setting it would be inert config that reads like a floor.
+      {KilnCMS.Accounts.AccountThrottle, clean_period: :timer.minutes(5)},
       # Per-user and per-org spend ceilings for every optional LLM feature (SEO
       # drafting, block assist). Started unconditionally: the table is empty
       # until someone asks for a generation, and starting it lazily would mean
