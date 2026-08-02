@@ -79,6 +79,18 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     probe: {1_000_000, :timer.minutes(1)}
   }
 
+# Per-account auth budgets (#478). The whole suite signs in as seeded users and
+# sends reset/magic-link mail, and every bucket keys on the email — so the real
+# limits would have unrelated auth tests refusing each other's sign-ins and
+# swallowing each other's mail (the ETS table is node-wide and is not reset
+# between test files). `KilnCMS.Accounts.AccountThrottleTest` tightens all four
+# back down per-test, under `async: false`, to assert the real behaviour.
+config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
+  budget: 1_000_000,
+  window: :timer.minutes(15),
+  mail_budget: 1_000_000,
+  mail_window: :timer.hours(1)
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used

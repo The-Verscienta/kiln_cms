@@ -54,13 +54,13 @@ the router so preflights are answered before route matching).
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | **none, all envs** | `:docs` |
-| Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT | `:auth` |
+| Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT | `:auth` + per-account (#478) |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
 | Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
 | Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
-| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/sign-in/verify`, `/auth/passkey/*` | varies | `:auth` |
+| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/sign-in/verify`, `/auth/passkey/*` | varies | `:auth`; password sign-in also per-account (#478) |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | none |
@@ -94,7 +94,16 @@ build if a resource is ever registered without that authorizer.
   default org unless `TENANT_STRICT_HOST=true`, which 404s it instead — see
   residual risk 2.
 - **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across eight
-  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`.
+  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. Password sign-in is
+  limited on a second axis by `KilnCMS.Accounts.AccountThrottle` (#478): a flat
+  per-**account** budget, which IP rotation cannot escape and which the browser
+  sign-in gets even though it submits over `/live` and so never passes the
+  router's `:auth` bucket at all. Deliberately flat rather than escalating —
+  a lockout that lengthens each time an attacker burns a window is a denial of
+  service against any known address. A successful sign-in, a completed password
+  reset and a passkey sign-in each clear it. A separate flat per-address budget
+  covers the two mail-triggering requests (password reset, magic link) so
+  neither becomes a mailbomb.
 - **CSP & secure headers** — `put_secure_browser_headers` plus a per-request
   nonce-based Content-Security-Policy on browser pipelines; a narrower static
   policy for preview/forms/embeds and a relaxed one scoped to the Swagger
@@ -170,9 +179,17 @@ build if a resource is ever registered without that authorizer.
   cannot publish or delete.
 
 ### Headless sign-in (`POST /api/auth/sign_in`)
-- **Credential stuffing / brute force** — mitigated by the `:auth` bucket and
-  bcrypt cost; failures return a generic 401. *Residual:* no account lockout or
-  progressive backoff (see below).
+- **Credential stuffing / brute force** — mitigated on two axes: the per-IP
+  `:auth` bucket, and the per-account budget in `KilnCMS.Accounts.AccountThrottle`
+  (#478), which an attacker rotating source addresses cannot escape. Bcrypt cost
+  applies to both — including to a *throttled* attempt, which burns the same
+  simulated hash, so response time doesn't reveal that an address is currently
+  at its budget. Failures return a generic 401 and so does a throttled attempt;
+  the budget keys on the *submitted* identifier, so an address with no account
+  throttles identically and the refusal is not an enumeration oracle. The
+  account owner is mailed once per window when attempts start being refused.
+  *Residual:* the second factor (`POST /sign-in/verify`, TOTP and recovery
+  codes) has no per-account budget — tracked separately.
 - **Token theft** — JWTs are bearer tokens; clients must store them securely and
   use TLS. Tokens are revocable via the token store.
 
@@ -353,8 +370,18 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    submits a block tree without ids and omits the field gets the declared
    default — which silently clears an admin-set value. Enforcing more requires
    stable block identity on the headless write path. Tracked in #566.
-9. **No account lockout or progressive backoff** on repeated auth failures —
-   the `:auth` rate-limit bucket is the only control.
+9. **Per-account throttling is per node, in memory, and keyed on
+   attacker-chosen strings.** `AccountThrottle` (#478) holds its budgets in ETS,
+   so a restart forgives every accumulated attempt and a second node would carry
+   its own counters — the same trade `KilnCMSWeb.RateLimit` makes, and deliberate:
+   counters on the user row would turn every guess into a write to a row the
+   attacker chooses, and would leave an unknown address with nowhere to count,
+   which is what reopens account enumeration. Two consequences to watch: unlike
+   the per-IP buckets the key space is unbounded (one row per distinct address
+   *submitted*, for the window's length), and an attacker who spends a victim's
+   mail budget delays that victim's own reset mail until the window rolls — the
+   suppression is logged for exactly that reason. Revisit if Kiln is ever
+   deployed multi-node.
 10. **The `:browser` pipeline is not rate-limited**, so `/`, `/developers`, all
     `/editor/**` LiveView mounts, and the account/governance export endpoints
     are unthrottled. They are session-gated (except the first two), so this is
