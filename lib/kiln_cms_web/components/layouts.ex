@@ -523,8 +523,11 @@ defmodule KilnCMSWeb.Layouts do
   attr :locale_links, :list, default: []
   attr :locale, :string, default: nil, doc: "active locale, to keep nav links locale-prefixed"
 
-  # Defaults to nil (the default org) on purpose: PreviewLive, TokenPreviewLive
-  # and the error templates render this component bare.
+  # Defaults to nil, which resolves the DEFAULT org's branding — so omitting it
+  # on a tenant's page shows another site's name and logo. That is #656, and it
+  # is why every caller here passes it. The default exists for renders with no
+  # request behind them at all (a template rendered directly, a preview of an
+  # unresolved tenant), not as a convenience.
   attr :current_org, :any,
     default: nil,
     doc: "the request's organization (#336), supplying the white-label branding (#48)"
