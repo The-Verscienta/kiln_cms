@@ -135,12 +135,15 @@ defmodule KilnCMS.Governance.ChainTest do
   defp swap_positions!(a, b) do
     set_position!(a, -1)
     set_position!(b, a.sequence)
-    set_position!(%{a | sequence: -1}, b.sequence)
+    set_position!(a, b.sequence)
   end
 
+  # Scoped to the one anchor by id. Filtering on `sequence` alone would rewrite
+  # every anchor at that position in every org, which is safe only while a test
+  # happens to create exactly one document.
   defp set_position!(anchor, position) do
     KilnCMS.Repo.update_all(
-      from(a in "history_anchors", where: a.sequence == ^anchor.sequence),
+      from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
       set: [sequence: position]
     )
   end
@@ -1042,6 +1045,64 @@ defmodule KilnCMS.Governance.ChainTest do
 
       assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
       assert reason =~ "anchor sequence is not contiguous"
+    end
+
+    test "an anchor nobody can vouch for stops the chain reading verified" do
+      # The hole the first pass at this left open, and it needed no DELETE at
+      # all. `anchor_digest/1` covers neither `key_id` nor `sequence`, so an
+      # attacker nulls a non-head anchor's signature to make it unjudgeable,
+      # renumbers it into the baseline position, and nothing objects: the
+      # promoted anchor is skipped by the signature sweep, and its short
+      # `version_count` becomes the anchored prefix.
+      #
+      # Now an unjudgeable anchor floors the whole chain. `:unsigned` is not a
+      # clean bill — it is the honest one.
+      actor = admin()
+      page = four_anchor_page(admin: actor)
+
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id)),
+        set: [signature: nil]
+      )
+
+      assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "an anchor signed with a key we do not hold floors it too" do
+      actor = admin()
+      page = four_anchor_page(admin: actor)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id)),
+        set: [key_id: "a-key-this-deployment-has-never-held"]
+      )
+
+      # Indistinguishable from a rotation whose outgoing key was never
+      # registered, which is exactly why it must not read `:verified`.
+      assert :unverifiable = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "real hash tampering is still reported on an unsigned deployment" do
+      # The floor must not swallow the one check that needs no key. Folding
+      # attestation into the structural verdict would have replaced a genuine
+      # `{:tampered, …}` with a shrug on every keyless deployment.
+      unsign!()
+
+      page = four_anchor_page(admin: admin())
+
+      KilnCMS.Repo.update_all(
+        from(v in "pages_versions",
+          where: v.version_source_id == type(^page.id, :binary_id),
+          where: v.version_action_name == "create"
+        ),
+        set: [changes: %{"title" => "Doctored"}]
+      )
+
+      assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
     end
 
     test "a short anchor cannot be renumbered into the baseline position" do

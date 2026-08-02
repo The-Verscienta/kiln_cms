@@ -205,9 +205,10 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # It is inside the signed payload from v4 on, so a v4 anchor cannot be
     # renumbered without the signing key. Backfilled anchors were signed before
     # it existed and so are renumberable — which is why `Chain.chain_intact/1`
-    # also requires `version_count` to be non-decreasing along the run, on
-    # columns that *are* covered. A short anchor cannot be promoted to the head
-    # without violating that.
+    # also requires `version_count` to be non-decreasing along the run — on
+    # columns the signature sweep has established are attested, which is why an
+    # anchor it cannot judge floors the chain rather than being skipped. A short
+    # anchor cannot be promoted to the head without violating that.
     #
     # It does **not** catch a clean truncation of the newest anchors — nothing
     # inside the document's own anchor set can, since a shorter chain is

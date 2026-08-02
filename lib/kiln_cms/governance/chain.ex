@@ -83,12 +83,23 @@ defmodule KilnCMS.Governance.Chain do
   **This narrows the laundering route in #597; it does not close it.** Say what
   holds, precisely:
 
-    * **Every anchor's signature is verified**, not only the head's. That is the
-      foundation the rest stands on: while only the baseline was checked, every
+    * **Every anchor's signature is verified**, not only the head's, and an
+      anchor that cannot be judged **floors the whole chain**. That is the
+      foundation the rest stands on. While only the baseline was checked, every
       other anchor's attested columns were rewritable, and any invariant
-      computed over them was satisfiable by an attacker. Not holding the key
-      (rotation without registering the outgoing one) stays `:unverifiable`
-      rather than red, and an unsigned anchor is skipped rather than judged.
+      computed over them was satisfiable. And merely *skipping* an unjudgeable
+      anchor was the same hole one column over: `anchor_digest/1` covers neither
+      `key_id` nor `sequence`, so nulling a non-head signature made that anchor
+      invisible to the sweep, after which it could be renumbered into the
+      baseline position with nothing objecting. So a chain containing an anchor
+      nobody can vouch for reads `:unsigned` or `:unverifiable` — never
+      `:verified`. That is also the honest answer for the benign cases it
+      covers: no key configured, or a rotation whose outgoing key was never
+      registered.
+
+      The floor never *softens* a verdict. The hash comparison needs no key at
+      all, so real tampering is still reported as `{:tampered, …}` on a keyless
+      deployment.
     * Deleting or rewriting a **middle** anchor is detected — its successor names
       it, and the digest covers the predecessor's hash, count, signature and its
       own link columns, so it cannot be repaired without the signing key.
@@ -116,13 +127,18 @@ defmodule KilnCMS.Governance.Chain do
       nothing attests an absent value; hence `NOT NULL`, backfilled. Anchors
       backfilled by that migration were signed before the column existed, so
       their position is *not* covered by their own signature — what holds them
-      in place is that `version_count` must rise with position, on columns that
-      are covered. A short anchor cannot be promoted to the baseline without
-      violating it.
-    * Deleting the **newest** anchors is still **not** detected. Nothing points
-      at the newest anchor, so a shorter chain is indistinguishable from a
-      younger one, and no amount of state inside the document's own anchor set
-      can tell them apart. Since it is exactly the newest anchors that commit to
+      in place is that `version_count` must rise with position — on columns the
+      signature sweep has established are attested, which is why that sweep has
+      to floor rather than skip. A short anchor cannot be promoted to the
+      baseline without violating it.
+    * Deleting the **newest** anchors is still **not** detected, and neither is
+      *hiding* them — `UPDATE … SET resource_type = 'page_x'` or a rewritten
+      `source_id` takes the newest anchors out of the set the query returns,
+      which is the same attack reached with `UPDATE` instead of `DELETE`. So
+      revoking `DELETE` on `history_anchors` narrows this less than it sounds.
+      Nothing points at the newest anchor, so a shorter chain is
+      indistinguishable from a younger one, and no amount of state inside the
+      document's own anchor set can tell them apart. Since it is exactly the newest anchors that commit to
       the most recent versions, an attacker who doctors version *k* deletes only
       the anchors with `version_count >= k` — newest-first, past the `RESTRICT`
       — leaves the rest intact, and the next write re-anchors from the surviving
@@ -422,6 +438,7 @@ defmodule KilnCMS.Governance.Chain do
               anchor
             )
           )
+          |> floor_to(attestation(all))
         end
     end
   end
@@ -468,6 +485,39 @@ defmodule KilnCMS.Governance.Chain do
     end
   end
 
+  @doc """
+  The strongest thing that can honestly be said about a chain's attestation.
+
+  `:ok` when every anchor's signature verified, `:unsigned` when any carries
+  none, `:unverifiable` when any is signed with a key this deployment does not
+  hold. `verify/4` uses it as a **floor**: a chain containing an anchor nobody
+  can vouch for never reads `:verified`, whatever the hashes say.
+
+  Separate from `chain_intact/1` on purpose. The hash comparison is the one
+  check that works without any key at all, so it has to run and be reported even
+  on an unsigned deployment — folding attestation into the structural verdict
+  would have replaced a real `{:tampered, …}` with a shrug.
+  """
+  @spec attestation([struct()]) :: :ok | :unsigned | :unverifiable
+  def attestation(anchors) do
+    Enum.reduce(anchors, :ok, fn anchor, weakest ->
+      case anchor_signature(anchor) do
+        # A tampered signature is `chain_intact/1`'s business, and it has
+        # already refused by the time this runs.
+        {:tampered, _} -> weakest
+        judged -> weaker(weakest, judged)
+      end
+    end)
+  end
+
+  # `:verified` only survives a chain every anchor of which could be judged.
+  # A tamper verdict is never softened — it was reached on the hashes, which
+  # need no key.
+  defp floor_to({:tampered, _} = tampered, _attestation), do: tampered
+  defp floor_to(_verdict, :unsigned), do: :unsigned
+  defp floor_to(_verdict, :unverifiable), do: :unverifiable
+  defp floor_to(verdict, :ok), do: verdict
+
   # Every anchor, not only the head (#666).
   #
   # `verify/4` only ever signature-checked the baseline, which left every other
@@ -475,21 +525,38 @@ defmodule KilnCMS.Governance.Chain do
   # the position checks are computed from. An attacker who could renumber a
   # non-head anchor, or lower its `version_count`, could satisfy contiguity and
   # monotonicity while promoting a short, early anchor to the head, putting the
-  # doctored versions outside the anchored prefix. Checking each one closes that
-  # by making every column the checks read attested.
+  # doctored versions outside the anchored prefix.
+  #
+  # **An anchor that cannot be judged is not a pass.** Silently continuing past
+  # one was a hole in its own right, and a one-column one: `anchor_digest/1`
+  # covers neither `key_id` nor `sequence`, so `UPDATE … SET signature = NULL`
+  # (or a bogus `key_id`) on a non-head anchor made it unjudgeable, after which
+  # it could be renumbered into the baseline position with nothing objecting.
+  # So the weakest outcome across the chain wins, and it is the verdict the
+  # caller gets: a chain containing an anchor we cannot vouch for reads
+  # `:unsigned` or `:unverifiable`, never `:verified`.
+  #
+  # That is also the honest answer for the benign cases it covers — a deployment
+  # with no key, or one mid-rotation without the outgoing key registered. Both
+  # already read that way from the head; now the whole chain has to earn it.
   defp signatures_intact(anchors) do
-    anchors
-    |> Enum.reduce_while(:ok, fn anchor, :ok ->
+    Enum.reduce_while(anchors, :ok, fn anchor, :ok ->
       case anchor_signature(anchor) do
         {:tampered, _} = broken -> {:halt, broken}
-        _verified_or_unjudgeable -> {:cont, :ok}
+        _judged -> {:cont, :ok}
       end
     end)
   end
 
-  # An unsigned anchor is not a failure here: the deployment may have no key at
-  # all, which `verdict/5` reports as `:unsigned` rather than pretending to an
-  # assurance it does not have.
+  # `:ok`/`:verified` is the strongest, then `:unsigned`, then `:unverifiable` —
+  # "signed with a key we do not hold" says less than "not signed at all",
+  # because the former is also what a tampered `key_id` looks like.
+  defp weaker(:unverifiable, _), do: :unverifiable
+  defp weaker(_, :unverifiable), do: :unverifiable
+  defp weaker(:unsigned, _), do: :unsigned
+  defp weaker(_, :unsigned), do: :unsigned
+  defp weaker(_, _), do: :ok
+
   defp anchor_signature(%{signature: nil}), do: :unsigned
 
   defp anchor_signature(anchor),
@@ -603,6 +670,7 @@ defmodule KilnCMS.Governance.Chain do
             source_id,
             covered_loaded(versions, anchor)
           )
+          |> floor_to(attestation(all))
         end
     end
   end

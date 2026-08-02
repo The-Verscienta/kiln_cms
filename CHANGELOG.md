@@ -216,14 +216,30 @@ migration, a rewritten column, a dropped config key).
   notice, all closed (#597, #666).
 
   **The foundation: every anchor's signature is now checked, not only the
-  baseline's.** While only the head was checked, every other anchor's attested
-  columns were freely rewritable — and those columns are exactly what any
-  structural invariant is computed from, so no invariant over them could be
-  relied on. Not holding the key (a rotation without the outgoing key
-  registered) stays `:unverifiable` rather than red, and an unsigned anchor is
-  skipped rather than judged. Cost is one signature verification per anchor, on
-  audit paths only: the governance page and `mix kiln.audit.verify`. Nothing on
-  the delivery path verifies a chain.
+  baseline's — and an anchor that cannot be judged floors the whole chain.**
+  While only the head was checked, every other anchor's attested columns were
+  freely rewritable, and those columns are exactly what any structural invariant
+  is computed from. Merely *skipping* an unjudgeable anchor was the same hole one
+  column over: the digest chain covers neither `key_id` nor `sequence`, so
+  `UPDATE … SET signature = NULL` on a non-head anchor made it invisible to the
+  sweep, after which it could be renumbered into the baseline position with
+  nothing objecting. A chain containing an anchor nobody can vouch for now reads
+  `:unsigned` or `:unverifiable`, never `:verified`.
+
+  **That means some deployments will see a verdict change without anything being
+  wrong.** An instance that turned signing on partway through its life has
+  anchors from before it, and those are genuinely unattested — such a document
+  now reads `:unsigned` where the head alone read `:verified`. That is the
+  honest answer, not a regression; it is the same answer a fully keyless
+  deployment already got. The floor never *softens* anything either: the hash
+  comparison needs no key, so real tampering is still reported as `TAMPERED`
+  even with no signing key configured at all.
+
+  Cost is one signature verification per anchor, measured at ~72 µs — about
+  150 ms for a document with 2 000 anchors. Audit paths only: the governance page
+  and `mix kiln.audit.verify`. Nothing on the delivery path verifies a chain, but
+  note the fleet sweep is now O(total anchors) rather than O(documents), so it is
+  not something to put on a tight cron on an `anchor_every_write` deployment.
 
   **Reordering.** `verify/4` takes the *latest* anchor as its baseline, and
   "latest" was decided by `inserted_at` — a column written by the database and
@@ -257,7 +273,11 @@ migration, a rewritten column, a dropped config key).
   it does not stop a wipe. Both behaviours have tests.
 
   **Still open, and stated rather than implied.** Deleting the *newest* anchors
-  is undetectable. Nothing points at the newest one, so a shorter chain is
+  is undetectable — and so is *hiding* them, since rewriting `resource_type` or
+  `source_id` takes them out of the set the query returns, which is the same
+  attack with `UPDATE` instead of `DELETE`. (Worth knowing because "revoke
+  `DELETE` from the application role" is the usual advice and it does not cover
+  this.) Nothing points at the newest one, so a shorter chain is
   indistinguishable from a younger one, and no state inside the document's own
   anchor set can tell them apart — which is why **#666 stays open** for a witness
   outside the database (an append-only log, retention-locked object storage, a
@@ -271,8 +291,10 @@ migration, a rewritten column, a dropped config key).
   signed before the column existed, so both the v4 and v3 payload shapes are
   offered and each anchor matches exactly one. Their positions are therefore not
   covered by their own signatures; what holds them in place is that
-  `version_count` must rise with position, on columns that are covered, so a
-  short early anchor cannot be promoted to the baseline. (#597, #666)
+  `version_count` must rise with position — on columns the signature sweep has
+  established are attested, which is why an anchor it cannot judge floors the
+  chain rather than being skipped. A short early anchor cannot be promoted to the
+  baseline. (#597, #666)
 
 - **A LiveView join with no URL is refused instead of skipping every router
   gate.** LiveView's channel has a catch-all for a join payload carrying
