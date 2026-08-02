@@ -211,6 +211,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **Error pages now wear the requesting site's branding, not the default org's.**
+  All three templates (403, 404, 500) opened with a bare `<Layouts.public>` and
+  passed no `current_org`. That attr defaults to `nil`, and
+  `KilnCMS.Branding.for_org(nil)` resolves the **default organization** — so a
+  404 on `acme.example.com` rendered another site's `site_name` and logo. The
+  whole point of white-labelling (#48) is that a tenant's visitors never see
+  another tenant's identity, and an error page is still that tenant's page.
+
+  The assign was already there, and the page was already half using it: the root
+  layout read `current_org` for the `<title>`, the favicon and the brand colour
+  tokens, so an error page on a tenant's host carried the right title above the
+  wrong header — self-contradictory rather than uniformly wrong, which is a good
+  part of why it went unnoticed. Phoenix hands the error renderer the conn that
+  already passed through the router, so the resolved tenant is right there. It is read through
+  a small helper rather than as `@conn.assigns[:current_org]`, because an error
+  page also renders for requests that never reached `SetTenant` — an exception
+  in an earlier plug, a template rendered directly — where there is no `:conn`
+  assign to dereference. Those keep the operator's own defaults, which is the
+  right answer and must not itself be an error. (#656)
+
 - **`TENANT_STRICT_HOST` refusals no longer cost a database lookup every time.**
   A refused request is halted in the endpoint, above the router — and every rate
   limiter lives in a router *pipeline*, so turning strict host matching on took
