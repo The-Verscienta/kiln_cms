@@ -81,8 +81,8 @@ One deployment can serve many organizations, each on its own host. The request's
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `TENANT_BASE_HOST` | `PHX_HOST` | The apex tenant subdomains are carved from. Set it only when tenant subdomains live under a different apex than the canonical URL host. | [`config/runtime.exs:443`](../config/runtime.exs#L443) |
-| `TENANT_STRICT_HOST` | `false` | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Recommended for every multi-tenant deployment** (#563) — without it a bare hostname, an IP literal, `localhost` or an attacker-supplied `Host` is served the default site's content, branding and analytics. Leave it off for a single-host install, where the bare host and an IP legitimately arrive unmatched and would start 404ing. The app logs a warning at boot if it is off on a deployment with more than one org. | [`config/runtime.exs:457`](../config/runtime.exs#L457) |
+| `TENANT_BASE_HOST` | `PHX_HOST` | The apex tenant subdomains are carved from. Set it only when tenant subdomains live under a different apex than the canonical URL host. | [`config/runtime.exs:477`](../config/runtime.exs#L477) |
+| `TENANT_STRICT_HOST` | `false` | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Recommended for every multi-tenant deployment** (#563) — without it a bare hostname, an IP literal, `localhost` or an attacker-supplied `Host` is served the default site's content, branding and analytics. Leave it off for a single-host install, where the bare host and an IP legitimately arrive unmatched and would start 404ing. The app logs a warning at boot if it is off on a deployment with more than one org. | [`config/runtime.exs:490`](../config/runtime.exs#L490) |
 
 **What it covers.** Everything the router serves, plus LiveView mounts and all
 three sockets — GraphQL (`/ws/gql`), visual editing (`/ws/bridge`) and
@@ -204,8 +204,8 @@ outbound port 25.
 | `SMTP_PORT` | `587` | Relay port. | [`config/runtime.exs:321`](../config/runtime.exs#L321) |
 | `SMTP_USERNAME` | unset | Relay username (`auth: :always`). | [`config/runtime.exs:322`](../config/runtime.exs#L322) |
 | `SMTP_PASSWORD` | unset | Relay password. | [`config/runtime.exs:323`](../config/runtime.exs#L323) |
-| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:581`](../config/runtime.exs#L581) |
-| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:564`](../config/runtime.exs#L564) |
+| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:729`](../config/runtime.exs#L729) |
+| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:712`](../config/runtime.exs#L712) |
 | `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:336`](../config/runtime.exs#L336) |
 
 ## Optional — search (Meilisearch)

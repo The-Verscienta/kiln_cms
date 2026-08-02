@@ -445,6 +445,11 @@ if config_env() == :prod do
   # would otherwise fail the Origin check. `//*.host` matches any scheme/port. The
   # explicit list (not `true`) is required for the wildcard; `CHECK_ORIGINS` still
   # widens it (e.g. a custom domain mid-migration).
+  #
+  # The wildcard covers every subdomain of the base host, registered as an org or
+  # not, so passing it says nothing about WHICH org a socket may act as. That is
+  # each socket's own tenant resolution (#654) — every one of the four resolves
+  # from the host it connected on, whatever origin admitted it.
   check_origin = ["https://" <> host, "//*." <> host | extra_origins]
 
   config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
