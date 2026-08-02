@@ -2,6 +2,9 @@
 /_build/
 # The strict-tenancy build root (CI's MIX_BUILD_ROOT; also used locally).
 /_build_strict/
+# The overlay-drift build root, likewise — reproducing that CI job locally
+# needs its own, since the overlay's project.exs registers different domains.
+/_build_overlay/
 
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
