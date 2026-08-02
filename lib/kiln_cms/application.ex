@@ -70,7 +70,17 @@ defmodule KilnCMS.Application do
       # DocServer per open document, registered by channel topic. Idle-cheap —
       # servers only exist while editors are attached (+ a grace period).
       {Registry, keys: :unique, name: KilnCMS.Collab.Crdt.Registry},
-      {DynamicSupervisor, name: KilnCMS.Collab.Crdt.DocSupervisor, strategy: :one_for_one},
+      # `max_children` for the same reason as the task supervisor above (#676):
+      # each DocServer pins a Yex NIF document in memory and lingers ten minutes
+      # past its last client, so an unbounded supervisor is an unbounded amount
+      # of resident memory. One server per document being edited, and #655 made
+      # the key the resolved record, so a client can no longer conjure several
+      # per document by varying the topic string — this bounds how many
+      # documents can be open at once, not how many ways there are to name one.
+      {DynamicSupervisor,
+       name: KilnCMS.Collab.Crdt.DocSupervisor,
+       strategy: :one_for_one,
+       max_children: KilnCMS.Collab.Crdt.max_documents()},
       # Start a worker by calling: KilnCMS.Worker.start_link(arg)
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry

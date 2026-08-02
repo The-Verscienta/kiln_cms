@@ -125,11 +125,19 @@ defmodule KilnCMSWeb.CollabChannel do
   # `attach/1` reaches it, and a supervisor can refuse to start one at all.
   # Neither is the caller's fault and neither should crash the join.
   defp attach(doc_key, org_id, socket) do
-    {:ok, server} = Crdt.ensure_server(doc_key, org_id)
-    {state, peers} = Crdt.attach(server)
+    # `:unavailable` is the deployment's open-document ceiling (#676), already
+    # logged where it is decided. It is a capacity answer, not an authorization
+    # one, so it says so rather than joining the uniform "not found".
+    case Crdt.ensure_server(doc_key, org_id) do
+      {:ok, server} ->
+        {state, peers} = Crdt.attach(server)
 
-    {:ok, %{"state" => Base.encode64(state), "peers" => peers},
-     assign(socket, :doc_server, server)}
+        {:ok, %{"state" => Base.encode64(state), "peers" => peers},
+         assign(socket, :doc_server, server)}
+
+      {:error, :unavailable} ->
+        {:error, %{reason: "unavailable"}}
+    end
   rescue
     error ->
       Logger.warning("Collab doc server unavailable: #{inspect(error)}")
