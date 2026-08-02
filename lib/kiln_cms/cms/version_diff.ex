@@ -16,6 +16,10 @@ defmodule KilnCMS.CMS.VersionDiff do
       that moved is reported as *moved* rather than as a delete plus an insert.
       A changed rich-text block carries an `:inline` diff of its prose.
 
+  Not every reported field is one a restore writes back — workflow and
+  attribution are deliberately left alone. `KilnCMS.CMS.VersionFields.restorable?/1`
+  is the answer, and the compare modal marks those rows (#691).
+
   Both use `List.myers_difference/2` from the standard library; no diff dependency
   is involved.
 
@@ -31,6 +35,7 @@ defmodule KilnCMS.CMS.VersionDiff do
 
   alias KilnCMS.Blocks.PortableText
   alias KilnCMS.CMS.BlockText
+  alias KilnCMS.CMS.VersionFields
   alias KilnCMS.CMS.VersionSnapshot
 
   @typedoc "A run of unchanged / removed / added text."
@@ -40,15 +45,22 @@ defmodule KilnCMS.CMS.VersionDiff do
   @type status :: :added | :removed | :changed | :unchanged
 
   defmodule Field do
-    @moduledoc "One attribute's before/after in a `KilnCMS.CMS.VersionDiff`."
+    @moduledoc """
+    One attribute's before/after in a `KilnCMS.CMS.VersionDiff`.
+
+    `restorable?` is answered here rather than by the renderer because it is a
+    fact about the *resource* (`KilnCMS.CMS.VersionFields.restorable?/2`), and
+    the resource is in hand at diff time and gone by render time (#691).
+    """
     @derive {Inspect, optional: [:inline, :entries]}
-    defstruct [:name, :status, :old, :new, inline: nil, entries: []]
+    defstruct [:name, :status, :old, :new, inline: nil, entries: [], restorable?: true]
 
     @type t :: %__MODULE__{
             name: atom(),
             status: KilnCMS.CMS.VersionDiff.status(),
             old: term(),
             new: term(),
+            restorable?: boolean(),
             inline: [KilnCMS.CMS.VersionDiff.run()] | nil,
             entries: [
               %{
@@ -103,30 +115,6 @@ defmodule KilnCMS.CMS.VersionDiff do
           blocks: [Block.t()],
           changed?: boolean()
         }
-
-  # Bookkeeping, not editorial content: tenancy, the paper-trail pointer, derived
-  # search columns, soft-delete. Showing these would bury the one line the editor
-  # actually came to read.
-  #
-  # Identity, timestamps, the lock counter and the embedding are NOT listed here
-  # — they're derived from the resource at call time, because a snapshot can't
-  # contain what PaperTrail never wrote. Restating that list by hand is how a
-  # newly-ignored attribute ends up reported as *removed* on every comparison
-  # against the working draft.
-  @ignored_fields ~w(
-    org_id type_definition_id published_version_id
-    archived_at deleted_at search_text blocks
-  )a
-
-  # Editorially significant first; anything else the resource declares (a dynamic
-  # type's own columns, a future attribute) is appended alphabetically rather than
-  # dropped.
-  @field_order ~w(
-    title slug path_alias excerpt state audience locale
-    seo_title seo_description seo_keywords seo_image canonical_url
-    published_at scheduled_at unpublish_at
-    author_id category_id featured_image_id custom_fields
-  )a
 
   # Compared key-by-key rather than as one opaque value.
   @map_fields ~w(custom_fields)a
@@ -189,30 +177,22 @@ defmodule KilnCMS.CMS.VersionDiff do
     |> Enum.map(fn {op, tokens} -> {op, Enum.join(tokens)} end)
   end
 
-  @doc "The attributes of `resource` this module compares, in display order."
+  @doc """
+  The attributes of `resource` this module compares, in display order.
+
+  Declared in `KilnCMS.CMS.VersionFields`, alongside the restorable set it has
+  to stay in step with (#691).
+  """
   @spec diffable_fields(module()) :: [atom()]
-  def diffable_fields(resource) do
-    # A snapshot can only hold what PaperTrail wrote, so what PaperTrail skips is
-    # what this skips — read from the resource rather than restated here.
-    untracked =
-      Ash.Resource.Info.primary_key(resource) ++
-        AshPaperTrail.Resource.Info.ignore_attributes(resource)
-
-    names =
-      resource
-      |> Ash.Resource.Info.attributes()
-      |> Enum.map(& &1.name)
-      |> Enum.reject(&(&1 in @ignored_fields or &1 in untracked))
-
-    known = Enum.filter(@field_order, &(&1 in names))
-    rest = names |> Enum.reject(&(&1 in @field_order)) |> Enum.sort()
-
-    known ++ rest
-  end
+  defdelegate diffable_fields(resource), to: VersionFields
 
   # ── Fields ────────────────────────────────────────────────────────────────
 
   defp diff_fields(old, new, resource) do
+    # Resolved once per diff, not once per row: `restorable_fields/1` walks the
+    # resource, and a long comparison renders dozens of rows.
+    restorable = VersionFields.restorable_fields(resource)
+
     resource
     |> diffable_fields()
     |> Enum.flat_map(fn name ->
@@ -232,27 +212,28 @@ defmodule KilnCMS.CMS.VersionDiff do
           []
 
         name in @map_fields ->
-          [map_field(name, old_value, new_value)]
+          [map_field(name, old_value, new_value, name in restorable)]
 
         true ->
-          [scalar_field(name, old_value, new_value)]
+          [scalar_field(name, old_value, new_value, name in restorable)]
       end
     end)
   end
 
-  defp scalar_field(name, old_value, new_value) do
+  defp scalar_field(name, old_value, new_value, restorable?) do
     %Field{
       name: name,
       status: status(old_value, new_value),
       old: old_value,
       new: new_value,
+      restorable?: restorable?,
       inline: maybe_inline(old_value, new_value)
     }
   end
 
   # A map field diffs to one entry per key that differs, so "added a `subtitle`"
   # doesn't render as two walls of JSON.
-  defp map_field(name, old_value, new_value) do
+  defp map_field(name, old_value, new_value, restorable?) do
     old_map = if is_map(old_value), do: old_value, else: %{}
     new_map = if is_map(new_value), do: new_value, else: %{}
 
@@ -285,6 +266,7 @@ defmodule KilnCMS.CMS.VersionDiff do
       status: status(old_value, new_value),
       old: old_value,
       new: new_value,
+      restorable?: restorable?,
       entries: entries
     }
   end

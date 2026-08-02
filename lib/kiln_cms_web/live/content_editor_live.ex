@@ -29,6 +29,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Slug
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
+  alias KilnCMSWeb.VersionDiffComponents
 
   # Preferred display order for the block palette; any block type registered
   # beyond these is appended automatically (the palette is registry-driven, so
@@ -1714,8 +1715,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:compare_pick, [])
          |> put_flash(:info, gettext("Restored that version."))}
 
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, restore_error_message(error))}
+
       _ ->
         {:noreply, put_flash(socket, :error, gettext("Couldn't restore that version."))}
+    end
+  end
+
+  # A restore can fail for a reason the editor can act on — a category deleted or
+  # a media item trashed since the version was written (#691) — and collapsing
+  # every failure into one flash left them with a dead end instead of a fix.
+  defp restore_error_message(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.filter(&match?(%{field: field} when not is_nil(field), &1))
+    |> Enum.map_join(" ", &"#{VersionDiffComponents.field_label(&1.field)} #{&1.message}.")
+    |> case do
+      "" -> gettext("Couldn't restore that version.")
+      message -> message
     end
   end
 

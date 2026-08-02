@@ -1442,6 +1442,17 @@ defmodule KilnCMS.CMS.Content do
           accept []
           argument :version_id, :uuid, allow_nil?: false
           change KilnCMS.CMS.Changes.RestoreVersion
+
+          # A restore is a content write, so everything derived from content has
+          # to move with it (#691). Declared AFTER `RestoreVersion`, which writes
+          # the restored values from a `before_action` hook — hooks run in
+          # registration order, so `SetSearchText` sees the reverted document and
+          # not the one being replaced.
+          change KilnCMS.CMS.Changes.RecordSlugRedirect
+          change KilnCMS.CMS.Changes.SetSearchText
+          change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
         end
 
         update :unpublish do

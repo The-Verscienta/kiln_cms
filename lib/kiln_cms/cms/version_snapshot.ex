@@ -109,13 +109,14 @@ defmodule KilnCMS.CMS.VersionSnapshot do
   """
   @spec current(struct()) :: t()
   def current(%resource{} = record) do
-    skip =
-      Ash.Resource.Info.primary_key(resource) ++
-        AshPaperTrail.Resource.Info.ignore_attributes(resource)
+    # `VersionFields` owns "what a version can contain" — deciding it separately
+    # here is how a newly-ignored attribute ends up reported as *removed* on
+    # every comparison against the working draft (#691).
+    tracked = KilnCMS.CMS.VersionFields.tracked_fields(resource)
 
     resource
     |> Ash.Resource.Info.attributes()
-    |> Enum.reject(&(&1.name in skip))
+    |> Enum.filter(&(&1.name in tracked))
     |> Map.new(&{to_string(&1.name), dump(&1, Map.get(record, &1.name))})
   end
 

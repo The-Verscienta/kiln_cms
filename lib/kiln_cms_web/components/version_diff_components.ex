@@ -76,10 +76,25 @@ defmodule KilnCMSWeb.VersionDiffComponents do
             </h3>
             <ul class="space-y-3">
               <li :for={field <- @diff.fields} class="rounded border border-base-content/10 p-3">
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                   <span class="text-sm font-medium">{field_label(field.name)}</span>
                   <.status_pill status={field.status} />
+                  <%!-- Restore sits a few inches away in this same modal, and it
+                        moves editorial content only — workflow and attribution
+                        are left as they are. Saying so here is the difference
+                        between a documented rule and a silent no-op (#691). The
+                        rationale is a visible line rather than a `title=`
+                        tooltip: `/editor` ships as an installable PWA (#65),
+                        and a phone has no hover. --%>
+                  <.pill :if={!field.restorable?} tone="bg-base-200 text-base-content/60">
+                    {gettext("Not restored")}
+                  </.pill>
                 </div>
+                <p :if={!field.restorable?} class="mt-1 text-xs text-base-content/60">
+                  {gettext(
+                    "Restoring a version reverts editorial content. Workflow state, schedule and author stay as they are."
+                  )}
+                </p>
                 <.field_body field={field} />
               </li>
             </ul>
@@ -104,15 +119,12 @@ defmodule KilnCMSWeb.VersionDiffComponents do
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="text-sm font-medium">{block_label(block.type)}</span>
                   <.status_pill status={block.status} />
-                  <span
-                    :if={block.moved?}
-                    class="rounded bg-info/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-info-ink"
-                  >
+                  <.pill :if={block.moved?} tone="bg-info/20 text-info-ink">
                     {gettext("Moved %{from} → %{to}",
                       from: block.old_index + 1,
                       to: block.new_index + 1
                     )}
-                  </span>
+                  </.pill>
                 </div>
 
                 <p
@@ -225,16 +237,25 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     """
   end
 
+  # The one pill shape in this view. Three call sites render side by side in the
+  # same flex row, so a padding or radius tweak on one of them is immediately
+  # visible against the other two.
+  attr :tone, :string, required: true
+  slot :inner_block, required: true
+
+  defp pill(assigns) do
+    ~H"""
+    <span class={["rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide", @tone]}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
   attr :status, :atom, required: true
 
   defp status_pill(assigns) do
     ~H"""
-    <span class={[
-      "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-      status_class(@status)
-    ]}>
-      {status_label(@status)}
-    </span>
+    <.pill tone={status_class(@status)}>{status_label(@status)}</.pill>
     """
   end
 
