@@ -514,6 +514,68 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **`audit_anchor_every_write` no longer reports untouched documents as
+  tampered.** Turning it on made the audit surface it exists to strengthen read
+  permanently red after two autosaves, with no tampering anywhere.
+
+  Two changes, each correct alone, ran against each other in the same
+  `after_transaction`. `AnchorVersion` anchors every write, including each
+  `:autosave`, so a debounced save's version row was folded and signed
+  immediately. `CoalesceAutosaveVersions` then merged the trailing autosave run
+  into one snapshot (#32) — deleting the superseded rows and rewriting the
+  survivor's diff. Both of those are rows an anchor had just committed to, and
+  the chain folds the diff, so the anchored prefix could no longer reproduce and
+  the row count no longer reached `version_count`. Either alone is fatal, and
+  the verdict is permanent: no later publish clears it, and there is no
+  supported way to re-anchor a document. It needed no unusual usage — autosave
+  is on by default in the editor, so the one flag was enough.
+
+  Coalescing now stops at `Chain.anchored_boundary/1` as well as at the last
+  manual version, so it never touches a row inside an anchor's fold. Anything
+  that mutates version rows should ask the same question; coalescing is the only
+  such path in ordinary operation (`RestoreVersion` replays rows and writes a
+  new version, it does not rewrite old ones — the one other path is the
+  `mix kiln.promote_data` task, which moves version rows between tables and is
+  tracked separately).
+
+  Ordering the two hooks instead — coalesce first, anchor second — was the
+  obvious-looking alternative and does not work, which is worth recording because
+  it is the cheapest-looking way to "get coalescing back". Ash can guarantee the
+  order (`after_transaction/3` takes `prepend?`), but the row a save destroys was
+  anchored by the *previous* save, in a previous transaction. No intra-transaction
+  ordering reaches it. The shipped fix is order-independent for the same reason,
+  which is why it does not depend on Ash's hook order staying what it is today.
+
+  Three details, because a wrong answer here destroys history that cannot be
+  reconstructed. The boundary lookup **ignores the `audit_anchors_enabled` master
+  kill switch**, unlike every other read in `Chain`: turning that switch off stops
+  anchoring but does not delete the anchors already minted, and reading "no
+  anchors" because the feature is off would let coalescing eat them and red the
+  document the moment it came back on. It **never raises** — it runs after the
+  editor's save has committed, where a raise reaches the LiveView rather than the
+  changeset, so an unreadable `history_anchors` (migration not yet applied, a
+  transient fault) answers `:unknown`. And **`:unknown` means "assume everything
+  is anchored"**, so nothing is coalesced: skipping costs version rows, guessing
+  costs history. `CoalesceAutosaveVersions` is now wrapped the same way for the
+  same reason — tidying history must not cost an editor their save, which is the
+  rule `Chain.anchor/2` and `extend/2` already followed.
+
+  `history_anchors` gains the sort columns on its lookup index. `latest_anchor/3`
+  is a top-1 by `(inserted_at, id)` descending, which on the filter columns alone
+  makes Postgres fetch every anchor a document has and top-N sort them — and
+  `anchor_every_write` mints one anchor per save, so an hour of debounced typing
+  reaches ~1200 of them and this change asks for the latest twice per save.
+
+  The cost is real and falls only where the flag is on: when every save is
+  anchored, every autosave row is anchored the moment it is written, so there is
+  never an unanchored pair to collapse and an hour of typing leaves one version
+  row per debounce rather than one for the session. That is the honest form of
+  the trade — the alternative is not "both", it is the false tamper verdict —
+  and `docs/editorial-consent.md` now states it as the price of the setting
+  alongside the per-save signature. With the flag off (the default) anchoring
+  happens at publish, a publish is itself a non-autosave version, so the two
+  boundaries coincide and coalescing behaves exactly as before. (#671)
+
 - **The collaborative-editing doc supervisor is bounded.** Its
   `DynamicSupervisor` had no `max_children`, so nothing limited how many
   authoritative Yjs documents a deployment could hold open — and each one pins a

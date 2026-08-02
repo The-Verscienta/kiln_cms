@@ -164,9 +164,9 @@ end
 #
 # Anchors are always minted at publish. This additionally extends the signed
 # chain after *every* versioned write, closing the window between two publishes
-# — #356's "sign every version, not just published artifacts". It costs one
-# signature and one `history_anchors` row per save, which is why the compiled
-# default is `false`: a regulated deployment wants it, a blog does not.
+# — #356's "sign every version, not just published artifacts". It costs a
+# signature and a `history_anchors` row per save, AND it disables autosave
+# coalescing (#671), so a draft keeps one version row per debounce. Hence false.
 #
 # Runtime rather than compile-time on purpose — an operator must be able to turn
 # this off without rebuilding the image. See KilnCMS.Governance.Chain and

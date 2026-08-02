@@ -6,6 +6,8 @@ defmodule KilnCMS.Governance.ChainTest do
   use KilnCMS.DataCase, async: false
 
   import Ecto.Query
+
+  require Ash.Query
   import ExUnit.CaptureLog
 
   alias KilnCMS.CMS
@@ -50,6 +52,52 @@ defmodule KilnCMS.Governance.ChainTest do
       )
 
     CMS.publish_page!(page, %{}, actor: actor)
+  end
+
+  # The debounced editor save, which is what `CoalesceAutosaveVersions` runs on.
+  # There is no code interface for it — it is reached only from
+  # `ContentEditorLive.do_autosave/1` — so the changeset is built directly.
+  defp autosave!(page, title, actor) do
+    page
+    |> Ash.Changeset.for_update(:autosave, %{title: title}, actor: actor)
+    |> Ash.update!()
+  end
+
+  # The version rows sorting at or before the anchor's recorded boundary — the
+  # ones it folded, and therefore the ones that must never move.
+  #
+  # The comparison is spelled out rather than borrowed from `Chain`, on purpose:
+  # asserting through `anchored_boundary/1` would let a wrong boundary agree
+  # with itself. The caller cross-checks the count against the anchor's own
+  # `version_count`, which is the value this cannot compute.
+  defp anchored_version_ids(page, %{last_version_at: at} = anchor) when not is_nil(at) do
+    Page.Version
+    |> Ash.Query.filter(version_source_id == ^page.id)
+    |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
+    |> Ash.read!(authorize?: false, tenant: page.org_id)
+    |> Enum.filter(fn v ->
+      case DateTime.compare(v.version_inserted_at, at) do
+        :lt -> true
+        :eq -> v.id <= anchor.last_version_id
+        :gt -> false
+      end
+    end)
+    |> Enum.map(& &1.id)
+  end
+
+  defp autosave_count(page) do
+    Page.Version
+    |> Ash.Query.filter(version_source_id == ^page.id and version_action_name == :autosave)
+    |> Ash.count!(authorize?: false, tenant: page.org_id)
+  end
+
+  # Every field `Chain`'s item digest folds, so a rewritten `changes` map or a
+  # deleted row both show up as a difference.
+  defp version_digests(page, ids) do
+    Page.Version
+    |> Ash.Query.filter(version_source_id == ^page.id and id in ^ids)
+    |> Ash.read!(authorize?: false, tenant: page.org_id)
+    |> Map.new(&{&1.id, {&1.version_action_name, &1.version_inserted_at, &1.changes}})
   end
 
   # A version row stamped BEFORE every row an existing anchor already covered —
@@ -330,6 +378,219 @@ defmodule KilnCMS.Governance.ChainTest do
       )
 
       assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # #671. Two features that are each correct alone and were fatal together:
+    # `AnchorVersion` anchors every autosave, and `CoalesceAutosaveVersions`
+    # then destroys the superseded rows and rewrites the survivor's `changes` —
+    # both of which the anchor already committed to. The verdict was permanently
+    # red with no tampering, on the one configuration that exists to make the
+    # audit surface stronger, and autosave is on by default in the editor.
+    test "autosaving twice does not fake a tamper verdict" do
+      actor = admin()
+      page = published_page(actor)
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      page = autosave!(page, "First autosave", actor)
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      page = autosave!(page, "Second autosave", actor)
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      # A third, because the run only became coalescible at two: the second
+      # save is what first had a predecessor to supersede.
+      _page = autosave!(page, "Third autosave", actor)
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "no anchored version row is destroyed or rewritten by coalescing" do
+      actor = admin()
+      page = published_page(actor)
+
+      page = autosave!(page, "First autosave", actor)
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+      anchored = anchored_version_ids(page, anchor)
+      digests = version_digests(page, anchored)
+
+      # Or the comparison below is `%{} == %{}` and holds for the trivial
+      # reason that it selected nothing. Cross-checked against a number the
+      # helper did not compute: create + publish + the first autosave.
+      assert length(anchored) == anchor.version_count
+      assert anchor.version_count == 3
+
+      _page = page |> autosave!("Second autosave", actor) |> autosave!("Third", actor)
+
+      # The rows an anchor committed to must still exist, byte-identical in
+      # every field the item digest folds. Asserted directly rather than only
+      # through the verdict: a future change could make `verify/4` tolerant
+      # without making the history honest.
+      assert version_digests(page, anchored) == digests
+    end
+
+    test "a never-published draft is protected the same way" do
+      # The shape the flag actually produces in the editor: `do_autosave/1` is
+      # gated on `state == :draft`, so a published page is not what autosave
+      # runs against. With no publish there is no non-autosave version to bound
+      # the run either, so the anchor is the ONLY thing holding the line.
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{title: "Draft", slug: "chain-d671-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      page = page |> autosave!("One", actor) |> autosave!("Two", actor)
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+      assert autosave_count(page) == 2
+    end
+
+    test "the cost is paid in version rows, not in a wrong verdict" do
+      actor = admin()
+      page = published_page(actor)
+
+      _page =
+        page
+        |> autosave!("One", actor)
+        |> autosave!("Two", actor)
+        |> autosave!("Three", actor)
+
+      # The honest trade, asserted so it is a decision rather than a surprise:
+      # when every save is anchored there is never an unanchored pair to
+      # collapse, so the run #32 exists to compress stays uncompressed. Off by
+      # default, and `docs/editorial-consent.md` states it as the cost of the
+      # setting. The alternative — coalescing anyway — is the permanent false
+      # tamper verdict above.
+      assert autosave_count(page) == 3
+    end
+  end
+
+  describe "coalescing against an anchored prefix" do
+    # These run with `anchor_every_write` OFF, so the boundary can be placed
+    # deliberately rather than covering everything. That is the only way to
+    # exercise a PARTIAL cut — the case where `after_anchored/2` returns a
+    # proper subset of the trailing run, which is where a wrong boundary would
+    # either destroy anchored history or silently disable #32.
+
+    test "with anchoring at publish only, the autosave run still collapses" do
+      # The default configuration, and the control for everything below: the
+      # anchored boundary is the publish's own version, every autosave sorts
+      # after it, so #32's coalescing is untouched.
+      refute Chain.every_write?()
+
+      actor = admin()
+      page = published_page(actor)
+
+      page =
+        page
+        |> autosave!("One", actor)
+        |> autosave!("Two", actor)
+        |> autosave!("Three", actor)
+
+      assert autosave_count(page) == 1
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "a boundary inside the run freezes the anchored rows and collapses the rest" do
+      actor = admin()
+      page = published_page(actor)
+
+      page = autosave!(page, "One", actor)
+      :ok = Chain.anchor(page)
+      frozen = Chain.latest_anchor("page", page.id, page.org_id)
+
+      page = page |> autosave!("Two", actor) |> autosave!("Three", actor)
+
+      # One anchored autosave, untouched, plus the two later ones merged.
+      assert autosave_count(page) == 2
+      assert version_digests(page, anchored_version_ids(page, frozen)) != %{}
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      # The merge still carries the whole run's cumulative delta, so a restore
+      # of the survivor reconstructs every field — what #32 promises.
+      [_anchored, merged] =
+        Page.Version
+        |> Ash.Query.filter(version_source_id == ^page.id and version_action_name == :autosave)
+        |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
+        |> Ash.read!(authorize?: false, tenant: page.org_id)
+
+      assert merged.changes["title"] == "Three"
+    end
+
+    test "an anchor that recorded only a count still protects its rows" do
+      actor = admin()
+      page = published_page(actor)
+
+      page = autosave!(page, "One", actor)
+      :ok = Chain.anchor(page)
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+      anchored = anchored_version_ids(page, anchor)
+      digests = version_digests(page, anchored)
+
+      # Anchors minted before #598 carry no boundary timestamp, only a
+      # `version_count`. `resolved_boundary/2` resolves that to the same sort
+      # key by reading the row at that position — the one branch of the fix
+      # nothing else exercises.
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+        set: [last_version_at: nil, last_version_id: nil]
+      )
+
+      _page = page |> autosave!("Two", actor) |> autosave!("Three", actor)
+
+      assert version_digests(page, anchored) == digests
+      assert autosave_count(page) == 2
+    end
+
+    test "an unresolvable count refuses to coalesce rather than guessing" do
+      actor = admin()
+      page = published_page(actor)
+
+      page = autosave!(page, "One", actor)
+      :ok = Chain.anchor(page)
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+
+      # A count larger than the surviving rows: the state a document damaged by
+      # #671 on a pre-#598 deployment is already in. There is no row to resolve
+      # the position to, so the honest answer is "cannot tell" — and the
+      # conservative response to that is to touch nothing, not to assume
+      # nothing is anchored.
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+        set: [last_version_at: nil, last_version_id: nil, version_count: 99]
+      )
+
+      assert :unknown = Chain.anchored_boundary(page)
+
+      _page = page |> autosave!("Two", actor) |> autosave!("Three", actor)
+
+      assert autosave_count(page) == 3
+    end
+
+    test "the master kill switch does not open the gate on rows already anchored" do
+      actor = admin()
+      page = published_page(actor)
+
+      page = autosave!(page, "One", actor)
+      :ok = Chain.anchor(page)
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+      anchored = anchored_version_ids(page, anchor)
+      digests = version_digests(page, anchored)
+
+      # `audit_anchors_enabled: false` stops anchoring; it does not delete the
+      # anchors already minted, and they still commit to what they commit to.
+      # Reading `[]` here because the feature is "off" would let coalescing eat
+      # them and red the document the moment the switch came back on.
+      Application.put_env(:kiln_cms, :audit_anchors_enabled, false)
+      on_exit(fn -> Application.delete_env(:kiln_cms, :audit_anchors_enabled) end)
+
+      _page = page |> autosave!("Two", actor) |> autosave!("Three", actor)
+
+      Application.delete_env(:kiln_cms, :audit_anchors_enabled)
+
+      assert version_digests(page, anchored) == digests
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
     end
   end
 

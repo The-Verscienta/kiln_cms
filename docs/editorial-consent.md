@@ -111,6 +111,24 @@ Two properties are worth knowing:
   costs one signature and one row per save. The incremental fold keeps that
   cost flat as history grows.
 
+  **It also turns off autosave coalescing, and that is not a bug (#671).**
+  Normally a run of debounced editor autosaves is collapsed into one version
+  row (#32) — the older rows are deleted and the survivor's diff is rewritten
+  to the cumulative delta. A row an anchor has committed to cannot be treated
+  that way: the anchor could never reproduce, no later anchor would repair it,
+  and the document would read `tampered` forever with nobody having touched it.
+  So with this setting on, every autosave row is anchored the moment it is
+  written, and an anchored row is never collapsed. (A row whose anchoring
+  failed — `Chain.extend/2` never raises, so a chain problem cannot cost an
+  editor their save — is unanchored and will be collapsed like any other. That
+  errs towards fewer rows, not towards a wrong verdict.)
+
+  What that costs is version rows: an editor typing for an hour leaves one row
+  per debounce instead of one row for the session. That is the setting's real
+  price, on top of the signature per save, and it is the honest form of the
+  trade — the alternative is not "both", it is a false tamper verdict. Plan
+  retention accordingly if you turn it on for a high-volume authoring team.
+
 Consent recording now has a dashboard UI (#352). The publish gate is currently
 a single global required-kinds list; per-content-type requirements are a later
 phase.

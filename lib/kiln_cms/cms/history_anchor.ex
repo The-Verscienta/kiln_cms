@@ -26,7 +26,16 @@ defmodule KilnCMS.CMS.HistoryAnchor do
 
     custom_indexes do
       # The `for_content` lookup: anchors for one document within its site.
-      index [:org_id, :resource_type, :source_id]
+      #
+      # Carries the sort as well as the filter, because the overwhelmingly
+      # common shape is `latest_anchor/3` — a top-1 by `(inserted_at, id)`
+      # descending. On the filter columns alone Postgres fetches every anchor
+      # the document has and top-N sorts them, which is O(anchors per document)
+      # on a path that runs per write: `anchor_every_write` mints one anchor per
+      # save, so an hour of debounced typing leaves ~1200 of them, and both
+      # `mint/3` and `CoalesceAutosaveVersions` ask for the latest on every one
+      # of those saves. Same treatment the version tables got in #672.
+      index [:org_id, :resource_type, :source_id, :inserted_at, :id]
     end
   end
 

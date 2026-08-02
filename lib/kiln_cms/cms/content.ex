@@ -1336,8 +1336,11 @@ defmodule KilnCMS.CMS.Content do
         # tagged `version_action_name: :autosave` and can be coalesced — a save
         # per editor pause would otherwise flood history (issue #32).
         # `CoalesceAutosaveVersions` collapses the trailing run of autosave
-        # versions into a single snapshot after each save. Drafts only (enforced
-        # by the editor); no `updated` webhook (draft edits are silent anyway).
+        # versions into a single snapshot after each save — except for rows an
+        # anchor has already committed to, which are immutable, so with
+        # `audit_anchor_every_write` on nothing is collapsed at all (#671).
+        # Drafts only (enforced by the editor); no `updated` webhook (draft
+        # edits are silent anyway).
         update :autosave do
           require_atomic? false
           change optimistic_lock(:lock_version)
