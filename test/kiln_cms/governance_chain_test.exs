@@ -85,6 +85,17 @@ defmodule KilnCMS.Governance.ChainTest do
     |> Enum.map(& &1.id)
   end
 
+  # `ON DELETE RESTRICT` on `prev_anchor_id` blocks the deletions several tests
+  # need to perform in order to check what happens *after* one. Dropping it
+  # models the threat these tests are about — an attacker with database control,
+  # who can drop a constraint — rather than working around the fix. The sandbox
+  # rolls the DDL back with the test.
+  defp drop_prev_anchor_constraint! do
+    KilnCMS.Repo.query!(
+      "ALTER TABLE history_anchors DROP CONSTRAINT history_anchors_prev_anchor_id_fkey"
+    )
+  end
+
   defp autosave_count(page) do
     Page.Version
     |> Ash.Query.filter(version_source_id == ^page.id and version_action_name == :autosave)
@@ -867,6 +878,43 @@ defmodule KilnCMS.Governance.ChainTest do
     # that expose it, wait for the next write, and the fresh anchor is folded
     # from genesis over the doctored rows and verifies clean. Deleting only the
     # OLDER anchors now leaves the newest one pointing at nothing.
+    test "Postgres refuses to delete an anchor a SURVIVING anchor names" do
+      # `ON DELETE RESTRICT` on `prev_anchor_id` (#597). This is the property it
+      # actually buys, stated precisely because the obvious stronger reading is
+      # false — see the next test.
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [_newest | [older | _]] = Chain.anchors("page", page.id, page.org_id)
+
+      assert_raise Postgrex.Error, ~r/foreign key constraint/, fn ->
+        KilnCMS.Repo.delete_all(
+          from(a in "history_anchors", where: a.id == type(^older.id, :binary_id))
+        )
+      end
+    end
+
+    test "RESTRICT does NOT block deleting the whole chain in one statement" do
+      # Characterised because it is the natural thing to assume and it is wrong:
+      # Postgres checks the constraint after the statement's rows are gone, so a
+      # `DELETE … WHERE source_id = …` that removes referrer and referent
+      # together succeeds. What RESTRICT buys is that a MIDDLE anchor cannot be
+      # removed on its own — the attacker must take its successor too, which is
+      # the shape `chain_intact/1`'s sequence check catches.
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.source_id == type(^page.id, :binary_id))
+      )
+
+      assert :unanchored = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
     test "deleting a predecessor anchor is detected" do
       actor = admin()
       page = published_page(actor)
@@ -880,6 +928,12 @@ defmodule KilnCMS.Governance.ChainTest do
 
       ids = Enum.map(older, & &1.id)
 
+      # Past the `RESTRICT` deliberately: the threat model is an attacker with
+      # database control, who can drop a constraint. The constraint raises the
+      # cost; `chain_intact/1` is what still notices afterwards, and it also
+      # covers anchors that predate the constraint.
+      drop_prev_anchor_constraint!()
+
       KilnCMS.Repo.delete_all(
         from(a in "history_anchors", where: a.id in ^Enum.map(ids, &Ecto.UUID.dump!/1))
       )
@@ -887,6 +941,70 @@ defmodule KilnCMS.Governance.ChainTest do
       assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
       assert reason =~ "anchor chain broken"
       assert reason =~ newest.prev_anchor_id
+    end
+
+    test "removing a middle anchor AND its successor leaves a visible gap" do
+      # The case the predecessor links alone cannot catch: with the successor
+      # gone too, every surviving link still resolves. The signed `sequence`
+      # is what makes the hole visible (#666).
+      actor = admin()
+      page = published_page(actor)
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
+      :ok = Chain.anchor(page)
+      page = CMS.update_page!(page, %{title: "Fourth"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      anchors = Chain.anchors("page", page.id, page.org_id)
+      assert Enum.map(anchors, & &1.sequence) == [4, 3, 2, 1]
+
+      drop_prev_anchor_constraint!()
+
+      # Take out 3 and 2. What is left is [4, 1]: 4 names 3, which is gone —
+      # so null 4's link too, which is what an attacker who wanted the links to
+      # resolve would do. Only the sequence still says something is missing.
+      doomed = Enum.filter(anchors, &(&1.sequence in [2, 3]))
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors",
+          where: a.sequence == 4 and a.source_id == type(^page.id, :binary_id)
+        ),
+        set: [prev_anchor_id: nil, prev_anchor_digest: nil]
+      )
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors",
+          where: a.id in ^Enum.map(doomed, &Ecto.UUID.dump!(&1.id))
+        )
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "anchor sequence has gaps"
+    end
+
+    test "rewriting inserted_at no longer changes the verification baseline" do
+      # #666's other half. `inserted_at` is written by the database and attested
+      # by nothing, so while anchors were READ in that order, backdating the
+      # newest one made an older, shorter anchor the baseline — the doctored
+      # versions then fell outside the anchored prefix and were never hashed,
+      # with nothing deleted at all. Reading by the signed `sequence` closes it.
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id)),
+        set: [inserted_at: ~U[2000-01-01 00:00:00.000000Z]]
+      )
+
+      [still_newest | _] = Chain.anchors("page", page.id, page.org_id)
+      assert still_newest.id == newest.id
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
     end
 
     # A predecessor that is present but rewritten — the other half of the hole.

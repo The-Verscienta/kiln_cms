@@ -211,6 +211,48 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **History anchors carry a signed position, so the chain can no longer be
+  reordered or silently holed.** Two ways to move the verification baseline
+  without deleting anything the chain would notice, both closed (#597, #666).
+
+  **Reordering.** `Chain.verify/4` takes the *latest* anchor as its baseline, and
+  "latest" was decided by `inserted_at` — a column written by the database and
+  attested by nothing. So `UPDATE history_anchors SET inserted_at = now() WHERE
+  id = <an older, shorter anchor>` made that anchor the baseline: the doctored
+  versions then sat outside the anchored prefix and were never hashed, and the
+  verdict was `:verified` with not a single row deleted. Anchors now carry a
+  1-based per-document `sequence`, assigned at write time and inside the signed
+  payload (v4), and that is what they are read in the order of. Repointing it
+  breaks the signature, exactly as repointing the fold boundary does since #598.
+
+  **Holes.** The predecessor links added in #591 catch a middle anchor removed
+  while its successor survives. They do not catch it when the successor goes too
+  — every surviving link still resolves. The sequence does: the run is then
+  `[7, 6, 3, 2, 1]` and the gap is visible. `prev_anchor_id` also gains
+  `ON DELETE RESTRICT`, which is what forces the attacker into that shape, since
+  a middle anchor can no longer be removed on its own.
+
+  Be precise about what `RESTRICT` does **not** buy, because the stronger reading
+  is wrong and worth pinning: Postgres checks the constraint after the
+  statement's rows are gone, so `DELETE … WHERE source_id = …` removes referrer
+  and referent together and succeeds. It narrows the attack to the shape the
+  sequence catches; it does not stop a wipe. Both behaviours have tests.
+
+  **Still open, and stated rather than implied.** Deleting the *newest* anchors
+  is undetectable. Nothing points at the newest one, so a shorter chain is
+  indistinguishable from a younger one, and no state inside the document's own
+  anchor set can tell them apart — which is why #666 stays open for a witness
+  outside the database (an append-only log, retention-locked object storage, a
+  transparency log). On an unsigned deployment (`KILN_PROVENANCE_PRIVATE_KEY`
+  unset, the default) the sequence is an ordinary column and the whole thing is
+  advisory, the same caveat the predecessor link already carried.
+
+  Existing anchors keep verifying: `sequence` is null on them, they sort after
+  every sequenced anchor (which is where they belong), a null is skipped rather
+  than read as a gap, and the v3/v2/v1 payload shapes are still offered. An
+  anchor that *has* a sequence is only ever checked against the v4 shape, so one
+  cannot be written into an older anchor after the fact. (#597, #666)
+
 - **A LiveView join with no URL is refused instead of skipping every router
   gate.** LiveView's channel has a catch-all for a join payload carrying
   neither `"url"` nor `"redirect"`: it matches no route, and Phoenix attaches a

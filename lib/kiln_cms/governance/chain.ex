@@ -86,27 +86,49 @@ defmodule KilnCMS.Governance.Chain do
     * Deleting or rewriting a **middle** anchor is detected — its successor names
       it, and the digest covers the predecessor's hash, count, signature and its
       own link columns, so it cannot be repaired without the signing key.
-    * Deleting the **newest** anchors is **not** detected. Nothing points at the
-      newest anchor, so a shorter chain is indistinguishable from a younger one.
-      Since it is exactly the newest anchors that commit to the most recent
-      versions, an attacker who doctors version *k* deletes only the anchors with
-      `version_count >= k`, leaves the rest intact, and the next write re-anchors
-      from the surviving prefix over the doctored rows. Verdict: `:verified`.
-      Confirmed empirically, and characterised in the test suite.
+    * Deleting a middle anchor **together with its successor** is detected too,
+      by the signed per-document `sequence` (#666): the surviving run is then
+      `[7, 6, 3, 2, 1]`, and a hole is visible even though every surviving link
+      resolves.
+
+      `prev_anchor_id` also carries `ON DELETE RESTRICT`, which is what forces
+      the attacker into that shape: a middle anchor cannot be removed on its own
+      while its successor survives. Be precise about what that does **not** buy —
+      Postgres checks the constraint after the statement's rows are gone, so a
+      `DELETE … WHERE source_id = …` that removes referrer and referent together
+      still succeeds. RESTRICT narrows the attack to the shape the sequence
+      catches; it does not stop a wipe. Both are characterised in the test suite.
+    * **Reordering** is detected. `sequence` is what anchors are read in the
+      order of, and it is inside the signed payload. Before it, ordering was by
+      `inserted_at` — written by the database, attested by nothing — so
+      `UPDATE history_anchors SET inserted_at = now() WHERE id = <older>` made
+      the shorter anchor the verification baseline, putting the doctored
+      versions outside the anchored prefix with nothing deleted at all.
+    * Deleting the **newest** anchors is still **not** detected. Nothing points
+      at the newest anchor, so a shorter chain is indistinguishable from a
+      younger one, and no amount of state inside the document's own anchor set
+      can tell them apart. Since it is exactly the newest anchors that commit to
+      the most recent versions, an attacker who doctors version *k* deletes only
+      the anchors with `version_count >= k` — newest-first, past the `RESTRICT`
+      — leaves the rest intact, and the next write re-anchors from the surviving
+      prefix over the doctored rows. Verdict: `:verified`. Confirmed
+      empirically, and characterised in the test suite.
     * Wiping **every** anchor returns the document to `:unanchored` and the next
       write anchors it afresh — indistinguishable from a document anchored for
-      the first time.
+      the first time. Same shape as the truncation case, and same limit.
     * Without a signing key (the default — `KILN_PROVENANCE_PRIVATE_KEY` unset),
-      none of this holds at all: the digest is computed from public columns, so
-      an attacker recomputes any link they like, and the verdict is `:unsigned`
-      either way. **The predecessor link is advisory on an unsigned deployment.**
+      none of this holds at all: the digest and the sequence are ordinary
+      columns, so an attacker recomputes any link and renumbers any position,
+      and the verdict is `:unsigned` either way. **The predecessor link and the
+      sequence are advisory on an unsigned deployment.**
 
-  Closing the truncation case needs state the document's own anchor set cannot
-  provide — a per-document monotonic sequence with an external witness, an
-  append-only store, or `ON DELETE RESTRICT` plus a signed head pointer. Tracked
-  in #666; #597 stays open until then. Revoking `DELETE` on `history_anchors`
-  for the application role remains the cheap defence in depth, and is orthogonal
-  to all of this.
+  Closing the truncation case needs a witness the database does not hold: the
+  head digest published periodically to an append-only log, object storage with
+  a retention lock, or a transparency log. That is the only option that survives
+  full database control, which is the threat model the feature exists for.
+  Tracked in #666; #597 covers everything above it. Revoking `DELETE` on
+  `history_anchors` for the application role remains worthwhile on top of the
+  `RESTRICT`, and is orthogonal to all of this.
 
   ## When anchors are minted
 
@@ -255,8 +277,10 @@ defmodule KilnCMS.Governance.Chain do
       # one count to check the same invariant even when they did fold something.
       if allow_empty?, do: warn_on_skew(scope, type, previous, computed.version_count)
 
+      sequence = next_sequence(previous)
+
       {signature, key_id} =
-        sign(anchor_payload(type, record.id, computed, previous, prev_digest, boundary))
+        sign(anchor_payload(type, record.id, computed, previous, prev_digest, boundary, sequence))
 
       CMS.create_history_anchor!(
         %{
@@ -271,7 +295,8 @@ defmodule KilnCMS.Governance.Chain do
           key_id: key_id,
           actor_id: opts[:actor_id],
           prev_anchor_id: previous && previous.id,
-          prev_anchor_digest: prev_digest
+          prev_anchor_digest: prev_digest,
+          sequence: sequence
         },
         authorize?: false,
         tenant: record.org_id
@@ -283,6 +308,15 @@ defmodule KilnCMS.Governance.Chain do
 
   defp seed(nil), do: {@genesis, 0}
   defp seed(anchor), do: {anchor.chain_hash, anchor.version_count}
+
+  # 1-based, assigned at write time (#666). A chain that starts on anchors
+  # minted before `sequence` existed begins at 1 anyway: the point is that the
+  # sequenced run is contiguous and orders itself, not that it counts every
+  # anchor the document ever had. `for_content` sorts nulls last, so the legacy
+  # prefix stays where it belongs.
+  defp next_sequence(nil), do: 1
+  defp next_sequence(%{sequence: nil}), do: 1
+  defp next_sequence(%{sequence: n}), do: n + 1
 
   # The sort key this anchor ends on: the last row it folded, or — when it
   # folded nothing — the one its predecessor ended on, carried forward so the
@@ -385,6 +419,10 @@ defmodule KilnCMS.Governance.Chain do
   def chain_intact(anchors) do
     by_id = Map.new(anchors, &{&1.id, &1})
 
+    with :ok <- links_intact(anchors, by_id), do: sequence_intact(anchors)
+  end
+
+  defp links_intact(anchors, by_id) do
     anchors
     |> Enum.reject(&is_nil(&1.prev_anchor_id))
     |> Enum.reduce_while(:ok, fn anchor, :ok ->
@@ -393,6 +431,46 @@ defmodule KilnCMS.Governance.Chain do
         broken -> {:halt, broken}
       end
     end)
+  end
+
+  # The signed positions must be contiguous down to 1 (#666).
+  #
+  # The predecessor links already catch a middle anchor removed while its
+  # successor survives. This catches the same removal when the successor is
+  # removed too — the run is then `[7, 6, 3, 2, 1]` and the hole is visible
+  # even though every surviving link resolves. It is also what makes the read
+  # order safe to trust: `for_content` sorts on `sequence` precisely because
+  # `inserted_at` is attested by nothing.
+  #
+  # What it deliberately does NOT catch is a clean truncation of the newest
+  # anchors: `[3, 2, 1]` after deleting 5 and 4 is indistinguishable from a
+  # document that has only ever been anchored three times. Nothing inside the
+  # document's own anchor set can tell those apart — see the module docs and
+  # #666.
+  #
+  # Anchors minted before `sequence` existed carry nil and are skipped rather
+  # than treated as a gap; a mixed chain is a deployment mid-upgrade, not an
+  # attack.
+  defp sequence_intact(anchors) do
+    anchors
+    |> Enum.map(& &1.sequence)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sort(:desc)
+    |> case do
+      [] ->
+        :ok
+
+      sequenced ->
+        expected = Enum.to_list(length(sequenced)..1//-1)
+
+        if sequenced == expected do
+          :ok
+        else
+          {:tampered,
+           "anchor sequence has gaps: #{inspect(sequenced)} is not contiguous " <>
+             "down to 1, so an anchor between them was removed"}
+        end
+    end
   end
 
   defp link_intact(anchor, by_id) do
@@ -559,6 +637,17 @@ defmodule KilnCMS.Governance.Chain do
     prev = anchor.prev_anchor_id && %{id: anchor.prev_anchor_id}
     boundary = %{id: anchor.last_version_id, at: anchor.last_version_at}
 
+    v4 =
+      anchor_payload(
+        type,
+        source_id,
+        computed,
+        prev,
+        anchor.prev_anchor_digest,
+        boundary,
+        anchor.sequence
+      )
+
     v3 = anchor_payload(type, source_id, computed, prev, anchor.prev_anchor_digest, boundary)
 
     # An older-shape candidate is offered only when the columns it does NOT
@@ -576,6 +665,11 @@ defmodule KilnCMS.Governance.Chain do
     v1 = legacy_anchor_payload(type, source_id, computed)
 
     cond do
+      # `sequence` steers the read order, so once an anchor has one, only the
+      # shape that covers it is offered — otherwise a v3 anchor could have a
+      # sequence written into it after the fact and still verify, which is the
+      # ordering attack #666 is about.
+      not is_nil(anchor.sequence) -> [v4]
       not is_nil(anchor.last_version_at) -> [v3]
       is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) -> [v3, v2, v1]
       true -> [v3, v2]
@@ -708,8 +802,13 @@ defmodule KilnCMS.Governance.Chain do
   # The read itself, with no kill-switch gate. `anchors/4` applies the gate;
   # `anchored_boundary/1` deliberately does not — see its docs.
   defp read_anchors(type, source_id, org_id, limit) do
-    # Newest first with an id tiebreak (same-microsecond anchors).
-    query = [sort: [inserted_at: :desc, id: :desc]]
+    # Newest first by the SIGNED `sequence` (#666) — not by `inserted_at`, which
+    # is attested by nothing and was therefore a way to change the verification
+    # baseline without deleting anything. Restated here rather than left to
+    # `for_content`'s own `prepare build(sort: …)`, because passing `query:`
+    # replaces that sort rather than extending it. Nulls last for anchors minted
+    # before the column existed; `inserted_at` and `id` order those.
+    query = [sort: [sequence: :desc_nils_last, inserted_at: :desc, id: :desc]]
     query = if limit, do: Keyword.put(query, :limit, limit), else: query
 
     CMS.list_history_anchors_for!(type, source_id,
@@ -805,8 +904,26 @@ defmodule KilnCMS.Governance.Chain do
   # and the next anchor covers whatever rows the attacker chose. Anything that
   # steers the fold has to be attested.
   #
-  # `v: 3` because the shape changed again; `anchor_payload/5` and
-  # `legacy_anchor_payload/3` keep anchors minted at v2 and v1 verifying.
+  # `v: 4` adds `sequence`, for the same reason the boundary joined at v3: it
+  # steers verification — it is the order `for_content` reads in and therefore
+  # what picks the baseline — so it has to be attested (#666). The v3, v2 and v1
+  # shapes below keep anchors minted by earlier releases verifying.
+  defp anchor_payload(type, source_id, computed, prev, prev_digest, boundary, sequence) do
+    Canonical.encode(%{
+      "v" => 4,
+      "type" => type,
+      "source_id" => source_id,
+      "chain_hash" => computed.chain_hash,
+      "version_count" => computed.version_count,
+      "prev_anchor_id" => prev && prev.id,
+      "prev_anchor_digest" => prev_digest,
+      "last_version_id" => boundary.id,
+      "last_version_at" => boundary.at && DateTime.to_iso8601(boundary.at),
+      "sequence" => sequence
+    })
+  end
+
+  # The pre-#666 signed shape.
   defp anchor_payload(type, source_id, computed, prev, prev_digest, boundary) do
     Canonical.encode(%{
       "v" => 3,
