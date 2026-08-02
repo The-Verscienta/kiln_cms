@@ -101,8 +101,8 @@ defmodule KilnCMS.CMS.VersionSnapshot do
   A live record's state in snapshot shape — the unsaved working draft as the
   compare view's "current" side.
 
-  Mirrors what `AshPaperTrail.ChangeBuilders.ChangesOnly` would have written had
-  the record been saved right now: the same attributes (primary key and
+  Mirrors what AshPaperTrail's changes-only builder would have written had the
+  record been saved right now: the same attributes (primary key and
   `ignore_attributes` dropped), dumped with the same call, then JSON round-tripped
   because a snapshot read back from JSONB has lost its atoms, structs and
   `DateTime`s. Without that trip every field would read as changed.
