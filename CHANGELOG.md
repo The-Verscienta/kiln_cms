@@ -419,6 +419,25 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The collaborative-editing doc supervisor is bounded.** Its
+  `DynamicSupervisor` had no `max_children`, so nothing limited how many
+  authoritative Yjs documents a deployment could hold open — and each one pins a
+  Yex NIF document in memory and lingers ten minutes past its last client.
+  `config :kiln_cms, :collab_max_documents` (default 500) now caps it, counted
+  in documents open concurrently across the deployment rather than editors,
+  since several editors on one document share one server. Over the ceiling, a
+  join is refused with `unavailable` — a capacity answer, distinct from the
+  uniform "not found" the authorization checks give — and the client falls back
+  to solo editing with autosave, the same fallback it uses when the prototype is
+  switched off. The refusal is logged at error level, because the only other
+  symptom is editors quietly losing collaboration.
+
+  Behind `:collab_prototype`, which is off in production, so this was never live
+  exposure; it becomes load-bearing if collab graduates. #655 had already made
+  the doc key the resolved record, so a client could no longer conjure several
+  servers per document by varying the topic string — this bounds how many
+  documents can be open at once, not how many ways there are to name one. (#676)
+
 - **`entries_versions` had no index on `version_source_id`.** When the version
   tables' foreign keys were dropped, `pages_versions` and `posts_versions` got a
   single-column index to replace the lookup the FK had been providing;

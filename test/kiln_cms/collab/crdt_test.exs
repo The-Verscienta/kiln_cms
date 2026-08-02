@@ -16,6 +16,36 @@ defmodule KilnCMS.Collab.CrdtTest do
 
   defp text(doc), do: doc |> Yex.Doc.get_text("field") |> Yex.Text.to_string()
 
+  describe "the open-document ceiling (#676)" do
+    test "the supervisor is actually started with the cap" do
+      # The wiring, not the number: a `DynamicSupervisor` fixes `max_children`
+      # at boot, so nothing a test can do at runtime exercises the refusal
+      # against the real supervisor. Reading its state is the only way to catch
+      # the failure that matters — someone dropping the option and leaving the
+      # supervisor silently unbounded again.
+      state = :sys.get_state(KilnCMS.Collab.Crdt.DocSupervisor)
+
+      assert state.max_children == Crdt.max_documents()
+      assert is_integer(state.max_children)
+    end
+
+    test "the ceiling is configurable, and a nonsense value keeps the default" do
+      default = Crdt.max_documents()
+      on_exit(fn -> Application.delete_env(:kiln_cms, :collab_max_documents) end)
+
+      Application.put_env(:kiln_cms, :collab_max_documents, 12)
+      assert Crdt.max_documents() == 12
+
+      # Zero would make every join fail and a negative is not a spelling of an
+      # intent, so both keep the default rather than being interpreted — the
+      # same rule the env flags follow.
+      for bad <- [0, -1, "many", nil] do
+        Application.put_env(:kiln_cms, :collab_max_documents, bad)
+        assert Crdt.max_documents() == default, "#{inspect(bad)} must keep the default"
+      end
+    end
+  end
+
   test "ensure_server is idempotent per key" do
     key = doc_key()
     {:ok, a} = Crdt.ensure_server(key, org_id())

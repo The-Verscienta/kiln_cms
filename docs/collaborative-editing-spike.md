@@ -246,6 +246,7 @@ client over the channel). Where it lives:
 | Transport | `KilnCMSWeb.CollabChannel` over `/ws/collab` (`CollabSocket`, Phoenix.Token-gated, editor-minted; every join additionally authorizes the document as the token's user under the connection's org — #655) |
 | Client | `assets/js/collab.js` (one shared Y.Doc + channel per document; ~70 LOC provider) + TipTap `Collaboration` per rich-text block, one `XmlFragment` per block |
 | Flag | `config :kiln_cms, :collab_prototype` — on in dev/test, off in prod; joins refuse when off |
+| Ceiling | `config :kiln_cms, :collab_max_documents` (default 500) — concurrent open documents across the deployment, since each doc server pins a Yex NIF document and lingers ten minutes past its last client. Over it, joins are refused with `unavailable` and the client falls back to solo editing with autosave (#676) |
 
 Findings against the §3 risks:
 
