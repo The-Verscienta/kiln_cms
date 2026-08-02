@@ -591,6 +591,108 @@ defmodule KilnCMS.Governance.Chain do
     type |> anchors(source_id, org_id, 1) |> List.first()
   end
 
+  @typedoc """
+  How much of a document's version history is inside an anchor's fold.
+
+  `:none` — nothing is anchored. `{at, id}` — every row at or before that
+  `(version_inserted_at, id)` key is. `:unknown` — the question could not be
+  answered, which callers must treat as "all of it": see `anchored_boundary/1`.
+  """
+  @type anchored :: {DateTime.t(), Ash.UUID.t()} | :none | :unknown
+
+  @doc """
+  How much of `record`'s version history an anchor has already committed to.
+
+  A version row inside the fold is immutable. Destroying or rewriting one is
+  unrecoverable: that anchor can never reproduce, no later anchor repairs it,
+  and the verdict is `{:tampered, …}` — indistinguishable from real tampering,
+  permanently.
+
+  This is not hypothetical bookkeeping. `KilnCMS.CMS.Changes.CoalesceAutosaveVersions`
+  destroys superseded autosave rows and rewrites the survivor's `changes` on
+  every debounced save, and with `anchor_every_write` on those same rows have
+  just been anchored — so the two features, each correct alone, produced a
+  permanent false tamper verdict on the one configuration that exists to make
+  the audit surface stronger (#671). Anything that mutates version rows asks
+  this first.
+
+  Three things make it answer conservatively, because every wrong answer here
+  destroys history that cannot be reconstructed:
+
+    * **It ignores the `audit_anchors_enabled` kill switch**, unlike every other
+      read here. Turning the switch off stops anchoring; it does not delete the
+      anchors already minted, and those rows still commit to what they commit
+      to. Reading `[]` because the feature is "off" would let coalescing eat
+      them and red the document the moment the switch came back on.
+    * **It never raises.** It runs in `after_transaction`, after the editor's
+      save has already committed, where a raise reaches the LiveView rather than
+      the changeset — the same reason `anchor/2` and `extend/2` are wrapped. An
+      unreadable `history_anchors` (the migration not yet applied, a transient
+      fault) answers `:unknown`.
+    * **`:unknown` means "assume everything".** A pre-#598 anchor recorded only
+      a `version_count`, so the position is resolved by reading the
+      `version_count`-th surviving row; when fewer rows survive than the anchor
+      counted — which is the state a document damaged by #671 is already in —
+      there is no row to resolve to, and the honest answer is that we cannot
+      tell rather than that nothing is anchored.
+  """
+  @spec anchored_boundary(struct()) :: anchored()
+  def anchored_boundary(record) do
+    type = to_string(KilnCMS.Firing.Engine.document_type(record))
+    scope = %{resource: record.__struct__, source_id: record.id, org_id: record.org_id}
+
+    type
+    |> read_anchors(record.id, record.org_id, 1)
+    |> List.first()
+    |> resolved_boundary(scope)
+  rescue
+    error ->
+      Logger.error("Anchor boundary unreadable, skipping version coalescing: #{inspect(error)}")
+      :unknown
+  end
+
+  defp resolved_boundary(nil, _scope), do: :none
+
+  defp resolved_boundary(%{last_version_at: at, last_version_id: id}, _scope)
+       when not is_nil(at),
+       do: {at, id}
+
+  # Pre-#598 anchors recorded a count and no position (`resume_at/1`'s
+  # `{:offset, n}` case). Resolve it to the same sort key by reading the row at
+  # that position, so callers have one shape to reason about rather than two.
+  #
+  # Deleted rows push the n-th survivor later, which is conservative. Deleting
+  # enough of them that there is no n-th row at all is not — so that answers
+  # `:unknown` rather than `:none`.
+  defp resolved_boundary(%{version_count: n}, scope) when n > 0 do
+    scope.resource
+    |> version_scope(scope.source_id)
+    |> Ash.Query.offset(n - 1)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(authorize?: false, tenant: scope.org_id)
+    |> case do
+      nil -> :unknown
+      version -> {version.version_inserted_at, version.id}
+    end
+  end
+
+  defp resolved_boundary(_anchor, _scope), do: :none
+
+  @doc """
+  Narrow `query` over a version resource to the rows no anchor has committed to.
+
+  The same predicate the incremental fold resumes on, exposed so a caller that
+  mutates version rows can exclude the anchored prefix in SQL rather than
+  filtering in memory. `:none` is the identity; `:unknown` is not accepted,
+  because "narrow to nothing" and "read nothing" are different enough that the
+  caller should say which it means.
+  """
+  @spec after_anchored(Ash.Query.t(), {DateTime.t(), Ash.UUID.t()} | :none) :: Ash.Query.t()
+  def after_anchored(query, :none), do: query
+
+  def after_anchored(query, {at, boundary_id}),
+    do: resume_after(query, {:after, {at, boundary_id}})
+
   @doc """
   Every anchor for a document, newest first — the input to `chain_intact/1`.
 
@@ -600,19 +702,21 @@ defmodule KilnCMS.Governance.Chain do
   """
   @spec anchors(String.t(), Ash.UUID.t(), Ash.UUID.t() | nil, pos_integer() | nil) :: [struct()]
   def anchors(type, source_id, org_id, limit \\ nil) do
-    if enabled?() do
-      # Newest first with an id tiebreak (same-microsecond anchors).
-      query = [sort: [inserted_at: :desc, id: :desc]]
-      query = if limit, do: Keyword.put(query, :limit, limit), else: query
+    if enabled?(), do: read_anchors(type, source_id, org_id, limit), else: []
+  end
 
-      CMS.list_history_anchors_for!(type, source_id,
-        authorize?: false,
-        tenant: org_id,
-        query: query
-      )
-    else
-      []
-    end
+  # The read itself, with no kill-switch gate. `anchors/4` applies the gate;
+  # `anchored_boundary/1` deliberately does not — see its docs.
+  defp read_anchors(type, source_id, org_id, limit) do
+    # Newest first with an id tiebreak (same-microsecond anchors).
+    query = [sort: [inserted_at: :desc, id: :desc]]
+    query = if limit, do: Keyword.put(query, :limit, limit), else: query
+
+    CMS.list_history_anchors_for!(type, source_id,
+      authorize?: false,
+      tenant: org_id,
+      query: query
+    )
   end
 
   # ── internals ─────────────────────────────────────────────────────────────
