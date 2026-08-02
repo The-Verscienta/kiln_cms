@@ -176,6 +176,31 @@ build if a resource is ever registered without that authorizer.
 - **Token theft** — JWTs are bearer tokens; clients must store them securely and
   use TLS. Tokens are revocable via the token store.
 
+### Editor / admin LiveViews (`/editor/**`, `/media`)
+- **Router gates skipped by a url-less join** — a `/live` join whose payload
+  carries neither `"url"` nor `"redirect"` matches no route, and Phoenix only
+  attaches a `live_session`'s `on_mount` hooks when a route matched. So such a
+  join runs none of the tier gates. The credential is the signed
+  `data-phx-session` blob scraped from any page the caller was served, which
+  outlives both the visit and a later demotion. *Mitigated (#688):*
+  `KilnCMSWeb.LiveRouteGuard` is declared by `use KilnCMSWeb, :live_view`, so it
+  is attached to the view rather than to the `live_session` and runs anyway; it
+  refuses a connected join that matched no route **and whose session names a
+  `live_session`** as a 404, which the channel turns into a client reload rather
+  than a crash. (The `live_session` half is load-bearing: a sticky
+  `live_render` child is a "main" session that legitimately carries no URL, so
+  refusing on "root with no route" would put it in a reload loop.) A test walks
+  every `live` route in the router and fails if its view does not carry the
+  guard, which is what enforces it for plugin panels rather than assuming it.
+  *Watch:* third-party LiveViews keep the framework behaviour — AshAdmin's are
+  compile-gated to `:dev_routes`; AshAuthentication's sign-in views are
+  unauthenticated, so a url-less join reaches no authorization it could not
+  reach signed out, but it does skip `:assign_current_org` and therefore renders
+  with the **default org's** branding on a tenant host.
+- **Session as the credential** — the whole surface is gated by the session
+  cookie plus the per-org effective tier, so the cookie's integrity is the
+  boundary; see the `__Host-` prefix under Controls (#686).
+
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a

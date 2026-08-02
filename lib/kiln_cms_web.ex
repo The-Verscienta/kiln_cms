@@ -62,6 +62,11 @@ defmodule KilnCMSWeb do
     quote do
       use Phoenix.LiveView
 
+      # Attached to the LiveView module rather than to a `live_session`, because
+      # the router's hooks are exactly what a url-less join skips (#688). A hook
+      # declared here survives that, and refuses the join.
+      on_mount KilnCMSWeb.LiveRouteGuard
+
       unquote(html_helpers())
     end
   end
