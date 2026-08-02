@@ -25,22 +25,32 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     repo KilnCMS.Repo
 
     custom_indexes do
-      # The `for_content` lookup: anchors for one document within its site.
-      #
-      # Carries the sort as well as the filter, because the overwhelmingly
-      # common shape is `latest_anchor/3` — a top-1 by `(inserted_at, id)`
-      # descending. On the filter columns alone Postgres fetches every anchor
-      # the document has and top-N sorts them, which is O(anchors per document)
-      # on a path that runs per write: `anchor_every_write` mints one anchor per
-      # save, so an hour of debounced typing leaves ~1200 of them, and both
-      # `mint/3` and `CoalesceAutosaveVersions` ask for the latest on every one
-      # of those saves. Same treatment the version tables got in #672.
+      # The `for_content` lookup: anchors for one document within its site,
+      # in timestamp order. Kept for the governance trail and exports, which
+      # display anchors chronologically; verification does not use it.
       index [:org_id, :resource_type, :source_id, :inserted_at, :id]
 
-      # The chain's own order (#666). `sequence` is what `Chain.anchors/4` sorts
-      # on now that ordering by unsigned `inserted_at` was a way to change the
-      # verification baseline without deleting anything.
-      index [:org_id, :resource_type, :source_id, :sequence]
+      # The chain's own order (#666), and what `latest_anchor/3` actually reads
+      # in. It carries the sort, not just the filter: on the filter columns alone
+      # Postgres fetches every anchor the document has and top-N sorts them,
+      # which is O(anchors per document) on a path that runs per write —
+      # `anchor_every_write` mints one anchor per save, so an hour of debounced
+      # typing leaves ~1200, and both `mint/3` and `CoalesceAutosaveVersions`
+      # ask for the latest on every one of those saves. `sequence` is `NOT NULL`,
+      # so a backward scan of this plain btree serves `ORDER BY sequence DESC` as
+      # a top-1 with no sort node. (A `NULLS LAST` ordering would have been
+      # servable by no btree at all — a second reason the column is not
+      # nullable.)
+      #
+      # UNIQUE because `next_sequence/1` is a read-then-write in
+      # `after_transaction`, outside the document's own transaction: two
+      # concurrent mints read the same predecessor and pick the same number.
+      # Without this both land, the run reads `[2, 2, 1]`, and the document is
+      # permanently and falsely tampered — unrepairable, since anchors have no
+      # destroy action. With it the loser's insert fails into `Chain.anchor/2`
+      # and `extend/2`'s existing rescue: a logged skip, which is what an
+      # anchoring problem is supposed to cost.
+      index [:org_id, :resource_type, :source_id, :sequence], unique: true
     end
 
     references do
@@ -90,14 +100,14 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # the shorter anchor the baseline — the doctored versions then fell outside
     # the anchored prefix and were never hashed, with nothing deleted at all.
     # `sequence` is inside the signed payload, so repointing it breaks the
-    # signature. Nulls last for anchors minted before it existed: they are by
-    # definition older than every sequenced one.
+    # signature. It is `NOT NULL` and unique per document, so this is a total
+    # order with no null case to reason about — see the attribute.
     read :for_content do
       argument :resource_type, :string, allow_nil?: false
       argument :source_id, :uuid, allow_nil?: false
 
       filter expr(resource_type == ^arg(:resource_type) and source_id == ^arg(:source_id))
-      prepare build(sort: [sequence: :desc_nils_last, inserted_at: :desc, id: :desc])
+      prepare build(sort: [sequence: :desc])
     end
   end
 
@@ -181,20 +191,29 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     #   * it is the **order** `for_content` reads in, so the verification
     #     baseline cannot be changed by rewriting a timestamp;
     #   * a **gap** in it is visible. The predecessor links already catch a
-    #     middle anchor being removed while its successor survives; a sequence
-    #     catches the same removal when the successor is removed too, as long as
-    #     anything later survives.
+    #     middle anchor removed while its successor survives; a position catches
+    #     the same removal when the successor is removed too.
     #
-    # It is inside the signed payload, so it cannot be repointed without the
-    # signing key. It does **not** catch a clean truncation of the newest
-    # anchors — nothing inside the document's own anchor set can, since a
-    # shorter chain is indistinguishable from a younger one. That needs a
-    # witness outside the database; see `KilnCMS.Governance.Chain` and #666.
+    # `allow_nil? false` is load-bearing, not tidiness. A nullable position is a
+    # one-statement way to redo the very attack this closes: null the newest
+    # anchors' positions, an older and shorter anchor becomes the baseline, the
+    # doctored versions fall outside the anchored prefix, and the verdict is
+    # `:verified` with nothing deleted. **Nothing attests an absent value**, so
+    # the column refuses to be absent. Existing anchors were backfilled in
+    # `(inserted_at, id)` order by the migration that added it.
     #
-    # Null on anchors minted before this existed. A document's first sequenced
-    # anchor starts at 1 regardless, so a mixed chain reads newest-first
-    # correctly (sequenced ones first, legacy ones after, by timestamp).
-    attribute :sequence, :integer, public?: true
+    # It is inside the signed payload from v4 on, so a v4 anchor cannot be
+    # renumbered without the signing key. Backfilled anchors were signed before
+    # it existed and so are renumberable — which is why `Chain.chain_intact/1`
+    # also requires `version_count` to be non-decreasing along the run, on
+    # columns that *are* covered. A short anchor cannot be promoted to the head
+    # without violating that.
+    #
+    # It does **not** catch a clean truncation of the newest anchors — nothing
+    # inside the document's own anchor set can, since a shorter chain is
+    # indistinguishable from a younger one. That needs a witness outside the
+    # database; see `KilnCMS.Governance.Chain` and #666.
+    attribute :sequence, :integer, allow_nil?: false, public?: true
 
     attribute :actor_id, :uuid, public?: true
 

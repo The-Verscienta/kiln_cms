@@ -211,47 +211,68 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
-- **History anchors carry a signed position, so the chain can no longer be
-  reordered or silently holed.** Two ways to move the verification baseline
-  without deleting anything the chain would notice, both closed (#597, #666).
+- **History anchors verify as a chain, not just at the head.** Three ways to
+  move the verification baseline without deleting anything the chain would
+  notice, all closed (#597, #666).
 
-  **Reordering.** `Chain.verify/4` takes the *latest* anchor as its baseline, and
+  **The foundation: every anchor's signature is now checked, not only the
+  baseline's.** While only the head was checked, every other anchor's attested
+  columns were freely rewritable — and those columns are exactly what any
+  structural invariant is computed from, so no invariant over them could be
+  relied on. Not holding the key (a rotation without the outgoing key
+  registered) stays `:unverifiable` rather than red, and an unsigned anchor is
+  skipped rather than judged. Cost is one signature verification per anchor, on
+  audit paths only: the governance page and `mix kiln.audit.verify`. Nothing on
+  the delivery path verifies a chain.
+
+  **Reordering.** `verify/4` takes the *latest* anchor as its baseline, and
   "latest" was decided by `inserted_at` — a column written by the database and
   attested by nothing. So `UPDATE history_anchors SET inserted_at = now() WHERE
   id = <an older, shorter anchor>` made that anchor the baseline: the doctored
-  versions then sat outside the anchored prefix and were never hashed, and the
+  versions then sat outside the anchored prefix, were never hashed, and the
   verdict was `:verified` with not a single row deleted. Anchors now carry a
-  1-based per-document `sequence`, assigned at write time and inside the signed
-  payload (v4), and that is what they are read in the order of. Repointing it
-  breaks the signature, exactly as repointing the fold boundary does since #598.
+  1-based per-document `sequence`, inside the signed payload (v4), and that is
+  the order they are read in.
+
+  It is **`NOT NULL` and unique**, and both matter. A nullable position would
+  have been the same hole one column over — nothing attests an *absent* value,
+  so nulling the newest positions would have rolled the baseline back just as
+  the timestamp rewrite did. Unique because assigning it is a read-then-write in
+  `after_transaction`: without the constraint two concurrent mints pick the same
+  number, and the run reads `[2, 2, 1]` — a permanent, unrepairable false tamper
+  verdict on a document nobody touched. With it, the loser's insert fails into
+  the existing rescue as a logged skip.
 
   **Holes.** The predecessor links added in #591 catch a middle anchor removed
   while its successor survives. They do not catch it when the successor goes too
-  — every surviving link still resolves. The sequence does: the run is then
-  `[7, 6, 3, 2, 1]` and the gap is visible. `prev_anchor_id` also gains
-  `ON DELETE RESTRICT`, which is what forces the attacker into that shape, since
-  a middle anchor can no longer be removed on its own.
+  — every surviving link still resolves. On a signed deployment the signature
+  sweep does, because the attacker has to rewrite the survivor's link columns to
+  get there and those are signed. On an unsigned one, where that is free, the
+  position gap is what is left. `prev_anchor_id` also gains `ON DELETE
+  RESTRICT`, which forces the attacker into that shape.
 
-  Be precise about what `RESTRICT` does **not** buy, because the stronger reading
-  is wrong and worth pinning: Postgres checks the constraint after the
-  statement's rows are gone, so `DELETE … WHERE source_id = …` removes referrer
-  and referent together and succeeds. It narrows the attack to the shape the
-  sequence catches; it does not stop a wipe. Both behaviours have tests.
+  Be precise about what `RESTRICT` does **not** buy: Postgres checks the
+  constraint after the statement's rows are gone, so `DELETE … WHERE source_id =
+  …` removes referrer and referent together and succeeds. It narrows the attack;
+  it does not stop a wipe. Both behaviours have tests.
 
   **Still open, and stated rather than implied.** Deleting the *newest* anchors
   is undetectable. Nothing points at the newest one, so a shorter chain is
   indistinguishable from a younger one, and no state inside the document's own
-  anchor set can tell them apart — which is why #666 stays open for a witness
+  anchor set can tell them apart — which is why **#666 stays open** for a witness
   outside the database (an append-only log, retention-locked object storage, a
-  transparency log). On an unsigned deployment (`KILN_PROVENANCE_PRIVATE_KEY`
-  unset, the default) the sequence is an ordinary column and the whole thing is
-  advisory, the same caveat the predecessor link already carried.
+  transparency log). `docs/governance-dashboard.md` now tells operators to export
+  the head digest on a schedule if the property has to actually hold. On an
+  unsigned deployment the structural checks still run and still report, but treat
+  them as advisory: they raise the cost of a forgery, they do not attest
+  anything.
 
-  Existing anchors keep verifying: `sequence` is null on them, they sort after
-  every sequenced anchor (which is where they belong), a null is skipped rather
-  than read as a gap, and the v3/v2/v1 payload shapes are still offered. An
-  anchor that *has* a sequence is only ever checked against the v4 shape, so one
-  cannot be written into an older anchor after the fact. (#597, #666)
+  Existing anchors are backfilled in write order and keep verifying — they were
+  signed before the column existed, so both the v4 and v3 payload shapes are
+  offered and each anchor matches exactly one. Their positions are therefore not
+  covered by their own signatures; what holds them in place is that
+  `version_count` must rise with position, on columns that are covered, so a
+  short early anchor cannot be promoted to the baseline. (#597, #666)
 
 - **A LiveView join with no URL is refused instead of skipping every router
   gate.** LiveView's channel has a catch-all for a join payload carrying
@@ -787,6 +808,25 @@ migration, a rewritten column, a dropped config key).
   sighted and screen-reader users alike. The copyable media URL now says so too.
 
 ### Upgrading
+
+**Rolling back past the history-anchor sequence migration is a one-way door for
+the audit surface.** `history_anchors.sequence` is inside the signed payload of
+every anchor minted after the upgrade (#666), so `mix ecto.rollback` past it
+drops the column and makes all of those anchors report
+`{:tampered, "anchor signature does not verify"}`. Rolling *forward* again does
+not heal it — the column comes back empty. Nothing else in the release depends
+on it, so if you need to roll back for an unrelated reason, roll back the
+application and leave this migration applied.
+
+The migration itself is safe to run on a live instance: the column is backfilled
+before the `NOT NULL` lands, and the new foreign key is added `NOT VALID` and
+validated separately, so neither step takes a lock that blocks traffic.
+
+One thing it can surface rather than cause: if validation fails, some anchor
+names a predecessor that no longer exists — the hole #597 exists to detect. The
+migration says so, prints the query that lists them, and the constraint is
+already protecting new writes; the existing rows are what it cannot vouch for.
+Restore them from a backup, or accept the hole and validate manually.
 
 **Everyone is signed out once on deploy.** The session cookie is renamed from
 `_kiln_cms_key` to `__Host-_kiln_cms_key` in production (#686). The browser

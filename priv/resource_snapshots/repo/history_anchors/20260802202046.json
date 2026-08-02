@@ -195,7 +195,7 @@
       "type": "text"
     },
     {
-      "allow_nil?": true,
+      "allow_nil?": false,
       "default": "nil",
       "generated?": false,
       "precision": null,
@@ -322,14 +322,14 @@
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
-      "unique": false,
+      "unique": true,
       "using": null,
       "where": null
     }
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "D338B5A9678F65D4C2CB8D834E6BD83ED28C91E2A8DBEA9F48297C095184E5D7",
+  "hash": "7B44A2AED29356B8AC691B114C48617B5B6E162B3B26C6351FE7A237132FA566",
   "identities": [],
   "multitenancy": {
     "attribute": "org_id",

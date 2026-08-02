@@ -96,6 +96,63 @@ defmodule KilnCMS.Governance.ChainTest do
     )
   end
 
+  # A published page with four anchors, positions 1..4, each covering strictly
+  # more versions than the last.
+  defp four_anchor_page(admin: actor) do
+    page = published_page(actor)
+
+    page =
+      Enum.reduce(~w(Second Third Fourth), page, fn title, acc ->
+        acc = CMS.update_page!(acc, %{title: title}, actor: actor)
+        :ok = Chain.anchor(acc)
+        acc
+      end)
+
+    assert Chain.anchors("page", page.id, page.org_id) |> Enum.map(& &1.sequence) == [4, 3, 2, 1]
+    page
+  end
+
+  # Delete the anchors at `positions` and null the survivor's link columns, so
+  # every remaining link resolves — what an attacker excising a run would do.
+  defp excise_positions!(page, positions) do
+    KilnCMS.Repo.update_all(
+      from(a in "history_anchors",
+        where:
+          a.source_id == type(^page.id, :binary_id) and
+            a.sequence == ^(Enum.max(positions) + 1)
+      ),
+      set: [prev_anchor_id: nil, prev_anchor_digest: nil]
+    )
+
+    KilnCMS.Repo.delete_all(
+      from(a in "history_anchors",
+        where: a.source_id == type(^page.id, :binary_id) and a.sequence in ^positions
+      )
+    )
+  end
+
+  # Exchange two anchors' positions, keeping the run contiguous.
+  defp swap_positions!(a, b) do
+    set_position!(a, -1)
+    set_position!(b, a.sequence)
+    set_position!(%{a | sequence: -1}, b.sequence)
+  end
+
+  defp set_position!(anchor, position) do
+    KilnCMS.Repo.update_all(
+      from(a in "history_anchors", where: a.sequence == ^anchor.sequence),
+      set: [sequence: position]
+    )
+  end
+
+  # Drop the signing key for the rest of the test: the anchors already minted
+  # keep their signatures, so this is only usable before any are written.
+  defp unsign! do
+    previous = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+    Application.put_env(:kiln_cms, KilnCMS.Provenance, Keyword.delete(previous, :signing_key))
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Provenance, previous) end)
+  end
+
   defp autosave_count(page) do
     Page.Version
     |> Ash.Query.filter(version_source_id == ^page.id and version_action_name == :autosave)
@@ -817,7 +874,16 @@ defmodule KilnCMS.Governance.ChainTest do
       now = Chain.latest_anchor("page", page.id, page.org_id)
       assert now.version_count == anchor.version_count + 1
       assert now.last_version_at
-      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      # NOT `:verified` — and that is the point of #666's signature sweep, not a
+      # regression. `last_version_at` is inside the signed payload, so the
+      # `UPDATE` above (which stands in for an anchor minted before the column
+      # existed) is itself detectable now that every anchor's signature is
+      # checked, not just the head's. A genuine pre-#598 anchor was signed
+      # without the column and verifies fine; this simulation rewrites a signed
+      # one, which is exactly what the sweep exists to notice.
+      assert {:tampered, "anchor signature does not verify"} =
+               Chain.verify(Page, "page", page.id, page.org_id)
     end
 
     # The boundary steers which rows the next anchor covers, so it is signed.
@@ -943,45 +1009,59 @@ defmodule KilnCMS.Governance.ChainTest do
       assert reason =~ newest.prev_anchor_id
     end
 
-    test "removing a middle anchor AND its successor leaves a visible gap" do
+    test "removing a middle anchor AND its successor is caught by the signature sweep" do
       # The case the predecessor links alone cannot catch: with the successor
-      # gone too, every surviving link still resolves. The signed `sequence`
-      # is what makes the hole visible (#666).
+      # gone too, every surviving link resolves. On a SIGNED deployment the
+      # attacker has to null the survivor's link columns to get there, and those
+      # are inside its signed payload — so checking every anchor's signature,
+      # not just the head's, is what catches it (#666).
       actor = admin()
-      page = published_page(actor)
-
-      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
-      :ok = Chain.anchor(page)
-      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
-      :ok = Chain.anchor(page)
-      page = CMS.update_page!(page, %{title: "Fourth"}, actor: actor)
-      :ok = Chain.anchor(page)
-
-      anchors = Chain.anchors("page", page.id, page.org_id)
-      assert Enum.map(anchors, & &1.sequence) == [4, 3, 2, 1]
+      page = four_anchor_page(admin: actor)
 
       drop_prev_anchor_constraint!()
+      excise_positions!(page, [2, 3])
 
-      # Take out 3 and 2. What is left is [4, 1]: 4 names 3, which is gone —
-      # so null 4's link too, which is what an attacker who wanted the links to
-      # resolve would do. Only the sequence still says something is missing.
-      doomed = Enum.filter(anchors, &(&1.sequence in [2, 3]))
+      assert {:tampered, "anchor signature does not verify"} =
+               Chain.verify(Page, "page", page.id, page.org_id)
+    end
 
-      KilnCMS.Repo.update_all(
-        from(a in "history_anchors",
-          where: a.sequence == 4 and a.source_id == type(^page.id, :binary_id)
-        ),
-        set: [prev_anchor_id: nil, prev_anchor_digest: nil]
-      )
+    test "the same removal on an UNSIGNED deployment is caught by the position gap" do
+      # Where the position check earns its place. With no signing key there is no
+      # signature to break, so nulling the survivor's link columns is free and
+      # every surviving link resolves. The run is then `[4, 1]`, and the hole in
+      # it is the only thing left that says an anchor is missing.
+      #
+      # `chain_intact/1` runs before `verdict/5`'s `:unsigned` short-circuit, so
+      # the finding is reported rather than swallowed by "we cannot judge".
+      unsign!()
 
-      KilnCMS.Repo.delete_all(
-        from(a in "history_anchors",
-          where: a.id in ^Enum.map(doomed, &Ecto.UUID.dump!(&1.id))
-        )
-      )
+      page = four_anchor_page(admin: admin())
+
+      drop_prev_anchor_constraint!()
+      excise_positions!(page, [2, 3])
 
       assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
-      assert reason =~ "anchor sequence has gaps"
+      assert reason =~ "anchor sequence is not contiguous"
+    end
+
+    test "a short anchor cannot be renumbered into the baseline position" do
+      # Contiguity alone is satisfied by any permutation, and a permutation is
+      # what would promote an early, short anchor to the head — putting the
+      # doctored versions outside the anchored prefix. `version_count` rising
+      # with position is what forbids it. Unsigned, so the swap itself is free
+      # and the invariant is the only thing standing.
+      unsign!()
+
+      page = four_anchor_page(admin: admin())
+      [newest | _] = anchors = Chain.anchors("page", page.id, page.org_id)
+      oldest = List.last(anchors)
+
+      assert newest.version_count > oldest.version_count
+
+      swap_positions!(newest, oldest)
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "anchor sequence is out of order"
     end
 
     test "rewriting inserted_at no longer changes the verification baseline" do
