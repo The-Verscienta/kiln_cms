@@ -41,6 +41,15 @@ defmodule KilnCMSWeb.Tenant do
   topic and not tenancy was what scoped it. It now resolves its tenant like the
   other two, and every join authorizes the document under it.
 
+  A **connected** LiveView mount was a third until #654 — not because it
+  resolved no host, but because it resolved the *client's*: `socket.host_uri` is
+  rebuilt from the join payload rather than from a `Host` header, so strict or
+  not, the client named its own org. `/live` now carries `connect_info: [:uri]`
+  like the other three, and `:assign_current_org` resolves from the socket's own
+  request URI, refusing a claim that names a different org
+  (`HostMismatchError`). All four socket families now agree: the tenant is the
+  one the transport connected on, never the one the payload asks for.
+
   ## The `:current_org` assign
 
   `current_org_id/1` reads the resolved org back off a conn/socket's
@@ -75,6 +84,54 @@ defmodule KilnCMSWeb.Tenant do
       opts
       |> Keyword.put_new(:message, "no organization is configured for host #{inspect(host)}")
       |> then(&struct!(__MODULE__, &1))
+    end
+
+    def exception(message) when is_binary(message), do: %__MODULE__{message: message}
+  end
+
+  defmodule HostMismatchError do
+    @moduledoc """
+    Raised when a **connected** LiveView mount claims a host belonging to a
+    different organization than the one the socket actually connected on (#654).
+
+    `socket.host_uri` on a connected mount is rebuilt from the client's join
+    payload, not from a validated `Host` header, and `check_origin` admits every
+    subdomain of the base host — so left alone the client picks its own
+    `:current_org`. `KilnCMSWeb.LiveUserAuth.on_mount(:assign_current_org, ...)`
+    resolves from `connect_info[:uri]`, the socket's own request URI, and raises
+    this when the claim names someone else.
+
+    The comparison is by resolved **org**, not by host string. Two spellings of
+    one org's host are not a mismatch, and treating them as one would 404 the
+    LiveView surface of any deployment behind a `Host`-rewriting proxy, on an
+    IPv6 literal, or on a custom domain reached by its subdomain.
+
+    `plug_status: 404` for the same reason `UnknownHostError` carries it: it puts
+    the raise in the range LiveView's channel turns into a client reload
+    rather than a process crash, so a probe costs no crash report. It is a 404
+    and not a 403 deliberately — the answer to "does this socket belong here" is
+    the answer to "is there anything here for you", and the two must not be
+    distinguishable.
+    """
+    defexception [:claimed, :connected, :message, plug_status: 404]
+
+    @impl true
+    def exception(opts) when is_list(opts) do
+      # Built field by field rather than through `struct!/2` over the opts: an
+      # unrecognised key there would raise `KeyError` inside the channel's
+      # rescue, and a `KeyError` is a 500 — turning the deliberately quiet 404
+      # into a crash report per probe, which is the one thing the status buys.
+      claimed = opts[:claimed]
+      connected = opts[:connected]
+
+      %__MODULE__{
+        claimed: claimed,
+        connected: connected,
+        message:
+          opts[:message] ||
+            "LiveView mount claimed host #{inspect(claimed)}, " <>
+              "which is not the organization it connected on (#{inspect(connected)})"
+      }
     end
 
     def exception(message) when is_binary(message), do: %__MODULE__{message: message}
