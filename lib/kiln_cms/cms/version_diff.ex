@@ -17,8 +17,9 @@ defmodule KilnCMS.CMS.VersionDiff do
       A changed rich-text block carries an `:inline` diff of its prose.
 
   Not every reported field is one a restore writes back — workflow and
-  attribution are deliberately left alone. `KilnCMS.CMS.VersionFields.restorable?/1`
-  is the answer, and the compare modal marks those rows (#691).
+  attribution are deliberately left alone. Each `Field` carries `restorable?`
+  (from `KilnCMS.CMS.VersionFields.restorable?/2`, answered here because the
+  resource is in hand), and the compare modal marks those rows (#691).
 
   Both use `List.myers_difference/2` from the standard library; no diff dependency
   is involved.

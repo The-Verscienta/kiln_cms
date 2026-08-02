@@ -30,7 +30,7 @@ defmodule KilnCMS.CMS.VersionFields do
     * `author_id` — attribution. Reverting the text of a document does not make
       a previous author responsible for it again.
 
-  Anything excluded here is what `restorable?/1` answers `false` for, so the
+  Anything excluded here is what `restorable?/2` answers `false` for, so the
   compare modal can mark those rows rather than leaving the editor to discover
   it after clicking.
 
