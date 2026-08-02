@@ -2828,7 +2828,7 @@ msgid "%{count} unused recovery codes remain."
 msgstr "Quedan %{count} códigos de recuperación sin usar."
 
 #: lib/kiln_cms_web/live/preview_live.ex:294
-#: lib/kiln_cms_web/live/token_preview_live.ex:273
+#: lib/kiln_cms_web/live/token_preview_live.ex:278
 #, elixir-autogen, elixir-format
 msgid "%{count} viewing"
 msgstr "%{count} viendo"
@@ -4307,7 +4307,7 @@ msgid "Path alias pattern (optional)"
 msgstr "Patrón de alias de ruta (opcional)"
 
 #: lib/kiln_cms_web/live/preview_live.ex:284
-#: lib/kiln_cms_web/live/token_preview_live.ex:263
+#: lib/kiln_cms_web/live/token_preview_live.ex:268
 #, elixir-autogen, elixir-format
 msgid "People viewing"
 msgstr "Personas viendo"

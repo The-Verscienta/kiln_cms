@@ -240,7 +240,12 @@ defmodule KilnCMSWeb.TokenPreviewLive do
         </span>
       </div>
 
-      <Layouts.public>
+      <%!-- The requesting site's branding, not the default org's (#680). A
+            preview link is designed to be forwarded, so it does reveal which
+            site the draft belongs to — which is the right trade against the
+            alternative this replaces: showing a DIFFERENT tenant's name and
+            logo around the draft. --%>
+      <Layouts.public current_org={@current_org}>
         <article class="prose max-w-none">
           <header :if={@excerpt?} class="mb-6">
             <h1 class="text-3xl font-bold tracking-tight">{@title}</h1>
