@@ -21,6 +21,22 @@ every sign-in, after the first factor.
   first-factor token across the redirect — the user is **not** signed in until a
   valid code is entered.
 
+## "Remember me" and the second factor
+
+Ticking "Remember me" on the sign-in page issues a 30-day cookie that signs the
+browser in on its own. For a 2FA account that cookie is only issued **after a
+code verifies** ([#699](https://github.com/The-Verscienta/kiln_cms/issues/699)):
+AshAuthentication writes it at the first factor by default, which would let
+someone tick the box, close the code prompt, and keep a credential that never
+asks for a code again. `KilnCMSWeb.AuthController` withholds it there and
+`KilnCMSWeb.TwoFactorController` issues it on success instead.
+
+Once issued it *does* skip the code prompt on later visits, deliberately — it
+represents a device that completed every factor. Signing out deletes it. Note
+that changing the password does **not** currently revoke it (nor any other
+stored token — see [#730](https://github.com/The-Verscienta/kiln_cms/issues/734)),
+so signing out is the reliable way to withdraw a device today.
+
 ## Why a wrong code can say "too many attempts"
 
 Six digits and a ±1-step tolerance are guessable in a way a password is not, and

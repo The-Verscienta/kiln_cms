@@ -120,4 +120,64 @@ defmodule KilnCMSWeb.SessionCookieTest do
       assert running == SessionCookie.options(running[:secure])
     end
   end
+
+  describe "the remember-me cookie (#699)" do
+    test "carries the __Host- prefix in production, and the bare name without Secure" do
+      # It is the *better* credential of the two — thirty days rather than a
+      # browser session, and it signs in a visitor with no session at all — so
+      # leaving it outside the rule would reopen #686 on the stronger cookie.
+      assert SessionCookie.remember_me_key(true) == :"__Host-remember_me"
+      assert SessionCookie.remember_me_key(false) == :remember_me
+    end
+
+    test "is a name the resource takes from here rather than restating" do
+      # The read path keys on the strategy's DSL value while the write path goes
+      # through `KilnCMSWeb.AuthController`, so the two spelling it differently
+      # fails open: the browser sends nothing and the failure reads as "remember
+      # me doesn't work" rather than as a control that stopped applying.
+      #
+      # Asserting the *set* of names this module can produce, not the one this
+      # build happens to compile with — `strategy.cookie_name == remember_me_key(flag)`
+      # would hold just as well if both sides were wrong together, and would
+      # keep holding if the `cookie_name` line were deleted and the library's
+      # default (`:remember_me`, which is also the non-secure name) took over.
+      strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :remember_me)
+
+      assert strategy.cookie_name in [
+               SessionCookie.remember_me_key(true),
+               SessionCookie.remember_me_key(false)
+             ]
+
+      assert strategy.cookie_name == SessionCookie.remember_me_key(false),
+             "this build is not `Secure`, so it must carry the bare name"
+    end
+
+    test "config/prod.exs is what makes the prefixed name the shipped one" do
+      assert SessionCookie.remember_me_key(prod_secure_session_cookie()) ==
+               :"__Host-remember_me"
+    end
+
+    test "the production attributes are every precondition the prefix needs" do
+      # Constructed rather than observed, for the reason the whole module exists:
+      # no test build emits the production cookie, so a test that reads what this
+      # one writes asserts the dev shape and passes whatever a release ships.
+      opts = SessionCookie.remember_me_options(prod_secure_session_cookie())
+
+      assert opts[:secure]
+      assert opts[:path] == "/"
+      refute Keyword.has_key?(opts, :domain)
+      assert opts[:http_only]
+      assert opts[:same_site] == "Lax"
+    end
+
+    test "a non-boolean flag is refused by name, as it is for the session cookie" do
+      assert_raise ArgumentError, ~r/:secure_session_cookie/, fn ->
+        SessionCookie.remember_me_key(not_a_boolean())
+      end
+
+      assert_raise ArgumentError, ~r/:secure_session_cookie/, fn ->
+        SessionCookie.remember_me_options(not_a_boolean())
+      end
+    end
+  end
 end

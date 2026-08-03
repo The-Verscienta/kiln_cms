@@ -11,6 +11,17 @@ defmodule KilnCMS.Accounts.User do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshAuthentication]
 
+  # The remember-me cookie's name, which is `__Host-`-prefixed exactly when the
+  # session cookie is (#699). Resolved here rather than written as a literal
+  # because the *read* path keys on this DSL value while the *write* path goes
+  # through `KilnCMSWeb.AuthController`, and the two spelling it differently
+  # would fail open — the browser would send nothing and no one would be
+  # remembered. `KilnCMSWeb.SessionCookie` owns the rule for both cookies; see
+  # its moduledoc for why the prefix cannot be unconditional.
+  @remember_me_cookie KilnCMSWeb.SessionCookie.remember_me_key(
+                        Application.compile_env(:kiln_cms, :secure_session_cookie, false)
+                      )
+
   authentication do
     add_ons do
       log_out_everywhere do
@@ -70,7 +81,14 @@ defmodule KilnCMS.Accounts.User do
         sender KilnCMS.Accounts.User.Senders.SendMagicLink
       end
 
-      remember_me :remember_me
+      # "Remember me" on the sign-in form (#699). The token is a 30-day JWT, so
+      # the cookie carrying it is a stronger credential than the session cookie
+      # and gets the same `__Host-` treatment — see `KilnCMSWeb.SessionCookie`
+      # and the `put_remember_me_cookie/3` override in `KilnCMSWeb.AuthController`.
+      remember_me :remember_me do
+        cookie_name @remember_me_cookie
+        token_lifetime {30, :days}
+      end
 
       # Third-party / headless read access. A key signs in as this user, so it
       # inherits the user's read scope; the relationship below is pre-filtered to
@@ -250,6 +268,15 @@ defmodule KilnCMS.Accounts.User do
         sensitive? true
       end
 
+      # Declared here rather than only on `:sign_in_with_token` because this is
+      # the action the sign-in form is built from, and
+      # `Components.Helpers.remember_me_field/1` looks for the preparation on
+      # *this* action to decide whether to render the checkbox at all (#699).
+      argument :remember_me, :boolean do
+        description "Whether to issue a long-lived remember-me token."
+        allow_nil? true
+      end
+
       # validates the provided email and password and generates a token
       prepare AshAuthentication.Strategy.Password.SignInPreparation
 
@@ -258,9 +285,22 @@ defmodule KilnCMS.Accounts.User do
       # Refuses with the same `AuthenticationFailed` a wrong password produces.
       prepare KilnCMS.Accounts.Preparations.ThrottleSignIn
 
+      # Mints the remember-me token when the box is ticked. On the LiveView path
+      # it deliberately does nothing here: `sign_in_tokens_enabled?` is on, so
+      # the form sets `skip_remember_me_token_generation` and forwards the flag
+      # to `:sign_in_with_token` instead, which is where the token is actually
+      # minted. Keeping it on both is what makes the direct (non-LiveView) POST
+      # to `/auth/user/password/sign_in` work as well.
+      prepare AshAuthentication.Strategy.RememberMe.MaybeGenerateTokenPreparation
+
       metadata :token, :string do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
+      end
+
+      metadata :remember_me, :map do
+        description "The remember-me token, cookie name and lifetime, when requested."
+        allow_nil? true
       end
     end
 
@@ -282,12 +322,26 @@ defmodule KilnCMS.Accounts.User do
         sensitive? true
       end
 
+      # The LiveView sign-in form carries the ticked checkbox across this
+      # exchange as a query param rather than minting on the password action,
+      # so this is where the remember-me token is actually issued (#699).
+      argument :remember_me, :boolean do
+        description "Whether to issue a long-lived remember-me token."
+        allow_nil? true
+      end
+
       # validates the provided sign in token and generates a token
       prepare AshAuthentication.Strategy.Password.SignInWithTokenPreparation
+      prepare AshAuthentication.Strategy.RememberMe.MaybeGenerateTokenPreparation
 
       metadata :token, :string do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
+      end
+
+      metadata :remember_me, :map do
+        description "The remember-me token, cookie name and lifetime, when requested."
+        allow_nil? true
       end
     end
 
