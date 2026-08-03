@@ -67,7 +67,7 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
   def call(conn, _opts) do
     case proxies() do
       [] ->
-        warn_once_if_forwarded(conn)
+        warn_once_if_forwarded(conn.req_headers)
         conn
 
       list ->
@@ -75,6 +75,56 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
           {:ok, opts} -> RemoteIp.call(conn, opts)
           :error -> conn
         end
+    end
+  end
+
+  @doc """
+  The client address for a connection that has no `Plug.Conn` — a socket
+  handshake, whose `connect_info` carries `:peer_data` and `:x_headers` but
+  nothing this plug can rewrite (#715).
+
+  Same rule as `call/2` and deliberately so: with no trusted proxies the
+  forwarding headers are spoofable and are ignored, so the peer address stands.
+  Two copies of "when do we believe `X-Forwarded-For`" that drift would give the
+  socket a different client identity than the HTTP request that preceded it, and
+  the whole point of sharing a bucket is that they agree.
+
+  One narrowing worth knowing: `Phoenix.LiveView`'s `:x_headers` is exactly the
+  headers whose name starts with `x-`, so the RFC 7239 `Forwarded:` header —
+  which `RemoteIp` honours over HTTP — cannot reach here. A deployment behind a
+  proxy that sets *only* `Forwarded:` therefore keys socket buckets on the proxy
+  address. That is the safe direction (a bucket too coarse, never one attributed
+  to a spoofed address), and it is the transport's limit, not a choice made here.
+
+  Returns `nil` only when the caller has neither — which the endpoint's
+  `connect_info` makes impossible for `/live`, so a `nil` means the transport
+  was reconfigured and callers should treat it as one unknown client rather than
+  as "no limit applies".
+  """
+  @spec resolve([{String.t(), String.t()}], :inet.ip_address() | nil) ::
+          :inet.ip_address() | nil
+  def resolve(x_headers, peer_address) do
+    case proxies() do
+      [] ->
+        warn_once_if_forwarded(x_headers)
+        peer_address
+
+      list ->
+        from_headers(x_headers, list) || peer_address
+    end
+  end
+
+  # `RemoteIp.from/2` inits the options itself, so the cached `remote_ip_opts/1`
+  # cannot be handed to it. It is still consulted first, because `RemoteIp.init/1`
+  # RAISES on a malformed CIDR and that cache is where the outcome is remembered:
+  # without it a bad list would construct an exception and a stacktrace on every
+  # socket connect, forever, with the log latched silent after the first. A bad
+  # list degrades to "trust nothing", for the same reason it does in `call/2` —
+  # a spoofable header is never honoured on the way down.
+  defp from_headers(x_headers, list) do
+    case remote_ip_opts(list) do
+      {:ok, _cached} -> RemoteIp.from(x_headers, proxies: list)
+      :error -> nil
     end
   end
 
@@ -88,16 +138,21 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
 
   # The latch is checked before the headers so that, once warned, the steady
   # state is a single `persistent_term` read rather than a header scan.
-  defp warn_once_if_forwarded(conn) do
+  #
+  # Takes the header list rather than a conn so the socket path shares it: a
+  # deployment whose only traffic is WebSocket upgrades collapses its buckets
+  # exactly the same way, and a detection that only ran for `Plug.Conn` would
+  # stay silent for it — which is the shape of trap this exists to catch.
+  defp warn_once_if_forwarded(headers) do
     if :persistent_term.get(@warned_key, false) do
       :ok
     else
-      if forwarded?(conn), do: warn_untrusted_forwarding(), else: :ok
+      if forwarded?(headers), do: warn_untrusted_forwarding(), else: :ok
     end
   end
 
-  defp forwarded?(conn),
-    do: Enum.any?(conn.req_headers, fn {name, _value} -> name in @forwarding_headers end)
+  defp forwarded?(headers),
+    do: Enum.any?(headers, fn {name, _value} -> name in @forwarding_headers end)
 
   defp warn_untrusted_forwarding do
     :persistent_term.put(@warned_key, true)

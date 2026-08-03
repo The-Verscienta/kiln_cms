@@ -9,6 +9,18 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   `AshAuthentication.Strategy.action/3`. A plug per route is a list to forget to
   add to.
 
+  ## An attempt is an execution, not a build
+
+  Everything here is charged from a `before_action` hook, never from `prepare/3`
+  directly, and that is load-bearing rather than stylistic. A preparation runs
+  when the query is **built**, and `AshPhoenix.Form` builds one on every
+  `validate/2` — the sign-in form is `phx-change="change"`, so a charge in
+  `prepare/3` costs one unit *per keystroke*, plus one for each page load that
+  builds the form at all. A user typing a twenty-character password would spend
+  their own budget and be refused before they could submit it. `before_action`
+  runs once, when the read actually executes, which is the only thing that is an
+  attempt.
+
   ## Charge the attempt, forgive the success
 
   `AccountThrottle.consume/1` is one atomic increment-and-compare, run before the
@@ -39,6 +51,37 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   attempt that reaches it. A user who mistypes their password nine times and then
   gets it right must not be mailed "someone is guessing at your password", and
   the alert's own once-per-window budget must not be spent on them.
+
+  ## The other axis, for the one caller that has no plug (#715)
+
+  The per-account budget bounds guesses at *one* account. It does not bound
+  volume: one address can spend a thousand accounts' budgets, and every attempt
+  costs a bcrypt verify and an ETS row. Every HTTP entry point already pays the
+  router's per-IP `:auth` bucket for that, but the browser sign-in submits its
+  credentials as a LiveView event over `/live`, which passes no pipeline at all.
+
+  So when the action's context carries a `:kiln_client_ip` — which only
+  `KilnCMSWeb.SignInLive` sets, from the socket's own handshake — this
+  charges the same `:auth` bucket the plug would have. Deliberately the *same*
+  bucket, so the socket and the HTTP form share one window per address rather
+  than handing an attacker a second budget by switching transport. And
+  deliberately keyed on the context rather than charged unconditionally: a path
+  that already passed the plug would otherwise be charged twice, halving a limit
+  the threat model states as one number.
+
+  The IP is charged **before** the account budget, and a refusal spends no
+  account budget. The other order would let a flood from one address burn a
+  thousand victims' budgets on its way to being refused — turning the control
+  that exists to protect accounts into the lever for locking them out.
+
+  A success forgives the account counter and never the IP one. Volume is volume;
+  an attacker holding one valid credential must not be able to reset their
+  address's budget by spending it.
+
+  The per-IP refusal is also the one refusal here that does *not* burn a
+  simulated bcrypt — see `refuse_address/1` for why the timing argument that
+  governs the account refusal does not apply to it, and why paying it anyway
+  would forfeit most of what this control is for.
   """
   use Ash.Resource.Preparation
 
@@ -48,8 +91,42 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.SignInAlert
 
+  # Named here rather than at the caller so the two ends cannot drift into
+  # writing and reading different keys — which would fail silently, as "no IP in
+  # context" is a legitimate state meaning "a plug already charged this".
+  @context_key :kiln_client_ip
+
+  @doc """
+  The action context that asks this preparation to charge the `:auth` bucket for
+  `client_ip` as well.
+
+  `KilnCMSWeb.SignInLive` merges this into the sign-in form's context; nothing
+  that reaches the action through a plug should, because the plug charged it.
+  """
+  @spec client_ip_context(String.t()) :: map()
+  def client_ip_context(client_ip) when is_binary(client_ip), do: %{@context_key => client_ip}
+
   @impl true
   def prepare(query, opts, context) do
+    Query.before_action(query, &charge(&1, opts, context))
+  end
+
+  # Everything is charged from a `before_action` hook rather than from
+  # `prepare/3` itself, because a preparation runs when the query is **built**
+  # and a build is not an attempt. `AshPhoenix.Form.validate/2` builds one, and
+  # the sign-in form is `phx-change="change"` — so charging in `prepare/3` spends
+  # a budget per *keystroke*, and a user typing their password locks themselves
+  # out before they can submit it. (It also charged once per page load, since
+  # building the form builds a query too.) A `before_action` hook runs once, when
+  # the read actually executes, which is the thing worth counting.
+  defp charge(query, opts, context) do
+    case charge_client_ip(query) do
+      {:deny, _retry_after} -> refuse_address(query)
+      :allow -> throttle_account(query, opts, context)
+    end
+  end
+
+  defp throttle_account(query, opts, context) do
     case identifier(query) do
       nil ->
         query
@@ -62,11 +139,48 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
     end
   end
 
+  # `:allow` also covers "no IP in the context", which is every caller that
+  # reached the action through a pipeline carrying `Plugs.RateLimit, :auth`.
+  defp charge_client_ip(query) do
+    case Map.get(query.context, @context_key) do
+      ip when is_binary(ip) -> KilnCMSWeb.RateLimit.check(:auth, ip)
+      _absent -> :allow
+    end
+  end
+
   defp forgive_on_success(query, identifier) do
     Query.after_action(query, fn _query, records ->
       if Enum.any?(records, &signed_in?/1), do: AccountThrottle.forgive(identifier)
       {:ok, records}
     end)
+  end
+
+  # The per-IP refusal, which is deliberately *not* the per-account one.
+  #
+  # It mails nobody: the address being refused says nothing about whose account
+  # was aimed at, and an attacker who has spent their budget must not also get
+  # to pick whose inbox rings.
+  #
+  # And it does not burn a simulated bcrypt. The account refusal must (see
+  # below) because a fast answer would tell an attacker *which addresses* are
+  # currently throttled, which is an enumeration oracle. Here the only thing a
+  # fast answer reveals is that the caller's own address is out of budget, which
+  # the caller already knows — they sent the traffic. Paying bcrypt anyway would
+  # give up the thing this control exists for: past the limit, a flood over
+  # `/live` would still cost a full password hash per request, which is most of
+  # the CPU an unthrottled flood costs in the first place.
+  defp refuse_address(query) do
+    Query.add_error(
+      query,
+      AuthenticationFailed.exception(
+        query: query,
+        caused_by: %{
+          module: __MODULE__,
+          action: :sign_in_with_password,
+          message: "Too many sign-in attempts from this address"
+        }
+      )
+    )
   end
 
   defp refuse(query, identifier, opts, context) do

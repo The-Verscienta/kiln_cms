@@ -68,12 +68,20 @@ config :kiln_cms, :analytics_enabled, false
 # test requests come from 127.0.0.1, so a fast full-suite run can pack more than
 # the production `:api` limit (120/min) of `/api/*` calls into one window and
 # 429 unrelated tests (flaky on fast machines, and it started failing CI as the
-# `/api` test volume grew). Only the buckets no test asserts on are raised — the
-# `:auth`/`:preview`/`:form`/`:docs` limits `KilnCMSWeb.Plugs.RateLimitTest`
-# exercises are left at their real values. Production is unaffected (unset).
+# `/api` test volume grew). `:preview`/`:form`/`:docs` stay at their real values,
+# which `KilnCMSWeb.Plugs.RateLimitTest` asserts on. Production is unaffected
+# (unset).
+#
+# `:auth` used to be in that second group and is not any more (#715). The suite
+# had grown to sit right on its real 20/min: the sign-in page, `/api/auth/*` and
+# `/sign-in/verify` all key on 127.0.0.1, and *one* more request tipped several
+# unrelated tests into 429. Raised to a number with headroom rather than to
+# 1_000_000, because `RateLimitTest` still exhausts this bucket and derives the
+# count from here — a million iterations is not a test.
 config :kiln_cms, KilnCMSWeb.RateLimit,
   limits: %{
     api: {1_000_000, :timer.minutes(1)},
+    auth: {200, :timer.minutes(1)},
     delivery: {1_000_000, :timer.minutes(1)},
     gql: {1_000_000, :timer.minutes(1)},
     probe: {1_000_000, :timer.minutes(1)}

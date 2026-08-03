@@ -61,9 +61,10 @@ the router so preflights are answered before route matching).
 | Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
 | Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/sign-in/verify`, `/auth/passkey/*` | varies | `:auth`; password sign-in also per-account (#478) |
+| Sign-in submit over `/live` | LiveView `"submit"` on `/sign-in` | credentials → session | `:auth`, charged on the action (#715) + per-account (#478) |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
-| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | none |
+| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **The server-side Ash policies are the authorization boundary.** Every read and
@@ -94,11 +95,21 @@ build if a resource is ever registered without that authorizer.
   default org unless `TENANT_STRICT_HOST=true`, which 404s it instead — see
   residual risk 2.
 - **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across eight
-  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. Password sign-in is
-  limited on a second axis by `KilnCMS.Accounts.AccountThrottle` (#478): a flat
-  per-**account** budget, which IP rotation cannot escape and which the browser
-  sign-in gets even though it submits over `/live` and so never passes the
-  router's `:auth` bucket at all. Deliberately flat rather than escalating —
+  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. The browser sign-in is
+  the one credential path no plug can reach: AshAuthentication's form is a
+  LiveComponent that calls `AshPhoenix.Form.submit/2` in-process, so the
+  credentials arrive as a `/live` event and pass no pipeline. It is charged the
+  same `:auth` bucket anyway (#715) — `KilnCMSWeb.SignInLive` attaches the
+  socket's own client address (`:peer_data`/`:x_headers`, resolved through the
+  same trusted-proxy rule `Plugs.ClientIp` applies) to the form's context, and
+  `Preparations.ThrottleSignIn` charges it on the action. Same bucket as the
+  HTTP form, so switching transport buys no second budget; charged only when
+  that context is present, so a request that already paid the plug is not
+  charged twice. Password sign-in is limited on a second axis by
+  `KilnCMS.Accounts.AccountThrottle` (#478): a flat per-**account** budget,
+  which IP rotation cannot escape. The IP is charged first and a refusal spends
+  no account budget — otherwise a flood from one address could lock out every
+  account it named. Deliberately flat rather than escalating —
   a lockout that lengthens each time an attacker burns a window is a denial of
   service against any known address. A successful sign-in, a completed password
   reset and a passkey sign-in each clear it. A separate flat per-address budget
@@ -210,10 +221,13 @@ build if a resource is ever registered without that authorizer.
   every `live` route in the router and fails if its view does not carry the
   guard, which is what enforces it for plugin panels rather than assuming it.
   *Watch:* third-party LiveViews keep the framework behaviour — AshAdmin's are
-  compile-gated to `:dev_routes`; AshAuthentication's sign-in views are
+  compile-gated to `:dev_routes`; AshAuthentication's remaining views
+  (`/password-reset/:token`, `/confirm`, `/magic-link`, `/sign-out`) are
   unauthenticated, so a url-less join reaches no authorization it could not
   reach signed out, but it does skip `:assign_current_org` and therefore renders
-  with the **default org's** branding on a tenant host.
+  with the **default org's** branding on a tenant host (tracked in #701).
+  `/sign-in`, `/register` and `/reset` are routed to `KilnCMSWeb.SignInLive`
+  (#715), a Kiln module, so those three do carry the guard and are outside that.
 - **Session as the credential** — the whole surface is gated by the session
   cookie plus the per-org effective tier, so the cookie's integrity is the
   boundary; see the `__Host-` prefix under Controls (#686).
@@ -335,6 +349,21 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    `X-Client-IP` or `X-Real-IP`) while no proxies are trusted. The
    trap itself remains — honouring the header without a trusted-proxy list would
    be worse, since it is spoofable — so this is detection, not a fix.
+
+   Two things about `:auth` specifically, both worse for addresses many people
+   share (an office NAT, or any deployment in the trap above). **One successful
+   browser sign-in now spends three of its twenty:** the page GET, the submit
+   (#715), and the token-exchange GET the LiveView redirects to on success. A
+   failed guess spends one, so the budget bites a legitimate user harder than
+   the attacker it is aimed at — roughly six sign-ins per minute per address.
+   And **the refusal reads as a wrong password**, deliberately: it is the same
+   generic `AuthenticationFailed` a bad credential produces, with no 429 and no
+   `Retry-After`, because distinguishing it would tell an attacker exactly when
+   their window rolls. The cost is that a throttled user is told the wrong
+   thing. Both are accepted rather than closed; a per-address `:auth` limit that
+   is generous enough never to inconvenience a shared egress is not a limit.
+   `TRUSTED_PROXIES` is what makes the buckets per-*client* and is the real
+   remedy on any deployment behind a proxy.
 5. **Preview tokens bypass authorization and tenancy.** `PreviewController`
    loads with `authorize?: false` and no tenant. Token validity and expiry are
    the whole control. (`live_session :token_preview` does now carry
@@ -386,6 +415,16 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     `/editor/**` LiveView mounts, and the account/governance export endpoints
     are unthrottled. They are session-gated (except the first two), so this is
     an availability rather than a confidentiality concern.
+
+    The `/live` socket is unthrottled in the same way, and more broadly: it has
+    no limiter on joins or on events at all. The one thing that used to make
+    that a *confidentiality* concern is closed — the sign-in submit is a
+    LiveView event, and #715 charges it the `:auth` bucket on the action rather
+    than at a plug it never passes, so brute force over the socket is bounded
+    per address exactly as the HTTP form is. What remains is volume: joins are
+    uncounted, so a caller replaying a scraped session token pays nothing per
+    attempt, and #700 notes that a *malformed* join costs an error-tracker
+    event. Tracked in #678 and #700.
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.

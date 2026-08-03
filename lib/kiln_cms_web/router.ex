@@ -590,10 +590,14 @@ defmodule KilnCMSWeb.Router do
     # (#48): the AshAuthentication `Components.Banner` overrides are compile-time
     # literals, so `Layouts.auth/1` draws the per-org logo and site name instead.
     # `:assign_current_org` resolves from the socket host and needs no user.
+    # `live_view:` is `KilnCMSWeb.SignInLive` — the library's page with the
+    # socket's client address attached, because the sign-in submit is a LiveView
+    # event and so passes none of this pipeline's plugs, `:auth` included (#715).
     if Application.compile_env(:kiln_cms, :registration_enabled, true) do
       sign_in_route register_path: "/register",
                     reset_path: "/reset",
                     auth_routes_prefix: "/auth",
+                    live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
                       {KilnCMSWeb.LiveUserAuth, :assign_current_org},
@@ -603,6 +607,7 @@ defmodule KilnCMSWeb.Router do
     else
       sign_in_route reset_path: "/reset",
                     auth_routes_prefix: "/auth",
+                    live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
                       {KilnCMSWeb.LiveUserAuth, :assign_current_org},

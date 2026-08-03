@@ -35,9 +35,17 @@ defmodule KilnCMSWeb.Endpoint do
   # refuses a socket claiming a different org. Declared on both transports:
   # longpoll builds `connect_info` from its own initial HTTP request the same
   # way, so dropping it there would leave that transport unpinned.
+  #
+  # `:peer_data` and `:x_headers` are what `KilnCMSWeb.Plugs.ClientIp.resolve/2`
+  # keys the socket's client address off (#715). The browser sign-in submits its
+  # credentials as a LiveView event, never as a form POST, so the router's
+  # `:auth` bucket never sees it — `KilnCMSWeb.SignInLive` charges that bucket
+  # itself, and this is where it learns whose attempt it is. The plug above
+  # rewrites `conn.remote_ip`; a socket has no conn to rewrite, so it needs the
+  # raw pair instead.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:uri, session: @session_options]],
-    longpoll: [connect_info: [:uri, session: @session_options]]
+    websocket: [connect_info: [:uri, :peer_data, :x_headers, session: @session_options]],
+    longpoll: [connect_info: [:uri, :peer_data, :x_headers, session: @session_options]]
 
   # `connect_info: [:uri]` so the socket can resolve its tenant from the
   # connecting host (epic #336) — a raw transport bypasses the SetTenant plug, so

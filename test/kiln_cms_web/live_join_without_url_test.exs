@@ -37,11 +37,15 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
   # :live_view` and are outside the guard. Listed rather than filtered by
   # namespace so that a *new* third-party LiveView in the router fails this test
   # and gets looked at.
+  #
+  # `AshAuthentication.Phoenix.SignInLive` is *not* on this list: `/sign-in`,
+  # `/register` and `/reset` are routed to `KilnCMSWeb.SignInLive`, which wraps
+  # it in order to attach the client address (#715) and picks up the guard on
+  # the way past.
   @unguarded_views [
     AshAuthentication.Phoenix.ConfirmLive,
     AshAuthentication.Phoenix.MagicSignInLive,
     AshAuthentication.Phoenix.ResetLive,
-    AshAuthentication.Phoenix.SignInLive,
     AshAuthentication.Phoenix.SignOutLive
   ]
 
