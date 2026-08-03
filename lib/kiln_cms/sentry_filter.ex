@@ -26,11 +26,21 @@ defmodule KilnCMS.SentryFilter do
   is a `FunctionClauseError`, a `GenServer terminating` report, and one Sentry
   event *per attempt*.
 
-  That is a cheap flood with an unauthenticated shape: the credential is a
-  signed `data-phx-session` blob scraped from any page the caller was served,
-  the payload is one field, and there is no limiter on socket joins at all.
-  Someone wanting to bury a real alert — or simply exhaust a Sentry quota —
-  changes `"url"` from a string to `nil` in a loop.
+  How much that costs is worth stating accurately, because it sizes the trade.
+  Sentry.Dedupe is on by default and already collapses this: every input to
+  its hash is constant across attempts — Sentry never calls `Exception.blame/3`,
+  so the message is the same string for `nil`, `42` and `%{}` alike, and the
+  stacktrace, level, fingerprint and tags do not vary either. Its 30-second TTL
+  is refreshed on each hit, so a sustained flood is roughly *one* event, not one
+  per attempt.
+
+  What the filter buys is therefore narrower than "stops a quota burn": it skips
+  building an event per attempt and the "dropped as duplicate" log line per
+  attempt, and — the part that matters — it stops a caller *choosing* to emit a
+  real-looking issue at all. The credential is a signed `data-phx-session` blob
+  scraped from any page the caller was legitimately served, the payload is one
+  field, and socket joins have no limiter, so the alternative is one genuine
+  issue sitting in the tracker for as long as someone cares to keep it there.
 
   Dropping the event does not pretend the crash isn't happening: the local
   `GenServer terminating` report is untouched, and an operator investigating
@@ -51,6 +61,7 @@ defmodule KilnCMS.SentryFilter do
 
   @join_module Phoenix.LiveView.Route
   @join_function :live_link_info_without_checks
+  @join_arity 3
 
   @doc """
   Return the event to report it, or `nil`/`false` to drop it (see
@@ -60,7 +71,11 @@ defmodule KilnCMS.SentryFilter do
   def before_send(%Sentry.Event{original_exception: %TransientDeliveryError{}}), do: nil
 
   def before_send(%Sentry.Event{
-        original_exception: %FunctionClauseError{module: @join_module, function: @join_function}
+        original_exception: %FunctionClauseError{
+          module: @join_module,
+          function: @join_function,
+          arity: @join_arity
+        }
       }),
       do: nil
 

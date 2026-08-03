@@ -57,17 +57,20 @@ defmodule KilnCMS.SentryFilterTest do
     end
 
     test "a well-formed url does not crash at all, so nothing is being masked" do
-      refute match?(%FunctionClauseError{}, join_crash("/"))
+      # Asserted positively. `join_crash/1` rescues *any* exception and returns
+      # it, so `refute match?(%FunctionClauseError{}, ...)` would pass just as
+      # happily if the well-formed path were crashing with an ArgumentError —
+      # the one test meant to prove nothing is masked, proving nothing.
+      assert {:internal, %Phoenix.LiveView.Route{}} = join_crash("/sign-in")
     end
 
     test "keeps a FunctionClauseError from anywhere else" do
       # The narrowness is the point: dropping every `FunctionClauseError`, or
       # everything from `Phoenix.LiveView.Channel`, would swallow real LiveView
       # bugs — which is the opposite of what this exists to protect.
-      # A genuine `FunctionClauseError` from an unrelated module. Built by
-      # calling a function with arguments no clause matches — `Date.new/4`
-      # requires integers — rather than by constructing the struct, so it
-      # carries the same shape a real one would.
+      # A genuine `FunctionClauseError` from unrelated code — raised inside
+      # `Calendar.ISO` by way of `Date.new/4` — rather than a constructed
+      # struct, so it carries the same shape a real one would.
       elsewhere =
         try do
           Date.new(:not_a_year, 1, 1)
