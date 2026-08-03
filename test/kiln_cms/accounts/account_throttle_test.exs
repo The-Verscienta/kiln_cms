@@ -308,6 +308,56 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
     end
   end
 
+  describe "the second-factor budget (#714)" do
+    @second_factor_budget 2
+
+    setup do
+      previous = Application.get_env(:kiln_cms, AccountThrottle, [])
+
+      Application.put_env(
+        :kiln_cms,
+        AccountThrottle,
+        Keyword.put(previous, :second_factor_budget, @second_factor_budget)
+      )
+
+      on_exit(fn -> Application.put_env(:kiln_cms, AccountThrottle, previous) end)
+      :ok
+    end
+
+    test "is separate from the sign-in budget, so neither spends the other" do
+      user_id = Ecto.UUID.generate()
+      address = email()
+      on_exit(fn -> AccountThrottle.reset(address) end)
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user_id) end)
+
+      for _ <- 1..@second_factor_budget,
+          do: assert(:allow = AccountThrottle.consume_second_factor(user_id))
+
+      assert {:deny, _} = AccountThrottle.consume_second_factor(user_id)
+
+      # The first factor is untouched: the two are different questions, and a
+      # spent code budget must not also lock the password step (nor the reverse,
+      # or every sign-in would eat into the codes an authenticator can be out of
+      # sync by).
+      assert :allow = AccountThrottle.consume(address)
+    end
+
+    test "is tighter than the sign-in budget, because six digits are guessable" do
+      assert @second_factor_budget < @budget
+    end
+
+    test "a verified code clears it" do
+      user_id = Ecto.UUID.generate()
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user_id) end)
+
+      for _ <- 1..@second_factor_budget, do: AccountThrottle.consume_second_factor(user_id)
+      assert {:deny, _} = AccountThrottle.consume_second_factor(user_id)
+
+      AccountThrottle.forgive_second_factor(user_id)
+      assert :allow = AccountThrottle.consume_second_factor(user_id)
+    end
+  end
+
   describe "the HTTP entry point" do
     test "the headless sign-in is throttled, not just the action" do
       address = email()

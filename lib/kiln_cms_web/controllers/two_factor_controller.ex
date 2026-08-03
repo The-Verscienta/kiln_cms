@@ -5,10 +5,32 @@ defmodule KilnCMSWeb.TwoFactorController do
   token that `KilnCMSWeb.AuthController` sets — the user is not signed in until a
   valid code is entered here. Served on the `:browser_auth` pipeline (CSRF + the
   tight `:auth` rate limit slowing code brute-forcing).
+
+  ## The per-IP limit is not the bound that matters here (#714)
+
+  `:auth` keys strictly on the client address, which is the axis #478 established
+  an attacker escapes by rotating addresses. That mattered less for the password,
+  which is not enumerable; it matters a great deal for six digits and a skew
+  window. So every submitted code is charged
+  `KilnCMS.Accounts.AccountThrottle.consume_second_factor/1`, keyed on the
+  pending account, and a verified code clears the counter.
+
+  Charged **before** the code is checked, not after a failure, for the reason
+  `AccountThrottle`'s moduledoc gives about check-then-count: a burst of
+  simultaneous submissions would otherwise all read "under budget" and all get a
+  full verification.
+
+  The refusal is a plain 429 that says so, rather than the generic "that code
+  isn't valid" a wrong code gets. Everywhere else in the auth flow a refusal is
+  deliberately indistinguishable, because the alternative leaks whether an
+  account exists — here the account is already known to whoever is asking (they
+  hold a signed pending token naming it), so hiding the throttle buys nothing
+  and costs a legitimate user, who is told their correct code was wrong.
   """
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.Totp
   alias KilnCMSWeb.AuthController
 
@@ -21,12 +43,23 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   def create(conn, %{"code" => code}) do
     with {:ok, user} <- pending_user(conn),
+         :allow <- AccountThrottle.consume_second_factor(user.id),
          {:ok, user} <- second_factor(user, code) do
+      AccountThrottle.forgive_second_factor(user.id)
       AuthController.complete_sign_in(conn, user, gettext("You are now signed in"))
     else
       :error ->
         # Pending token missing/expired — restart from sign-in.
         redirect(conn, to: ~p"/sign-in")
+
+      {:deny, retry_after_ms} ->
+        # The pending token is deliberately left in the session: the user has
+        # done nothing wrong and should be able to try again when the window
+        # rolls, without re-entering their password. Its own five-minute
+        # lifetime still applies.
+        conn
+        |> put_resp_header("retry-after", Integer.to_string(div(retry_after_ms, 1000)))
+        |> render_form(429, gettext("Too many attempts. Wait a few minutes and try again."))
 
       :invalid ->
         render_form(conn, 401, gettext("That code isn't valid. Try again."))
