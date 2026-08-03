@@ -164,13 +164,40 @@ build if a resource is ever registered without that authorizer.
   is the better credential of the two — a 30-day token rather than a browser
   session — and `sign_in_with_remember_me` runs ahead of `load_from_session`, so
   planting one signs a visitor in who has no session on the target host at all.
-  AshAuthentication's default writer hardcodes `secure: Mix.env() != :dev` with
-  no prefix and no explicit `path`, so `KilnCMSWeb.AuthController` overrides both
-  the writer and the deleter, and the name itself comes from
-  `SessionCookie.remember_me_key/1` — which is also what the *read* path keys on,
-  since the strategy's `cookie_name` is set from it. Sign-out deletes it through
-  the same override; attributes that did not match would leave the cookie in
-  place and sign the user straight back in.
+  AshAuthentication's default writer hardcodes `secure: Mix.env() != :dev` and
+  leaves the name unprefixed, so `KilnCMSWeb.AuthController` overrides both the
+  writer and the deleter; both take their attributes from
+  `SessionCookie.remember_me_options/1` and the name from
+  `remember_me_key/1` — which is also what the *read* path keys on, since the
+  strategy's `cookie_name` is set from it. Sign-out deletes it through the same
+  override, so the two sides cannot drift into a deletion the browser will not
+  match.
+
+  It is read on `:browser_auth` only, never on `:browser`. Signing a visitor in
+  writes the session, so `Plug.Session` emits `Set-Cookie` — and `:browser`
+  serves public delivery pages marked `public, max-age=60`, where a shared cache
+  would be free to store one editor's session cookie against a public URL. A
+  remembered visitor who opens an authoring URL is redirected to `/sign-in`,
+  signed in there, and sent on.
+
+  *Residual:* signing out revokes only the token in the browser doing it, so a
+  cookie copied elsewhere keeps working until it expires. There is no
+  "sign out other devices" affordance, and #734 records that a password change
+  does not currently revoke stored tokens either.
+
+  **Remember-me and the second factor.** The cookie is a completed sign-in in a
+  cookie — the read plug hands it to `store_in_session/2` directly, so it never
+  passes `AuthController.success/4` and never reaches the 2FA diversion. Since
+  AshAuthentication issues it in `Plug.Dispatcher` *before* `success/4` runs, a
+  2FA account would otherwise be handed a 30-day credential having proved only
+  its password: tick the box, abandon the code prompt, and the second factor is
+  gone entirely. So `success/4` withholds the cookie on the diversion and
+  carries the *intent* in the pending token; `TwoFactorController` issues a
+  freshly minted one once a code verifies (a fresh mint rather than the withheld
+  token, to keep a 30-day credential out of the five-minute pending blob). That
+  the resulting cookie then signs the user in later *without* a code is the
+  deliberate part — it is a "this device completed every factor" credential, and
+  that is what remember-me is for on a 2FA account.
 - **SSRF protection on outbound webhooks** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard

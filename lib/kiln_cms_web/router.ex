@@ -64,12 +64,6 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
-    # Ahead of `load_from_session` so a remembered visitor is signed in *and*
-    # resolved within the same request (#699). It is a no-op when the session
-    # already names a user, so it cannot override a live session — and the
-    # cookie it reads is `__Host-`-prefixed in production, which is what stops a
-    # sibling tenant origin planting one.
-    plug :sign_in_with_remember_me
     plug :load_from_session
   end
 
@@ -143,10 +137,23 @@ defmodule KilnCMSWeb.Router do
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
     plug KilnCMSWeb.Plugs.RateLimit, :auth
-    # Also here, so a remembered visitor who lands on `/sign-in` is recognised
-    # and `:live_no_user` sends them on rather than showing them a form they
-    # don't need. Sign-out lives on this pipeline too and deletes the cookie
-    # before this plug could re-read it, so it cannot undo a sign-out.
+    # Remember-me is read *only* here, not on `:browser` (#699), and the reason
+    # is the public delivery surface. `sign_in_with_remember_me` signs the
+    # visitor in by writing the session, so `Plug.Session` emits `Set-Cookie` —
+    # and `ContentController` marks ungated pages `public, max-age=60`. A shared
+    # cache is then free to store one remembered editor's session cookie against
+    # a public URL and hand it to every anonymous visitor for the next minute.
+    # It also does a JWT verify plus two DB reads, which on `:browser` would run
+    # ahead of the `:delivery` bucket that is supposed to bound exactly that.
+    #
+    # Nothing is lost: a remembered visitor who opens an authoring URL is
+    # redirected here by `:live_user_required`, is signed in by this plug, and
+    # `:live_no_user` sends them straight on. One extra redirect, and the
+    # credential is only read on the surface that exists to establish sessions.
+    #
+    # Ahead of `load_from_session` so the sign-in is resolved within the same
+    # request. Safe there because the plug is a no-op when the session already
+    # names a user, so it cannot swap a live session for a stale cookie.
     plug :sign_in_with_remember_me
     plug :load_from_session
   end

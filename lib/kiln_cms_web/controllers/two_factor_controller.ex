@@ -36,17 +36,26 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   def new(conn, _params) do
     case pending_user(conn) do
-      {:ok, _user} -> render_form(conn, 200, nil)
+      {:ok, _user, _remember_me?} -> render_form(conn, 200, nil)
       :error -> redirect(conn, to: ~p"/sign-in")
     end
   end
 
   def create(conn, %{"code" => code}) do
-    with {:ok, user} <- pending_user(conn),
+    with {:ok, user, remember_me?} <- pending_user(conn),
          :allow <- AccountThrottle.consume_second_factor(user.id),
          {:ok, user} <- second_factor(user, code) do
       AccountThrottle.forgive_second_factor(user.id)
-      AuthController.complete_sign_in(conn, user, gettext("You are now signed in"))
+
+      conn
+      # Only now. The remember-me cookie is a complete sign-in in a cookie — the
+      # read plug hands it straight to `store_in_session/2` — so issuing it at
+      # the first factor, which is what AshAuthentication does by default, would
+      # let someone tick the box, abandon this prompt, and hold a thirty-day
+      # credential that never asks for a code. `AuthController.success/4`
+      # withholds it there and carries the intent here instead (#699).
+      |> then(&if remember_me?, do: AuthController.put_remember_me(&1, user), else: &1)
+      |> AuthController.complete_sign_in(user, gettext("You are now signed in"))
     else
       :error ->
         # Pending token missing/expired — restart from sign-in.
@@ -100,14 +109,19 @@ defmodule KilnCMSWeb.TwoFactorController do
   # missing/expired/tampered or the account no longer has 2FA.
   defp pending_user(conn) do
     with pending when is_binary(pending) <- get_session(conn, :pending_2fa),
-         {:ok, %{"user_id" => user_id, "token" => token}} <-
+         {:ok, %{"user_id" => user_id, "token" => token} = payload} <-
            AuthController.verify_pending(conn, pending),
          user when not is_nil(user) <-
            Accounts.get_user!(user_id, authorize?: false, not_found_error?: false),
          true <- Accounts.totp_enabled?(user) do
       # Reattach the first-factor token so `complete_sign_in` can store the
       # session (the token was already minted + stored at password sign-in).
-      {:ok, %{user | __metadata__: Map.put(user.__metadata__, :token, token)}}
+      #
+      # `remember_me` defaults to false rather than being required, so a pending
+      # token minted before this shipped — or by any other caller of
+      # `sign_pending/4` — degrades to "no cookie" rather than to a crash.
+      {:ok, %{user | __metadata__: Map.put(user.__metadata__, :token, token)},
+       payload["remember_me"] == true}
     else
       _ -> :error
     end

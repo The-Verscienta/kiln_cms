@@ -22,11 +22,77 @@ defmodule KilnCMSWeb.AuthController do
     # auth token, already minted + stored) and divert to the code prompt.
     # Everything else completes the sign-in immediately.
     if Accounts.totp_enabled?(user) do
+      # Read before withholding: deleting a cookie *adds* a `resp_cookies` entry,
+      # so the check has to happen first.
+      remember_me? = remember_me_pending?(conn)
+
       conn
-      |> put_session(:pending_2fa, sign_pending(conn, user, token))
+      |> withhold_remember_me()
+      |> put_session(:pending_2fa, sign_pending(conn, user, token, remember_me?))
       |> redirect(to: ~p"/sign-in/verify")
     else
       complete_sign_in(conn, user, message_for(activity))
+    end
+  end
+
+  # A remember-me cookie is a *complete* sign-in in a cookie: the read plug hands
+  # it to `store_in_session/2` directly, which never passes through this module
+  # and so never reaches the diversion above. AshAuthentication writes it in
+  # `Plug.Dispatcher` **before** calling `success/4`, so by the time we know the
+  # account has a second factor the cookie is already on the response — issued to
+  # someone who has proved only the first factor.
+  #
+  # Left alone, that is not a weakened second factor, it is no second factor at
+  # all: tick the box, abandon the code prompt, and the resulting cookie signs
+  # you in for thirty days without one. So the cookie is withdrawn here and the
+  # *intent* is carried across the prompt instead; `KilnCMSWeb.TwoFactorController`
+  # issues it once the code verifies. See #699 and #714.
+  defp withhold_remember_me(conn) do
+    if remember_me_pending?(conn) do
+      delete_remember_me_cookie(conn, to_string(@remember_me_cookie))
+    else
+      conn
+    end
+  end
+
+  # A remember-me cookie carrying an actual value on the response, i.e. one the
+  # dispatcher just issued — as opposed to the empty, expired one a deletion
+  # leaves behind.
+  defp remember_me_pending?(conn) do
+    case conn.resp_cookies[to_string(@remember_me_cookie)] do
+      %{value: value} when is_binary(value) and value != "" -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  Issues the remember-me cookie for a sign-in that has completed *every* factor.
+
+  Called by `KilnCMSWeb.TwoFactorController` once a code verifies, because
+  AshAuthentication issues the cookie at the first factor and this is the only
+  point at which a 2FA account has actually signed in. Minting a fresh token
+  rather than stashing the withheld one keeps a thirty-day credential out of the
+  five-minute pending blob entirely.
+
+  Best-effort: a sign-in that has already succeeded must not fail because a
+  convenience cookie could not be minted.
+  """
+  @spec put_remember_me(Plug.Conn.t(), Accounts.User.t()) :: Plug.Conn.t()
+  def put_remember_me(conn, user) do
+    strategy = AshAuthentication.Info.strategy!(Accounts.User, :remember_me)
+
+    case AshAuthentication.Jwt.token_for_user(user, %{"purpose" => "remember_me"},
+           purpose: :remember_me,
+           token_lifetime: strategy.token_lifetime
+         ) do
+      {:ok, token, _claims} ->
+        put_remember_me_cookie(conn, to_string(@remember_me_cookie), %{
+          token: token,
+          max_age: AshAuthentication.Utils.lifetime_to_seconds(strategy.token_lifetime)
+        })
+
+      _error ->
+        conn
     end
   end
 
@@ -66,25 +132,25 @@ defmodule KilnCMSWeb.AuthController do
   (#699).
 
   Overrides AshAuthentication's default writer, which hardcodes
-  `secure: Mix.env() != :dev`, sets no `path`, and leaves the name unprefixed —
-  the exact shape #686 closed for the session cookie, on a credential that is
-  strictly better for an attacker: thirty days rather than a browser session,
-  and it signs in a visitor who has no session at all.
+  `secure: Mix.env() != :dev` and leaves the name unprefixed — the exact shape
+  #686 closed for the session cookie, on a credential that is strictly better
+  for an attacker: thirty days rather than a browser session, and it signs in a
+  visitor who has no session at all.
 
-  `Secure` and the prefix ride one flag (`KilnCMSWeb.SessionCookie` explains
-  why), and `path: "/"` with no `Domain` is pinned because the browser refuses
-  to store a `__Host-` cookie without them — silently, so getting it wrong would
-  read as "remember me just doesn't work" rather than as a broken control.
+  The attributes come from `KilnCMSWeb.SessionCookie.remember_me_options/1` so
+  the production shape is constructible, and therefore assertable, from a
+  non-production build — the same seam `options/1` gives the session cookie.
   """
   @impl true
   def put_remember_me_cookie(conn, cookie_name, %{token: token, max_age: max_age}) do
-    Plug.Conn.put_resp_cookie(conn, cookie_name, token,
-      max_age: max_age,
-      http_only: true,
-      same_site: "Lax",
-      secure: @secure_cookies,
-      path: "/"
-    )
+    opts =
+      Keyword.put(
+        KilnCMSWeb.SessionCookie.remember_me_options(@secure_cookies),
+        :max_age,
+        max_age
+      )
+
+    Plug.Conn.put_resp_cookie(conn, cookie_name, token, opts)
   end
 
   @doc """
@@ -92,22 +158,37 @@ defmodule KilnCMSWeb.AuthController do
 
   The attributes have to match what `put_remember_me_cookie/3` wrote or the
   browser keeps the old cookie and the "signed out" user is signed straight back
-  in on their next page load — `sign_in_with_remember_me` runs ahead of
-  `load_from_session`, so it would not even need a session to do it.
+  in on their next page load, so both come from the same place.
+
+  In production the library's own deleter would in fact be equivalent — Plug
+  defaults `path` to `"/"` and adds `Secure` on an HTTPS conn — so what this
+  earns is the *test* and *dev* case, where the dep compiles
+  `Mix.env() != :dev` to `true` and would emit a `Secure` deletion over plain
+  HTTP, and the guarantee that the two sides cannot drift apart later.
   """
   @impl true
   def delete_remember_me_cookie(conn, cookie_name) do
-    Plug.Conn.delete_resp_cookie(conn, cookie_name,
-      http_only: true,
-      same_site: "Lax",
-      secure: @secure_cookies,
-      path: "/"
+    Plug.Conn.delete_resp_cookie(
+      conn,
+      cookie_name,
+      KilnCMSWeb.SessionCookie.remember_me_options(@secure_cookies)
     )
   end
 
-  @doc "Sign a pending-2FA token binding the sign-in to a user id + first-factor token."
-  def sign_pending(conn, user, token),
-    do: Phoenix.Token.sign(conn, @pending_2fa_salt, %{"user_id" => user.id, "token" => token})
+  @doc """
+  Sign a pending-2FA token binding the sign-in to a user id + first-factor token.
+
+  `remember_me?` carries the ticked checkbox across the code prompt. It is the
+  *intent* only — the cookie itself was withheld at the first factor and is
+  issued by `put_remember_me/2` once the code verifies.
+  """
+  def sign_pending(conn, user, token, remember_me? \\ false) do
+    Phoenix.Token.sign(conn, @pending_2fa_salt, %{
+      "user_id" => user.id,
+      "token" => token,
+      "remember_me" => remember_me?
+    })
+  end
 
   @doc ~S'Verify a pending-2FA token, returning `{:ok, %{"user_id" => _, "token" => _}}` or an error.'
   def verify_pending(conn, pending) when is_binary(pending) do

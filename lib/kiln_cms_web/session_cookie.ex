@@ -45,9 +45,11 @@ defmodule KilnCMSWeb.SessionCookie do
 
   So `remember_me_key/1` rides the same flag, and `KilnCMSWeb.AuthController`
   overrides AshAuthentication's cookie writer to pair it with the attributes the
-  prefix requires. The library's default writer hardcodes `secure: Mix.env() !=
-  :dev` with no prefix and no explicit `path`, which is exactly the shape #686
-  closed for the session cookie.
+  prefix requires — from `remember_me_options/1`, so the production shape is
+  constructible from a non-production build the way `options/1` is. The
+  library's default writer hardcodes `secure: Mix.env() != :dev` and leaves the
+  name unprefixed, which is exactly the shape #686 closed for the session
+  cookie.
 
   The name is an **atom** because `remember_me`'s DSL takes one, and it is read
   back on the *read* path from that same DSL value — so setting it here is what
@@ -59,7 +61,6 @@ defmodule KilnCMSWeb.SessionCookie do
   """
 
   @base "_kiln_cms_key"
-  @remember_me_base "remember_me"
   @host_prefix "__Host-"
 
   @doc """
@@ -91,8 +92,51 @@ defmodule KilnCMSWeb.SessionCookie do
       :remember_me
   """
   @spec remember_me_key(boolean()) :: atom()
-  def remember_me_key(true), do: :"#{@host_prefix}#{@remember_me_base}"
-  def remember_me_key(false), do: :"#{@remember_me_base}"
+  def remember_me_key(true), do: :"__Host-remember_me"
+  def remember_me_key(false), do: :remember_me
+  def remember_me_key(other), do: raise_non_boolean(other)
+
+  @doc """
+  The `Plug.Conn.put_resp_cookie/4` options for the remember-me cookie.
+
+  Here rather than inline in `KilnCMSWeb.AuthController` for the reason
+  `options/1` is here: `:secure_session_cookie` is compile-time and only
+  `config/prod.exs` sets it, so a test that reads what this build emits asserts
+  the dev shape and passes whatever a release would ship. Constructible for
+  `true` from a non-production build, this is assertable.
+
+      iex> KilnCMSWeb.SessionCookie.remember_me_options(true)[:secure]
+      true
+
+      iex> KilnCMSWeb.SessionCookie.remember_me_options(true)[:path]
+      "/"
+  """
+  @spec remember_me_options(boolean()) :: keyword()
+  def remember_me_options(secure?) when is_boolean(secure?) do
+    [
+      http_only: true,
+      same_site: "Lax",
+      # The two the `__Host-` prefix depends on, alongside `Secure`. Pinned
+      # rather than left to Plug's defaults so a later edit has to state the
+      # intent to break them — a browser discards a `__Host-` cookie that
+      # violates either, silently.
+      secure: secure?,
+      path: "/"
+    ]
+  end
+
+  def remember_me_options(other), do: raise_non_boolean(other)
+
+  defp raise_non_boolean(value) do
+    raise ArgumentError, """
+    config :kiln_cms, :secure_session_cookie must be a boolean, got: #{inspect(value)}
+
+    It sets both the auth cookies' `Secure` attribute and their `__Host-`
+    prefix, which browsers only honour together. A non-boolean cannot be
+    coerced safely: any non-empty string is truthy, so "false" would mark the
+    cookies `Secure` under the unprefixed names (#686, #699).
+    """
+  end
 
   @doc """
   The `Plug.Session` options for a given `:secure_session_cookie` setting.
