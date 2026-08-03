@@ -29,6 +29,86 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **A `gallery` block, and an `accordion` block that deliberately fires no
+  structured data.** Two gaps, one of which was actively producing wrong
+  markup (#482).
+
+  **`gallery`** is an ordered set of images with per-image alt text and
+  captions, a layout hint (`grid`, `masonry`, `carousel`, resolved through an
+  allowlist so no user string reaches a `style`), and one **`ImageGallery`**
+  JSON-LD node describing the collection rather than N unrelated images. The
+  `image` block holds one image and nothing held a list; a `columns` block could
+  fake a grid but carried no gallery semantics, so editors got inconsistent
+  crops and hand-placed captions. Editor UX is multi-select from the media
+  library — images land in the order they were clicked — plus drag-to-reorder
+  *and* keyboard move up/down, because a gallery is only an ordering and an
+  editor who cannot reorder it cannot use it.
+
+  **`accordion`** renders the same `<details>/<summary>` panels as `faq` and
+  contributes **nothing** to the `@graph`. That is the entire point: `faq`
+  always fires `FAQPage`, so an editor reaching for "a thing that collapses" — a
+  specification table, a changelog, a set of terms — was publishing a claim that
+  the page is a list of questions and answers, and answer engines act on that
+  claim. The split is by meaning, not by looks. `faq` is unchanged and remains
+  the right block for genuine Q&A.
+
+  Both go through the publish, tracking and safety paths a block is *supposed*
+  to go through, which for a block holding a list is not automatic — each of
+  these was a silent gap rather than a crash:
+
+  - Gallery image urls are sanitized on the write path. A gallery's urls sit one
+    level down inside an `{:array, :map}` field, where the `image` block's own
+    clause could not see them — they were the one image src that would have
+    reached storage unfiltered.
+  - The alt-text publish gate (#403) checks **each** image. It tests for a
+    top-level `alt` field, so a fifty-image gallery with nothing described would
+    have published while a single undescribed `image` block beside it was
+    refused.
+  - Media reference edges are recorded per image, so usage counts, re-fire on
+    media change, and delivery cache busts all work. The extractor matches field
+    names ending in `media_id`; a gallery has none, so it would have recorded no
+    edges at all.
+  - Delivery batch-loads gallery media in the same single query as image blocks,
+    so every image gets its `srcset`, intrinsic dimensions and focal point.
+
+  Three things were fixed in passing, all found by the tests written for this:
+
+  - `srcset` building moved into `KilnCMS.Media.Presentation`. Its rule —
+    cropped variants such as `card` are excluded, because a `srcset` is a set of
+    interchangeable renderings of the same image and a crop is a different
+    picture — is easy to get wrong and was one private function away from being
+    reimplemented.
+  - The block serializer property test had silently covered only 6 of 13 block
+    types: its generator is hand-written, so a new type joined the registry and
+    the totality guarantee quietly stopped applying to it. It now covers every
+    core type and fails when one is missing. Widening it also showed the
+    property asserted a *narrower* contract than `Kiln.Block.Renderer` declares
+    — a container block legitimately returns a list of nodes.
+  - The block upcaster's string→atom map had fallen five types behind, so `faq`,
+    `how_to`, `claim`, `form` and `divider` each resolved to the wrong module's
+    migration chain. Harmless only because no block has yet declared a version
+    above 1; the first `migrate` step on any of them would simply not have run.
+  - **Editing rows on a saved record deleted the document's other blocks.**
+    `AshPhoenix.Form.params/1` returns only *touched* fields, so on a form
+    loaded from a record it carries no `blocks` key — and `validate/2` rebuilds
+    the sub-forms from the keys it is handed. Writing one block's rows back
+    therefore dropped every block that was not mentioned. Adding an image to a
+    gallery on a saved page would have taken the rest of the page with it. The
+    image picker already carried the full block set through for exactly this
+    reason; the row buttons now do too.
+  - Delivery and the alt-text publish gate both fed block `media_id` values
+    straight into a uuid-column filter. Ash rejects a non-uuid at query build,
+    so a single junk id written by an import or an API call took the published
+    page down with a 500 — and turned "this image has no alt text" into an
+    unactionable crash in the editor.
+  - **An image block's own alt text was being discarded on the live site.**
+    Delivery took `MediaItem.alt` unconditionally whenever the library row
+    resolved, while the fired artifact, the previews and the publish gate all
+    use the block's alt — which `Validations.MediaAltText` documents as "what
+    ships". An image described for its placement, pointing at a library row
+    nobody had filled in, passed the gate and then shipped `alt=""`. The block's
+    alt now wins, with the library row as the fallback behind it.
+
 - **`reading_time_minutes` alongside `word_count`** on every content type, in
   the same places: the admin show view, JSON:API and GraphQL
   (`readingTimeMinutes`). Kiln computed the word count and stopped there, so

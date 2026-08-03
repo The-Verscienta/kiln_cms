@@ -174,6 +174,94 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ ~s(alt="Nested image")
     end
 
+    test "gallery images get their srcset, and never a cropped variant (#482)", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "g.jpg",
+          url: "/uploads/g-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          alt: "Library default",
+          focal_x: 0.25,
+          focal_y: 0.75,
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/g-thumb",
+              "width" => 400,
+              "height" => 267
+            },
+            # A focal-aware crop. It has a different aspect ratio, so it must
+            # never appear in a srcset — the browser would swap in a
+            # differently-shaped picture at some viewport widths.
+            "card" => %{"key" => "c", "url" => "/uploads/g-card", "width" => 800, "height" => 450}
+          }
+        })
+
+      page =
+        page(%{
+          title: "Gallery Page",
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "title" => "Shots",
+              "layout" => "masonry",
+              "images" => [
+                %{
+                  "url" => "/uploads/g-orig",
+                  "media_id" => media.id,
+                  "alt" => "Placement alt",
+                  "caption" => "At work"
+                }
+              ]
+            }
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "kiln-gallery"
+      assert html =~ "column-count:3"
+      assert html =~ "/uploads/g-thumb 400w"
+      assert html =~ "/uploads/g-orig 1600w"
+      refute html =~ "g-card"
+
+      # The block's own alt wins over the library default — it is the one
+      # written for this placement (#403).
+      assert html =~ ~s(alt="Placement alt")
+      refute html =~ "Library default"
+      assert html =~ "At work"
+      assert html =~ "object-position: 25% 75%"
+    end
+
+    test "an accordion renders its panels on-site (#482)", %{conn: conn} do
+      page =
+        page(%{
+          title: "Accordion Page",
+          blocks: [
+            %{
+              "_type" => "accordion",
+              "title" => "Specifications",
+              "first_open" => true,
+              "panels" => [
+                %{"title" => "Size", "content" => "Large"},
+                %{"title" => "Weight", "content" => "Heavy"}
+              ]
+            }
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "kiln-accordion"
+      assert html =~ "Size"
+      assert html =~ "Heavy"
+      # Only the first panel opens.
+      assert html |> String.split("<details") |> Enum.count(&String.starts_with?(&1, " open")) ==
+               1
+    end
+
     test "GEO blocks render their items and citations on-site (#357)", %{conn: conn} do
       page =
         page(%{

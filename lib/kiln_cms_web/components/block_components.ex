@@ -52,6 +52,66 @@ defmodule KilnCMSWeb.BlockComponents do
               <.render_block :for={child <- col.blocks} block={child} />
             </div>
           </div>
+        <% @type == "gallery" -> %>
+          <%!-- Image collection (#482): heading in content, items in :images.
+                `style` comes from an allowlisted layout key
+                (KilnCMS.Blocks.Gallery.layout_style/1), so it is safe as an
+                attribute value — same rule the columns grid follows. Each item
+                carries its own srcset/focal/dimensions, resolved by delivery's
+                batch media load. --%>
+          <section class="kiln-gallery space-y-2">
+            <h2 :if={@block.content not in [nil, ""]} class="text-xl font-bold">{@block.content}</h2>
+            <div class="kiln-gallery-items" style={@block[:style]}>
+              <%!-- Filtered, not guarded per-element: the block's own `:web`
+                    serializer drops url-less items entirely, and guarding only
+                    the `<img>` would leave an empty captioned figure here that
+                    the fired artifact does not have. --%>
+              <figure
+                :for={image <- gallery_images(@block)}
+                class="kiln-gallery-item m-0"
+              >
+                <img
+                  :if={src = HTMLSanitizer.safe_image_src(image[:url])}
+                  src={src}
+                  srcset={image[:srcset]}
+                  sizes={image[:srcset] && "(max-width: 768px) 50vw, 320px"}
+                  alt={image[:alt] || ""}
+                  width={image[:width]}
+                  height={image[:height]}
+                  style={image[:focal]}
+                  loading="lazy"
+                  class="w-full rounded"
+                />
+                <figcaption
+                  :if={image[:caption] not in [nil, ""]}
+                  class="mt-1 text-sm text-base-content/70"
+                >
+                  {image[:caption]}
+                </figcaption>
+              </figure>
+            </div>
+          </section>
+        <% @type == "accordion" -> %>
+          <%!-- Collapsible panels (#482). Deliberately identical in markup to the
+                faq branch below and deliberately different in meaning: this one
+                contributes nothing to the structured-data graph. See
+                KilnCMS.Blocks.Accordion. --%>
+          <section class="kiln-accordion space-y-2">
+            <h2 :if={@block.content not in [nil, ""]} class="text-xl font-bold">{@block.content}</h2>
+            <%!-- Indexed AFTER filtering, matching the block's own serializer.
+                  Indexing first would open panel zero of the raw list — so a
+                  blank leading row (one click too many on "Add panel") leaves
+                  the on-site page with nothing open while the fired artifact
+                  opens the first real panel. --%>
+            <details
+              :for={{panel, index} <- Enum.with_index(accordion_panels(@block))}
+              open={index == 0 && @block[:first_open] == true}
+              class="kiln-accordion-item rounded border border-base-300 p-2"
+            >
+              <summary class="cursor-pointer font-medium">{panel["title"]}</summary>
+              <p class="mt-1">{panel["content"]}</p>
+            </details>
+          </section>
         <% @type == "faq" -> %>
           <%!-- GEO Q&A block (#357): title in content, item rows in :items. --%>
           <section class="kiln-faq space-y-2">
@@ -272,6 +332,39 @@ defmodule KilnCMSWeb.BlockComponents do
     }
   end
 
+  # An image's alt rides along so surfaces that render from the thin shape — the
+  # pop-out preview, the in-context edit overlay — show the same alt text
+  # delivery will. `srcset`/`focal` deliberately do not: those need a loaded
+  # MediaItem, which is a delivery concern.
+  defp thin_block(%{type: :image, content: content, data: data}),
+    do: %{type: "image", content: content, alt: data["alt"] || ""}
+
+  # Repeating-item blocks (#482). The thin shape carries no media enrichment —
+  # `thin_blocks/1` serves the pop-out preview and the editor, which render from
+  # the stored url rather than from a batch-loaded MediaItem — so item keys are
+  # atoms here to match what `render_block/1` reads, and `:srcset`/`:focal` are
+  # simply absent (the `:if` guards handle that).
+  defp thin_block(%{type: :gallery, content: content, data: data}) do
+    %{
+      type: "gallery",
+      content: content,
+      style: KilnCMS.Blocks.Gallery.layout_style(data["layout"]),
+      images:
+        for image <- data["images"] || [], is_map(image) do
+          %{url: image["url"], alt: image["alt"], caption: image["caption"]}
+        end
+    }
+  end
+
+  defp thin_block(%{type: :accordion, content: content, data: data}) do
+    %{
+      type: "accordion",
+      content: content,
+      first_open: data["first_open"] == true,
+      panels: data["panels"] || []
+    }
+  end
+
   # GEO blocks (#357): carry the data-side fields the renderer reads, so the
   # pop-out preview shows item rows and citations, not just the primary text.
   defp thin_block(%{type: :faq, content: content, data: data}),
@@ -296,4 +389,18 @@ defmodule KilnCMSWeb.BlockComponents do
   end
 
   defp thin_block(block), do: %{type: to_string(block.type), content: block.content}
+
+  # The items each renderable surface actually shows, filtered the same way the
+  # block modules' own `:web` serializers filter. Two renderers over one block
+  # that disagree about which items count is a bug that only shows up as "the
+  # published page looks different from the preview".
+  defp gallery_images(block) do
+    for image <- block[:images] || [], present?(image[:url]), do: image
+  end
+
+  defp accordion_panels(block) do
+    for panel <- block[:panels] || [], present?(panel["title"]), do: panel
+  end
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 end

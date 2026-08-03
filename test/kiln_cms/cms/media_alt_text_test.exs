@@ -252,6 +252,103 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
     end
   end
 
+  # #482: a gallery is one block holding N images, so both the publish gate and
+  # the reference extractor have to look inside it. Neither did by default — the
+  # gate tests a top-level `:alt` field and the extractor matches on field names
+  # ending in `media_id`, and a gallery has neither.
+  describe "galleries" do
+    setup do
+      require_alt!()
+      :ok
+    end
+
+    defp gallery_block(images),
+      do: %{"_type" => "gallery", "images" => images}
+
+    test "an undescribed gallery image blocks publishing, like a lone image would" do
+      actor = admin()
+      img = image()
+
+      p =
+        page(
+          %{blocks: [gallery_block([%{"url" => img.url, "media_id" => img.id, "alt" => ""}])]},
+          actor
+        )
+
+      assert {:error, %Ash.Error.Invalid{} = error} = CMS.publish_page(p, actor: actor)
+      assert Exception.message(error) =~ "no alt text"
+    end
+
+    test "one undescribed image among described ones is still caught" do
+      actor = admin()
+      [a, b] = [image(), image()]
+
+      p =
+        page(
+          %{
+            blocks: [
+              gallery_block([
+                %{"url" => a.url, "media_id" => a.id, "alt" => "Described"},
+                %{"url" => b.url, "media_id" => b.id, "alt" => ""}
+              ])
+            ]
+          },
+          actor
+        )
+
+      assert {:error, %Ash.Error.Invalid{} = error} = CMS.publish_page(p, actor: actor)
+      # The one named is the one at fault, not the whole gallery.
+      assert Exception.message(error) =~ b.url
+      refute Exception.message(error) =~ a.url
+    end
+
+    test "a described gallery publishes" do
+      actor = admin()
+      img = image()
+
+      p =
+        page(
+          %{
+            blocks: [
+              gallery_block([%{"url" => img.url, "media_id" => img.id, "alt" => "A kiln"}])
+            ]
+          },
+          actor
+        )
+
+      assert {:ok, _published} = CMS.publish_page(p, actor: actor)
+    end
+
+    test "a decorative library item excuses a blank gallery alt" do
+      actor = admin()
+      img = image(%{decorative: true})
+
+      p =
+        page(
+          %{blocks: [gallery_block([%{"url" => img.url, "media_id" => img.id, "alt" => ""}])]},
+          actor
+        )
+
+      assert {:ok, _published} = CMS.publish_page(p, actor: actor)
+    end
+
+    test "every gallery image becomes a media reference edge" do
+      [a, b] = [image(), image()]
+
+      blocks =
+        KilnCMS.CMS.TypedBlocks.to_typed([
+          gallery_block([
+            %{"url" => a.url, "media_id" => a.id, "alt" => "A"},
+            %{"url" => b.url, "media_id" => b.id, "alt" => "B"}
+          ])
+        ])
+
+      # Without a dedicated clause this is `[]`, and a gallery silently loses
+      # usage counts, re-fire on media change, and delivery cache busts.
+      assert References.media_refs(blocks) == [{:media, a.id}, {:media, b.id}]
+    end
+  end
+
   describe "reference extraction" do
     test "a non-uuid media_id never becomes an edge" do
       # `media_id` is a free-text block field, so an importer can put anything

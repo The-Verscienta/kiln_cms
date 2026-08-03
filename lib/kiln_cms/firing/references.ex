@@ -13,7 +13,7 @@ defmodule KilnCMS.Firing.References do
   content bridged to `Custom`, in `data["ref"]` / `data["refs"]`
   (`%{"type" => "page"|"post", "id" => uuid}`).
   """
-  alias KilnCMS.Blocks.{Columns, Custom}
+  alias KilnCMS.Blocks.{Columns, Custom, Gallery}
   alias KilnCMS.CMS
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing
@@ -103,6 +103,18 @@ defmodule KilnCMS.Firing.References do
 
   defp block_media_refs(%Columns{} = block),
     do: block |> Columns.child_blocks_flat() |> Enum.flat_map(&block_media_refs/1)
+
+  # A gallery's ids sit inside an `{:array, :map}` field, so the field-name
+  # convention below cannot see them — `images` does not end in `media_id`, and
+  # the value is a list of maps rather than a list of ids. Left to the generic
+  # clause a gallery records *no* media edges at all, which loses usage counts,
+  # re-fire on media change, and delivery cache busts, all silently (#482).
+  defp block_media_refs(%Gallery{} = block) do
+    block
+    |> Gallery.media_ids()
+    |> Enum.filter(&valid_uuid?/1)
+    |> Enum.map(&{:media, &1})
+  end
 
   defp block_media_refs(%mod{} = block) do
     mod

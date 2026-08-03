@@ -79,7 +79,7 @@ the citation-relevant metadata answer engines key on: `datePublished` /
 `dateModified`, `inLanguage`, and the SEO description; Article-family types
 carry the body as `articleBody`, the rest as `text`.
 
-**Structured-data blocks.** Three first-party blocks whose `:json_ld` renders
+**Structured-data blocks.** Four first-party blocks whose `:json_ld` renders
 expand the `@graph` (and which render meaningfully on *every* surface):
 
 - **`faq`** — Q&A rows, fired as a **`FAQPage`** node (`Question` /
@@ -95,6 +95,22 @@ expand the `@graph` (and which render meaningfully on *every* surface):
   the `:web` surface as a `<cite>` link and the `:llm` surface as a trailing
   `Source: [title](url)` line, so extracting engines pick up the source
   wherever they read.
+- **`gallery`** — an ordered set of images, fired as one **`ImageGallery`** node
+  holding an `ImageObject` per image with its alt as `name` and its caption as
+  `caption` ([#482](https://github.com/The-Verscienta/kiln_cms/issues/482)). One
+  node for the collection, not N loose images: that is the difference between
+  "this page has several pictures" and "this page is a gallery", and it is why
+  the block exists rather than a row of `image` blocks.
+
+**And one block that deliberately fires nothing.** The **`accordion`** renders
+the same `<details>/<summary>` panels as `faq` and contributes **no** node.
+
+That is not an oversight, it is the reason it was added. `faq` always fires
+`FAQPage`, so an editor reaching for "a thing that collapses" — a specification
+table, a changelog, a set of terms — was publishing a claim that the page is a
+list of questions and answers, which answer engines act on. The split is by
+meaning, not by looks: use `faq` for genuine questions and answers, `accordion`
+for everything else that folds.
 
 Same deploy note as the `:llm` surface: content published before this feature
 carries the old JSON-LD until re-fired.

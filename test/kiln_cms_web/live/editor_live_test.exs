@@ -2547,7 +2547,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # Add one Q&A row, then type into its bound inputs.
       lv
-      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
       |> render_click()
 
       lv
@@ -2582,11 +2582,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> render_click()
 
       lv
-      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
       |> render_click()
 
       lv
-      |> element("button[phx-click='geo_item_remove'][phx-value-index='0'][phx-value-item='0']")
+      |> element("button[phx-click='item_row_remove'][phx-value-index='0'][phx-value-item='0']")
       |> render_click()
 
       lv |> form("#page-editor") |> render_submit()
@@ -2594,6 +2594,261 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
       assert block.type == :faq
       assert block.data["items"] == []
+    end
+
+    # #482: the accordion rides the same row editor as faq/how_to, so what needs
+    # pinning is that it was actually wired into it (`@row_editor_types` and
+    # `@row_fields` are two lists that have to agree) rather than that repeating
+    # rows work at all.
+    test "accordion panels add, edit and persist through save", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='accordion']")
+      |> render_click()
+
+      lv
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
+      |> render_click()
+
+      lv
+      |> form("#page-editor")
+      |> render_change(%{
+        "form" => %{
+          "blocks" => %{
+            "0" => %{
+              "title" => "Specifications",
+              "panels" => %{"0" => %{"title" => "Size", "content" => "Large"}}
+            }
+          }
+        }
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert block.type == :accordion
+      assert block.content == "Specifications"
+      assert block.data["panels"] == [%{"title" => "Size", "content" => "Large"}]
+    end
+
+    test "gallery images are picked, reordered and removed", %{conn: conn} do
+      page = draft_page(%{blocks: []})
+      [a, b] = for n <- 1..2, do: gallery_media(n)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='gallery']")
+      |> render_click()
+
+      bid = gallery_block_id(lv)
+
+      # Multi-select: two images chosen in one visit to the drawer, and the
+      # order they were clicked is the order they land in.
+      lv
+      |> element("button[phx-click='open_gallery_picker'][phx-value-bid='#{bid}']")
+      |> render_click()
+
+      for item <- [b, a], do: lv |> element("button[phx-value-id='#{item.id}']") |> render_click()
+      lv |> element("button[phx-click='add_picked_images']") |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["media_id"]) == [b.id, a.id]
+    end
+
+    test "moving an image down swaps it with the next one", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [
+                %{"url" => "/one.jpg", "alt" => "One"},
+                %{"url" => "/two.jpg", "alt" => "Two"}
+              ]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      bid = gallery_block_id(lv)
+
+      lv
+      |> element(
+        "button[phx-click='gallery_move'][phx-value-bid='#{bid}'][phx-value-item='0'][phx-value-dir='down']"
+      )
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["alt"]) == ["Two", "One"]
+    end
+
+    # The drag hook reports the new order as previous row indices. A stale or
+    # partial order must not delete rows — it is a reorder, not a replace.
+    test "a partial drag order appends the rows it did not mention", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [
+                %{"url" => "/one.jpg", "alt" => "One"},
+                %{"url" => "/two.jpg", "alt" => "Two"},
+                %{"url" => "/three.jpg", "alt" => "Three"}
+              ]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      render_hook(lv, "gallery_reorder", %{"bid" => gallery_block_id(lv), "order" => ["2", "0"]})
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["alt"]) == ["Three", "One", "Two"]
+    end
+
+    defp gallery_media(n) do
+      unique = System.unique_integer([:positive])
+
+      Ash.Seed.seed!(MediaItem, %{
+        filename: "g#{n}-#{unique}.jpg",
+        url: "/uploads/g#{n}-#{unique}"
+      })
+    end
+
+    # The gallery editor keys its controls on the block's stable id, which is
+    # generated on insert — read it back out of the rendered markup rather than
+    # assuming an index.
+    defp gallery_block_id(lv) do
+      [_, bid] =
+        Regex.run(~r/phx-click="open_gallery_picker" phx-value-bid="([^"]+)"/, render(lv))
+
+      bid
+    end
+
+    # The one that mattered most: `AshPhoenix.Form.params/1` is only_touched?, so
+    # on a form loaded from a saved record a partial `blocks` write deletes every
+    # block it does not mention. `pick_image` already guarded against this;
+    # the row/gallery buttons did not, and populating a gallery goes through them.
+    test "editing one block's rows does not delete the document's other blocks", %{conn: conn} do
+      media = gallery_media(1)
+
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "heading",
+              "id" => Ash.UUID.generate(),
+              "text" => "Keep me",
+              "level" => 2
+            },
+            %{"_type" => "gallery", "id" => Ash.UUID.generate(), "images" => []}
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      bid = gallery_block_id(lv)
+
+      lv
+      |> element("button[phx-click='open_gallery_picker'][phx-value-bid='#{bid}']")
+      |> render_click()
+
+      lv |> element("button[phx-value-id='#{media.id}']") |> render_click()
+      lv |> element("button[phx-click='add_picked_images']") |> render_click()
+      lv |> form("#page-editor") |> render_submit()
+
+      blocks = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+
+      assert Enum.map(blocks, & &1.type) == [:heading, :gallery]
+      assert Enum.find(blocks, &(&1.type == :heading)).content == "Keep me"
+    end
+
+    test "reordering a gallery holding the same image twice keeps both", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [
+                %{"url" => "/same.jpg", "alt" => ""},
+                %{"url" => "/same.jpg", "alt" => ""},
+                %{"url" => "/other.jpg", "alt" => "Other"}
+              ]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      # Two of these rows are identical maps. Deduping the *rows* rather than the
+      # *indices* collapses them into one and then drops both from the tail, so a
+      # drag — including a drop in place, which Sortable also reports — silently
+      # deletes an image.
+      render_hook(lv, "gallery_reorder", %{
+        "bid" => gallery_block_id(lv),
+        "order" => ["2", "1", "0"]
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert length(block.data["images"]) == 3
+
+      assert Enum.map(block.data["images"], & &1["url"]) == [
+               "/other.jpg",
+               "/same.jpg",
+               "/same.jpg"
+             ]
+    end
+
+    test "an out-of-range move index is a no-op, not a nil row", %{conn: conn} do
+      page =
+        draft_page(%{
+          blocks: [
+            %{
+              "_type" => "gallery",
+              "id" => Ash.UUID.generate(),
+              "images" => [%{"url" => "/one.jpg", "alt" => "One"}]
+            }
+          ]
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+
+      bid = gallery_block_id(lv)
+
+      # `to_int/1` accepts a negative, and `Enum.at(list, -1)` is the LAST row
+      # rather than an error — so an unchecked `from` moves the wrong image, and
+      # one past the end writes a `nil` into an `{:array, :map}` the resource
+      # refuses to save, wedging the block.
+      for {item, dir} <- [{"-1", "down"}, {"5", "up"}] do
+        render_click(lv, "gallery_move", %{"bid" => bid, "item" => item, "dir" => dir})
+      end
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+      assert Enum.map(block.data["images"], & &1["alt"]) == ["One"]
     end
 
     test "a claim block persists its citation fields via the DSL editor", %{conn: conn} do
@@ -2641,7 +2896,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> render_click()
 
       lv
-      |> element("button[phx-click='geo_item_add'][phx-value-index='0']")
+      |> element("button[phx-click='item_row_add'][phx-value-index='0']")
       |> render_click()
 
       html =

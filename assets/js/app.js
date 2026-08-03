@@ -603,6 +603,35 @@ const Hooks = {
       this.sorters = []
     },
   },
+
+  // Drag-to-reorder for a gallery block's images (#482). A single list, so it
+  // needs neither the shared group of NestedBlockSortable nor its re-init on
+  // update — but it does report the full new order rather than a delta, for the
+  // same reason: the server rebuilds the list authoritatively and LiveView
+  // reconciles the DOM back to the server-rendered order.
+  //
+  // Dragging is an enhancement, not the mechanism: each row also carries move
+  // up/down buttons that push the same reorder through the keyboard, so a
+  // pointer is never the only way to reorder a gallery.
+  GallerySortable: {
+    mounted() {
+      const blockId = this.el.dataset.blockId
+      this.sorter = Sortable.create(this.el, {
+        animation: 150,
+        handle: "[data-image-handle]",
+        ghostClass: "opacity-40",
+        onEnd: () => {
+          const order = Array.from(this.el.querySelectorAll("[data-image-row]")).map(
+            row => row.dataset.imageRow,
+          )
+          this.pushEvent("gallery_reorder", {bid: blockId, order})
+        },
+      })
+    },
+    destroyed() {
+      this.sorter && this.sorter.destroy()
+    },
+  },
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

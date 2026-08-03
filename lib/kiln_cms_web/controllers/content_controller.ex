@@ -706,16 +706,15 @@ defmodule KilnCMSWeb.ContentController do
     Map.new(slugs, &{&1, KilnCMS.Forms.get_active(&1, org_id)})
   end
 
-  # Batch-load the media items referenced by image blocks (so we render one
-  # query, not one per image).
+  # Batch-load the media items referenced by image and gallery blocks (so we
+  # render one query, not one per image).
+  #
+  # A gallery's ids live one level down, inside its `images` list, so collecting
+  # only top-level `media_id` would leave every gallery image with no srcset, no
+  # focal point and no intrinsic dimensions on the public site — a silent
+  # degradation, since the stored url still renders (#482).
   defp load_block_media(blocks, org_id) do
-    ids =
-      for b <- blocks,
-          to_string(b.type) == "image",
-          id = b.data["media_id"],
-          is_binary(id),
-          uniq: true,
-          do: id
+    ids = blocks |> Enum.flat_map(&block_media_ids/1) |> Enum.uniq()
 
     case ids do
       [] ->
@@ -733,6 +732,32 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # Filtered to real uuids once, here, rather than in each clause.
+  #
+  # A blank `media_id` is the normal state of an image pasted in by URL — but
+  # `media_id` is a free-text block field, so an importer or an API caller can
+  # put anything in it, and `id` is a uuid column: Ash rejects a non-uuid at
+  # query build, which means `list_media_items!` *raises* and the published page
+  # 500s for every visitor. `KilnCMS.Firing.References` has guarded this since
+  # it was written; delivery never did, and a gallery multiplies the exposure
+  # from one id per block to N.
+  defp block_media_ids(%{type: type, data: data}) do
+    type |> to_string() |> media_ids_for(data) |> Enum.filter(&valid_media_id?/1)
+  end
+
+  defp block_media_ids(_block), do: []
+
+  defp media_ids_for("image", data), do: [data["media_id"]]
+
+  defp media_ids_for("gallery", data) do
+    data["images"] |> List.wrap() |> Enum.filter(&is_map/1) |> Enum.map(& &1["media_id"])
+  end
+
+  defp media_ids_for(_type, _data), do: []
+
+  defp valid_media_id?(id) when is_binary(id), do: match?({:ok, _}, Ecto.UUID.cast(id))
+  defp valid_media_id?(_id), do: false
+
   defp enrich_block(block, media, forms) do
     base = %{type: to_string(block.type), content: block.content}
 
@@ -745,11 +770,24 @@ defmodule KilnCMSWeb.ContentController do
 
         Map.merge(base, %{
           srcset: srcset(item),
-          alt: item.alt,
+          # The block's own alt wins, with the library row as the fallback
+          # behind it. This used to take `item.alt` unconditionally, which put
+          # this surface at odds with every other one: the fired `:web`
+          # artifact, the pop-out preview and the in-context editor all render
+          # the block's alt, and `Validations.MediaAltText` gates publishing on
+          # the block's alt and says in as many words that it "is what ships".
+          # It wasn't. An image block described for its placement, pointing at a
+          # library row nobody had filled in, passed the gate and then shipped
+          # `alt=""` on the live site — the one surface the gate exists to
+          # protect (#403, #482).
+          alt: presence(block.data["alt"]) || item.alt,
           width: item.width,
           height: item.height,
           focal: focal_style(item)
         })
+
+      block.type == :gallery ->
+        enrich_gallery(base, block, media)
 
       block.type == :form ->
         # nil form (inactive/unknown slug) → the component renders nothing.
@@ -760,9 +798,54 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # Per-item media enrichment (#482), mirroring what the `image` branch does for
+  # a single image. An item whose `media_id` resolved to nothing still renders
+  # from its stored url — just without srcset/focal/dimensions — which is what
+  # happens when media is deleted out from under a published document.
+  defp enrich_gallery(base, block, media) do
+    images =
+      for image <- block.data["images"] || [], is_map(image) do
+        item = media[image["media_id"]]
+
+        %{
+          url: image["url"],
+          # The item's own alt wins: it is the one written *for this placement*,
+          # and `MediaItem.alt` is the library-wide default behind it. Same
+          # precedence #403 established for the single-image block.
+          alt: presence(image["alt"]) || (item && item.alt),
+          caption: image["caption"],
+          srcset: item && KilnCMS.Media.Presentation.srcset(item),
+          width: item && item.width,
+          height: item && item.height,
+          focal: item && KilnCMS.Media.Presentation.focal_style(item)
+        }
+      end
+
+    Map.merge(base, %{
+      images: images,
+      style: KilnCMS.Blocks.Gallery.layout_style(block.data["layout"])
+    })
+  end
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_value), do: nil
+
   # GEO blocks (#357): surface the data-side fields the renderer reads.
   defp enrich_geo(base, %{type: :faq} = block),
     do: Map.put(base, :items, block.data["items"] || [])
+
+  defp enrich_geo(base, %{type: :accordion} = block) do
+    Map.merge(base, %{
+      panels: block.data["panels"] || [],
+      first_open: block.data["first_open"] == true
+    })
+  end
 
   defp enrich_geo(base, %{type: :how_to} = block) do
     Map.merge(base, %{description: block.data["description"], steps: block.data["steps"] || []})
@@ -793,41 +876,12 @@ defmodule KilnCMSWeb.ContentController do
     })
   end
 
-  # `object-position` from the media item's focal point, so any theme (or the
-  # inline styles below) cropping via `object-fit` keeps the subject in frame.
-  # Omitted at the default center — no styling noise for untouched media.
-  defp focal_style(%{focal_x: x, focal_y: y})
-       when is_number(x) and is_number(y) and (x != 0.5 or y != 0.5) do
-    "object-position: #{round(x * 100)}% #{round(y * 100)}%"
-  end
-
-  defp focal_style(_item), do: nil
-
-  # Builds an `srcset` value from a media item's variants plus the original,
-  # e.g. "/uploads/thumb 400w, /uploads/medium 1024w, /uploads/orig 1600w".
-  # Cropped variants (different aspect ratio) are excluded — they're for
-  # consumers that ask for that framing by label, not for responsive scaling.
-  defp srcset(item) do
-    cropped = KilnCMS.ImageProcessor.cropped_labels()
-
-    variant_parts =
-      for {label, %{"url" => url, "width" => w}} <- item.variants || %{},
-          label not in cropped,
-          safe = KilnCMS.HTMLSanitizer.safe_image_src(url),
-          is_binary(safe),
-          do: "#{safe} #{w}w"
-
-    original =
-      case item.width && KilnCMS.HTMLSanitizer.safe_image_src(item.url) do
-        url when is_binary(url) -> ["#{url} #{item.width}w"]
-        _ -> []
-      end
-
-    case variant_parts ++ original do
-      [] -> nil
-      parts -> Enum.join(parts, ", ")
-    end
-  end
+  # `srcset/1` and `focal_style/1` live in `KilnCMS.Media.Presentation` — the
+  # gallery block (#482) is the second consumer, and `srcset`'s exclusion of
+  # cropped variants is the kind of rule that gets reintroduced by someone
+  # writing a second builder rather than finding the first.
+  defp srcset(item), do: KilnCMS.Media.Presentation.srcset(item)
+  defp focal_style(item), do: KilnCMS.Media.Presentation.focal_style(item)
 
   defp not_found(conn) do
     conn
