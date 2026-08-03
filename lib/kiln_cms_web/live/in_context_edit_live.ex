@@ -332,6 +332,11 @@ defmodule KilnCMSWeb.InContextEditLive do
   def render(assigns) do
     ~H"""
     <Layouts.public locale_links={[]} locale={@record.locale} current_org={@current_org}>
+      <%!-- This page renders in the *public* layout so the editor sees the real
+            page, which means it inherits none of the console chrome — including
+            the environment strip. Typing straight into live content is the last
+            place you want to be unsure which deployment you are on (#469). --%>
+      <Layouts.environment_banner />
       <Layouts.flash_group flash={@flash} />
       <.edit_bar
         record={@record}

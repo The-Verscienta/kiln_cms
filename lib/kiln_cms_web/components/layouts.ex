@@ -60,6 +60,12 @@ defmodule KilnCMSWeb.Layouts do
     assigns = assign(assigns, :brand, Branding.for_org(assigns[:current_org]))
 
     ~H"""
+    <%!-- Sign-in is where an operator forms their belief about which deployment
+          they are on, and a scrubbed clone shows production's logo and site name
+          here (#469). Telling them after they authenticate is one page too late. --%>
+    <div :if={KilnCMS.Environment.label()} class="-mt-4 mb-4 flex justify-center">
+      <.environment_banner />
+    </div>
     <div class="mb-6 flex w-full justify-center">
       <a href="/" class="flex items-center">
         <img src={@brand.logo_url} class="h-10 w-auto" alt="" referrerpolicy="no-referrer" />
@@ -124,6 +130,10 @@ defmodule KilnCMSWeb.Layouts do
     >
       {gettext("Search")}
     </.link>
+    <%!-- `/editor/api-keys` and `/account` render here rather than in `console`,
+          and minting an API key against the wrong deployment is one of the more
+          expensive mistakes on the whole surface (#469). --%>
+    <.environment_banner />
     <header class="border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <a href="/" class="flex items-center gap-3">
@@ -276,34 +286,41 @@ defmodule KilnCMSWeb.Layouts do
       </aside>
 
       <div class="flex min-h-screen flex-col">
-        <header class="sticky top-0 z-20 flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-content/10 bg-base-100/90 px-4 py-2 backdrop-blur sm:px-6">
-          <label
-            for="kiln-nav-toggle"
-            class="-ml-1 cursor-pointer rounded-md p-2 text-base-content/70 hover:bg-base-200 lg:hidden"
-          >
-            <.icon name="hero-bars-3" class="size-5" />
-            <span class="sr-only">{gettext("Menu")}</span>
-          </label>
-          <%!-- Chrome label, not a heading: each page body owns the single <h1>
+        <%!-- The strip rides inside the sticky container rather than above it:
+              an environment indicator that scrolls away is visible only when
+              nothing is at stake. One border, at the bottom of the header, so
+              the shell keeps its single hairline. --%>
+        <div class="sticky top-0 z-20">
+          <.environment_banner />
+          <header class="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-content/10 bg-base-100/90 px-4 py-2 backdrop-blur sm:px-6">
+            <label
+              for="kiln-nav-toggle"
+              class="-ml-1 cursor-pointer rounded-md p-2 text-base-content/70 hover:bg-base-200 lg:hidden"
+            >
+              <.icon name="hero-bars-3" class="size-5" />
+              <span class="sr-only">{gettext("Menu")}</span>
+            </label>
+            <%!-- Chrome label, not a heading: each page body owns the single <h1>
                 (its main heading), so this stays a plain element to preserve
                 one-h1-per-page (regression #174). --%>
-          <div :if={@page_title} class="truncate text-sm font-semibold tracking-tight">
-            {@page_title}
-          </div>
-          <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-            <.link
-              navigate={~p"/editor/search"}
-              class="hidden items-center gap-2 rounded-md border border-base-content/15 px-2.5 py-1.5 text-sm text-base-content/60 hover:bg-base-200 sm:flex"
-            >
-              <.icon name="hero-magnifying-glass" class="size-4" />
-              <span>{gettext("Search")}</span>
-              <span class="kbd ml-1">⌘K</span>
-            </.link>
-            {render_slot(@actions)}
-            <.locale_switcher />
-            <.theme_toggle />
-          </div>
-        </header>
+            <div :if={@page_title} class="truncate text-sm font-semibold tracking-tight">
+              {@page_title}
+            </div>
+            <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+              <.link
+                navigate={~p"/editor/search"}
+                class="hidden items-center gap-2 rounded-md border border-base-content/15 px-2.5 py-1.5 text-sm text-base-content/60 hover:bg-base-200 sm:flex"
+              >
+                <.icon name="hero-magnifying-glass" class="size-4" />
+                <span>{gettext("Search")}</span>
+                <span class="kbd ml-1">⌘K</span>
+              </.link>
+              {render_slot(@actions)}
+              <.locale_switcher />
+              <.theme_toggle />
+            </div>
+          </header>
+        </div>
 
         <main id="main" class="flex-1 px-4 py-6 sm:px-6 lg:px-8">
           <div class={@container_class}>
@@ -316,6 +333,67 @@ defmodule KilnCMSWeb.Layouts do
     </div>
     """
   end
+
+  @doc """
+  Names the deployment when `KILN_ENV_LABEL` is set, and renders nothing at all
+  otherwise (#469).
+
+  A full-width strip rather than a badge in the header row, deliberately: the
+  incident it prevents is an editor working in the wrong environment on a
+  scrubbed staging clone whose console is byte-for-byte identical to
+  production's, and a pill among six other header controls is exactly the kind
+  of thing you stop seeing after a day. In the console it sits *inside* the
+  sticky header container for the same reason — a strip that scrolls away is
+  visible only at the top of an unscrolled page, which is the moment nothing is
+  at stake.
+
+  The label is real text, not colour alone — the colour is the glance, the word
+  is what survives a screen reader, a monochrome display and the ~8% of readers
+  with a colour-vision deficiency. It carries an `aria-label`, because a bare
+  `<div>` in the chrome belongs to no landmark and would otherwise be reachable
+  only by reading the page linearly. `role="status"` is deliberately absent:
+  this is standing chrome, not an update, and announcing it on every navigation
+  would make it noise.
+
+  `KilnCMS.Environment.tone/0` is asked only when there is a label to draw. It
+  logs on an unrecognized value and this renders once per page, so asking on a
+  deployment that shows no strip would warn forever about a value nothing uses.
+  """
+  def environment_banner(assigns) do
+    assigns = assign(assigns, :label, KilnCMS.Environment.label())
+
+    ~H"""
+    <div
+      :if={@label}
+      aria-label={gettext("Deployment environment")}
+      class={
+        [
+          "flex items-center justify-center gap-2 px-4 py-1 text-xs font-semibold uppercase",
+          # The console's own uppercase micro-label tracking (`.side-section` in
+          # app.css): loose tracking is load-bearing for legibility in caps, and
+          # the shell already picked the value.
+          "tracking-[0.06em]",
+          environment_tone_class(KilnCMS.Environment.tone())
+        ]
+      }
+    >
+      <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
+      <span class="min-w-0 truncate">{gettext("Environment: %{label}", label: @label)}</span>
+    </div>
+    """
+  end
+
+  # `bg-<tone>/N` with `text-<tone>-ink` — an accent used as text on its own pale
+  # tint only reaches ~2-4:1 (the ink-token note in assets/css/app.css). Spelled
+  # out per tone rather than interpolated: Tailwind scans source for literal
+  # class names, so a built string compiles to no CSS at all.
+  #
+  # No neutral clause: `bg-base-200` is ~1.06:1 against the page it would be
+  # drawn on, and a strip nobody can see is worse than no strip.
+  defp environment_tone_class("error"), do: "bg-error/20 text-error-ink"
+  defp environment_tone_class("info"), do: "bg-info/20 text-info-ink"
+  defp environment_tone_class("success"), do: "bg-success/20 text-success-ink"
+  defp environment_tone_class(_warning), do: "bg-warning/20 text-warning-ink"
 
   # First letter of the signed-in user's email, for the account avatar.
   defp user_initial(%{email: email}) when is_binary(email),

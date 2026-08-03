@@ -90,6 +90,12 @@ cmd_up() {
     Serve it by pointing a Kiln instance at:
       DATABASE_URL=${STAGING_DATABASE_URL}
     with a FRESH SECRET_KEY_BASE and outbound integrations left off.
+
+    Also set KILN_ENV_LABEL on that instance, e.g.:
+      KILN_ENV_LABEL=staging
+    The clone keeps production's content AND branding, so without a label its
+    console is indistinguishable from the real one. Leave it unset in production.
+
     Tear it down with: ./scripts/staging.sh down
 EOF
 }
