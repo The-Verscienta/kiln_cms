@@ -31,6 +31,14 @@ defmodule KilnCMSWeb.RateLimit do
     billing_webhook: {300, :timer.minutes(1)}
   }
 
+  @doc false
+  # Test seam: the shipped limits, before the test env's overrides. Nothing in
+  # production should read this — `limits/0` is the effective policy. It exists
+  # so the suite can still pin the numbers the threat model states for the
+  # buckets it also has to raise in order to run (#715).
+  @spec default_limits() :: %{atom() => {pos_integer(), pos_integer()}}
+  def default_limits, do: @default_limits
+
   @doc """
   Effective per-bucket limits: the defaults, with any per-bucket overrides from
   `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{bucket => {limit, scale}}`
@@ -49,6 +57,32 @@ defmodule KilnCMSWeb.RateLimit do
 
   defp configured_limits do
     Application.get_env(:kiln_cms, __MODULE__, []) |> Keyword.get(:limits, %{})
+  end
+
+  # A client whose address the transport did not report. Not an address, so it
+  # cannot collide with one — every such caller shares one budget, which is the
+  # safe reading of "we do not know who this is".
+  @unknown_client "unknown"
+
+  @doc """
+  The bucket key for a client address.
+
+  One function so that every caller spells an address the same way: the plug
+  keys on `conn.remote_ip`, and `KilnCMSWeb.SignInLive` keys on an address
+  resolved from a socket handshake (#715). Those two must produce the same
+  string for the same client, or the shared `:auth` bucket is two buckets.
+  """
+  @spec client_key(:inet.ip_address() | nil) :: String.t()
+  def client_key(nil), do: @unknown_client
+
+  def client_key(address) do
+    # `:inet.ntoa/1` answers `{:error, :einval}` rather than raising on anything
+    # that is not an address tuple. This runs on a public page's hot path, so
+    # the miss shares the unknown bucket instead of 500ing the request.
+    case :inet.ntoa(address) do
+      formatted when is_list(formatted) -> to_string(formatted)
+      _invalid -> @unknown_client
+    end
   end
 
   @doc "Returns `:allow` or `{:deny, retry_after_ms}` for the given bucket key."

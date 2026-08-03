@@ -83,9 +83,8 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
     """
   end
 
-  defp remote_ip(conn) do
-    conn.remote_ip
-    |> :inet.ntoa()
-    |> to_string()
-  end
+  # Through `RateLimit.client_key/1` rather than formatted here, so this and the
+  # socket path (`KilnCMSWeb.SignInLive`) cannot spell one client two ways and
+  # split the `:auth` bucket they are meant to share (#715).
+  defp remote_ip(conn), do: RateLimit.client_key(conn.remote_ip)
 end
