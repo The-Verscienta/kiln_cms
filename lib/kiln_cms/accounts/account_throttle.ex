@@ -36,15 +36,20 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   exists to bound. So `consume/1` is the only gate, it runs once per attempt,
   and nothing reads the counter to decide.
 
-  ## It never reveals whether an account exists
+  ## The pre-account buckets never reveal whether an account exists
 
-  Every bucket keys on the **submitted identifier**, normalized and hashed —
-  never on a resolved user id. An address with no account throttles exactly like
+  Every bucket reached *before* an account is known — sign-in and the two mail
+  budgets — keys on the **submitted identifier**, normalized and hashed, never on
+  a resolved user id. An address with no account throttles exactly like
   one with an account, the caller renders the refusal as the same generic
   failure a wrong password produces, and
   `KilnCMS.Accounts.Preparations.ThrottleSignIn` spends the same bcrypt time on
   a refusal that AshAuthentication spends on a miss, so the refusal is not a
   timing oracle either.
+
+  The second-factor bucket (below) is the exception that proves the rule: it
+  keys on a resolved user id, and it can, because by the time it is reached the
+  caller has already proved the first factor and the account is not in question.
 
   The hash is not decoration: this table is a security control keyed on user
   identifiers, and it survives into crash dumps and `:observer`.
@@ -131,12 +136,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   burst can't all pass a check that a later increment would have failed.
   """
   @spec consume(String.t()) :: :allow | {:deny, non_neg_integer()}
-  def consume(identifier) do
-    case hit(key("signin", identifier), window(), budget()) do
-      {:allow, _count} -> :allow
-      {:deny, retry_after_ms} -> {:deny, retry_after_ms}
-    end
-  end
+  def consume(identifier), do: charge("signin", identifier, window(), budget())
 
   @doc """
   Clears the sign-in counter for this identifier.
@@ -157,12 +157,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   moduledoc for why those share a budget.
   """
   @spec consume_second_factor(String.t()) :: :allow | {:deny, non_neg_integer()}
-  def consume_second_factor(user_id) do
-    case hit(key("2fa", user_id), second_factor_window(), second_factor_budget()) do
-      {:allow, _count} -> :allow
-      {:deny, retry_after_ms} -> {:deny, retry_after_ms}
-    end
-  end
+  def consume_second_factor(user_id),
+    do: charge("2fa", user_id, second_factor_window(), second_factor_budget())
 
   @doc """
   Clears the second-factor counter for this account.
@@ -232,18 +228,47 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   end
 
   @doc false
+  # Test seam: the shipped limits, before any config override. Nothing in
+  # production reads this — the private accessors below are the effective
+  # policy. It exists so a suite can assert on the numbers the threat model
+  # states while still overriding them to run (#714).
+  @spec defaults() :: keyword()
+  def defaults do
+    [
+      budget: @budget,
+      window: @window,
+      second_factor_budget: @second_factor_budget,
+      second_factor_window: @second_factor_window,
+      mail_budget: @mail_budget,
+      mail_window: @mail_window
+    ]
+  end
+
+  @doc false
   # Test seam: forget everything about an identifier, so a suite can assert on a
   # deterministic budget without waiting out a real window.
   #
-  # The buckets are not all keyed on the same *kind* of subject — sign-in and
-  # mail key on a submitted email address, the second factor on a user id — so
-  # a test that wants both cleared calls this with both.
+  # Covers only the buckets keyed on a submitted email address. The second
+  # factor keys on a user id, which is a different subject entirely, so it is
+  # cleared through `forgive_second_factor/1` rather than folded in here — the
+  # alternative deletes a `2fa:<hash of an email>` row that nothing ever writes.
   @spec reset(String.t()) :: :ok
   def reset(identifier) do
     forgive(identifier)
-    forgive_second_factor(identifier)
     drop(key("signin:alert", identifier), @alert_window)
     Enum.each([:password_reset, :magic_link], &drop(key("mail:#{&1}", identifier), mail_window()))
+  end
+
+  # One atomic increment-and-compare per bucket. Shared rather than copied per
+  # bucket so that "the gate *is* the counter" — see the moduledoc — holds by
+  # construction for every budget here, present and future. The arity-1 public
+  # functions stay, because the per-bucket `@doc` is where the reasoning lives
+  # and a public `charge(prefix, …)` would let a call site pick a budget.
+  defp charge(prefix, subject, window, budget) do
+    case hit(key(prefix, subject), window, budget) do
+      {:allow, _count} -> :allow
+      {:deny, retry_after_ms} -> {:deny, retry_after_ms}
+    end
   end
 
   # Hammer's `set/3` is spec'd `count :: pos_integer()`, so zeroing a bucket is a

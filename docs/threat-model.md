@@ -61,7 +61,7 @@ the router so preflights are answered before route matching).
 | Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
 | Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`; password sign-in also per-account (#478) |
-| Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth` + per-account, tighter than sign-in (#714) |
+| Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Sign-in submit over `/live` | LiveView `"submit"` on `/sign-in` | credentials → session | `:auth`, charged on the action (#715) + per-account (#478) |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |

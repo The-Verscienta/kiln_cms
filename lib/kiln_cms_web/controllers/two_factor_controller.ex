@@ -53,10 +53,13 @@ defmodule KilnCMSWeb.TwoFactorController do
         redirect(conn, to: ~p"/sign-in")
 
       {:deny, retry_after_ms} ->
-        # The pending token is deliberately left in the session: the user has
-        # done nothing wrong and should be able to try again when the window
-        # rolls, without re-entering their password. Its own five-minute
-        # lifetime still applies.
+        # The pending token is left in the session rather than cleared — the
+        # caller has not failed authentication, so bouncing them to `/sign-in`
+        # would be the wrong answer to "you have tried too often". It will not
+        # usually outlive the wait: `@pending_2fa_max_age` is five minutes and
+        # this window is fifteen, so a refused user will normally re-enter their
+        # password and land back here. That is fine and is the point — the
+        # budget keys on the account, so a fresh token does not refill it.
         conn
         |> put_resp_header("retry-after", Integer.to_string(div(retry_after_ms, 1000)))
         |> render_form(429, gettext("Too many attempts. Wait a few minutes and try again."))
@@ -72,8 +75,16 @@ defmodule KilnCMSWeb.TwoFactorController do
   # recovery code, burned on use in the same update (#331). The consume action
   # returns a fresh record; the pending first-factor token from `pending_user/1`
   # is reattached so `complete_sign_in` can store the session.
+  #
+  # Inner whitespace is stripped, not just trimmed. Authenticator apps display
+  # the code as `123 456`, and Safari's `autocomplete="one-time-code"` fill and
+  # a plain paste both carry that space through. Before the budget existed that
+  # cost a retry; now it costs one of five, so three pastes and one genuine
+  # clock-skew miss would lock a user out for fifteen minutes without their ever
+  # having entered a wrong code. (The recovery-code path already normalizes case
+  # and separators for the same reason — see `RecoveryCodes`.)
   defp second_factor(user, code) when is_binary(code) do
-    if Totp.valid?(user.totp_secret, String.trim(code)) do
+    if Totp.valid?(user.totp_secret, String.replace(code, ~r/\s/u, "")) do
       {:ok, user}
     else
       case Accounts.consume_totp_recovery_code(user, %{code: code}, authorize?: false) do

@@ -3661,7 +3661,7 @@ msgstr "Introduzca un código actual para desactivarla"
 msgid "Enter a path starting with /."
 msgstr "Introduzca una ruta que empiece por /."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:128
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr "Introduzca el código de 6 dígitos de su aplicación de autenticación o uno de sus códigos de recuperación."
@@ -4954,7 +4954,7 @@ msgstr "Ese código no es válido: la autenticación de doble factor sigue activ
 msgid "That code isn't valid — try again."
 msgstr "Ese código no es válido: inténtelo de nuevo."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:65
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:68
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Try again."
 msgstr "Ese código no es válido. Inténtelo de nuevo."
@@ -5116,8 +5116,8 @@ msgstr "Traducciones"
 msgid "Tue"
 msgstr "mar"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:123
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:127
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:134
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:138
 #: lib/kiln_cms_web/live/settings_live.ex:369
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
@@ -5191,7 +5191,7 @@ msgstr "Use «true» para que la casilla aparezca marcada por defecto."
 msgid "User"
 msgstr "Usuario"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:140
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:151
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr "Verificar"
@@ -7202,7 +7202,7 @@ msgstr "No la usa ningún documento publicado."
 msgid "and %{count} more"
 msgstr "y %{count} más"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:62
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:65
 #, elixir-autogen, elixir-format
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr "Demasiados intentos. Espere unos minutos e inténtelo de nuevo."

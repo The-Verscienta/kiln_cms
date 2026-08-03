@@ -22,6 +22,7 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
   @password "password123456"
   @budget 3
   @mail_budget 2
+  @second_factor_budget 2
 
   setup do
     previous = Application.get_env(:kiln_cms, AccountThrottle, [])
@@ -33,7 +34,9 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
         budget: @budget,
         window: :timer.minutes(15),
         mail_budget: @mail_budget,
-        mail_window: :timer.hours(1)
+        mail_window: :timer.hours(1),
+        second_factor_budget: @second_factor_budget,
+        second_factor_window: :timer.minutes(15)
       )
     )
 
@@ -309,21 +312,6 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
   end
 
   describe "the second-factor budget (#714)" do
-    @second_factor_budget 2
-
-    setup do
-      previous = Application.get_env(:kiln_cms, AccountThrottle, [])
-
-      Application.put_env(
-        :kiln_cms,
-        AccountThrottle,
-        Keyword.put(previous, :second_factor_budget, @second_factor_budget)
-      )
-
-      on_exit(fn -> Application.put_env(:kiln_cms, AccountThrottle, previous) end)
-      :ok
-    end
-
     test "is separate from the sign-in budget, so neither spends the other" do
       user_id = Ecto.UUID.generate()
       address = email()
@@ -343,7 +331,13 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
     end
 
     test "is tighter than the sign-in budget, because six digits are guessable" do
-      assert @second_factor_budget < @budget
+      # Read through `defaults/0`, not from this file's own overrides: those are
+      # numbers the *test* chose, so comparing them would assert `2 < 3` and
+      # stay green if the shipped second-factor budget were raised to fifty.
+      # This is the one assertion behind the claim the moduledoc and the threat
+      # model both make, so it has to look at what actually ships.
+      defaults = AccountThrottle.defaults()
+      assert defaults[:second_factor_budget] < defaults[:budget]
     end
 
     test "a verified code clears it" do

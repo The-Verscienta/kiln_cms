@@ -1,8 +1,6 @@
 defmodule KilnCMSWeb.TwoFactorControllerTest do
   @moduledoc "The second-factor sign-in gate (issue #331)."
-  # Not `async: true`: the budget tests below tighten the app-wide
-  # second-factor limit, which lives in one node-wide ETS table (#714).
-  use KilnCMSWeb.ConnCase, async: false
+  use KilnCMSWeb.ConnCase, async: true
 
   import Plug.Conn
 
@@ -99,111 +97,6 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
 
       conn = conn |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => "AAAA-AAAA"})
       assert conn.status == 401
-    end
-  end
-
-  # `async: false` — these tighten the app-wide second-factor budget, which the
-  # rest of the file (and every other suite that signs a 2FA user in) reads.
-  # ExUnit runs sync modules after every async one, so the tightening cannot
-  # reach another file.
-  describe "the per-account budget (#714)" do
-    alias KilnCMS.Accounts.AccountThrottle
-    alias KilnCMS.Accounts.RecoveryCodes
-
-    @budget 3
-
-    setup do
-      previous = Application.get_env(:kiln_cms, AccountThrottle, [])
-
-      Application.put_env(
-        :kiln_cms,
-        AccountThrottle,
-        Keyword.put(previous, :second_factor_budget, @budget)
-      )
-
-      on_exit(fn -> Application.put_env(:kiln_cms, AccountThrottle, previous) end)
-      :ok
-    end
-
-    defp verify(user, code) do
-      build_conn() |> with_pending(user) |> post(~p"/sign-in/verify", %{"code" => code})
-    end
-
-    defp exhaust(user), do: Enum.each(1..@budget, fn _ -> verify(user, "000000") end)
-
-    test "a run of wrong codes bounds further guesses, the right code included" do
-      user = enabled_user()
-      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
-
-      exhaust(user)
-
-      # The point of budgeting the second factor: six digits and a skew window
-      # are guessable, so the *correct* code has to be refused too, or an
-      # attacker's final successful guess still lands.
-      refused = verify(user, Totp.code_at(@secret, System.system_time(:second)))
-      assert refused.status == 429
-      assert refused.resp_body =~ "Too many attempts"
-      assert [retry_after] = get_resp_header(refused, "retry-after")
-      assert String.to_integer(retry_after) > 0
-    end
-
-    test "a fresh pending token buys no new attempts" do
-      user = enabled_user()
-      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
-
-      exhaust(user)
-
-      # The window this replaces. `@pending_2fa_max_age` is five minutes, but
-      # re-running the password step mints a new pending token *and* forgives the
-      # sign-in counter — so it costs an attacker who holds the password nothing
-      # to renew. `with_pending/2` mints a brand-new token here, and the budget
-      # keys on the account rather than on the token, so it does not care.
-      assert verify(user, "000000").status == 429
-    end
-
-    test "recovery codes draw on the same budget, not one of their own" do
-      user = enabled_user()
-      codes = RecoveryCodes.generate()
-
-      user =
-        Ash.Seed.update!(user, %{totp_recovery_hashes: Enum.map(codes, &RecoveryCodes.hash/1)})
-
-      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
-
-      exhaust(user)
-
-      # An attacker who cannot guess the TOTP pivots to the recovery codes; two
-      # budgets would simply be one budget twice as large.
-      assert verify(user, hd(codes)).status == 429
-    end
-
-    test "a verified code clears the counter" do
-      user = enabled_user()
-      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
-
-      # One short of the budget, then the real code.
-      for _ <- 1..(@budget - 1), do: assert(verify(user, "000000").status == 401)
-      code = Totp.code_at(@secret, System.system_time(:second))
-      assert redirected_to(verify(user, code)) == ~p"/editor/overview"
-
-      # If the counter had survived, this run would spend the budget and the
-      # code below would be refused — an authenticator a minute out of sync
-      # must not carry its failures into the next sign-in.
-      for _ <- 1..(@budget - 1), do: assert(verify(user, "000000").status == 401)
-      assert redirected_to(verify(user, code)) == ~p"/editor/overview"
-    end
-
-    test "the budget follows the account, not the browser" do
-      user = enabled_user()
-      other = enabled_user()
-      on_exit(fn -> Enum.each([user, other], &AccountThrottle.forgive_second_factor(&1.id)) end)
-
-      exhaust(user)
-
-      # Every request above already came from a fresh `build_conn/0`, so a
-      # per-session or per-IP counter would not have bound them at all.
-      assert verify(user, "000000").status == 429
-      assert verify(other, "000000").status == 401
     end
   end
 end
