@@ -120,6 +120,19 @@
         });
       })();
     </script>
+    <%!-- Per-site code injection (#490), last in <head> so a snippet can
+          override anything above it. `assigns[:code_injection]` is set ONLY by
+          `KilnCMSWeb.Plugs.CodeInjection` in the `:delivery` pipeline, so this
+          renders nothing on the editor console — an org admin's script must
+          never execute in an operator's authenticated session, and the pipeline
+          is what guarantees that rather than a condition someone has to
+          remember here.
+
+          `raw/1` is the whole feature: the point is to run a <script>, so there
+          is no sanitizer. What bounds it is org-admin-only writes, a version
+          trail on every change, and a CSP that only allows the origins and
+          script hashes recorded alongside the snippet. --%>
+    {raw(assigns[:code_injection] && assigns[:code_injection].head_html)}
   </head>
   <body>
     <%!-- Skip link (#175): first focusable element, visually hidden until
@@ -131,5 +144,9 @@
       {gettext("Skip to main content")}
     </a>
     {@inner_content}
+    <%!-- The footer half of #490 — last in <body>, so a widget that appends to
+          the DOM finds the page already built. Same delivery-only contract as
+          the head snippet above. --%>
+    {raw(assigns[:code_injection] && assigns[:code_injection].footer_html)}
   </body>
 </html>

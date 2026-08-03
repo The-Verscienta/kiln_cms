@@ -194,6 +194,25 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved code injection (#490) — the snippet **and**
+  the CSP sources that let it run, which is why the two are one cached struct.
+  """
+  def code_injection_key(org_id), do: "code_injection:#{org_id}"
+
+  @doc """
+  Drop a site's cached code injection after a settings save.
+
+  Staler than branding would be: the struct carries the CSP sources as well as
+  the HTML, so a stale entry serves the NEW snippet under the OLD policy — a
+  blocked script and a console error rather than a visibly out-of-date page.
+  """
+  @spec bust_code_injection(Ash.UUID.t()) :: :ok
+  def bust_code_injection(org_id) do
+    if enabled?(), do: Cachex.del(@cache, code_injection_key(org_id))
+    :ok
+  end
+
+  @doc """
   Cache key for a site's generated sitemap XML (shared with the sitemap
   controller). Per-org (epic #336): each organization serves its own sitemap of
   its own published URLs.

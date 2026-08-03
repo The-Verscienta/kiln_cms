@@ -180,6 +180,12 @@ defmodule KilnCMSWeb.Router do
   # Light per-IP ceiling for public HTML delivery (especially cache-miss paths).
   pipeline :delivery do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
+    # Per-site code injection (#490). ONLY here — the root layout is shared with
+    # the editor console, so "delivery only" is enforced by which pipeline the
+    # plug lives in rather than by a conditional in the template. Runs after
+    # `:browser`'s `put_browser_csp`, because it rewrites the header that plug
+    # set.
+    plug KilnCMSWeb.Plugs.CodeInjection
   end
 
   # Public form submissions (admin-defined forms). No CSRF — the endpoints
@@ -310,6 +316,10 @@ defmodule KilnCMSWeb.Router do
       # White-label branding for the current site (#48) — name, logo, colour.
       # Org-scoped: you brand the site you're on (switch org by host).
       live "/editor/branding", BrandingLive, :index
+      # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
+      # by the live session's tier gate AND the resource policy; the snippet is
+      # rendered only by the `:delivery` pipeline, never here.
+      live "/editor/code-injection", CodeInjectionLive, :index
       live "/editor/mail", MailSettingsLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus

@@ -470,6 +470,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-swatch"
           },
           %{
+            key: :code_injection,
+            label: gettext("Code injection"),
+            path: ~p"/editor/code-injection",
+            icon: "hero-code-bracket"
+          },
+          %{
             key: :types,
             label: gettext("Content types"),
             path: ~p"/editor/types",
