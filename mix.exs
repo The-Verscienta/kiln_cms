@@ -153,6 +153,7 @@ defmodule KilnCMS.MixProject do
       "docs/data-flows.md": [],
       # Security & access
       "docs/policy-matrix.md": [],
+      "docs/code-injection.md": [],
       "docs/granular-rbac.md": [],
       "docs/passkeys.md": [],
       "docs/two-factor-auth.md": [],
@@ -213,6 +214,7 @@ defmodule KilnCMS.MixProject do
         "docs/multiplayer-preview.md",
         "docs/editorial-consent.md",
         "docs/governance-dashboard.md",
+        "docs/code-injection.md",
         "docs/localization-workflows.md",
         "docs/automation.md",
         "docs/newsletter.md",

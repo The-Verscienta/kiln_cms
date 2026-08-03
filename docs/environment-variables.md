@@ -456,8 +456,8 @@ production.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/test.exs:103`](../config/test.exs#L103) |
-| `KILN_STRICT_TEST` | unset | Set to the literal `1` to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Matched as `== "1"` rather than through the shared parser, deliberately — it is read in `config/test.exs`, which cannot call project modules. | [`config/test.exs:187`](../config/test.exs#L187) |
+| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/test.exs:118`](../config/test.exs#L118) |
+| `KILN_STRICT_TEST` | unset | Set to the literal `1` to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Matched as `== "1"` rather than through the shared parser, deliberately — it is read in `config/test.exs`, which cannot call project modules. | [`config/test.exs:202`](../config/test.exs#L202) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:11`](../config/e2e.exs#L11) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:12`](../config/e2e.exs#L12) |
 | `POSTGRES_HOST` | `localhost` | E2E database host. | [`config/e2e.exs:13`](../config/e2e.exs#L13) |

@@ -302,6 +302,25 @@ anyone who hits an old URL, and branding tokens render on every public page.
 Both reads are tenant-scoped, so a request sees only its own site's rows. The
 slug-change hook that writes redirects runs as the **system**.
 
+## Code injection — `SiteCodeInjection` (#490)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteCodeInjection` (`read`) | ✅ everyone incl. anonymous | admin only (`save`, `update`, `destroy`) |
+| `SiteCodeInjection.Version` (`read`) | admin only | ❌ nobody (system-written, never destroyed) |
+
+The row's contents are served verbatim to anonymous visitors, so the read policy
+says they are public rather than pretending otherwise. The **history** is not:
+"what the site serves now" and "who put it there, and what it said last week"
+are different questions with different audiences, so the version twin is
+org-admin only and has no writable action at all.
+
+Writes are the tightest surface in this table for their size — this is stored
+XSS by design, so an org admin writing it is the whole authorization model. The
+second half of that model is not a policy: `KilnCMSWeb.Plugs.CodeInjection` runs
+only in the `:delivery` pipeline, so the snippet can never render in the editor
+console. See [code-injection.md](code-injection.md).
+
 ## Content types — `TypeDefinition`
 
 | Action | admin | editor | viewer | anonymous |

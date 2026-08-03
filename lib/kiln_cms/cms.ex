@@ -288,6 +288,21 @@ defmodule KilnCMS.CMS do
       define :reset_site_branding, action: :destroy
     end
 
+    # Per-site custom head/footer HTML for the DELIVERY site (#490). Stored XSS
+    # by design — org-admin write, delivery-only render. Read through
+    # `KilnCMS.CodeInjection`, never directly.
+    resource KilnCMS.CMS.SiteCodeInjection do
+      define :list_site_code_injection, action: :read
+      define :save_site_code_injection, action: :save
+      define :reset_site_code_injection, action: :destroy
+    end
+
+    # The version twin: "who added that script, and when". Registered because
+    # AshPaperTrail generates it into this domain.
+    resource KilnCMS.CMS.SiteCodeInjection.Version do
+      define :list_code_injection_versions, action: :read
+    end
+
     # Editorial/authorization consent linked to content (#356).
     resource KilnCMS.CMS.Consent do
       define :record_consent, action: :record
