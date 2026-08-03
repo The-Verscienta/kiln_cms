@@ -34,7 +34,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Preferred display order for the block palette; any block type registered
   # beyond these is appended automatically (the palette is registry-driven, so
   # adding a `Kiln.Block` module needs no editor change).
-  @type_order ~w(rich_text heading quote image embed divider columns faq how_to claim custom)
+  @type_order ~w(rich_text heading quote image gallery embed divider columns accordion faq how_to claim custom)
+
+  # Block types edited by `item_rows_editor/1` — a repeating label + body row —
+  # and the `{:array, :map}` param names those rows bind into. Both lists are
+  # load-bearing beyond the component: `normalize_item_rows/1` needs the field
+  # names to turn indexed maps back into lists, and the add/remove handlers
+  # guard on them. A block added to one and not the other silently loses its
+  # rows on save, which is why they sit together here rather than inline.
+  @row_editor_types ~w(faq how_to accordion)
+  @row_fields ~w(items steps panels)
 
   # Child block types offerable inside a `columns` container (#335). A curated
   # subset with simple field editors — nested blocks get functional inputs, not
@@ -164,6 +173,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
          |> assign(:picking, nil)
+         |> assign(:picked, [])
          |> assign(:media_query, "")
          # nil = not searching (browse the mounted window); a list = DB search
          # results, so the picker also finds items beyond that window.
@@ -947,7 +957,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       params
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
-      |> normalize_geo_items()
+      |> normalize_item_rows()
       |> normalize_tag_ids()
 
     {params, socket} = sync_slug(params, event["_target"], socket)
@@ -1265,6 +1275,47 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # A mode outside insert/replace is ignored, not left to fall through.
   def handle_event("assist_apply", _params, socket), do: {:noreply, socket}
 
+  # The gallery's picker is multi-select (#482): a gallery is built from several
+  # images at once, and re-opening a drawer per image turns "add these eight" into
+  # eight round trips through a modal.
+  def handle_event("open_gallery_picker", %{"bid" => bid}, socket)
+      when is_binary(bid) and bid != "",
+      do: {:noreply, socket |> assign(:picking, {:gallery, bid}) |> assign(:picked, [])}
+
+  def handle_event("open_gallery_picker", _params, socket), do: {:noreply, socket}
+
+  # Selection is an ordered list, not a set: the order images are clicked is the
+  # order they land in the gallery, which is the least surprising thing a
+  # multi-select can do and saves a reorder afterwards.
+  def handle_event("toggle_pick", %{"id" => id, "url" => url}, socket) do
+    picked = socket.assigns.picked
+
+    picked =
+      if Enum.any?(picked, &(&1.id == id)),
+        do: Enum.reject(picked, &(&1.id == id)),
+        else: picked ++ [%{id: id, url: url}]
+
+    {:noreply, assign(socket, :picked, picked)}
+  end
+
+  def handle_event("add_picked_images", %{"bid" => bid}, socket) do
+    case socket.assigns.picked do
+      [] ->
+        {:noreply, reset_picker(socket)}
+
+      picked ->
+        # Alt is left blank deliberately rather than seeded from the library
+        # item: `MediaItem.alt` is the library-wide description, and what ships
+        # is the block's own. Pre-filling it would make a per-placement
+        # description look already written, and the publish gate (#403) is what
+        # asks for it — better it asks than that a stale default sails past.
+        rows = for image <- picked, do: %{"url" => image.url, "media_id" => image.id, "alt" => ""}
+
+        {:noreply, socket} = update_gallery_images(socket, bid, &(&1 ++ rows))
+        {:noreply, reset_picker(socket)}
+    end
+  end
+
   def handle_event("close_picker", _params, socket),
     do: {:noreply, reset_picker(socket)}
 
@@ -1433,19 +1484,71 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # same targeted-update pattern as `pick_image` at an index), so there's no
   # parallel socket state to keep in sync.
 
-  def handle_event("geo_item_add", %{"index" => index, "field" => field}, socket)
-      when field in ["items", "steps"] do
-    update_geo_items(socket, index, field, &(&1 ++ [%{}]))
+  def handle_event("item_row_add", %{"index" => index, "field" => field}, socket)
+      when field in @row_fields do
+    update_item_rows(socket, index, field, &(&1 ++ [%{}]))
   end
 
   def handle_event(
-        "geo_item_remove",
+        "item_row_remove",
         %{"index" => index, "field" => field, "item" => item},
         socket
       )
-      when field in ["items", "steps"] do
-    update_geo_items(socket, index, field, &List.delete_at(&1, to_int(item)))
+      when field in @row_fields do
+    update_item_rows(socket, index, field, &List.delete_at(&1, to_int(item)))
   end
+
+  # ── gallery image rows (#482) ───────────────────────────────────────────────
+
+  def handle_event("gallery_remove", %{"bid" => bid, "item" => item}, socket) do
+    update_gallery_images(socket, bid, &List.delete_at(&1, to_int(item)))
+  end
+
+  def handle_event("gallery_move", %{"bid" => bid, "item" => item, "dir" => dir}, socket) do
+    from = to_int(item)
+    to = if dir == "up", do: from - 1, else: from + 1
+
+    update_gallery_images(socket, bid, fn images ->
+      # BOTH ends checked. `to_int/1` accepts a negative, and `Enum.at(images,
+      # -1)` is the last row rather than an error — so an unchecked `from` moves
+      # the wrong image, and one past the end inserts a `nil` into an
+      # `{:array, :map}` the resource refuses to save.
+      bounds = 0..(length(images) - 1)//1
+
+      if from in bounds and to in bounds do
+        moved = Enum.at(images, from)
+        images |> List.delete_at(from) |> List.insert_at(to, moved)
+      else
+        images
+      end
+    end)
+  end
+
+  # The client reports the new order as a list of the *previous* row indices,
+  # and the server rebuilds from those — never from row content, which the
+  # client could have edited between the drag and the event.
+  def handle_event("gallery_reorder", %{"bid" => bid, "order" => order}, socket)
+      when is_list(order) do
+    update_gallery_images(socket, bid, fn images ->
+      # Deduped and rejected by INDEX, never by value. Two rows pointing at the
+      # same media item are identical maps, so matching on the map itself
+      # collapses them into one and then drops both from the tail — a drag on a
+      # gallery holding one image twice would silently delete a copy.
+      indices =
+        order
+        |> Enum.map(&to_int/1)
+        |> Enum.filter(&(&1 in 0..(length(images) - 1)//1))
+        |> Enum.uniq()
+
+      # Any row the client failed to mention keeps its place at the end rather
+      # than being dropped: a stale or partial order must not delete images.
+      unmentioned = Enum.reject(0..(length(images) - 1)//1, &(&1 in indices))
+
+      for index <- indices ++ Enum.to_list(unmentioned), do: Enum.at(images, index)
+    end)
+  end
+
+  def handle_event("gallery_reorder", _params, socket), do: {:noreply, socket}
 
   # Remove the block with stable id `bid`. Resolving the id to a path now (rather
   # than trusting a path captured at render) means an in-flight reorder can't turn
@@ -1582,7 +1685,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       params
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
-      |> normalize_geo_items()
+      |> normalize_item_rows()
       |> normalize_tag_ids()
 
     result =
@@ -2086,7 +2189,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # item rows normalized — the shared path for events that rebuild block params
   # (e.g. an image pick) so a partial update can't drop the nested tree.
   defp revalidate(socket, params) do
-    params = params |> inject_children(socket.assigns.block_children) |> normalize_geo_items()
+    params = params |> inject_children(socket.assigns.block_children) |> normalize_item_rows()
     assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
   end
 
@@ -2154,40 +2257,57 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
 
-  # Merge `fields` into the block at `index`, tolerating params where blocks are
-  # an indexed map (the usual LiveView shape) or a list.
-  defp put_block(params, index, fields) do
-    Map.update(params, "blocks", %{to_string(index) => fields}, fn
-      blocks when is_map(blocks) ->
-        Map.update(blocks, to_string(index), fields, &Map.merge(&1, fields))
-
-      blocks when is_list(blocks) ->
-        List.update_at(blocks, String.to_integer(index), &Map.merge(&1 || %{}, fields))
-    end)
-  end
-
   # ── GEO item rows: params helpers (#357) ────────────────────────────────────
 
   # Apply `fun` to the item list of one block (by index) and re-validate.
-  defp update_geo_items(socket, index, field, fun) do
-    params =
-      socket.assigns.form
-      |> AshPhoenix.Form.params()
-      |> normalize_geo_items()
+  defp update_item_rows(socket, index, field, fun) do
+    # The FULL block set, not a partial params write. `AshPhoenix.Form.params/1`
+    # is `only_touched?`, so a form freshly loaded from a saved record carries no
+    # `blocks` key at all — and `validate/2` rebuilds the sub-forms from the keys
+    # it is given, so writing `%{"blocks" => %{"0" => …}}` deletes every other
+    # block in the document. `pick_image` already carries the full set through
+    # for exactly this reason; these buttons need it just as much, and more
+    # often, since the gallery's only route to its first image is one of them.
+    #
+    # Rebuilding also resolves the "params or stored value?" question: each
+    # block's input map already carries its rows, whether they came from the
+    # record or from something the editor typed.
+    blocks = full_blocks_input(socket.assigns.form)
+    index = to_int(index)
 
-    current = params |> block_param_at(index) |> Map.get(field) |> List.wrap()
-    params = put_block(params, to_string(index), %{field => fun.(current)})
+    case Enum.at(blocks, index) do
+      nil ->
+        {:noreply, socket}
 
-    socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
-    broadcast_preview(socket)
-    {:noreply, mark_dirty(socket)}
+      block ->
+        current = block |> Map.get(field) |> stringify_rows()
+        blocks = List.replace_at(blocks, index, Map.put(block, field, fun.(current)))
+
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> Map.put("blocks", blocks)
+
+        socket = revalidate(socket, params)
+        broadcast_preview(socket)
+        {:noreply, mark_dirty(socket)}
+    end
   end
 
-  defp block_param_at(params, index) do
-    case params["blocks"] do
-      blocks when is_map(blocks) -> Map.get(blocks, to_string(index)) || %{}
-      blocks when is_list(blocks) -> Enum.at(blocks, to_int(index)) || %{}
-      _ -> %{}
+  defp stringify_rows(value) do
+    value
+    |> List.wrap()
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(&Map.new(&1, fn {k, v} -> {to_string(k), v} end))
+  end
+
+  # Resolve the block id to an index *now* rather than trusting one captured at
+  # render, for the reason `remove_block` gives: an in-flight reorder must not
+  # turn a click on one block into an edit of another.
+  defp update_gallery_images(socket, bid, fun) do
+    case block_index_by_id(socket.assigns.form, bid) do
+      nil -> {:noreply, socket}
+      index -> update_item_rows(socket, index, "images", fun)
     end
   end
 
@@ -2195,7 +2315,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (`"items" => %{"0" => %{…}}`) — convert to the ordered lists the blocks'
   # `{:array, :map}` fields cast. Non-numeric keys (the always-present sentinel
   # that keeps the param submitted when every row is removed) are dropped.
-  defp normalize_geo_items(params) do
+  defp normalize_item_rows(params) do
     # `Map.update/4` would *insert* a nil `blocks` key on block-less params
     # (title-only edits), which AshPhoenix's nested-form validate chokes on.
     case params do
@@ -2211,7 +2331,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp normalize_block_items(%{} = block) do
-    Enum.reduce(["items", "steps"], block, fn key, block ->
+    # `images` is the gallery's row field. It is not in `@row_fields` because it
+    # is not edited by `item_rows_editor/1` — but it is still an indexed map on
+    # the wire, so it needs the same flattening or a gallery loses every image
+    # on save.
+    Enum.reduce(@row_fields ++ ["images"], block, fn key, block ->
       case block do
         %{^key => %{} = indexed} -> Map.put(block, key, indexed_items_to_list(indexed))
         _ -> block
@@ -2450,8 +2574,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # nil (image hidden) for rejected schemes like `javascript:`/`data:`.
   defp safe_preview_src(url), do: KilnCMS.HTMLSanitizer.safe_image_src(url)
 
-  defp reset_picker(socket),
-    do: socket |> assign(:picking, nil) |> assign(:media_query, "") |> assign(:picker_media, nil)
+  defp reset_picker(socket) do
+    socket
+    |> assign(:picking, nil)
+    |> assign(:picked, [])
+    |> assign(:media_query, "")
+    |> assign(:picker_media, nil)
+  end
 
   # ── AI-assisted SEO drafting (#60) ────────────────────────────────────────
 
@@ -3747,6 +3876,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
+  defp pick_index({:gallery, _id}), do: "gallery"
   defp pick_index(:featured), do: "featured"
   defp pick_index(:seo_image), do: "seo_image"
   defp pick_index({:block, _id}), do: "block"
@@ -3755,6 +3885,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The target block's stable id for a per-block pick; nil for featured/new picks
   # (so no `phx-value-bid` attribute is emitted for those).
   defp pick_block_id({:block, id}), do: id
+  defp pick_block_id({:gallery, id}), do: id
   defp pick_block_id(_), do: nil
 
   attr :block_types, :list, required: true
@@ -3875,6 +4006,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :media, :list, required: true
   attr :results, :list, default: nil
   attr :query, :string, required: true
+  attr :picked, :list, default: []
 
   # Media-library browser as a right-side drawer (Theme D). It slides in beside the
   # editor rather than a full-screen modal that blanks the whole surface, so you
@@ -3883,7 +4015,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # image block (`{:block, id}`). Browse + search + insert; while a query is active
   # `results` (a DB search) replaces the browse window.
   defp image_picker(assigns) do
-    assigns = assign(assigns, :visible, assigns.results || assigns.media)
+    assigns =
+      assigns
+      |> assign(:visible, assigns.results || assigns.media)
+      |> assign(:multi?, match?({:gallery, _id}, assigns.index))
 
     ~H"""
     <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
@@ -3939,13 +4074,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <button
               :for={item <- @visible}
               type="button"
-              phx-click="pick_image"
+              phx-click={if @multi?, do: "toggle_pick", else: "pick_image"}
               phx-value-index={pick_index(@index)}
               phx-value-bid={pick_block_id(@index)}
               phx-value-id={item.id}
               phx-value-url={item.url}
               title={item.filename}
-              class="group overflow-hidden rounded border border-base-content/10 hover:ring-2 hover:ring-primary"
+              aria-pressed={@multi? && to_string(picked_position(@picked, item.id) != nil)}
+              class={[
+                "group relative overflow-hidden rounded border hover:ring-2 hover:ring-primary",
+                if(picked_position(@picked, item.id),
+                  do: "border-primary ring-2 ring-primary",
+                  else: "border-base-content/10"
+                )
+              ]}
             >
               <img
                 src={item.url}
@@ -3953,16 +4095,52 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 loading="lazy"
                 class="aspect-square w-full object-cover"
               />
+              <%!-- The number, not a tick: in a multi-select whose order becomes
+                    the gallery order, "which one did I click third" is the thing
+                    an editor actually needs to see. --%>
+              <span
+                :if={position = picked_position(@picked, item.id)}
+                class="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-content"
+              >
+                {position}
+              </span>
             </button>
           </div>
+        </div>
+
+        <div
+          :if={@multi?}
+          class="flex items-center justify-between gap-3 border-t border-base-content/10 p-4"
+        >
+          <p class="text-sm text-base-content/70">
+            {ngettext("%{count} image selected", "%{count} images selected", length(@picked))}
+          </p>
+          <button
+            type="button"
+            phx-click="add_picked_images"
+            phx-value-bid={pick_block_id(@index)}
+            disabled={@picked == []}
+            class="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-content disabled:opacity-40"
+          >
+            {gettext("Add to gallery")}
+          </button>
         </div>
       </div>
     </div>
     """
   end
 
+  # 1-based position of a media id in the current selection, or nil.
+  defp picked_position(picked, id) do
+    case Enum.find_index(picked, &(&1.id == id)) do
+      nil -> nil
+      index -> index + 1
+    end
+  end
+
   # Drawer heading, per open mode.
   defp picker_title(:new), do: gettext("Insert an image")
+  defp picker_title({:gallery, _id}), do: gettext("Add images to the gallery")
   defp picker_title(:featured), do: gettext("Featured image")
   defp picker_title(:seo_image), do: gettext("Choose a social image")
   defp picker_title(_), do: gettext("Choose an image")
@@ -4123,6 +4301,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("divider"), do: "hero-minus"
   defp block_icon("columns"), do: "hero-view-columns"
   defp block_icon("portable_text"), do: "hero-bars-3"
+  defp block_icon("gallery"), do: "hero-photo"
+  defp block_icon("accordion"), do: "hero-bars-3-bottom-left"
   defp block_icon("faq"), do: "hero-question-mark-circle"
   defp block_icon("how_to"), do: "hero-list-bullet"
   defp block_icon("claim"), do: "hero-check-badge"
@@ -4138,6 +4318,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("divider"), do: gettext("Visual separator between sections")
   defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
   defp block_description("portable_text"), do: gettext("Portable Text rich content")
+
+  defp block_description("gallery"),
+    do: gettext("Several images with captions, fired as ImageGallery structured data")
+
+  # Says what it is NOT, because that is the only difference an editor can see:
+  # this and the FAQ block draw the same collapsing panels, and picking the wrong
+  # one publishes a claim that the page is a list of questions and answers.
+  defp block_description("accordion"),
+    do: gettext("Collapsible panels with no structured data — use FAQ for questions and answers")
+
   defp block_description("faq"), do: gettext("Q&A list, fired as FAQPage structured data")
 
   defp block_description("how_to"),
@@ -4251,16 +4441,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # ── GEO item-list editor (faq items / how_to steps, #357) ───────────────────
+  # ── Repeating two-field row editor (faq / how_to / accordion) ───────────────
 
   # Repeatable two-field rows bound straight into the union member's
-  # `{:array, :map}` param (`…[items][0][question]`); `normalize_geo_items`
+  # `{:array, :map}` param (`…[items][0][question]`); `normalize_block_items`
   # turns the indexed maps back into lists on validate/save. The hidden
   # sentinel keeps the param present when every row is removed, so deleting
   # the last row actually clears the stored list.
+  #
+  # Written for the GEO blocks (#357) and generalized when the accordion arrived
+  # (#482) — three blocks, one shape: a label and a body per row. The `case`
+  # below has no fallback on purpose: a block wired into `@row_editor_types`
+  # without a spec here should fail loudly at render rather than draw an empty
+  # box the editor cannot use.
   attr :bf, :any, required: true
 
-  defp geo_items_editor(assigns) do
+  defp item_rows_editor(assigns) do
     {field, key_a, key_b, label_a, label_b, add_label} =
       case block_type_string(assigns.bf) do
         "faq" ->
@@ -4270,13 +4466,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
         "how_to" ->
           {:steps, "name", "text", gettext("Step label (optional)"), gettext("Instruction"),
            gettext("Add step")}
+
+        "accordion" ->
+          {:panels, "title", "content", gettext("Panel title"), gettext("Panel content"),
+           gettext("Add panel")}
       end
 
     assigns =
       assigns
       |> assign(:field, field)
       |> assign(:name, assigns.bf[field].name)
-      |> assign(:items, geo_item_maps(assigns.bf[field].value))
+      |> assign(:items, item_row_maps(assigns.bf[field].value))
       |> assign(:key_a, key_a)
       |> assign(:key_b, key_b)
       |> assign(:label_a, label_a)
@@ -4312,7 +4512,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </div>
         <button
           type="button"
-          phx-click="geo_item_remove"
+          phx-click="item_row_remove"
           phx-value-index={@bf.index}
           phx-value-field={@field}
           phx-value-item={i}
@@ -4325,7 +4525,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       <button
         type="button"
-        phx-click="geo_item_add"
+        phx-click="item_row_add"
         phx-value-index={@bf.index}
         phx-value-field={@field}
         class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
@@ -4338,7 +4538,177 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # The current item rows of an `{:array, :map}` field value, tolerating nil
   # (fresh block) and non-map junk.
-  defp geo_item_maps(value), do: value |> List.wrap() |> Enum.filter(&is_map/1)
+  defp item_row_maps(value), do: value |> List.wrap() |> Enum.filter(&is_map/1)
+
+  # A function rather than `@row_editor_types` inline in the template: inside a
+  # `~H` sigil `@name` means `assigns.name`, so referencing the module attribute
+  # there reads a socket assign that does not exist and raises at render.
+  defp row_editor_type?(type), do: type in @row_editor_types
+
+  # ── gallery editor (#482) ───────────────────────────────────────────────────
+
+  # One row per image: thumbnail, alt, caption, reorder, remove. Rows bind into
+  # the `images` `{:array, :map}` param exactly as the row editor above binds
+  # `items`/`steps`/`panels`, so `normalize_item_rows/1` flattens them the same
+  # way and there is no parallel socket state to keep in sync.
+  #
+  # Reordering is offered twice on purpose. Dragging is the fast path; the
+  # up/down buttons are the one that works from a keyboard, on a touch screen,
+  # and with a screen reader — the same pairing `move_block/2` gives the
+  # top-level list, and the reason it is not a "nice to have" is that a gallery
+  # is *only* an ordering: an editor who cannot reorder it cannot use it.
+  attr :bf, :any, required: true
+
+  defp gallery_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(:name, assigns.bf[:images].name)
+      |> assign(:images, item_row_maps(assigns.bf[:images].value))
+      |> assign(:bid, assigns.bf[:id].value)
+
+    ~H"""
+    <div class="mt-2 space-y-2">
+      <%!-- Keeps the param present when the last image is removed, so clearing a
+            gallery actually clears the stored list rather than leaving the old
+            one untouched. Same trick as the row editor. --%>
+      <input type="hidden" name={"#{@name}[_sentinel]"} value="" />
+
+      <%!-- The gallery draws its own fields, so it is excluded from
+            `dsl_block_fields/1` — which means anything not rendered here is
+            unreachable from the editor entirely. `title` is one of them. --%>
+      <.input field={@bf[:title]} label={gettext("Heading (optional)")} />
+
+      <.input
+        field={@bf[:layout]}
+        type="select"
+        label={gettext("Layout")}
+        options={gallery_layout_options()}
+      />
+
+      <div
+        :if={@images != []}
+        id={"gallery-#{@bid}"}
+        phx-hook="GallerySortable"
+        data-block-id={@bid}
+        class="space-y-2"
+      >
+        <div
+          :for={{image, i} <- Enum.with_index(@images)}
+          data-image-row={i}
+          class="flex items-start gap-2 rounded border border-base-content/10 p-2"
+        >
+          <button
+            type="button"
+            data-image-handle
+            aria-hidden="true"
+            tabindex="-1"
+            class="mt-1 cursor-grab text-base-content/40"
+          >
+            <.icon name="hero-bars-2" class="size-4" />
+          </button>
+
+          <img
+            :if={safe_preview_src(image["url"])}
+            src={safe_preview_src(image["url"])}
+            alt=""
+            class="size-16 shrink-0 rounded border border-base-content/10 object-cover"
+          />
+
+          <div class="grow space-y-1">
+            <input type="hidden" name={"#{@name}[#{i}][url]"} value={image["url"]} />
+            <input type="hidden" name={"#{@name}[#{i}][media_id]"} value={image["media_id"]} />
+            <input
+              type="text"
+              name={"#{@name}[#{i}][alt]"}
+              value={image["alt"]}
+              placeholder={gettext("Alt text — leave blank only if decorative")}
+              aria-label={gettext("Alt text")}
+              phx-debounce="300"
+              class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+            />
+            <input
+              type="text"
+              name={"#{@name}[#{i}][caption]"}
+              value={image["caption"]}
+              placeholder={gettext("Caption (optional)")}
+              aria-label={gettext("Caption")}
+              phx-debounce="300"
+              class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+            />
+          </div>
+
+          <div class="flex flex-col">
+            <button
+              type="button"
+              phx-click="gallery_move"
+              phx-value-bid={@bid}
+              phx-value-item={i}
+              phx-value-dir="up"
+              disabled={i == 0}
+              aria-label={gettext("Move image up")}
+              class="text-base-content/60 hover:text-base-content disabled:opacity-30"
+            >
+              <.icon name="hero-chevron-up" class="size-4" />
+            </button>
+            <button
+              type="button"
+              phx-click="gallery_move"
+              phx-value-bid={@bid}
+              phx-value-item={i}
+              phx-value-dir="down"
+              disabled={i == length(@images) - 1}
+              aria-label={gettext("Move image down")}
+              class="text-base-content/60 hover:text-base-content disabled:opacity-30"
+            >
+              <.icon name="hero-chevron-down" class="size-4" />
+            </button>
+            <button
+              type="button"
+              phx-click="gallery_remove"
+              phx-value-bid={@bid}
+              phx-value-item={i}
+              aria-label={gettext("Remove image")}
+              class="mt-1 text-base-content/60 hover:text-error"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p :if={@images == []} class="text-sm text-base-content/60">
+        {gettext("No images yet.")}
+      </p>
+
+      <button
+        type="button"
+        phx-click="open_gallery_picker"
+        phx-value-bid={@bid}
+        class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+      >
+        <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Add images")}
+      </button>
+    </div>
+    """
+  end
+
+  # A blank first option, because a fresh gallery has `layout: nil` and a select
+  # with no empty entry silently selects whichever option sorts first — the
+  # editor would read "Carousel" while the preview rendered the default grid,
+  # and the first save would post a layout nobody chose. (The columns editor
+  # below prepends "Equal width" for the same reason.) It is also the only way
+  # back to the default once a layout has been picked.
+  defp gallery_layout_options do
+    [{gettext("Grid (default)"), ""}] ++
+      for layout <- KilnCMS.Blocks.Gallery.layouts(),
+          layout != "grid",
+          do: {gallery_layout_label(layout), layout}
+  end
+
+  defp gallery_layout_label("grid"), do: gettext("Grid")
+  defp gallery_layout_label("masonry"), do: gettext("Masonry")
+  defp gallery_layout_label("carousel"), do: gettext("Carousel")
+  defp gallery_layout_label(other), do: other
 
   # ── columns (nested-layout) editor (#335) ───────────────────────────────────
 
@@ -4907,20 +5277,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <.input field={bf[:alt]} label={gettext("Alt text")} />
                       <.input field={bf[:caption]} label={gettext("Caption")} />
                     </div>
+                    <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
                     <.columns_editor
                       :if={block_type_string(bf) == "columns"}
                       bf={bf}
                       columns={col_state(@block_children, bf)}
                       child_types={@nested_child_types}
                     />
-                    <div :if={block_type_string(bf) not in ["rich_text", "image", "columns"]}>
+                    <div :if={
+                      block_type_string(bf) not in ["rich_text", "image", "columns", "gallery"]
+                    }>
                       <.dsl_block_fields
                         bf={bf}
                         role={@tier}
                         locked_fields={@locked_fields}
                         cursors={@cursors}
                       />
-                      <.geo_items_editor :if={block_type_string(bf) in ["faq", "how_to"]} bf={bf} />
+                      <.item_rows_editor :if={row_editor_type?(block_type_string(bf))} bf={bf} />
                     </div>
                     <%!-- Inline "+" to insert a block right after this one (B2). --%>
                     <.block_inserter
@@ -5403,6 +5776,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         media={@media}
         results={@picker_media}
         query={@media_query}
+        picked={@picked}
       />
 
       <.version_compare

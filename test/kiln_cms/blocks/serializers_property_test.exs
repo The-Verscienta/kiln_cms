@@ -7,7 +7,8 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
   use ExUnitProperties
 
   alias KilnCMS.Blocks
-  alias KilnCMS.Blocks.{Custom, Embed, Heading, Image, Quote, RichText}
+  alias KilnCMS.Blocks.{Accordion, Claim, Columns, Custom, Divider, Embed, Faq, Form}
+  alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText}
 
   defp text, do: StreamData.string(:printable, max_length: 40)
 
@@ -41,8 +42,85 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
         %Quote{text: t, featured: f}
       end),
       StreamData.map(text(), fn u -> %Embed{url: u} end),
+      StreamData.map(
+        StreamData.list_of(
+          StreamData.map(StreamData.tuple({text(), text(), text()}), fn {u, a, c} ->
+            %{"url" => u, "alt" => a, "caption" => c, "media_id" => ""}
+          end),
+          max_length: 3
+        ),
+        fn images -> %Gallery{images: images, layout: "grid"} end
+      ),
+      StreamData.map(
+        StreamData.list_of(
+          StreamData.map(StreamData.tuple({text(), text()}), fn {t, c} ->
+            %{"title" => t, "content" => c}
+          end),
+          max_length: 3
+        ),
+        fn panels -> %Accordion{panels: panels} end
+      ),
+      StreamData.map(text(), fn s -> %Form{form_slug: s} end),
+      StreamData.constant(%Divider{}),
+      StreamData.map(StreamData.tuple({text(), text(), text(), text()}), fn {t, st, su, r} ->
+        %Claim{text: t, source_title: st, source_url: su, rating: r}
+      end),
+      StreamData.map(
+        StreamData.list_of(
+          StreamData.map(StreamData.tuple({text(), text()}), fn {q, a} ->
+            %{"question" => q, "answer" => a}
+          end),
+          max_length: 3
+        ),
+        fn items -> %Faq{items: items} end
+      ),
+      StreamData.map(
+        StreamData.list_of(
+          StreamData.map(StreamData.tuple({text(), text()}), fn {n, t} ->
+            %{"name" => n, "text" => t}
+          end),
+          max_length: 3
+        ),
+        fn steps -> %HowTo{steps: steps} end
+      ),
+      # Children are raw maps typed lazily at render, so the interesting inputs
+      # are a well-formed child, a junk child, and none at all.
+      StreamData.map(
+        StreamData.one_of([
+          StreamData.constant([]),
+          StreamData.constant([%{"blocks" => [%{"_type" => "divider"}]}]),
+          StreamData.constant([%{"blocks" => ["not a block"]}])
+        ]),
+        fn cols -> %Columns{columns: cols, layout: "1-1"} end
+      ),
       StreamData.map(text(), fn lt -> %Custom{legacy_type: lt, content: "x", data: %{}} end)
     ])
+  end
+
+  # The generator above is hand-maintained, which means a new block type joins
+  # the registry and this property quietly stops covering it — it does not fail,
+  # it just tests one fewer thing. This is the test that notices.
+  #
+  # Totality (decision A4) is the guarantee the whole firing pipeline rests on:
+  # an unhandled surface must return nil, never raise, because `Engine` maps a
+  # serializer over every block of a document and one raise takes the whole
+  # artifact down.
+  test "the generator covers every registered block type" do
+    generated =
+      block_generator()
+      |> Enum.take(400)
+      |> MapSet.new(fn %mod{} -> Kiln.Block.Info.name(mod) end)
+
+    # Core types only. A plugin's blocks are the plugin's own to guarantee, and
+    # the installed plugin set varies by config — asserting over the full
+    # registry would make this fail for a reason that has nothing to do with the
+    # core serializers.
+    core = MapSet.new(KilnCMS.Blocks.core_types())
+
+    assert MapSet.subset?(core, generated),
+           "no generator for: #{inspect(MapSet.to_list(MapSet.difference(core, generated)))}. " <>
+             "Add one to block_generator/0 — without it the totality property " <>
+             "silently skips this block type."
   end
 
   property "every serializer is total over arbitrary blocks" do
@@ -50,9 +128,20 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
       # Web is always renderable to a binary (iodata), never raises.
       assert is_binary(IO.iodata_to_binary(Blocks.render(block, :web)))
 
-      # JSON is a map; JSON-LD is a map or nil (no contribution) — never raises.
+      # JSON is a map; JSON-LD is nil (no contribution), one node, or several —
+      # never raises. The list arm is not slack: `Kiln.Block.Renderer` declares
+      # `[map()]` and a container block legitimately returns its children's
+      # nodes, which is exactly what `Engine.json_ld_nodes/1` flattens into the
+      # document `@graph`. Asserting map-or-nil here described a narrower
+      # contract than the one the engine implements, and it went unnoticed only
+      # because the generator had no container block in it.
       assert is_map(Blocks.render(block, :json))
-      assert match?(nil, Blocks.render(block, :json_ld)) or is_map(Blocks.render(block, :json_ld))
+
+      case Blocks.render(block, :json_ld) do
+        nil -> :ok
+        node when is_map(node) -> :ok
+        nodes when is_list(nodes) -> assert Enum.all?(nodes, &is_map/1)
+      end
 
       # Search projection is always a string.
       assert is_binary(Blocks.search_text(block))

@@ -565,31 +565,19 @@ defmodule KilnCMSWeb.InContextEditLive do
   # (srcset/focal) is a delivery concern; the edit surface renders the plain
   # source, which is enough to keep the page's shape recognizable.
   #
-  # A `columns` container (#335) is rendered through the shared thin-map builder
-  # so its nested children show in place (read-only here — structural nested
-  # edits live in the full editor, like the other non-text blocks on this surface).
-  # The GEO blocks (#357) also carry data-side fields (items/steps/citation),
-  # which the thin-map builder surfaces for the shared renderer.
-  defp read_only_block(%mod{} = struct)
-       when mod in [
-              KilnCMS.Blocks.Columns,
-              KilnCMS.Blocks.Faq,
-              KilnCMS.Blocks.HowTo,
-              KilnCMS.Blocks.Claim
-            ] do
+  # Everything goes through the shared thin-map builder, so a block that carries
+  # data-side fields — a `columns` container's children (#335), the GEO blocks'
+  # items/steps/citation (#357), a gallery's images or an accordion's panels
+  # (#482) — shows them here without this module knowing which blocks those are.
+  #
+  # This used to be a hardcoded `when mod in [...]` list beside a hand-written
+  # fallback, which meant every new data-carrying block rendered blank on this
+  # surface until someone remembered to add it. The builder already has a total
+  # fallback of its own, so there is nothing for the list to protect.
+  defp read_only_block(struct) do
     [legacy] = TypedBlocks.to_legacy([struct])
     [thin] = BlockComponents.thin_blocks([legacy])
     thin
-  end
-
-  defp read_only_block(struct) do
-    [legacy] = TypedBlocks.to_legacy([struct])
-    base = %{type: to_string(legacy.type), content: legacy.content}
-
-    case to_string(legacy.type) do
-      "image" -> Map.put(base, :alt, Map.get(legacy.data, "alt") || "")
-      _ -> base
-    end
   end
 
   # Stable-id region element id, keyed by `region_version` so a save/restore

@@ -212,6 +212,59 @@ defmodule KilnCMS.Firing.FiringTest do
       assert html =~ "kiln-faq"
       assert html =~ "kiln-claim"
     end
+
+    test "a gallery fires ImageGallery, an accordion fires nothing (#482)" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Gallery",
+            slug: slug(),
+            blocks: [
+              %{
+                type: :gallery,
+                content: "Shots",
+                data: %{
+                  "layout" => "grid",
+                  "images" => [%{"url" => "/a.jpg", "alt" => "A kiln", "caption" => "At work"}]
+                },
+                order: 0
+              },
+              %{
+                type: :accordion,
+                content: "Specifications",
+                data: %{"panels" => [%{"title" => "Size", "content" => "Large"}]},
+                order: 1
+              }
+            ]
+          },
+          actor: actor
+        )
+
+      page = CMS.publish_page!(page, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, ld} = Engine.read(org, :page, page.id, :json_ld)
+      types = Enum.map(ld["@graph"], & &1["@type"])
+
+      assert "ImageGallery" in types
+
+      # The whole point of the accordion existing beside `faq`: it renders the
+      # same collapsing panels and contributes no claim about the page. If this
+      # ever fails, the block has become a duplicate of `faq` under a new name.
+      refute "FAQPage" in types
+
+      # Both still render, and both still project into search + the LLM surface.
+      {:ok, %{"html" => html}} = Engine.read(org, :page, page.id, :web)
+      assert html =~ "kiln-gallery"
+      assert html =~ "kiln-accordion"
+
+      {:ok, %{"markdown" => md}} = Engine.read(org, :page, page.id, :llm)
+      assert md =~ "![A kiln](/a.jpg)"
+      assert md =~ "### Size"
+    end
   end
 
   describe "reads never touch the live tree" do

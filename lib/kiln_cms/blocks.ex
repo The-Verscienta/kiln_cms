@@ -21,6 +21,11 @@ defmodule KilnCMS.Blocks do
     divider: KilnCMS.Blocks.Divider,
     form: KilnCMS.Blocks.Form,
     columns: KilnCMS.Blocks.Columns,
+    gallery: KilnCMS.Blocks.Gallery,
+    # The semantically neutral sibling of `faq` (#482): same `<details>` markup,
+    # deliberately no structured data. See its moduledoc for why that split is by
+    # meaning rather than by looks.
+    accordion: KilnCMS.Blocks.Accordion,
     # GEO blocks (#357): structured Q&A, procedures, and sourced claims whose
     # :json_ld renders expand the fired @graph (FAQPage / HowTo / Claim(Review)).
     faq: KilnCMS.Blocks.Faq,

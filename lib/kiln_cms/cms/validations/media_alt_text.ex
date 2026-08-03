@@ -48,6 +48,7 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
   require Ash.Query
 
   alias KilnCMS.Blocks.Columns
+  alias KilnCMS.Blocks.Gallery
   alias KilnCMS.CMS.MediaItem
   alias KilnCMS.CMS.TypedBlocks
 
@@ -110,10 +111,27 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
   defp blank?(value) when is_binary(value), do: String.trim(value) == ""
   defp blank?(_value), do: false
 
+  # A gallery is one block holding N images, so it is expanded into one
+  # image-shaped map per item — same `alt`/`media_id`/`url` keys the checks below
+  # already read, so every one of them (blank test, decorative lookup, label)
+  # works on a gallery item unchanged.
+  #
+  # Without this a gallery is simply invisible to the gate: `image_without_alt?/1`
+  # tests `Map.has_key?(block, :alt)` and a gallery block has no top-level `alt`,
+  # so a fifty-image gallery with nothing described would publish while a single
+  # undescribed `image` block next to it is refused (#482).
   defp flatten(blocks) do
     Enum.flat_map(List.wrap(blocks), fn
-      %Columns{} = block -> block |> Columns.child_blocks_flat() |> flatten()
-      block -> [block]
+      %Columns{} = block ->
+        block |> Columns.child_blocks_flat() |> flatten()
+
+      %Gallery{} = block ->
+        for image <- Gallery.images(block) do
+          %{alt: image["alt"], media_id: image["media_id"], url: image["url"]}
+        end
+
+      block ->
+        [block]
     end)
   end
 
@@ -121,7 +139,13 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
   defp decorative_ids(candidates, org_id) do
     candidates
     |> Enum.map(&media_id/1)
-    |> Enum.filter(&is_binary/1)
+    # Real uuids only. `media_id` is free-text on the block, and `id` is a uuid
+    # column — Ash rejects a non-uuid at query build, so an imported junk value
+    # would make `Ash.read!` raise here and turn "this image has no alt text"
+    # into an unactionable 500 in the editor. A junk id resolves to no media
+    # item anyway, so dropping it is also the right answer: the image is not
+    # marked decorative, and the gate refuses it.
+    |> Enum.filter(&match?({:ok, _}, Ecto.UUID.cast(&1)))
     |> Enum.uniq()
     |> case do
       [] ->
