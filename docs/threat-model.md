@@ -479,8 +479,14 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     than at a plug it never passes, so brute force over the socket is bounded
     per address exactly as the HTTP form is. What remains is volume: joins are
     uncounted, so a caller replaying a scraped session token pays nothing per
-    attempt, and #700 notes that a *malformed* join costs an error-tracker
-    event. Tracked in #678 and #700.
+    attempt. A *malformed* join — one whose `"url"` is present but not a binary
+    — is worse than uncounted: it function-clauses before any mount hook, ahead
+    of the channel's `try/rescue`, so it is a crash rather than the clean 404 a
+    url-less probe gets. #700 stops that reaching the error tracker
+    (`KilnCMS.SentryFilter` drops exactly that one function's
+    `FunctionClauseError`, leaving the local report intact), so it can no longer
+    be used to bury real alerts or burn a Sentry quota — but the join itself is
+    still free. Tracked in #678.
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
