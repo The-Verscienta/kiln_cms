@@ -248,6 +248,9 @@ defmodule KilnCMSWeb.PresentationLive do
   def render(assigns) do
     ~H"""
     <div class="flex h-[calc(100vh-4rem)] flex-col">
+      <%!-- The presentation console wraps no layout component, so the console's
+            environment strip can never reach it — it has to be drawn here (#469). --%>
+      <KilnCMSWeb.Layouts.environment_banner />
       <div class="flex items-center justify-between border-b border-base-300 bg-base-100 px-4 py-2">
         <div class="flex items-center gap-3">
           <.link navigate={~p"/editor/content/#{@kind}/#{@record.id}"} class="text-sm underline">

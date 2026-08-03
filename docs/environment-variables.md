@@ -15,7 +15,7 @@ compilation and before the system starts.
 > `PHX_SERVER`, `PORT`, `CSP_IMG_SRC`, `UNSPLASH_ACCESS_KEY`, `CORS_ORIGINS`,
 > `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, `PRESENTATION_PREVIEW_URL`,
 > the `KILN_UPDATE_*` group (plus `KILN_PIN_PATH`), `SENTRY_DSN` / `SENTRY_ENV` /
-> `RELEASE_VSN`, and the `OTEL_*` group.
+> `RELEASE_VSN`, the `OTEL_*` group, and `KILN_ENV_LABEL` / `KILN_ENV_COLOR`.
 >
 > Three more are read in every environment **except `:test`**, where they are
 > skipped so the suite cannot depend on a developer's exported shell:
@@ -54,26 +54,26 @@ These must be set when running a production release. Missing `DATABASE_URL`,
 | Variable | Purpose | Where it's read |
 |----------|---------|-----------------|
 | `PHX_SERVER` | Set to start the web server in a release; without it the release boots but does not serve HTTP. The generated `bin/server` script sets this for you. **Presence-checked, not parsed** — the partial exception to the on/off rules above. *Any* value starts the server, including a blank `PHX_SERVER=` and an unrecognized one, because Phoenix documents this as "any truthy value" and reading a declared-but-empty variable as "serve nothing" is a silent outage. The one rule it does honour is the off-spellings: `false`/`0`/`no`/`off` keep the server off, where they used to start it anyway. | [`config/runtime.exs:47`](../config/runtime.exs#L47) |
-| `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime.exs:349`](../config/runtime.exs#L349) |
-| `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime.exs:402`](../config/runtime.exs#L402) |
-| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime.exs:520`](../config/runtime.exs#L520) |
-| `PHX_HOST` | Public hostname used to generate URLs and validate socket origins (defaults to `example.com`, so effectively required — wrong values break links, emails, **and LiveView socket connections**). Bare hostname; any `https://` prefix or trailing `/` is stripped. | [`config/runtime.exs:415`](../config/runtime.exs#L415) |
+| `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime.exs:376`](../config/runtime.exs#L376) |
+| `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime.exs:429`](../config/runtime.exs#L429) |
+| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime.exs:547`](../config/runtime.exs#L547) |
+| `PHX_HOST` | Public hostname used to generate URLs and validate socket origins (defaults to `example.com`, so effectively required — wrong values break links, emails, **and LiveView socket connections**). Bare hostname; any `https://` prefix or trailing `/` is stripped. | [`config/runtime.exs:435`](../config/runtime.exs#L435) |
 
 ## Optional — server & networking
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `PORT` | `4000` | HTTP listen port the Bandit server binds to. | [`config/runtime.exs:52`](../config/runtime.exs#L52) |
-| `CHECK_ORIGINS` | unset | Comma-separated **extra** origins allowed to open LiveView/channel sockets, for when the app is served from more than one hostname (e.g. mid domain migration). Entries may be full origins (`https://cms.example.com`), scheme-less (`//cms.example.com` — any scheme/port), or bare hosts (normalized to `//host`). The `PHX_HOST` origin is always allowed. Unset ⇒ only `PHX_HOST` may connect. | [`config/runtime.exs:428`](../config/runtime.exs#L428) |
-| `CORS_ORIGINS` | unset | Comma-separated allowlist (or `*`) of origins allowed cross-origin **HTTP** reads of the headless API (`/api/*`, `/gql`). Read in every environment; without it prod stays same-origin-only. Does not affect sockets — that's `CHECK_ORIGINS`. See [`KilnCMSWeb.CORS`](../lib/kiln_cms_web/cors.ex). | [`config/runtime.exs:111`](../config/runtime.exs#L111) |
-| `EMBED_ORIGINS` | unset ⇒ same-origin only | Comma-separated allowlist of sites permitted to **iframe** an embeddable form (`/forms/:slug/embed`) — sets that page's CSP `frame-ancestors`. **Unset (or blank) means same-origin only, so cross-site embedding is off until you set it** (#562 — the default used to be `*`). `*` re-opens it to any site; that is a clickjacking surface, since form submission is deliberately CSRF-free. See [`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex) and [forms.md](forms.md#embedding-on-another-site). | [`config/runtime.exs:123`](../config/runtime.exs#L123) |
-| `VISUAL_EDITING_ENABLED` | `true` | Set to an off-spelling to disable the visual-editing bridge (#355): the annotated preview route (`/api/visual-editing/:type/:slug`) 404s and the live-preview socket (`/ws/bridge`) refuses. Which origins may use the bridge (annotated read, write API, socket) is governed by **`CORS_ORIGINS`** — the bridge is cross-origin *to a different app*, so it uses that allowlist, not `CHECK_ORIGINS` (same-app extra hosts). See [visual-editing-bridge.md](visual-editing-bridge.md) and [`KilnCMS.VisualEditing`](../lib/kiln_cms/visual_editing.ex). | [`config/runtime.exs:159`](../config/runtime.exs#L159) |
-| `PRESENTATION_PREVIEW_URL` | unset | The external front end's URL template for the Presentation console (`/editor/presentation/:type/:slug`, #355) — placeholders `{path}`/`{type}`/`{slug}`/`{locale}` (a bare base URL gets `{path}` appended). Unset ⇒ the console shows a setup hint. The front-end origin is derived from this for `postMessage` validation. See [visual-editing-bridge.md](visual-editing-bridge.md#the-presentation-console-side-by-side-editing) and [`KilnCMSWeb.Presentation`](../lib/kiln_cms_web/presentation.ex). | [`config/runtime.exs:279`](../config/runtime.exs#L279) |
-| `POOL_SIZE` | `10` | Ecto database connection pool size. See the pool-sizing formula in [`docs/performance.md`](performance.md). | [`config/runtime.exs:389`](../config/runtime.exs#L389) |
-| `ECTO_IPV6` | unset | Set to an on-spelling to connect to Postgres over IPv6. | [`config/runtime.exs:355`](../config/runtime.exs#L355) |
-| `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset **only** when the app is internet-facing directly, where `X-Forwarded-For` is spoofable. **If you run behind a proxy — Coolify, Traefik, nginx, a cloud load balancer — set this.** Unset there, every request carries the proxy's address, so every rate-limit bucket becomes one shared counter for the whole internet: one noisy client exhausts `:auth` (20/min) for everybody, and the per-IP brute-force protection on `/sign-in` stops being per-IP. Nothing errors, so the app logs a warning once per node the first time a forwarded request arrives while this is unset (#564). | [`config/runtime.exs:467`](../config/runtime.exs#L467) |
-| `DNS_CLUSTER_QUERY` | unset | DNS query for libcluster-style node discovery. | [`config/runtime.exs:455`](../config/runtime.exs#L455) |
-| `KILN_READING_TIME_WPM` | `230` | Words per minute behind the `reading_time_minutes` calculation and the `reading_time()` computed-field function (#492). A non-positive or unparseable value keeps the default and warns on stderr. 230 is a mid-range figure for adult silent reading of English prose; a single rate is an English assumption, so see the caveat in [headless-consumer-guide.md](headless-consumer-guide.md#word-count-and-reading-time). | [`config/runtime.exs:135`](../config/runtime.exs#L135) |
+| `CHECK_ORIGINS` | unset | Comma-separated **extra** origins allowed to open LiveView/channel sockets, for when the app is served from more than one hostname (e.g. mid domain migration). Entries may be full origins (`https://cms.example.com`), scheme-less (`//cms.example.com` — any scheme/port), or bare hosts (normalized to `//host`). The `PHX_HOST` origin is always allowed. Unset ⇒ only `PHX_HOST` may connect. | [`config/runtime.exs:447`](../config/runtime.exs#L447) |
+| `CORS_ORIGINS` | unset | Comma-separated allowlist (or `*`) of origins allowed cross-origin **HTTP** reads of the headless API (`/api/*`, `/gql`). Read in every environment; without it prod stays same-origin-only. Does not affect sockets — that's `CHECK_ORIGINS`. See [`KilnCMSWeb.CORS`](../lib/kiln_cms_web/cors.ex). | [`config/runtime.exs:133`](../config/runtime.exs#L133) |
+| `EMBED_ORIGINS` | unset ⇒ same-origin only | Comma-separated allowlist of sites permitted to **iframe** an embeddable form (`/forms/:slug/embed`) — sets that page's CSP `frame-ancestors`. **Unset (or blank) means same-origin only, so cross-site embedding is off until you set it** (#562 — the default used to be `*`). `*` re-opens it to any site; that is a clickjacking surface, since form submission is deliberately CSRF-free. See [`KilnCMSWeb.Embed`](../lib/kiln_cms_web/embed.ex) and [forms.md](forms.md#embedding-on-another-site). | [`config/runtime.exs:84`](../config/runtime.exs#L84) |
+| `VISUAL_EDITING_ENABLED` | `true` | Set to an off-spelling to disable the visual-editing bridge (#355): the annotated preview route (`/api/visual-editing/:type/:slug`) 404s and the live-preview socket (`/ws/bridge`) refuses. Which origins may use the bridge (annotated read, write API, socket) is governed by **`CORS_ORIGINS`** — the bridge is cross-origin *to a different app*, so it uses that allowlist, not `CHECK_ORIGINS` (same-app extra hosts). See [visual-editing-bridge.md](visual-editing-bridge.md) and [`KilnCMS.VisualEditing`](../lib/kiln_cms/visual_editing.ex). | [`config/runtime.exs:16`](../config/runtime.exs#L16) |
+| `PRESENTATION_PREVIEW_URL` | unset | The external front end's URL template for the Presentation console (`/editor/presentation/:type/:slug`, #355) — placeholders `{path}`/`{type}`/`{slug}`/`{locale}` (a bare base URL gets `{path}` appended). Unset ⇒ the console shows a setup hint. The front-end origin is derived from this for `postMessage` validation. See [visual-editing-bridge.md](visual-editing-bridge.md#the-presentation-console-side-by-side-editing) and [`KilnCMSWeb.Presentation`](../lib/kiln_cms_web/presentation.ex). | [`config/runtime.exs:306`](../config/runtime.exs#L306) |
+| `POOL_SIZE` | `10` | Ecto database connection pool size. See the pool-sizing formula in [`docs/performance.md`](performance.md). | [`config/runtime.exs:416`](../config/runtime.exs#L416) |
+| `ECTO_IPV6` | unset | Set to an on-spelling to connect to Postgres over IPv6. | [`config/runtime.exs:382`](../config/runtime.exs#L382) |
+| `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset **only** when the app is internet-facing directly, where `X-Forwarded-For` is spoofable. **If you run behind a proxy — Coolify, Traefik, nginx, a cloud load balancer — set this.** Unset there, every request carries the proxy's address, so every rate-limit bucket becomes one shared counter for the whole internet: one noisy client exhausts `:auth` (20/min) for everybody, and the per-IP brute-force protection on `/sign-in` stops being per-IP. Nothing errors, so the app logs a warning once per node the first time a forwarded request arrives while this is unset (#564). | [`config/runtime.exs:494`](../config/runtime.exs#L494) |
+| `DNS_CLUSTER_QUERY` | unset | DNS query for libcluster-style node discovery. | [`config/runtime.exs:482`](../config/runtime.exs#L482) |
+| `KILN_READING_TIME_WPM` | `230` | Words per minute behind the `reading_time_minutes` calculation and the `reading_time()` computed-field function (#492). A non-positive or unparseable value keeps the default and warns on stderr. 230 is a mid-range figure for adult silent reading of English prose; a single rate is an English assumption, so see the caveat in [headless-consumer-guide.md](headless-consumer-guide.md#word-count-and-reading-time). | [`config/runtime.exs:162`](../config/runtime.exs#L162) |
 | `CSP_IMG_SRC` | unset | Space-separated **extra** origins allowed in the browser CSP's `img-src` — needed when media serves from a CDN or image host on a different hostname than the site (e.g. `https://media.example.com`). See [media-pipeline.md](media-pipeline.md#production-storage--cdn). | [`config/runtime.exs:58`](../config/runtime.exs#L58) |
 
 > **Note on ports.** The public URL is hardcoded to port `443`/`https`
@@ -90,8 +90,8 @@ One deployment can serve many organizations, each on its own host. The request's
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `TENANT_BASE_HOST` | `PHX_HOST` | The apex tenant subdomains are carved from. Set it only when tenant subdomains live under a different apex than the canonical URL host. | [`config/runtime.exs:477`](../config/runtime.exs#L477) |
-| `TENANT_STRICT_HOST` | `false` | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Recommended for every multi-tenant deployment** (#563) — without it a bare hostname, an IP literal, `localhost` or an attacker-supplied `Host` is served the default site's content, branding and analytics. Leave it off for a single-host install, where the bare host and an IP legitimately arrive unmatched and would start 404ing. The app logs a warning at boot if it is off on a deployment with more than one org. | [`config/runtime.exs:490`](../config/runtime.exs#L490) |
+| `TENANT_BASE_HOST` | `PHX_HOST` | The apex tenant subdomains are carved from. Set it only when tenant subdomains live under a different apex than the canonical URL host. | [`config/runtime.exs:501`](../config/runtime.exs#L501) |
+| `TENANT_STRICT_HOST` | `false` | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Recommended for every multi-tenant deployment** (#563) — without it a bare hostname, an IP literal, `localhost` or an attacker-supplied `Host` is served the default site's content, branding and analytics. Leave it off for a single-host install, where the bare host and an IP legitimately arrive unmatched and would start 404ing. The app logs a warning at boot if it is off on a deployment with more than one org. | [`config/runtime.exs:517`](../config/runtime.exs#L517) |
 
 **What it covers.** Everything the router serves, plus LiveView mounts and all
 three sockets — GraphQL (`/ws/gql`), visual editing (`/ws/bridge`) and
@@ -159,10 +159,10 @@ KilnCMS defaults. All four are read only under `:prod`; for dev or test, set
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime.exs:501`](../config/runtime.exs#L501) |
-| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime.exs:502`](../config/runtime.exs#L502) |
-| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime.exs:503`](../config/runtime.exs#L503) |
-| `BRAND_PRIMARY_COLOR` | unset | Hex colour (`#1d4ed8`) driving the emitted OKLCH theme tokens. Anything that isn't a hex colour is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. | [`config/runtime.exs:504`](../config/runtime.exs#L504) |
+| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime.exs:528`](../config/runtime.exs#L528) |
+| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime.exs:525`](../config/runtime.exs#L525) |
+| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime.exs:530`](../config/runtime.exs#L530) |
+| `BRAND_PRIMARY_COLOR` | unset | Hex colour (`#1d4ed8`) driving the emitted OKLCH theme tokens. Anything that isn't a hex colour is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. | [`config/runtime.exs:523`](../config/runtime.exs#L523) |
 
 ## Optional — Unsplash (media library)
 
@@ -174,8 +174,8 @@ KilnCMS defaults. All four are read only under `:prod`; for dev or test, set
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `DATABASE_SSL` | `true` | Encrypt the Postgres connection. Set to an off-spelling only for a provider that genuinely cannot offer TLS — an unrecognized value keeps TLS on rather than silently downgrading to plaintext (#606). | [`config/runtime.exs:366`](../config/runtime.exs#L366) |
-| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`); unset — or blank, like every variable above — leaves the connection encrypted but `verify_none`. | [`config/runtime.exs:374`](../config/runtime.exs#L374) |
+| `DATABASE_SSL` | `true` | Encrypt the Postgres connection. Set to an off-spelling only for a provider that genuinely cannot offer TLS — an unrecognized value keeps TLS on rather than silently downgrading to plaintext (#606). | [`config/runtime.exs:15`](../config/runtime.exs#L15) |
+| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`); unset — or blank, like every variable above — leaves the connection encrypted but `verify_none`. | [`config/runtime.exs:386`](../config/runtime.exs#L386) |
 
 ## Optional — object storage (S3-compatible)
 
@@ -188,15 +188,15 @@ CDN deployment guide.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:542`](../config/runtime.exs#L542) |
-| `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:549`](../config/runtime.exs#L549) |
-| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:564`](../config/runtime.exs#L564) |
-| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:565`](../config/runtime.exs#L565) |
-| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:567`](../config/runtime.exs#L567) |
-| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:556`](../config/runtime.exs#L556) |
-| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:571`](../config/runtime.exs#L571) |
-| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:573`](../config/runtime.exs#L573) |
-| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:575`](../config/runtime.exs#L575) |
+| `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:566`](../config/runtime.exs#L566) |
+| `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:576`](../config/runtime.exs#L576) |
+| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:591`](../config/runtime.exs#L591) |
+| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:592`](../config/runtime.exs#L592) |
+| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:594`](../config/runtime.exs#L594) |
+| `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:583`](../config/runtime.exs#L583) |
+| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:568`](../config/runtime.exs#L568) |
+| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:600`](../config/runtime.exs#L600) |
+| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:602`](../config/runtime.exs#L602) |
 
 Media objects are uploaded with `Cache-Control: public, max-age=31536000,
 immutable` — there is no env var for it, because storage keys are write-once
@@ -237,16 +237,16 @@ outbound port 25.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:694`](../config/runtime.exs#L694) |
-| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:734`](../config/runtime.exs#L734) |
-| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:766`](../config/runtime.exs#L766) |
-| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:695`](../config/runtime.exs#L695) |
-| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:726`](../config/runtime.exs#L726) |
-| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:727`](../config/runtime.exs#L727) |
-| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:728`](../config/runtime.exs#L728) |
-| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:729`](../config/runtime.exs#L729) |
-| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:712`](../config/runtime.exs#L712) |
-| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:742`](../config/runtime.exs#L742) |
+| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:707`](../config/runtime.exs#L707) |
+| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:713`](../config/runtime.exs#L713) |
+| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:793`](../config/runtime.exs#L793) |
+| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:707`](../config/runtime.exs#L707) |
+| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:753`](../config/runtime.exs#L753) |
+| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:754`](../config/runtime.exs#L754) |
+| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:755`](../config/runtime.exs#L755) |
+| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:709`](../config/runtime.exs#L709) |
+| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:736`](../config/runtime.exs#L736) |
+| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:769`](../config/runtime.exs#L769) |
 | `DKIM_PRIVATE_KEY` | unset | Direct mode's DKIM signing key (PKCS#1 RSA PEM, same shape as the provenance key). **Most deployments should not set this**: `/editor/mail` generates the keypair, picks a selector, prints the TXT record to publish and then verifies it against DNS alongside SPF, DMARC, PTR and outbound port 25. This variable exists for a deployment whose policy forbids a private key in the database — select the env provider on that page (it falls back to this variable name when none is given, [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex#L8)) and supply the PEM yourself, because that provider is read-only and the Generate button can no longer help. A blank value counts as unset. Being a multi-line PEM it carries the same `.env`-parser caveat as `KILN_PROVENANCE_PRIVATE_KEY`, so the file provider is the better of the two escape hatches. Generate with `openssl genrsa -traditional -out kiln-dkim.pem 2048`, and stay at 2048 bits — a 4096-bit public half overflows the 255-byte TXT string limit. See [direct-email-delivery.md](direct-email-delivery.md). | [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex) |
 
 ## Optional — search (Meilisearch)
@@ -257,9 +257,9 @@ after enabling. See [`docs/meilisearch.md`](meilisearch.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:584`](../config/runtime.exs#L584) |
-| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:588`](../config/runtime.exs#L588), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
-| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:589`](../config/runtime.exs#L589) |
+| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:608`](../config/runtime.exs#L608) |
+| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:615`](../config/runtime.exs#L615), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
+| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:616`](../config/runtime.exs#L616) |
 
 ## Optional — AI-assisted SEO drafting
 
@@ -273,8 +273,8 @@ and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md)
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime.exs:604`](../config/runtime.exs#L604) |
-| `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs:606`](../config/runtime.exs#L606) |
+| `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime.exs:621`](../config/runtime.exs#L621) |
+| `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs:630`](../config/runtime.exs#L630) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | unset | Provider credentials. **Read by `req_llm`, never by Kiln** — they don't enter Kiln's config or database. | `req_llm` |
 
 ## Optional — AI block assist in the editor
@@ -287,8 +287,8 @@ boot warning for a hosted provider. See [`docs/ai-assist.md`](ai-assist.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs:627`](../config/runtime.exs#L627) |
-| `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs:629`](../config/runtime.exs#L629) |
+| `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs:648`](../config/runtime.exs#L648) |
+| `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs:652`](../config/runtime.exs#L652) |
 
 ## Optional — error tracking (Sentry)
 
@@ -297,9 +297,9 @@ capture is a no-op. See [`docs/observability.md`](observability.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SENTRY_DSN` | unset | Sentry DSN (`https://<publickey>@o0.ingest.sentry.io/0`, or your own host when self-hosting). Enables error reporting when set. **Where to get it:** the Sentry project's Settings → Client Keys (DSN). It is not confidential in the strict sense — browser SDKs ship it publicly — but it does authorize writes to the project, so handle it like a credential anyway. | [`config/runtime.exs:74`](../config/runtime.exs#L74) |
-| `SENTRY_ENV` | `config_env()` | Environment name tag for Sentry events. | [`config/runtime.exs:77`](../config/runtime.exs#L77) |
-| `RELEASE_VSN` | unset | Release version tag (set automatically by the release runtime) to pin regressions to a deploy. | [`config/runtime.exs:80`](../config/runtime.exs#L80) |
+| `SENTRY_DSN` | unset | Sentry DSN (`https://<publickey>@o0.ingest.sentry.io/0`, or your own host when self-hosting). Enables error reporting when set. **Where to get it:** the Sentry project's Settings → Client Keys (DSN). It is not confidential in the strict sense — browser SDKs ship it publicly — but it does authorize writes to the project, so handle it like a credential anyway. | [`config/runtime.exs:97`](../config/runtime.exs#L97) |
+| `SENTRY_ENV` | `config_env()` | Environment name tag for Sentry events. | [`config/runtime.exs:104`](../config/runtime.exs#L104) |
+| `RELEASE_VSN` | unset | Release version tag (set automatically by the release runtime) to pin regressions to a deploy. | [`config/runtime.exs:107`](../config/runtime.exs#L107) |
 
 ## Optional — distributed tracing (OpenTelemetry)
 
@@ -309,9 +309,9 @@ Enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which flips the
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP collector endpoint — anything that speaks OTLP: a local `otel-collector`, Grafana Alloy, Jaeger, or a vendor's ingest URL. Enables tracing when set. Port 4318 is the conventional HTTP port, 4317 gRPC; match it to the protocol below. | [`config/runtime.exs:90`](../config/runtime.exs#L90) |
-| `OTEL_SERVICE_NAME` | `kiln_cms` | Service name attached to spans. Free-form — this is how the deployment is labelled in the tracing UI. | [`config/runtime.exs:96`](../config/runtime.exs#L96) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol: `http_protobuf`, `http_json` or `grpc`. | [`config/runtime.exs:100`](../config/runtime.exs#L100) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP collector endpoint — anything that speaks OTLP: a local `otel-collector`, Grafana Alloy, Jaeger, or a vendor's ingest URL. Enables tracing when set. Port 4318 is the conventional HTTP port, 4317 gRPC; match it to the protocol below. | [`config/runtime.exs:117`](../config/runtime.exs#L117) |
+| `OTEL_SERVICE_NAME` | `kiln_cms` | Service name attached to spans. Free-form — this is how the deployment is labelled in the tracing UI. | [`config/runtime.exs:115`](../config/runtime.exs#L115) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol: `http_protobuf`, `http_json` or `grpc`. | [`config/runtime.exs:115`](../config/runtime.exs#L115) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | unset | Standard OTLP headers, as comma-separated `key=value` pairs (`api-key=abc123,x-tenant=acme`) — usually the ingest credential from whichever vendor `OTEL_EXPORTER_OTLP_ENDPOINT` points at. Honored by the exporter library, not by Kiln. | OpenTelemetry exporter (standard `OTEL_*`) |
 
 ## Optional — tamper-evident history & content signing (#356, #340)
@@ -323,11 +323,11 @@ configured. See [editorial-consent.md](editorial-consent.md) and
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `KILN_AUDIT_ANCHOR_EVERY_WRITE` | `false` | Set to `true`/`1`/`yes`/`on` to anchor **every** versioned write, not just publishes — #356's "sign every version, not just published artifacts". Closes the window between two publishes, at the cost of one signature and one `history_anchors` row per save — **and** of autosave coalescing, which cannot collapse rows an anchor has committed to, so every debounced draft save keeps its own version row (#671; `docs/editorial-consent.md` has the reasoning). A regulated deployment wants this; a blog does not. Read at runtime so it can be turned off without rebuilding the image — note this only governs the per-write extension; the `:audit_anchors_enabled` master switch is still compile-time. Only a recognized spelling writes config, so an unrecognized value keeps the configured default rather than being read as "off" — silently not signing is the dangerous direction. Ignored under `MIX_ENV=test` so the suite stays deterministic. | [`config/runtime.exs:185`](../config/runtime.exs#L185) |
+| `KILN_AUDIT_ANCHOR_EVERY_WRITE` | `false` | Set to `true`/`1`/`yes`/`on` to anchor **every** versioned write, not just publishes — #356's "sign every version, not just published artifacts". Closes the window between two publishes, at the cost of one signature and one `history_anchors` row per save — **and** of autosave coalescing, which cannot collapse rows an anchor has committed to, so every debounced draft save keeps its own version row (#671; `docs/editorial-consent.md` has the reasoning). A regulated deployment wants this; a blog does not. Read at runtime so it can be turned off without rebuilding the image — note this only governs the per-write extension; the `:audit_anchors_enabled` master switch is still compile-time. Only a recognized spelling writes config, so an unrecognized value keeps the configured default rather than being read as "off" — silently not signing is the dangerous direction. Ignored under `MIX_ENV=test` so the suite stays deterministic. | [`config/runtime.exs:212`](../config/runtime.exs#L212) |
 | `KILN_PROVENANCE_PRIVATE_KEY` | unset | PKCS#1 RSA private key PEM (`BEGIN RSA PRIVATE KEY`) used to sign history anchors and C2PA-*style* content manifests (#340). Unset ⇒ anchors are stored **unsigned** — still an integrity checksum, but the anchor row itself is no longer tamper-proof, and `verify` reports `:unsigned` rather than `:verified`. The key source is configurable (`config :kiln_cms, KilnCMS.Provenance, signing_key:`); this var is only the default `{:env, …}` binding, so a deployment that set `signing_key: :dkim` or a `{:file, …}` in source ignores it. It is also a multi-line value and most `.env` parsers do not carry embedded newlines; prefer `KILN_PROVENANCE_KEY_FILE`. PKCS#8 is rejected — convert with `openssl rsa -in key.pem -traditional`. | [`config/config.exs:471`](../config/config.exs#L471) |
-| `KILN_PROVENANCE_KEY_FILE` | unset | Path to the same PEM, mounted as a file (Docker/K8s secret). Sets `signing_key: {:file, …}` at runtime — before #608 this shape existed only in `config/config.exs`, i.e. only with a rebuild. It replaces `signing_key` **wholesale**, so it wins over `KILN_PROVENANCE_PRIVATE_KEY` (mount the file first, unset the var after) but equally over a source-configured `:dkim` or `{:file, …}` — setting it switches the signing key, and every new anchor gets a new `key_id`. | [`config/runtime.exs:227`](../config/runtime.exs#L227) |
-| `KILN_PROVENANCE_RETIRED_KEY_FILES` | unset | Comma-separated **paths** to the public halves of keys that no longer sign but must still verify. Sets `:retired_key_files`, which `KeyRegistry.retired/0` **unions** with any `:retired_keys` configured in source — so the env route can only add verification keys, never drop one. (That holds because this var is the sole writer of `:retired_key_files`; put source config in `:retired_keys`.) Blank entries are ignored, so a trailing comma is harmless, and a value with no paths at all warns and changes nothing rather than clearing the list. An unreadable path is logged and skipped rather than blinding the keys that do resolve. Paths only — a public key is multi-line too — and since `,` separates and each entry is trimmed, a path containing a comma or significant leading/trailing whitespace can't be expressed here; use `retired_keys` in source for those. | [`config/runtime.exs:254`](../config/runtime.exs#L254) |
-| `KILN_PROVENANCE_ENABLED` | `false` | Set to `true`/`1`/`yes`/`on` to produce signed manifests for fired artifacts and serve `/api/provenance/*`. **A signing key alone is not enough**: with this unset, the key signs history anchors and every provenance endpoint still returns `404`. Parsed by the shared [on/off rules](#onoff-variables), so an unrecognized value keeps the default and warns rather than turning signing off. Ignored under `MIX_ENV=test`. See [provenance.md](provenance.md). | [`config/runtime.exs:215`](../config/runtime.exs#L215) |
+| `KILN_PROVENANCE_KEY_FILE` | unset | Path to the same PEM, mounted as a file (Docker/K8s secret). Sets `signing_key: {:file, …}` at runtime — before #608 this shape existed only in `config/config.exs`, i.e. only with a rebuild. It replaces `signing_key` **wholesale**, so it wins over `KILN_PROVENANCE_PRIVATE_KEY` (mount the file first, unset the var after) but equally over a source-configured `:dkim` or `{:file, …}` — setting it switches the signing key, and every new anchor gets a new `key_id`. | [`config/runtime.exs:254`](../config/runtime.exs#L254) |
+| `KILN_PROVENANCE_RETIRED_KEY_FILES` | unset | Comma-separated **paths** to the public halves of keys that no longer sign but must still verify. Sets `:retired_key_files`, which `KeyRegistry.retired/0` **unions** with any `:retired_keys` configured in source — so the env route can only add verification keys, never drop one. (That holds because this var is the sole writer of `:retired_key_files`; put source config in `:retired_keys`.) Blank entries are ignored, so a trailing comma is harmless, and a value with no paths at all warns and changes nothing rather than clearing the list. An unreadable path is logged and skipped rather than blinding the keys that do resolve. Paths only — a public key is multi-line too — and since `,` separates and each entry is trimmed, a path containing a comma or significant leading/trailing whitespace can't be expressed here; use `retired_keys` in source for those. | [`config/runtime.exs:276`](../config/runtime.exs#L276) |
+| `KILN_PROVENANCE_ENABLED` | `false` | Set to `true`/`1`/`yes`/`on` to produce signed manifests for fired artifacts and serve `/api/provenance/*`. **A signing key alone is not enough**: with this unset, the key signs history anchors and every provenance endpoint still returns `404`. Parsed by the shared [on/off rules](#onoff-variables), so an unrecognized value keeps the default and warns rather than turning signing off. Ignored under `MIX_ENV=test`. See [provenance.md](provenance.md). | [`config/runtime.exs:242`](../config/runtime.exs#L242) |
 
 > **Rotating the signing key.** Verification resolves the key named by each
 > signature's `key_id`, so pre-rotation anchors and manifests keep verifying —
@@ -369,12 +369,32 @@ page then reports the version alone.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests. | [`config/runtime.exs:305`](../config/runtime.exs#L305) |
+| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests. | [`config/runtime.exs:321`](../config/runtime.exs#L321) |
 | `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](../projects/README.md). | [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
+
+## Optional — environment indicator
+
+A coloured strip across the top of every console page naming this deployment
+(#469). A scrubbed staging clone keeps production's content *and* branding, so
+the two consoles are otherwise byte-for-byte identical — which is what invites
+"I edited the wrong environment".
+
+**Unset means no strip**, so production stays clean with nothing configured. It
+is the environment you recognise by the absence of a label; staging and
+development are the ones that set these.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_ENV_LABEL` | unset | The name shown in the strip (`staging`, `dev`, `qa`). Unset ⇒ no strip at all. | [`KilnCMS.Environment`](../lib/kiln_cms/environment.ex) |
+| `KILN_ENV_COLOR` | `warning` | Which design-kit tone to render it in: `warning`, `error`, `info`, `success`. **A tone name, not a hex** — the kit pairs each tone with an `-ink` text token chosen to clear WCAG contrast against that tone's tint, and a supplied colour would take the tint while keeping ink picked for a different one. An unrecognized name logs a warning and falls back to `warning`. | [`KilnCMS.Environment`](../lib/kiln_cms/environment.ex) |
+
+`mix kiln.staging.scrub` and `scripts/staging.sh up` both close with a reminder
+to set this. Neither can set it: the scrub runs as a throwaway process against a
+remote `DATABASE_URL`, not inside the application that will serve the clone.
 
 ## Optional — seeding and staging
 
@@ -402,8 +422,8 @@ production.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/test.exs:91`](../config/test.exs#L91) |
-| `KILN_STRICT_TEST` | unset | Set to the literal `1` to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Matched as `== "1"` rather than through the shared parser, deliberately — it is read in `config/test.exs`, which cannot call project modules. | [`config/test.exs:175`](../config/test.exs#L175) |
+| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/test.exs:96`](../config/test.exs#L96) |
+| `KILN_STRICT_TEST` | unset | Set to the literal `1` to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Matched as `== "1"` rather than through the shared parser, deliberately — it is read in `config/test.exs`, which cannot call project modules. | [`config/test.exs:185`](../config/test.exs#L185) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:11`](../config/e2e.exs#L11) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:12`](../config/e2e.exs#L12) |
 | `POSTGRES_HOST` | `localhost` | E2E database host. | [`config/e2e.exs:13`](../config/e2e.exs#L13) |
