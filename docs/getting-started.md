@@ -2,7 +2,7 @@
 
 KilnCMS is a CMS that is headless *and* traditional: the same content is served
 through JSON:API, GraphQL, MCP and a RAG endpoint, and rendered directly by the
-app. It runs on the STAPLE stack (Phoenix · Tailwind · LiveView · Elixir) with
+app. It runs on Phoenix · Ash · LiveView · Tailwind · Elixir, with
 the **Ash Framework** at its core — resources, not schemas, are the source of
 truth for storage, actions, authorization and the publishing state machine.
 
