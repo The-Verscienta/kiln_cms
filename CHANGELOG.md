@@ -364,6 +364,53 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **A second-factor lockout now tells the owner.** #478 mails an account owner
+  when their *password* is being guessed at. #714 added the equivalent budget
+  for the *second factor* and mailed nobody, which is backwards on signal
+  strength: reaching the code prompt requires a signed pending token, and that
+  token is only minted once a **first factor has already succeeded**. A
+  second-factor lockout is not "someone is guessing at your account" — it is
+  "someone got in far enough to be asked for a code".
+
+  It was worse than an unwired notification. The password alert *cannot* fire in
+  that scenario: to keep grinding codes an attacker must keep minting pending
+  tokens, which means re-running the first factor, and that step succeeds — so
+  `ThrottleSignIn` forgives the sign-in counter every time and its budget is
+  never reached. Net: in the one case where a primary credential was provably in
+  someone else's hands, the owner received nothing at all.
+
+  `KilnCMS.Accounts.SecondFactor.charge/1` now fires the alert for **both**
+  sign-in gates — the browser prompt and the headless
+  `POST /api/auth/sign_in/verify`. Shared rather than written out per
+  controller because it is three coupled pieces (the charge, the alert, the
+  deny shape), and a gate that quietly stopped alerting would look exactly like
+  a working one; that is #726 in miniature.
+
+  The copy is careful about two things the obvious wording gets wrong:
+
+  - It does **not** say "someone has your password".
+    `AuthController.success/4` is the callback for every registered strategy,
+    so a magic link and an SSO assertion reach the code prompt exactly as a
+    password does. For those users the compromised credential is their mailbox
+    or their identity provider, and a mail telling them to change their Kiln
+    password would leave the actual hole open. The mail names all three.
+  - It does **not** assume an attacker. The budget is shared with the settings
+    forms (#727), so an owner who fumbles five codes regenerating their recovery
+    set and then signs in normally trips this with nobody attacking them — the
+    likeliest trigger in practice. "If that was you" comes second, before the
+    intrusion paragraph rather than after it.
+
+  Its once-per-six-hours budget is separate from the password alert's, so the
+  weaker signal cannot suppress the stronger one in exactly the order an attack
+  produces them. The refusal is logged when the mail goes and when it is
+  suppressed, and a delivery failure hands the claimed window back rather than
+  swallowing six hours of alerts along with the one mail.
+
+  A lockout confined to `/editor/settings`, with no sign-in attempt after it,
+  still notifies nobody — the person there holds a session rather than a first
+  factor, so it is different news and wants different copy. Filed as #757.
+  (#728)
+
 - **The three TOTP actions on `/editor/settings` are now budgeted, so a stolen
   session can't grind the six digits that gate them.** #714 bounded the second
   factor at `POST /sign-in/verify`; the other actions that check the same code

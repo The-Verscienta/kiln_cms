@@ -132,6 +132,32 @@ build if a resource is ever registered without that authorizer.
   refusal in the auth flow: the account is already known to whoever is asking,
   so there is nothing to hide, and a generic "that code isn't valid" would tell
   a legitimate user their correct code was wrong.
+
+  A lockout at either sign-in gate **mails the owner** (#728), and it is a much
+  stronger signal than the password alert above: reaching that prompt requires
+  a pending token, and a pending token is only minted once a **first factor has
+  already succeeded**. That case is also structurally invisible to the password
+  alert — sustaining the grind means re-running the first factor, which
+  succeeds and forgives the sign-in counter every time, so its budget is never
+  reached. Before #728 the one case where a primary credential was provably in
+  someone else's hands produced no notification at all.
+
+  The copy is careful about two things the obvious wording gets wrong. It does
+  **not** say "someone has your password": `AuthController.success/4` is the
+  callback for every strategy, so a magic link or an OIDC assertion reaches the
+  prompt the same way, and for those users the compromised credential is a
+  mailbox or an IdP — the mail names all three rather than sending them to
+  secure the wrong account. And it does not assume an attacker, because the
+  budget is shared with the settings forms (#727), so an owner who fumbles
+  codes there and then signs in trips it with nobody attacking them. Its
+  once-per-six-hours budget is separate from the password alert's, so the
+  weaker signal cannot suppress the stronger one in exactly the order an attack
+  produces them; the refusal is logged when the mail goes and when it is
+  suppressed; and a delivery failure hands the window back rather than
+  swallowing six hours of alerts with it.
+  *Watch:* a lockout confined to `/editor/settings` — no sign-in attempt after
+  it — still notifies nobody (#757); different news, because the person there
+  holds a session rather than a first factor.
 - **CSP & secure headers** — `put_secure_browser_headers` plus a per-request
   nonce-based Content-Security-Policy on browser pipelines; a narrower static
   policy for preview/forms/embeds and a relaxed one scoped to the Swagger

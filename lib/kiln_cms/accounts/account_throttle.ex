@@ -185,6 +185,38 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   end
 
   @doc """
+  The same, for the second factor's lockout alert (#728), keyed on the account.
+
+  Its **own** bucket rather than a share of `alert_allowed?/1`'s, and the
+  reason is the whole point of that alert: a second-factor lockout means the
+  password is known compromised, where a sign-in lockout means someone is
+  merely guessing. Sharing would let the weaker signal suppress the stronger
+  one for six hours — and it would do so in exactly the sequence an attack
+  produces, since guessing the password is what comes first.
+  """
+  @spec second_factor_alert_allowed?(String.t()) :: boolean()
+  def second_factor_alert_allowed?(user_id) do
+    match?({:allow, _count}, hit(key("2fa:alert", user_id), @alert_window, 1))
+  end
+
+  @doc """
+  Hands back an alert window that was claimed but never used.
+
+  `second_factor_alert_allowed?/1` spends the window before the mail is built,
+  because `hit/3` is one atomic increment-and-compare and splitting it into a
+  check plus a later increment would let two simultaneous refusals both send.
+  The cost of that ordering is that anything failing afterwards — a wedged Oban
+  queue, a saturated cache, a missing `:email_from` — would swallow the window
+  along with the mail, and the owner would hear nothing for six hours about the
+  strongest signal this system produces.
+
+  So the caller releases it on failure. Also the seam a test uses to re-arm the
+  alert without waiting out a real window.
+  """
+  @spec forget_second_factor_alert(String.t()) :: :ok
+  def forget_second_factor_alert(user_id), do: drop(key("2fa:alert", user_id), @alert_window)
+
+  @doc """
   Whether another `purpose` mail may be sent to this address.
 
   Consumes budget on every call, including refused ones — a caller asking is a
@@ -270,10 +302,11 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   # Test seam: forget everything about an identifier, so a suite can assert on a
   # deterministic budget without waiting out a real window.
   #
-  # Covers only the buckets keyed on a submitted email address. The second
-  # factor keys on a user id, which is a different subject entirely, so it is
-  # cleared through `forgive_second_factor/1` rather than folded in here — the
-  # alternative deletes a `2fa:<hash of an email>` row that nothing ever writes.
+  # Covers only the buckets keyed on a submitted email address. The two keyed on
+  # a user id are a different subject entirely, so they are cleared through
+  # `forgive_second_factor/1` and `forget_second_factor_alert/1` rather than
+  # folded in here — the alternative deletes a `2fa:<hash of an email>` row that
+  # nothing ever writes.
   @spec reset(String.t()) :: :ok
   def reset(identifier) do
     forgive(identifier)

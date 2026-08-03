@@ -23,9 +23,9 @@ defmodule KilnCMS.Accounts.SecondFactor do
   pivot to the recovery codes, and two budgets would simply be one budget twice
   as large.
 
-  Charging that budget is the **caller's** job, and has to happen before this is
-  called — see `KilnCMS.Accounts.AccountThrottle`'s moduledoc on why the gate
-  must be the counter rather than a check followed by a later increment.
+  Charging that budget happens in `charge/1`, which both gates call before
+  `verify/2` — see `KilnCMS.Accounts.AccountThrottle`'s moduledoc on why the
+  gate must be the counter rather than a check followed by a later increment.
 
   ## A missing secret must not take the recovery codes with it
 
@@ -40,7 +40,41 @@ defmodule KilnCMS.Accounts.SecondFactor do
   """
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.SignInAlert
   alias KilnCMS.Accounts.Totp
+
+  @doc """
+  Charges one second-factor attempt at a **sign-in gate**, and alerts the owner
+  when that spends the budget (#714, #728).
+
+  Returns `:allow`, or `{:deny, user, retry_after_ms}` — carrying the user back
+  out because a `with`'s `else` cannot see its clause bindings, and the refusal
+  branch needs it for the `retry-after` header.
+
+  Here rather than written out per controller because it is three coupled
+  pieces, not one: the charge, the alert, and the deny shape. Two copies means
+  the next edit lands on whichever gate its author was looking at — which is
+  what #726 was, and what #745 is about at a larger scale. A gate that quietly
+  stopped alerting would look exactly like a working gate.
+
+  The alert belongs to *this* function and not to the budget itself, because
+  `KilnCMS.Accounts.Changes.ThrottleSecondFactor` charges the same bucket from
+  `/editor/settings` (#727) and that refusal is different news: the person there
+  holds a session, not a first factor. See #757.
+  """
+  @spec charge(Accounts.User.t()) ::
+          :allow | {:deny, Accounts.User.t(), non_neg_integer()}
+  def charge(user) do
+    case AccountThrottle.consume_second_factor(user.id) do
+      :allow ->
+        :allow
+
+      {:deny, retry_after_ms} ->
+        SignInAlert.second_factor_locked(user)
+        {:deny, user, retry_after_ms}
+    end
+  end
 
   @doc """
   Verifies `code` against `user`'s TOTP secret, falling back to their recovery
