@@ -124,7 +124,7 @@ build if a resource is ever registered without that authorizer.
   Tighter because six digits and a skew window are guessable in a way a password
   is not, and because whoever is at that prompt has already got past the first
   factor. It keys on the account rather than on the pending token for the same
-  reason: `@pending_2fa_max_age` bounds nothing on its own, since re-running the
+  reason: the pending token's five-minute life bounds nothing on its own, since re-running the
   password step mints a fresh token *and* — because that step succeeds — clears
   the sign-in counter, so an attacker holding the password renews the window for
   free. TOTP codes and recovery codes share the budget; two would be one budget

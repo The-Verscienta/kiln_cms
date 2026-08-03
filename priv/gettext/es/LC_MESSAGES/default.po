@@ -1027,7 +1027,7 @@ msgstr "Texto enriquecido TipTap, bloques con arrastrar y soltar, vista previa e
 msgid "Updated."
 msgstr "Actualizado."
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:265
+#: lib/kiln_cms_web/controllers/auth_controller.ex:241
 #, elixir-autogen, elixir-format
 msgid "You are now signed out"
 msgstr "Ha cerrado la sesión"
@@ -1150,7 +1150,7 @@ msgstr "Añadir bloque"
 msgid "All notifications are on by default. Uncheck any you'd rather not receive."
 msgstr "Todas las notificaciones están activadas por defecto. Desmarque las que prefiera no recibir."
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:224
+#: lib/kiln_cms_web/controllers/auth_controller.ex:200
 #, elixir-autogen, elixir-format
 msgid "An account with this email already exists. We've sent a link to that address - confirm it to finish linking this provider to your account."
 msgstr "Ya existe una cuenta con este correo electrónico. Hemos enviado un enlace a esa dirección; confírmelo para terminar de vincular este proveedor a su cuenta."
@@ -1216,7 +1216,7 @@ msgstr "Texto con formato: negrita, cursiva y listas"
 msgid "Highlighted quotation"
 msgstr "Cita destacada"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:242
+#: lib/kiln_cms_web/controllers/auth_controller.ex:218
 #, elixir-autogen, elixir-format
 msgid "Incorrect email or password"
 msgstr "Correo electrónico o contraseña incorrectos"
@@ -1359,13 +1359,13 @@ msgstr "Suba una imagen arriba para empezar a crear su biblioteca."
 msgid "Visual separator between sections"
 msgstr "Separador visual entre secciones"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:204
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:66
+#: lib/kiln_cms_web/controllers/auth_controller.ex:180
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:73
 #, elixir-autogen, elixir-format
 msgid "You are now signed in"
 msgstr "Ha iniciado sesión"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:215
+#: lib/kiln_cms_web/controllers/auth_controller.ex:191
 #, elixir-autogen, elixir-format
 msgid "You have already signed in another way, but have not confirmed your account. You can confirm your account using the link we sent to you, or by resetting your password."
 msgstr "Ya ha iniciado sesión de otra manera, pero no ha confirmado su cuenta. Puede confirmar su cuenta con el enlace que le enviamos o restableciendo su contraseña."
@@ -1396,12 +1396,12 @@ msgstr "Necesita acceso de administrador para ver esa página."
 msgid "Your data"
 msgstr "Sus datos"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:201
+#: lib/kiln_cms_web/controllers/auth_controller.ex:177
 #, elixir-autogen, elixir-format
 msgid "Your email address has now been confirmed"
 msgstr "Su dirección de correo electrónico ha sido confirmada"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:203
+#: lib/kiln_cms_web/controllers/auth_controller.ex:179
 #, elixir-autogen, elixir-format
 msgid "Your password has successfully been reset"
 msgstr "Su contraseña se ha restablecido correctamente"
@@ -3666,7 +3666,7 @@ msgstr "Introduzca un código actual para desactivarla"
 msgid "Enter a path starting with /."
 msgstr "Introduzca una ruta que empiece por /."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:144
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:136
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr "Introduzca el código de 6 dígitos de su aplicación de autenticación o uno de sus códigos de recuperación."
@@ -4798,7 +4798,7 @@ msgstr "Sesión iniciada con una clave de acceso."
 msgid "Single line text"
 msgstr "Texto de una línea"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:236
+#: lib/kiln_cms_web/controllers/auth_controller.ex:212
 #, elixir-autogen, elixir-format
 msgid "Single sign-on failed — the identity couldn't be verified or linked. Try again, or contact an administrator."
 msgstr "Falló el inicio de sesión único: no se pudo verificar o vincular la identidad. Inténtelo de nuevo o contacte con un administrador."
@@ -4960,7 +4960,7 @@ msgstr "Ese código no es válido: la autenticación de doble factor sigue activ
 msgid "That code isn't valid — try again."
 msgstr "Ese código no es válido: inténtelo de nuevo."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:93
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:100
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Try again."
 msgstr "Ese código no es válido. Inténtelo de nuevo."
@@ -5122,8 +5122,8 @@ msgstr "Traducciones"
 msgid "Tue"
 msgstr "mar"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:143
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:131
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:135
 #: lib/kiln_cms_web/live/settings_live.ex:385
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
@@ -5197,7 +5197,7 @@ msgstr "Use «true» para que la casilla aparezca marcada por defecto."
 msgid "User"
 msgstr "Usuario"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:156
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:148
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr "Verificar"
@@ -7208,7 +7208,7 @@ msgstr "No la usa ningún documento publicado."
 msgid "and %{count} more"
 msgstr "y %{count} más"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:90
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:97
 #, elixir-autogen, elixir-format
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr "Demasiados intentos. Espere unos minutos e inténtelo de nuevo."

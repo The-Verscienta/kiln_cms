@@ -27,34 +27,41 @@ defmodule KilnCMSWeb.TwoFactorController do
   hold a signed pending token naming it), so hiding the throttle buys nothing
   and costs a legitimate user, who is told their correct code was wrong.
 
-  ## This is one of two doors, and they share a lock (#726)
+  ## This is one of two doors, and almost nothing here is door-specific (#745)
 
   `KilnCMSWeb.ApiAuthController` runs the same step headlessly at
-  `POST /api/auth/sign_in/verify`. The code check itself is
-  `KilnCMS.Accounts.SecondFactor.verify/2` so the two cannot normalize a
-  submission differently, and both charge the *same* per-account bucket — a
-  budget an attacker can double by alternating endpoints is not a budget.
+  `POST /api/auth/sign_in/verify`. Both charge the *same* per-account bucket —
+  a budget an attacker can double by alternating endpoints is not a budget —
+  and both reach it through the same two functions:
+
+    * `KilnCMS.Accounts.PendingSignIn` owns the blob: minting it, the
+      five-minute lifetime, and the four steps that turn it back into a user.
+      This gate differs only in passing `:session`, because its blob lives in
+      the session rather than in the client's hands.
+    * `KilnCMS.Accounts.SecondFactor.check/2` owns charge → verify → forgive,
+      so the ordering `AccountThrottle` depends on cannot be got wrong at one
+      call site and right at the other.
+
+  What is left below is genuinely this door's own: a session key, a rendered
+  HTML form, and the remember-me cookie.
   """
   use KilnCMSWeb, :controller
 
-  alias KilnCMS.Accounts
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.SecondFactor
   alias KilnCMSWeb.AuthController
 
   def new(conn, _params) do
-    case pending_user(conn) do
-      {:ok, _user, _remember_me?} -> render_form(conn, 200, nil)
+    case pending(conn) do
+      {:ok, _pending} -> render_form(conn, 200, nil)
       :error -> redirect(conn, to: ~p"/sign-in")
     end
   end
 
   def create(conn, %{"code" => code}) do
-    with {:ok, user, remember_me?} <- pending_user(conn),
-         :allow <- SecondFactor.charge(user),
-         {:ok, user} <- SecondFactor.verify(user, code) do
-      AccountThrottle.forgive_second_factor(user.id)
-
+    with {:ok, %{user: user, remember_me?: remember_me?}} <- pending(conn),
+         {:ok, user} <- SecondFactor.check(user, code) do
       conn
       # Only now. The remember-me cookie is a complete sign-in in a cookie — the
       # read plug hands it straight to `store_in_session/2` — so issuing it at
@@ -69,7 +76,7 @@ defmodule KilnCMSWeb.TwoFactorController do
         # Pending token missing/expired — restart from sign-in.
         redirect(conn, to: ~p"/sign-in")
 
-      # `SecondFactor.charge/1` has already alerted the owner: whoever is here
+      # `SecondFactor.check/2` has already alerted the owner: whoever is here
       # got past a first factor, and #478's alert structurally cannot fire in
       # this scenario (re-running that step to mint a fresh pending token
       # *succeeds*, which forgives the sign-in counter). The user comes back
@@ -78,7 +85,7 @@ defmodule KilnCMSWeb.TwoFactorController do
         # The pending token is left in the session rather than cleared — the
         # caller has not failed authentication, so bouncing them to `/sign-in`
         # would be the wrong answer to "you have tried too often". It will not
-        # usually outlive the wait: `@pending_2fa_max_age` is five minutes and
+        # usually outlive the wait: `PendingSignIn.max_age/0` is five minutes and
         # this window is fifteen, so a refused user will normally re-enter their
         # password and land back here. That is fine and is the point — the
         # budget keys on the account, so a fresh token does not refill it.
@@ -96,26 +103,11 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   def create(conn, _params), do: redirect(conn, to: ~p"/sign-in")
 
-  # Resolve the pending token to the awaiting user, or `:error` if it's
-  # missing/expired/tampered or the account no longer has 2FA.
-  defp pending_user(conn) do
-    with pending when is_binary(pending) <- get_session(conn, :pending_2fa),
-         {:ok, %{"user_id" => user_id, "token" => token} = payload} <-
-           AuthController.verify_pending(conn, pending),
-         user when not is_nil(user) <-
-           Accounts.get_user!(user_id, authorize?: false, not_found_error?: false),
-         true <- Accounts.totp_enabled?(user) do
-      # Reattach the first-factor token so `complete_sign_in` can store the
-      # session (the token was already minted + stored at password sign-in).
-      #
-      # `remember_me` defaults to false rather than being required, so a pending
-      # token minted before this shipped — or by any other caller of
-      # `sign_pending/4` — degrades to "no cookie" rather than to a crash.
-      {:ok, %{user | __metadata__: Map.put(user.__metadata__, :token, token)},
-       payload["remember_me"] == true}
-    else
-      _ -> :error
-    end
+  # The session key is this gate's only difference from the headless one; the
+  # blob itself — its lifetime, its payload, the four steps that turn it back
+  # into a user — is `PendingSignIn`'s business for both (#745).
+  defp pending(conn) do
+    PendingSignIn.resolve(:session, conn, get_session(conn, :pending_2fa))
   end
 
   # Standalone styled page (no app shell) matching the sign-in aesthetic. Inline

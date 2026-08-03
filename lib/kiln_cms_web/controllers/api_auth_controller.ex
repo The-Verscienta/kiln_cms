@@ -131,10 +131,8 @@ defmodule KilnCMSWeb.ApiAuthController do
     code = params["code"]
 
     with :ok <- require_params([{"pending_token", pending}, {"code", code}]),
-         {:ok, user, jti} <- PendingSignIn.resolve(conn, pending),
-         :allow <- SecondFactor.charge(user),
-         {:ok, user} <- SecondFactor.verify(user, code) do
-      AccountThrottle.forgive_second_factor(user.id)
+         {:ok, %{user: user, jti: jti}} <- PendingSignIn.resolve(:encrypted, conn, pending),
+         {:ok, user} <- SecondFactor.check(user, code) do
       # Only now, and only on success: a wrong code or a spent budget leaves the
       # blob alive, because neither is a failed authentication and neither
       # should turn "that code isn't valid" into "start over".
@@ -155,7 +153,7 @@ defmodule KilnCMSWeb.ApiAuthController do
           "Sign-in is no longer pending. Start again."
         )
 
-      # Alerting the owner is `SecondFactor.charge/1`'s job, shared with the
+      # Alerting the owner is `SecondFactor.check/2`'s job, shared with the
       # browser prompt (#728) — a door that budgets the code but tells nobody
       # is #726's lesson repeated one layer up.
       {:deny, _user, retry_after_ms} ->
@@ -177,7 +175,7 @@ defmodule KilnCMSWeb.ApiAuthController do
           "Too many attempts. Try again later."
         )
 
-      # `:invalid` from `SecondFactor.verify/2` — and a catch-all, because that
+      # `:invalid` from `SecondFactor.check/2` — and a catch-all, because that
       # module is shared with the browser prompt, whose own `else` is equally
       # narrow. Widening its return from `:invalid` to the more idiomatic
       # `{:error, reason}` is a one-line change that would otherwise turn an
@@ -194,7 +192,7 @@ defmodule KilnCMSWeb.ApiAuthController do
     |> put_status(:ok)
     |> json(%{
       two_factor_required: true,
-      pending_token: PendingSignIn.mint(conn, user),
+      pending_token: PendingSignIn.mint(:encrypted, conn, user),
       expires_in: PendingSignIn.max_age()
     })
   end
