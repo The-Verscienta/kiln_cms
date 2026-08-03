@@ -45,8 +45,10 @@ defmodule KilnCMS.Analytics.ContentView do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
-    # Views are recorded only by the system (the delivery controller, via
-    # `authorize?: false`); never by an external caller.
+    # Views are recorded only by the system (the delivery controllers, via
+    # `authorize?: false` — see KilnCMSWeb.ViewTracking); never by an external
+    # caller. A headless front end's views are counted server-side from its
+    # artifact fetch, so there is no ingest endpoint to spoof this counter with.
     policy action_type(:create) do
       forbid_if always()
     end

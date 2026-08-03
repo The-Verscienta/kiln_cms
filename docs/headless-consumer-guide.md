@@ -139,3 +139,38 @@ Two independent defenses; use both:
 Treat "which states can this credential see" as part of the credential's blast
 radius: a leaked editor-keyed delivery config exposes drafts, not just
 rate-limit headroom.
+
+## Analytics: your fetches are what get counted
+
+A successful `GET /api/content/:type/:slug` records a view against that
+document, so a headless site's traffic appears at `/editor/analytics` instead of
+reading as zero. There is nothing to install: no beacon, no cookie, no client
+JS. Counting happens server-side on the request you already make, and stores
+only the same aggregate counters the rendered site uses — no visitor data. (For
+the same reason there is no ingest endpoint to POST your own numbers to; see
+[advanced-analytics-plan.md](advanced-analytics-plan.md) → "Privacy constraints".)
+
+What that number means depends on how you cache, so read it as a **floor rather
+than a census**:
+
+* **Your cache absorbs readers.** With ISR, a CDN in front of your frontend, or
+  a static build, you fetch once and serve that document to everyone until it
+  expires. Those readers are invisible to Kiln.
+* **A build-time fetch counts a deploy**, not a reader. A CI pipeline that
+  prerenders every page inflates counts by one per page per build.
+* **Each surface counts separately.** Rendering a page from `?surface=json` plus
+  `?surface=json_ld` is two views of one document.
+* **Revalidation counts.** A conditional request that gets a `304` still counts
+  — the client is actively serving that document. Excluding it would make a
+  CDN-fronted site report near-zero.
+* **Point-in-time reads do not count.** `?as_of=` is a history query, not a
+  delivery.
+
+The stored counters have no surface dimension, so headless and rendered views
+sum together in the dashboard. If you export metrics, the
+`kiln_cms.analytics.view.count` telemetry counter is tagged with `surface`
+(`"html"` for the rendered site, otherwise the fired surface name), which is
+where the two can be told apart.
+
+If you need true reader counts, that has to come from your own frontend's
+analytics — Kiln deliberately cannot see the browser.

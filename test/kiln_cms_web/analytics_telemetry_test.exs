@@ -70,4 +70,56 @@ defmodule KilnCMSWeb.AnalyticsTelemetryTest do
              &(&1.name == [:kiln_cms, :analytics, :view, :count])
            )
   end
+
+  # A published page with its artifact fired, so the headless endpoint serves it
+  # rather than answering 503 while it compiles (#208).
+  defp fired_page do
+    actor =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "tel-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Surface",
+          slug: "surf-#{System.unique_integer([:positive])}",
+          blocks: [%{type: :heading, content: "Hi", data: %{"level" => 1}, order: 0}]
+        },
+        actor: actor
+      )
+
+    page = CMS.publish_page!(page, actor: actor)
+    KilnCMS.DataCase.drain_oban()
+    page
+  end
+
+  describe "delivery surface" do
+    test "the rendered site tags itself html", %{conn: conn} do
+      listen()
+      page = published_page()
+
+      conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert_receive {:telemetry, [:kiln_cms, :analytics, :view], _measurements, metadata}
+      assert metadata.surface == "html"
+    end
+
+    # The tag is what keeps a mixed counter interpretable: the stored counters
+    # have no surface dimension, so without it there is no way to tell a
+    # headless site's traffic from the rendered site's.
+    test "a headless artifact fetch tags the surface it served", %{conn: conn} do
+      listen()
+      page = fired_page()
+
+      conn |> get(~p"/api/content/page/#{page.slug}?surface=json_ld") |> json_response(200)
+
+      assert_receive {:telemetry, [:kiln_cms, :analytics, :view], _measurements, metadata}
+      assert metadata.type == "page"
+      assert metadata.surface == "json_ld"
+    end
+  end
 end

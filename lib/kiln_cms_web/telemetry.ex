@@ -129,11 +129,14 @@ defmodule KilnCMSWeb.Telemetry do
         description: "Time to build a public HTML delivery response"
       ),
       counter("kiln_cms.analytics.view.count",
-        tags: [:type],
+        tags: [:type, :surface],
         description:
-          "Public content views recorded, by content type. Aggregate only — the " <>
-            "event's content_id metadata is deliberately not a tag (it would be " <>
-            "an unbounded series)."
+          "Public content views recorded, by content type and delivery surface " <>
+            "(\"html\" for the rendered site, otherwise the fired surface a " <>
+            "headless client fetched). Aggregate only — the event's content_id " <>
+            "metadata is deliberately not a tag (it would be an unbounded " <>
+            "series); `surface` is safe because KilnCMSWeb.ViewTracking bounds " <>
+            "it to the known surface names."
       ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures
