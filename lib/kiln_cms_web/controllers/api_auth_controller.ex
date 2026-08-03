@@ -82,6 +82,7 @@ defmodule KilnCMSWeb.ApiAuthController do
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.SecondFactor
   alias KilnCMS.Accounts.User
+  alias KilnCMSWeb.ApiError
 
   @doc """
   Exchange `email` + `password` for a bearer token.
@@ -147,7 +148,7 @@ defmodule KilnCMSWeb.ApiAuthController do
       # has since turned two-factor off. All of them mean the same thing to a
       # client: this exchange is over, start again at `POST /api/auth/sign_in`.
       :error ->
-        error(
+        ApiError.send(
           conn,
           :unauthorized,
           "pending_expired",
@@ -167,7 +168,11 @@ defmodule KilnCMSWeb.ApiAuthController do
           "retry-after",
           Integer.to_string(AccountThrottle.retry_after_seconds(retry_after_ms))
         )
-        |> error(:too_many_requests, "too_many_attempts", "Too many attempts. Try again later.")
+        |> ApiError.send(
+          :too_many_requests,
+          "too_many_attempts",
+          "Too many attempts. Try again later."
+        )
 
       # `:invalid` from `SecondFactor.verify/2` — and a catch-all, because that
       # module is shared with the browser prompt, whose own `else` is equally
@@ -175,7 +180,7 @@ defmodule KilnCMSWeb.ApiAuthController do
       # `{:error, reason}` is a one-line change that would otherwise turn an
       # unauthenticated route into a `WithClauseError` 500 instead of a 401.
       _ ->
-        error(conn, :unauthorized, "invalid_code", "That code isn't valid")
+        ApiError.send(conn, :unauthorized, "invalid_code", "That code isn't valid")
     end
   end
 
@@ -217,18 +222,8 @@ defmodule KilnCMSWeb.ApiAuthController do
   end
 
   defp unauthorized(conn),
-    do: error(conn, :unauthorized, "invalid_credentials", "Invalid email or password")
+    do: ApiError.send(conn, :unauthorized, "invalid_credentials", "Invalid email or password")
 
   defp missing_params(conn, detail),
-    do: error(conn, :unprocessable_entity, "missing_parameters", detail)
-
-  defp error(conn, status, code, detail) do
-    conn
-    |> put_status(status)
-    |> json(%{
-      errors: [
-        %{status: to_string(Plug.Conn.Status.code(status)), code: code, detail: detail}
-      ]
-    })
-  end
+    do: ApiError.send(conn, :unprocessable_entity, "missing_parameters", detail)
 end

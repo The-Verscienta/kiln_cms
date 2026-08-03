@@ -648,6 +648,36 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A rate-limited request now answers the same error envelope as everything
+  else it sits in front of.** `{"errors": [{"status", "code", "detail"}]}` was
+  described in a comment as *"the standard error envelope shared across the
+  headless surfaces"* and then written out eight times. The per-IP 429 was the
+  one clients hit most and the one that carried least: `{"errors":
+  [{"detail": "Too many requests"}]}`, with no `status` and no `code`, so a
+  client branching on `errors[].code` fell through to its unknown-error path on
+  the single refusal that has a defined recovery — and `POST
+  /api/auth/sign_in/verify` could answer 429 in two different shapes for the
+  same URL, depending on whether the per-IP bucket or the per-account budget
+  refused it. It now answers `code: "too_many_requests"` with the numeric
+  `status`, next to the `retry-after` it already sent. The HTML denial page for
+  browser navigations is unchanged.
+
+  `GET /api/visual-editing/:type/:slug` likewise answered an envelope-*shaped*
+  body with two of the three fields missing, and now answers the envelope.
+
+  Behind both: `FormController`'s copy interpolated the status it was handed
+  instead of normalizing it through `Plug.Conn.Status.code/1`, so an atom
+  status would have answered `"status": "unprocessable_entity"` where the
+  others answer `"422"`. Nothing passed it an atom, so no client saw that one —
+  it was a divergence waiting for the next error case added to that controller.
+
+  Every headless surface now renders through `KilnCMSWeb.ApiError.send/4`, and
+  a source scan fails the build when a module writes the envelope by hand, so
+  the convention is enforced rather than described. `docs/api.md` now also
+  names the three shapes that deliberately differ (JSON:API's richer entries,
+  form field errors, `/api/resolve`'s verdict) and the two that are known gaps
+  (#750). (#744)
+
 - **`audit_anchor_every_write` no longer reports untouched documents as
   tampered.** Turning it on made the audit surface it exists to strengthen read
   permanently red after two autosaves, with no tampering anywhere.

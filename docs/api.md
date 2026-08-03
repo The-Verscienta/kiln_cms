@@ -423,18 +423,43 @@ Over the limit returns **429** with a `retry-after` header.
 
 ## Error responses
 
-All surfaces return errors as a JSON object with an **`errors` array**, each
-entry carrying a string `status` (HTTP code), a machine-readable `code`, and a
-human `detail`:
+The headless surfaces return errors as a JSON object with an **`errors`
+array**, each entry carrying a string `status` (HTTP code), a machine-readable
+`code`, and a human `detail`:
 
 ```jsonc
 { "errors": [ { "status": "404", "code": "not_found", "detail": "Content not found." } ] }
 ```
 
-This is the JSON:API shape; the headless sign-in, fired-artifact
-(`not_found` / `artifact_compiling`), and preview-token (`invalid_preview`)
-endpoints use the same envelope (#190). GraphQL follows the GraphQL spec's
-top-level `errors` array instead.
+This is the JSON:API shape. `status` is always the **numeric** HTTP code as a
+string (`"422"`, never `"unprocessable_entity"`) — safe to `parseInt` — and
+`code` is a stable token you can branch on.
+
+You get it from the headless sign-in, fired-artifact (`not_found` /
+`artifact_compiling`), related-content, provenance, form-schema and
+form-submission, visual-editing and preview-token (`invalid_preview`)
+endpoints — **and from the 429 when you exceed a rate-limit bucket**
+(`too_many_requests`, alongside `retry-after`). All of them render through one
+implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
+new endpoint writes its own (#190, #744).
+
+Three responses on these paths are deliberately **not** this envelope:
+
+- **`/api/json/*`** (JSON:API proper) carries the same three fields plus the
+  spec's `id`, `title` and `source.pointer`.
+- **Field-level validation errors** from `POST /api/forms/:slug` are
+  `{"ok": false, "errors": {"<field>": "…"}}` — a per-field map. The envelope
+  says the request failed; this says which input was wrong.
+- **`GET /api/resolve`** answers a verdict, not an error:
+  `{"status": "ok" | "moved" | "not_found"}`. That `status` is the verdict and
+  is *not* an HTTP code.
+
+Two further shapes are known gaps rather than intentional (#750): an unrouted
+`/api` path or an unhandled 500 answers `{"errors": {"detail": "…"}}`, where
+`errors` is an object rather than an array; and `/api/resolve`'s 400 answers a
+singular `{"error": "…"}`. Don't write a client that depends on either.
+
+GraphQL follows the GraphQL spec's top-level `errors` array instead.
 
 ## Versioning & stability
 
