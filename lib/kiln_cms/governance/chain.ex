@@ -131,29 +131,21 @@ defmodule KilnCMS.Governance.Chain do
       signature sweep has established are attested, which is why that sweep has
       to floor rather than skip. A short anchor cannot be promoted to the
       baseline without violating it.
-    * Deleting the **newest** anchors is still **not** detected, and neither is
-      *hiding* them — `UPDATE … SET resource_type = 'page_x'` or a rewritten
-      `source_id` takes the newest anchors out of the set the query returns,
-      which is the same attack reached with `UPDATE` instead of `DELETE`. So
-      revoking `DELETE` on `history_anchors` narrows this less than it sounds.
-      A third variant only *weakens* a verdict rather than faking one, and is
-      worth knowing because an operator reads it as benign: `key_id` is in
-      neither the signed payload nor the digest — it cannot be, since the key it
-      names is what would check the signature covering it — so one `UPDATE` on
-      any anchor makes a corpus read `:unverifiable`, which looks exactly like a
-      rotation whose outgoing key was never registered.
-
-      Nothing points at the newest anchor, so a shorter chain is
-      indistinguishable from a younger one, and no amount of state inside the
-      document's own anchor set can tell them apart. Since it is exactly the newest anchors that commit to
-      the most recent versions, an attacker who doctors version *k* deletes only
-      the anchors with `version_count >= k` — newest-first, past the `RESTRICT`
-      — leaves the rest intact, and the next write re-anchors from the surviving
-      prefix over the doctored rows. Verdict: `:verified`. Confirmed
-      empirically, and characterised in the test suite.
-    * Wiping **every** anchor returns the document to `:unanchored` and the next
-      write anchors it afresh — indistinguishable from a document anchored for
-      the first time. Same shape as the truncation case, and same limit.
+    * Deleting the **newest** anchors is detected, and so is *hiding* them —
+      `UPDATE … SET resource_type = 'page_x'` or a rewritten `source_id` takes
+      them out of the set the query returns, which is the same attack reached
+      with `UPDATE` instead of `DELETE`, and reads the same way here. Both are
+      caught by the **checkpoint witness** rather than by anything in the
+      document's own anchor set, for the reason the next section gives.
+    * Wiping **every** anchor is detected on a witnessed document: it reads
+      `{:tampered, …}` rather than the `:unanchored` it used to, which was
+      indistinguishable from a document anchored for the first time.
+    * One variant only *weakens* a verdict rather than faking one, and is worth
+      knowing because an operator reads it as benign: `key_id` is in neither the
+      signed payload nor the digest — it cannot be, since the key it names is
+      what would check the signature covering it — so one `UPDATE` on any anchor
+      makes a corpus read `:unverifiable`, which looks exactly like a rotation
+      whose outgoing key was never registered.
     * Without a signing key (the default — `KILN_PROVENANCE_PRIVATE_KEY` unset)
       the digest and the position are ordinary columns an attacker can recompute
       and renumber, and the verdict is `:unsigned` regardless. The structural
@@ -162,13 +154,50 @@ defmodule KilnCMS.Governance.Chain do
       rather than swallowed. But **treat them as advisory there**: they raise the
       cost of a forgery, they do not attest anything.
 
-  Closing the truncation case needs a witness the database does not hold: the
-  head digest published periodically to an append-only log, object storage with
-  a retention lock, or a transparency log. That is the only option that survives
-  full database control, which is the threat model the feature exists for.
-  Tracked in #666; #597 covers everything above it. Revoking `DELETE` on
-  `history_anchors` for the application role remains worthwhile on top of the
-  `RESTRICT`, and is orthogonal to all of this.
+  ## The witness (#666)
+
+  Nothing points at the newest anchor, so a shorter chain is indistinguishable
+  from a younger one, and **no amount of state inside the document's own anchor
+  set can tell them apart**. An attacker who doctors version *k* deletes only
+  the anchors with `version_count >= k` — newest-first, past the `RESTRICT` —
+  leaves the rest intact, and the next write re-anchors from the surviving
+  prefix over the doctored rows.
+
+  What closes it is a statement made from outside the document:
+  `KilnCMS.Governance.Checkpoint` mints a signed, org-wide Merkle commitment to
+  every document's head anchor on a schedule and publishes it through
+  `KilnCMS.Governance.Witness`. `verify/4` compares the live head against the
+  newest checkpoint entry, so a document witnessed at position 7 that now heads
+  at 5 is `{:tampered, …}`.
+
+  The comparison is against the anchor **at the witnessed position**, not against
+  the head. Comparing heads was a one-extra-publish hole: positions are refilled
+  by `next_sequence/1`, so two ordinary writes after a truncation put the head
+  *past* what was witnessed with a contiguous chain underneath, and a
+  head-versus-head check reads that as ordinary growth.
+
+  Three limits, stated rather than glossed:
+
+    * **Anchors above the witnessed position are not witnessed.** Truncating
+      back to the last witnessed position is still invisible, so the exposure
+      window is exactly one checkpoint interval — which is what makes the
+      cadence (`KILN_GOVERNANCE_CHECKPOINT_CRON`) a security parameter and not a
+      performance one.
+    * **With the default `None` witness the commitment stays in the database.**
+      That still catches the attack in its ordinary form, because
+      `chain_checkpoints` is a second table the attacker has to remember. It does
+      not survive one who does — deleting a document's entry rows removes the
+      witness, and nothing here can tell that from a document no checkpoint ever
+      covered. Configure a real sink for the property.
+    * **Publication is only half of it.** A checkpoint nobody reads back is a
+      file. `mix kiln.audit.checkpoint --audit` compares the sink to the database
+      in *both* directions — including listing what was published and looking for
+      what the database no longer has, which is the direction that sees a deleted
+      checkpoint at all — and it wants to run somewhere the application host does
+      not control.
+
+  Revoking `DELETE` on `history_anchors` for the application role remains
+  worthwhile on top of the `RESTRICT`, and is orthogonal to all of this.
 
   ## When anchors are minted
 
@@ -184,6 +213,7 @@ defmodule KilnCMS.Governance.Chain do
   require Logger
 
   alias KilnCMS.CMS
+  alias KilnCMS.Governance.Checkpoint
   alias KilnCMS.Provenance.Canonical
   alias KilnCMS.Provenance.Signer
 
@@ -418,10 +448,11 @@ defmodule KilnCMS.Governance.Chain do
       nothing says it is bad. Registering the retired key's public half
       (`KilnCMS.Provenance.KeyRegistry`) turns these back into `:verified`.
     * `:unanchored` — the document has no anchors yet (never published since
-      anchoring was enabled).
+      anchoring was enabled) **and** no checkpoint ever saw it anchored.
     * `{:tampered, reason}` — the anchored history no longer reproduces the
-      hash (altered/deleted/reordered versions), or the signature fails
-      against a key we DO hold. Not holding the key is `:unverifiable`, above.
+      hash (altered/deleted/reordered versions), the signature fails against a
+      key we DO hold, or the chain is shorter than the last checkpoint
+      witnessed. Not holding the key is `:unverifiable`, above.
 
   Only the anchored prefix is covered — edits since the last publish anchor
   at the next publish. Callers that need to show that window use
@@ -429,24 +460,116 @@ defmodule KilnCMS.Governance.Chain do
   """
   @spec verify(module(), String.t(), Ash.UUID.t(), Ash.UUID.t() | nil) :: verdict()
   def verify(resource, type, source_id, org_id) do
-    case anchors(type, source_id, org_id) do
-      [] ->
-        :unanchored
+    all = anchors(type, source_id, org_id)
 
-      [anchor | _] = all ->
-        with attested when is_atom(attested) <- chain_intact(all) do
-          verdict(
-            anchor,
-            compute(resource, source_id, org_id, anchor.version_count),
-            type,
-            source_id,
-            covered_by_query(
-              %{resource: resource, source_id: source_id, org_id: org_id},
-              anchor
-            )
-          )
-          |> floor_to(attested)
-        end
+    with witnessed when is_atom(witnessed) <- witness_intact(all, type, source_id, org_id),
+         [anchor | _] <- all,
+         attested when is_atom(attested) <- chain_intact(all) do
+      verdict(
+        anchor,
+        compute(resource, source_id, org_id, anchor.version_count),
+        type,
+        source_id,
+        covered_by_query(
+          %{resource: resource, source_id: source_id, org_id: org_id},
+          anchor
+        )
+      )
+      # ONE floor over both, not two chained calls. `floor_to/2` sets the verdict
+      # rather than lowering it, so `|> floor_to(attested) |> floor_to(witnessed)`
+      # let the second overwrite the first: an `:unverifiable` chain plus an
+      # `:unsigned` witness came out `:unsigned`, which reads as the benign
+      # "no key configured" rather than the weaker "signed by a key we do not
+      # hold". `weaker/2` is this module's own ordering of exactly that.
+      |> floor_to(weaker(attested, witnessed))
+    else
+      # No anchors, and no checkpoint says there should be — a document that has
+      # never been published since anchoring was enabled.
+      [] -> :unanchored
+      {:tampered, _} = tampered -> tampered
+    end
+  end
+
+  # The witness comparison (#666): what an external checkpoint last recorded for
+  # this document, against what it heads at now.
+  #
+  # This is the only check here that can see a chain that is *shorter* than it
+  # was. Everything else `verify/4` does is computed from rows the attacker also
+  # controls, so a truncated chain is internally consistent by construction —
+  # see `KilnCMS.Governance.Checkpoint`.
+  #
+  # `:ok` when no checkpoint covers the document, which is the honest answer for
+  # one created since the last run, and for a deployment that has not minted one
+  # yet. A checkpoint that cannot be judged floors the verdict rather than being
+  # skipped, for the same reason an unjudgeable anchor does.
+  #
+  # `:unreadable` is that rule applied to the witness itself. An entry whose
+  # columns will not load is not an absent entry, and treating it as one was a
+  # one-statement kill: `proof` is a `jsonb[]` Postgres accepts any JSON into and
+  # Ecto raises on, so `UPDATE … SET proof = ARRAY['"x"'::jsonb]` on a single row
+  # turned the witness off for that document with nothing but a log line.
+  # The anchoring kill switch gates this too. `anchors/4` returns `[]` when
+  # `:audit_anchors_enabled` is off, and the checkpoint switch is a separate
+  # flag — so without this gate, an operator turning anchoring off on a
+  # deployment that had already minted checkpoints turned every witnessed
+  # document `{:tampered, "…it now has no anchors at all"}`, failing the whole
+  # corpus in `mix kiln.audit.verify`. The switch stops anchoring; it is not a
+  # claim that history was rewritten.
+  defp witness_intact(anchors, type, source_id, org_id) do
+    if enabled?() do
+      case Checkpoint.witnessed_head(type, source_id, org_id) do
+        :none -> :ok
+        :unreadable -> :unverifiable
+        {:tampered, _} = tampered -> tampered
+        {:ok, entry, attestation} -> against_witness(anchors, entry, attestation)
+      end
+    else
+      :ok
+    end
+  end
+
+  # Every anchor gone, on a document a checkpoint saw anchored. Before the
+  # witness this was `:unanchored` — indistinguishable from a document anchored
+  # for the first time, which is what made wiping the set a laundering route
+  # rather than an alarm.
+  defp against_witness([], entry, _attestation) do
+    {:tampered,
+     "checkpoint #{entry.checkpoint_sequence} witnessed this document at anchor " <>
+       "position #{entry.head_sequence}, and it now has no anchors at all"}
+  end
+
+  # The comparison is against the anchor **at the witnessed position**, not
+  # against the head.
+  #
+  # Comparing heads was a one-extra-publish hole, and an easy one to write: with
+  # `head.sequence > entry.head_sequence` read as ordinary growth, an attacker
+  # deletes the witnessed anchor, doctors the versions, and lets two ordinary
+  # publishes refill positions N and N+1. `next_sequence/1` closes the gap,
+  # `chain_intact/1` sees a contiguous run with `version_count` rising, the head
+  # is now *past* the witnessed position — and the verdict is `:verified` over
+  # history the checkpoint committed to differently. Anchors are immutable, so
+  # the anchor at a witnessed position must be *that* anchor forever, whatever
+  # has been minted above it.
+  defp against_witness(anchors, entry, attestation) do
+    witnessed = Enum.find(anchors, &(&1.sequence == entry.head_sequence))
+
+    cond do
+      is_nil(witnessed) ->
+        {:tampered,
+         "anchor chain truncated: checkpoint #{entry.checkpoint_sequence} witnessed " <>
+           "position #{entry.head_sequence}, which no surviving anchor occupies " <>
+           "(the newest is at #{List.first(anchors).sequence})"}
+
+      witnessed.id != entry.head_anchor_id or witnessed.chain_hash != entry.chain_hash ->
+        {:tampered,
+         "the anchor at position #{entry.head_sequence} is not the one checkpoint " <>
+           "#{entry.checkpoint_sequence} witnessed there"}
+
+      true ->
+        # Anchors above the witnessed position are not yet covered, so truncating
+        # back to it stays invisible. That window is one checkpoint interval
+        # wide, which is why the cadence is a security parameter.
+        attestation
     end
   end
 
@@ -653,21 +776,28 @@ defmodule KilnCMS.Governance.Chain do
   """
   @spec verify_loaded([struct()], String.t(), Ash.UUID.t(), Ash.UUID.t() | nil) :: verdict()
   def verify_loaded(versions, type, source_id, org_id) do
-    case anchors(type, source_id, org_id) do
-      [] ->
-        :unanchored
+    all = anchors(type, source_id, org_id)
 
-      [anchor | _] = all ->
-        with attested when is_atom(attested) <- chain_intact(all) do
-          verdict(
-            anchor,
-            fold(Enum.take(versions, anchor.version_count)),
-            type,
-            source_id,
-            covered_loaded(versions, anchor)
-          )
-          |> floor_to(attested)
-        end
+    with witnessed when is_atom(witnessed) <- witness_intact(all, type, source_id, org_id),
+         [anchor | _] <- all,
+         attested when is_atom(attested) <- chain_intact(all) do
+      verdict(
+        anchor,
+        fold(Enum.take(versions, anchor.version_count)),
+        type,
+        source_id,
+        covered_loaded(versions, anchor)
+      )
+      # ONE floor over both, not two chained calls. `floor_to/2` sets the verdict
+      # rather than lowering it, so `|> floor_to(attested) |> floor_to(witnessed)`
+      # let the second overwrite the first: an `:unverifiable` chain plus an
+      # `:unsigned` witness came out `:unsigned`, which reads as the benign
+      # "no key configured" rather than the weaker "signed by a key we do not
+      # hold". `weaker/2` is this module's own ordering of exactly that.
+      |> floor_to(weaker(attested, witnessed))
+    else
+      [] -> :unanchored
+      {:tampered, _} = tampered -> tampered
     end
   end
 

@@ -59,14 +59,29 @@ Phase 1 was a read model over what the cluster already produces. Phase 2
   Anchors chain to each other and carry a signed per-document position, so a
   `TAMPERED` verdict also covers a removed or rewritten middle anchor, a middle
   anchor removed together with its successor, and a reordering of the chain
-  (#597, #666). What it does **not** cover is a clean truncation of the newest
-  anchors: a shorter chain is indistinguishable from a younger one, and nothing
-  inside the database can tell them apart. If that matters for your obligations,
-  export the head digest somewhere outside the database on a schedule — the
-  fleet sweep (`mix kiln.audit.verify`) is the natural place to hang it. Note
-  too that on an unsigned deployment the links and the sequence are ordinary
-  columns and the verdict is `unsigned` regardless: configure a signing key
-  before treating any of this as evidence.
+  (#597). Note that on an unsigned deployment the links and the sequence are
+  ordinary columns and the verdict is `unsigned` regardless: configure a signing
+  key before treating any of this as evidence.
+- **Checkpoints** (#666) — a clean truncation of the *newest* anchors is the one
+  thing no column inside the document can catch: a shorter chain is
+  indistinguishable from a younger one. So a scheduled job mints a signed,
+  org-wide Merkle commitment to every document's head anchor and publishes it
+  outside the database (`KilnCMS.Governance.Checkpoint` /
+  `KilnCMS.Governance.Witness`). A document witnessed at position 7 that now
+  heads at 5 reads `TAMPERED`, and one whose anchors were wiped entirely reads
+  `TAMPERED` rather than `unanchored`.
+
+  Three things an operator has to know before treating this as evidence:
+
+  - Anchors minted since the last checkpoint are **not yet witnessed**, so the
+    exposure window is one `KILN_GOVERNANCE_CHECKPOINT_CRON` interval wide.
+  - The default witness keeps the commitment **in the database**. That catches
+    the attack in its ordinary form and not an attacker who remembers the second
+    table; set `KILN_GOVERNANCE_WITNESS` to `file` or `s3` for the real
+    property.
+  - Publishing is half of it. `mix kiln.audit.checkpoint --audit` is what
+    compares the sink to the database, and it wants to run somewhere the
+    application host does not control.
 - **Consent recording UI** — record a consent (kind / grantor / reference /
   note) directly from the trail page.
 

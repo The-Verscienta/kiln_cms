@@ -43,6 +43,11 @@ config :kiln_cms, Oban,
   ],
   repo: KilnCMS.Repo,
   plugins: [
+    # The crontab is assembled in KilnCMS.Application.oban_config/0 rather than
+    # written here, so a runtime override (KILN_GOVERNANCE_CHECKPOINT_CRON) sets
+    # a plain `:kiln_cms` key instead of reaching into this nested keyword list.
+    # `Config` DEEP-MERGES keyword lists, so overriding one entry of a plugin
+    # tuple from runtime.exs is a footgun with a history here (#608).
     {Oban.Plugins.Cron, []},
     # Delete finished jobs after 7 days. Without this, `oban_jobs` grows
     # without bound AND retains job args indefinitely — and mail jobs carry
@@ -319,6 +324,30 @@ config :kiln_cms, :audit_anchors_enabled, true
 # Override per deployment at runtime with KILN_AUDIT_ANCHOR_EVERY_WRITE=true
 # (runtime.exs) — no rebuild needed to turn it back off.
 config :kiln_cms, :audit_anchor_every_write, false
+
+# Org-wide anchor-chain checkpoints (#666). Anchors make history tamper-evident
+# against everything except TRUNCATION: delete a document's newest anchors and
+# the surviving prefix still verifies, because nothing inside the document says
+# how many there were. A checkpoint is the statement from outside — a signed
+# Merkle commitment to every document's head anchor, minted on the cron below.
+# Cheap: one signature per org per run plus a row per document whose head moved.
+config :kiln_cms, :governance_checkpoints_enabled, true
+
+# Where checkpoints are PUBLISHED. The default keeps them in the database, which
+# still catches an attacker who deletes anchors and forgets `chain_checkpoints`
+# — and does not survive one who remembers. A deployment that needs the property
+# to actually hold points this at a sink its database credentials cannot rewrite:
+# KILN_GOVERNANCE_WITNESS=file|s3 in runtime.exs. See KilnCMS.Governance.Witness.
+config :kiln_cms, KilnCMS.Governance.Witness, adapter: KilnCMS.Governance.Witness.None
+
+# How often a checkpoint is minted. Nightly by default because the cost is one
+# signature per org, but the cadence is a SECURITY parameter, not a performance
+# one: anchors minted since the last checkpoint are not yet witnessed, so the
+# window in which a chain can be truncated undetected is exactly one interval.
+# A regulated deployment shortens it (KILN_GOVERNANCE_CHECKPOINT_CRON="0 * * * *").
+# `false` disables the scheduled run without disabling checkpoints, for a
+# deployment that drives `mix kiln.audit.checkpoint` from its own scheduler.
+config :kiln_cms, :governance_checkpoint_cron, "40 3 * * *"
 
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means

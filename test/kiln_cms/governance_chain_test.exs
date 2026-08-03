@@ -8,11 +8,12 @@ defmodule KilnCMS.Governance.ChainTest do
   import Ecto.Query
 
   require Ash.Query
-  import ExUnit.CaptureLog
+  import ExUnit.CaptureLog, only: [capture_log: 1, with_log: 1]
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Page
   alias KilnCMS.Governance.Chain
+  alias KilnCMS.Governance.Checkpoint
 
   # A real signing key so anchors are signed (the provenance key source).
   setup do
@@ -1219,12 +1220,15 @@ defmodule KilnCMS.Governance.ChainTest do
       assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
     end
 
-    # The route #597 filed, which this change narrows but does NOT close. An
-    # attacker deletes only the anchors covering the doctored version — the
-    # newest, which nothing points at — so `chain_intact/1` sees no dangling
-    # link. Characterised rather than asserted-as-correct: when the truncation
-    # case is closed this test should FAIL, which is the point of writing it.
-    test "deleting the NEWEST anchor is not detected — the open half of #597" do
+    # The route #597 filed and #666 closed. An attacker deletes only the anchors
+    # covering the doctored version — the newest, which nothing points at — so
+    # `chain_intact/1` sees no dangling link and the surviving prefix still folds
+    # to its recorded hash. Nothing INSIDE the document can tell that apart from
+    # a younger chain; what catches it is the checkpoint witness.
+    #
+    # This test asserted `:verified` until #666. It is left in the same shape on
+    # purpose: the inversion is the acceptance criterion.
+    test "deleting the NEWEST anchor is not detected without a witness" do
       actor = admin()
       page = published_page(actor)
       page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
@@ -1236,22 +1240,517 @@ defmodule KilnCMS.Governance.ChainTest do
         from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
       )
 
-      # The surviving prefix still verifies, so nothing flags the truncation.
+      # No checkpoint was ever minted for this org, so there is nothing outside
+      # the document to compare against.
       assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
     end
 
-    # The residual the moduledoc now states outright: wiping EVERY anchor returns
-    # the document to :unanchored rather than being detected as tampering.
-    # Asserted so the limit is recorded rather than assumed.
-    test "wiping every anchor reads as unanchored, not tampered" do
+    test "deleting the NEWEST anchor IS detected once a checkpoint witnessed it" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "anchor chain truncated"
+    end
+
+    # The laundering route the truncation exists to serve: doctor a version,
+    # delete the anchors that cover it, wait for the next write to re-anchor from
+    # the surviving prefix. Before the witness the final verdict was `:verified`.
+    test "re-anchoring over doctored history after a truncation stays tampered" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      assert {:tampered, _reason} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # Reached with UPDATE rather than DELETE: rewriting `resource_type` takes the
+    # newest anchors out of the set the query returns, which is the same attack
+    # and used to read the same way.
+    test "hiding the newest anchor by rewriting its resource_type is detected" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors",
+          where: a.id == type(^newest.id, :binary_id),
+          update: [set: [resource_type: "page_x"]]
+        ),
+        []
+      )
+
+      assert {:tampered, _reason} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # Was `:unanchored` — indistinguishable from a document anchored for the
+    # first time, which is what made a wholesale wipe a laundering route rather
+    # than an alarm.
+    test "wiping every anchor on a witnessed document is tampered, not unanchored" do
       page = published_page(admin())
       assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.source_id == type(^page.id, :binary_id))
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "no anchors at all"
+    end
+
+    test "wiping every anchor on a document no checkpoint saw is still unanchored" do
+      page = published_page(admin())
 
       KilnCMS.Repo.delete_all(
         from(a in "history_anchors", where: a.source_id == type(^page.id, :binary_id))
       )
 
       assert :unanchored = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # Growth past the witness is normal and must not read as tampering.
+    test "anchoring past the last checkpoint stays verified" do
+      actor = admin()
+      page = published_page(actor)
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # The governance trail folds an already-loaded version list through a
+    # different entry point. Both have to reach the same verdict, or the
+    # dashboard and `mix kiln.audit.verify` disagree about the same document.
+    test "verify_loaded/4 reaches the same truncation verdict" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      versions = Chain.versions_asc(Page, page.id, page.org_id)
+
+      assert {:tampered, _} = Chain.verify_loaded(versions, "page", page.id, page.org_id)
+    end
+  end
+
+  describe "checkpoint witness (#666)" do
+    test "an entry rewritten to match a truncated chain fails its inclusion proof" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+      [newest, older] = Chain.anchors("page", page.id, page.org_id) |> Enum.take(2)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      # The obvious repair: lower the witnessed head to the surviving anchor.
+      KilnCMS.Repo.update_all(
+        from(e in "chain_checkpoint_entries",
+          where: e.source_id == type(^page.id, :binary_id),
+          update: [
+            set: [
+              head_anchor_id: type(^older.id, :binary_id),
+              head_sequence: ^older.sequence,
+              chain_hash: ^older.chain_hash,
+              version_count: ^older.version_count
+            ]
+          ]
+        ),
+        []
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "not included in the root"
+    end
+
+    test "an entry whose checkpoint_sequence disagrees with its checkpoint is detected" do
+      actor = admin()
+      page = published_page(actor)
+      {:ok, _first} = Checkpoint.mint(page.org_id)
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+      {:ok, _second} = Checkpoint.mint(page.org_id)
+
+      # The denormalized ordering column against the checkpoint's SIGNED one.
+      KilnCMS.Repo.update_all(
+        from(e in "chain_checkpoint_entries",
+          where: e.source_id == type(^page.id, :binary_id) and e.head_sequence == 2,
+          update: [set: [checkpoint_sequence: 99]]
+        ),
+        []
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "claims position 99"
+    end
+
+    # Entries are read strongest-claim-first, so demoting one by renumbering it
+    # cannot make a weaker claim the standing one. Before that ordering, raising
+    # an old entry's `checkpoint_sequence` promoted it over the real witness.
+    test "renumbering a weaker entry cannot demote the standing claim" do
+      actor = admin()
+      page = published_page(actor)
+      {:ok, _first} = Checkpoint.mint(page.org_id)
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+      {:ok, _second} = Checkpoint.mint(page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(e in "chain_checkpoint_entries",
+          where: e.source_id == type(^page.id, :binary_id) and e.head_sequence == 1,
+          update: [set: [checkpoint_sequence: 99]]
+        ),
+        []
+      )
+
+      # The position-2 claim still stands and still matches, so the renumbering
+      # bought nothing.
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      # Deleting the stronger entry does not hand the attacker the weaker one
+      # either: it is now the standing claim, and the number they wrote on it is
+      # what the cross-check against the checkpoint's signed sequence catches.
+      KilnCMS.Repo.delete_all(
+        from(e in "chain_checkpoint_entries",
+          where: e.source_id == type(^page.id, :binary_id) and e.head_sequence == 2
+        )
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "claims position 99"
+    end
+
+    # An entry pointing at nothing is the state an attacker wants — no
+    # checkpoint to check the proof against. Both routes to it are refused by
+    # the database: `ON DELETE RESTRICT` keeps the checkpoint alive while an
+    # entry names it, and the foreign key refuses a repoint at an id that does
+    # not exist. `Checkpoint.attest/2` still handles the dangling case, as
+    # defence in depth for a deployment whose constraints were dropped.
+    test "an entry cannot be left pointing at a checkpoint that does not exist" do
+      page = published_page(admin())
+      {:ok, checkpoint} = Checkpoint.mint(page.org_id)
+
+      assert_raise Postgrex.Error, ~r/foreign_key_violation/, fn ->
+        KilnCMS.Repo.update_all(
+          from(e in "chain_checkpoint_entries",
+            where: e.source_id == type(^page.id, :binary_id),
+            update: [set: [checkpoint_id: type(^Ecto.UUID.generate(), :binary_id)]]
+          ),
+          []
+        )
+      end
+
+      assert_raise Postgrex.Error, ~r/foreign_key_violation/, fn ->
+        KilnCMS.Repo.delete_all(
+          from(c in "chain_checkpoints", where: c.id == type(^checkpoint.id, :binary_id))
+        )
+      end
+    end
+
+    # The honest limit of the default `None` witness, asserted rather than
+    # assumed: with the commitment in the database, an attacker who remembers
+    # the second table removes the evidence along with the anchors. Configuring
+    # a real sink is what makes `mix kiln.audit.checkpoint --audit` see the
+    # missing rows; nothing inside `verify/4` can.
+    test "deleting the entry rows removes the witness (the None-adapter limit)" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      KilnCMS.Repo.delete_all(
+        from(e in "chain_checkpoint_entries", where: e.source_id == type(^page.id, :binary_id))
+      )
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "a truncated head is not re-witnessed by the next checkpoint" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _first} = Checkpoint.mint(page.org_id)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      log = capture_log(fn -> {:ok, _second} = Checkpoint.mint(page.org_id) end)
+      assert log =~ "heads at anchor position"
+
+      # The evidence still stands: the second checkpoint recorded no lower entry
+      # to overwrite it with.
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "anchor chain truncated"
+    end
+
+    test "an unchanged document gets no new entry, and still verifies" do
+      page = published_page(admin())
+      {:ok, _first} = Checkpoint.mint(page.org_id)
+      {:ok, _second} = Checkpoint.mint(page.org_id)
+
+      entries =
+        KilnCMS.Repo.all(
+          from(e in "chain_checkpoint_entries",
+            where: e.source_id == type(^page.id, :binary_id),
+            select: e.head_sequence
+          )
+        )
+
+      assert entries == [1]
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "checkpoints chain to each other and are signed" do
+      page = published_page(admin())
+      {:ok, first} = Checkpoint.mint(page.org_id)
+
+      _page = CMS.update_page!(page, %{title: "Second"}, actor: admin())
+      {:ok, second} = Checkpoint.mint(page.org_id)
+
+      assert second.sequence == first.sequence + 1
+      assert second.prev_checkpoint_id == first.id
+      assert second.prev_checkpoint_digest == Checkpoint.digest(first)
+      refute is_nil(second.signature)
+      assert :ok = Checkpoint.checkpoint_attestation(second, page.org_id)
+    end
+
+    test "rewriting a checkpoint's root breaks its signature and floors the verdict" do
+      page = published_page(admin())
+      {:ok, checkpoint} = Checkpoint.mint(page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(c in "chain_checkpoints",
+          where: c.id == type(^checkpoint.id, :binary_id),
+          update: [set: [root: "doctored"]]
+        ),
+        []
+      )
+
+      # The inclusion proof no longer reconstructs the (rewritten) root, so this
+      # is caught before the signature is even consulted.
+      assert {:tampered, _reason} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "an unsigned checkpoint floors the verdict rather than being skipped" do
+      page = published_page(admin())
+      {:ok, checkpoint} = Checkpoint.mint(page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(c in "chain_checkpoints",
+          where: c.id == type(^checkpoint.id, :binary_id),
+          update: [set: [signature: nil, key_id: nil]]
+        ),
+        []
+      )
+
+      assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # The hole a head-versus-head comparison leaves. Anchor positions are refilled
+    # by `next_sequence/1`, so after the truncation two ordinary publishes put the
+    # head PAST the witnessed position with a contiguous chain underneath it. The
+    # comparison has to be at the witnessed position, not at the head.
+    test "re-anchoring PAST the witnessed position is still detected" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+      assert newest.sequence == 2
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      # Two writes: position 2 is refilled and 3 is minted, so the head is now
+      # beyond what the checkpoint witnessed.
+      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
+      :ok = Chain.anchor(page)
+      page = CMS.update_page!(page, %{title: "Fourth"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      assert [3, 2, 1] = Chain.anchors("page", page.id, page.org_id) |> Enum.map(& &1.sequence)
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "is not the one checkpoint"
+    end
+
+    # ...and the next scheduled checkpoint must not launder it by recording the
+    # replacement as the new truth.
+    test "the next checkpoint does not re-witness a substituted anchor" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _first} = Checkpoint.mint(page.org_id)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      log = capture_log(fn -> {:ok, _second} = Checkpoint.mint(page.org_id) end)
+      assert log =~ "no longer carries the anchor"
+
+      assert {:tampered, _reason} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # `proof` is a `jsonb[]`, so Postgres takes any JSON and Ecto raises on load.
+    # An unreadable witness must floor the verdict, not vanish — otherwise one
+    # UPDATE is cheaper than the deletion the whole mechanism defends against.
+    test "an entry rewritten into an unloadable shape floors the verdict" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      KilnCMS.Repo.query!(
+        "UPDATE chain_checkpoint_entries SET proof = ARRAY['\"not-a-map\"'::jsonb] " <>
+          "WHERE source_id = $1",
+        [Ecto.UUID.dump!(page.id)]
+      )
+
+      {verdict, log} =
+        with_log(fn -> Chain.verify(Page, "page", page.id, page.org_id) end)
+
+      assert verdict == :unverifiable
+      assert log =~ "cannot be verified against its witness"
+    end
+
+    # A forged checkpoint needs no signing key if an empty proof is accepted:
+    # set `root` to the leaf you want attested and pair it with `proof = '{}'`.
+    test "an entry with no inclusion proof is rejected on a multi-document checkpoint" do
+      actor = admin()
+      page = published_page(actor)
+      _other = published_page(actor)
+
+      {:ok, checkpoint} = Checkpoint.mint(page.org_id)
+      assert checkpoint.document_count == 2
+
+      KilnCMS.Repo.query!(
+        "UPDATE chain_checkpoint_entries SET proof = '{}' WHERE source_id = $1",
+        [Ecto.UUID.dump!(page.id)]
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "no inclusion proof"
+    end
+
+    # A real Merkle tree, not the degenerate single-leaf one every other test
+    # builds — so the proof machinery is actually exercised end to end.
+    test "inclusion proofs verify across a multi-document checkpoint" do
+      actor = admin()
+      pages = for _ <- 1..5, do: published_page(actor)
+
+      {:ok, checkpoint} = Checkpoint.mint(hd(pages).org_id)
+      assert checkpoint.document_count == 5
+
+      entries = Checkpoint.entries(checkpoint, hd(pages).org_id)
+      assert length(entries) == 5
+      assert Enum.all?(entries, &(&1.proof != []))
+
+      for page <- pages do
+        assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+      end
+    end
+
+    # The anchoring master switch stops anchoring; it does not claim history was
+    # rewritten. Without the gate every witnessed document went red at once.
+    test "turning off anchoring does not turn witnessed documents tampered" do
+      page = published_page(admin())
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+
+      Application.put_env(:kiln_cms, :audit_anchors_enabled, false)
+      on_exit(fn -> Application.put_env(:kiln_cms, :audit_anchors_enabled, true) end)
+
+      assert :unanchored = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "the kill switch makes the witness inert" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      {:ok, _checkpoint} = Checkpoint.mint(page.org_id)
+      [newest | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^newest.id, :binary_id))
+      )
+
+      Application.put_env(:kiln_cms, :governance_checkpoints_enabled, false)
+      on_exit(fn -> Application.put_env(:kiln_cms, :governance_checkpoints_enabled, true) end)
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
     end
   end
 end
