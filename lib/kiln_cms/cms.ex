@@ -304,6 +304,26 @@ defmodule KilnCMS.CMS do
       define :list_history_anchors_for, action: :for_content, args: [:resource_type, :source_id]
     end
 
+    # Org-wide, signed commitments to every document's head anchor (#666) — the
+    # witness that makes truncating a chain's newest anchors detectable. Minted
+    # by KilnCMS.Governance.CheckpointWorker; see KilnCMS.Governance.Checkpoint.
+    resource KilnCMS.CMS.ChainCheckpoint do
+      define :create_chain_checkpoint, action: :create
+      define :list_chain_checkpoints, action: :recent
+      define :list_unwitnessed_checkpoints, action: :unwitnessed
+      define :record_checkpoint_publication, action: :record_publication
+    end
+
+    resource KilnCMS.CMS.ChainCheckpointEntry do
+      define :create_chain_checkpoint_entry, action: :create
+
+      define :list_checkpoint_entries_for,
+        action: :for_content,
+        args: [:resource_type, :source_id]
+
+      define :list_checkpoint_entries_in, action: :for_checkpoint, args: [:checkpoint_id]
+    end
+
     # Admin-defined public forms (contact/signup/…) + their submissions.
     resource KilnCMS.CMS.Form do
       define :list_forms, action: :read

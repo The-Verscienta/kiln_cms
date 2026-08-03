@@ -214,6 +214,82 @@ if config_env() != :test do
   end
 end
 
+# ## Governance checkpoint witness (#666)
+#
+# Where the org-wide anchor-chain commitment gets published. Runtime rather than
+# compile time because it is the one knob that decides whether the truncation
+# guarantee holds against an attacker with full database access, and an operator
+# must be able to point it at a bucket without rebuilding the image.
+#
+# An unrecognized value leaves the compiled default (`none`) rather than
+# guessing. That is the *weaker* side, so it is warned about explicitly here
+# rather than left to `Env`'s generic stderr line — see KilnCMS.Config.Env on
+# why "fail to default" is not "fail safe".
+#
+# Skipped under :test so the suite does not depend on the developer's shell; the
+# checkpoint tests set the adapter explicitly.
+if config_env() != :test do
+  witness =
+    case System.get_env("KILN_GOVERNANCE_WITNESS") do
+      nil ->
+        nil
+
+      value ->
+        case value |> String.trim() |> String.downcase() do
+          "" ->
+            nil
+
+          "none" ->
+            KilnCMS.Governance.Witness.None
+
+          "file" ->
+            KilnCMS.Governance.Witness.File
+
+          "s3" ->
+            KilnCMS.Governance.Witness.S3
+
+          other ->
+            # ASCII only: config providers write to stderr before Logger exists,
+            # and non-ASCII comes back escaped in exactly the line an operator
+            # needs to read.
+            IO.puts(
+              :standard_error,
+              "KILN_GOVERNANCE_WITNESS=#{inspect(other)} is not one of none|file|s3 - " <>
+                "governance checkpoints will NOT be published outside the database, " <>
+                "which is the weaker side of the default. See #666."
+            )
+
+            nil
+        end
+    end
+
+  if witness do
+    config :kiln_cms, KilnCMS.Governance.Witness, adapter: witness
+  end
+
+  if dir = System.get_env("KILN_GOVERNANCE_WITNESS_DIR") do
+    config :kiln_cms, KilnCMS.Governance.Witness.File, dir: dir
+  end
+
+  if bucket = System.get_env("KILN_GOVERNANCE_WITNESS_BUCKET") do
+    config :kiln_cms, KilnCMS.Governance.Witness.S3,
+      bucket: bucket,
+      prefix: System.get_env("KILN_GOVERNANCE_WITNESS_PREFIX", "")
+  end
+
+  # How often the commitment is refreshed. The exposure window for a truncated
+  # chain is one interval wide, so a regulated deployment shortens this
+  # ("0 * * * *" for hourly) rather than leaving the nightly default.
+  #
+  # A plain `:kiln_cms` key rather than a reach into `Oban`'s nested plugin
+  # keyword list: `Config` deep-merges those, and overriding one entry of one
+  # plugin tuple from here is the #608 shape. `KilnCMS.Application.oban_config/0`
+  # assembles the crontab from this.
+  if cron = System.get_env("KILN_GOVERNANCE_CHECKPOINT_CRON") do
+    config :kiln_cms, :governance_checkpoint_cron, cron
+  end
+end
+
 # ## Signed provenance / C2PA-style content manifests (#340)
 #
 # `KilnCMS.Provenance` was configured in `config/config.exs` alone, which is
