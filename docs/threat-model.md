@@ -54,7 +54,8 @@ the router so preflights are answered before route matching).
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | **none, all envs** | `:docs` |
-| Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT | `:auth` + per-account (#478) |
+| Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
+| Headless second factor | `POST /api/auth/sign_in/verify` | encrypted pending token + TOTP or recovery code | `:auth`; the same per-account second-factor budget as the browser prompt (#714, #726) |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
@@ -254,9 +255,67 @@ build if a resource is ever registered without that authorizer.
   the budget keys on the *submitted* identifier, so an address with no account
   throttles identically and the refusal is not an enumeration oracle. The
   account owner is mailed once per window when attempts start being refused.
-  *Residual:* this endpoint does not ask for a second factor at all — a
-  2FA-enabled account's password alone returns a full JWT here, where the
-  browser flow would divert to `/sign-in/verify`. Tracked in #726.
+- **Skipping the second factor** — *closed (#726).* This endpoint used to return
+  a full JWT for a 2FA-enabled account on the password alone, where the browser
+  flow diverts to `/sign-in/verify`. That made TOTP optional in practice rather
+  than in policy: there is no point bounding six digits at one prompt while a
+  door next to it does not ask. A 2FA account now gets `200` with a pending
+  token instead of `201` with a JWT, and finishes at
+  `POST /api/auth/sign_in/verify`.
+  - **What is withheld is access to the token, not its existence.**
+    `Strategy.action/3` mints the JWT and — because `User` sets
+    `store_all_tokens?` — stores it, before anything looks at `totp_enabled?`.
+    The second factor gates whether the caller ever receives it. Say it that way
+    round: "no token is issued" would tell an incident responder that a
+    password-alone compromise leaves nothing to revoke, and it leaves something.
+    *Residual:* an abandoned exchange leaves a live token row nobody holds, for
+    the JWT's natural lifetime. Bounded by the per-IP `:auth` bucket only — the
+    per-account sign-in budget does not bite, because the password *succeeded*
+    and success forgives that counter. Tracked in #742.
+  - The pending blob is **encrypted** (`Phoenix.Token.encrypt/4`), not signed.
+    The browser's equivalent can be signed because it lives in the encrypted
+    session cookie; this one is handed to the client, and signing it would
+    publish the first-factor JWT it carries in a decodable payload —
+    reintroducing the bypass in a form that looks fixed. It follows that the
+    blob is itself a credential and has to be handled as one; `docs/api.md` says
+    so to integrators, because "opaque" reads as "harmless" otherwise.
+  - It is **single-use**: a completed redemption is recorded as spent, so a
+    captured verify request cannot be replayed — and a *successful* request is
+    the one most likely to be sitting in a log, a CI transcript or a crash
+    report. The browser flow gets this by deleting the session key. A wrong code
+    or a spent budget does *not* burn it, because neither is a failed
+    authentication.
+    *Residual:* that record is node-local (`Cachex`, the same trade
+    `WebAuthn.take_challenge/1` and `AccountThrottle` already make) and fails
+    **open**, so on a cluster a replay landing on a node that never saw the
+    redemption still succeeds. Fail-open is deliberate: failing closed would
+    break legitimate clients whose two requests are balanced onto different
+    nodes, which is a worse outcome than the replay it would prevent. Exactness
+    needs shared state; tracked in #743.
+  - Codes are charged `AccountThrottle.consume_second_factor/1` on the **same
+    per-account bucket** the browser prompt charges. Per-surface budgets would
+    let an attacker double their guesses by alternating endpoints, and the
+    five-minute pending lifetime bounds nothing on its own — re-running the
+    password step mints a fresh token, and succeeding also forgives the sign-in
+    counter. That bucket is per node too (residual risk #9 below), so the real
+    ceiling is 5 × nodes per window.
+    *Residual:* reaching that bucket used to require a browser session and a
+    CSRF token. It now takes five `curl` calls from anyone holding the password,
+    and because the bucket is shared it locks the owner out of *both* surfaces
+    for the window — the denial-of-service #478 chose a flat budget to avoid,
+    arriving by another route. The flat window still bounds it to one window's
+    tail rather than an escalating lockout.
+  - `two_factor_required` discloses that an account has a second factor, but
+    only to a caller who has already supplied the correct password — which the
+    browser flow discloses just as plainly by redirecting to the prompt. Every
+    refusal *before* that point is still the same generic 401, and costs the
+    same bcrypt.
+- **Passkeys as a side door** — a verified passkey completes sign-in with no
+  TOTP diversion (`KilnCMSWeb.PasskeyController`), and that is policy, not an
+  oversight: every Kiln passkey is registered *and* asserted with user
+  verification required, so the ceremony proves possession + PIN/biometric — the
+  bar the TOTP flow enforces. It is also browser-only; there is no headless
+  passkey route, so it is not a second door onto this surface.
 - **Token theft** — JWTs are bearer tokens; clients must store them securely and
   use TLS. Tokens are revocable via the token store.
 

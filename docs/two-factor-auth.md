@@ -15,11 +15,30 @@ every sign-in, after the first factor.
      confirm (`confirm_totp`). Only then is 2FA enforced.
   3. *Disable* (`disable_totp`) requires a current code, so a walk-up attacker on
      an open session still can't remove the factor.
-- **Sign-in gate:** `KilnCMSWeb.AuthController.success/4` diverts a 2FA-enabled
-  account to `/sign-in/verify` instead of establishing a session. A short-lived
-  (5-minute), signed pending token carries the user id + the already-minted
-  first-factor token across the redirect — the user is **not** signed in until a
-  valid code is entered.
+- **Sign-in gate (browser):** `KilnCMSWeb.AuthController.success/4` diverts a
+  2FA-enabled account to `/sign-in/verify` instead of establishing a session. A
+  short-lived (5-minute), signed pending token carries the user id + the
+  already-minted first-factor token across the redirect — the user is **not**
+  signed in until a valid code is entered. The blob only needs signing because
+  it lives in the (encrypted) session, where the client never sees it.
+- **Sign-in gate (headless):** `POST /api/auth/sign_in` answers a 2FA account
+  with `200 {"two_factor_required": true, "pending_token": …}` rather than the
+  `201` + JWT a single-factor account gets, and `POST /api/auth/sign_in/verify`
+  redeems that plus a code
+  ([#726](https://github.com/The-Verscienta/kiln_cms/issues/726)). Same five
+  minutes and the same budget as the browser prompt. This blob *is* handed to
+  the client, so it is **encrypted** rather than signed and is single-use; see
+  `KilnCMS.Accounts.PendingSignIn` and `docs/api.md`.
+
+  Until #726 this endpoint asked for no second factor at all, which is why the
+  sentence at the top of this page — "a valid code is required at every sign-in"
+  — is only now true. API keys remain the recommended credential for unattended
+  server-to-server use, and carry no second factor by design.
+- **Where the code is checked:** `KilnCMS.Accounts.SecondFactor.verify/2`, for
+  both gates, so neither can drift on what counts as a valid submission.
+  Whitespace normalization sits one level lower still, in
+  `KilnCMS.Accounts.Totp.valid?/3`, because the enrolment and disable forms
+  check a code too and used to reject the `123 456` an authenticator app copies.
 
 ## "Remember me" and the second factor
 
@@ -51,6 +70,13 @@ What an operator should know when a user reports it:
 - **It is per account, not per browser or per address.** Signing in from another
   device or network does not reset it, and neither does re-entering the password
   — a fresh pending token does not refill the budget, which is the point.
+- **It is per account, not per *surface*.** The browser prompt and the headless
+  `POST /api/auth/sign_in/verify` charge the same bucket (#726), so a user whose
+  correct code is refused in the browser may have spent it in a script — a CI
+  job or a mobile client retrying a stale code will do it silently. Check for a
+  headless client before concluding the browser attempts don't add up. Codes
+  submitted to the *enrolment* and *disable* forms are a different thing and
+  charge nothing.
 - **TOTP codes and recovery codes share it.** Someone who has spent the budget
   guessing codes cannot fall back to recovery codes until the window rolls.
 - **A completed password reset clears it.** That is the remedy to offer: it is
@@ -92,9 +118,21 @@ sign-in gate and the owner's enrolment UI. 2FA is "enabled" iff
 
 ## Scope & later phases
 
+Shipped since, and no longer out of scope:
+
+- **Passkeys/WebAuthn** — `KilnCMS.Accounts.WebAuthn`,
+  `KilnCMSWeb.PasskeyController`, `/auth/passkey/*`. A verified passkey
+  completes sign-in **without** a TOTP prompt, on purpose: every Kiln passkey is
+  registered *and* asserted with user verification required, so the ceremony
+  already proves possession + PIN/biometric. That is policy, and
+  `docs/threat-model.md` records it as such. Passkeys are browser-only — there
+  is no headless ceremony.
+- **SSO (OAuth2/OIDC)** — built on `assent` (bundled with
+  `ash_authentication`), compile-gated off by default: set
+  `config :kiln_cms, :sso_oidc, enabled: true` plus the `OIDC_*` env and
+  recompile. An SSO sign-in completes through `AuthController.success/4` like
+  any other, so a 2FA account is diverted to the code prompt from there too.
+
 Still out of scope (the other half of #331):
 
-- **SSO (OAuth2/OIDC/SAML) and passkeys/WebAuthn**.
-  `assent` (bundled with `ash_authentication`) already supports OAuth2/OIDC, so
-  SSO needs no new dependency; it was deferred here only because it can't be
-  verified without a live identity provider.
+- **SAML.**

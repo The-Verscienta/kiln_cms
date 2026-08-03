@@ -211,6 +211,55 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **`POST /api/auth/sign_in` no longer skips the second factor.** A 2FA-enabled
+  account's password alone returned a full user JWT here — the credential for
+  JSON:API, GraphQL and the headless REST surface, carrying that user's real
+  role — while the browser flow diverted the same account to `/sign-in/verify`.
+  That made TOTP optional in practice rather than in policy: there is no point
+  bounding six digits at one prompt (#714) while a door next to it does not ask
+  at all. Every mitigation on a second factor is worth what the weakest path
+  that skips it is worth (#726).
+
+  The headless flow now mirrors the browser one. Correct credentials for a 2FA
+  account answer **`200`** with `{"two_factor_required": true, "pending_token":
+  …, "expires_in": 300}` and **no bearer token**; the new
+  **`POST /api/auth/sign_in/verify`** exchanges that pending token plus a TOTP
+  or recovery code for the `201` the first call used to give. Accounts with no
+  second factor are unchanged — one call, `201`, token.
+
+  Three details are load-bearing rather than incidental. The pending blob is
+  **encrypted**, not signed: the browser's equivalent can be signed because it
+  lives in the encrypted session cookie, but this one is handed to the client,
+  and signing it would publish the first-factor JWT it carries in a payload
+  anyone can decode — reopening the same hole in a shape that looks fixed. It is
+  **single-use**, because the request most likely to end up in a log is a
+  successful one, and a replayable success is a credential with a five-minute
+  tail. And the code is charged the **same per-account bucket** the browser
+  prompt charges, because a budget an attacker can double by alternating
+  endpoints is not a budget.
+
+  Said precisely, what the second factor withholds is the caller's *access* to
+  the token, not its existence: `Strategy.action/3` mints and stores it before
+  anything looks at whether 2FA is on. `docs/threat-model.md` states it that way
+  round, because "no token is issued" would tell an incident responder there is
+  nothing to revoke.
+
+  Two things found in the same pass and fixed here: pasted codes containing
+  whitespace (`123 456`, what every authenticator app copies) were accepted at
+  sign-in but rejected by the enrolment and disable forms — normalization now
+  lives in `Totp.valid?/3`, below all three callers; and `Retry-After` was
+  computed with truncating division, so a refusal with under a second left told
+  a conforming client to retry immediately.
+
+  Passkeys were checked in the same pass and are **not** a bypass: every Kiln
+  passkey is registered *and* asserted with user verification required, so the
+  ceremony clears the bar TOTP is there to set, and there is no headless passkey
+  route in any case. `docs/threat-model.md` now records that as policy rather
+  than leaving it to be inferred.
+
+  This changes the response contract of an existing endpoint — see
+  **Upgrading**.
+
 - **History anchors verify as a chain, not just at the head.** Three ways to
   move the verification baseline without deleting anything the chain would
   notice, all closed (#597, #666).
@@ -830,6 +879,33 @@ migration, a rewritten column, a dropped config key).
   sighted and screen-reader users alike. The copyable media URL now says so too.
 
 ### Upgrading
+
+**`POST /api/auth/sign_in` can now answer `200` instead of `201`, and any client
+that branches on the presence of `token` will read that as a failure.** For an
+account with two-factor authentication enabled, the password alone no longer
+returns a bearer token (#726) — the response is `200` with
+`{"two_factor_required": true, "pending_token": …, "expires_in": 300}`, and the
+token comes from a second call to `POST /api/auth/sign_in/verify` carrying that
+pending token plus a TOTP or recovery code. **Branch on the status code.**
+
+Nothing changes for an account without a second factor: one call, `201`, token.
+So the blast radius is exactly your scripts that sign in as a 2FA-enabled user —
+check for those before deploying, because the failure is silent on the client
+side (a `200` with no `token` reads as a malformed response, not as an auth
+error). For unattended server-to-server use, move those callers to an **API
+key**: keys carry no second factor by design and are unaffected by any of this.
+
+Two smaller contract notes on the same endpoint:
+
+- Errors from both steps now carry a stable machine-readable `code` alongside
+  the existing `detail`: `invalid_credentials`, `missing_parameters`,
+  `pending_expired`, `invalid_code`, `too_many_attempts`. Purely additive.
+- Send `code` as a **string**. A JSON number is no longer reported as a missing
+  parameter, but a leading zero still makes the integer form wrong half the
+  time.
+
+No migration, no config, and rolling back is symmetric — the old endpoint simply
+resumes issuing tokens on the password alone, which is the bug.
 
 **Rolling back past the history-anchor sequence migration is a one-way door for
 the audit surface.** `history_anchors.sequence` is inside the signed payload of

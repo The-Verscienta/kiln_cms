@@ -68,7 +68,7 @@ are pure *clients* over actions that ship today.
 | Tier gating (editors submit, admins approve/return) | `KilnCMS.CMS.Checks.OrgAdmin` on the `:publish` and `:return_to_draft` policies |
 | The list + buttons UI, on the web | `KilnCMSWeb.EditorLive` |
 | Per-type dispatch (`Page`, `Post`, dynamic types) | `KilnCMS.CMS.ContentTypes` — `transition/4`, `list!/2`, `get_record!/3` |
-| Headless bearer sign-in (JWT) | `KilnCMSWeb.ApiAuthController`, `POST /api/auth/sign_in` (#37) |
+| Headless bearer sign-in (JWT) | `KilnCMSWeb.ApiAuthController`, `POST /api/auth/sign_in` (#37); a 2FA account finishes at `POST /api/auth/sign_in/verify` (#726) |
 | Bearer verification without a `conn` | `KilnCMSWeb.BearerAuth` — `token_from_params/1`, `user_from_token/1` |
 | Tenant-from-host on a raw socket | `lib/kiln_cms_web/graphql_socket.ex` |
 
