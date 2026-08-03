@@ -56,6 +56,16 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
     assert get_in(spec, ["paths", "/api/auth/sign_in", "post", "operationId"]) == "signIn"
     assert get_in(spec, ["paths", "/api/auth/sign_in", "post", "security"]) == []
 
+    # #726: the two-step 2FA exchange is part of the published contract, not
+    # folded into prose — a client that only knows about 201 will read "second
+    # factor required" as a failure.
+    assert get_in(spec, ["paths", "/api/auth/sign_in", "post", "responses", "200"])
+
+    assert get_in(spec, ["paths", "/api/auth/sign_in/verify", "post", "operationId"]) ==
+             "signInVerify"
+
+    assert get_in(spec, ["paths", "/api/auth/sign_in/verify", "post", "security"]) == []
+
     # #191: the artifact + preview delivery surfaces are documented as operations.
     assert get_in(spec, ["paths", "/api/content/{type}/{slug}", "get", "operationId"]) ==
              "getArtifact"

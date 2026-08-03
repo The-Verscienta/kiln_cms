@@ -20,10 +20,18 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
   # `PATCH`/`DELETE` are needed for the write API (#330) so an external front end
   # (e.g. the visual-editing bridge, #355) can round-trip edits cross-origin —
   # a `PATCH /api/json/<type>/:id` preflight must be answered. Reads stay GET.
+  # `retry-after` is exposed because the API documents it as part of a contract:
+  # the second-factor exchange (#726) and every rate-limited route answer a 429
+  # with it, and `docs/api.md` tells clients to back off by it. A browser hides
+  # every response header that is not on this list, so without it
+  # `res.headers.get('retry-after')` is `null` for exactly the allow-listed
+  # front ends `CORS_ORIGINS` exists to serve — a documented header that the
+  # audience it was documented for cannot read.
   @corsica Corsica.init(
              origins: {KilnCMSWeb.CORS, :allowed_origin?, []},
              allow_methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
              allow_headers: ["authorization", "content-type", "x-api-key"],
+             expose_headers: ["retry-after"],
              max_age: 600
            )
 

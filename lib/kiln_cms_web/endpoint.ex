@@ -153,11 +153,17 @@ defmodule KilnCMSWeb.Endpoint do
   plug KilnCMSWeb.Plugs.SetTenant
 
   # Attach request context (method, path, scrubbed headers/params) to any Sentry
-  # event raised while handling this request. No-op without a configured DSN.
-  # Sensitive params/headers are scrubbed by Sentry's defaults. On Bandit this is
-  # the capture path — `Sentry.PlugCapture` is deliberately omitted (it would
-  # double-report). See KilnCMS.Application.setup_observability/0.
-  plug Sentry.PlugContext
+  # event raised while handling this request. No-op without a configured DSN. On
+  # Bandit this is the capture path — `Sentry.PlugCapture` is deliberately
+  # omitted (it would double-report). See KilnCMS.Application.setup_observability/0.
+  #
+  # The scrubber is ours rather than Sentry's default, which masks only
+  # `password`/`passwd`/`secret`. That was already a partial list — it does not
+  # cover the second factor — and #726 added two more secrets to the request
+  # body: a `pending_token` plus a `code` is a complete sign-in for a 2FA
+  # account, so a single 500 on `/api/auth/sign_in/verify` would ship one to
+  # anyone with Sentry read access.
+  plug Sentry.PlugContext, body_scrubber: &KilnCMSWeb.SentryScrubber.scrub_params/1
 
   # CORS for the headless API surfaces (`/api/*`, `/gql`). Ahead of the router so
   # it can answer preflight `OPTIONS` requests, which never match a `get`/`post`

@@ -93,7 +93,17 @@
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "…"}'
 
+# 2FA account? That answers 200 with a pending_token instead of 201 with a token:
+curl -s -X POST "https://&lt;this-site&gt;/api/auth/sign_in/verify" \
+  -H "Content-Type: application/json" \
+  -d '{"pending_token": "&lt;pending&gt;", "code": "123456"}'
+
 curl -s "https://&lt;this-site&gt;/api/json/posts" -H "Authorization: Bearer &lt;token&gt;"</code></pre>
+    <p class="mt-4 rounded-lg border border-base-content/15 bg-base-200/60 px-4 py-3 text-sm text-base-content/70">
+      {gettext(
+        "If the account has two-factor authentication enabled, sign-in answers 200 with a pending token rather than 201 with a bearer token — branch on the status code, not on whether a token is present. Unattended clients should use an API key instead."
+      )}
+    </p>
     <p class="mt-4 rounded-lg border border-base-content/15 bg-base-200/60 px-4 py-3 text-sm text-base-content/70">
       {gettext(
         "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."

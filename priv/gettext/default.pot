@@ -1358,7 +1358,7 @@ msgid "Visual separator between sections"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex:204
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:58
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:66
 #, elixir-autogen, elixir-format
 msgid "You are now signed in"
 msgstr ""
@@ -2907,7 +2907,7 @@ msgstr ""
 msgid "6-digit code"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:98
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:108
 #, elixir-autogen, elixir-format
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
 msgstr ""
@@ -3664,7 +3664,7 @@ msgstr ""
 msgid "Enter a path starting with /."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:153
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr ""
@@ -3887,7 +3887,7 @@ msgstr ""
 msgid "Heading text"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:126
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:136
 #, elixir-autogen, elixir-format
 msgid "Headless consumer guide"
 msgstr ""
@@ -4001,7 +4001,7 @@ msgstr ""
 msgid "Mon"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:105
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:115
 #, elixir-autogen, elixir-format
 msgid "More surfaces"
 msgstr ""
@@ -4157,7 +4157,7 @@ msgstr ""
 msgid "None yet."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:121
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:131
 #, elixir-autogen, elixir-format
 msgid "Not sure which surface to use? Start with the consumer guide:"
 msgstr ""
@@ -4957,7 +4957,7 @@ msgstr ""
 msgid "That code isn't valid — try again."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:77
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:88
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Try again."
 msgstr ""
@@ -5119,8 +5119,8 @@ msgstr ""
 msgid "Tue"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:148
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:152
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:134
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:138
 #: lib/kiln_cms_web/live/settings_live.ex:369
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
@@ -5194,7 +5194,7 @@ msgstr ""
 msgid "User"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:165
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:151
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr ""
@@ -5345,7 +5345,7 @@ msgstr ""
 msgid "hard bounce"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:113
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:123
 #, elixir-autogen, elixir-format
 msgid "hybrid keyword + semantic search across all content types."
 msgstr ""
@@ -5365,7 +5365,7 @@ msgstr ""
 msgid "last used %{date}"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:117
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:127
 #, elixir-autogen, elixir-format
 msgid "locale discovery for building language switchers."
 msgstr ""
@@ -5456,7 +5456,7 @@ msgstr ""
 msgid "target missing"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:109
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:119
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
 msgstr ""
@@ -7205,7 +7205,7 @@ msgstr ""
 msgid "and %{count} more"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:74
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:85
 #, elixir-autogen, elixir-format
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr ""
@@ -7315,4 +7315,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/code_injection_live.ex:209
 #, elixir-autogen, elixir-format
 msgid "added just before </head>"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:103
+#, elixir-autogen, elixir-format
+msgid "If the account has two-factor authentication enabled, sign-in answers 200 with a pending token rather than 201 with a bearer token — branch on the status code, not on whether a token is present. Unattended clients should use an API key instead."
 msgstr ""

@@ -211,6 +211,28 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   end
 
   @doc """
+  A `Retry-After` header value, in whole seconds, for a `{:deny, ms}` refusal.
+
+  Rounded **up**, and never below one. `div(ms, 1000)` truncates, so anything
+  under a second becomes `Retry-After: 0` — which tells a conforming client to
+  retry immediately, straight into another refusal that spends the next window's
+  first attempt. Browsers ignore the header, so this only ever cost politeness
+  on the browser prompt; the headless second factor (#726) is consumed by
+  scripts that honour it.
+
+  Exported so both surfaces round the same way rather than each writing the
+  arithmetic out.
+  """
+  @spec retry_after_seconds(non_neg_integer()) :: pos_integer()
+  def retry_after_seconds(retry_after_ms) do
+    retry_after_ms
+    |> Kernel./(1000)
+    |> Float.ceil()
+    |> trunc()
+    |> max(1)
+  end
+
+  @doc """
   The digest this module keys buckets on.
 
   Exported so anything else keying per-address state agrees byte-for-byte: two

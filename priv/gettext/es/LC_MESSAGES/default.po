@@ -1358,7 +1358,7 @@ msgid "Visual separator between sections"
 msgstr "Separador visual entre secciones"
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex:204
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:58
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:66
 #, elixir-autogen, elixir-format
 msgid "You are now signed in"
 msgstr "Ha iniciado sesión"
@@ -2907,7 +2907,7 @@ msgstr "Redirecciones 301 desde URL retiradas. Las filas aparecen automáticamen
 msgid "6-digit code"
 msgstr "Código de 6 dígitos"
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:98
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:108
 #, elixir-autogen, elixir-format
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
 msgstr "Un token bearer amplía las lecturas y la búsqueda para incluir borradores. Los sitios de entrega que adjunten una clave de servicio deben usar las rutas exclusivas de contenido publicado (las gemelas /published) para que los borradores nunca se filtren."
@@ -3664,7 +3664,7 @@ msgstr "Introduzca un código actual para desactivarla"
 msgid "Enter a path starting with /."
 msgstr "Introduzca una ruta que empiece por /."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:153
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr "Introduzca el código de 6 dígitos de su aplicación de autenticación o uno de sus códigos de recuperación."
@@ -3887,7 +3887,7 @@ msgstr "Mitad"
 msgid "Heading text"
 msgstr "Texto del encabezado"
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:126
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:136
 #, elixir-autogen, elixir-format
 msgid "Headless consumer guide"
 msgstr "Guía del consumidor headless"
@@ -4001,7 +4001,7 @@ msgstr "Miembros"
 msgid "Mon"
 msgstr "lun"
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:105
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:115
 #, elixir-autogen, elixir-format
 msgid "More surfaces"
 msgstr "Más superficies"
@@ -4157,7 +4157,7 @@ msgstr "No hay versiones registradas."
 msgid "None yet."
 msgstr "Ninguno todavía."
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:121
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:131
 #, elixir-autogen, elixir-format
 msgid "Not sure which surface to use? Start with the consumer guide:"
 msgstr "¿No sabe qué superficie usar? Empiece por la guía del consumidor:"
@@ -4957,7 +4957,7 @@ msgstr "Ese código no es válido: la autenticación de doble factor sigue activ
 msgid "That code isn't valid — try again."
 msgstr "Ese código no es válido: inténtelo de nuevo."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:77
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:88
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Try again."
 msgstr "Ese código no es válido. Inténtelo de nuevo."
@@ -5119,8 +5119,8 @@ msgstr "Traducciones"
 msgid "Tue"
 msgstr "mar"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:148
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:152
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:134
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:138
 #: lib/kiln_cms_web/live/settings_live.ex:369
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
@@ -5194,7 +5194,7 @@ msgstr "Use «true» para que la casilla aparezca marcada por defecto."
 msgid "User"
 msgstr "Usuario"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:165
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:151
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr "Verificar"
@@ -5345,7 +5345,7 @@ msgstr "abandonado"
 msgid "hard bounce"
 msgstr "rebote permanente"
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:113
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:123
 #, elixir-autogen, elixir-format
 msgid "hybrid keyword + semantic search across all content types."
 msgstr "búsqueda híbrida por palabras clave y semántica en todos los tipos de contenido."
@@ -5365,7 +5365,7 @@ msgstr "elementos en la biblioteca"
 msgid "last used %{date}"
 msgstr "último uso el %{date}"
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:117
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:127
 #, elixir-autogen, elixir-format
 msgid "locale discovery for building language switchers."
 msgstr "descubrimiento de idiomas para construir selectores de idioma."
@@ -5456,7 +5456,7 @@ msgstr "taiji · centro"
 msgid "target missing"
 msgstr "destino ausente"
 
-#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:109
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:119
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
 msgstr "el artefacto renderizado: cuerpo de bloques completo, precompilado y cacheable en CDN."
@@ -7205,7 +7205,7 @@ msgstr "No la usa ningún documento publicado."
 msgid "and %{count} more"
 msgstr "y %{count} más"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:74
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:85
 #, elixir-autogen, elixir-format
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr "Demasiados intentos. Espere unos minutos e inténtelo de nuevo."
@@ -7316,3 +7316,8 @@ msgstr "se añade justo antes de </body>"
 #, elixir-autogen, elixir-format
 msgid "added just before </head>"
 msgstr "se añade justo antes de </head>"
+
+#: lib/kiln_cms_web/controllers/page_html/developers.html.heex:103
+#, elixir-autogen, elixir-format
+msgid "If the account has two-factor authentication enabled, sign-in answers 200 with a pending token rather than 201 with a bearer token — branch on the status code, not on whether a token is present. Unattended clients should use an API key instead."
+msgstr "Si la cuenta tiene la autenticación de dos factores activada, el inicio de sesión responde 200 con un token pendiente en lugar de 201 con un token de portador: decide según el código de estado, no según si hay un token presente. Los clientes desatendidos deberían usar una clave de API."

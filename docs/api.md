@@ -97,6 +97,58 @@ Notes:
 - The browser `/sign-in` LiveView remains the path for the interactive
   admin/editor UI (it establishes a session, not a bearer token).
 
+### Accounts with two-factor authentication
+
+If the account has TOTP enabled, the password alone is **not** enough: the
+response is a `200` (not a `201`) and carries no bearer token, only a
+short-lived handle for finishing the sign-in.
+
+```jsonc
+// 200 OK
+{
+  "two_factor_required": true,
+  "pending_token": "<opaque>",
+  "expires_in": 300
+}
+```
+
+Redeem it with a code from the authenticator app — or one of the account's
+one-time recovery codes:
+
+```bash
+curl -s -X POST http://localhost:4000/api/auth/sign_in/verify \
+  -H 'content-type: application/json' \
+  -d '{"pending_token": "<opaque>", "code": "123456"}'
+```
+
+That returns the same `201 Created` body the single-step flow gives.
+
+**Branch on the status code, not on the presence of `token`** — `201` means
+signed in, `200` means one step to go. A client that only looks for `token`
+will silently treat "second factor required" as a failure.
+
+Notes:
+
+- **Treat the pending token as a credential.** It is opaque and encrypted, but
+  what it encrypts is the sign-in this exchange will complete — it is safe
+  because of the encryption, not because of what is inside. Do not log it, do
+  not put it in a URL, and do not persist it past the exchange. (It is *not*
+  sufficient on its own: redeeming it also takes a valid code.)
+- It is redeemed **at most once**. A verify request that succeeded cannot be
+  replayed. A wrong code or a `429` leaves it usable, so a client can retry the
+  code without restarting.
+- Codes are budgeted **per account** — 5 per 15 minutes, per node — and the
+  budget is shared with the browser prompt at `/sign-in/verify`. A `429` here is
+  not reset by signing in again; it carries `Retry-After` in whole seconds.
+- Errors from both steps carry a stable `code` alongside `detail`:
+  `invalid_credentials`, `missing_parameters`, `pending_expired`,
+  `invalid_code`, `too_many_attempts`. A parameter you supplied with the wrong
+  JSON type is not reported as missing — send `code` as a **string**, since a
+  leading zero makes the integer form fail only some of the time.
+- For unattended server-to-server use prefer an **API key** over a user
+  password. Keys carry no second factor by design, so they are unaffected by
+  any of the above.
+
 In-process server code can skip the HTTP round-trip and mint a token directly:
 
 ```elixir

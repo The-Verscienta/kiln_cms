@@ -26,12 +26,20 @@ defmodule KilnCMSWeb.TwoFactorController do
   account exists — here the account is already known to whoever is asking (they
   hold a signed pending token naming it), so hiding the throttle buys nothing
   and costs a legitimate user, who is told their correct code was wrong.
+
+  ## This is one of two doors, and they share a lock (#726)
+
+  `KilnCMSWeb.ApiAuthController` runs the same step headlessly at
+  `POST /api/auth/sign_in/verify`. The code check itself is
+  `KilnCMS.Accounts.SecondFactor.verify/2` so the two cannot normalize a
+  submission differently, and both charge the *same* per-account bucket — a
+  budget an attacker can double by alternating endpoints is not a budget.
   """
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.AccountThrottle
-  alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.SecondFactor
   alias KilnCMSWeb.AuthController
 
   def new(conn, _params) do
@@ -44,7 +52,7 @@ defmodule KilnCMSWeb.TwoFactorController do
   def create(conn, %{"code" => code}) do
     with {:ok, user, remember_me?} <- pending_user(conn),
          :allow <- AccountThrottle.consume_second_factor(user.id),
-         {:ok, user} <- second_factor(user, code) do
+         {:ok, user} <- SecondFactor.verify(user, code) do
       AccountThrottle.forgive_second_factor(user.id)
 
       conn
@@ -70,7 +78,10 @@ defmodule KilnCMSWeb.TwoFactorController do
         # password and land back here. That is fine and is the point — the
         # budget keys on the account, so a fresh token does not refill it.
         conn
-        |> put_resp_header("retry-after", Integer.to_string(div(retry_after_ms, 1000)))
+        |> put_resp_header(
+          "retry-after",
+          Integer.to_string(AccountThrottle.retry_after_seconds(retry_after_ms))
+        )
         |> render_form(429, gettext("Too many attempts. Wait a few minutes and try again."))
 
       :invalid ->
@@ -79,31 +90,6 @@ defmodule KilnCMSWeb.TwoFactorController do
   end
 
   def create(conn, _params), do: redirect(conn, to: ~p"/sign-in")
-
-  # The 6-digit TOTP — or, when the authenticator is unavailable, a one-time
-  # recovery code, burned on use in the same update (#331). The consume action
-  # returns a fresh record; the pending first-factor token from `pending_user/1`
-  # is reattached so `complete_sign_in` can store the session.
-  #
-  # Inner whitespace is stripped, not just trimmed. Authenticator apps display
-  # the code as `123 456`, and Safari's `autocomplete="one-time-code"` fill and
-  # a plain paste both carry that space through. Before the budget existed that
-  # cost a retry; now it costs one of five, so three pastes and one genuine
-  # clock-skew miss would lock a user out for fifteen minutes without their ever
-  # having entered a wrong code. (The recovery-code path already normalizes case
-  # and separators for the same reason — see `RecoveryCodes`.)
-  defp second_factor(user, code) when is_binary(code) do
-    if Totp.valid?(user.totp_secret, String.replace(code, ~r/\s/u, "")) do
-      {:ok, user}
-    else
-      case Accounts.consume_totp_recovery_code(user, %{code: code}, authorize?: false) do
-        {:ok, updated} -> {:ok, %{updated | __metadata__: user.__metadata__}}
-        {:error, _} -> :invalid
-      end
-    end
-  end
-
-  defp second_factor(_user, _code), do: :invalid
 
   # Resolve the pending token to the awaiting user, or `:error` if it's
   # missing/expired/tampered or the account no longer has 2FA.

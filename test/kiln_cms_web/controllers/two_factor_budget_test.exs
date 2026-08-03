@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
   import Plug.Conn
 
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.RecoveryCodes
   alias KilnCMS.Accounts.Totp
 
@@ -90,11 +91,12 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     assert refused.status == 429
     assert refused.resp_body =~ "Too many attempts"
 
-    # `>= 0`, not `> 0`: these are fixed windows, so a refusal landing in the
-    # last second of one legitimately has under a second left and rounds down to
-    # zero. Asserting a positive number would go red for correct behaviour.
+    # `>= 1`: a refusal landing in the last second of a fixed window has under a
+    # second left, which truncating division rounded to zero — a retry hint that
+    # says "now". `AccountThrottle.retry_after_seconds/1` rounds up and floors at
+    # one, so a wait is always a wait.
     assert [retry_after] = get_resp_header(refused, "retry-after")
-    assert String.to_integer(retry_after) >= 0
+    assert String.to_integer(retry_after) >= 1
   end
 
   test "the refusal keeps the pending token, so it is not also a sign-out" do
@@ -167,6 +169,64 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     # which is the one that rules it out.
     assert verify(user, "000000").status == 429
     assert verify(other, "000000").status == 401
+  end
+
+  describe "the headless second factor draws on the same bucket (#726)" do
+    # Minted through the real module rather than hand-rolled, so a change to the
+    # payload shape or the salt breaks this loudly instead of leaving it asserting
+    # against a blob the controller can no longer read.
+    defp api_verify(user, code) do
+      pending = PendingSignIn.mint(KilnCMSWeb.Endpoint, %{user | __metadata__: %{token: "stub"}})
+
+      build_conn()
+      |> put_req_header("content-type", "application/json")
+      |> post("/api/auth/sign_in/verify", %{"pending_token" => pending, "code" => code})
+    end
+
+    test "a browser run of wrong codes bounds the API endpoint too" do
+      user = enabled_user()
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
+
+      exhaust(user)
+
+      # The bound the whole of #726 rests on. Two surfaces verify the same six
+      # digits; per-surface budgets would let an attacker double their guesses
+      # by alternating endpoints, which is not a budget, it is a speed bump.
+      refused = api_verify(user, valid_code())
+      assert refused.status == 429
+
+      # Pinned as a bound, not just as present. `div(ms, 1000)` truncates, so a
+      # refusal in the last second of a window used to emit `Retry-After: 0` —
+      # which tells a conforming client to retry immediately into the next
+      # refusal. Browsers ignore the header; scripts do not.
+      assert [retry_after] = get_resp_header(refused, "retry-after")
+      seconds = String.to_integer(retry_after)
+      assert seconds >= 1
+      assert seconds <= div(:timer.hours(1), 1000)
+    end
+
+    test "an API run of wrong codes bounds the browser prompt too" do
+      user = enabled_user()
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
+
+      Enum.each(1..@budget, fn _ -> assert api_verify(user, "000000").status == 401 end)
+
+      # ...and the same in the other direction, or the bound holds only for
+      # whichever surface an attacker chose not to use.
+      assert verify(user, valid_code()).status == 429
+    end
+
+    test "a verified API code clears the counter for both" do
+      user = enabled_user()
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
+
+      for _ <- 1..(@budget - 1), do: assert(api_verify(user, "000000").status == 401)
+      assert api_verify(user, valid_code()).status == 201
+
+      # A forgiveness that only cleared the surface it happened on would leave a
+      # user who fumbled their code in a script locked out of the browser.
+      assert redirected_to(verify(user, valid_code())) == ~p"/editor/overview"
+    end
   end
 
   test "whitespace in a pasted code does not cost an attempt" do

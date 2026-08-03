@@ -403,10 +403,16 @@ defmodule KilnCMSWeb.Router do
   end
 
   # Headless sign-in: POST credentials, receive a bearer token (issue #37).
+  #
+  # `/sign_in/verify` is the headless mirror of `/sign-in/verify` (#726): a 2FA
+  # account's password alone gets a pending token here, not a JWT, and the code
+  # is redeemed at the second route. Same `:auth` bucket, and the code itself is
+  # charged the per-account second-factor budget the browser prompt charges.
   scope "/api/auth", KilnCMSWeb do
     pipe_through :api_auth
 
     post "/sign_in", ApiAuthController, :sign_in
+    post "/sign_in/verify", ApiAuthController, :verify
   end
 
   # MCP server for LLM authoring clients (docs/mcp.md). The tool list comes
