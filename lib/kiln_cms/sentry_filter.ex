@@ -19,9 +19,9 @@ defmodule KilnCMS.SentryFilter do
   ## Malformed LiveView joins (#700)
 
   A `/live` join whose payload carries a **non-binary** `"url"` or `"redirect"`
-  crashes before any mount hook runs. `Phoenix.LiveView.Channel` calls
+  crashes before any mount hook runs. Phoenix.LiveView.Channel calls
   `authorize_session/3` outside the `try/rescue` that turns a 4xx into a clean
-  client reload, and `Phoenix.LiveView.Route.live_link_info_without_checks/3`
+  client reload, and Phoenix.LiveView.Route.live_link_info_without_checks/3
   accepts only a binary or a `%URI{}` — so `%{"url" => nil}` or `%{"url" => 42}`
   is a `FunctionClauseError`, a `GenServer terminating` report, and one Sentry
   event *per attempt*.
@@ -38,10 +38,10 @@ defmodule KilnCMS.SentryFilter do
   budget to spend.
 
   Deliberately narrow — this one function, on this one module.
-  `Phoenix.LiveView.Route.live_link_info_without_checks/3`
+  Phoenix.LiveView.Route.live_link_info_without_checks/3
   is the framework's own routing helper and nothing in Kiln calls it, so a
   `FunctionClauseError` from it is always this shape. A broader filter (any
-  `FunctionClauseError`, or anything from `Phoenix.LiveView.Channel`) would
+  `FunctionClauseError`, or anything from Phoenix.LiveView.Channel) would
   swallow real LiveView bugs, which is the opposite of the point. The fix
   belongs upstream, where the catch-all could reject a non-binary `"url"`
   rather than falling through to a function clause; until then this is the
