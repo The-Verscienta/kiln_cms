@@ -54,26 +54,7 @@
       "generated?": false,
       "precision": null,
       "primary_key?": false,
-      "references": {
-        "deferrable": false,
-        "destination_attribute": "id",
-        "destination_attribute_default": null,
-        "destination_attribute_generated": null,
-        "index?": false,
-        "match_type": null,
-        "match_with": null,
-        "multitenancy": {
-          "attribute": "org_id",
-          "global": false,
-          "strategy": "attribute"
-        },
-        "name": "site_code_injection_versions_version_source_id_fkey",
-        "on_delete": null,
-        "on_update": null,
-        "primary_key?": true,
-        "schema": "public",
-        "table": "site_code_injection"
-      },
+      "references": null,
       "scale": null,
       "size": null,
       "source": "version_source_id",
@@ -153,7 +134,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "3AB4935029C4E6F85D64B1C98CA4D87053085F45AA46EAC0B94345611A65BC5C",
+  "hash": "80982154FEB2758A5CC21585D8F246F9D5B61E68D8F7655E2718769D05BB39CA",
   "identities": [],
   "multitenancy": {
     "attribute": "org_id",

@@ -46,16 +46,7 @@ defmodule KilnCMS.Repo.Migrations.PerOrgCodeInjection do
       add :version_action_type, :text, null: false
       add :version_action_name, :text, null: false
       add :org_id, :uuid, null: false
-
-      add :version_source_id,
-          references(:site_code_injection,
-            column: :id,
-            name: "site_code_injection_versions_version_source_id_fkey",
-            type: :uuid,
-            prefix: "public"
-          ),
-          null: false
-
+      add :version_source_id, :uuid, null: false
       add :changes, :map
 
       add :version_inserted_at, :utc_datetime_usec,
@@ -79,11 +70,6 @@ defmodule KilnCMS.Repo.Migrations.PerOrgCodeInjection do
   end
 
   def down do
-    drop constraint(
-           :site_code_injection_versions,
-           "site_code_injection_versions_version_source_id_fkey"
-         )
-
     drop constraint(:site_code_injection_versions, "site_code_injection_versions_user_id_fkey")
 
     drop table(:site_code_injection_versions)

@@ -52,12 +52,26 @@ defmodule KilnCMSWeb.Plugs.CodeInjection do
     if Enum.all?(@directives, fn {key, _name} -> sources[key] == [] end) do
       conn
     else
-      Plug.Conn.update_resp_header(
-        conn,
-        "content-security-policy",
-        "",
-        &apply_sources(&1, sources)
-      )
+      apply_to_existing(conn, sources)
+    end
+  end
+
+  # `Plug.Conn.update_resp_header/4` puts its `initial` VERBATIM when the header
+  # is absent — it never runs the function on it — so passing `""` there would
+  # have replaced a missing policy with an empty one: maximally permissive, and
+  # with every origin and hash silently dropped. Today `:browser`'s
+  # `put_browser_csp` always runs first, but a route piped through `:delivery`
+  # without it would have found the worst of both.
+  #
+  # So the missing case is explicit: leave the response alone. No policy is the
+  # endpoint's decision, not this plug's to invent.
+  defp apply_to_existing(conn, sources) do
+    case Plug.Conn.get_resp_header(conn, "content-security-policy") do
+      [policy | _] ->
+        Plug.Conn.put_resp_header(conn, "content-security-policy", apply_sources(policy, sources))
+
+      [] ->
+        conn
     end
   end
 

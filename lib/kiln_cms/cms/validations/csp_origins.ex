@@ -29,7 +29,13 @@ defmodule KilnCMS.CMS.Validations.CspOrigins do
   # Deliberately a whole-string anchor with a tight character class: `;`, `,`,
   # whitespace and control characters cannot appear anywhere in a match, so a
   # value that passes cannot end the directive it lands in.
-  @origin ~r"^https?://(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$"i
+  #
+  # `\A`/`\z`, NOT `^`/`$`. In PCRE — which is what Elixir's `Regex` is — `$`
+  # matches *before a final newline*, so `"https://ok.example\n"` satisfies a
+  # `$`-anchored pattern and lands a newline inside a response header. That is
+  # the one input this validation exists to stop, and the anchor that looks
+  # right is the one that lets it through.
+  @origin ~r"\Ahttps?://(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?\z"i
 
   @plaintext_ok ~w(localhost 127.0.0.1)
 
@@ -53,11 +59,22 @@ defmodule KilnCMS.CMS.Validations.CspOrigins do
     end
   end
 
-  defp valid?(origin) when is_binary(origin) do
+  @doc """
+  Whether one string is an acceptable CSP source.
+
+  Public so the shape can be asserted directly. Ash's `:string` type trims
+  before this runs, so a value with surrounding whitespace never reaches it in
+  practice — and that is not a reason for the pattern to accept one. Testing the
+  predicate rather than only the action is what keeps the two independent.
+  """
+  @spec valid_origin?(term()) :: boolean()
+  def valid_origin?(origin) when is_binary(origin) do
     Regex.match?(@origin, origin) and scheme_ok?(origin)
   end
 
-  defp valid?(_origin), do: false
+  def valid_origin?(_origin), do: false
+
+  defp valid?(origin), do: valid_origin?(origin)
 
   defp scheme_ok?("https://" <> _rest), do: true
 

@@ -165,7 +165,12 @@ defmodule KilnCMSWeb.CodeInjectionLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_user={@current_user} current_org={@current_org}>
+    <Layouts.console
+      flash={@flash}
+      current_user={@current_user}
+      current_org={@current_org}
+      active={:code_injection}
+    >
       <.header>
         {gettext("Code injection")}
         <:subtitle>
@@ -182,7 +187,13 @@ defmodule KilnCMSWeb.CodeInjectionLive do
         </p>
       </div>
 
-      <.form for={@form} phx-change="validate" phx-submit="save" class="mt-8 space-y-8">
+      <.form
+        for={@form}
+        id="code-injection-form"
+        phx-change="validate"
+        phx-submit="save"
+        class="mt-8 space-y-8"
+      >
         <.input
           field={@form[:enabled]}
           type="checkbox"
@@ -258,7 +269,7 @@ defmodule KilnCMSWeb.CodeInjectionLive do
           </.button>
         </div>
       </.form>
-    </Layouts.app>
+    </Layouts.console>
     """
   end
 end

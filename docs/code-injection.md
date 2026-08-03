@@ -24,15 +24,36 @@ lands:
 - **Delivery only** may render it. `KilnCMSWeb.Plugs.CodeInjection` runs in the
   `:delivery` pipeline and nowhere else. The root layout is shared with the
   editor console, so this is enforced by *which pipeline the plug lives in*
-  rather than by a condition in a template — an org admin's script can never
-  execute in a Kiln operator's authenticated console session, and no reviewer has
-  to keep remembering that.
+  rather than by a condition in a template, and no reviewer has to keep
+  remembering it.
 - **Every change is versioned and attributed.** "When did this site start
   loading that script, and who added it" is answerable from the version trail.
 
-If you administer several sites, note the direction of trust: you are trusting
-each site's own admins with their own site's visitors, not with each other's and
-not with your console.
+## Read this before granting the role
+
+**The console shares an origin with the site.** `https://acme.example/editor`
+and `https://acme.example/` are the same origin. Script on the public site is
+therefore same-origin with the console: it never has to render *inside* a
+console page to reach one. A snippet can call
+`fetch("/editor/…", {credentials: "same-origin"})` in the browser of anyone
+who loads a public page while signed in, and the **Connections** field on this
+same form is where the exfiltration endpoint gets allowed.
+
+The account that matters here is a **platform admin**, who is an admin on every
+org. So on a shared-origin deployment, granting one site's admin code injection
+is close to granting them the console.
+
+This is inherent to same-origin code injection — Ghost's works the same way —
+and the mitigations are deployment-level:
+
+- Serve the console from a host no tenant controls, with tenant sites on their
+  own hosts. This is the real fix and it is worth doing before you hand this
+  role to anyone you would not also make a platform admin.
+- Or treat "org admin" as equivalent to console access on that deployment, and
+  staff it accordingly.
+
+The `:delivery` pipeline keeps the markup out of console *pages*. It does not
+make a same-origin script harmless, and nothing in the application can.
 
 ## CSP: why your snippet needs an allowlist
 

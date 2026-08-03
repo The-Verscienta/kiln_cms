@@ -140,8 +140,24 @@ defmodule KilnCMS.CodeInjection do
   # containing `>` cannot swallow the body.
   @script_open ~r/<script\b[^>]*>/i
   @script_close ~r/<\/script/i
+  @comment ~r/<!--.*?-->/s
 
-  defp inline_bodies(html), do: inline_bodies(html, [])
+  # `type` values a browser executes as script. Anything else — a JSON island, a
+  # client-side template — is data the browser never runs, so hashing it would
+  # put a `'sha256-…'` into the CSP of every page of the site authorizing a body
+  # that is not executing anywhere. That matters beyond this feature: a hash in
+  # the header is a standing permission, so it turns any OTHER HTML-injection
+  # sink on a delivery page into script execution against a nonce-only policy.
+  @executable_types ~w(
+    module text/javascript application/javascript application/ecmascript
+    text/ecmascript application/x-javascript text/jscript
+  )
+
+  defp inline_bodies(html) do
+    # Comments first: a `<script>` inside one is inert in the document, and
+    # hashing it is the same standing-permission problem as a JSON island.
+    html |> String.replace(@comment, "") |> inline_bodies([])
+  end
 
   defp inline_bodies(html, acc) do
     case Regex.run(@script_open, html, return: :index) do
@@ -149,22 +165,61 @@ defmodule KilnCMS.CodeInjection do
         Enum.reverse(acc)
 
       [{start, length}] ->
+        start_tag = binary_part(html, start, length)
         rest = binary_part(html, start + length, byte_size(html) - start - length)
 
         case Regex.run(@script_close, rest, return: :index) do
           # An unclosed `<script>` runs to end-of-fragment in a browser too, so
           # the whole remainder is the body — and then there is nothing left to
           # scan.
-          nil -> Enum.reverse([rest | acc])
-          [{body_length, _}] -> continue(rest, body_length, acc)
+          nil -> Enum.reverse(collect(start_tag, rest, acc))
+          [{body_length, _}] -> continue(start_tag, rest, body_length, acc)
         end
     end
   end
 
-  defp continue(rest, body_length, acc) do
+  defp continue(start_tag, rest, body_length, acc) do
     body = binary_part(rest, 0, body_length)
     remainder = binary_part(rest, body_length, byte_size(rest) - body_length)
-    inline_bodies(remainder, [body | acc])
+    inline_bodies(remainder, collect(start_tag, body, acc))
+  end
+
+  # Only bodies a browser will actually execute.
+  defp collect(start_tag, body, acc) do
+    if executable?(start_tag), do: [body | acc], else: acc
+  end
+
+  # One capture, quotes included, unquoted afterwards. Three alternation groups
+  # would be ambiguous: Elixir returns a non-participating group as `""`, which
+  # is indistinguishable from `type=""` — a legitimately empty value that means
+  # "executable". Capturing the raw token instead keeps that distinction.
+  @type_attr ~r/\btype\s*=\s*(?<value>"[^"]*"|'[^']*'|[^\s"'>]+)/i
+
+  defp executable?(start_tag) do
+    case Regex.named_captures(@type_attr, start_tag) do
+      nil -> true
+      %{"value" => value} -> value |> unquote_attr() |> executable_type?()
+    end
+  end
+
+  defp unquote_attr(<<?", rest::binary>>), do: String.trim_trailing(rest, "\"")
+  defp unquote_attr(<<?', rest::binary>>), do: String.trim_trailing(rest, "'")
+  defp unquote_attr(value), do: value
+
+  # An empty `type` is the same as none. Parameters after `;` (a charset) are
+  # ignored, matching how a browser reads the attribute.
+  defp executable_type?(nil), do: true
+
+  defp executable_type?(type) do
+    type
+    |> String.split(";")
+    |> List.first()
+    |> String.trim()
+    |> String.downcase()
+    |> case do
+      "" -> true
+      normalized -> normalized in @executable_types
+    end
   end
 
   defp resolve(org_id) do

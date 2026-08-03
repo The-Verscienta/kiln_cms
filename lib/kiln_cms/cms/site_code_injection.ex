@@ -21,13 +21,37 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
       arbitrary script would hand every future contributor to that form a much
       larger blast radius.
     * **Delivery only to render.** `KilnCMSWeb.Plugs.CodeInjection` runs in the
-      `:delivery` pipeline and nowhere else, so nothing reaches the editor
-      console. An org admin who can already write here gains nothing by it; an
-      admin of *another* org must never be able to script the console session of
-      a Kiln operator, and the one-way pipeline is what guarantees that
-      structurally rather than by review.
+      `:delivery` pipeline and nowhere else, so the snippet is never emitted
+      *into* a console page. That is enforced structurally rather than by
+      review, which is why it is a pipeline and not a template condition.
     * **Every change is versioned and attributed** (`paper_trail`), so "when did
       this site start loading that script, and who added it" is answerable.
+
+  ### What "delivery only" does NOT buy — read this before granting the role
+
+  **The console shares an origin with the site.** `https://acme.example/editor`
+  and `https://acme.example/` are the same origin, so script running on the
+  public site is same-origin with the console and does not need to render inside
+  it to reach it. A snippet can `fetch("/editor/…", credentials: "same-origin")`
+  in the browser of anyone who loads a public page while signed in — and
+  `connect_src` is a field on this very row, so the exfiltration channel is
+  configured alongside the payload.
+
+  The victim who matters is a **platform admin**, for whom
+  `Scoping.effective_tier/2` returns `:admin` on every org. So granting one
+  site's admin code injection grants them script execution on the origin your
+  console lives on, against anyone with more privilege who visits that site.
+
+  This is inherent to same-origin code injection — Ghost's has the same
+  property — and the honest mitigations are deployment-level, not policy-level:
+
+    * serve the console from a host no tenant controls, and keep tenant sites on
+      their own hosts; or
+    * treat "org admin" on a shared-origin deployment as equivalent to trusting
+      that person with the console, and staff it accordingly.
+
+  Do not read the `:delivery` pipeline as a substitute for either. It keeps the
+  markup out of console *pages*; it cannot make a same-origin script harmless.
 
   ## Reads are public, deliberately
 
@@ -91,6 +115,13 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
     # module is generated separately — so the mixin's `policies` block has
     # nothing to attach to without this.
     version_extensions(authorizers: [Ash.Policy.Authorizer])
+    # No FK from version -> source. With one, the row becomes UNDELETABLE the
+    # moment it has any history — and paper_trail writes history on every save,
+    # so "Remove" would raise on every row that has ever been saved. Keeping the
+    # audit rows after a delete is also the behaviour you want here: "this site
+    # used to run that script and then stopped" is exactly the question. Same
+    # choice, for the same reason, as `KilnCMS.CMS.Content`.
+    reference_source?(false)
   end
 
   actions do
@@ -168,8 +199,14 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
 
     # Emitted verbatim, at the end of `<head>` and just before `</body>`
     # respectively. Nothing is sanitized — see the moduledoc.
-    attribute :head_html, :string, public?: true
-    attribute :footer_html, :string, public?: true
+    #
+    # Bounded because both ends of this are shared. The resolved struct lives in
+    # the SHARED content cache, so an unbounded snippet competes for the same
+    # budget as every other org's hot pages; and the hash scan runs on save in
+    # the LiveView process. 64 KB is far more than any real analytics tag and
+    # small enough that neither is a lever.
+    attribute :head_html, :string, public?: true, constraints: [max_length: 65_536]
+    attribute :footer_html, :string, public?: true, constraints: [max_length: 65_536]
 
     # A master switch separate from clearing the fields, so an operator
     # debugging a broken third-party script can turn it off and back on without
@@ -186,9 +223,25 @@ defmodule KilnCMS.CMS.SiteCodeInjection do
     # optional leading `*.` label — never a bare `*`, never a keyword like
     # `'unsafe-inline'`, which would let a settings form disable the policy it is
     # extending.
-    attribute :script_src, {:array, :string}, default: [], public?: true
-    attribute :connect_src, {:array, :string}, default: [], public?: true
-    attribute :img_src, {:array, :string}, default: [], public?: true
+    # Bounded for a different reason than the HTML: these are concatenated into
+    # a response HEADER. Most reverse proxies cap response headers at 8-16 KB
+    # and answer 502 past it, so without a cap a saved settings value could take
+    # a site's public delivery down. 32 origins of 253 bytes (the DNS name
+    # limit) stays well inside that even with all three lists full.
+    attribute :script_src, {:array, :string},
+      default: [],
+      public?: true,
+      constraints: [max_length: 32, items: [max_length: 253]]
+
+    attribute :connect_src, {:array, :string},
+      default: [],
+      public?: true,
+      constraints: [max_length: 32, items: [max_length: 253]]
+
+    attribute :img_src, {:array, :string},
+      default: [],
+      public?: true,
+      constraints: [max_length: 32, items: [max_length: 253]]
 
     # Base64 SHA-256 of each inline `<script>` body in the snippet, derived on
     # write by `Changes.HashInlineScripts`. Not writable from input: it is a

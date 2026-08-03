@@ -33,7 +33,7 @@ defmodule KilnCMS.CodeInjectionTest do
     test "hashes each inline body and skips src-only and empty scripts" do
       hashes =
         CodeInjection.inline_hashes([
-          ~s(<script src="https://plausible.io/js/script.js" defer></script>),
+          "<script src=\"https://plausible.io/js/script.js\" defer></script>",
           "<script>console.log('hi')</script>",
           "<script>   </script>"
         ])
@@ -74,6 +74,29 @@ defmodule KilnCMS.CodeInjectionTest do
       assert Base.encode64(:crypto.hash(:sha256, "tail()")) in hashes
     end
 
+    # A hash in the CSP is a STANDING permission on every page of the site. So a
+    # body the browser will never execute must not get one — otherwise any other
+    # HTML-injection sink on a delivery page becomes script execution against an
+    # otherwise nonce-only policy.
+    test "does not hash bodies the browser will not execute" do
+      assert CodeInjection.inline_hashes([
+               "<!-- <script>commented()</script> -->",
+               "<script type=\"application/json\">{}</script>",
+               "<script type=\"text/template\"><div>x</div></script>"
+             ]) == []
+    end
+
+    test "hashes the script types a browser does run" do
+      hashes =
+        CodeInjection.inline_hashes([
+          "<script type=\"module\">mod()</script>",
+          "<script type=\"text/javascript; charset=utf-8\">legacy()</script>",
+          "<script type=\"\">empty()</script>"
+        ])
+
+      assert length(hashes) == 3
+    end
+
     test "no scripts means no hashes" do
       assert CodeInjection.inline_hashes(["<meta name=\"verify\" content=\"x\" />", nil, ""]) ==
                []
@@ -104,18 +127,43 @@ defmodule KilnCMS.CodeInjectionTest do
     end
 
     # A save touching only the footer must still re-hash the head, or the head's
-    # script silently loses its authorization.
+    # script keeps being served with its authorization gone — blocked, with a
+    # console error as the only symptom.
+    #
+    # `:save` is an upsert, so the second changeset has no `head_html` at all
+    # and `upsert_fields` leaves the stored one alone. Hashing the changeset
+    # alone drops it. The second save here sends ONLY the footer, which is what
+    # makes this test the guard it is named for.
     test "re-hashes both fields when only one is edited" do
       actor = user(:admin)
       save!(%{"head_html" => "<script>head()</script>"}, actor)
+      row = save!(%{"footer_html" => "<script>foot()</script>"}, actor)
 
-      row =
-        save!(
-          %{"head_html" => "<script>head()</script>", "footer_html" => "<script>foot()</script>"},
-          actor
-        )
+      head = Base.encode64(:crypto.hash(:sha256, "head()"))
+      foot = Base.encode64(:crypto.hash(:sha256, "foot()"))
 
-      assert length(row.script_hashes) == 2
+      assert Enum.sort(row.script_hashes) == Enum.sort([head, foot])
+      assert row.head_html == "<script>head()</script>"
+
+      # And the resolved struct the CSP is built from agrees.
+      assert Enum.sort(CodeInjection.for_org(org_id()).script_hashes) ==
+               Enum.sort([head, foot])
+    end
+
+    # Deleting the row must work. `paper_trail` writes a version on every save,
+    # so a FK from version -> source would make the row undeletable the moment
+    # it had any history — i.e. always, by the time anyone clicks Remove.
+    test "a row with version history can still be removed" do
+      actor = user(:admin)
+      save!(%{"head_html" => "<script>one()</script>"}, actor)
+      row = save!(%{"head_html" => "<script>two()</script>"}, actor)
+
+      assert :ok = CMS.reset_site_code_injection(row, actor: actor, tenant: org_id())
+      assert {:ok, []} = CMS.list_site_code_injection(authorize?: false, tenant: org_id())
+
+      # The audit rows outlive the deletion — "this site used to run that and
+      # then stopped" is exactly the question the trail exists for.
+      assert CMS.list_code_injection_versions!(authorize?: false, tenant: org_id()) != []
     end
 
     test "an editor cannot write code injection" do
@@ -176,7 +224,8 @@ defmodule KilnCMS.CodeInjectionTest do
       for bad <- [
             "https://ok.example; script-src *",
             "https://ok.example\nx-frame-options: none",
-            "https://ok.example, *"
+            "https://ok.example, *",
+            "https://ok.example x-frame-options"
           ] do
         assert {:error, _} =
                  CMS.save_site_code_injection(%{"connect_src" => [bad]},
@@ -185,6 +234,23 @@ defmodule KilnCMS.CodeInjectionTest do
                  ),
                "#{inspect(bad)} should be refused"
       end
+    end
+
+    # Two layers, and the second must not depend on the first. Ash's `:string`
+    # type trims by default, so surrounding whitespace never reaches the
+    # validation — but "the type happens to trim" is not a reason for the
+    # pattern to accept a value with a newline in it. PCRE's `$` matches BEFORE
+    # a final newline, so a `$`-anchored pattern would, which is why the
+    # validation uses `\z`.
+    test "surrounding whitespace is trimmed, and the pattern refuses it regardless" do
+      row =
+        save!(%{"connect_src" => ["  https://ok.example\n"]}, user(:admin))
+
+      assert row.connect_src == ["https://ok.example"]
+
+      refute KilnCMS.CMS.Validations.CspOrigins.valid_origin?("https://ok.example\n")
+      refute KilnCMS.CMS.Validations.CspOrigins.valid_origin?("https://ok.example\r\n")
+      assert KilnCMS.CMS.Validations.CspOrigins.valid_origin?("https://ok.example")
     end
 
     test "refuses plaintext http to a non-local host" do
