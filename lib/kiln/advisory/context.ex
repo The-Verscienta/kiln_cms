@@ -10,6 +10,21 @@ defmodule Kiln.Advisory.Context do
 
   Built once per analysis and handed to every registered check, so the
   expensive part — the body walk — is paid once no matter how many checks run.
+
+  ## `facts`, for what a pure function cannot compute
+
+  Checks are pure functions: no database, no network. That is what lets the
+  editor re-run every one of them on a keystroke and what stops a third-party
+  check from doing something expensive on the render path.
+
+  Some questions still need I/O — "does this internal link resolve?" is a query
+  per path (#474). `facts` is where a caller puts an answer it computed *for*
+  the checks, on whatever schedule suits it. The check stays pure; the cost is
+  paid once, deliberately, by the caller that knows when it is affordable.
+
+  A check reading a fact must handle its absence: `facts` is empty for a caller
+  that did not do that work, and the honest outcome there is `:n_a` rather than
+  a finding invented from nothing.
   """
 
   alias Kiln.Advisory.Body
@@ -17,10 +32,11 @@ defmodule Kiln.Advisory.Context do
   @type t :: %__MODULE__{
           fields: %{atom() => term()},
           body: Body.t(),
-          locale: String.t()
+          locale: String.t(),
+          facts: %{atom() => term()}
         }
 
-  defstruct fields: %{}, body: %Body{}, locale: "en"
+  defstruct fields: %{}, body: %Body{}, locale: "en", facts: %{}
 
   @doc """
   Build a context from loose fields and an already-computed body.
@@ -33,8 +49,24 @@ defmodule Kiln.Advisory.Context do
   def new(fields, %Body{} = body, opts \\ []) do
     locale = opts |> Keyword.get(:locale) |> presence() || KilnCMS.I18n.default_locale()
 
-    %__MODULE__{fields: normalize(fields), body: body, locale: locale}
+    %__MODULE__{
+      fields: normalize(fields),
+      body: body,
+      locale: locale,
+      # `|| %{}` rather than only a default: a caller writing
+      # `facts: opts[:facts]` passes an explicit nil, and `fact/3` would then
+      # `BadMapError` instead of taking the documented "absent fact" path.
+      facts: Keyword.get(opts, :facts) || %{}
+    }
   end
+
+  @doc """
+  A caller-computed fact, or `default` when this caller did not compute it.
+
+      fact(context, :link_targets, %{})
+  """
+  @spec fact(t(), atom(), term()) :: term()
+  def fact(%__MODULE__{facts: facts}, key, default \\ nil), do: Map.get(facts, key, default)
 
   @doc """
   A field's value, defaulting to `""` so checks can match on emptiness.

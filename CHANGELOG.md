@@ -102,6 +102,64 @@ migration, a rewritten column, a dropped config key).
   latent hazard rather than a live one, but "the id is whatever was in the path"
   made that escaping the only line of defence.
 
+- **Broken internal links are flagged in the editor** — the deterministic half
+  of the link checker (#474). An author links `/blog/the-thing`; later it is
+  renamed, unpublished or deleted, and nothing says so. The link keeps rendering
+  and quietly 404s for every reader.
+
+  Two findings, deliberately not one: an `:error` when nothing resolves the path
+  in any state, and a `:warning` when the target exists but is not published.
+  Delivery cannot tell those apart — both are a 404 to a visitor — but they need
+  opposite actions, and collapsing them sends an editor hunting for a typo in a
+  link that is perfectly correct. Both name the offending paths, because "3
+  broken links" is a search task rather than advice.
+
+  **A path covered by a redirect is not reported.** A published rename leaves a
+  `KilnCMS.CMS.Redirect` behind and delivery serves a 301; flagging that reports
+  a working feature as a fault, which is the fastest way to make an advisory
+  panel something authors learn to ignore.
+
+  `KilnCMS.Links.Internal` mirrors delivery's own resolution order — flat
+  `/<prefix>/<slug>`, then the multi-segment path alias, then the redirect
+  table — because a checker with its own idea of what resolves reports links
+  that work and misses links that don't. It differs in exactly one way, on
+  purpose: it looks in every state, so it can distinguish "not published yet"
+  from "gone".
+
+  Advisory checks are pure functions, and resolving a link is a query per path,
+  so `Kiln.Advisory.Context` gains a **`facts`** map: answers a caller computed
+  for the checks, on whatever schedule suits it. A check reading a fact reports
+  `:n_a` when it is absent rather than inventing a verdict — a document whose
+  links were never checked is not a document whose links are fine. The editor
+  recomputes them only when the *set of linked paths* changes, so nothing here
+  runs on a keystroke.
+
+  **External link checking is not part of this** — it needs outbound requests,
+  per-domain throttling and a per-org opt-in, and #474 stays open for it.
+
+  **The design constraint is that "I could not resolve it" is not "it is
+  broken".** The resolver only reports a link broken inside a namespace it owns
+  — `/<content-prefix>/<slug>`, or a path an alias or redirect matches — and
+  says `:unknown` for everything else, which is never shown. The router serves
+  far more than content (`/`, `/blog`, `/search`, `/feed.xml`, every plugin
+  route) and enumerating that here would be a second copy of the router. One
+  `:error` grades a document Poor, so guessing the other way would have marked
+  every page on the site as failing over a single "read more on our blog" link.
+
+  Three things the review caught, each of which would have produced exactly that
+  false-positive flood: locale-prefixed URLs (`/fr/blog/x`) resolved as nothing,
+  because `Plugs.SetLocale` strips that segment before the router sees it and
+  the resolver did not; no default-locale retry, which delivery performs in two
+  places, so every link in a translated document on a partially translated site
+  read as broken; and a failed query being reported as a broken link rather than
+  as unknown. A fourth was a hard crash — the editor passed an `Organization`
+  struct where a uuid was required, which reaches a Cachex key and raises on
+  `String.Chars`.
+
+  One bug caught by dialyzer: every dynamic content type shares the `Entry`
+  table, so resolving a slug without also filtering on `type_definition_id`
+  would have let one type's URL resolve against another's content.
+
 - **A `gallery` block, and an `accordion` block that deliberately fires no
   structured data.** Two gaps, one of which was actively producing wrong
   markup (#482).

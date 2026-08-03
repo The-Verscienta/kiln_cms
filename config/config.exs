@@ -164,7 +164,8 @@ config :kiln_cms, Kiln.Advisory,
     KilnCMS.Seo.Checks.Keyphrase,
     KilnCMS.Seo.Checks.Readability,
     Kiln.Advisory.Checks.Headings,
-    Kiln.Advisory.Checks.ImageAlt
+    Kiln.Advisory.Checks.ImageAlt,
+    Kiln.Advisory.Checks.InternalLinks
   ]
 
 # `req_llm` (and its `llm_db` catalog) source a `.env` from the working

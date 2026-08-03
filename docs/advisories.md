@@ -92,6 +92,81 @@ panel supplies only its own code-to-sentence table:
 `KilnCMSWeb.SeoComponents` is exactly that: the SEO message table plus two thin
 wrappers. An accessibility panel would be the same shape.
 
+## Facts: what a pure check cannot compute
+
+Checks are pure — no database, no network. That is what lets the editor re-run
+every one of them on a keystroke, and what stops a third-party check doing
+something expensive on the render path.
+
+Some questions still need I/O. "Does this internal link resolve?" is a query per
+path. Those answers arrive as **facts**: the caller computes them on whatever
+schedule suits it and passes them in.
+
+```elixir
+Analyzer.analyze(fields, body, facts: %{link_targets: KilnCMS.Links.Internal.resolve_all(paths, locale, org_id)})
+```
+
+```elixir
+def check(context) do
+  case Context.fact(context, :link_targets) do
+    nil -> :n_a          # this caller did no lookup
+    targets -> judge(targets)
+  end
+end
+```
+
+**A check reading a fact must handle its absence, and `:n_a` is the honest
+answer.** Reporting a pass would claim a verdict nobody computed — a document
+whose links were never checked is not a document whose links are fine.
+
+The content editor recomputes `:link_targets` only when the *set of linked
+paths* changes, not on every body change and certainly not on every keystroke.
+
+## Broken internal links (#474)
+
+`Kiln.Advisory.Checks.InternalLinks` reports two things, deliberately not one:
+
+| Finding | Severity | Means |
+|---|---|---|
+| `internal_links_missing` | `:error` | Nothing resolves this path in any state. The link is wrong, or the target was deleted. |
+| `internal_links_unpublished` | `:warning` | A real document, not currently served. Publish it, or the author linked a draft too early. |
+
+Delivery cannot tell those apart — both are a 404 to a visitor — but they need
+opposite actions, and collapsing them sends an editor hunting for a typo in a
+link that is perfectly correct.
+
+A path covered by a redirect is **not** reported. A published rename leaves a
+`KilnCMS.CMS.Redirect` behind and delivery serves a 301; flagging that would
+report a working feature as a fault, which is the fastest way to make an
+advisory panel something authors learn to ignore.
+
+`KilnCMS.Links.Internal` mirrors delivery's resolution order — a leading
+supported-locale segment stripped (as `Plugs.SetLocale` does), then flat
+`/<prefix>/<slug>`, then the multi-segment path alias, then the redirect table,
+with the same default-locale retry delivery performs. A checker with its own
+idea of what resolves reports links that work and misses links that don't. It
+differs in exactly one way, on purpose: it looks in **every** state, so it can
+tell "not published yet" from "gone".
+
+### "I could not resolve it" is not "it is broken"
+
+The resolver only ever reports `:missing` for a path in a namespace it **owns** —
+`/<content-prefix>/<slug>`, or a path an alias or redirect matches. Everything
+else is `:unknown`, and `:unknown` is never shown to anyone.
+
+That is not caution for its own sake. The router serves far more than content
+(`/`, `/blog`, `/search`, `/developers`, `/feed.xml`, every plugin route), and
+enumerating it here would be a second copy of the router, wrong the day either
+changes. Guessing the other way is worse than not checking: one `:error` grades
+a document Poor, so a single "read more on our blog" link would mark every page
+on the site as failing, and authors would learn within a day to ignore the panel.
+
+A failed query is `:unknown` too — a transient database blip must not become a
+page full of false errors.
+
+**External links are not checked here.** That half of #474 needs outbound
+requests, per-domain throttling and a per-org opt-in, and is tracked separately.
+
 ## Where things live
 
 | | |
@@ -100,7 +175,8 @@ wrappers. An accessibility panel would be the same shape.
 | `Kiln.Advisory.Context` | fields + body facts, feature-neutral |
 | `Kiln.Advisory.Body` | the block-tree walk (headings, images, sentences, links) |
 | `Kiln.Advisory.Registry` | discovery, execution, containment, tally |
-| `Kiln.Advisory.Checks.*` | feature-neutral checks (headings, image alt) |
+| `Kiln.Advisory.Checks.*` | feature-neutral checks (headings, image alt, internal links) |
+| `KilnCMS.Links.Internal` | resolves a same-origin path the way delivery would |
 | `KilnCMS.Seo.Checks.*` | search-specific checks (meta, keyphrase, readability) |
 | `KilnCMS.Seo.Analyzer` | aggregates outcomes into the SEO report and grade |
 

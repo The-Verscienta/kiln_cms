@@ -605,6 +605,46 @@ defmodule KilnCMSWeb.ContentEditorLive do
       socket
       |> assign(:seo_body_digest, digest)
       |> assign(:seo_body_stats, Kiln.Advisory.Body.from_typed(typed))
+      |> refresh_link_targets()
+    end
+  end
+
+  # Resolving an internal link is a query per distinct path (#474), so it is
+  # keyed on the *set of paths* rather than on the body digest: an author typing
+  # a paragraph changes the body constantly and its links almost never. Nothing
+  # here runs on a keystroke — `refresh_body_stats/2` has already short-circuited
+  # on an unchanged body — and this narrows it further to a changed link set.
+  defp refresh_link_targets(socket) do
+    paths = socket.assigns.seo_body_stats.internal_link_paths
+    locale = link_locale(socket)
+
+    # Keyed on the locale as well as the paths: a link is judged in the locale
+    # of the document that holds it, so changing the document's locale changes
+    # every answer. Keying on paths alone would leave the panel reporting the
+    # old locale's verdicts for the rest of the session.
+    if {paths, locale} == socket.assigns[:link_paths] do
+      socket
+    else
+      socket
+      |> assign(:link_paths, {paths, locale})
+      |> assign(
+        :link_targets,
+        KilnCMS.Links.Internal.resolve_all(
+          paths,
+          link_locale(socket),
+          org_id(socket.assigns.current_org)
+        )
+      )
+    end
+  end
+
+  # The locale a link is judged in: the *form's* value, because that is what
+  # `refresh_seo_report/1` hands the analyzer. Reading the saved record's locale
+  # instead would resolve links in one locale and report them in another.
+  defp link_locale(socket) do
+    case socket.assigns.form && AshPhoenix.Form.value(socket.assigns.form, :locale) do
+      locale when is_binary(locale) and locale != "" -> locale
+      _other -> socket.assigns.record.locale || KilnCMS.I18n.default_locale()
     end
   end
 
@@ -627,7 +667,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assign(
       socket,
       :seo_report,
-      KilnCMS.Seo.Analyzer.analyze(fields, socket.assigns.seo_body_stats)
+      KilnCMS.Seo.Analyzer.analyze(fields, socket.assigns.seo_body_stats,
+        facts: %{link_targets: socket.assigns[:link_targets] || %{}}
+      )
     )
   end
 
