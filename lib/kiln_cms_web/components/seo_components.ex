@@ -172,6 +172,31 @@ defmodule KilnCMSWeb.SeoComponents do
     )
   end
 
+  # ── Internal links (#474) ─────────────────────────────────────────────────
+
+  # The paths are named rather than counted. "3 broken links" turns advice into
+  # a search task, and the author is the one person who knows which of them was
+  # a typo.
+  def finding_message(%{code: :internal_links_missing, args: a}, _pinned?) do
+    ngettext(
+      "%{paths} doesn't resolve — readers clicking it get a 404.",
+      "%{count} links don't resolve — readers clicking them get a 404: %{paths}",
+      a.count,
+      count: a.count,
+      paths: Enum.join(a.paths, ", ")
+    )
+  end
+
+  def finding_message(%{code: :internal_links_unpublished, args: a}, _pinned?) do
+    ngettext(
+      "%{paths} points at content that isn't published yet.",
+      "%{count} links point at content that isn't published yet: %{paths}",
+      a.count,
+      count: a.count,
+      paths: Enum.join(a.paths, ", ")
+    )
+  end
+
   def finding_message(%{code: :og_image_missing}, _pinned?),
     do: gettext("No social image — links to this page will share without a preview picture.")
 

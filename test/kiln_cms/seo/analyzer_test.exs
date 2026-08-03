@@ -469,4 +469,42 @@ defmodule KilnCMS.Seo.AnalyzerTest do
       assert finding.args.score < 50.0
     end
   end
+
+  describe "caller-computed facts reach the checks (#474)" do
+    defp linking_body(path) do
+      [
+        %{
+          "_type" => "rich_text",
+          "body" => [
+            %{
+              "_type" => "block",
+              "style" => "normal",
+              "children" => [%{"_type" => "span", "text" => "see this", "marks" => ["l"]}],
+              "markDefs" => [%{"_key" => "l", "_type" => "link", "href" => path}]
+            }
+          ]
+        }
+      ]
+    end
+
+    test "a resolved-broken link becomes a finding in the report" do
+      report =
+        Analyzer.analyze_blocks(%{title: "T"}, linking_body("/gone"),
+          facts: %{link_targets: %{"/gone" => :missing}}
+        )
+
+      assert Enum.any?(report.findings, &(&1.code == :internal_links_missing))
+    end
+
+    test "without the fact the report says nothing about links" do
+      # The whole point of `:n_a`: a caller that did no lookup must not be told
+      # its links are fine, and must not be told they are broken either.
+      report = Analyzer.analyze_blocks(%{title: "T"}, linking_body("/gone"))
+
+      refute Enum.any?(
+               report.findings,
+               &(&1.code in [:internal_links_missing, :internal_links_unpublished])
+             )
+    end
+  end
 end

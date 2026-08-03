@@ -46,17 +46,24 @@ defmodule KilnCMS.Seo.Analyzer do
   `:seo_title`, `:seo_description`, `:seo_keywords`, `:seo_image`,
   `:featured_image_id` and `:locale` — whatever subset is available.
   """
-  @spec analyze(map(), Body.t()) :: report()
-  def analyze(fields, %Body{} = body) do
+  @spec analyze(map(), Body.t(), keyword()) :: report()
+  def analyze(fields, %Body{} = body, opts \\ []) do
     fields
-    |> Context.new(body, locale: fields[:locale] || fields["locale"])
+    |> Context.new(body,
+      locale: fields[:locale] || fields["locale"],
+      # Caller-computed answers to questions a pure check cannot ask — see
+      # `Kiln.Advisory.Context`. Absent for a caller that did no such work, and
+      # the checks that read one report `:n_a` rather than inventing a verdict.
+      facts: Keyword.get(opts, :facts, %{})
+    )
     |> Registry.run()
     |> report(body)
   end
 
   @doc "Analyze with body facts derived from `blocks` in one call."
-  @spec analyze_blocks(map(), term()) :: report()
-  def analyze_blocks(fields, blocks), do: analyze(fields, Body.compute(blocks))
+  @spec analyze_blocks(map(), term(), keyword()) :: report()
+  def analyze_blocks(fields, blocks, opts \\ []),
+    do: analyze(fields, Body.compute(blocks), opts)
 
   @doc "An empty report — for call sites that need the shape before any analysis."
   @spec empty() :: report()
