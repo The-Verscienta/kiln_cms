@@ -226,6 +226,39 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a generated feed (#486).
+
+  `type` is the content-type name for a per-type feed (`/blog/feed.xml`) or
+  `nil` for the site-wide one; `format` is `:atom` or `:json`. Per-org, like
+  every other aggregate key here.
+  """
+  @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json) :: String.t()
+  def feed_key(org_id, type, format), do: "feed:#{org_id}:#{type || "all"}:#{format}"
+
+  @doc """
+  Drop the feeds a write to `type` affects: that type's own, and the site-wide
+  ones it appears in.
+
+  Takes the type rather than enumerating every syndicated type, for the reason
+  `bust/3` does: the caller knows which record changed, and a dynamic type's
+  name is not derivable from an org id. A type that was *removed* from
+  syndication leaves its own stale key behind, which the TTL reclaims — the
+  site-wide feeds, which are the ones anyone is actually subscribed to, drop
+  immediately.
+  """
+  @spec bust_feeds(Ash.UUID.t(), String.t() | atom() | nil) :: :ok
+  def bust_feeds(org_id, type) do
+    if enabled?() do
+      for name <- Enum.uniq([nil, type && to_string(type)]),
+          format <- [:atom, :json] do
+        Cachex.del(@cache, feed_key(org_id, name, format))
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
   Drop all cached published content. The blunt fallback for writes whose blast
   radius isn't a single `{type, slug}` (e.g. a media-item edit that may be
   referenced by any number of pages); prefer `bust/2` where the affected record

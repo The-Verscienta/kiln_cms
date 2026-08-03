@@ -24,7 +24,7 @@ msgid "Attempting to reconnect"
 msgstr "Tentative de reconnexion"
 
 #: lib/kiln_cms_web/components/layouts.ex:627
-#: lib/kiln_cms_web/controllers/content_controller.ex:273
+#: lib/kiln_cms_web/controllers/content_controller.ex:274
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
 msgid "Blog"
@@ -1652,7 +1652,7 @@ msgstr "JSON:API"
 msgid "Label"
 msgstr "Libellé"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:274
+#: lib/kiln_cms_web/controllers/content_controller.ex:275
 #, elixir-autogen, elixir-format
 msgid "Latest posts."
 msgstr "Derniers articles."
@@ -1840,7 +1840,7 @@ msgstr "Enregistrement…"
 #: lib/kiln_cms_web/components/layouts.ex:229
 #: lib/kiln_cms_web/components/layouts.ex:315
 #: lib/kiln_cms_web/components/layouts.ex:630
-#: lib/kiln_cms_web/controllers/content_controller.ex:340
+#: lib/kiln_cms_web/controllers/content_controller.ex:341
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/media_live.ex:941
 #: lib/kiln_cms_web/live/search_palette_live.ex:17
@@ -1880,7 +1880,7 @@ msgstr "Les recherches sont journalisées anonymement — sans identifiant utili
 msgid "Select %{title}"
 msgstr "Sélectionner %{title}"
 
-#: lib/kiln_cms_web/components/layouts/root.html.heex:120
+#: lib/kiln_cms_web/components/layouts/root.html.heex:131
 #, elixir-autogen, elixir-format
 msgid "Skip to main content"
 msgstr "Aller au contenu principal"

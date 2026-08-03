@@ -29,6 +29,7 @@ defmodule KilnCMS.CMS.ContentTypes do
           path_segment: String.t() | nil,
           slug_pattern: String.t() | nil,
           alias_pattern: String.t() | nil,
+          published_feed?: boolean(),
           source: :compiled | :dynamic,
           definition: struct() | nil
         }
@@ -38,10 +39,16 @@ defmodule KilnCMS.CMS.ContentTypes do
   # types' segments and configured locales are added at validation time (see
   # `Validations.AvailableTypeName`). Keep in sync with the top-level scopes in
   # `KilnCMSWeb.Router`.
+  #
+  # `feed.xml` / `feed.json` are here as *slug* guards rather than segment ones
+  # (#486): the feed routes are `/:plural/feed.xml`, declared before the delivery
+  # scope, so a record whose slug is `feed.xml` would be permanently shadowed by
+  # its own type's feed — the silent-shadowing failure `Validations.SlugAvailable`
+  # exists to prevent.
   @reserved_path_segments ~w(account admin api auth billing blog content dev
-                             editor gql locale mailbox media membership
-                             playground preview register reset search sign_in
-                             swaggerui up)
+                             editor feed.json feed.xml gql locale mailbox media
+                             membership playground preview register reset search
+                             sign_in swaggerui up)
 
   @doc "The Ash domains scanned for content types (default `[KilnCMS.CMS]`)."
   @spec content_domains() :: [module()]
@@ -183,6 +190,9 @@ defmodule KilnCMS.CMS.ContentTypes do
         if(function_exported?(resource, :__kiln_content_alias_pattern__, 0),
           do: resource.__kiln_content_alias_pattern__()
         ),
+      # Compiled types (Page/Post) all have a public index of published records;
+      # a dynamic type says so per type (#486 reads this to decide syndication).
+      published_feed?: true,
       source: :compiled,
       definition: nil
     }
@@ -201,6 +211,7 @@ defmodule KilnCMS.CMS.ContentTypes do
       path_segment: definition.path_segment,
       slug_pattern: definition.slug_pattern,
       alias_pattern: definition.alias_pattern,
+      published_feed?: definition.has_published_feed,
       source: :dynamic,
       definition: definition
     }

@@ -530,6 +530,17 @@ defmodule KilnCMSWeb.Router do
     # LLM content index (llmstxt.org convention) — the GEO analogue of the sitemap.
     get "/llms.txt", LlmsController, :index
 
+    # Syndication (#486). Site-wide, then one per content type at its own public
+    # prefix (`/blog/feed.xml`). The per-type routes are a `:plural` wildcard
+    # rather than generated routes because dynamic types (D17) are data, not
+    # compile-time — the controller resolves the segment against the org's
+    # syndicated types and 404s anything else. Under `:probe` with the sitemap
+    # for the same reason: an unauthenticated fetch that scans published rows.
+    get "/feed.xml", FeedController, :index
+    get "/feed.json", FeedController, :index_json
+    get "/:plural/feed.xml", FeedController, :type
+    get "/:plural/feed.json", FeedController, :type_json
+
     # Web app manifest for the installable editor PWA (#65). Per-org, so it's a
     # controller rather than a `priv/static` file. Unauthenticated by necessity
     # (the browser fetches it as a page subresource) and cheap — a cached

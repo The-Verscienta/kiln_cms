@@ -34,6 +34,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
 | **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
+| **Feeds**              | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content.  | [§ Feeds](#feeds) |
 | **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [§ Webhooks](#webhooks) |
 | **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
 
@@ -217,6 +218,59 @@ curl -s http://localhost:4000/api/locales
 
 Pass the returned codes as the `locale` argument/param to the other surfaces
 (`GET /api/content/:type/:slug?locale=fr`, `postBySlug(slug:, locale:)`, etc.).
+
+## Feeds
+
+Atom 1.0 and JSON Feed 1.1, for readers and for the RSS-driven automation every
+email-campaign tool is built on (#486):
+
+| URL | Format | Scope |
+|-----|--------|-------|
+| `GET /feed.xml` | Atom 1.0 | Every syndicated content type |
+| `GET /feed.json` | JSON Feed 1.1 | Every syndicated content type |
+| `GET /blog/feed.xml` | Atom 1.0 | Posts only |
+| `GET /pages/feed.xml` | Atom 1.0 | Pages only |
+
+A type's own feed lives under its public path segment where it has one
+(`/blog/…` for posts) and under its plural otherwise (`/pages/…`) — a type served
+at `<base>/<slug>` has no prefix of its own, and deriving one would put its feed
+at `/feed.xml`, which is already taken. Both spellings resolve, so
+`/posts/feed.xml` works too. A dynamic content type (D17) gets a feed at its own
+segment automatically.
+
+Delivery pages advertise these in `<head>` via `<link rel="alternate">`, so a
+reader or a campaign tool finds them without being handed the URL.
+
+**Feeds are published *and* public.** An audience-gated record is published and
+paywalled; it never appears in a feed, which anonymous readers and third-party
+aggregators fetch.
+
+**A type syndicates if it already has a public index.** For a dynamic content
+type that is the per-type "Has a public index of published entries" checkbox in
+`/editor/types`, which defaults to **off** — a type nobody chose to publish an
+index for is not one whose records should be enumerable. Compiled types (Page,
+Post) have public indexes by definition.
+
+On top of that, an operator can drop a type deployment-wide, and choose which
+types syndicate their full body. Full-text is opt-in because it hands the whole
+article to everything subscribed:
+
+```elixir
+config :kiln_cms, :feeds,
+  exclude: ["page"],        # types that should not syndicate at all
+  full_content: ["post"],   # types whose entries carry the rendered body
+  entry_limit: 50           # newest N records per feed (capped at 200)
+```
+
+These two are deployment-wide, not per-organization — the wrong grain for a
+multi-tenant install, tracked separately.
+
+Feeds carry the **default locale only**: a record translated into three
+languages is three rows, and a feed carrying all three re-notifies every
+subscriber three times per publish.
+
+Feeds are cached for five minutes and dropped on any publish/unpublish, so a new
+post is in the feed on the next fetch rather than after the TTL.
 
 ## Webhooks
 
