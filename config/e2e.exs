@@ -35,6 +35,16 @@ config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
 # Fast password hashing so seeding + sign-in aren't slow.
 config :bcrypt_elixir, log_rounds: 1
 
+# The whole browser suite drives one server from one address, and every spec
+# signs in — so the per-IP `:auth` bucket counts the suite as a single client.
+# At the real 20/min that is now seven sign-ins per window (#715 added a third
+# charge per sign-in: the page GET, the submit, and the token-exchange GET the
+# LiveView redirects to), which the suite already exceeds. Whether a run goes
+# red is then down to where the fixed window happens to fall — a flake, not a
+# signal. Raised here for the same reason `config/test.exs` raises it, and
+# production is unaffected (unset).
+config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{auth: {1_000, :timer.minutes(1)}}
+
 # Emails are stored locally (Swoosh.Adapters.Local from config.exs); disable the
 # external API client so the app boots without hackney.
 config :swoosh, :api_client, false
