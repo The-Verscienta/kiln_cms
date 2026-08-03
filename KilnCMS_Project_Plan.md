@@ -1,6 +1,6 @@
-# KilnCMS: A World-Class CMS on the STAPLE Ecosystem
+# KilnCMS: A World-Class CMS on the Elixir/Ash Ecosystem
 
-**Project Goal:** Build a modern, high-performance, developer- and editor-friendly Content Management System (headless + traditional) that rivals or exceeds Strapi, Sanity, and even parts of enterprise DXPs like Sitecore/AEM — but built natively on Elixir/Phoenix with the **STAPLE stack** (Phoenix + Elixir + Tailwind + LiveView + **Ash Framework**; the *A* in STAPLE — Alpine.js — is kept optional and isn't currently wired in, since LiveView + colocated JS hooks have covered all client interactivity so far).
+**Project Goal:** Build a modern, high-performance, developer- and editor-friendly Content Management System (headless + traditional) that rivals or exceeds Strapi, Sanity, and even parts of enterprise DXPs like Sitecore/AEM — but built natively on **Phoenix + Ash + LiveView + Tailwind + Elixir**. Client-side interactivity is LiveView + colocated JS hooks throughout; neither Surface nor Alpine.js is used.
 
 **Why this exists:** Strapi is flexible but Node.js-based and limited in real-time/typing/performance. Beacon is great but lighter on modeling. Sitecore/AEM are bloated and expensive. KilnCMS leverages Ash's declarative power for the best content models, LiveView for instant real-time editing/preview, PostgreSQL + Ecto (via Ash) for reliability, and a deliberately minimal ops footprint — **native BEAM `Phoenix.PubSub`** for real-time, **Oban** (Postgres) for jobs, and in-process caching/rate-limiting — with **DragonflyDB** available as an *optional* multi-node shared cache rather than a hard dependency (see **Architectural Decisions** below).
 
@@ -28,13 +28,14 @@
 
 ## Tech Stack (World-Class Edition)
 
-### Core STAPLE + Required
+### Core stack + Required
 | Layer              | Technology                          | Why / Notes |
 |--------------------|-------------------------------------|-------------|
 | Language           | Elixir 1.19+ / OTP                  | Concurrency, fault-tolerance, DX |
 | Web Framework      | Phoenix 1.8+ + LiveView (latest)    | Real-time UIs, channels, PubSub, HEEx components |
-| Styling            | Tailwind CSS (latest) + custom HEEx components / design system | Full control, lightweight, consistent with STAPLE philosophy. No DaisyUI by default. |
-| Light JS           | Phoenix LiveView + colocated JS hooks (Sortable, TipTap) | Minimal client JS. **No Alpine.js currently** — LiveView + hooks cover interactivity; add Alpine only for a specific need |
+| Styling            | Tailwind CSS (latest) + custom HEEx components / design system | Full control, lightweight, minimal-dependency. No DaisyUI by default. |
+| Templating         | Plain **HEEx** + a hand-written component kit | **No Surface** — HEEx function components cover the need without a second templating layer |
+| Light JS           | Phoenix LiveView + colocated JS hooks (Sortable, TipTap) | Minimal client JS. **No Alpine.js** — LiveView + hooks cover interactivity; add Alpine only for a specific need |
 | Domain Modeling    | **Ash Framework** (core + AshPostgres + AshPhoenix) | Declarative resources, actions, policies, calculations — best content models possible |
 | Admin UI           | **AshAdmin** + custom LiveView pages | Instant super-admin + tailored content editor |
 | Database           | PostgreSQL + Ecto (via AshPostgres) | Reliable, JSONB, full-text, strong consistency |
@@ -504,7 +505,7 @@ Full setup guide will live in `/docs/setup.md`.
 4. ~~Set up Docker dev environment~~ — done (Postgres + native PubSub; Dragonfly optional profile — D2).
 5. **Kiln v2 build (current focus)** — Phase A (firing spike) ✅ done; **Phase B next** (`Kiln.Block` Spark DSL + typed blocks + Portable Text). Roadmap A–J in `docs/kiln-v2-implementation-guide.md`.
 
-This plan is designed to be actionable, realistic, and ambitious enough to create something genuinely world-class while staying true to the STAPLE philosophy of high productivity and joy in development.
+This plan is designed to be actionable, realistic, and ambitious enough to create something genuinely world-class while staying true to the Elixir/Phoenix philosophy of high productivity and joy in development.
 
 Let's build something exceptional. Ready when you are. 🚀
 
