@@ -25,10 +25,12 @@ defmodule KilnCMSWeb.Layouts do
   Permitted with no nonce: `style-src` is `'self' 'unsafe-inline'` and carries
   no nonce source (`KilnCMSWeb.Router`).
   """
-  attr :org, :any, default: nil, doc: "the request's organization, or nil for the default org"
+  attr :brand, KilnCMS.Branding,
+    required: true,
+    doc: "the resolved brand — see `brand_or_unbranded/1`, which fails closed (#701)"
 
   def brand_tokens(assigns) do
-    assigns = assign(assigns, :css, Branding.for_org(assigns.org).css)
+    assigns = assign(assigns, :css, assigns.brand.css)
 
     # `{...}` does NOT interpolate inside <style> (a HEEx raw-text element), so
     # this must use <%= %>. `raw/1` is likewise required: escaping would turn the
@@ -53,11 +55,15 @@ defmodule KilnCMSWeb.Layouts do
   `:assign_current_org` added to their `on_mount` (it resolves from the socket
   host and needs no signed-in user).
   """
-  attr :current_org, :any, default: nil
+  # Deliberately NO `attr :current_org` with a default. `attr` compiles a
+  # `Map.put_new/3` into the function, so a declared default puts the key on the
+  # assigns *before* the body sees them — which would make the absent case below
+  # unreachable, and this layout would go on rendering the default org's
+  # identity for a join that resolved no org at all (#701).
   slot :inner_content
 
   def auth(assigns) do
-    assigns = assign(assigns, :brand, Branding.for_org(assigns[:current_org]))
+    assigns = assign(assigns, :brand, brand_or_unbranded(assigns))
 
     ~H"""
     <%!-- Sign-in is where an operator forms their belief about which deployment
@@ -76,6 +82,51 @@ defmodule KilnCMSWeb.Layouts do
     </div>
     {@inner_content}
     """
+  end
+
+  @doc """
+  The brand to render when the caller may not have resolved an organization at
+  all (#701).
+
+  `Branding.for_org(nil)` resolves the **default** organization, which is right
+  when a caller deliberately asks for the instance-wide identity and wrong when
+  it simply never found out. On a tenant host the second case renders another
+  site's name and logo — the leak #48 exists to prevent, and the one #680 and
+  #558 closed for the token preview and the error pages.
+
+  The two are distinguishable, and the distinction is exactly the bug: a hook
+  that ran always *assigns* `:current_org` (`LiveUserAuth.request_org!/1` returns
+  an org or raises), so a **missing key** means no hook ran. So an absent key
+  renders unbranded, and a present one keeps resolving as before, including the
+  legitimate `nil`.
+
+  ## What this does and does not close
+
+  Defence in depth, not a fix for the #701 scenario. A url-less join matches no
+  route, and Phoenix.LiveView.Channel's `load_layout/2` takes the router's
+  `layout:` from the matched route's `live_session` — so such a join falls back
+  to `view.__live__()[:layout]`, which for the AshAuthentication views still
+  outside `KilnCMSWeb.LiveRouteGuard` is *their* layout, not this one. This
+  function therefore does not run on that path. #701 stays open for it.
+
+  What it does hold for is every path that *does* reach these layouts with no
+  resolved org — which is none today (`Plugs.SetTenant` always assigns, and every
+  `live_session` carries `:assign_current_org`), and that is the point: the next
+  one should render stock rather than another tenant.
+
+  Failing closed here rather than in `Branding.for_org/1` is deliberate. That
+  function has callers for which `nil` genuinely means "the instance", the mail
+  senders and `SignInAlert` among them; making *it* fail closed would turn a
+  branded single-org deployment's reset emails and page titles into stock
+  "KilnCMS" to fix a leak that only exists where a hook was skipped.
+  """
+  @spec brand_or_unbranded(map()) :: Branding.t()
+  def brand_or_unbranded(assigns) do
+    if Map.has_key?(assigns, :current_org) do
+      Branding.for_org(assigns[:current_org])
+    else
+      Branding.defaults()
+    end
   end
 
   @doc "The site name for an org, resolved through the branding fallback chain."

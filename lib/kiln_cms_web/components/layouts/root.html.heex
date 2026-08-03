@@ -4,16 +4,24 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <%!-- White-label branding (#48). `assigns[:current_org]` (not `@current_org`):
-          the plug assigns it on every request, but the `:authenticated_routes`
-          live session has no `:assign_current_org` on_mount, and
-          `Branding.for_org(nil)` correctly resolves the default org. --%>
+    <%!-- White-label branding (#48), failing closed rather than defaulting (#701).
+          Every path that reaches this layout resolves the org first — the
+          `SetTenant` plug over HTTP, `:assign_current_org` on every
+          `live_session` that renders it — so a *missing* `:current_org` key
+          means no hook ran at all, which is the state a url-less LiveView join
+          leaves a view in. `Branding.for_org(nil)` would answer that with the
+          DEFAULT org's name and favicon, i.e. another tenant's identity on a
+          tenant host. `brand_or_unbranded/1` renders stock instead, and still
+          resolves normally whenever the key is present.
+
+          (This comment used to say `:authenticated_routes` had no
+          `:assign_current_org`. It has had one since #563.) --%>
     <.live_title
-      default={Layouts.brand_name(assigns[:current_org])}
-      suffix={" · " <> Layouts.brand_name(assigns[:current_org])}
+      default={Layouts.brand_or_unbranded(assigns).site_name}
+      suffix={" · " <> Layouts.brand_or_unbranded(assigns).site_name}
       phx-no-format
     >{assigns[:page_title]}</.live_title>
-    <link rel="icon" href={KilnCMS.Branding.for_org(assigns[:current_org]).favicon_url} />
+    <link rel="icon" href={Layouts.brand_or_unbranded(assigns).favicon_url} />
     <%!-- Installable editor PWA (#65). `assigns[:pwa]` is set by the
           `:live_editor_required` / `:live_admin_required` on_mount hooks, so
           these tags appear on authoring pages ONLY — a public reader is never
@@ -35,7 +43,7 @@
     <meta
       :if={assigns[:pwa]}
       name="apple-mobile-web-app-title"
-      content={Layouts.brand_name(assigns[:current_org])}
+      content={Layouts.brand_or_unbranded(assigns).site_name}
     />
     <link :if={assigns[:pwa]} rel="apple-touch-icon" href={~p"/images/apple-touch-icon.png"} />
     <meta :if={assigns[:meta_description]} name="description" content={@meta_description} />
@@ -86,7 +94,7 @@
           these declarations are unlayered, so they outrank both `@layer theme`
           and `@layer base`, and a :root-only override would silently flatten
           dark mode. Emits nothing for an unbranded site. --%>
-    <Layouts.brand_tokens org={assigns[:current_org]} />
+    <Layouts.brand_tokens brand={Layouts.brand_or_unbranded(assigns)} />
     <%!-- type="module": the bundle is ESM (esbuild --splitting) so the TipTap
           editor chunk loads on demand in the admin editor only. --%>
     <script defer phx-track-static type="module" src={~p"/assets/js/app.js"}>
