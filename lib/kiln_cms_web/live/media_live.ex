@@ -39,6 +39,8 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:is_admin, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign(:query, nil)
      |> assign(:selected, nil)
+     |> assign(:usages, empty_usages())
+     |> assign(:usage_counts, %{})
      |> assign(:view, :library)
      |> assign(:trashed, [])
      |> assign(:refresh_timer, nil)
@@ -283,11 +285,14 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("save_meta", %{"alt" => alt, "caption" => caption}, socket) do
+  def handle_event("save_meta", %{"alt" => alt, "caption" => caption} = params, socket) do
     actor = socket.assigns.actor
+    decorative = params["decorative"] in [true, "true"]
 
     socket =
-      case CMS.update_media_item(socket.assigns.selected, %{alt: alt, caption: caption},
+      case CMS.update_media_item(
+             socket.assigns.selected,
+             %{alt: alt, caption: caption, decorative: decorative},
              actor: actor,
              tenant: socket.assigns.current_org
            ) do
@@ -541,7 +546,17 @@ defmodule KilnCMSWeb.MediaLive do
     socket
     |> assign(:media, items)
     |> assign(:more?, more?)
+    |> assign(:usage_counts, usage_counts(items, socket.assigns.current_org))
     |> assign(:total, count_media(socket))
+  end
+
+  # One query for the whole grid, so the delete confirmation can say what a
+  # delete affects. Best-effort: the count is context, and an unreadable
+  # reference graph must not stop the library from rendering.
+  defp usage_counts(items, org_id) do
+    KilnCMS.Firing.References.usage_counts(tenant_id(org_id), Enum.map(items, & &1.id))
+  rescue
+    _error -> %{}
   end
 
   # Refresh the loaded items in place (after uploads, deletes, metadata edits,
@@ -610,19 +625,56 @@ defmodule KilnCMSWeb.MediaLive do
     ~p"/media?#{params}"
   end
 
-  defp assign_selected(socket, nil), do: assign(socket, :selected, nil)
+  defp assign_selected(socket, nil),
+    do: socket |> assign(:selected, nil) |> assign(:usages, empty_usages())
 
   defp assign_selected(socket, id) do
     case CMS.get_media_item(id, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
       {:ok, item} ->
-        assign(socket, :selected, item)
+        socket
+        |> assign(:selected, item)
+        |> assign(:usages, usages(item, socket.assigns.current_org))
 
       _ ->
         socket
         |> assign(:selected, nil)
+        |> assign(:usages, empty_usages())
         |> put_flash(:error, gettext("That item no longer exists."))
     end
   end
+
+  # Best-effort: the "used by" list is context, and an editor must still be able
+  # to open a media item when the reference graph can't be read.
+  defp usages(item, org_id) do
+    KilnCMS.Firing.References.usages(tenant_id(org_id) || item.org_id, item.id)
+  rescue
+    _error -> empty_usages()
+  end
+
+  # Deleting a hero image without being told what it appears on is how a page
+  # loses its hero (#403). The count comes from one query over the whole grid,
+  # so it is available at the point of decision rather than only inside a drawer
+  # the editor may never open.
+  defp delete_confirm(item, counts) do
+    case Map.get(counts, item.id) do
+      nil ->
+        gettext("Delete %{name}?", name: item.filename)
+
+      count ->
+        gettext("Delete %{name}? It is used by %{count} published document(s).",
+          name: item.filename,
+          count: count
+        )
+    end
+  end
+
+  defp empty_usages, do: %{total: 0, items: []}
+
+  # `current_org` is the org STRUCT on this LiveView; the reference read wants
+  # its id.
+  defp tenant_id(%{id: id}), do: id
+  defp tenant_id(id) when is_binary(id), do: id
+  defp tenant_id(_other), do: nil
 
   defp flash_for_upload(socket, ok, []) when ok > 0,
     do:
@@ -878,7 +930,15 @@ defmodule KilnCMSWeb.MediaLive do
                 <p class="flex items-center gap-1 text-[10px] text-base-content/70">
                   <span :if={item.width}>{item.width}×{item.height}</span>
                   <span>{humanize_bytes(item.byte_size)}</span>
-                  <span :if={!item.alt} class="text-warning" title={gettext("Missing alt text")}>
+                  <%!-- `decorative` clears the warning (#403): an editor who has
+                        correctly marked a divider must not watch the badge stay
+                        lit, or they learn to ignore it on the images that
+                        really are missing alt. --%>
+                  <span
+                    :if={!item.alt && !item.decorative}
+                    class="text-warning"
+                    title={gettext("Missing alt text")}
+                  >
                     {gettext("· no alt")}
                   </span>
                 </p>
@@ -886,7 +946,7 @@ defmodule KilnCMSWeb.MediaLive do
               <button
                 phx-click="delete"
                 phx-value-id={item.id}
-                data-confirm={gettext("Delete %{name}?", name: item.filename)}
+                data-confirm={delete_confirm(item, @usage_counts)}
                 aria-label={gettext("Delete")}
                 class="absolute right-1 top-1 rounded bg-base-100/80 p-1 transition hover:text-error opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"
               >
@@ -908,7 +968,7 @@ defmodule KilnCMSWeb.MediaLive do
         </div>
       </div>
 
-      <.media_detail :if={@selected} item={@selected} />
+      <.media_detail :if={@selected} item={@selected} usages={@usages} />
     </Layouts.console>
     """
   end
@@ -1075,6 +1135,7 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   attr :item, :map, required: true
+  attr :usages, :map, required: true
 
   # Detail drawer for a single media item: preview, metadata, copyable URL, and
   # an alt-text / caption editor (accessibility + SEO).
@@ -1233,6 +1294,26 @@ defmodule KilnCMSWeb.MediaLive do
               class="field-input mt-1"
             />
           </div>
+          <%!-- Decorative is a recorded decision, not an inference from a blank
+                field (#403): a divider or a texture correctly has no alt text,
+                and without somewhere to say so it is indistinguishable from an
+                oversight. The publish check reads this. --%>
+          <label class="flex items-start gap-2 text-sm">
+            <input type="hidden" name="decorative" value="false" />
+            <input
+              type="checkbox"
+              name="decorative"
+              value="true"
+              checked={@item.decorative}
+              class="mt-0.5"
+            />
+            <span>
+              {gettext("Decorative — no alt text needed")}
+              <span class="block text-[11px] text-base-content/50">
+                {gettext("For dividers, textures, and images that only repeat nearby text.")}
+              </span>
+            </span>
+          </label>
           <div>
             <label for="media-caption" class="text-sm font-medium">{gettext("Caption")}</label>
             <textarea
@@ -1244,6 +1325,41 @@ defmodule KilnCMSWeb.MediaLive do
           </div>
           <.button type="submit" variant="primary">{gettext("Save details")}</.button>
         </form>
+
+        <%!-- "Where is this used" (#403). Read from the reference graph the fire
+              path already maintains, so it is an exact answer rather than a
+              scan — and it is here because deleting or replacing an image
+              without knowing what it appears on is how a page loses its hero. --%>
+        <div class="mt-6 border-t border-base-content/10 pt-4">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
+            {gettext("Used by")}
+          </h3>
+          <p :if={@usages.total == 0} class="mt-2 text-sm text-base-content/60">
+            {gettext("Not used by any published document.")}
+          </p>
+          <ul :if={@usages.items != []} class="mt-2 space-y-1">
+            <li :for={usage <- @usages.items} class="flex items-center gap-2 text-sm">
+              <.link
+                :if={usage.kind}
+                navigate={~p"/editor/content/#{usage.kind}/#{usage.id}"}
+                class="link truncate"
+              >
+                {usage.title}
+              </.link>
+              <span :if={!usage.kind} class="truncate">{usage.title}</span>
+              <span class="shrink-0 text-[11px] text-base-content/50">{usage.state}</span>
+            </li>
+          </ul>
+          <p
+            :if={@usages.total > length(@usages.items)}
+            class="mt-2 text-[11px] text-base-content/50"
+          >
+            {gettext("and %{count} more", count: @usages.total - length(@usages.items))}
+          </p>
+          <p :if={@usages.total > 0} class="mt-2 text-[11px] text-base-content/50">
+            {gettext("Drafts that have never been published are not listed.")}
+          </p>
+        </div>
       </div>
     </div>
     """

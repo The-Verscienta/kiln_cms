@@ -112,6 +112,7 @@ defmodule KilnCMS.CMS.MediaItem do
       :variants,
       :alt,
       :caption,
+      :decorative,
       :storage_key,
       :url,
       :focal_x,
@@ -284,6 +285,15 @@ defmodule KilnCMS.CMS.MediaItem do
 
     attribute :alt, :string, public?: true
     attribute :caption, :string, public?: true
+
+    # Alt-text enforcement (#403). A decorative image — a divider, a texture, a
+    # visual echo of adjacent text — correctly has NO alt text: a screen reader
+    # should skip it, which HTML spells `alt=""`. That is indistinguishable from
+    # "nobody got round to it" unless someone says so, and every form and import
+    # in the world coerces a blank input to one or the other. So it's a recorded
+    # decision rather than an inference from an empty string, and the publish
+    # check (`Validations.MediaAltText`) treats it as satisfied.
+    attribute :decorative, :boolean, allow_nil?: false, default: false, public?: true
 
     # Storage pointer + public/CDN url.
     attribute :storage_key, :string, public?: true

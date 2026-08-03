@@ -62,7 +62,7 @@ defmodule KilnCMS.Firing.Engine do
       # Keep the dependency graph current (decision D13). Invalidation of
       # referrers is enqueued by the caller (publish hook / re-fire worker), not
       # here, to keep fire/2 free of recursion.
-      KilnCMS.Firing.References.rebuild(org_id, type, document.id, typed)
+      KilnCMS.Firing.References.rebuild(org_id, type, document, typed)
     end
 
     # Firing-duration telemetry (#206): wall-clock of the per-surface render

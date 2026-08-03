@@ -39,6 +39,73 @@ and fired artifacts keep serving the old URL until re-publish. The focal point
 is carried through the geometry (rotating the image rotates the point), and
 variants regenerate from the edited original.
 
+## Alt text and usage tracking
+
+`MediaItem.alt` has always existed and has always been optional, which means it
+is missing on exactly the images nobody thought about. Two things address that
+(#403).
+
+### Alt text is enforced at publish, not at upload
+
+Off by default:
+
+```elixir
+config :kiln_cms, :media, require_alt_text: true
+```
+
+With it on, `:publish` and `:publish_scheduled` are refused when the document
+contains an image block whose `alt` is blank, and the error names every
+offending image at once so an editor can fix them in one pass.
+
+**It checks the alt that actually renders** — the *block's* `alt` field. That is
+what the image block's renderer and `KilnCMSWeb.BlockComponents` emit; the
+library item's `MediaItem.alt` is the editor's default when inserting an image,
+not what ships. Checking the library row instead would get it wrong in both
+directions: refusing a page whose block carries a perfectly good description
+because the library row is blank, and publishing a page that renders `alt=""`
+because some library row happens to be filled in. An image pasted in by URL,
+with no library item at all, is checked the same way.
+
+Publish rather than upload, deliberately: what matters is whether the
+*published page* is readable. A required field on upload blocks a bulk import,
+has nothing sensible to say about decorative images, and makes every item
+already in the library retroactively invalid.
+
+**`decorative` is an answer, not an omission.** A divider, a texture, an image
+that only repeats the sentence beside it — those correctly have *no* alt text,
+which HTML spells `alt=""`. The flag on the media item records that as a
+decision, so a blank block alt is accepted when the block points at an item
+marked decorative. Without somewhere to say it, "deliberately silent" is
+indistinguishable from "nobody got round to it".
+
+Editing an *already published* document does not re-run this check — the gate is
+on the publish actions. Tightening that is tracked separately.
+
+### "Used by"
+
+The media detail drawer lists the documents that reference an item, and the
+delete confirmation says how many there are, so an editor can see what a delete
+or a replace affects before doing it.
+
+This reads the same `Firing.ReferenceEdge` graph the re-fire wave already
+maintains, extended to record `content -> media` edges — an exact answer from one
+indexed lookup rather than a scan of every document's block tree. Media is a
+reference *target* only: a media item is not a document, has no artifacts and
+never fires, so it is never a `from_type`.
+
+Three reference sites are tracked: image-shaped block fields (any field named
+`…media_id` or `…image_id`), a document's `featured_image_id`, and `:media`
+custom fields. Edges are rebuilt from scratch on every fire, so removing a
+reference removes the usage.
+
+> **Published references only.** Edges are written when a document **fires**,
+> which happens on publish — so an image used only by never-published drafts
+> reports as unused. Deletes are soft (AshArchival), so a restore covers the
+> mistake either way.
+
+The drawer lists at most 25 referrers plus a total, because a site logo can be
+referenced by every document on the site and each one costs its own fetch.
+
 ## Production storage & CDN
 
 Development uses the Local adapter (`priv/uploads`, served by the app's own
