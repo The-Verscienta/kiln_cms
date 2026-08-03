@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Feeds
   alias KilnCMS.I18n
   alias KilnCMSWeb.StructuredData
 
@@ -549,8 +550,39 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:og_type, "article")
     |> assign(:hreflang, hreflang_alternates(ct, translations, base_url))
     |> assign(:locale_links, locale_links(ct, translations, record.locale, base_url))
+    |> assign(:feeds, feed_alternates(ct, org, base_url))
     |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org)))
     |> render(template, record: record, blocks: blocks)
+  end
+
+  # Feed autodiscovery (#486): the site-wide feed plus this type's own, so a
+  # reader landing on a post can subscribe to just that type. Built from
+  # `FeedController.feed_path/2` rather than spelled out here, so the advertised
+  # URL and the routed one cannot drift. A type that doesn't syndicate
+  # advertises only the site-wide feed; if nothing syndicates, nothing is
+  # advertised at all.
+  defp feed_alternates(ct, org, base_url) do
+    site = KilnCMS.Branding.for_org(org.id).site_name
+
+    scopes =
+      if Feeds.syndicated?(ct) do
+        [{nil, site}, {ct, "#{site} — #{ct.label}"}]
+      else
+        [{nil, site}]
+      end
+
+    if Feeds.syndicated_types(org.id) == [] do
+      []
+    else
+      for {scope, title} <- scopes,
+          {format, mime} <- [{:atom, "application/atom+xml"}, {:json, "application/feed+json"}] do
+        %{
+          type: mime,
+          title: title,
+          href: base_url <> KilnCMSWeb.FeedController.feed_path(scope, format)
+        }
+      end
+    end
   end
 
   # Published locale variants of `slug`, scoped to the request's site (#336) so

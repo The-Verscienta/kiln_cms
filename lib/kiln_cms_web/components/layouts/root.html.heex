@@ -41,6 +41,17 @@
     <meta :if={assigns[:meta_description]} name="description" content={@meta_description} />
     <meta :if={assigns[:meta_keywords]} name="keywords" content={@meta_keywords} />
     <link :if={assigns[:canonical_url]} rel="canonical" href={@canonical_url} />
+    <%!-- Feed autodiscovery (#486). Assigned by the delivery controllers only —
+          the console and auth pages leave it unset, so `/editor/*` never
+          advertises a feed. This is how a reader or a campaign tool finds the
+          feed without being handed the URL. --%>
+    <link
+      :for={feed <- assigns[:feeds] || []}
+      rel="alternate"
+      type={feed.type}
+      title={feed.title}
+      href={feed.href}
+    />
     <meta :if={assigns[:page_title]} property="og:title" content={@page_title} />
     <meta :if={assigns[:meta_description]} property="og:description" content={@meta_description} />
     <meta :if={assigns[:og_image]} property="og:image" content={@og_image} />
