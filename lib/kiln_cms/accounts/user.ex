@@ -501,13 +501,24 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      # Budgeted like the other two (#727), and not because enrolment is
+      # sensitive. On an account that is *already* enrolled this action is a
+      # second `:regenerate_totp_recovery_codes` wearing a different name:
+      # nothing scopes it to an enrolment in progress, so `ValidTotpCode` runs
+      # against the **live** secret and a correct guess hands back a fresh
+      # recovery-code set while leaving the secret and `totp_confirmed_at`
+      # untouched. The owner's authenticator keeps working and nothing looks
+      # wrong. Leaving the code here unbudgeted would have left the door it is
+      # next to bolted and this one open.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
     end
 
     # Replace the recovery-code set — requires a current authenticator code, so
-    # a walk-up attacker on an open session can't mint themselves backup codes.
+    # an attacker on a stolen session can't mint themselves backup codes without
+    # guessing it, and gets five guesses per fifteen minutes to try (#727).
     # Unused codes from the previous set stop working immediately.
     update :regenerate_totp_recovery_codes do
       description "Mint a fresh 2FA recovery-code set (invalidates the old one)."
@@ -516,6 +527,10 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      # Above the validation on purpose — see the change's moduledoc. A wrong
+      # code is the only one worth charging, and by the time the validation has
+      # rejected it there is no hook left to charge from.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
     end
@@ -534,8 +549,15 @@ defmodule KilnCMS.Accounts.User do
       change KilnCMS.Accounts.Changes.ConsumeRecoveryCode
     end
 
-    # Turn 2FA off — requires a current code, so a walk-up attacker on an open
-    # session still can't remove the second factor.
+    # Turn 2FA off — requires a current code, and that code is now budgeted, so
+    # an attacker on a stolen session can't remove the second factor by grinding
+    # six digits at socket speed either (#727). Five attempts per account per
+    # fifteen minutes, shared with the sign-in prompt so the two can't be spent
+    # independently.
+    #
+    # That is the whole of what this action relies on. `:setup_totp` above
+    # clears `totp_confirmed_at` with no code at all, which turns the second
+    # factor off by a different door — tracked as #754, not fixed here.
     update :disable_totp do
       description "Disable 2FA (requires a current code)."
       accept []
@@ -543,6 +565,7 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
       change set_attribute(:totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)

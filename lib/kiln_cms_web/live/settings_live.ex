@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.SettingsLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
 
@@ -138,8 +139,13 @@ defmodule KilnCMSWeb.SettingsLive do
          |> assign(:recovery_codes, Ash.Resource.get_metadata(user, :recovery_codes))
          |> put_flash(:info, gettext("Two-factor authentication is now on."))}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — try again."))}
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           second_factor_error(error, gettext("That code isn't valid — try again."))
+         )}
     end
   end
 
@@ -157,8 +163,13 @@ defmodule KilnCMSWeb.SettingsLive do
            gettext("New recovery codes generated — the old ones no longer work.")
          )}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — try again."))}
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           second_factor_error(error, gettext("That code isn't valid — try again."))
+         )}
     end
   end
 
@@ -177,8 +188,13 @@ defmodule KilnCMSWeb.SettingsLive do
          |> assign(:recovery_codes, nil)
          |> put_flash(:info, gettext("Two-factor authentication is now off."))}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("That code isn't valid — 2FA is still on."))}
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           second_factor_error(error, gettext("That code isn't valid — 2FA is still on."))
+         )}
     end
   end
 
@@ -576,4 +592,20 @@ defmodule KilnCMSWeb.SettingsLive do
     </Layouts.console>
     """
   end
+
+  # A spent second-factor budget (#727) and a wrong code are opposite advice:
+  # "check your authenticator" sends someone to type five more codes into a
+  # budget that has nothing left. Telling them apart discloses nothing — whoever
+  # is here is already signed in as this account.
+  defp second_factor_error(%{errors: errors}, wrong_code_message) do
+    case Enum.find(List.wrap(errors), &match?(%SecondFactorThrottled{}, &1)) do
+      %SecondFactorThrottled{retry_after_seconds: seconds} ->
+        gettext("Too many attempts — try again in %{seconds} seconds.", seconds: seconds)
+
+      nil ->
+        wrong_code_message
+    end
+  end
+
+  defp second_factor_error(_error, wrong_code_message), do: wrong_code_message
 end

@@ -291,6 +291,43 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The three TOTP actions on `/editor/settings` are now budgeted, so a stolen
+  session can't grind the six digits that gate them.** #714 bounded the second
+  factor at `POST /sign-in/verify`; the other actions that check the same code
+  — `disable_totp`, `regenerate_totp_recovery_codes` and `confirm_totp`, all
+  LiveView events — were charged nothing at all. A LiveView event passes no
+  router pipeline, so they did not even get the per-IP `:auth` bucket, the gap
+  #715 closed for the sign-in submit. An attacker with a stolen session cookie
+  could push the event in a loop and grind 10^6 at socket speed; on a hit,
+  `disable_totp` nulls `totp_secret` and empties the recovery hashes.
+
+  `confirm_totp` belongs on that list for a reason worth stating, because it
+  reads like enrolment and looks exempt. It is not scoped to an enrolment in
+  progress: run against an account that is **already** enrolled, it validates
+  against the *live* secret and mints a fresh recovery-code set, invalidating
+  the owner's — the same prize `regenerate_totp_recovery_codes` gives, from a
+  differently-named door, while `totp_secret` and `totp_confirmed_at` stay put
+  so the owner's authenticator keeps working and nothing looks wrong.
+
+  All three now charge `AccountThrottle.consume_second_factor/1` — five per
+  account per fifteen minutes, and deliberately the **same** bucket
+  `/sign-in/verify` uses, so an attacker cannot exhaust one prompt and pivot to
+  another for a fresh five. The charge is declared on the Ash action rather
+  than in the `handle_event` clauses, so a fourth caller inherits the bound
+  instead of missing it, and it lands in a `change` body rather than a
+  `before_action` hook, because a hook never runs for the invalid changeset a
+  wrong code produces — and a wrong code is the only one worth charging.
+
+  The forms now say "too many attempts — try again in N seconds" rather than
+  "that code isn't valid", which is the opposite advice.
+
+  Two things this does *not* do. It bounds guessing only: `setup_totp` still
+  clears `totp_confirmed_at` with no code at all, removing the second factor
+  without guessing anything — filed as #754. And it hands a stolen session a
+  small denial-of-service it did not have, since five wrong codes here deny the
+  real owner `/sign-in/verify` for the rest of the window — strictly less than
+  what holding the session already grants. (#727)
+
 - **`POST /api/auth/sign_in` no longer skips the second factor.** A 2FA-enabled
   account's password alone returned a full user JWT here — the credential for
   JSON:API, GraphQL and the headless REST surface, carrying that user's real

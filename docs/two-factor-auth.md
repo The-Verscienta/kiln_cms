@@ -74,9 +74,22 @@ What an operator should know when a user reports it:
   `POST /api/auth/sign_in/verify` charge the same bucket (#726), so a user whose
   correct code is refused in the browser may have spent it in a script — a CI
   job or a mobile client retrying a stale code will do it silently. Check for a
-  headless client before concluding the browser attempts don't add up. Codes
-  submitted to the *enrolment* and *disable* forms are a different thing and
-  charge nothing.
+  headless client before concluding the browser attempts don't add up.
+- **All three settings forms share it too.** *Enabling*, *disabling* and
+  *regenerating recovery codes* on `/editor/settings` each charge the same
+  bucket ([#727](https://github.com/The-Verscienta/kiln_cms/issues/727)) — they
+  verify the same six digits, and a separate budget would just be this one
+  twice as large. So a user who mistyped at a settings prompt can find the
+  sign-in prompt refusing them, and the reverse. Those forms say "too many
+  attempts — try again in N seconds" rather than "that code isn't valid", for
+  the same reason the sign-in prompt does.
+
+  Enrolment is on that list, which is not obvious. `confirm_totp` is not
+  scoped to an enrolment in progress: run against an account that is *already*
+  enrolled it checks the live secret and mints a fresh recovery-code set, which
+  is `regenerate_totp_recovery_codes`' prize through a different door. The cost
+  is that a user enrolling with a skewed device clock can spend the budget that
+  gates their next sign-in — a correct code clears it.
 - **TOTP codes and recovery codes share it.** Someone who has spent the budget
   guessing codes cannot fall back to recovery codes until the window rolls.
 - **A completed password reset clears it.** That is the remedy to offer: it is
