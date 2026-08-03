@@ -87,6 +87,15 @@ defmodule KilnCMSWeb.LiveRouteGuard do
   reason — attaching the client address to the sign-in form — and picks this up
   on the way past. Worth knowing rather than relying on: it is a side effect of
   a wrapper that exists for something else.
+
+  It also covers only a *well-formed* join. A payload whose `"url"` is present
+  but not a binary — `nil`, a number, a map — never reaches a mount hook at all:
+  `authorize_session/3` runs outside the channel's `try/rescue`, and
+  Phoenix.LiveView.Route.live_link_info_without_checks/3 function-clauses on
+  it. That is a crash rather than a refusal, so this guard cannot narrow it, and
+  the clean 404 that makes a url-*less* probe cost nothing does not apply. What
+  it costs is an error-tracker event per attempt, which #700 stops at
+  `KilnCMS.SentryFilter` rather than pretending the crash is not happening.
   """
 
   require Logger

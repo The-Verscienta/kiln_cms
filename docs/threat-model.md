@@ -479,8 +479,18 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     than at a plug it never passes, so brute force over the socket is bounded
     per address exactly as the HTTP form is. What remains is volume: joins are
     uncounted, so a caller replaying a scraped session token pays nothing per
-    attempt, and #700 notes that a *malformed* join costs an error-tracker
-    event. Tracked in #678 and #700.
+    attempt. A *malformed* join — one whose `"url"` is present but not a binary
+    — is worse than uncounted: it function-clauses before any mount hook, ahead
+    of the channel's `try/rescue`, so it is a crash rather than the clean 404 a
+    url-less probe gets. #700 stops that reaching the error tracker
+    (`KilnCMS.SentryFilter` drops exactly that one function's
+    `FunctionClauseError` at one arity, leaving the local report intact). Sizing
+    it honestly: Sentry.Dedupe already collapsed the flood to roughly one
+    event, so what this removes is a caller's ability to *plant* a real-looking
+    issue at will, not a quota burn. The join itself is still free, and the
+    Sentry logger handler's own `:rate_limiting` option — which would bound any
+    crash shape rather than one named function — is available and unset.
+    Tracked in #678.
 11. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
