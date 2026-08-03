@@ -13,6 +13,13 @@ defmodule KilnCMS.Accounts.Changes.ForgiveSignInThrottle do
   single-use secret delivered to the account's own mailbox; holding it is a
   stronger claim than the password the throttle is protecting.
 
+  The second-factor budget (#714) is cleared with it, for the same reason and
+  one step further along. Resetting the password is precisely what *stops* an
+  attacker grinding that budget — they can no longer complete the first factor
+  and mint pending tokens — so a victim who takes the remedy and then finds
+  `/sign-in/verify` still answering 429 for the tail of a fifteen-minute window
+  has fixed the problem and been punished for it.
+
   Applied `after_action`, so a reset that fails validation forgives nothing.
   """
   use Ash.Resource.Change
@@ -23,6 +30,7 @@ defmodule KilnCMS.Accounts.Changes.ForgiveSignInThrottle do
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_action(changeset, fn _changeset, record ->
       AccountThrottle.forgive(to_string(record.email))
+      AccountThrottle.forgive_second_factor(record.id)
       {:ok, record}
     end)
   end

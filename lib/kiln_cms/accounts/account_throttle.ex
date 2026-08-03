@@ -36,18 +36,54 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   exists to bound. So `consume/1` is the only gate, it runs once per attempt,
   and nothing reads the counter to decide.
 
-  ## It never reveals whether an account exists
+  ## The pre-account buckets never reveal whether an account exists
 
-  Every bucket keys on the **submitted identifier**, normalized and hashed —
-  never on a resolved user id. An address with no account throttles exactly like
+  Every bucket reached *before* an account is known — sign-in and the two mail
+  budgets — keys on the **submitted identifier**, normalized and hashed, never on
+  a resolved user id. An address with no account throttles exactly like
   one with an account, the caller renders the refusal as the same generic
   failure a wrong password produces, and
   `KilnCMS.Accounts.Preparations.ThrottleSignIn` spends the same bcrypt time on
   a refusal that AshAuthentication spends on a miss, so the refusal is not a
   timing oracle either.
 
+  The second-factor bucket (below) is the exception that proves the rule: it
+  keys on a resolved user id, and it can, because by the time it is reached the
+  caller has already proved the first factor and the account is not in question.
+
   The hash is not decoration: this table is a security control keyed on user
   identifiers, and it survives into crash dumps and `:observer`.
+
+  ## The second factor gets a tighter budget of its own (#714)
+
+  The second factor is the thing that is supposed to survive a leaked or stuffed
+  password, so it is the one place where "the attacker already has the first
+  factor" is the *starting* assumption rather than the worst case. Someone at
+  `/sign-in/verify` holds a valid `:pending_2fa` token, and without a budget
+  they can grind the six-digit space — 10^6, and TOTP accepts a skew window — at
+  whatever rate their IP pool allows.
+
+  `@pending_2fa_max_age` is no bound on that. Re-running the password step mints
+  a fresh pending token, and because that step *succeeds* it also calls
+  `forgive/1` and clears the sign-in counter — so the five-minute window costs an
+  attacker who has the password precisely nothing to renew. That is why this
+  budget keys on the account rather than on the pending token: minting a new
+  token does not buy new attempts.
+
+  Tighter than sign-in, deliberately. A six-digit code is guessable in a way a
+  password is not, and a legitimate user is reading theirs off a screen — five
+  wrong ones is already a bad day, not a typo.
+
+  Keyed on the **user id**, not on a submitted identifier. By this point the
+  account is known (the pending token names it and is signed), so there is no
+  enumeration concern to defend against and nothing an attacker could aim at
+  someone else's bucket. It still goes through `key/2` and so is still hashed:
+  the saving is one SHA-256 per attempt, and one key-building path that every
+  bucket shares is worth more than that.
+
+  TOTP codes and recovery codes share the budget. An attacker who cannot guess
+  the code will pivot to the codes, and they are drawn from the same pool — two
+  budgets would simply be one budget twice as large.
 
   ## Mail-triggering requests get their own budget
 
@@ -80,6 +116,9 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @budget 10
   @window :timer.minutes(15)
 
+  @second_factor_budget 5
+  @second_factor_window :timer.minutes(15)
+
   @mail_budget 5
   @mail_window :timer.hours(1)
 
@@ -97,12 +136,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   burst can't all pass a check that a later increment would have failed.
   """
   @spec consume(String.t()) :: :allow | {:deny, non_neg_integer()}
-  def consume(identifier) do
-    case hit(key("signin", identifier), window(), budget()) do
-      {:allow, _count} -> :allow
-      {:deny, retry_after_ms} -> {:deny, retry_after_ms}
-    end
-  end
+  def consume(identifier), do: charge("signin", identifier, window(), budget())
 
   @doc """
   Clears the sign-in counter for this identifier.
@@ -113,6 +147,30 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec forgive(String.t()) :: :ok
   def forgive(identifier), do: drop(key("signin", identifier), window())
+
+  @doc """
+  Charges one second-factor attempt against this account (#714).
+
+  `user_id` comes from the signed `:pending_2fa` token, so it names an account
+  the caller has already proved the first factor for. One charge per submitted
+  code, whether it is checked as a TOTP code or as a recovery code — see the
+  moduledoc for why those share a budget.
+  """
+  @spec consume_second_factor(String.t()) :: :allow | {:deny, non_neg_integer()}
+  def consume_second_factor(user_id),
+    do: charge("2fa", user_id, second_factor_window(), second_factor_budget())
+
+  @doc """
+  Clears the second-factor counter for this account.
+
+  Called on a verified code, for the same reason `forgive/1` is called on a
+  verified password: a user whose authenticator was a minute out of sync, or who
+  fumbled a recovery code, has now proved they hold the factor, and carrying
+  their failures into the next sign-in would lock out the person the budget
+  exists to protect.
+  """
+  @spec forgive_second_factor(String.t()) :: :ok
+  def forgive_second_factor(user_id), do: drop(key("2fa", user_id), second_factor_window())
 
   @doc """
   Whether the owner of this identifier should be told their account is being
@@ -170,13 +228,47 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   end
 
   @doc false
+  # Test seam: the shipped limits, before any config override. Nothing in
+  # production reads this — the private accessors below are the effective
+  # policy. It exists so a suite can assert on the numbers the threat model
+  # states while still overriding them to run (#714).
+  @spec defaults() :: keyword()
+  def defaults do
+    [
+      budget: @budget,
+      window: @window,
+      second_factor_budget: @second_factor_budget,
+      second_factor_window: @second_factor_window,
+      mail_budget: @mail_budget,
+      mail_window: @mail_window
+    ]
+  end
+
+  @doc false
   # Test seam: forget everything about an identifier, so a suite can assert on a
   # deterministic budget without waiting out a real window.
+  #
+  # Covers only the buckets keyed on a submitted email address. The second
+  # factor keys on a user id, which is a different subject entirely, so it is
+  # cleared through `forgive_second_factor/1` rather than folded in here — the
+  # alternative deletes a `2fa:<hash of an email>` row that nothing ever writes.
   @spec reset(String.t()) :: :ok
   def reset(identifier) do
     forgive(identifier)
     drop(key("signin:alert", identifier), @alert_window)
     Enum.each([:password_reset, :magic_link], &drop(key("mail:#{&1}", identifier), mail_window()))
+  end
+
+  # One atomic increment-and-compare per bucket. Shared rather than copied per
+  # bucket so that "the gate *is* the counter" — see the moduledoc — holds by
+  # construction for every budget here, present and future. The arity-1 public
+  # functions stay, because the per-bucket `@doc` is where the reasoning lives
+  # and a public `charge(prefix, …)` would let a call site pick a budget.
+  defp charge(prefix, subject, window, budget) do
+    case hit(key(prefix, subject), window, budget) do
+      {:allow, _count} -> :allow
+      {:deny, retry_after_ms} -> {:deny, retry_after_ms}
+    end
   end
 
   # Hammer's `set/3` is spec'd `count :: pos_integer()`, so zeroing a bucket is a
@@ -193,6 +285,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   defp window, do: config(:window, @window)
   defp mail_budget, do: config(:mail_budget, @mail_budget)
   defp mail_window, do: config(:mail_window, @mail_window)
+  defp second_factor_budget, do: config(:second_factor_budget, @second_factor_budget)
+  defp second_factor_window, do: config(:second_factor_window, @second_factor_window)
 
   defp config(key, default) do
     :kiln_cms

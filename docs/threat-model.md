@@ -60,7 +60,8 @@ the router so preflights are answered before route matching).
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
 | Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
 | Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
-| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/sign-in/verify`, `/auth/passkey/*` | varies | `:auth`; password sign-in also per-account (#478) |
+| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`; password sign-in also per-account (#478) |
+| Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Sign-in submit over `/live` | LiveView `"submit"` on `/sign-in` | credentials → session | `:auth`, charged on the action (#715) + per-account (#478) |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
@@ -115,6 +116,21 @@ build if a resource is ever registered without that authorizer.
   reset and a passkey sign-in each clear it. A separate flat per-address budget
   covers the two mail-triggering requests (password reset, magic link) so
   neither becomes a mailbomb.
+
+  The **second factor** carries its own, tighter per-account budget (#714): five
+  submitted codes per fifteen minutes at `POST /sign-in/verify`, keyed on the
+  account the signed pending token names, with a verified code clearing it.
+  Tighter because six digits and a skew window are guessable in a way a password
+  is not, and because whoever is at that prompt has already got past the first
+  factor. It keys on the account rather than on the pending token for the same
+  reason: `@pending_2fa_max_age` bounds nothing on its own, since re-running the
+  password step mints a fresh token *and* — because that step succeeds — clears
+  the sign-in counter, so an attacker holding the password renews the window for
+  free. TOTP codes and recovery codes share the budget; two would be one budget
+  twice as large. This refusal is a plain 429 that says so, unlike every other
+  refusal in the auth flow: the account is already known to whoever is asking,
+  so there is nothing to hide, and a generic "that code isn't valid" would tell
+  a legitimate user their correct code was wrong.
 - **CSP & secure headers** — `put_secure_browser_headers` plus a per-request
   nonce-based Content-Security-Policy on browser pipelines; a narrower static
   policy for preview/forms/embeds and a relaxed one scoped to the Swagger
@@ -199,8 +215,9 @@ build if a resource is ever registered without that authorizer.
   the budget keys on the *submitted* identifier, so an address with no account
   throttles identically and the refusal is not an enumeration oracle. The
   account owner is mailed once per window when attempts start being refused.
-  *Residual:* the second factor (`POST /sign-in/verify`, TOTP and recovery
-  codes) has no per-account budget — tracked separately.
+  *Residual:* this endpoint does not ask for a second factor at all — a
+  2FA-enabled account's password alone returns a full JWT here, where the
+  browser flow would divert to `/sign-in/verify`. Tracked in #726.
 - **Token theft** — JWTs are bearer tokens; clients must store them securely and
   use TLS. Tokens are revocable via the token store.
 

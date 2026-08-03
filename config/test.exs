@@ -97,7 +97,14 @@ config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
   budget: 1_000_000,
   window: :timer.minutes(15),
   mail_budget: 1_000_000,
-  mail_window: :timer.hours(1)
+  mail_window: :timer.hours(1),
+  # The second-factor budget (#714) keys on a user id rather than an email, so
+  # it cannot collide across test files the way the others can — but the 2FA
+  # controller suite drives several attempts against one seeded user, and the
+  # real budget of 5 is small enough to reach by accident. Raised on the same
+  # principle; `AccountThrottleTest` tightens it back per-test.
+  second_factor_budget: 1_000_000,
+  second_factor_window: :timer.minutes(15)
 
 # Configure your database
 #

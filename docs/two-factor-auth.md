@@ -19,7 +19,34 @@ every sign-in, after the first factor.
   account to `/sign-in/verify` instead of establishing a session. A short-lived
   (5-minute), signed pending token carries the user id + the already-minted
   first-factor token across the redirect — the user is **not** signed in until a
-  valid code is entered. The `:auth` rate limit slows code brute-forcing.
+  valid code is entered.
+
+## Why a wrong code can say "too many attempts"
+
+Six digits and a ±1-step tolerance are guessable in a way a password is not, and
+whoever is at that prompt has already got past the first factor. So beyond the
+per-IP `:auth` limit — which an attacker escapes by rotating addresses — every
+submitted code is charged a **per-account** budget: five per fifteen minutes,
+keyed on the account the pending token names, cleared the moment a valid code is
+accepted ([#714](https://github.com/The-Verscienta/kiln_cms/issues/714)).
+
+What an operator should know when a user reports it:
+
+- **It is per account, not per browser or per address.** Signing in from another
+  device or network does not reset it, and neither does re-entering the password
+  — a fresh pending token does not refill the budget, which is the point.
+- **TOTP codes and recovery codes share it.** Someone who has spent the budget
+  guessing codes cannot fall back to recovery codes until the window rolls.
+- **A completed password reset clears it.** That is the remedy to offer: it is
+  also what stops an attacker minting the pending tokens they were spending the
+  budget with.
+- **Whitespace is not a wasted attempt.** `123 456` pasted from an authenticator
+  is normalized before it is checked; recovery codes are already case- and
+  separator-insensitive.
+- **It answers 429 with `Retry-After`,** rather than the generic "that code
+  isn't valid" a wrong code gets. Unlike the rest of the auth flow there is
+  nothing to hide here — whoever is asking already holds a signed token naming
+  the account — and telling a user their correct code was wrong is worse.
 
 ## The TOTP implementation
 

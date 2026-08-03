@@ -22,6 +22,7 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
   @password "password123456"
   @budget 3
   @mail_budget 2
+  @second_factor_budget 2
 
   setup do
     previous = Application.get_env(:kiln_cms, AccountThrottle, [])
@@ -33,7 +34,9 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
         budget: @budget,
         window: :timer.minutes(15),
         mail_budget: @mail_budget,
-        mail_window: :timer.hours(1)
+        mail_window: :timer.hours(1),
+        second_factor_budget: @second_factor_budget,
+        second_factor_window: :timer.minutes(15)
       )
     )
 
@@ -305,6 +308,47 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
       request_magic_link(address)
       drain_oban()
       assert_no_email_sent()
+    end
+  end
+
+  describe "the second-factor budget (#714)" do
+    test "is separate from the sign-in budget, so neither spends the other" do
+      user_id = Ecto.UUID.generate()
+      address = email()
+      on_exit(fn -> AccountThrottle.reset(address) end)
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user_id) end)
+
+      for _ <- 1..@second_factor_budget,
+          do: assert(:allow = AccountThrottle.consume_second_factor(user_id))
+
+      assert {:deny, _} = AccountThrottle.consume_second_factor(user_id)
+
+      # The first factor is untouched: the two are different questions, and a
+      # spent code budget must not also lock the password step (nor the reverse,
+      # or every sign-in would eat into the codes an authenticator can be out of
+      # sync by).
+      assert :allow = AccountThrottle.consume(address)
+    end
+
+    test "is tighter than the sign-in budget, because six digits are guessable" do
+      # Read through `defaults/0`, not from this file's own overrides: those are
+      # numbers the *test* chose, so comparing them would assert `2 < 3` and
+      # stay green if the shipped second-factor budget were raised to fifty.
+      # This is the one assertion behind the claim the moduledoc and the threat
+      # model both make, so it has to look at what actually ships.
+      defaults = AccountThrottle.defaults()
+      assert defaults[:second_factor_budget] < defaults[:budget]
+    end
+
+    test "a verified code clears it" do
+      user_id = Ecto.UUID.generate()
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user_id) end)
+
+      for _ <- 1..@second_factor_budget, do: AccountThrottle.consume_second_factor(user_id)
+      assert {:deny, _} = AccountThrottle.consume_second_factor(user_id)
+
+      AccountThrottle.forgive_second_factor(user_id)
+      assert :allow = AccountThrottle.consume_second_factor(user_id)
     end
   end
 
