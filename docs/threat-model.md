@@ -64,7 +64,7 @@ the router so preflights are answered before route matching).
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`; password sign-in also per-account (#478) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Sign-in submit over `/live` | LiveView `"submit"` on `/sign-in` | credentials → session | `:auth`, charged on the action (#715) + per-account (#478) |
-| Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none |
+| Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
@@ -346,6 +346,26 @@ build if a resource is ever registered without that authorizer.
 - **Session as the credential** — the whole surface is gated by the session
   cookie plus the per-org effective tier, so the cookie's integrity is the
   boundary; see the `__Host-` prefix under Controls (#686).
+- **Second-factor codes over the socket** — `/editor/settings` verifies a TOTP
+  code for `disable_totp`, `regenerate_totp_recovery_codes` **and**
+  `confirm_totp`. A LiveView event passes no router pipeline, so none of them
+  got the per-IP `:auth` bucket: a stolen session could push the event in a
+  loop and grind 10^6 at socket speed. On a hit `disable_totp` removes the
+  second factor outright, and either of the other two hands over a working
+  recovery-code set — `confirm_totp` included, because it is not scoped to an
+  enrolment in progress, so on an enrolled account it checks the *live* secret
+  and mints codes while leaving the secret and `totp_confirmed_at` untouched.
+  Nothing notifies the owner in any case. *Mitigated (#727):* all three charge
+  `AccountThrottle.consume_second_factor/1` — five per account per fifteen
+  minutes, the **same** bucket `/sign-in/verify` uses, so they cannot be spent
+  independently. The charge lives on the Ash action rather than in the
+  `handle_event` clauses, so a future caller inherits it.
+  *Watch:* the bound is per node (residual risk 9). It bounds *guessing* only —
+  `setup_totp` still clears `totp_confirmed_at` with no code at all, removing
+  the second factor without guessing anything (#754). And it hands a stolen
+  session a small denial-of-service it did not have: five wrong codes here deny
+  the real owner `/sign-in/verify` for the rest of the window. That is strictly
+  less than what the session already grants, so the trade is accepted.
 
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
