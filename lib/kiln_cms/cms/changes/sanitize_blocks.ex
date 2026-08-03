@@ -37,6 +37,8 @@ defmodule KilnCMS.CMS.Changes.SanitizeBlocks do
 
   defp sanitize_content(:rich_text, content), do: HTMLSanitizer.sanitize_rich_text(content)
   defp sanitize_content(:image, content), do: HTMLSanitizer.safe_image_src(content) || ""
-  defp sanitize_content(:embed, content), do: HTMLSanitizer.safe_embed_url(content) || ""
+  # The author's URL, not a rewritten player URL — see the matching clause in
+  # `KilnCMS.CMS.TypedBlocks.sanitize_attrs/1` (#489).
+  defp sanitize_content(:embed, content), do: HTMLSanitizer.safe_external_url(content) || ""
   defp sanitize_content(_type, content), do: content
 end

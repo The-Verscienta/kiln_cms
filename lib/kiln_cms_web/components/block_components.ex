@@ -159,15 +159,41 @@ defmodule KilnCMSWeb.BlockComponents do
           <%!-- nil form (inactive/unknown slug) renders nothing on-site. --%>
           <.public_form :if={@block[:form]} form={@block[:form]} />
         <% @type == "embed" -> %>
+          <%!-- Two shapes, and only the allowlisted hosts get an iframe. --%>
           <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
             <iframe
               src={embed}
-              title={gettext("Embedded media")}
+              title={@block[:title] || gettext("Embedded media")}
               class="h-full w-full rounded"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowfullscreen
             />
           </div>
+          <%!-- Everything else with resolved oEmbed metadata renders as a card
+                (#489): a link, a thumbnail and a title, all escaped scalars. The
+                provider's own `html` is never used — see KilnCMS.OEmbed. An
+                embed with no metadata falls through to nothing, which is what it
+                rendered before the feature existed. --%>
+          <a
+            :if={embed_card?(@block)}
+            href={HTMLSanitizer.safe_href(@block.content)}
+            rel="noopener"
+            class="kiln-embed-card flex gap-3 rounded border border-base-300 p-3 no-underline hover:bg-base-200"
+          >
+            <img
+              :if={thumb = HTMLSanitizer.safe_image_src(@block[:thumbnail_url])}
+              src={thumb}
+              alt=""
+              loading="lazy"
+              class="size-20 shrink-0 rounded object-cover"
+            />
+            <span class="min-w-0">
+              <span class="block font-medium">{@block[:title]}</span>
+              <span :if={byline = embed_byline(@block)} class="block text-sm text-base-content/70">
+                {byline}
+              </span>
+            </span>
+          </a>
         <% true -> %>
           <p>{@block.content}</p>
       <% end %>
@@ -336,6 +362,21 @@ defmodule KilnCMSWeb.BlockComponents do
   # pop-out preview, the in-context edit overlay — show the same alt text
   # delivery will. `srcset`/`focal` deliberately do not: those need a loaded
   # MediaItem, which is a delivery concern.
+  # Embed metadata (#489) rides the thin shape so the previews and the
+  # in-context editor show the same card delivery does, rather than an empty
+  # figure while the real page shows a title and a thumbnail.
+  defp thin_block(%{type: :embed, content: content, data: data}) do
+    %{
+      type: "embed",
+      content: content,
+      title: data["title"],
+      author_name: data["author_name"],
+      provider_name: data["provider_name"],
+      thumbnail_url: data["thumbnail_url"],
+      resolved_url: data["resolved_url"]
+    }
+  end
+
   defp thin_block(%{type: :image, content: content, data: data}),
     do: %{type: "image", content: content, alt: data["alt"] || ""}
 
@@ -403,4 +444,24 @@ defmodule KilnCMSWeb.BlockComponents do
   end
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
+
+  # One predicate, shared with the block module's own `card?/1`, so the fired
+  # artifact and the live site cannot disagree about when a card exists — the
+  # drift the #482 review found between the gallery/accordion renderers.
+  defp embed_card?(block) do
+    is_nil(HTMLSanitizer.safe_embed_url(block.content)) and
+      KilnCMS.Blocks.Embed.card?(%KilnCMS.Blocks.Embed{
+        url: block.content,
+        title: block[:title],
+        resolved_url: block[:resolved_url]
+      })
+  end
+
+  # "Provider · Author", omitting whichever is missing, nil when both are.
+  defp embed_byline(block) do
+    case [block[:provider_name], block[:author_name]] |> Enum.filter(&present?/1) do
+      [] -> nil
+      parts -> Enum.join(parts, " · ")
+    end
+  end
 end

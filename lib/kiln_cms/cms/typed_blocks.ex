@@ -160,8 +160,27 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp sanitize_attrs(%{"_type" => "image"} = m),
     do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_image_src(&1) || ""))
 
-  defp sanitize_attrs(%{"_type" => "embed"} = m),
-    do: Map.update(m, "url", nil, &(HTMLSanitizer.safe_embed_url(&1) || ""))
+  # Keeps the author's URL rather than rewriting it to a player URL (#489).
+  #
+  # This used to run `safe_embed_url/1`, which knows two hosts and rewrites
+  # them — so a stored embed URL was a canonical YouTube/Vimeo player URL or the
+  # empty string, and everything else an author pasted was destroyed on save.
+  # Whether a URL may be *framed* is a render-time question both surfaces
+  # already ask; making it the storage filter as well meant nothing downstream
+  # could ever see what was actually embedded.
+  #
+  # The metadata fields are resolved server-side, but they are ordinary block
+  # scalars — the editor's generic field renderer offers them as inputs and a
+  # headless `block_tree` write can set them directly — so they are filtered
+  # here on the same footing as anything else an author can type. In particular
+  # `thumbnail_url` becomes an `<img src>`: without this, "checked against the
+  # provider's CDN when it was resolved" would be true only of values that
+  # actually came from a resolve.
+  defp sanitize_attrs(%{"_type" => "embed"} = m) do
+    m
+    |> Map.update("url", nil, &(HTMLSanitizer.safe_external_url(&1) || ""))
+    |> Map.update("thumbnail_url", nil, &KilnCMS.OEmbed.allowed_thumbnail(&1))
+  end
 
   # A `gallery`'s urls live one level down, inside an `{:array, :map}` field, so
   # the `image` clause above never sees them. Without this a gallery item is the
@@ -343,8 +362,22 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp typed(:quote, id, content, data, _block),
     do: %Quote{id: id, _type: "quote", text: content, citation: data_str(data, "citation")}
 
-  defp typed(:embed, id, content, _data, _block),
-    do: %Embed{id: id, _type: "embed", url: content}
+  # The oEmbed metadata (#489) rides in `data`, like every other block's
+  # non-primary fields. Dropping it here loses the card on any legacy→typed
+  # path, which is every delivery and preview read.
+  defp typed(:embed, id, content, data, _block) do
+    %Embed{
+      id: id,
+      _type: "embed",
+      url: content,
+      title: data_str(data, "title"),
+      author_name: data_str(data, "author_name"),
+      provider_name: data_str(data, "provider_name"),
+      thumbnail_url: data_str(data, "thumbnail_url"),
+      resolved_url: data_str(data, "resolved_url"),
+      resolved_at: data_str(data, "resolved_at")
+    }
+  end
 
   defp typed(:divider, id, _content, _data, _block),
     do: %Divider{id: id, _type: "divider"}
@@ -446,7 +479,20 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_legacy(%Quote{} = b),
     do: %{type: :quote, content: b.text, data: %{"citation" => b.citation}, id: b.id}
 
-  defp one_to_legacy(%Embed{} = b), do: %{type: :embed, content: b.url, data: %{}, id: b.id}
+  defp one_to_legacy(%Embed{} = b),
+    do: %{
+      type: :embed,
+      content: b.url,
+      data: %{
+        "title" => b.title,
+        "author_name" => b.author_name,
+        "provider_name" => b.provider_name,
+        "thumbnail_url" => b.thumbnail_url,
+        "resolved_url" => b.resolved_url,
+        "resolved_at" => b.resolved_at
+      },
+      id: b.id
+    }
 
   defp one_to_legacy(%Divider{} = b), do: %{type: :divider, content: nil, data: %{}, id: b.id}
 

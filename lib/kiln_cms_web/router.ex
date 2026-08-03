@@ -799,7 +799,15 @@ defmodule KilnCMSWeb.Router do
   # CDN, e.g. Cloudflare Images) plus Unsplash's thumbnail host while the
   # media library's Unsplash integration is enabled.
   defp base_csp do
-    extra = Application.get_env(:kiln_cms, :csp_img_src, []) ++ KilnCMS.Unsplash.csp_img_src()
+    # oEmbed card thumbnails (#489). Only the enabled providers' CDNs, and
+    # only their *known* hosts — the resolver already refuses a thumbnail
+    # URL that is not one of these, so the two lists cannot drift into
+    # allowing something nothing renders (or rendering something the policy
+    # blocks). Empty when the feature is off, which is the default.
+    extra =
+      Application.get_env(:kiln_cms, :csp_img_src, []) ++
+        KilnCMS.Unsplash.csp_img_src() ++
+        KilnCMS.OEmbed.Provider.thumbnail_hosts()
 
     case Enum.uniq(extra) do
       [] ->

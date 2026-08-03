@@ -30,7 +30,12 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
   # after_transaction — anchoring it would consume the publish's own version
   # and leave `RecordPublishedVersion` with nothing to record, dropping the
   # `published_version_id` linkage from the anchor.
-  @versionless_actions [:set_embedding, :set_published_version_id]
+  # `:set_oembed_metadata` (#489) is here for the same reason as
+  # `:set_embedding`: it is a background write that PaperTrail already ignores,
+  # so there is no version to fold — and without this entry every resolve pays
+  # the anchor query set and, on a document with no prior anchor, mints one
+  # attributed to `actor_id: nil`.
+  @versionless_actions [:set_embedding, :set_published_version_id, :set_oembed_metadata]
 
   @impl true
   def change(changeset, _opts, context) do

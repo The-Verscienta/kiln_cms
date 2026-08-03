@@ -836,6 +836,20 @@ defmodule KilnCMSWeb.ContentController do
 
   defp presence(_value), do: nil
 
+  # Embed cards (#489). Without these fields an embed reaches `BlockComponents`
+  # as `%{type, content}` and the card branch — which needs a title — renders
+  # nothing at all: the fired artifact and every preview showed a card while the
+  # public page, the one surface that matters, showed an empty div.
+  defp enrich_geo(base, %{type: :embed} = block) do
+    Map.merge(base, %{
+      title: block.data["title"],
+      author_name: block.data["author_name"],
+      provider_name: block.data["provider_name"],
+      thumbnail_url: block.data["thumbnail_url"],
+      resolved_url: block.data["resolved_url"]
+    })
+  end
+
   # GEO blocks (#357): surface the data-side fields the renderer reads.
   defp enrich_geo(base, %{type: :faq} = block),
     do: Map.put(base, :items, block.data["items"] || [])
