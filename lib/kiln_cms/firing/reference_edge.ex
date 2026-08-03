@@ -64,7 +64,10 @@ defmodule KilnCMS.Firing.ReferenceEdge do
   end
 
   validations do
-    validate {KilnCMS.Firing.Validations.KnownDocumentType, attributes: [:from_type, :to_type]}
+    # `:media` is a legal target and never a source (#403): a media item is not
+    # a document, has no artifacts and never fires.
+    validate {KilnCMS.Firing.Validations.KnownDocumentType,
+              attributes: [:from_type, :to_type], only_target: [to_type: [:media]]}
   end
 
   # Multi-tenancy (epic #336): edges are partitioned by org so the re-fire wave

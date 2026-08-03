@@ -1412,6 +1412,10 @@ defmodule KilnCMS.CMS.Content do
           # Compliance gate (#356): block publish when a required editorial consent
           # is missing (config-gated, no-op by default — see the validation).
           validate KilnCMS.CMS.Validations.RequiredConsent
+          # Accessibility gate (#403), config-gated and off by default: a publish
+          # is refused when the document shows an image with neither alt text nor
+          # a `decorative` mark.
+          validate KilnCMS.CMS.Validations.MediaAltText
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -1426,6 +1430,10 @@ defmodule KilnCMS.CMS.Content do
           # Same compliance gate as `:publish` (#356) — a scheduled publish must
           # also satisfy any required consent.
           validate KilnCMS.CMS.Validations.RequiredConsent
+          # Accessibility gate (#403), config-gated and off by default: a publish
+          # is refused when the document shows an image with neither alt text nor
+          # a `decorative` mark.
+          validate KilnCMS.CMS.Validations.MediaAltText
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
