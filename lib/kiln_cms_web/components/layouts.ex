@@ -96,11 +96,23 @@ defmodule KilnCMSWeb.Layouts do
 
   The two are distinguishable, and the distinction is exactly the bug: a hook
   that ran always *assigns* `:current_org` (`LiveUserAuth.request_org!/1` returns
-  an org or raises), so a **missing key** means no hook ran. That is the state a
-  url-less join leaves a LiveView in — it skips its `live_session`'s `on_mount`
-  list entirely — and it is unreachable on any path that went through the
-  router. So an absent key renders unbranded, and a present one keeps resolving
-  as before, including the legitimate `nil`.
+  an org or raises), so a **missing key** means no hook ran. So an absent key
+  renders unbranded, and a present one keeps resolving as before, including the
+  legitimate `nil`.
+
+  ## What this does and does not close
+
+  Defence in depth, not a fix for the #701 scenario. A url-less join matches no
+  route, and Phoenix.LiveView.Channel's `load_layout/2` takes the router's
+  `layout:` from the matched route's `live_session` — so such a join falls back
+  to `view.__live__()[:layout]`, which for the AshAuthentication views still
+  outside `KilnCMSWeb.LiveRouteGuard` is *their* layout, not this one. This
+  function therefore does not run on that path. #701 stays open for it.
+
+  What it does hold for is every path that *does* reach these layouts with no
+  resolved org — which is none today (`Plugs.SetTenant` always assigns, and every
+  `live_session` carries `:assign_current_org`), and that is the point: the next
+  one should render stock rather than another tenant.
 
   Failing closed here rather than in `Branding.for_org/1` is deliberate. That
   function has callers for which `nil` genuinely means "the instance", the mail

@@ -14,48 +14,59 @@ defmodule KilnCMSWeb.BrandingFailClosedTest do
   a url-less LiveView join leaves behind, since it skips its `live_session`'s
   whole `on_mount` list.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  # `async: false`, and the branded org is a *seeded* one rather than the default
+  # — the same two precautions `KilnCMS.BrandingTest` and
+  # `KilnCMSWeb.BrandTokensTest` take. `Branding.for_org/1` commits into the
+  # process-global Cachex for five minutes and is not sandboxed, so branding the
+  # default org here would make `KilnCMSWeb.ErrorHTMLTest` render "Powered by
+  # Acme Press." and fail on an unrelated PR. That file's own moduledoc names
+  # this exact hazard.
+  use KilnCMSWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest, only: [rendered_to_string: 1]
 
-  alias KilnCMS.Accounts
   alias KilnCMS.Branding
   alias KilnCMSWeb.Layouts
 
-  # A branded org, so "default org's identity" and "unbranded" are visibly
-  # different strings. Without this the test would pass on a deployment whose
-  # default org happens to carry no branding row — i.e. for the wrong reason.
+  # A branded org, so "resolved" and "unbranded" are visibly different strings.
+  # Without a branding row the assertions would pass against the stock name —
+  # i.e. for the wrong reason.
   setup do
-    org_id = Accounts.default_org_id()
+    org =
+      Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+        name: "Acme",
+        slug: "acme-#{System.unique_integer([:positive])}"
+      })
 
     {:ok, _row} =
       KilnCMS.CMS.save_site_branding(
         %{site_name: "Acme Press", logo_url: "/acme.svg"},
-        tenant: org_id,
+        tenant: org.id,
         authorize?: false
       )
 
-    KilnCMS.Cache.bust_branding(org_id)
-    on_exit(fn -> KilnCMS.Cache.bust_branding(org_id) end)
+    KilnCMS.Cache.bust_branding(org.id)
+    on_exit(fn -> KilnCMS.Cache.bust_branding(org.id) end)
 
-    %{org_id: org_id}
+    %{org_id: org.id}
   end
 
-  # Exactly how Phoenix invokes a `layout:` — `Phoenix.LiveView.Renderer` puts
+  # How Phoenix invokes a `layout:` — `Phoenix.LiveView.Renderer` puts
   # `:inner_content` on the socket's assigns and hands them to
-  # `Phoenix.Template.render/4`, which calls the function directly. Notably NOT
-  # as `<Layouts.auth />`: that path applies the `attr` defaults, which would
-  # supply the very key whose absence is the thing under test.
+  # `Phoenix.Template.render/4`, which applies the function to them.
+  #
+  # That is NOT a way of dodging `attr` defaults, and it would be wrong to read
+  # it as one: Phoenix merges those inside the generated overridable wrapper, so
+  # they apply on a direct call too. The absent key survives here only because
+  # `auth/1` declares no `attr :current_org` — which is exactly the line the
+  # layout comments say must not come back.
   defp layout_assigns(extra \\ []) do
     Enum.into(extra, %{__changed__: %{}, inner_content: []})
   end
 
   describe "brand_or_unbranded/1" do
     test "falls back to the stock brand when nothing assigned an org" do
-      brand = Layouts.brand_or_unbranded(%{})
-
-      assert brand == Branding.defaults()
-      refute brand.site_name == Branding.for_org(nil).site_name
+      assert Layouts.brand_or_unbranded(%{}) == Branding.defaults()
     end
 
     test "resolves normally when the key is present, including a legitimate nil", %{
