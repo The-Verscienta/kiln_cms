@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.ProvenanceController do
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Provenance
+  alias KilnCMSWeb.ApiError
 
   @surfaces KilnCMS.Firing.Surfaces.name_map()
   @max_age_seconds 300
@@ -82,7 +83,7 @@ defmodule KilnCMSWeb.ProvenanceController do
            {:ok, artifact} <- artifact_row(record, surface) do
         fun.(record, artifact)
       else
-        _ -> error(conn, :not_found, "not_found", "No provenance for this content.")
+        _ -> ApiError.send(conn, :not_found, "not_found", "No provenance for this content.")
       end
     else
       disabled(conn)
@@ -112,22 +113,15 @@ defmodule KilnCMSWeb.ProvenanceController do
   end
 
   defp disabled(conn),
-    do: error(conn, :not_found, "provenance_disabled", "Content provenance is not enabled.")
+    do:
+      ApiError.send(conn, :not_found, "provenance_disabled", "Content provenance is not enabled.")
 
   defp unavailable(conn, reason) do
-    error(
+    ApiError.send(
       conn,
       :service_unavailable,
       "provenance_unavailable",
       "Signing key unavailable: #{KilnCMS.Keys.describe_error(reason)}"
     )
-  end
-
-  defp error(conn, status, code, detail) do
-    conn
-    |> put_status(status)
-    |> json(%{
-      errors: [%{status: to_string(Plug.Conn.Status.code(status)), code: code, detail: detail}]
-    })
   end
 end

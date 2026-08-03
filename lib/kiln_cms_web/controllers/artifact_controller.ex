@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
+  alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.ViewTracking
 
   @surfaces KilnCMS.Firing.Surfaces.name_map()
@@ -67,7 +68,7 @@ defmodule KilnCMSWeb.ArtifactController do
     else
       :backfilling -> backfilling(conn)
       :unavailable -> unavailable(conn)
-      _ -> error(conn, :not_found, "not_found", "Content not found.")
+      _ -> ApiError.send(conn, :not_found, "not_found", "Content not found.")
     end
   end
 
@@ -121,7 +122,7 @@ defmodule KilnCMSWeb.ArtifactController do
       |> json(%{as_of: as_of, type: type, entries: entries})
     else
       :error ->
-        error(
+        ApiError.send(
           conn,
           :bad_request,
           "invalid_as_of",
@@ -129,12 +130,12 @@ defmodule KilnCMSWeb.ArtifactController do
         )
 
       _ ->
-        error(conn, :not_found, "not_found", "Unknown content type.")
+        ApiError.send(conn, :not_found, "not_found", "Unknown content type.")
     end
   end
 
   def index_point_in_time(conn, _params) do
-    error(
+    ApiError.send(
       conn,
       :bad_request,
       "missing_as_of",
@@ -189,7 +190,7 @@ defmodule KilnCMSWeb.ArtifactController do
       serve_point_in_time(conn, as_of, published_at, params["surface"] || "json", body)
     else
       :error ->
-        error(
+        ApiError.send(
           conn,
           :bad_request,
           "invalid_as_of",
@@ -197,13 +198,13 @@ defmodule KilnCMSWeb.ArtifactController do
         )
 
       {:error, :not_published} ->
-        error(conn, :not_found, "not_published", "No published version as of that date.")
+        ApiError.send(conn, :not_found, "not_published", "No published version as of that date.")
 
       # Distinct from never-published: this content existed and had been taken
       # down at that moment. A compliance reader asking "what did this say on
       # date X" is owed "it wasn't published then", not the prior publish.
       {:error, :withdrawn} ->
-        error(
+        ApiError.send(
           conn,
           :not_found,
           "withdrawn",
@@ -211,7 +212,7 @@ defmodule KilnCMSWeb.ArtifactController do
         )
 
       _ ->
-        error(conn, :not_found, "not_found", "Content not found.")
+        ApiError.send(conn, :not_found, "not_found", "Content not found.")
     end
   end
 
@@ -240,16 +241,6 @@ defmodule KilnCMSWeb.ArtifactController do
     # Same per-surface envelope as live delivery — :llm is raw text/markdown
     # with or without as_of.
     |> respond(surface, body)
-  end
-
-  # Standard error envelope shared with the other headless surfaces (#190):
-  # `{"errors": [{"status", "code", "detail"}]}`.
-  defp error(conn, status, code, detail) do
-    conn
-    |> put_status(status)
-    |> json(%{
-      errors: [%{status: to_string(Plug.Conn.Status.code(status)), code: code, detail: detail}]
-    })
   end
 
   # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
@@ -345,7 +336,11 @@ defmodule KilnCMSWeb.ArtifactController do
   defp backfilling(conn) do
     conn
     |> put_resp_header("retry-after", Integer.to_string(@retry_after_seconds))
-    |> error(:service_unavailable, "artifact_compiling", "Artifact is compiling; retry shortly.")
+    |> ApiError.send(
+      :service_unavailable,
+      "artifact_compiling",
+      "Artifact is compiling; retry shortly."
+    )
   end
 
   # The database is down and this content isn't warm in cache (#341). Warm
@@ -354,7 +349,7 @@ defmodule KilnCMSWeb.ArtifactController do
   defp unavailable(conn) do
     conn
     |> put_resp_header("retry-after", Integer.to_string(@retry_after_seconds))
-    |> error(
+    |> ApiError.send(
       :service_unavailable,
       "temporarily_unavailable",
       "Content is temporarily unavailable; retry shortly."

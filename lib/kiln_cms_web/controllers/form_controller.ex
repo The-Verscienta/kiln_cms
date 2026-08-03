@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.FormController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Forms
+  alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Embed
   alias KilnCMSWeb.Tenant
 
@@ -62,7 +63,7 @@ defmodule KilnCMSWeb.FormController do
   def schema(conn, %{"slug" => slug}) do
     case Forms.get_active(slug, Tenant.current_org_id(conn)) do
       nil ->
-        error(conn, 404, "not_found", "Form not found.")
+        ApiError.send(conn, :not_found, "not_found", "Form not found.")
 
       form ->
         json(conn, %{
@@ -131,7 +132,7 @@ defmodule KilnCMSWeb.FormController do
   def submit_json(conn, %{"slug" => slug} = params) do
     case run(conn, slug, params) do
       :not_found ->
-        error(conn, 404, "not_found", "Form not found.")
+        ApiError.send(conn, :not_found, "not_found", "Form not found.")
 
       {:ok, form} ->
         json(conn, %{ok: true, message: form.success_message})
@@ -205,12 +206,6 @@ defmodule KilnCMSWeb.FormController do
     else
       _ -> nil
     end
-  end
-
-  defp error(conn, status, code, detail) do
-    conn
-    |> put_status(status)
-    |> json(%{errors: [%{status: to_string(status), code: code, detail: detail}]})
   end
 
   defp h(value) do

@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.VisualEditingController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Engine
   alias KilnCMS.VisualEditing
+  alias KilnCMSWeb.ApiError
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     locale = params["locale"] || KilnCMS.I18n.default_locale()
@@ -71,8 +72,6 @@ defmodule KilnCMSWeb.VisualEditingController do
   end
 
   defp not_found(conn, message) do
-    conn
-    |> put_status(:not_found)
-    |> json(%{"errors" => [%{"detail" => message}]})
+    ApiError.send(conn, :not_found, "not_found", message)
   end
 end

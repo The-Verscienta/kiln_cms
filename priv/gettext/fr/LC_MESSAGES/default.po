@@ -2052,7 +2052,7 @@ msgstr "Types archivés"
 msgid "August"
 msgstr "août"
 
-#: lib/kiln_cms_web/plugs/rate_limit.ex:60
+#: lib/kiln_cms_web/plugs/rate_limit.ex:70
 #, elixir-autogen, elixir-format
 msgid "Back to the homepage"
 msgstr "Retour à la page d'accueil"
@@ -2333,7 +2333,7 @@ msgstr "Affiché dans votre fuseau horaire local ; stocké en UTC."
 msgid "Something went wrong"
 msgstr "Une erreur s'est produite"
 
-#: lib/kiln_cms_web/plugs/rate_limit.ex:53
+#: lib/kiln_cms_web/plugs/rate_limit.ex:63
 #, elixir-autogen, elixir-format
 msgid "Too many requests"
 msgstr "Trop de requêtes"
@@ -2397,7 +2397,7 @@ msgstr "Vous n'avez pas la permission de voir cette page."
 msgid "You have unsaved changes. Leave without saving?"
 msgstr "Vous avez des modifications non enregistrées. Quitter sans enregistrer ?"
 
-#: lib/kiln_cms_web/plugs/rate_limit.ex:56
+#: lib/kiln_cms_web/plugs/rate_limit.ex:66
 #, elixir-autogen, elixir-format
 msgid "You've made too many requests in a short time. Try again in %{seconds} seconds."
 msgstr "Vous avez effectué trop de requêtes en peu de temps. Réessayez dans %{seconds} secondes."
@@ -5703,23 +5703,23 @@ msgstr "— Sans groupe —"
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."
 msgstr "« %{name} » contient %{count} étiquette(s). Supprimer le groupe quand même ? Les étiquettes sont conservées et se retrouvent sans groupe."
 
-#: lib/kiln_cms_web/controllers/form_controller.ex:170
+#: lib/kiln_cms_web/controllers/form_controller.ex:171
 #, elixir-autogen, elixir-format
 msgid "Back"
 msgstr "Retour"
 
-#: lib/kiln_cms_web/controllers/form_controller.ex:42
-#: lib/kiln_cms_web/controllers/form_controller.ex:111
+#: lib/kiln_cms_web/controllers/form_controller.ex:43
+#: lib/kiln_cms_web/controllers/form_controller.ex:112
 #, elixir-autogen, elixir-format
 msgid "Form not found."
 msgstr "Formulaire introuvable."
 
-#: lib/kiln_cms_web/controllers/form_controller.ex:117
+#: lib/kiln_cms_web/controllers/form_controller.ex:118
 #, elixir-autogen, elixir-format
 msgid "Thanks — we got your message."
 msgstr "Merci — nous avons bien reçu votre message."
 
-#: lib/kiln_cms_web/controllers/form_controller.ex:195
+#: lib/kiln_cms_web/controllers/form_controller.ex:196
 #, elixir-autogen, elixir-format
 msgid "Your submission couldn't be saved: %{detail}"
 msgstr "Votre envoi n'a pas pu être enregistré : %{detail}"

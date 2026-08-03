@@ -11,6 +11,7 @@ defmodule KilnCMSWeb.RelatedController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Search.Related
+  alias KilnCMSWeb.ApiError
 
   @max_age_seconds 300
 
@@ -41,22 +42,15 @@ defmodule KilnCMSWeb.RelatedController do
       # a database outage answers 503-retryable, never a cacheable 404.
       :unavailable ->
         conn
-        |> put_status(:service_unavailable)
         |> put_resp_header("retry-after", "2")
-        |> json(%{
-          errors: [
-            %{
-              status: "503",
-              code: "temporarily_unavailable",
-              detail: "Content is temporarily unavailable; retry shortly."
-            }
-          ]
-        })
+        |> ApiError.send(
+          :service_unavailable,
+          "temporarily_unavailable",
+          "Content is temporarily unavailable; retry shortly."
+        )
 
       _ ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{errors: [%{status: "404", code: "not_found", detail: "Content not found."}]})
+        ApiError.send(conn, :not_found, "not_found", "Content not found.")
     end
   end
 
