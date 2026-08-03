@@ -11,6 +11,12 @@ defmodule KilnCMS.Analytics do
   window, so their sums diverge — the counter stays the source of truth for
   all-time totals.
 
+  Views are recorded by `KilnCMSWeb.ViewTracking` from both delivery surfaces —
+  the rendered site and the headless `/api/content` artifact fetch — so a
+  decoupled front end still reports traffic. Read its docs before comparing the
+  two: a headless count is an artifact *fetch*, which a caching front end makes
+  a floor rather than a census.
+
   Each recorded view also emits a `[:kiln_cms, :analytics, :view]` telemetry
   event so external sinks (Prometheus, OTLP) can observe view traffic; see
   `docs/observability.md`.

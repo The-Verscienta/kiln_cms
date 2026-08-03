@@ -12,12 +12,12 @@ defmodule KilnCMSWeb.ContentController do
   """
   use KilnCMSWeb, :controller
 
-  alias KilnCMS.Analytics
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
   alias KilnCMSWeb.StructuredData
+  alias KilnCMSWeb.ViewTracking
 
   def show_page(conn, %{"slug" => slug}) do
     locale = locale(conn)
@@ -104,7 +104,7 @@ defmodule KilnCMSWeb.ContentController do
     if is_binary(alias_path) and conn.request_path != alias_path do
       moved_permanently(conn, alias_path)
     else
-      track_view(type_string, payload.record.id, payload.record.org_id)
+      ViewTracking.track(:html, type_string, payload.record.id, payload.record.org_id)
       render_content(conn, view, payload, ct, audiences)
     end
   end
@@ -795,57 +795,6 @@ defmodule KilnCMSWeb.ContentController do
       [] -> nil
       parts -> Enum.join(parts, ", ")
     end
-  end
-
-  # Record a privacy-first page view. Best-effort and **off the request path**:
-  # the upsert runs in a supervised, unlinked task so a slow DB pool (or a crawler
-  # spike) can't queue page delivery. The supervisor's `max_children` bounds
-  # concurrent tasks, so a spike drops views (start_child → {:error, :max_children})
-  # rather than exhausting the pool. Failures are swallowed.
-  #
-  # `:async_analytics` is on in prod/dev but off under test, where the detached
-  # task would run outside the ExUnit SQL sandbox connection (leaking a connection
-  # past the owning test and racing assertions). Running it inline keeps the
-  # upsert on the request's sandbox-owned connection.
-  defp track_view(type, id, org_id) do
-    # Emitted synchronously, before the task branch, and independently of
-    # `:async_analytics`: it is an in-process dispatch with no IO, it stays
-    # inside the request's OTel span, and it still fires when the supervisor
-    # sheds the DB write below ({:error, :max_children}) — so the event tracks
-    # real traffic rather than DB capacity, and a divergence from the stored
-    # counters is itself the backpressure signal. Emitting from an Ash hook
-    # instead would give the changeset an after_action and so wrap every public
-    # page view in a transaction (KilnCMS.Repo.prefer_transaction? is false).
-    :telemetry.execute(
-      [:kiln_cms, :analytics, :view],
-      %{count: 1},
-      # `content_id` is metadata only and is deliberately NOT a metric tag — one
-      # Prometheus series per content item would be unbounded. No org_id: this
-      # metadata can reach Sentry/OTLP exporters (see KilnCMS.Mail).
-      %{type: type, content_id: id}
-    )
-
-    if Application.get_env(:kiln_cms, :async_analytics, true) do
-      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record_view(type, id, org_id) end)
-    else
-      record_view(type, id, org_id)
-    end
-
-    :ok
-  end
-
-  # Both counters land in the viewed record's own site (epic #336): the all-time
-  # total and today's bucket. Two independent single-row upserts sharing one
-  # supervised task — deliberately not wrapped in a transaction, which would
-  # hold the hot totals row's lock across both statements and halve its
-  # throughput ceiling. Sharing the task also means overload drops both together,
-  # so they under-count consistently instead of drifting apart.
-  defp record_view(type, id, org_id) do
-    opts = [authorize?: false, tenant: org_id]
-    Analytics.record_view(type, id, opts)
-    Analytics.record_view_day(type, id, opts)
-  rescue
-    _ -> :ok
   end
 
   defp not_found(conn) do

@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
+  alias KilnCMSWeb.ViewTracking
 
   @surfaces KilnCMS.Firing.Surfaces.name_map()
   # How long clients should wait before retrying a still-compiling artifact.
@@ -46,7 +47,23 @@ defmodule KilnCMSWeb.ArtifactController do
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
          {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale),
          {:ok, body} <- artifact(record, surface) do
-      serve(conn, record, params["surface"] || "json", body)
+      surface_name = params["surface"] || "json"
+
+      # Count the fetch, so a headless front end's traffic reaches
+      # `/editor/analytics` instead of reading as zero (the visitor's browser
+      # never touches Kiln, so this request is the only delivery event there
+      # is). Tracked here rather than inside `serve/4` for two reasons: the
+      # public type name is `ct.type`, which `serve/4` doesn't carry (a dynamic
+      # type's *storage* type is the shared `:entry` tier, so deriving it from
+      # the record would file every dynamic document under one name), and a
+      # revalidating client that gets the 304 below is still actively serving
+      # this document — excluding it would make a CDN-fronted site report
+      # near-zero, which is the gap this closes. Only live delivery counts:
+      # `?as_of=` snapshots (compliance reads) and the draft visual-editing
+      # surface deliberately do not.
+      ViewTracking.track(surface_name, to_string(ct.type), record.id, record.org_id)
+
+      serve(conn, record, surface_name, body)
     else
       :backfilling -> backfilling(conn)
       :unavailable -> unavailable(conn)
