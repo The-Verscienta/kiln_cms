@@ -120,4 +120,32 @@ defmodule KilnCMSWeb.SessionCookieTest do
       assert running == SessionCookie.options(running[:secure])
     end
   end
+
+  describe "the remember-me cookie (#699)" do
+    test "carries the __Host- prefix in production, and the bare name without Secure" do
+      # It is the *better* credential of the two — thirty days rather than a
+      # browser session, and it signs in a visitor with no session at all — so
+      # leaving it outside the rule would reopen #686 on the stronger cookie.
+      assert SessionCookie.remember_me_key(true) == :"__Host-remember_me"
+      assert SessionCookie.remember_me_key(false) == :remember_me
+    end
+
+    test "is the name the resource actually configures, not one it restates" do
+      # The read path keys on this DSL value while the write path goes through
+      # `KilnCMSWeb.AuthController`; if the two ever spell it differently the
+      # browser simply sends nothing, and the failure reads as "remember me
+      # doesn't work" rather than as a control that stopped applying.
+      strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :remember_me)
+
+      assert strategy.cookie_name ==
+               SessionCookie.remember_me_key(
+                 Application.get_env(:kiln_cms, :secure_session_cookie, false)
+               )
+    end
+
+    test "config/prod.exs is what makes the prefixed name the shipped one" do
+      assert SessionCookie.remember_me_key(prod_secure_session_cookie()) ==
+               :"__Host-remember_me"
+    end
+  end
 end

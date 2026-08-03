@@ -11,6 +11,11 @@ defmodule KilnCMSWeb.AuthController do
   @pending_2fa_salt "two-factor pending"
   @pending_2fa_max_age 300
 
+  # Same flag the session cookie rides, for the same reason: `__Host-` is only
+  # honoured alongside `Secure`, and dev/test/e2e serve over plain HTTP.
+  @secure_cookies Application.compile_env(:kiln_cms, :secure_session_cookie, false)
+  @remember_me_cookie KilnCMSWeb.SessionCookie.remember_me_key(@secure_cookies)
+
   def success(conn, activity, user, token) do
     # If the account has two-factor enabled, the first factor alone must not grant
     # a session: stash a signed, expiring pending token (carrying the first-factor
@@ -54,6 +59,50 @@ defmodule KilnCMSWeb.AuthController do
     # — `/` is a dead end for someone who just signed in to manage a membership.
     default = if user.role in [:editor, :admin], do: ~p"/editor/overview", else: ~p"/account"
     SafeRedirect.local_path(get_session(conn, :return_to), default)
+  end
+
+  @doc """
+  Writes the remember-me cookie with the attributes its `__Host-` name requires
+  (#699).
+
+  Overrides AshAuthentication's default writer, which hardcodes
+  `secure: Mix.env() != :dev`, sets no `path`, and leaves the name unprefixed —
+  the exact shape #686 closed for the session cookie, on a credential that is
+  strictly better for an attacker: thirty days rather than a browser session,
+  and it signs in a visitor who has no session at all.
+
+  `Secure` and the prefix ride one flag (`KilnCMSWeb.SessionCookie` explains
+  why), and `path: "/"` with no `Domain` is pinned because the browser refuses
+  to store a `__Host-` cookie without them — silently, so getting it wrong would
+  read as "remember me just doesn't work" rather than as a broken control.
+  """
+  @impl true
+  def put_remember_me_cookie(conn, cookie_name, %{token: token, max_age: max_age}) do
+    Plug.Conn.put_resp_cookie(conn, cookie_name, token,
+      max_age: max_age,
+      http_only: true,
+      same_site: "Lax",
+      secure: @secure_cookies,
+      path: "/"
+    )
+  end
+
+  @doc """
+  Clears the remember-me cookie on sign-out.
+
+  The attributes have to match what `put_remember_me_cookie/3` wrote or the
+  browser keeps the old cookie and the "signed out" user is signed straight back
+  in on their next page load — `sign_in_with_remember_me` runs ahead of
+  `load_from_session`, so it would not even need a session to do it.
+  """
+  @impl true
+  def delete_remember_me_cookie(conn, cookie_name) do
+    Plug.Conn.delete_resp_cookie(conn, cookie_name,
+      http_only: true,
+      same_site: "Lax",
+      secure: @secure_cookies,
+      path: "/"
+    )
   end
 
   @doc "Sign a pending-2FA token binding the sign-in to a user id + first-factor token."
@@ -117,11 +166,21 @@ defmodule KilnCMSWeb.AuthController do
     |> redirect(to: ~p"/sign-in")
   end
 
+  @impl true
   def sign_out(conn, _params) do
     return_to = SafeRedirect.local_path(get_session(conn, :return_to), ~p"/")
 
     conn
     |> clear_session(:kiln_cms)
+    # `clear_session/2` already deletes the remember-me cookie — but through the
+    # *library's* writer, whose attributes are not the ones we wrote it with
+    # (`secure: Mix.env() != :dev`, no explicit `path`). A browser only replaces
+    # a cookie whose name, domain and path all match, so re-deleting it through
+    # our own override is what makes sign-out actually stick. Getting this wrong
+    # would sign the user straight back in on their next page load, for thirty
+    # days, with no session needed — `sign_in_with_remember_me` runs ahead of
+    # `load_from_session`.
+    |> delete_remember_me_cookie(to_string(@remember_me_cookie))
     |> put_flash(:info, gettext("You are now signed out"))
     |> redirect(to: return_to)
   end

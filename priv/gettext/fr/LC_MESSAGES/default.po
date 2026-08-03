@@ -1024,7 +1024,7 @@ msgstr "Texte enrichi TipTap, blocs glisser-déposer, aperçu en direct et resta
 msgid "Updated."
 msgstr "Mis à jour."
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:125
+#: lib/kiln_cms_web/controllers/auth_controller.ex:184
 #, elixir-autogen, elixir-format
 msgid "You are now signed out"
 msgstr "Vous êtes maintenant déconnecté"
@@ -1147,7 +1147,7 @@ msgstr "Ajouter un bloc"
 msgid "All notifications are on by default. Uncheck any you'd rather not receive."
 msgstr "Toutes les notifications sont activées par défaut. Décochez celles que vous ne souhaitez pas recevoir."
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:94
+#: lib/kiln_cms_web/controllers/auth_controller.ex:143
 #, elixir-autogen, elixir-format
 msgid "An account with this email already exists. We've sent a link to that address - confirm it to finish linking this provider to your account."
 msgstr "Un compte associé à cette adresse e-mail existe déjà. Nous avons envoyé un lien à cette adresse — confirmez-le pour terminer la liaison de ce fournisseur à votre compte."
@@ -1213,7 +1213,7 @@ msgstr "Texte mis en forme avec gras, italique et listes"
 msgid "Highlighted quotation"
 msgstr "Citation mise en avant"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:112
+#: lib/kiln_cms_web/controllers/auth_controller.ex:161
 #, elixir-autogen, elixir-format
 msgid "Incorrect email or password"
 msgstr "E-mail ou mot de passe incorrect"
@@ -1356,13 +1356,13 @@ msgstr "Téléversez une image ci-dessus pour commencer à constituer votre bibl
 msgid "Visual separator between sections"
 msgstr "Séparateur visuel entre les sections"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:74
+#: lib/kiln_cms_web/controllers/auth_controller.ex:123
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex:49
 #, elixir-autogen, elixir-format
 msgid "You are now signed in"
 msgstr "Vous êtes maintenant connecté"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:85
+#: lib/kiln_cms_web/controllers/auth_controller.ex:134
 #, elixir-autogen, elixir-format
 msgid "You have already signed in another way, but have not confirmed your account. You can confirm your account using the link we sent to you, or by resetting your password."
 msgstr "Vous vous êtes déjà connecté d'une autre manière, mais vous n'avez pas confirmé votre compte. Vous pouvez confirmer votre compte à l'aide du lien que nous vous avons envoyé, ou en réinitialisant votre mot de passe."
@@ -1393,12 +1393,12 @@ msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
 msgid "Your data"
 msgstr "Vos données"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:71
+#: lib/kiln_cms_web/controllers/auth_controller.ex:120
 #, elixir-autogen, elixir-format
 msgid "Your email address has now been confirmed"
 msgstr "Votre adresse e-mail a bien été confirmée"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:73
+#: lib/kiln_cms_web/controllers/auth_controller.ex:122
 #, elixir-autogen, elixir-format
 msgid "Your password has successfully been reset"
 msgstr "Votre mot de passe a bien été réinitialisé"
@@ -4792,7 +4792,7 @@ msgstr "Connecté avec une clé d'accès."
 msgid "Single line text"
 msgstr "Texte sur une ligne"
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:106
+#: lib/kiln_cms_web/controllers/auth_controller.ex:155
 #, elixir-autogen, elixir-format
 msgid "Single sign-on failed — the identity couldn't be verified or linked. Try again, or contact an administrator."
 msgstr "L'authentification unique a échoué — l'identité n'a pas pu être vérifiée ou liée. Réessayez, ou contactez un administrateur."

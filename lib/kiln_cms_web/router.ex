@@ -64,6 +64,12 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
+    # Ahead of `load_from_session` so a remembered visitor is signed in *and*
+    # resolved within the same request (#699). It is a no-op when the session
+    # already names a user, so it cannot override a live session — and the
+    # cookie it reads is `__Host-`-prefixed in production, which is what stops a
+    # sibling tenant origin planting one.
+    plug :sign_in_with_remember_me
     plug :load_from_session
   end
 
@@ -137,6 +143,11 @@ defmodule KilnCMSWeb.Router do
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
     plug KilnCMSWeb.Plugs.RateLimit, :auth
+    # Also here, so a remembered visitor who lands on `/sign-in` is recognised
+    # and `:live_no_user` sends them on rather than showing them a form they
+    # don't need. Sign-out lives on this pipeline too and deletes the cookie
+    # before this plug could re-read it, so it cannot undo a sign-out.
+    plug :sign_in_with_remember_me
     plug :load_from_session
   end
 

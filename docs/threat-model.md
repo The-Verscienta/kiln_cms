@@ -159,6 +159,18 @@ build if a resource is ever registered without that authorizer.
   sibling's write is rejected at the source; the prefix rides the same flag as
   `Secure`, and dev, test and e2e keep the bare name over plain HTTP
   (`KilnCMSWeb.SessionCookie`, #686).
+
+  The **remember-me** cookie is inside the same rule (#699), and had to be: it
+  is the better credential of the two — a 30-day token rather than a browser
+  session — and `sign_in_with_remember_me` runs ahead of `load_from_session`, so
+  planting one signs a visitor in who has no session on the target host at all.
+  AshAuthentication's default writer hardcodes `secure: Mix.env() != :dev` with
+  no prefix and no explicit `path`, so `KilnCMSWeb.AuthController` overrides both
+  the writer and the deleter, and the name itself comes from
+  `SessionCookie.remember_me_key/1` — which is also what the *read* path keys on,
+  since the strategy's `cookie_name` is set from it. Sign-out deletes it through
+  the same override; attributes that did not match would leave the cookie in
+  place and sign the user straight back in.
 - **SSRF protection on outbound webhooks** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard

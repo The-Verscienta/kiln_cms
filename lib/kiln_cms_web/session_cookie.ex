@@ -1,6 +1,7 @@
 defmodule KilnCMSWeb.SessionCookie do
   @moduledoc """
-  The session cookie's whole shape, and the one rule that governs its name.
+  The session cookie's whole shape, and the one rule that governs the names of
+  every cookie Kiln authenticates with.
 
   Kiln serves every organization as a sibling host under a single registrable
   domain (`<slug>.<base_host>`, epic #336). A cookie set without a `Domain`
@@ -34,10 +35,31 @@ defmodule KilnCMSWeb.SessionCookie do
   any non-localhost HTTP dev host do not, so the bare name is what the
   non-production envs can rely on.)
 
-  See #686 and `docs/threat-model.md`.
+  ## The rule covers remember-me too (#699)
+
+  A second cookie that signs a request in is a second cookie a sibling origin
+  can plant, and the remember-me token is the *better* prize: thirty days rather
+  than a browser session, and it needs no pre-existing session on the target
+  host — `sign_in_with_remember_me` runs ahead of `load_from_session`, so
+  planting one signs the victim in as the attacker on their next page load.
+
+  So `remember_me_key/1` rides the same flag, and `KilnCMSWeb.AuthController`
+  overrides AshAuthentication's cookie writer to pair it with the attributes the
+  prefix requires. The library's default writer hardcodes `secure: Mix.env() !=
+  :dev` with no prefix and no explicit `path`, which is exactly the shape #686
+  closed for the session cookie.
+
+  The name is an **atom** because `remember_me`'s DSL takes one, and it is read
+  back on the *read* path from that same DSL value — so setting it here is what
+  makes both ends agree. A prefixed name written by the controller but read
+  under the bare name would fail open: the browser would send nothing, and every
+  remembered user would silently stop being remembered.
+
+  See #686, #699 and `docs/threat-model.md`.
   """
 
   @base "_kiln_cms_key"
+  @remember_me_base "remember_me"
   @host_prefix "__Host-"
 
   @doc """
@@ -55,6 +77,22 @@ defmodule KilnCMSWeb.SessionCookie do
   @spec key(boolean()) :: String.t()
   def key(true), do: @host_prefix <> @base
   def key(false), do: @base
+
+  @doc """
+  The remember-me cookie name for a given `Secure` setting, as an atom.
+
+  An atom because `remember_me`'s `cookie_name` DSL option takes one, and that
+  DSL value is what the *read* path keys on — see the moduledoc.
+
+      iex> KilnCMSWeb.SessionCookie.remember_me_key(true)
+      :"__Host-remember_me"
+
+      iex> KilnCMSWeb.SessionCookie.remember_me_key(false)
+      :remember_me
+  """
+  @spec remember_me_key(boolean()) :: atom()
+  def remember_me_key(true), do: :"#{@host_prefix}#{@remember_me_base}"
+  def remember_me_key(false), do: :"#{@remember_me_base}"
 
   @doc """
   The `Plug.Session` options for a given `:secure_session_cookie` setting.
