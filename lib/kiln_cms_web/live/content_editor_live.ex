@@ -4379,10 +4379,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # The scalar DSL fields a role may edit (field-level policy, Phase J), excluding
   # types with bespoke UIs (rich_text/map/reference/array).
+  # Fields resolved by the server, not typed by a person. They are ordinary
+  # block scalars — so without this the generic editor offers each of them as a
+  # free-text box, which is how `thumbnail_url` (an `<img src>` on the public
+  # page) and `resolved_at` (a machine timestamp) became editable in the first
+  # draft of #489. The write path filters them anyway; this stops the editor
+  # inviting the attempt.
+  @server_resolved_fields [
+    :title,
+    :author_name,
+    :provider_name,
+    :thumbnail_url,
+    :resolved_url,
+    :resolved_at
+  ]
+
   defp editable_scalar_fields(module, role) do
+    server_resolved = if module == KilnCMS.Blocks.Embed, do: @server_resolved_fields, else: []
+
     module
     |> Kiln.Block.Info.fields()
-    |> Enum.reject(&(&1.type in [:rich_text, :map, :reference] or match?({:array, _}, &1.type)))
+    |> Enum.reject(fn field ->
+      field.type in [:rich_text, :map, :reference] or match?({:array, _}, field.type) or
+        field.name in server_resolved
+    end)
     |> Enum.filter(&Kiln.Block.Policy.can_edit_field?(module, &1.name, role))
   end
 

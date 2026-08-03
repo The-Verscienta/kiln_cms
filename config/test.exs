@@ -19,6 +19,14 @@ config :kiln_cms, KilnCMS.CMS.ContentTypes, cache_registry?: false
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
 
+# oEmbed (#489) is OFF by default everywhere, including here — the tests that
+# need it turn it on themselves, so nothing accidentally makes an outbound
+# request. `req_options` points at a Req.Test stub for when they do; the
+# SafeUrl `resolve_dns: false` below is what lets a stub host resolve at all.
+config :kiln_cms, KilnCMS.OEmbed,
+  enabled: false,
+  req_options: [plug: {Req.Test, KilnCMS.OEmbed}]
+
 # Webhook URL validation: skip DNS resolution for Req.Test stub hosts.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: false, resolve_dns: false
 

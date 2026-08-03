@@ -199,12 +199,16 @@ build if a resource is ever registered without that authorizer.
   the resulting cookie then signs the user in later *without* a code is the
   deliberate part — it is a "this device completed every factor" credential, and
   that is what remember-me is for on a 2FA account.
-- **SSRF protection on outbound webhooks** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
+- **SSRF protection on outbound calls** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard
-  timeout. Delivery connects to the *pinned* resolved IP with SNI and cert
+  timeout. Callers connect to the *pinned* resolved IP with SNI and cert
   validation kept on the original hostname, closing the DNS-rebinding window,
-  and follows no redirects.
+  and follow no redirects — a followed redirect is a fresh resolution the pin
+  never sees. `KilnCMS.SafeFetch` packages that plus a streaming byte cap, since
+  an attacker-influenced response has an attacker-influenced *length* too.
+  (`Webhooks.DeliveryWorker` still has its own copy of the pinning; folding it
+  onto `SafeFetch` is tracked in #753.)
 - **Upload handling** — uploads validated from bytes rather than declared type,
   EXIF stripped, and blobs served with `Content-Disposition: attachment` and
   `X-Content-Type-Options: nosniff`.
@@ -396,6 +400,31 @@ build if a resource is ever registered without that authorizer.
 - **SSRF** — mitigated by `SafeUrl` with IP pinning (see Controls).
 - **Replay / forgery at the receiver** — deliveries are HMAC-signed; receivers
   must verify the signature and timestamp.
+
+### oEmbed resolution (`OEMBED_ENABLED`, #489)
+- **Content choosing the destination** — prevented by design. Kiln does **not**
+  use oEmbed discovery, which would mean fetching the embedded page and
+  following a `<link rel="…oembed">` — i.e. letting a field any editor can type
+  decide which host the server dials, with its egress IP. Endpoints are
+  constants in `KilnCMS.OEmbed.Provider`; the URL only selects which of them is
+  asked, and a URL no provider claims produces no request at all.
+- **The dial itself** — `KilnCMS.SafeFetch` (pinned, no redirects, 64KB cap).
+  Belt and braces given the endpoints are constants, but a provider's *DNS* is
+  not, and "the endpoint is hardcoded" is the assumption that makes a later
+  `OEMBED_PROVIDERS` change quietly dangerous.
+- **Provider HTML** — discarded, not sanitized. An oEmbed response carries an
+  `html` field of provider-authored iframe/script markup; rendering it means
+  trusting a third party with script execution on the delivery origin. Cards are
+  built from escaped scalars, and the canonical-iframe rewrite for YouTube and
+  Vimeo remains the only thing that emits an `<iframe>`.
+- **Thumbnails** — checked against that provider's own CDN hosts, on resolve
+  *and* on any write, because the metadata fields are ordinary block scalars an
+  editor or a headless caller can set directly. `img-src` widens to exactly that
+  list, and only while the feature is enabled.
+- **Cost amplification** — a save containing an unresolved embed costs one
+  outbound request. Bounded by the resolve being enqueued only when a provider
+  claims the URL *and* the block has no title yet, so a resolved document does
+  not re-fetch; and by Oban's per-document uniqueness window.
 
 ### Other outbound calls
 `Kiln.Updates` (GitHub releases, admin-triggered), `KilnCMS.Unsplash`,

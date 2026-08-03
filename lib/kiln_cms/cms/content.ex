@@ -1006,7 +1006,7 @@ defmodule KilnCMS.CMS.Content do
         ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at, :lock_version])
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
-        ignore_actions([:set_embedding, :set_published_version_id])
+        ignore_actions([:set_embedding, :set_published_version_id, :set_oembed_metadata])
         # No FK from version -> source, so a `:purge` can hard-delete a record
         # whose history exists. Versions of purged content are kept as audit rows.
         reference_source?(false)
@@ -1253,6 +1253,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -1314,6 +1315,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
 
           # Edits to already-published content fire a `<type>.updated` webhook;
           # `only_when: :published` keeps draft edits and autosaves silent.
@@ -1376,6 +1378,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
@@ -1459,6 +1462,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.RecordSlugRedirect
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
+          change KilnCMS.CMS.Changes.EnqueueOEmbed
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
         end
@@ -1540,6 +1544,42 @@ defmodule KilnCMS.CMS.Content do
         update :set_published_version_id do
           require_atomic? false
           accept [:published_version_id]
+        end
+
+        # Internal: write resolved oEmbed metadata back onto the blocks (#489).
+        #
+        # Its own action rather than `:update`, for the reasons `:set_embedding`
+        # is: `:update` carries `optimistic_lock`, `NotifyWebhooks` and
+        # `FireArtifacts`, and is not in `ignore_actions`. Resolving one embed
+        # on a published post through it would emit a spurious `updated` webhook
+        # to every subscriber, re-fire every artifact, cut a history version
+        # attributed to nobody, and bump `updated_at` (reordering
+        # `updated_at`-sorted feeds and sitemaps) plus `lock_version` — which,
+        # since the resolve is enqueued from `:autosave` too, would land while
+        # an editor is typing and make their next autosave a `StaleRecord`.
+        #
+        # Artifacts still need re-firing so the card reaches delivery, but that
+        # is the worker's decision (only when the document is published), not a
+        # side effect of every metadata write.
+        update :set_oembed_metadata do
+          require_atomic? false
+          accept [:blocks]
+
+          # `search_text` is denormalized by a change on the editorial actions,
+          # and a resolved embed's title is the only text an embed block has
+          # ever contributed to it. Without this, a document whose embeds
+          # resolved in the background stays unsearchable by those titles until
+          # some unrelated save happens to recompute it.
+          change KilnCMS.CMS.Changes.SetSearchText
+
+          # `updated_at` still moves: Ash writes it on every update action and a
+          # change cannot override that. It is bounded rather than fixed — a
+          # resolve only ever runs seconds after the save that enqueued it, and
+          # a resolved document never re-enqueues (`EnqueueOEmbed` requires a
+          # blank title), so the bump lands on a document whose `updated_at` had
+          # just moved anyway. What would have been a real problem is the
+          # *version*, the *webhook* and the *lock*, and this action carries
+          # none of those.
         end
       end
 
