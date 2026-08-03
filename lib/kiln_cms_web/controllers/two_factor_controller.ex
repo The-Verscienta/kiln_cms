@@ -51,7 +51,7 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   def create(conn, %{"code" => code}) do
     with {:ok, user, remember_me?} <- pending_user(conn),
-         :allow <- AccountThrottle.consume_second_factor(user.id),
+         :allow <- SecondFactor.charge(user),
          {:ok, user} <- SecondFactor.verify(user, code) do
       AccountThrottle.forgive_second_factor(user.id)
 
@@ -69,7 +69,12 @@ defmodule KilnCMSWeb.TwoFactorController do
         # Pending token missing/expired — restart from sign-in.
         redirect(conn, to: ~p"/sign-in")
 
-      {:deny, retry_after_ms} ->
+      # `SecondFactor.charge/1` has already alerted the owner: whoever is here
+      # got past a first factor, and #478's alert structurally cannot fire in
+      # this scenario (re-running that step to mint a fresh pending token
+      # *succeeds*, which forgives the sign-in counter). The user comes back
+      # through the tuple because a `with`'s `else` cannot see clause bindings.
+      {:deny, _user, retry_after_ms} ->
         # The pending token is left in the session rather than cleared — the
         # caller has not failed authentication, so bouncing them to `/sign-in`
         # would be the wrong answer to "you have tried too often". It will not

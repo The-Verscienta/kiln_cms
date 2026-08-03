@@ -132,7 +132,7 @@ defmodule KilnCMSWeb.ApiAuthController do
 
     with :ok <- require_params([{"pending_token", pending}, {"code", code}]),
          {:ok, user, jti} <- PendingSignIn.resolve(conn, pending),
-         :allow <- AccountThrottle.consume_second_factor(user.id),
+         :allow <- SecondFactor.charge(user),
          {:ok, user} <- SecondFactor.verify(user, code) do
       AccountThrottle.forgive_second_factor(user.id)
       # Only now, and only on success: a wrong code or a spent budget leaves the
@@ -155,7 +155,10 @@ defmodule KilnCMSWeb.ApiAuthController do
           "Sign-in is no longer pending. Start again."
         )
 
-      {:deny, retry_after_ms} ->
+      # Alerting the owner is `SecondFactor.charge/1`'s job, shared with the
+      # browser prompt (#728) — a door that budgets the code but tells nobody
+      # is #726's lesson repeated one layer up.
+      {:deny, _user, retry_after_ms} ->
         # The pending token stays valid — the caller has not failed
         # authentication, and telling them to restart would be the wrong answer
         # to "you have tried too often". It will not usually outlive the wait

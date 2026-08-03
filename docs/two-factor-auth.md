@@ -95,6 +95,42 @@ What an operator should know when a user reports it:
 - **A completed password reset clears it.** That is the remedy to offer: it is
   also what stops an attacker minting the pending tokens they were spending the
   budget with.
+- **A lockout at the *sign-in* prompt mails the owner**
+  ([#728](https://github.com/The-Verscienta/kiln_cms/issues/728)). Reaching that
+  prompt needs a pending token, and a pending token is only minted once a **first
+  factor has already succeeded** — so a lockout there means someone got in far
+  enough to be asked for a code, which is a much stronger signal than the
+  password alert's "someone is guessing".
+
+  Two things the mail deliberately does *not* say, both of which the obvious
+  wording would get wrong:
+
+  - **It does not say "someone has your password".** `AuthController.success/4`
+    is the callback for every strategy, so a magic link and an SSO assertion
+    reach the code prompt exactly as a password does. For those users the
+    compromised thing is their mailbox or their identity provider, and telling
+    them to change their Kiln password would leave the actual hole open. The
+    mail lists all three.
+  - **It does not assume an attacker.** The budget is shared with the settings
+    forms (#727), so an owner who fumbles five codes regenerating their recovery
+    set and then signs in normally trips it with nobody attacking them — the
+    likeliest trigger in practice. "If that was you" comes second in the mail,
+    before the intrusion paragraph, not buried at the end.
+
+  Separate copy and a separate once-per-six-hours budget from the password
+  alert, so the weaker signal cannot suppress the stronger one. The refusal is
+  logged when the mail goes and when it is suppressed; if delivery then fails,
+  the window is handed back so the next refusal can try again.
+
+  Note the password alert (#478) structurally *cannot* fire in this scenario: to
+  keep grinding codes, an attacker must keep re-running the first factor, and
+  that step succeeds, which forgives the sign-in counter every time. Before
+  #728, the one case where a primary credential was provably in someone else's
+  hands produced no notification at all.
+
+  A lockout that happens *entirely* at `/editor/settings` — with no sign-in
+  attempt afterwards — still sends nothing, because the person there holds a
+  session rather than a first factor and that is different news (see #757).
 - **Whitespace is not a wasted attempt.** `123 456` pasted from an authenticator
   is normalized before it is checked; recovery codes are already case- and
   separator-insensitive.

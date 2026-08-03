@@ -3666,7 +3666,7 @@ msgstr "Saisissez un code actuel pour la désactiver"
 msgid "Enter a path starting with /."
 msgstr "Saisissez un chemin commençant par /."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:144
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr "Saisissez le code à 6 chiffres de votre application d'authentification, ou l'un de vos codes de récupération."
@@ -4960,7 +4960,7 @@ msgstr "Ce code n'est pas valide — l'authentification à deux facteurs reste a
 msgid "That code isn't valid — try again."
 msgstr "Ce code n'est pas valide — réessayez."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:88
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:93
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Try again."
 msgstr "Ce code n'est pas valide. Réessayez."
@@ -5122,8 +5122,8 @@ msgstr "Traductions"
 msgid "Tue"
 msgstr "mar."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:134
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:138
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:143
 #: lib/kiln_cms_web/live/settings_live.ex:385
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
@@ -5197,7 +5197,7 @@ msgstr "Utilisez « true » pour cocher la case par défaut."
 msgid "User"
 msgstr "Utilisateur"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:151
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:156
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr "Vérifier"
@@ -7208,7 +7208,7 @@ msgstr "Utilisée par aucun document publié."
 msgid "and %{count} more"
 msgstr "et %{count} de plus"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:85
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:90
 #, elixir-autogen, elixir-format
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr "Trop de tentatives. Patientez quelques minutes et réessayez."

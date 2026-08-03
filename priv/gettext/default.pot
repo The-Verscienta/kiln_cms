@@ -3666,7 +3666,7 @@ msgstr ""
 msgid "Enter a path starting with /."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:144
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr ""
@@ -4960,7 +4960,7 @@ msgstr ""
 msgid "That code isn't valid — try again."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:88
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:93
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Try again."
 msgstr ""
@@ -5122,8 +5122,8 @@ msgstr ""
 msgid "Tue"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:134
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:138
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:139
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:143
 #: lib/kiln_cms_web/live/settings_live.ex:385
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
@@ -5197,7 +5197,7 @@ msgstr ""
 msgid "User"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:151
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:156
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr ""
@@ -7208,7 +7208,7 @@ msgstr ""
 msgid "and %{count} more"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:85
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:90
 #, elixir-autogen, elixir-format
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr ""
