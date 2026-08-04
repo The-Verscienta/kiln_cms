@@ -32,7 +32,7 @@
    `prefers-color-scheme` fallback is needed here. Retune the brand by editing
    `--color-primary` (and friends) — every utility follows automatically.
 
-   This is the "ember" design language (see design/design-system.md): the
+   This is the "ember" design language (see docs/design-language.md): the
    #FF6200 ember brand on neutral-gray surfaces. Note: pure #FF6200 only reaches
    ~3:1 against white, so `--color-primary-content` is a near-black ink (≈5.6:1
    on the fill) to keep primary buttons/badges at WCAG AA. */

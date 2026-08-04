@@ -1,7 +1,14 @@
 # Kiln CMS — Design Language
 
-*Status: proposal / first slice. Applies to the admin & authoring UI (`/editor/*`,
-media, auth). The public delivery frontend keeps its own minimal chrome.*
+*Applies to the admin & authoring UI (`/editor/*`, media, auth). The public
+delivery frontend keeps its own minimal chrome.*
+
+Kiln CMS is a focused, editor-first content management system for thoughtful
+creators and teams. It prioritizes clarity, speed, and editorial flow over
+feature bloat. **Voice**: calm, confident, precise — like a trusted editor.
+The design goals: reduce cognitive load for writers/editors, make publishing
+feel satisfying and safe, scale from solo to team use, and stay
+keyboard-first accessible.
 
 ## Why this exists
 
@@ -13,30 +20,37 @@ shell. Without it, pages reached for one-off Tailwind (`rounded border
 border-base-content/20 px-3 py-1.5 …`) and the product read like a stock
 Phoenix-generated site rather than a content management *application*.
 
-This document is the shared reference for that layer. The goal: Kiln looks like
+This document is the shared reference for that layer — brand principles,
+tokens, the component kit, and the console shell. The goal: Kiln looks like
 **Kiln** — familiar to anyone who's used DaisyUI/Directus/Strapi, but its own
 thing, and with **no CSS-framework dependency**.
 
 ## Principles
 
-1. **Own it, DaisyUI-flavored.** Borrow DaisyUI's *naming* (`btn`, `card`,
+1. **Clarity.** Every element has one purpose.
+2. **Trust.** Reliable save states, clear permissions, helpful error messages.
+3. **Efficiency.** Fast paths for common tasks; minimal clicks to publish.
+4. **Editorial focus.** Content is king; chrome stays out of the way.
+5. **Own it, DaisyUI-flavored.** Borrow DaisyUI's *naming* (`btn`, `card`,
    `field-*`, `kbd`) so it feels familiar, but define every rule ourselves,
-   driven by our tokens. No DaisyUI (or any component-lib) dependency.
-2. **Tokens are the single source of truth.** Components never hard-code a
+   driven by our tokens. **There is no DaisyUI (or any component-lib)
+   dependency — a class outside this hand-written kit renders nothing.**
+6. **Tokens are the single source of truth.** Components never hard-code a
    color, radius, or font — they read `var(--color-*)`, `var(--radius-*)`,
    `var(--font-sans)`. Retuning the brand (one `--color-primary` edit) or adding
    a theme flows through everything automatically.
-3. **Semantic over ad-hoc.** Prefer a named component (`<.button>`, `.card`,
+7. **Semantic over ad-hoc.** Prefer a named component (`<.button>`, `.card`,
    `.field-input`) over a bespoke stack of utilities. Utilities are for
    *layout* (flex, grid, spacing), not for re-inventing a control's look.
-4. **The shell carries the identity.** A persistent sidebar + workspace top bar
+8. **The shell carries the identity.** A persistent sidebar + workspace top bar
    is the single biggest signal that this is an app. Every authoring screen
    lives inside it.
-5. **Both themes, always.** Anything added must look right in light *and* dark;
+9. **Both themes, always.** Anything added must look right in light *and* dark;
    because rules use tokens, this is usually free — but check it.
-6. **Accessible by construction.** Focus-visible rings, `aria-current` for nav,
-   real labels, keyboard-reachable controls. The design language and a11y are
-   the same effort.
+10. **Accessible by construction.** WCAG 2.1 AA+ baseline: full keyboard
+    navigation, focus-visible rings, `aria-current` for nav, real labels,
+    4.5:1 contrast, semantic HTML preferred. The design language and a11y are
+    the same effort.
 
 ## Tokens (already in `app.css`)
 
@@ -94,6 +108,31 @@ written as a function component or a raw `class="…"` in a template.
   Publish
 </button>
 ```
+
+## Content & tone
+
+- Use "Save draft" and "Publish now", not generic labels like "Submit".
+- Errors read in plain language with a next step, not a raw exception.
+- Status terminology stays consistent everywhere it appears (draft, in
+  review, published, archived — never a synonym mid-flow).
+- Copy overall: concise, calm, action-oriented, non-technical where possible.
+
+## UX patterns
+
+- **Entry status system** — Draft → Published → Archived, surfaced with
+  `<.badge>`.
+- **Save & Publish flow** — autosave plus explicit validation before publish.
+- **Editor preview** — live preview with device-width modes.
+- **Media, empty, and permission states** — each has a dedicated treatment
+  (`<.empty_state>` for the first two; permission states degrade gracefully
+  rather than dead-ending).
+
+## Layout
+
+Responsive breakpoints: 640 / 768 / 1024 / 1280px, with a 12-column grid and
+the collapsible console sidebar as the base layout. See
+[Design system → Responsive](design-system.md#responsive) for the concrete
+per-component conventions (nav collapse, header stacking, two-column forms).
 
 ## The console shell — `Layouts.console/1`
 
