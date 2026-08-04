@@ -485,6 +485,44 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert [item] = CMS.list_media_items!(actor: editor)
       assert item.filename == "big.pdf"
     end
+
+    test "an oversized image is rejected under the (smaller) image cap, not waved through under the document ceiling",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      # A structurally-valid 1x1 PNG padded past 10MB with a private ancillary
+      # tEXt chunk (safe for any PNG decoder, libvips included, to skip) —
+      # over the 10MB image cap, under the 25MB Phoenix-level ceiling
+      # `@max_file_size` sets for the upload socket itself. Proves the image
+      # cap is actually enforced, not just the looser document one (#481).
+      big_png = @png |> insert_padding_chunk(11_000_000 - byte_size(@png))
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "big.png", content: big_png, type: "image/png"}
+        ])
+
+      assert render_upload(input, "big.png")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "Upload failed"
+      assert html =~ "big.png"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+    end
+  end
+
+  # Splices a private `teXt` ancillary chunk (safe for any PNG decoder to
+  # skip) of `pad_bytes` of content into a valid PNG, right after IHDR —
+  # inflates the file size without touching pixel data.
+  defp insert_padding_chunk(png, pad_bytes) do
+    ihdr_end = 8 + 4 + 4 + 13 + 4
+    <<head::binary-size(^ihdr_end), tail::binary>> = png
+    data = :binary.copy(<<0>>, pad_bytes)
+    type = "teXt"
+    crc = :erlang.crc32(type <> data)
+    chunk = <<byte_size(data)::32, type::binary, data::binary, crc::32>>
+    head <> chunk <> tail
   end
 
   describe "unsplash" do

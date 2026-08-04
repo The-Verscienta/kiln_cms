@@ -99,26 +99,30 @@ defmodule KilnCMS.CMS.MediaItem do
     end
   end
 
+  # `:audience` is deliberately excluded from `@create_accept` (used only by
+  # `:create`, below) — see that action's comment.
+  @writable_fields [
+    :filename,
+    :content_type,
+    :byte_size,
+    :width,
+    :height,
+    :variants,
+    :alt,
+    :caption,
+    :decorative,
+    :storage_key,
+    :url,
+    :focal_x,
+    :focal_y
+  ]
+  @create_accept @writable_fields
+
   actions do
     # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
     destroy :destroy, primary?: true, require_atomic?: false
 
-    default_accept [
-      :filename,
-      :content_type,
-      :byte_size,
-      :width,
-      :height,
-      :variants,
-      :alt,
-      :caption,
-      :decorative,
-      :storage_key,
-      :url,
-      :focal_x,
-      :focal_y,
-      :audience
-    ]
+    default_accept @writable_fields ++ [:audience]
 
     # Primary read, paginated for the headless JSON:API media library (offset +
     # keyset, bounded page size). `required?: false` keeps `CMS.list_media_items`
@@ -135,7 +139,15 @@ defmodule KilnCMS.CMS.MediaItem do
                  default_limit: 25
     end
 
-    create :create, primary?: true
+    # No `:audience` (unlike `default_accept`, below, which every other
+    # action uses): gating goes through `:update` only, where
+    # `Changes.MigrateMediaStorage` can enforce "documents only" and
+    # "private storage must be configured" against the transition it's
+    # actually performing. A bare `create` with `audience: :member` would
+    # skip both checks and the storage relocation entirely — the row would
+    # claim to be gated while its blob sits wherever the caller's
+    # `storage_key`/`url` point, public bucket included.
+    create :create, primary?: true, accept: @create_accept
 
     # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
     update :update do
@@ -339,8 +351,14 @@ defmodule KilnCMS.CMS.MediaItem do
     # check (`Validations.MediaAltText`) treats it as satisfied.
     attribute :decorative, :boolean, allow_nil?: false, default: false, public?: true
 
-    # Storage pointer + public/CDN url.
-    attribute :storage_key, :string, public?: true
+    # The CDN/public url is the client-facing pointer; the raw storage key
+    # is an internal implementation detail (#481: a gated item's key lives
+    # in *private* storage, so exposing it would name something outside
+    # every public interface for no reason a client needs). `public? false`
+    # only affects JSON:API/GraphQL exposure — `storage_key` still flows
+    # through `@writable_fields` for the internal writes that set it
+    # (upload, `Media.Transform`, `Changes.MigrateMediaStorage`).
+    attribute :storage_key, :string, public?: false
     attribute :url, :string, public?: true
 
     # Focal point (0.0–1.0) for smart cropping.

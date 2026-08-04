@@ -157,6 +157,32 @@ defmodule KilnCMS.CMS.MediaItemTest do
       assert unchanged.audience == :public
       assert unchanged.storage_key == doc.storage_key
     end
+
+    test "audience can't be set at create time — gating only ever goes through :update" do
+      # :create's accept list deliberately excludes :audience (unlike every
+      # other writable field, via `default_accept`) — MigrateMediaStorage
+      # only runs `on: [:update]`, so a create carrying `audience: :member`
+      # would otherwise land a gated row whose blob was never relocated out
+      # of whatever (possibly public) storage the caller wrote it to.
+      # Ash rejects the unaccepted input outright rather than silently
+      # dropping it — the create simply errors.
+      actor = editor()
+      key = KilnCMS.Storage.generate_key("doc.pdf")
+      put(key, "%PDF-1.7\nfake pdf bytes")
+
+      assert_raise Ash.Error.Invalid, ~r/audience/, fn ->
+        CMS.create_media_item!(
+          %{
+            filename: "doc.pdf",
+            content_type: "application/pdf",
+            storage_key: key,
+            url: KilnCMS.Storage.url(key),
+            audience: :member
+          },
+          actor: actor
+        )
+      end
+    end
   end
 
   describe "storage relocation" do

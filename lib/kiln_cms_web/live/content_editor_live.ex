@@ -1572,11 +1572,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # actor-authorized `MediaItem` rather than trusted from the click payload —
   # denormalizing a client-supplied size/type onto the block would let it
   # display something that doesn't match what `MediaDownloadController`
-  # actually serves.
+  # actually serves. A direct `get_media_item` here, not a lookup in
+  # `@file_media`/`@picker_files`: a search result outside the mounted
+  # window lives ONLY in `@picker_files`, and an id present in neither list
+  # (a stale click, or a co-editor's concurrent delete) must still resolve
+  # correctly rather than silently no-op.
   def handle_event("pick_file", %{"id" => media_id}, socket) do
     bid = socket.assigns.file_picking
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
-    with item when not is_nil(item) <- Enum.find(socket.assigns.file_media, &(&1.id == media_id)),
+    with {:ok, item} <- CMS.get_media_item(media_id, actor: actor, tenant: org),
          index when not is_nil(index) <- block_index_by_id(socket.assigns.form, bid) do
       blocks =
         socket.assigns.form

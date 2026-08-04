@@ -182,6 +182,30 @@ defmodule KilnCMSWeb.ContentEditorFileBlockTest do
     assert filled.byte_size == 4096
   end
 
+  test "picking a document found only via search (created after mount) still fills the block", %{
+    conn: conn
+  } do
+    editor = authed_user(:editor)
+    pg = page(editor)
+
+    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{pg.id}")
+
+    # Created AFTER the LiveView mounted @file_media — reachable only through
+    # a live search (@picker_files), never the mount-time snapshot. A picker
+    # that only ever looked in @file_media would silently no-op here.
+    doc = document!(editor, %{filename: "late-arrival.pdf"})
+
+    render_click(lv, "open_file_picker", %{"bid" => block_id(pg)})
+    render_click(lv, "search_file_media", %{"q" => "late-arrival"})
+    render_click(lv, "pick_file", %{"id" => doc.id})
+
+    lv |> form("#page-editor") |> render_submit()
+
+    [block] = CMS.get_page!(pg.id, authorize?: false).blocks
+    assert block.value.media_id == doc.id
+    assert block.value.filename == "late-arrival.pdf"
+  end
+
   test "the picker closes after picking, leaving no stray state", %{conn: conn} do
     editor = authed_user(:editor)
     doc = document!(editor)

@@ -26,11 +26,15 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
 
   The blob is copied to its new location and `storage_key`/`url` updated on
   the changeset **before** the database commits (`before_action`); the old
-  blob is only deleted **after** the commit succeeds (`after_action`). If the
-  transaction rolls back for any unrelated reason, the copy is simply
-  orphaned (cheap, and nothing referenced it yet) rather than the row ending
-  up pointing at a key that was already deleted. Ash re-runs `before_action`
-  on retry, so a transient copy failure never leaves the record half-migrated.
+  blob is only deleted **after the transaction actually commits**
+  (`after_transaction`, not `after_action` — `after_action` still runs
+  *inside* the transaction, before commit, so deleting there could drop the
+  old blob and then have the surrounding write roll back for an unrelated
+  reason, orphaning the row on a since-deleted key). If the transaction
+  rolls back, the copy is simply orphaned (cheap, and nothing referenced it
+  yet) rather than the row ending up pointing at a key that was already
+  deleted. Ash re-runs `before_action` on retry, so a transient copy failure
+  never leaves the record half-migrated.
   """
   use Ash.Resource.Change
 
@@ -41,7 +45,7 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
     if Ash.Changeset.changing_attribute?(changeset, :audience) do
       changeset
       |> Ash.Changeset.before_action(&migrate/1)
-      |> Ash.Changeset.after_action(&cleanup_old_blob/2)
+      |> Ash.Changeset.after_transaction(&cleanup_old_blob/2)
     else
       changeset
     end
@@ -125,7 +129,12 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
     end
   end
 
-  defp cleanup_old_blob(changeset, record) do
+  # `after_transaction`, not `after_action` — this delete is irreversible
+  # external state, and must only happen once the DB write it depends on has
+  # actually committed (see the moduledoc). A failed/rolled-back result
+  # passes straight through: nothing to clean up if the audience change
+  # itself never landed.
+  defp cleanup_old_blob(changeset, {:ok, record} = result) do
     old_key = changeset.data.storage_key
 
     # Guard on the KEY actually having changed, not just `audience` — a
@@ -140,6 +149,8 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
         else: Storage.delete(old_key)
     end
 
-    {:ok, record}
+    result
   end
+
+  defp cleanup_old_blob(_changeset, result), do: result
 end
