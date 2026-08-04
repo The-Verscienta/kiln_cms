@@ -138,6 +138,160 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
     end
   end
 
+  describe "clear by omission (#566)" do
+    setup do
+      admin = user(:admin)
+
+      {:ok, page} =
+        create_page(admin, [quote_block(%{"featured" => true, "text" => "featured"})])
+
+      %{page: page, admin: admin, editor: user(:editor)}
+    end
+
+    test "an editor cannot clear an admin-set field by dropping the id and omitting it",
+         %{page: page, editor: editor} do
+      # The hole. Block ids do not round-trip on the headless path — `blocks` is
+      # not `public?`, so a client cannot read the tree it would be preserving —
+      # and once the id is gone the block reads as new, where a restricted field
+      # must equal its default. Omit the field and the cast supplies exactly
+      # that default, so the write looked like a no-op and silently cleared it.
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [quote_block(%{"text" => "edited"})]},
+                 actor: editor
+               )
+
+      # And the message names the actual mistake. "cannot change `featured`" is
+      # unactionable advice for a client that sent no `featured` at all.
+      assert Exception.message(error) =~ "cannot omit `featured`"
+    end
+
+    test "an admin may still clear it", %{page: page, admin: admin} do
+      assert {:ok, updated} =
+               CMS.update_page(page, %{block_tree: [quote_block(%{"text" => "edited"})]},
+                 actor: admin
+               )
+
+      assert %Ash.Union{value: %{featured: false}} = hd(updated.blocks)
+    end
+
+    test "sending the block's id is the way through", %{page: page, editor: editor} do
+      # The remedy the error names has to actually work, or the fix is a wall.
+      # Note it is the *id*, not the value: resubmitting `featured: true` on an
+      # id-less block is still refused by the older rule (a block with no id is
+      # new, and a new block must carry the default), so the message must not
+      # advise that.
+      stored = stored_block(page)
+
+      assert {:ok, updated} =
+               CMS.update_page(
+                 page,
+                 %{
+                   block_tree: [
+                     quote_block(%{"id" => stored.id, "text" => "edited", "featured" => true})
+                   ]
+                 },
+                 actor: editor
+               )
+
+      assert %Ash.Union{value: %{text: "edited", featured: true}} = hd(updated.blocks)
+    end
+
+    test "the message advises the remedy that works", %{page: page, editor: editor} do
+      {:error, error} =
+        CMS.update_page(page, %{block_tree: [quote_block(%{"text" => "edited"})]}, actor: editor)
+
+      assert Exception.message(error) =~ "send each block's id"
+    end
+
+    test "a page with no admin-set value is untouched", %{editor: editor} do
+      # The common case, and why this is narrower than requiring ids everywhere:
+      # a headless client writing ordinary content never notices.
+      {:ok, plain} = create_page(user(:admin), [quote_block(%{"text" => "plain"})])
+
+      assert {:ok, updated} =
+               CMS.update_page(plain, %{block_tree: [quote_block(%{"text" => "edited"})]},
+                 actor: editor
+               )
+
+      assert %Ash.Union{value: %{text: "edited", featured: false}} = hd(updated.blocks)
+    end
+
+    test "the check only ever refuses; it grants nothing", %{page: page, editor: editor} do
+      # The design constraint, pinned. An earlier attempt paired id-less blocks
+      # with stored ones by POSITION and treated that as identity — which handed
+      # the featured slot to whatever new content landed in that position. A
+      # block with a fresh id is unambiguously new and must carry the default,
+      # before and after.
+      assert {:error, error} =
+               CMS.update_page(
+                 page,
+                 %{
+                   block_tree: [
+                     quote_block(%{
+                       "id" => Ecto.UUID.generate(),
+                       "text" => "editor spam",
+                       "featured" => true
+                     })
+                   ]
+                 },
+                 actor: editor
+               )
+
+      assert Exception.message(error) =~ "cannot change `featured`"
+    end
+
+    test "an editor may still insert a block above the featured one",
+         %{page: page, editor: editor} do
+      # The regression the positional pairing caused: the new block matched no
+      # id, paired with the stored featured quote by position, and was refused
+      # for not carrying a value it had no business carrying.
+      stored = stored_block(page)
+
+      assert {:ok, updated} =
+               CMS.update_page(
+                 page,
+                 %{
+                   block_tree: [
+                     quote_block(%{"text" => "new intro"}),
+                     quote_block(%{
+                       "id" => stored.id,
+                       "text" => "featured",
+                       "featured" => true
+                     })
+                   ]
+                 },
+                 actor: editor
+               )
+
+      assert [%Ash.Union{value: %{featured: false}}, %Ash.Union{value: %{featured: true}}] =
+               updated.blocks
+    end
+
+    test "the editor form's own writes are unaffected", %{page: page, editor: editor} do
+      # `ContentEditorLive` and the inline-editing bridge set `blocks` directly
+      # rather than passing `block_tree`, so there is no raw input and nothing
+      # can have been omitted. The editor form does not render `featured` at
+      # all, so a rule that fired here would be unactionable.
+      stored = stored_block(page)
+
+      assert {:ok, _updated} =
+               CMS.update_page(
+                 page,
+                 %{
+                   blocks: [
+                     %{
+                       "_type" => "quote",
+                       "id" => stored.id,
+                       "text" => "edited",
+                       "featured" => true
+                     }
+                   ]
+                 },
+                 actor: editor
+               )
+    end
+  end
+
   describe "system writes" do
     test "an actor-less write is exempt" do
       assert {:ok, page} =

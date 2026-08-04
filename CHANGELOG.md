@@ -472,6 +472,35 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **An editor can no longer clear an admin-set block field by omitting it.**
+  `EnforceBlockFieldPolicy` (#51) stopped an editor *setting* a restricted field
+  — `KilnCMS.Blocks.Quote` declares `field :featured, editable_by: [:admin]` —
+  but not clearing one. A block with no id reads as new, where a restricted
+  field must equal its declared default; omit the field and the cast supplies
+  exactly that default, so the write looked like a no-op and silently reset what
+  an admin had set. Block ids cannot round-trip on the headless path: `blocks`
+  is not `public?`, so a client never reads the tree it would be preserving.
+
+  A **wholly id-less** tree that omits such a field is now refused when any
+  stored block of that type holds a non-default value for it, and the error says
+  to send the block ids. The rule only ever refuses — it never permits a write
+  that used to fail, and never writes a value nobody submitted.
+
+  Both alternatives were tried and rejected. Pairing id-less blocks with stored
+  ones by position looks like identity and is not: it handed the featured slot
+  to whatever new content landed in that position, and refused an editor merely
+  inserting a block above a featured one. Carrying the value forward silently
+  writes something the client never sent. "Wholly" id-less matters for the same
+  reason — a tree carrying any id shows the client can round-trip them, so a
+  block without one there is genuinely new and is judged as before.
+
+  A page with nothing restricted set behaves exactly as it did, which is why
+  this is narrower than requiring ids on every write. Still open, and now
+  recorded rather than implied: reusing the id of another block **of the same
+  type** moves an admin-set field off the block that had it, and an empty
+  `block_tree` deletes the block outright. Both are about which block an id
+  names rather than what a field may hold. (#566)
+
 - **Registration, password-reset and magic-link forms are bounded per client
   address.** #715 closed this for the sign-in submit: AshAuthentication's forms
   are LiveComponents calling `AshPhoenix.Form.submit/2` in-process, so the

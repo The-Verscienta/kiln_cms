@@ -450,11 +450,18 @@ mutations are all covered — not just the editor form, which additionally filte
 the fields it renders. An existing block (matched by id) may keep whatever value
 it already had; a new block must carry the field's declared default.
 
+Omitting a restricted field is not the same as setting it to its default, and
+used to be treated as if it were: a **wholly id-less** tree that leaves the
+field out now fails when any stored block of that type holds a non-default
+value, rather than silently clearing it (#566). The remedy the error names is
+to send each block's id — a tree carrying ids is judged block by block as
+before, so inserting a new block beside a restricted one is unaffected.
+
 Nested children of a `columns` block are raw maps rather than union members, so
-they carry no id to diff and are held to the stricter default-value rule. A
-headless client that drops block ids *and* omits a restricted field still gets
-the default, which can clear an admin-set value — residual risk 8 in
-[`threat-model.md`](threat-model.md).
+they carry no identity at all and are held to the stricter default-value rule.
+See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
+and does not guarantee — in particular that reusing another block's id is a
+separate, still-open hole.
 
 ## Coverage
 

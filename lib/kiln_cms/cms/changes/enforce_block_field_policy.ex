@@ -45,9 +45,48 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   This closes the "nest it in a column to bypass the check" hole at the cost of
   refusing an edit to a column that already contains an admin-set value.
 
-  A restricted field can still be *cleared* by a headless client that drops the
-  block's id and omits the field, since the default then legitimately applies.
-  Recorded as residual risk in `docs/threat-model.md`.
+  ## Omitted is not the same as default (#566)
+
+  Judging an id-less block against the field's default left one way through:
+  drop the ids **and** omit the restricted field, and the default applies
+  legitimately — silently clearing a value an admin set. An editor could not
+  *set* `featured` that way, but they could clear it.
+
+  So a field the client did not send is no longer read as a write of the
+  default. It is checked against the **raw `block_tree` argument**, where an
+  omitted key is genuinely absent — the cast tree cannot answer the question,
+  because the union's cast has already filled every omitted field with its
+  default, which is precisely why the two were indistinguishable.
+
+  When a **wholly id-less** tree omits a restricted field that some stored block
+  of that type holds, the write is **refused**. Refused rather than guessed at:
+  with no id there is no identity, and the obvious substitutes are worse than
+  the gap. Pairing by position looks like identity and is not — it refuses an
+  editor inserting a block above a featured one, and it hands the featured slot
+  to whatever new content lands in that position. Carrying the value forward
+  silently writes something the client never sent.
+
+  *Wholly* id-less matters. A tree carrying any id shows the client can
+  round-trip them, so a block without one there is genuinely new and is judged
+  as before — otherwise inserting a plain block above a featured one would be
+  refused for not carrying a value it has no business carrying.
+
+  So this only ever refuses more; it never permits a write that used to fail,
+  and it never writes a value nobody submitted. The cost is that an editor
+  cannot rewrite the body of a page holding an admin-set field without either
+  round-tripping ids or resubmitting the value — and they were never allowed to
+  change it, so nothing is lost but the silence.
+
+  ## What it still does not cover
+
+  Reusing the **id of another block of the same type** substitutes that block's
+  permitted value, so an editor can move an admin-set field off the block that
+  had it. And an empty `block_tree` deletes the block outright. Both are about
+  which block an id names rather than what a field may hold, and both predate
+  this; closing them needs the write path to verify that a submitted id belongs
+  to the block it claims. Nested `columns` children have no identity at all —
+  see the note above — so the omission rule cannot reach them either. Recorded
+  as residual risk in `docs/threat-model.md`.
   """
   use Ash.Resource.Change
 
@@ -70,13 +109,33 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   defp enforce(changeset, role) do
     if Ash.Changeset.changing_attribute?(changeset, :blocks) do
       stored = index_by_id(changeset.data)
+      raw = raw_input(changeset)
+      # Only a *wholly* id-less tree cannot say which block is which. A tree
+      # carrying any id shows the client can round-trip them, so a block without
+      # one there is genuinely new — and holding it to the omission rule would
+      # refuse an editor simply inserting a block above a featured one.
+      identified? = Enum.any?(raw, &has_id?/1)
 
       changeset
       |> Ash.Changeset.get_attribute(:blocks)
       |> List.wrap()
-      |> Enum.reduce(changeset, &check_block(&2, &1, stored, role))
+      |> Enum.with_index()
+      |> Enum.reduce(changeset, fn {block, index}, acc ->
+        check_block(acc, block, stored, role, Enum.at(raw, index), identified?)
+      end)
     else
       changeset
+    end
+  end
+
+  # The `block_tree` argument as the client sent it, index-aligned with the cast
+  # tree. Absent when the write set `blocks` directly — which the editor form
+  # and the inline-editing bridge both do — and then there is nothing to have
+  # omitted, so every field reads as supplied and the rules are unchanged.
+  defp raw_input(changeset) do
+    case Ash.Changeset.fetch_argument(changeset, :block_tree) do
+      {:ok, blocks} when is_list(blocks) -> blocks
+      _ -> []
     end
   end
 
@@ -92,7 +151,14 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
 
   defp index_by_id(_data), do: %{}
 
-  defp check_block(changeset, %Ash.Union{value: %module{} = block}, stored, role) do
+  defp check_block(
+         changeset,
+         %Ash.Union{value: %module{} = block},
+         stored,
+         role,
+         raw,
+         identified?
+       ) do
     previous = Map.get(stored, Map.get(block, :id))
 
     module
@@ -100,16 +166,53 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     |> Enum.reduce(changeset, fn field, acc ->
       new_value = Map.get(block, field.name)
 
-      if new_value == permitted_value(field, previous) do
-        acc
-      else
-        add_violation(acc, module, field.name)
+      cond do
+        new_value != permitted_value(field, previous) ->
+          add_violation(acc, module, field.name)
+
+        # The value is permitted, but only because the cast supplied the default
+        # for a field the client never sent — and somewhere in the stored tree
+        # that field is set. Accepting it clears an admin's value by omission
+        # (#566); there is no id to tell us whether this block is that one.
+        not identified? and clears_by_omission?(field, previous, raw, stored, module) ->
+          add_omission_violation(acc, module, field.name)
+
+        true ->
+          acc
       end
     end)
     |> check_nested(block, module, role)
   end
 
-  defp check_block(changeset, _other, _stored, _role), do: changeset
+  defp check_block(changeset, _other, _stored, _role, _raw, _identified?), do: changeset
+
+  defp has_id?(raw) when is_map(raw),
+    do: not is_nil(Map.get(raw, :id) || Map.get(raw, "id"))
+
+  defp has_id?(_raw), do: false
+
+  # Only for a block with no id match, only for a field the client omitted, and
+  # only when some stored block of the same type actually holds a non-default
+  # value — so an ordinary page, where nothing restricted is set, is untouched.
+  defp clears_by_omission?(field, previous, raw, stored, module) do
+    is_nil(previous) and not supplied?(raw, field.name) and
+      stored_holds_non_default?(stored, module, field)
+  end
+
+  defp stored_holds_non_default?(stored, module, field) do
+    Enum.any?(stored, fn
+      {_id, %^module{} = block} -> Map.get(block, field.name) != field.default
+      _other -> false
+    end)
+  end
+
+  # A field the client did not send at all. Both key shapes, because the API and
+  # editor submit strings while code interfaces submit atoms. No raw entry means
+  # the write did not come through `block_tree`, so nothing was omitted.
+  defp supplied?(raw, name) when is_map(raw),
+    do: Map.has_key?(raw, name) or Map.has_key?(raw, to_string(name))
+
+  defp supplied?(_raw, _name), do: true
 
   # An existing block may keep whatever it already had; a new one must carry the
   # field's declared default.
@@ -195,6 +298,22 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     Ash.Changeset.add_error(changeset,
       field: :blocks,
       message: "cannot change `#{field_name}` on a #{type} block: restricted to other roles"
+    )
+  end
+
+  # A different mistake with a different fix, so it says so: a client that sent
+  # no `featured` at all is not helped by being told it cannot change one, and
+  # on the headless path `blocks` is not readable, so it has no way to know the
+  # field exists until something says.
+  defp add_omission_violation(changeset, module, field_name) do
+    type = Kiln.Block.Info.name(module)
+
+    Ash.Changeset.add_error(changeset,
+      field: :blocks,
+      message:
+        "cannot omit `#{field_name}` on a #{type} block: it is set on this content and " <>
+          "restricted to other roles, and a block tree carrying no ids cannot say which " <>
+          "block is which — send each block's id"
     )
   end
 end
