@@ -55,18 +55,32 @@ defmodule KilnCMS.Forms do
 
   @doc """
   How long ago (in milliseconds) a form carrying `token` was rendered, or
-  `nil` when the token is missing, forged, or older than
-  #{div(@rendered_at_max_age, 60_000)} minutes — a headless/JSON caller with
-  no rendered page to time simply sends none, and gets `nil` here rather than
-  an error.
+  `nil` when the token is missing, forged, older than
+  #{div(@rendered_at_max_age, 60_000)} minutes, or the computed delta is
+  negative — a headless/JSON caller with no rendered page to time simply
+  sends none, and gets `nil` here rather than an error.
+
+  The negative case is deliberate, not a stray guard: on a multi-node
+  deployment, the node that minted the token and the node verifying it can
+  disagree by however much their clocks have drifted. Flooring a negative
+  delta to `0` would read as "submitted instantly" on every request that
+  happens to land on a node running slightly behind — indistinguishable from
+  a genuine bot and, unlike a bot, load-bearing on nothing the visitor did.
+  `nil` (no signal) is the honest answer to "we can't tell."
   """
   @spec fill_time_ms(term()) :: non_neg_integer() | nil
   def fill_time_ms(token) when is_binary(token) do
     case Phoenix.Token.verify(KilnCMSWeb.Endpoint, @rendered_at_salt, token,
            max_age: div(@rendered_at_max_age, 1000)
          ) do
-      {:ok, rendered_at_ms} -> max(System.system_time(:millisecond) - rendered_at_ms, 0)
-      {:error, _reason} -> nil
+      {:ok, rendered_at_ms} ->
+        case System.system_time(:millisecond) - rendered_at_ms do
+          delta when delta >= 0 -> delta
+          _negative -> nil
+        end
+
+      {:error, _reason} ->
+        nil
     end
   end
 

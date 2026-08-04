@@ -186,7 +186,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
       CMS.destroy_form_submission(submission, opts)
     end
 
-    {:noreply, reload_submissions(socket)}
+    # A row deleted by its own trash icon (not bulk-delete, which doesn't
+    # exist yet) can be one a checkbox had selected — drop it so the "N
+    # selected" bar doesn't count a row that's gone, and a later bulk action
+    # doesn't silently no-op trying to find it.
+    selected = MapSet.delete(socket.assigns.selected_submissions, id)
+
+    {:noreply, socket |> assign(:selected_submissions, selected) |> reload_submissions()}
   end
 
   def handle_event("filter_status", %{"status" => status}, socket) do

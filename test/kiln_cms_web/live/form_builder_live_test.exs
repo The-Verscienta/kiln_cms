@@ -407,6 +407,32 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
 
       assert html =~ ~s(/editor/forms/#{form.id}/entries/export.csv)
     end
+
+    test "deleting a selected row drops it from the selection instead of leaving it stale", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+      {form, [], lv, _html} = builder(conn, admin)
+
+      s1 =
+        CMS.create_form_submission!(%{form_id: form.id, data: %{"a" => "1"}}, authorize?: false)
+
+      CMS.create_form_submission!(%{form_id: form.id, data: %{"a" => "2"}}, authorize?: false)
+
+      lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+      selected_html = render_click(lv, "select_all_visible", %{})
+      assert selected_html =~ "2 selected"
+
+      html =
+        lv
+        |> element(~s(button[phx-click="delete_submission"][phx-value-id="#{s1.id}"]))
+        |> render_click()
+
+      # One selected row is gone: the count drops rather than staying stale,
+      # and a bulk action afterward can't silently target the deleted id.
+      assert html =~ "1 selected"
+      refute html =~ "2 selected"
+    end
   end
 
   test "the public form renders placeholder, default, width and submit label", %{conn: conn} do

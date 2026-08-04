@@ -36,6 +36,15 @@ defmodule Kiln.Forms.SpamCheck.RegistryTest do
     def check(_context), do: raise("plugin author had a bad day")
   end
 
+  # The realistic plugin-author mistake this guards against: an `if` with no
+  # `else` returns `nil` on the untaken branch, not `:ok`.
+  defmodule MalformedCheck do
+    use Kiln.Forms.SpamCheck
+
+    @impl Kiln.Forms.SpamCheck
+    def check(_context), do: nil
+  end
+
   defp context(data \\ %{}, opts \\ []), do: Context.new(data, opts)
 
   describe "outcomes and scoring" do
@@ -67,6 +76,16 @@ defmodule Kiln.Forms.SpamCheck.RegistryTest do
       outcomes = Registry.run(context(), [CleanCheck, RaisingCheck, FlaggingCheck])
 
       assert [{CleanCheck, :ok}, {FlaggingCheck, {:flag, :something_off, 25}}] = outcomes
+    end
+
+    @tag :capture_log
+    test "a malformed (non-raising) outcome is dropped rather than crashing score/1" do
+      # An `if` with no `else` returns `nil`, not `:ok` — this must not reach
+      # score/1's Enum.reduce/3, which has no clause for it.
+      outcomes = Registry.run(context(), [CleanCheck, MalformedCheck, FlaggingCheck])
+
+      assert [{CleanCheck, :ok}, {FlaggingCheck, {:flag, :something_off, 25}}] = outcomes
+      assert Registry.score(outcomes) == 25
     end
   end
 

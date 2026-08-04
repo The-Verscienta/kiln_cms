@@ -223,6 +223,26 @@ defmodule KilnCMS.FormsTest do
       assert submission.status == :new
     end
 
+    test "a rendered-at token minted slightly in the future (clock skew) gives no fill-time signal" do
+      # A different node's clock running ahead is not evidence of a bot —
+      # Forms.fill_time_ms/1 must not floor this to 0 and flag it as instant.
+      future_token =
+        Phoenix.Token.sign(
+          KilnCMSWeb.Endpoint,
+          "form_rendered_at",
+          System.system_time(:millisecond) + 5_000
+        )
+
+      assert Forms.fill_time_ms(future_token) == nil
+
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+      assert {:ok, submission} =
+               Forms.submit(form, %{"message" => "hi", Forms.rendered_at_field() => future_token})
+
+      assert submission.spam_score == 0
+    end
+
     test "a :spam submission never queues a notification or fires the webhook" do
       CMS.create_webhook_endpoint!(
         %{url: "https://example.test/hook", events: ["form.submitted"]},

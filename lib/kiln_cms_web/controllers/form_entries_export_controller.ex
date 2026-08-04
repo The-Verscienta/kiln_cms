@@ -9,11 +9,14 @@ defmodule KilnCMSWeb.FormEntriesExportController do
   `AnalyticsLive` itself is editor-visible; this mirrors
   `KilnCMSWeb.GovernanceController` instead, whose dashboard is admin-only.
 
-  Columns are the form's own field set, in its configured order, plus
+  Columns are the form's **current** field set, in its configured order, plus
   `status`/`spam_score`/`submitted_at` — not a union of whatever keys happen
-  to appear in the stored data, so a field an editor later removed still
-  produces a stable column rather than reshaping the export underneath a
-  script that expects yesterday's columns.
+  to appear in the stored data, which would reshape the export every time an
+  admin adds a field. The tradeoff: a field removed after some submissions
+  already carry it drops that column, and their data for it, from the
+  export entirely — nothing recovers it here. `FormSubmission.data` itself
+  still has it (this only affects what the CSV projects), but there is no
+  "show removed fields too" option in this endpoint today.
 
   Not streamed: unlike the analytics export, submission volume for one form
   has no comparable retention window to bound a request against, but a

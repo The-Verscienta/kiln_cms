@@ -57,6 +57,7 @@ defmodule Kiln.Forms.SpamCheck.Registry do
     module.check(context)
     |> List.wrap()
     |> Enum.map(&{module, &1})
+    |> Enum.filter(&valid_outcome?/1)
   rescue
     exception ->
       Logger.error("Spam check #{inspect(module)} raised: #{Exception.message(exception)}")
@@ -66,6 +67,22 @@ defmodule Kiln.Forms.SpamCheck.Registry do
     kind, reason ->
       Logger.error("Spam check #{inspect(module)} #{kind}: #{inspect(reason)}")
       []
+  end
+
+  # Containment covers more than a raise: a check that returns something
+  # other than `:ok`/`{:flag, reason, weight}` (an `if` with no `else`, a
+  # copy-paste from `Kiln.Advisory`'s different outcome shape) must not reach
+  # `score/1`'s `Enum.reduce/3`, which has no clause for anything else and
+  # would take the public, anonymous submission pipeline down with it.
+  defp valid_outcome?({_module, :ok}), do: true
+
+  defp valid_outcome?({_module, {:flag, reason, weight}})
+       when is_atom(reason) and is_integer(weight) and weight > 0,
+       do: true
+
+  defp valid_outcome?({module, other}) do
+    Logger.error("Spam check #{inspect(module)} returned a malformed outcome: #{inspect(other)}")
+    false
   end
 
   defp configured do
