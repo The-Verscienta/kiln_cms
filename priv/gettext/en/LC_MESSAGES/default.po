@@ -1027,7 +1027,7 @@ msgstr ""
 msgid "Updated."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:241
+#: lib/kiln_cms_web/controllers/auth_controller.ex:260
 #, elixir-autogen, elixir-format
 msgid "You are now signed out"
 msgstr ""
@@ -1150,7 +1150,7 @@ msgstr ""
 msgid "All notifications are on by default. Uncheck any you'd rather not receive."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:200
+#: lib/kiln_cms_web/controllers/auth_controller.ex:219
 #, elixir-autogen, elixir-format
 msgid "An account with this email already exists. We've sent a link to that address - confirm it to finish linking this provider to your account."
 msgstr ""
@@ -1216,7 +1216,7 @@ msgstr ""
 msgid "Highlighted quotation"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:218
+#: lib/kiln_cms_web/controllers/auth_controller.ex:237
 #, elixir-autogen, elixir-format
 msgid "Incorrect email or password"
 msgstr ""
@@ -1359,13 +1359,13 @@ msgstr ""
 msgid "Visual separator between sections"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:180
+#: lib/kiln_cms_web/controllers/auth_controller.ex:199
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex:73
 #, elixir-autogen, elixir-format
 msgid "You are now signed in"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:191
+#: lib/kiln_cms_web/controllers/auth_controller.ex:210
 #, elixir-autogen, elixir-format
 msgid "You have already signed in another way, but have not confirmed your account. You can confirm your account using the link we sent to you, or by resetting your password."
 msgstr ""
@@ -1396,12 +1396,12 @@ msgstr ""
 msgid "Your data"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:177
+#: lib/kiln_cms_web/controllers/auth_controller.ex:196
 #, elixir-autogen, elixir-format
 msgid "Your email address has now been confirmed"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:179
+#: lib/kiln_cms_web/controllers/auth_controller.ex:198
 #, elixir-autogen, elixir-format
 msgid "Your password has successfully been reset"
 msgstr ""
@@ -4308,7 +4308,7 @@ msgstr ""
 msgid "Passkey setup was cancelled or isn't supported by this browser."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/passkey_controller.ex:59
+#: lib/kiln_cms_web/controllers/passkey_controller.ex:62
 #, elixir-autogen, elixir-format
 msgid "Passkey sign-in failed. Try another method."
 msgstr ""
@@ -4788,7 +4788,7 @@ msgstr ""
 msgid "Sign in with your device's fingerprint, face, or PIN instead of a password. A passkey verifies you on the device, so it counts as two factors on its own."
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/passkey_controller.ex:51
+#: lib/kiln_cms_web/controllers/passkey_controller.ex:54
 #, elixir-autogen, elixir-format
 msgid "Signed in with a passkey."
 msgstr ""
@@ -4798,7 +4798,7 @@ msgstr ""
 msgid "Single line text"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/auth_controller.ex:212
+#: lib/kiln_cms_web/controllers/auth_controller.ex:231
 #, elixir-autogen, elixir-format
 msgid "Single sign-on failed — the identity couldn't be verified or linked. Try again, or contact an administrator."
 msgstr ""

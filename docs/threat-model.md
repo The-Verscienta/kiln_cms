@@ -709,11 +709,26 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     found", so the channel answers no question a caller could not already answer
     over HTTP.
 
-    **Still open, and general to every socket:** authorization runs at connect
-    and join and is never revisited. Nothing calls `Endpoint.disconnect/1`, so
-    deleting an account, demoting it, or narrowing its scopes does not evict a
-    live session — it keeps what it was granted until the socket drops (at most
-    the token's 24 hours, in practice as long as the tab stays open).
+    **Authorization runs at connect and join and is not revisited** — *closed
+    for the deliberate cases (#675).* An account that was demoted, removed from
+    an org, had its scopes or audiences narrowed, or was erased used to keep
+    everything its live sockets already held, for as long as the tab stayed
+    open, while every HTTP surface refused it immediately.
+    `KilnCMS.Accounts.SessionEviction` now drops those sockets from the actions
+    that make the change, and all four surfaces can actually be dropped:
+    `GraphqlSocket.id/1` returned `nil` (Phoenix for "never disconnectable"),
+    `BridgeSocket` is a raw transport with no `id/1` callback and subscribes
+    itself, and nothing set a `live_socket_id`, so `/live` was undroppable too.
+    Evicting is not re-authorizing: the client reconnects and runs the full
+    check again, which is the cheapest correct answer and costs nothing on the
+    CRDT hot path.
+    *Residual:* it is prompt, not complete — it fires on the actions wired to
+    it, so an authorization change nobody remembered to wire in is still
+    invisible to a live socket. The backstop is periodic re-authorization inside
+    the channel, tracked as #775. The broadcast itself is cluster-wide —
+    `Phoenix.PubSub`'s default adapter carries it to every node — but nothing
+    verifies that, so treat multi-node eviction as untested rather than
+    unsupported.
 
 ## Operating the dependency audit
 

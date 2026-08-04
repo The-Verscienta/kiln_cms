@@ -205,6 +205,11 @@ defmodule KilnCMS.Accounts.User do
       # The shape validation inspects the whole map — no atomic expression.
       require_atomic? false
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
+
+      # Every socket authorizes once, at connect and join, and never again — so
+      # a demotion or a narrowed scope left the live ones holding the grant they
+      # had (#675). Dropping them makes the next message prove it again.
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :access_changed}
     end
 
     # Billing-derived read entitlements (#337 Phase 2). Written only by
@@ -217,6 +222,10 @@ defmodule KilnCMS.Accounts.User do
       # The guard change runs in Elixir — no atomic expression.
       require_atomic? false
       change KilnCMS.Accounts.Changes.SyncBillingAudiences
+
+      # Audiences are the read axis, so a lapsed subscription narrows what a
+      # live GraphQL subscription may see (#675).
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :audiences_changed}
     end
 
     # GDPR Art. 17 erasure (#212). Admin-only. Scrubs PII from the account and
@@ -228,6 +237,10 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       accept []
       change KilnCMS.Accounts.Changes.AnonymizeUser
+
+      # The erasure revokes tokens, which stops new connections; the live ones
+      # had to be dropped too (#675).
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :anonymized}
     end
 
     update :change_password do

@@ -49,7 +49,10 @@ defmodule KilnCMSWeb.BridgeSocketTest do
                params: %{"type" => "post", "id" => post.id, "api_key" => key(admin)}
              })
 
-    assert state == %{type: "post", id: post.id}
+    # `actor_id` rides along so `init/1` can subscribe to that user's eviction
+    # topic — this socket is a raw transport with no `id/1` callback, so it has
+    # to listen for its own disconnect (#675).
+    assert state == %{type: "post", id: post.id, actor_id: admin.id}
 
     # init subscribes THIS process to the editor's preview topic.
     assert {:ok, ^state} = BridgeSocket.init(state)

@@ -472,6 +472,42 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **Demoting, offboarding or erasing a user now drops their live sockets.**
+  Authorization on every socket ran **once** — at connect, and at join for
+  channels — and was never revisited. `CollabChannel.handle_in("update", …)`
+  re-checks nothing; it only needs the `doc_server` its join resolved. So an
+  account that was demoted to `:viewer`, removed from an organization, had its
+  `editable_types` / `readable_types` / audiences narrowed, or was erased kept
+  everything its live sockets already held — on every joined channel, for as
+  long as the tab stayed open. Every HTTP surface refused it immediately; the
+  sockets did not. `grep -rn "Endpoint.disconnect" lib/` returned nothing.
+
+  That was tolerable while the collab socket was inert. #655 made the join the
+  security boundary, which made "evaluated once, never again" load-bearing —
+  and offboarding an editor mid-session is exactly the case an operator assumes
+  is covered.
+
+  Two halves had to be true, and neither was. **The sockets could not be
+  dropped at all:** `GraphqlSocket.id/1` returned `nil`, which is Phoenix's way
+  of saying a socket is never disconnectable; `BridgeSocket` is a raw transport
+  with no `id/1` callback; and nothing set a `live_socket_id`, so `/live` was
+  undroppable too. Only `CollabSocket` had a usable id, and nothing used it.
+  **And no action fired an eviction.** All four are now reachable, from one
+  topic built by one function so the broadcaster and the listeners cannot drift
+  onto different strings — a mismatch would fail silently, in the direction of
+  not evicting.
+
+  Evicting is not re-authorizing. The client reconnects immediately and that
+  reconnect runs the full authorization it always did, so the effect is "prove
+  it again" — the cheapest correct answer to a changed grant, and it costs
+  nothing on the CRDT hot path. Nothing tries to tell a widened grant from a
+  narrowed one either: that comparison is subtle, its failure mode is silent,
+  and being wrong in the permissive direction is the bug.
+
+  It is prompt rather than complete: it fires on the actions wired to it, so a
+  change nobody remembered to wire in is still invisible to a live socket. The
+  backstop is periodic re-authorization inside the channel, filed as #775. (#675)
+
 - **An editor can no longer clear an admin-set block field by omitting it.**
   `EnforceBlockFieldPolicy` (#51) stopped an editor *setting* a restricted field
   — `KilnCMS.Blocks.Quote` declares `field :featured, editable_by: [:admin]` —

@@ -65,6 +65,14 @@ defmodule KilnCMS.Accounts.ApiKey do
       accept []
       require_atomic? false
       change set_attribute(:revoked_at, &DateTime.utc_now/0)
+
+      # A key is the *entire* credential of `KilnCMSWeb.BridgeSocket`, which
+      # authorizes once at connect and then streams drafts. Revoking a leaked
+      # key did not stop the leak until the tab closed (#675). Keyed on the
+      # owning user, so this also drops their other sockets — a reconnect
+      # re-authorizes, so the cost is a reconnect and the alternative is a live
+      # socket holding a revoked credential.
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :api_key_revoked, user_id: :user_id}
     end
   end
 
