@@ -126,6 +126,7 @@ defmodule KilnCMS.MixProject do
       "docs/point-in-time.md": [],
       # Modeling & extending
       "docs/extending-content.md": [],
+      "docs/events.md": [title: "Events"],
       "docs/design-system.md": [],
       "docs/plugin-extensibility.md": [],
       "docs/frontend-assets.md": [],
@@ -224,6 +225,7 @@ defmodule KilnCMS.MixProject do
       ],
       "Modeling & extending": [
         "docs/extending-content.md",
+        "docs/events.md",
         "docs/design-system.md",
         "docs/plugin-extensibility.md",
         "docs/frontend-assets.md"
@@ -461,6 +463,20 @@ defmodule KilnCMS.MixProject do
       {:wax_, "~> 0.7"},
       # QR code SVG for TOTP enrolment (#331) — pure Elixir, no NIF.
       {:eqrcode, "~> 0.2"},
+      # Timezone database for event recurrence and ICS (#480). Elixir ships no
+      # zone data, so `DateTime.shift_zone/2` errors with `:utc_only_time_zone_database`
+      # until one is configured — and recurrence is *wall-clock* by definition:
+      # "every Tuesday at 19:00" must stay 19:00 across a DST boundary, which is
+      # arithmetic no amount of UTC storage can do.
+      #
+      # `tz` rather than `tzdata`: tzdata ships a runtime updater that fetches
+      # IANA releases over HTTP from a supervised process. In a codebase where
+      # every other outbound call is behind an explicit flag and an SSRF-safe
+      # path, a dependency that dials out on its own by default is the wrong
+      # shape. `tz` compiles the data in; updating it is a dependency bump,
+      # which is a decision an operator makes rather than one a background
+      # process makes for them.
+      {:tz, "~> 0.28"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       # Error tracking. No-op unless SENTRY_DSN is set (config/runtime.exs), so

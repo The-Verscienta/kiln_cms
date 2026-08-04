@@ -248,10 +248,15 @@ defmodule KilnCMS.Cache do
   Cache key for a generated feed (#486).
 
   `type` is the content-type name for a per-type feed (`/blog/feed.xml`) or
-  `nil` for the site-wide one; `format` is `:atom` or `:json`. Per-org, like
-  every other aggregate key here.
+  `nil` for the site-wide one; `format` is `:atom`, `:json` or `:ics`. Per-org,
+  like every other aggregate key here.
+
+  The calendar routes (#480) narrow `type` further — `"gigs/tag/jazz"` for a
+  tag-scoped calendar — which `bust_feeds/2` deliberately does not enumerate:
+  it drops the keys anyone is actually subscribed to and lets the TTL reclaim
+  the rest.
   """
-  @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json) :: String.t()
+  @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json | :ics) :: String.t()
   def feed_key(org_id, type, format), do: "feed:#{org_id}:#{type || "all"}:#{format}"
 
   @doc """
@@ -269,7 +274,9 @@ defmodule KilnCMS.Cache do
   def bust_feeds(org_id, type) do
     if enabled?() do
       for name <- Enum.uniq([nil, type && to_string(type)]),
-          format <- [:atom, :json] do
+          # `:ics` rides along (#480): a published event must appear in a
+          # subscribed calendar on the same hook that refreshes the feeds.
+          format <- [:atom, :json, :ics] do
         Cachex.del(@cache, feed_key(org_id, name, format))
       end
     end

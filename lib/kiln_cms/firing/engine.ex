@@ -345,6 +345,10 @@ defmodule KilnCMS.Firing.Engine do
       # A geolocation custom field (#428) is the document's contentLocation:
       # a Place carrying GeoCoordinates.
       |> put_content_location(KilnCMS.Firing.CustomFields.content_location(custom))
+      # An Event-typed document's dates come from its `datetime_range` field
+      # (#480). Only for the Event family: `startDate` on an Article is not a
+      # property schema.org defines.
+      |> put_event_schedule(document)
 
     # Structured data falls out of the typed blocks (decision D9): each block that
     # has a schema.org representation contributes a node to the document @graph. A
@@ -357,6 +361,18 @@ defmodule KilnCMS.Firing.Engine do
 
   defp put_content_location(node, nil), do: node
   defp put_content_location(node, location), do: Map.put(node, "contentLocation", location)
+
+  # `startDate`/`endDate` from the schedule field, and the recurrence as an
+  # `eventSchedule` — schema.org's own `Schedule`, which carries an RRULE
+  # verbatim, so a search engine sees the rule rather than a window of expanded
+  # instances that goes stale the moment it is fired.
+  defp put_event_schedule(%{"@type" => type} = node, document) do
+    if KilnCMS.Firing.SchemaOrg.event_type?(type),
+      do: Map.merge(node, KilnCMS.Events.schema_org_schedule(document)),
+      else: node
+  end
+
+  defp put_event_schedule(node, _document), do: node
 
   # The document's plain text, from the already-typed blocks. `:json_ld` wants
   # paragraph separation; the computed-field context (`word_count`,

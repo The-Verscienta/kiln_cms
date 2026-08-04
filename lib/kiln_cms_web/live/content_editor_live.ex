@@ -3389,22 +3389,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <legend class="mb-1 block text-sm font-medium">{@definition.label}</legend>
       <div class="grid grid-cols-2 gap-2">
         <div :for={part <- @parts}>
-          <label
-            for={cf_part_id(@definition, part)}
-            class="mb-0.5 block text-xs text-base-content/70"
-          >
-            {part.label}
-          </label>
-          <input
-            id={cf_part_id(@definition, part)}
-            type={Map.get(part, :type, "text")}
-            name={"#{@name}[#{part.key}]"}
-            value={composite_part_value(@value, part.key)}
-            required={@definition.required && Map.get(part, :required?, true)}
-            aria-invalid={@errors != [] && "true"}
-            aria-describedby={@errors != [] && cf_errors_id(@definition)}
-            class="field-input"
-            {Map.get(part, :attrs, %{})}
+          <.composite_part
+            definition={@definition}
+            part={part}
+            name={@name}
+            value={@value}
+            errors={@errors}
           />
         </div>
       </div>
@@ -3414,6 +3404,66 @@ defmodule KilnCMSWeb.ContentEditorLive do
       <.custom_field_errors_list definition={@definition} errors={@errors} />
     </fieldset>
     """
+  end
+
+  # A boolean part (`type: "checkbox"`) is not a text input with a different
+  # `type=`. On a checkbox `value=` is what gets *submitted*, not what is
+  # *checked* — binding the stored value there means a saved `all_day: true`
+  # reopens unchecked, and a stored `false` renders `value="false"`, so ticking
+  # the box submits the string "false" and the flag can never be turned on.
+  #
+  # So: a fixed `value="true"`, `checked` from the stored value, and a hidden
+  # companion so that unticking submits something rather than nothing. The
+  # hidden field is what makes "off" distinguishable from "the part was never
+  # rendered", which matters because a field type's `cast/2` sees only the parts
+  # that arrive.
+  defp composite_part(%{part: %{type: "checkbox"}} = assigns) do
+    ~H"""
+    <label class="mt-5 flex items-center gap-2 text-xs text-base-content/70">
+      <input type="hidden" name={"#{@name}[#{@part.key}]"} value="false" />
+      <input
+        id={cf_part_id(@definition, @part)}
+        type="checkbox"
+        name={"#{@name}[#{@part.key}]"}
+        value="true"
+        checked={composite_part_checked?(@value, @part.key)}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="checkbox checkbox-sm"
+        {Map.get(@part, :attrs, %{})}
+      />
+      {@part.label}
+    </label>
+    """
+  end
+
+  defp composite_part(assigns) do
+    ~H"""
+    <label for={cf_part_id(@definition, @part)} class="mb-0.5 block text-xs text-base-content/70">
+      {@part.label}
+    </label>
+    <input
+      id={cf_part_id(@definition, @part)}
+      type={Map.get(@part, :type, "text")}
+      name={"#{@name}[#{@part.key}]"}
+      value={composite_part_value(@value, @part.key)}
+      required={@definition.required && Map.get(@part, :required?, true)}
+      aria-invalid={@errors != [] && "true"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      class="field-input"
+      {Map.get(@part, :attrs, %{})}
+    />
+    """
+  end
+
+  # The same spellings `Kiln.FieldType` implementations accept, because a value
+  # arrives here either fresh from the form (a string) or round-tripped out of
+  # jsonb (a boolean).
+  defp composite_part_checked?(value, key) do
+    case composite_part_value(value, key) do
+      true -> true
+      binary when is_binary(binary) -> String.downcase(binary) in ~w(true 1 on yes)
+      _other -> false
+    end
   end
 
   # A plain `<input>`. Plugin and built-in field types (`Kiln.FieldType`) pick

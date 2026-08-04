@@ -158,6 +158,12 @@ config :kiln_cms, KilnCMS.Search,
 #
 # `Kiln.Advisory.Checks.*` are feature-neutral (an accessibility panel wants
 # them verbatim); `KilnCMS.Seo.Checks.*` are search-specific.
+# Timezone database (#480). Elixir ships none, so `DateTime.shift_zone/2` and
+# anything wall-clock returns `{:error, :utc_only_time_zone_database}` without
+# it. Set globally rather than per-call: a caller that forgets does not get a
+# subtly-UTC answer, it gets an error.
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 config :kiln_cms, Kiln.Advisory,
   checks: [
     KilnCMS.Seo.Checks.Meta,

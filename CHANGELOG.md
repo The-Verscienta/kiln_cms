@@ -29,6 +29,56 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Event content: schedules, recurrence, and calendar output.** Kiln has no
+  `Event` resource, and that is the design — an event is a content type carrying
+  a **`datetime_range`** field, composed at `/editor/types` like any other.
+  Everything downstream keys on the presence of that field rather than on a
+  hardcoded type name, so a venue's "Gig", a clinic's "Workshop" and a school's
+  "Open Day" are three types with three field sets and one calendar mechanism
+  (#480).
+
+  Two new field types: `:datetime_range` (start, optional end, IANA zone,
+  all-day) and `:recurrence` (an RRULE subset plus skipped dates).
+
+  Three decisions are the substance of the feature:
+
+  - **Local wall time plus a zone, not a UTC instant.** This is deliberately not
+    how the rest of Kiln stores time. `published_at` is a UTC instant because for
+    an editorial timestamp the moment *is* the fact; an event is the opposite.
+    "The doors open at 19:00" is a fact about the local clock, and storing UTC
+    silently moves the gig the next time a government changes its DST rules —
+    `18:00Z` becomes a 20:00 concert, while `19:00 Europe/London` stays a 19:00
+    concert. Expansion is wall-clock for the same reason, so a weekly event holds
+    its local time across a DST boundary; the *duration* recurs, not the end
+    instant.
+
+  - **An unsupported RRULE part is rejected, never ignored.** `FREQ` (daily,
+    weekly, monthly, yearly), `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`,
+    `BYMONTHDAY`, `BYMONTH` and `WKST` are honoured; `BYSETPOS`, `BYWEEKNO`,
+    `BYYEARDAY`, `BYHOUR`, `BYMINUTE` and `BYSECOND` are refused at the form. An
+    editor who writes a rule Kiln cannot honour should find out then, not from a
+    subscriber asking why the calendar is wrong. Expansion is always windowed and
+    always capped, because `FREQ=DAILY` with no `UNTIL` has infinitely many
+    occurrences.
+
+  - **A calendar ships the rule, not expanded occurrences.** `/calendar.ics`,
+    `/<plural>/calendar.ics`, `/<plural>/tags/<tag>/calendar.ics` and
+    `/<plural>/<slug>/calendar.ics` serve RFC 5545 iCalendar carrying `RRULE`
+    and `EXDATE`. A client understands rules, so this is both smaller and more
+    correct: it keeps showing occurrences past whatever window Kiln happened to
+    expand. **Published *and* `audience: :public` only** — a subscribed calendar
+    is fetched by an anonymous client on a timer, forever, so gated content is
+    filtered out explicitly rather than left to a read policy staying shaped as
+    it is today.
+
+  A type declaring one of the schema.org Event types also fires an `Event` JSON-LD
+  node with `startDate`, `endDate` and an `eventSchedule` holding the RRULE. The
+  timezone database is now `tz` rather than `tzdata`, which runs a runtime HTTP
+  updater — the wrong shape for a codebase that gates all egress.
+
+  Not included, and tracked separately: an occurrence-sorted paginated delivery
+  index. See [events.md](docs/events.md).
+
 - **Rich embed cards: server-side oEmbed metadata.** An embed block stored a URL
   and rendered `<figure data-url="…"></figure>` — no title, no thumbnail, no
   provider. A headless consumer got a naked URL, which in practice meant nothing
