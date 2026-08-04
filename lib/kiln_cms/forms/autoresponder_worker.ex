@@ -2,9 +2,10 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
   @moduledoc """
   Mails a form's **submitter** their confirmation email (#468,
   `KilnCMS.Forms.Autoresponder`) — the twin of `KilnCMS.Forms.NotificationWorker`,
-  which mails the admin instead. Queued by `KilnCMS.Forms.record/3` only when
-  `Autoresponder.eligible?/3` found somewhere to send it. Delivery + backoff
-  mirror the other mail workers (`Mail.deliver_for_worker/2`).
+  which mails the admin instead. Queued by `KilnCMS.Forms.submit/3`'s internal
+  record step only when `Autoresponder.eligible?/3` found somewhere to send
+  it. Delivery + backoff mirror the other mail workers
+  (`Mail.deliver_for_worker/2`).
   """
   use Oban.Worker, queue: :mail, max_attempts: 5
 

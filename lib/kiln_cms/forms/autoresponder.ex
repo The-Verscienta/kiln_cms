@@ -10,8 +10,8 @@ defmodule KilnCMS.Forms.Autoresponder do
 
   Only ever fires when the form actually has an `:email`-typed `FormField`
   *and* the submission gave it a non-blank value — `eligible?/3` is the one
-  place that decides "is there anyone to confirm with", so
-  `KilnCMS.Forms.record/3` and the config-time validation
+  place that decides "is there anyone to confirm with", so `KilnCMS.Forms`'
+  submission pipeline and the config-time validation
   (`KilnCMS.CMS.Validations.FormAutoresponderTokens`) can't drift on it.
   """
 
