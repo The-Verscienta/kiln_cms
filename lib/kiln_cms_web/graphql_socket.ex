@@ -22,12 +22,24 @@ defmodule KilnCMSWeb.GraphqlSocket do
     case KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
       {:ok, org} ->
         context = params |> actor_context() |> Map.put(:tenant, org.id)
-        {:ok, Absinthe.Phoenix.Socket.put_options(socket, context: context)}
+
+        socket =
+          socket
+          # Kept as an assign as well as in the Absinthe context, because `id/1`
+          # is given the Phoenix socket and cannot see the Absinthe options
+          # (#675).
+          |> Phoenix.Socket.assign(:kiln_actor_id, actor_id(context))
+          |> Absinthe.Phoenix.Socket.put_options(context: context)
+
+        {:ok, socket}
 
       :error ->
         :error
     end
   end
+
+  defp actor_id(%{actor: %{id: id}}), do: id
+  defp actor_id(_context), do: nil
 
   # An unusable or absent bearer token connects anonymously rather than being
   # refused — the public read surface is reachable without one, and the
@@ -45,6 +57,16 @@ defmodule KilnCMSWeb.GraphqlSocket do
     end
   end
 
+  # `nil` is Phoenix's way of saying a socket can never be disconnected, which
+  # is what left a demoted or deleted user's subscriptions running until they
+  # closed the tab (#675). An authenticated socket is now keyed on its user so
+  # `KilnCMS.Accounts.SessionEviction` can drop it; an anonymous one keeps `nil`,
+  # since it holds no grant that can be revoked.
   @impl true
-  def id(_socket), do: nil
+  def id(socket) do
+    case socket.assigns[:kiln_actor_id] do
+      user_id when is_binary(user_id) -> KilnCMS.Accounts.SessionEviction.topic(user_id)
+      _anonymous -> nil
+    end
+  end
 end

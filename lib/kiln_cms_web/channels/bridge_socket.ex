@@ -27,6 +27,7 @@ defmodule KilnCMSWeb.BridgeSocket do
   @behaviour Phoenix.Socket.Transport
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.PreviewLive
 
@@ -40,7 +41,12 @@ defmodule KilnCMSWeb.BridgeSocket do
          {:ok, org} <- fetch_org(info),
          actor <- authenticate(params["api_key"]),
          :ok <- authorize_read(ct, id, actor, org) do
-      {:ok, %{type: to_string(ct.type), id: id}}
+      # The actor id rides along so `init/1` can subscribe to that user's
+      # eviction topic. A raw transport has no `id/1` callback, so this socket
+      # cannot be dropped the way a `Phoenix.Socket` is — it has to listen for
+      # itself (#675). Anonymous connections carry `nil` and subscribe to
+      # nothing: they hold no grant that can be revoked.
+      {:ok, %{type: to_string(ct.type), id: id, actor_id: actor_id(actor)}}
     else
       _ -> :error
     end
@@ -49,8 +55,14 @@ defmodule KilnCMSWeb.BridgeSocket do
   @impl true
   def init(state) do
     Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic(state.type, state.id))
+    subscribe_to_eviction(state.actor_id)
     {:ok, state}
   end
+
+  defp subscribe_to_eviction(actor_id) when is_binary(actor_id),
+    do: Phoenix.PubSub.subscribe(KilnCMS.PubSub, SessionEviction.topic(actor_id))
+
+  defp subscribe_to_eviction(_anonymous), do: :ok
 
   # The client never sends anything meaningful; ignore inbound frames.
   @impl true
@@ -68,6 +80,14 @@ defmodule KilnCMSWeb.BridgeSocket do
 
     {:push, {:text, Jason.encode!(frame)}, state}
   end
+
+  # The eviction broadcast. `Endpoint.broadcast/3` delivers a
+  # `%Phoenix.Socket.Broadcast{}`, which is what a `Phoenix.Socket` acts on for
+  # its own sockets — here it has to be acted on by hand, because this is a raw
+  # transport (#675). Stopping the process closes the connection; the client
+  # reconnects and runs the full authorization again, which is the point.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "disconnect"}, state),
+    do: {:stop, :normal, state}
 
   def handle_info(_msg, state), do: {:ok, state}
 
@@ -96,6 +116,9 @@ defmodule KilnCMSWeb.BridgeSocket do
   end
 
   defp authenticate(_), do: nil
+
+  defp actor_id(%{id: id}), do: id
+  defp actor_id(_anonymous), do: nil
 
   # The actor must be able to read the document, or we refuse the socket (so a
   # draft is never streamed to someone who couldn't fetch it over HTTP). Scoped

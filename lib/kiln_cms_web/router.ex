@@ -170,6 +170,10 @@ defmodule KilnCMSWeb.Router do
     # names a user, so it cannot swap a live session for a stale cookie.
     plug :sign_in_with_remember_me
     plug :load_from_session
+    # After the two above, because it needs whichever of them resolved the user
+    # — and it covers the remember-me path, which never reaches
+    # `AuthController.complete_sign_in/3` (#675).
+    plug KilnCMSWeb.Plugs.LiveSocketId
   end
 
   # Preview endpoint — authorized by a signed token, not a session/bearer.

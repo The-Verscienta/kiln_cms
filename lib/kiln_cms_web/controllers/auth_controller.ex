@@ -105,11 +105,30 @@ defmodule KilnCMSWeb.AuthController do
     |> delete_session(:return_to)
     |> delete_session(:pending_2fa)
     |> store_in_session(user)
+    |> put_live_socket_id(user)
     # If your resource has a different name, update the assign name here (i.e :current_admin)
     |> assign(:current_user, user)
     |> put_flash(:info, message)
     |> redirect(to: return_to)
   end
+
+  @doc """
+  Key this session's LiveView socket to its user, so it can be dropped (#675).
+
+  LiveView sockets are disconnected by broadcasting on the session's
+  `live_socket_id`, and nothing was setting one — so `/live` could not be
+  disconnected at all, and a demoted or deleted editor kept every mounted view
+  until they closed the tab.
+
+  Keyed on the user rather than on the session, so one broadcast reaches every
+  session they have open, on the same topic every other socket listens on.
+  Public because the passkey ceremony establishes its session without passing
+  through `complete_sign_in/3` — the one place that would otherwise have been
+  missed.
+  """
+  @spec put_live_socket_id(Plug.Conn.t(), KilnCMS.Accounts.User.t()) :: Plug.Conn.t()
+  def put_live_socket_id(conn, user),
+    do: put_session(conn, :live_socket_id, KilnCMS.Accounts.SessionEviction.topic(user.id))
 
   @doc """
   Where this user lands after signing in (#157): editors/admins default to the

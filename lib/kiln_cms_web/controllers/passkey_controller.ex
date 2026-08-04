@@ -48,6 +48,9 @@ defmodule KilnCMSWeb.PasskeyController do
       conn
       |> delete_session(:return_to)
       |> AshAuthentication.Plug.Helpers.store_in_session(user)
+      # This ceremony establishes its session without going through
+      # `complete_sign_in/3`, so it has to key the socket itself (#675).
+      |> KilnCMSWeb.AuthController.put_live_socket_id(user)
       |> put_flash(:info, gettext("Signed in with a passkey."))
       |> json(%{redirect_to: return_to})
     else
