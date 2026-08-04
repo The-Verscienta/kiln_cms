@@ -30,6 +30,20 @@ defmodule KilnCMS.SafeFetch do
   `redirect: false` is load-bearing for the same reason: a followed redirect is
   a fresh resolution the pin never sees.
 
+  ## Which is why `:max_redirects` follows them here, by hand
+
+  Some callers have to follow one — a link checker (#474) that reported every
+  `http://` URL as a 301 would report the whole web as moved. `redirect: false`
+  still stands: each hop is a **fresh `request/3`**, so the `Location` is
+  re-validated and re-pinned exactly like the URL the caller passed. Handing the
+  chain to Req instead would resolve hops 2..n inside the client, past every
+  check this module exists to make, and one open redirect on a trusted host
+  would be a straight path back to the metadata service.
+
+  Default `0` — nothing follows a redirect unless it asks to. A response that is
+  *still* a 3xx when the hops run out comes back as that 3xx rather than an
+  error, so a caller can tell "redirect chain too long" from "refused to dial".
+
   ## Why there is a byte cap
 
   The response is attacker-influenced in both content *and length*. Without a
@@ -45,12 +59,21 @@ defmodule KilnCMS.SafeFetch do
   @default_connect_timeout 5_000
   @default_receive_timeout 10_000
 
+  # A hard ceiling on `:max_redirects` regardless of what a caller asks for.
+  # Every hop is a full validate-resolve-connect, so the option is also a
+  # multiplier on how long one call can occupy a worker.
+  @max_redirect_hops 10
+
+  @redirect_statuses [301, 302, 303, 307, 308]
+
   @type option ::
           {:max_bytes, pos_integer()}
           | {:connect_timeout, pos_integer()}
           | {:receive_timeout, pos_integer()}
           | {:headers, [{String.t(), String.t()}]}
           | {:body, iodata()}
+          | {:max_redirects, non_neg_integer()}
+          | {:truncate_body, boolean()}
           | {:req_options, keyword()}
 
   @type response :: %{status: integer(), headers: map(), body: binary()}
@@ -63,11 +86,28 @@ defmodule KilnCMS.SafeFetch do
   `:max_bytes`.
 
   Options: `:max_bytes` (default 256KB), `:connect_timeout` (5s),
-  `:receive_timeout` (10s), `:headers`, and `:req_options` (merged last, so a
+  `:receive_timeout` (10s), `:headers`, `:max_redirects` (default 0 — see the
+  moduledoc), `:truncate_body` (default false — when true an over-length body
+  is cut at the cap and returned as an ordinary response instead of an error,
+  for callers that only want the status), and `:req_options` (merged last, so a
   test env can point the request at a `Req.Test` stub).
   """
   @spec get(String.t(), [option()]) :: {:ok, response()} | {:error, String.t()}
   def get(url, opts \\ []), do: request(:get, url, opts)
+
+  @doc """
+  `HEAD` `url`, under the same pinning, redirect and byte-cap rules as `get/2`.
+
+  For asking whether a URL is *there* without paying for what is at it. Note
+  that plenty of servers answer HEAD with 405 or lie about it — a caller that
+  cares (`KilnCMS.Links.External`) retries with `get/2` rather than believing
+  the refusal.
+
+  The byte cap still applies: a server is free to send a body on a HEAD
+  response, and "we did not ask for one" is not a bound.
+  """
+  @spec head(String.t(), [option()]) :: {:ok, response()} | {:error, String.t()}
+  def head(url, opts \\ []), do: request(:head, url, opts)
 
   @doc """
   `POST` `body` to `url`, under the same pinning, redirect and byte-cap rules as
@@ -82,13 +122,107 @@ defmodule KilnCMS.SafeFetch do
   def post(url, body, opts \\ []), do: request(:post, url, Keyword.put(opts, :body, body))
 
   defp request(method, url, opts) when is_binary(url) do
-    case SafeUrl.resolve_pinned(url) do
-      {:ok, pinned_ip} -> dispatch(method, url, pinned_ip, opts)
-      {:error, reason} -> {:error, "blocked URL: #{reason}"}
-    end
+    hops = opts |> Keyword.get(:max_redirects, 0) |> clamp_hops()
+    follow(method, url, opts, hops, [])
   end
 
   defp request(_method, _url, _opts), do: {:error, "blocked URL: must be a valid URL with a host"}
+
+  defp clamp_hops(hops) when is_integer(hops) and hops > 0, do: min(hops, @max_redirect_hops)
+  defp clamp_hops(_hops), do: 0
+
+  # One hop. `visited` is a plain list because it is bounded by
+  # `@max_redirect_hops` — a set would buy nothing and costs an opaque type.
+  defp follow(method, url, opts, hops_left, visited) do
+    case SafeUrl.resolve_pinned(url) do
+      {:ok, pinned_ip} ->
+        method
+        |> dispatch(url, pinned_ip, opts)
+        |> maybe_follow(method, url, opts, hops_left, visited)
+
+      {:error, reason} ->
+        {:error, blocked_message(reason, visited)}
+    end
+  end
+
+  # A refusal on hop 2+ names the URL, because the one the caller passed was
+  # fine and "blocked URL: must not target private addresses" about a link that
+  # plainly is not private reads as a bug in the checker.
+  defp blocked_message(reason, []), do: "blocked URL: #{reason}"
+
+  defp blocked_message(reason, [previous | _rest]),
+    do: "blocked redirect from #{previous}: #{reason}"
+
+  defp maybe_follow({:ok, %{status: status} = response}, method, url, opts, hops_left, visited)
+       when status in @redirect_statuses and hops_left > 0 do
+    case next_url(response, url, [url | visited]) do
+      nil ->
+        {:ok, response}
+
+      next ->
+        {next_method, next_opts} = redirect_request(method, status, opts)
+        next_opts = strip_credentials_across_hosts(next_opts, url, next)
+        follow(next_method, next, next_opts, hops_left - 1, [url | visited])
+    end
+  end
+
+  defp maybe_follow(result, _method, _url, _opts, _hops_left, _visited), do: result
+
+  # A `Location` may be relative, so it is merged against the URL that produced
+  # it. An already-seen URL ends the chase and the 3xx is returned as the
+  # answer: a redirect loop is a fact about the link, not a transport failure.
+  defp next_url(response, url, visited) do
+    with [location | _rest] <- Map.get(response.headers, "location", []),
+         merged when is_binary(merged) <- merge_location(url, location),
+         false <- merged in visited do
+      merged
+    else
+      _other -> nil
+    end
+  end
+
+  defp merge_location(url, location) do
+    location = String.trim(to_string(location))
+
+    if location == "" do
+      nil
+    else
+      case URI.merge(URI.parse(url), location) do
+        %URI{host: host} = merged when is_binary(host) -> URI.to_string(merged)
+        _other -> nil
+      end
+    end
+  end
+
+  # RFC 9110: 303 (and, in practice, 301/302) turn a POST into a GET, and the
+  # body goes with it — replaying it against a target the author did not choose
+  # is how a redirect becomes a request forgery. HEAD survives every hop,
+  # including 303, which is exactly what a link check wants.
+  defp redirect_request(:head, _status, opts), do: {:head, opts}
+
+  defp redirect_request(method, status, opts) when method != :get and status in [301, 302, 303],
+    do: {:get, Keyword.delete(opts, :body)}
+
+  defp redirect_request(method, _status, opts), do: {method, opts}
+
+  # Headers the caller set for *its* target, dropped when the target changes.
+  # Nothing following redirects today sends either, but the cost of being wrong
+  # about that later is handing a webhook signing header or a session cookie to
+  # whoever controls a `Location` — and the caller that adds the header is not
+  # the one that reads this module.
+  @credential_headers ~w(authorization cookie proxy-authorization)
+
+  defp strip_credentials_across_hosts(opts, from_url, to_url) do
+    if URI.parse(from_url).host == URI.parse(to_url).host,
+      do: opts,
+      else: Keyword.update(opts, :headers, [], fn headers -> drop_credentials(headers) end)
+  end
+
+  defp drop_credentials(headers) do
+    Enum.reject(headers, fn {name, _value} ->
+      String.downcase(to_string(name)) in @credential_headers
+    end)
+  end
 
   defp dispatch(method, url, pinned_ip, opts) do
     max_bytes = Keyword.get(opts, :max_bytes, @default_max_bytes)
@@ -109,7 +243,7 @@ defmodule KilnCMS.SafeFetch do
         receive_timeout: Keyword.get(opts, :receive_timeout, @default_receive_timeout)
       ] ++
         body_option(opts) ++
-        collector_option(max_bytes) ++
+        collector_option(max_bytes, Keyword.get(opts, :truncate_body, false)) ++
         connect_target(
           url,
           pinned_ip,
@@ -148,18 +282,28 @@ defmodule KilnCMS.SafeFetch do
     end
   end
 
-  defp collector_option(max_bytes), do: [into: collector(max_bytes)]
+  defp collector_option(max_bytes, truncate?), do: [into: collector(max_bytes, truncate?)]
 
   # Streams the body, aborting the moment it passes `max_bytes` rather than
   # buffering first and checking after — the check has to happen while the bytes
   # are still arriving or it has already cost the memory it exists to bound.
-  defp collector(max_bytes) do
+  #
+  # `truncate?` decides what an abort *means*. By default it is an error: a
+  # caller that asked for a document and got the first 256KB of one has nothing
+  # it can parse. A caller that only wants the status line (a link checker) sets
+  # `truncate_body: true` and gets an ordinary response holding the prefix —
+  # without it, "this page is large" would be indistinguishable from "this page
+  # is gone", and every long article on the web would read as a broken link.
+  defp collector(max_bytes, truncate?) do
     fn {:data, data}, {req, resp} ->
       acc = resp.body || ""
 
       case acc do
         {:too_large, _limit} = marker ->
           {:halt, {req, %{resp | body: marker}}}
+
+        acc when byte_size(acc) + byte_size(data) > max_bytes and truncate? ->
+          {:halt, {req, %{resp | body: binary_part(acc <> data, 0, max_bytes)}}}
 
         acc when byte_size(acc) + byte_size(data) > max_bytes ->
           {:halt, {req, %{resp | body: {:too_large, max_bytes}}}}

@@ -152,6 +152,74 @@ migration, a rewritten column, a dropped config key).
   latent hazard rather than a live one, but "the id is whatever was in the path"
   made that escaping the only line of defence.
 
+- **Broken outbound links: a scheduled sweep and a site-wide report** — the
+  other half of the link checker (#474), and the half with teeth. A citation's
+  domain lapses, a linked article is taken down, a video is removed; nothing
+  says so, and the page keeps sending readers into a 404 on somebody else's
+  server.
+
+  **Off by default, per site.** `/editor/links` → *Turn on outbound checking*,
+  org-admin only. Turning it on is the decision that makes this server issue
+  requests to third parties on a schedule, and some deployments cannot do that
+  at all. The sweep is scheduled everywhere (`KILN_LINK_CHECK_CRON`); with no
+  site opted in it reads one settings row per org and stops.
+
+  **Very little is called broken, on purpose.** The web answers a checker
+  differently from a browser — bot walls 403, paywalls 401, CDNs 429, and a
+  great many hosts refuse `HEAD` outright. Only 404, 410 and a redirect chain
+  that never lands are reported. Everything else in the 4xx range, and any
+  address the SSRF guard refuses, is `:undetermined` and never shown to anyone.
+  This is the internal half's rule (*"I could not resolve it" is not "it is
+  broken"*) under worse conditions.
+
+  A 5xx, a timeout or a name that will not resolve is `:transient` and has to
+  fail **three consecutive checks** before it is reported. A dead domain arrives
+  that way rather than as a definite verdict, which is deliberate: DNS fails for
+  a minute far more often than forever, and the counter is what tells a lapsed
+  domain from a bad afternoon. Any success resets it.
+
+  `HEAD` goes first because it costs the far end nothing, and a 403/404/405/406
+  answer to it is re-asked with `GET` rather than believed — some servers really
+  do serve one to `HEAD` and the page to `GET`. That doubles traffic for some
+  broken links, which is the right way round.
+
+  **Manners, since this is outbound traffic in somebody's name.** Requests are
+  paced per **remote host** (`KilnCMS.Links.Throttle`, one per host every two
+  seconds), not per site or per job — the thing being protected is someone
+  else's server, and it does not care which tenant is pointing at it. A job that
+  hits a full bucket snoozes rather than sleeps, so one busy domain cannot stall
+  the queue. Healthy links are re-checked weekly, not nightly. The user-agent
+  identifies Kiln and carries a URL, and deliberately carries **no version**: a
+  link checker announces itself to every site an author has ever cited, and a
+  build number there is a permanent broadcast of what to try
+  (`KILN_LINK_CHECK_USER_AGENT` sets your own).
+
+  **`KilnCMS.SafeFetch` gained `head/2` and `:max_redirects`.** Following a
+  redirect is the one thing that module refused to do, because a followed
+  redirect is a fresh DNS resolution the address pin never sees. It now follows
+  them **by hand** — every hop is a full re-validate and re-pin — and credential
+  headers are dropped when the host changes. Handing the chain to the HTTP
+  client instead would resolve hops 2..n past every check, and one open redirect
+  on a trusted host would be a straight path back to the metadata service.
+  `:truncate_body` is the other new option, and it is not cosmetic: without it a
+  page larger than the byte cap comes back as an error and reads exactly like a
+  dead link.
+
+  Findings persist (`KilnCMS.CMS.ExternalLink`, one row per `{document, url}`)
+  because a sweep over everything has no editor open to report into. The report
+  inverts that grain and lists one row per URL with every document to open,
+  since an author fixes the link once and then visits each page. Reconciliation
+  is a single rule — rows not seen by the latest sweep are deleted — which
+  covers "the link was removed", "the document was unpublished", "the document
+  was deleted" and "the type was archived" without four hooks that each have to
+  remember. The delete runs only after a scan that reached the end.
+
+  Scanned: published records only; rich-text annotations (including inside table
+  cells), an `embed` block's URL, a `claim` block's `source_url`. Not scanned:
+  image and gallery URLs, which point at Kiln's own storage — checking those
+  would be this deployment asking itself whether its own files exist, over the
+  network, nightly. See [`docs/link-checking.md`](docs/link-checking.md).
+
 - **Broken internal links are flagged in the editor** — the deterministic half
   of the link checker (#474). An author links `/blog/the-thing`; later it is
   renamed, unpublished or deleted, and nothing says so. The link keeps rendering
@@ -185,7 +253,7 @@ migration, a rewritten column, a dropped config key).
   runs on a keystroke.
 
   **External link checking is not part of this** — it needs outbound requests,
-  per-domain throttling and a per-org opt-in, and #474 stays open for it.
+  per-domain throttling and a per-org opt-in, and ships as its own entry above.
 
   **The design constraint is that "I could not resolve it" is not "it is
   broken".** The resolver only reports a link broken inside a namespace it owns

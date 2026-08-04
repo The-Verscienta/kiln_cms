@@ -111,6 +111,7 @@ defmodule KilnCMS.MixProject do
       # Authoring & editorial
       "docs/editor-shortcuts.md": [],
       "docs/advisories.md": [],
+      "docs/link-checking.md": [],
       "docs/forms.md": [],
       "docs/seo.md": [],
       "docs/ai-assist.md": [],
@@ -208,6 +209,7 @@ defmodule KilnCMS.MixProject do
       "Authoring & editorial": [
         "docs/editor-shortcuts.md",
         "docs/advisories.md",
+        "docs/link-checking.md",
         "docs/forms.md",
         "docs/seo.md",
         "docs/ai-assist.md",

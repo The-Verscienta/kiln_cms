@@ -164,8 +164,10 @@ on the site as failing, and authors would learn within a day to ignore the panel
 A failed query is `:unknown` too — a transient database blip must not become a
 page full of false errors.
 
-**External links are not checked here.** That half of #474 needs outbound
-requests, per-domain throttling and a per-org opt-in, and is tracked separately.
+**External links are not checked here.** Outbound checking needs requests,
+per-domain throttling and a per-site opt-in, so it is a scheduled sweep with its
+own report at `/editor/links` rather than a check in this panel — see
+[Broken link checking](link-checking.md).
 
 ## Where things live
 

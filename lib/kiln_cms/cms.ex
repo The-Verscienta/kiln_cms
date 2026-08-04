@@ -303,6 +303,21 @@ defmodule KilnCMS.CMS do
       define :list_code_injection_versions, action: :read
     end
 
+    # Whether this site checks its outbound links (#474). Off unless saved; read
+    # through `KilnCMS.Links.Settings`, which resolves an absent row rather than
+    # creating one.
+    resource KilnCMS.CMS.SiteLinkCheck do
+      define :list_site_link_check, action: :read
+      define :save_site_link_check, action: :save
+    end
+
+    # One outbound URL in one document, and its last verdict (#474). Written by
+    # the sweep and the check worker, both system-side; read by the report.
+    resource KilnCMS.CMS.ExternalLink do
+      define :list_external_links, action: :read
+      define :observe_external_link, action: :observe
+    end
+
     # Editorial/authorization consent linked to content (#356).
     resource KilnCMS.CMS.Consent do
       define :record_consent, action: :record

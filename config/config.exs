@@ -39,6 +39,11 @@ config :kiln_cms, Oban,
     media: 3,
     webhooks: 3,
     scheduling: 5,
+    # Outbound link checking (#474). Deliberately the narrowest queue: every job
+    # is a request to somebody else's server, paced per domain by
+    # KilnCMS.Links.Throttle, and a wide queue would just produce more jobs
+    # snoozing on the same buckets.
+    link_check: 3,
     default: 10
   ],
   repo: KilnCMS.Repo,
@@ -363,6 +368,13 @@ config :kiln_cms, KilnCMS.Governance.Witness, adapter: KilnCMS.Governance.Witnes
 # `false` disables the scheduled run without disabling checkpoints, for a
 # deployment that drives `mix kiln.audit.checkpoint` from its own scheduler.
 config :kiln_cms, :governance_checkpoint_cron, "40 3 * * *"
+
+# When the external link sweep runs (#474). Safe to leave scheduled everywhere:
+# outbound checking is opt-in per site, so with nobody opted in this reads one
+# settings row per org and stops. Nightly, and offset from the checkpoint run so
+# two per-org sweeps don't start in the same minute. `false` disables the
+# schedule for a deployment that drives `KilnCMS.Links.Sweep.run/0` itself.
+config :kiln_cms, :link_check_cron, "20 4 * * *"
 
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
