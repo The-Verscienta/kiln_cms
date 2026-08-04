@@ -391,8 +391,19 @@ defmodule KilnCMS.Governance.ChainTest do
 
   describe "anchor_every_write" do
     setup do
+      # Capture and restore rather than `delete_env`: deleting falls back to the
+      # compiled default (`false`), not whatever was actually configured when the
+      # suite started — silently flipping the flag off for every test that runs
+      # after this `describe` block if anything ever configures it `true` (#611).
+      prev = Application.get_env(:kiln_cms, :audit_anchor_every_write)
       Application.put_env(:kiln_cms, :audit_anchor_every_write, true)
-      on_exit(fn -> Application.delete_env(:kiln_cms, :audit_anchor_every_write) end)
+
+      on_exit(fn ->
+        if is_nil(prev),
+          do: Application.delete_env(:kiln_cms, :audit_anchor_every_write),
+          else: Application.put_env(:kiln_cms, :audit_anchor_every_write, prev)
+      end)
+
       :ok
     end
 
@@ -654,12 +665,23 @@ defmodule KilnCMS.Governance.ChainTest do
       # anchors already minted, and they still commit to what they commit to.
       # Reading `[]` here because the feature is "off" would let coalescing eat
       # them and red the document the moment the switch came back on.
+      #
+      # Capture and restore rather than `delete_env` (#611) — see the
+      # `anchor_every_write` setup above for why deleting is lossy.
+      prev = Application.get_env(:kiln_cms, :audit_anchors_enabled)
       Application.put_env(:kiln_cms, :audit_anchors_enabled, false)
-      on_exit(fn -> Application.delete_env(:kiln_cms, :audit_anchors_enabled) end)
+
+      on_exit(fn ->
+        if is_nil(prev),
+          do: Application.delete_env(:kiln_cms, :audit_anchors_enabled),
+          else: Application.put_env(:kiln_cms, :audit_anchors_enabled, prev)
+      end)
 
       _page = page |> autosave!("Two", actor) |> autosave!("Three", actor)
 
-      Application.delete_env(:kiln_cms, :audit_anchors_enabled)
+      if is_nil(prev),
+        do: Application.delete_env(:kiln_cms, :audit_anchors_enabled),
+        else: Application.put_env(:kiln_cms, :audit_anchors_enabled, prev)
 
       assert version_digests(page, anchored) == digests
       assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
@@ -677,8 +699,16 @@ defmodule KilnCMS.Governance.ChainTest do
   end
 
   test "the kill switch disables anchoring" do
+    # Capture and restore rather than `delete_env` (#611) — see the
+    # `anchor_every_write` setup above for why deleting is lossy.
+    prev = Application.get_env(:kiln_cms, :audit_anchors_enabled)
     Application.put_env(:kiln_cms, :audit_anchors_enabled, false)
-    on_exit(fn -> Application.delete_env(:kiln_cms, :audit_anchors_enabled) end)
+
+    on_exit(fn ->
+      if is_nil(prev),
+        do: Application.delete_env(:kiln_cms, :audit_anchors_enabled),
+        else: Application.put_env(:kiln_cms, :audit_anchors_enabled, prev)
+    end)
 
     page = published_page(admin())
     assert is_nil(Chain.latest_anchor("page", page.id, page.org_id))

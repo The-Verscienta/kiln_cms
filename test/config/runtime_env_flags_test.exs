@@ -44,7 +44,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             DATABASE_SSL DATABASE_SSL_CACERTFILE ECTO_IPV6 PHX_SERVER
             VISUAL_EDITING_ENABLED KILN_UPDATE_CHECK KILN_ANALYTICS_REFERRERS
             KILN_ANALYTICS_LOW_COUNT_THRESHOLD
-            KILN_AUDIT_ANCHOR_EVERY_WRITE
+            KILN_AUDIT_ANCHORS_ENABLED KILN_AUDIT_ANCHOR_EVERY_WRITE
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
           ) ++ Map.keys(@prod_env)
@@ -351,6 +351,61 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       referrers = get_in(config, [:kiln_cms, :analytics_referrers])
       assert referrers[:enabled] == true
       assert referrers[:low_count_threshold] == 3
+    end
+  end
+
+  describe "KILN_AUDIT_ANCHORS_ENABLED (#356/#611)" do
+    # The master switch: `Chain.extend/2` requires this AND every_write, so
+    # before this variable existed there was no runtime way back once the
+    # compiled default was flipped off — a documented "no rebuild needed" kill
+    # switch that in fact needed one (#611).
+    defp anchors_enabled(value, env \\ :prod) do
+      {config, stderr} = eval_io(%{"KILN_AUDIT_ANCHORS_ENABLED" => value}, env)
+
+      written =
+        case get_in(config, [:kiln_cms, :audit_anchors_enabled]) do
+          nil -> :not_written
+          bool -> bool
+        end
+
+      {written, stderr}
+    end
+
+    test "on-spellings enable it, in any case and with surrounding space" do
+      for value <- ["true", "TRUE", "True", " true ", "1", "yes", "YES", "on", "On"] do
+        assert {true, _} = anchors_enabled(value), "expected #{inspect(value)} to enable it"
+      end
+    end
+
+    test "off-spellings disable it, in any case" do
+      for value <- ["false", "FALSE", "False", " off ", "0", "no", "NO", "OFF"] do
+        assert {false, _} = anchors_enabled(value), "expected #{inspect(value)} to disable it"
+      end
+    end
+
+    test "unset writes nothing, leaving the compiled default (true) in force" do
+      assert {:not_written, _} = anchors_enabled(nil)
+    end
+
+    test "an unrecognized value writes nothing and warns, instead of reading as on" do
+      for value <- ["enabled", "y", "t", "True!", ~s("true"), "maybe"] do
+        {written, stderr} = anchors_enabled(value)
+
+        assert written == :not_written,
+               "#{inspect(value)} must not be interpreted — it should keep the default"
+
+        assert stderr =~ "KILN_AUDIT_ANCHORS_ENABLED is set to an unrecognized value",
+               "#{inspect(value)} should warn rather than be silently swallowed"
+      end
+    end
+
+    test "a recognized value warns about nothing" do
+      {_written, stderr} = anchors_enabled("false")
+      refute stderr =~ "KILN_AUDIT_ANCHORS_ENABLED is set to an unrecognized value"
+    end
+
+    test "the block is skipped under :test so the suite is deterministic" do
+      assert {:not_written, _} = anchors_enabled("false", :test)
     end
   end
 

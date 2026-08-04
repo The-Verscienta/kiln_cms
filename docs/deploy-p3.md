@@ -69,6 +69,6 @@ No backfills required; no locks beyond ordinary DDL.
 ## Rollback notes
 
 Every feature is config- or data-gated: disable anchors via
-`:audit_anchors_enabled`, SSO via the compile gate, newsletter automation by
-disabling the rule. Migrations are additive and safe to leave in place on a
-rollback.
+`KILN_AUDIT_ANCHORS_ENABLED=false` (runtime, no rebuild — #611), SSO via the
+compile gate, newsletter automation by disabling the rule. Migrations are
+additive and safe to leave in place on a rollback.
