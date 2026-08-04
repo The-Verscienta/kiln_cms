@@ -7449,9 +7449,9 @@ msgstr[1] "%{count} enlaces apuntan a contenido que aún no está publicado: %{p
 #: lib/kiln_cms_web/live/analytics_live.ex:188
 #, elixir-autogen, elixir-format
 msgid "Export (CSV)"
-msgstr ""
+msgstr "Exportar (CSV)"
 
 #: lib/kiln_cms_web/live/analytics_live.ex:185
 #, elixir-autogen, elixir-format
 msgid "Export (JSON)"
-msgstr ""
+msgstr "Exportar (JSON)"
