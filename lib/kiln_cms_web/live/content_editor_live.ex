@@ -164,6 +164,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:assist_instruction, nil)
          |> assign(:assist_running?, false)
          |> assign(:assist_result, nil)
+         # Block-level editorial comments (#404): loaded once at mount (a
+         # document's comment volume is small) and refreshed after
+         # add/resolve/unresolve. `comment_block` is the id of the block whose
+         # thread panel is open (nil = closed, one at a time — same pattern as
+         # `assist_block`); `comment_draft` is that panel's textarea value.
+         |> assign(:comments, load_comments(kind, record.id, actor, org))
+         |> assign(:comment_block, nil)
+         |> assign(:comment_draft, nil)
          # Internal-link suggestions (#377). `nil` = never opened; loading is
          # deferred to first open because it costs a pgvector query plus a
          # record read per neighbour, which no page-load should pay.
@@ -1317,6 +1325,64 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # A mode outside insert/replace is ignored, not left to fall through.
   def handle_event("assist_apply", _params, socket), do: {:noreply, socket}
 
+  # ── Block-level editorial comments (#404) ───────────────────────────────────
+  #
+  # One thread per block; `RouteToBlockThread` on the resource is what makes
+  # that true regardless of caller, so nothing here has to track which comment
+  # is a reply to which — only ever "add a comment to this block" and "resolve
+  # this block's thread". `comment_draft` is synced the same way
+  # `assist_instruction` is: this panel sits inside the main content `<.form>`,
+  # which can't nest another `<form>`, so the textarea keeps its own
+  # unprefixed `phx-change` and the Send button reads the synced assign rather
+  # than anything in the click event.
+
+  def handle_event("comment_open", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "" do
+    {:noreply, socket |> close_comment_panel() |> assign(:comment_block, block_id)}
+  end
+
+  def handle_event("comment_open", _params, socket), do: {:noreply, socket}
+
+  def handle_event("comment_close", _params, socket), do: {:noreply, close_comment_panel(socket)}
+
+  def handle_event("comment_draft", params, socket) do
+    {:noreply, assign(socket, :comment_draft, params["comment_body"])}
+  end
+
+  def handle_event("comment_add", %{"bid" => block_id}, socket)
+      when is_binary(block_id) and block_id != "" do
+    body = socket.assigns.comment_draft
+
+    if is_binary(body) and String.trim(body) != "" do
+      case CMS.add_comment(
+             %{
+               content_type: to_string(socket.assigns.kind),
+               content_id: socket.assigns.record.id,
+               block_id: block_id,
+               body: body
+             },
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           ) do
+        {:ok, _comment} ->
+          {:noreply, socket |> reload_comments() |> assign(:comment_draft, nil)}
+
+        {:error, _error} ->
+          {:noreply, put_flash(socket, :error, gettext("Couldn't add comment."))}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("comment_add", _params, socket), do: {:noreply, socket}
+
+  def handle_event("comment_resolve", %{"id" => id}, socket),
+    do: resolve_comment_thread(socket, id, :resolve_comment)
+
+  def handle_event("comment_unresolve", %{"id" => id}, socket),
+    do: resolve_comment_thread(socket, id, :unresolve_comment)
+
   # The gallery's picker is multi-select (#482): a gallery is built from several
   # images at once, and re-opening a drawer per image turns "add these eight" into
   # eight round trips through a modal.
@@ -1928,6 +1994,55 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: socket |> cancel_async(:assist) |> assign(:assist_running?, false)
 
   defp cancel_assist(socket), do: socket
+
+  # ── Block-level editorial comments (#404): handle_event helpers ────────────
+
+  defp resolve_comment_thread(socket, id, action) do
+    case Enum.find(socket.assigns.comments, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      comment ->
+        case apply(CMS, action, [comment, %{}, [actor: socket.assigns.actor]]) do
+          {:ok, _} ->
+            {:noreply, reload_comments(socket)}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, gettext("Couldn't update that comment thread."))}
+        end
+    end
+  end
+
+  defp reload_comments(socket) do
+    comments =
+      load_comments(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    assign(socket, :comments, comments)
+  end
+
+  # Batch-loads `:author` on the whole list in one query rather than once per
+  # comment at render time (`comment_author_label/1` reads it back off the
+  # struct — no per-row load in the template). `authorize?: false` on the load
+  # only: `User`'s read policy is self-only (`id == actor(:id)`), so showing
+  # who wrote a comment — ordinary display data, not sensitive — would
+  # otherwise fail to load for every author but the viewer themselves. The
+  # comment list itself is still policy-checked normally.
+  defp load_comments(kind, record_id, actor, org) do
+    to_string(kind)
+    |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
+    |> Ash.load!(:author, authorize?: false, tenant: org)
+  end
+
+  defp close_comment_panel(socket) do
+    socket
+    |> assign(:comment_block, nil)
+    |> assign(:comment_draft, nil)
+  end
 
   defp run_workflow(socket, action)
        when action in ~w(submit return publish unpublish archive unarchive) do
@@ -3829,6 +3944,136 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  attr :block_id, :string, required: true
+  attr :comments, :list, required: true
+  attr :open?, :boolean, required: true
+  attr :draft, :string, default: nil
+
+  # Block-level editorial comment thread (#404) — same toggle-button-into-
+  # inline-panel shape as `assist_panel/1` above, and the same reason the
+  # textarea keeps its own unprefixed `phx-change`/`phx-debounce="blur"`
+  # rather than living inside a `<form>`: this sits inside the main content
+  # form, which can't nest one.
+  #
+  # Unlike `assist_panel/1`, rendered for every block type (outside all the
+  # per-type conditionals) — a comment can land on any block, not just rich
+  # text.
+  defp comment_panel(assigns) do
+    thread = thread_for_block(assigns.comments, assigns.block_id)
+    assigns = assign(assigns, :thread, thread)
+
+    ~H"""
+    <div class="mt-2">
+      <button
+        type="button"
+        phx-click={if @open?, do: "comment_close", else: "comment_open"}
+        phx-value-bid={@block_id}
+        aria-expanded={to_string(@open?)}
+        class={[
+          "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-base-200",
+          if(thread_resolved?(@thread),
+            do: "border-base-content/20 text-base-content/50",
+            else: "border-base-content/20"
+          )
+        ]}
+      >
+        <.icon name="hero-chat-bubble-left-right" class="size-3.5" />
+        {if @thread == [],
+          do: gettext("Comment"),
+          else:
+            ngettext("%{count} comment", "%{count} comments", length(@thread), count: length(@thread))}
+        <span :if={thread_resolved?(@thread)} class="text-success">
+          · {gettext("Resolved")}
+        </span>
+      </button>
+
+      <div
+        :if={@open?}
+        class="mt-2 space-y-2 rounded border border-base-content/15 bg-base-200/40 p-2"
+      >
+        <div :if={@thread == []} class="text-xs text-base-content/60">
+          {gettext("No comments on this block yet.")}
+        </div>
+
+        <div :for={comment <- @thread} class="rounded bg-base-100 p-2 text-xs">
+          <div class="flex items-center justify-between gap-2 text-base-content/60">
+            <span>{comment_author_label(comment)}</span>
+            <time datetime={DateTime.to_iso8601(comment.inserted_at)}>
+              {Calendar.strftime(comment.inserted_at, "%b %-d, %H:%M")}
+            </time>
+          </div>
+          <%!-- Rendered as a text node, never raw markup: a comment is
+                editor-typed prose, not HTML. --%>
+          <p class="mt-1 break-words">{comment.body}</p>
+          <button
+            :if={is_nil(comment.thread_id)}
+            type="button"
+            phx-click={if comment.resolved_at, do: "comment_unresolve", else: "comment_resolve"}
+            phx-value-id={comment.id}
+            class="mt-1 text-base-content/60 underline hover:text-base-content"
+          >
+            {if comment.resolved_at, do: gettext("Reopen thread"), else: gettext("Resolve thread")}
+          </button>
+        </div>
+
+        <%!-- See `assist_panel/1`'s textarea for why this is unprefixed with
+              its own phx-change/phx-debounce="blur" rather than a nested
+              <form>: the Send button reads @comment_draft (synced on blur),
+              never anything from its own click event. --%>
+        <textarea
+          name="comment_body"
+          rows="2"
+          phx-change="comment_draft"
+          phx-debounce="blur"
+          aria-label={gettext("Write a comment")}
+          placeholder={gettext("Write a comment…")}
+          class="field-input text-xs"
+        >{@draft}</textarea>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            phx-click="comment_add"
+            phx-value-bid={@block_id}
+            class="btn btn-sm btn-default"
+          >
+            {gettext("Send")}
+          </button>
+          <button
+            type="button"
+            phx-click="comment_close"
+            class="text-xs text-base-content/60 underline hover:text-base-content"
+          >
+            {gettext("Close")}
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # This block's thread, oldest first — the root (if any) followed by its
+  # replies. `RouteToBlockThread` guarantees every comment sharing a block id
+  # already belongs to the same one thread, so no grouping-by-thread-id is
+  # needed here; `comments` is already sorted by `inserted_at` from
+  # `list_comments_for!`.
+  defp thread_for_block(comments, block_id),
+    do: Enum.filter(comments, &(&1.block_id == block_id))
+
+  # A thread with no comments yet is not "resolved" — there's nothing to
+  # reopen. Otherwise resolved iff its root (thread_id: nil) carries a
+  # resolved_at.
+  defp thread_resolved?([]), do: false
+  defp thread_resolved?(thread), do: Enum.any?(thread, &(is_nil(&1.thread_id) and &1.resolved_at))
+
+  defp comment_author_label(%{author: %{name: name}}) when is_binary(name) and name != "",
+    do: name
+
+  defp comment_author_label(%{author: %{email: email}}) when not is_nil(email),
+    do: to_string(email)
+
+  defp comment_author_label(_comment), do: gettext("Someone")
+
   attr :form, :any, required: true
   attr :media, :list, required: true
   attr :current_org, :any, required: true
@@ -5409,6 +5654,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       />
                       <.item_rows_editor :if={row_editor_type?(block_type_string(bf))} bf={bf} />
                     </div>
+                    <%!-- Comments (#404) are rendered here, outside every
+                          per-type branch above, so they apply to any block
+                          type — unlike AI assist, which is rich_text-only. --%>
+                    <.comment_panel
+                      :if={bf[:id].value}
+                      block_id={bf[:id].value}
+                      comments={@comments}
+                      open?={@comment_block == bf[:id].value}
+                      draft={if @comment_block == bf[:id].value, do: @comment_draft}
+                    />
                     <%!-- Inline "+" to insert a block right after this one (B2). --%>
                     <.block_inserter
                       id={"insert-after-#{bf[:id].value}"}
