@@ -204,6 +204,13 @@ curl -s 'http://localhost:4000/api/json/posts' \
     authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
     [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and
     [mcp.md](mcp.md).
+- **`tag_ids` replaces, it doesn't merge** (#521): sending it on a content write
+  overwrites the *entire* tag set, so a partial list detaches every tag not
+  named. To attach/detach a subset instead, use `add_tag_ids`/`remove_tag_ids`
+  (JSON:API, GraphQL) — MCP's `update_page`/`update_post`/`update_entry` take
+  the same three arguments. See "Writing tags — replace vs merge" in
+  [json-api.md](json-api.md) or [headless-graphql-api.md](headless-graphql-api.md),
+  and [mcp.md](mcp.md) → "Tools".
 - Keys always **expire** and can be **revoked** immediately from the admin UI; an
   expired/revoked key returns **401**.
 - Works on JSON:API (`/api/json`), GraphQL (`/gql`, incl. the subscription
@@ -219,7 +226,7 @@ but **not every query returns drafts**. Pick the right surface:
 | List / filter drafts | JSON:API `GET /api/json/<type>?filter[state]=draft` | ✅ yes |
 | Search drafts | JSON:API `/search` · GraphQL `searchPosts`/`searchPages` | ✅ yes |
 | Fetch one **by id** | JSON:API `GET /api/json/<type>/:id` | ✅ yes |
-| Fetch one **by slug** | GraphQL `postBySlug`/`pageBySlug`, `categoryBySlug`, `tagBySlug` | ❌ **no — published only** |
+| Fetch one **by slug** | GraphQL `postBySlug`/`pageBySlug`, `categoryBySlug`, `tagBySlug`, `tagGroupBySlug` | ❌ **no — published only** |
 | Share a specific draft | `GET /preview/:token` (signed link) | n/a (no account needed) |
 
 > **GraphQL `*BySlug` never returns drafts.** Those queries run the
@@ -246,9 +253,13 @@ A quick map:
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`                         |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id`  | `/categories/by-slug/:slug`                   |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
+| TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id`  | `/tag-groups/by-slug/:slug`                   |
 
-Taxonomy (Category/Tag) is world-readable and now mirrors the GraphQL taxonomy
-surface over JSON:API (#185) — list, fetch by id, or fetch by slug.
+Taxonomy (Category/Tag/TagGroup) is world-readable and now mirrors the GraphQL
+taxonomy surface over JSON:API (#185) — list, fetch by id, or fetch by slug. A
+tag group is the bucket a tag is filed under — see [json-api.md](json-api.md)
+→ "Routes" and [headless-graphql-api.md](headless-graphql-api.md) → "Taxonomy"
+for the `tag_group_id`/`tagGroup` relationship and `content_types` scoping.
 
 `*/search` (keyword) and `*/semantic-search` (vector) take their inputs as
 top-level query params — `?query=<text>&locale=<code>` (plus optional
