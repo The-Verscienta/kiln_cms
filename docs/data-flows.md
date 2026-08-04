@@ -39,6 +39,7 @@ your deployment.
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
 | Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
 | Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). |
+| Funnel definitions | `funnels`, `funnel_steps` | No | Admin-authored ordered list of content items (landing → pricing → signup, #621). No visitor data, no counter table — step traffic is derived from `content_view_days` at read time. Not on a retention purge; kept until an admin deletes the funnel. |
 
 ## What data leaves the system
 

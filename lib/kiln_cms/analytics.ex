@@ -23,6 +23,11 @@ defmodule KilnCMS.Analytics do
   Each recorded view also emits a `[:kiln_cms, :analytics, :view]` telemetry
   event so external sinks (Prometheus, OTLP) can observe view traffic; see
   `docs/observability.md`.
+
+  `KilnCMS.Analytics.Funnel`/`FunnelStep` (#621) are the exception to all of
+  the above: admin-authored editorial *definitions*, not recorded traffic —
+  the first writable resources in this domain. A funnel's step traffic is
+  derived from `ContentViewDay` buckets at read time (#622), never stored.
   """
   use Ash.Domain, otp_app: :kiln_cms
 
@@ -46,6 +51,21 @@ defmodule KilnCMS.Analytics do
       define :record_search, action: :record
       define :top_searches, action: :top
       define :zero_result_searches, action: :zero_result
+    end
+
+    resource KilnCMS.Analytics.Funnel do
+      define :list_funnels, action: :read
+      define :get_funnel, action: :read, get_by: [:id]
+      define :create_funnel, action: :create
+      define :update_funnel, action: :update
+      define :destroy_funnel, action: :destroy
+    end
+
+    resource KilnCMS.Analytics.FunnelStep do
+      define :funnel_steps_for, action: :for_funnel, args: [:funnel_id]
+      define :create_funnel_step, action: :create
+      define :update_funnel_step, action: :update
+      define :destroy_funnel_step, action: :destroy
     end
   end
 

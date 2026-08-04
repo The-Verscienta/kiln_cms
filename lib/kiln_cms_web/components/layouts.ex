@@ -545,6 +545,12 @@ defmodule KilnCMSWeb.Layouts do
             icon: "hero-clipboard-document-list"
           },
           %{
+            key: :funnels,
+            label: gettext("Funnels"),
+            path: ~p"/editor/funnels",
+            icon: "hero-funnel"
+          },
+          %{
             key: :webhooks,
             label: gettext("Webhooks"),
             path: ~p"/editor/webhooks",
