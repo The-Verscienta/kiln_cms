@@ -19,9 +19,12 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   What a flat window buys is still most of the value: an attacker goes from
   unlimited guesses per account to `@budget` per `@window`, and the worst a
-  victim suffers is the tail of one window. A successful sign-in clears the
+  victim suffers is the tail of one window. A *completed* sign-in clears the
   counter outright, so a user who mistypes twice and then gets it right starts
-  from zero rather than carrying failures into their next session.
+  from zero rather than carrying failures into their next session. "Completed"
+  is load-bearing for a 2FA account: since #742 the password succeeding is not
+  enough, because a first factor that stops at the code prompt is precisely
+  what an attacker holding a stuffed password produces.
 
   Sign-in isn't the only way to prove you own the account, so a completed
   password reset and a passkey sign-in call `forgive/1` too — otherwise the one
@@ -63,12 +66,18 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   they can grind the six-digit space — 10^6, and TOTP accepts a skew window — at
   whatever rate their IP pool allows.
 
-  `PendingSignIn.max_age/0` is no bound on that. Re-running the password step mints
-  a fresh pending token, and because that step *succeeds* it also calls
-  `forgive/1` and clears the sign-in counter — so the five-minute window costs an
-  attacker who has the password precisely nothing to renew. That is why this
-  budget keys on the account rather than on the pending token: minting a new
-  token does not buy new attempts.
+  `PendingSignIn.max_age/0` is no bound on that: re-running the password step
+  mints a fresh pending token, so the five-minute window is one request away
+  from being renewed. That is why this budget keys on the account rather than on
+  the pending token — minting a new token buys no new attempts.
+
+  Renewing it is no longer *free*, either. Until #742 the password step also
+  forgave the sign-in counter, because it succeeded; now it does not for a 2FA
+  account, so each renewal costs one unit of `@budget`. That is a second, looser
+  ceiling on the same attack — and it composes: an account whose second factor
+  is locked out spends sign-in budget on every retry, so one cause can fill both
+  buckets. See `KilnCMS.Accounts.SignInAlert` on why the first-factor mail's
+  copy has to read sanely for an owner who did that to themselves.
 
   Tighter than sign-in, deliberately. A six-digit code is guessable in a way a
   password is not, and a legitimate user is reading theirs off a screen — five
@@ -141,9 +150,11 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @doc """
   Clears the sign-in counter for this identifier.
 
-  Called on any proof of ownership — a successful password sign-in, a completed
-  password reset, a passkey sign-in. A locked-out owner whose only remedy was
-  the thing being blocked would have no remedy at all.
+  Called on any proof of ownership — a completed password sign-in, a verified
+  second factor (`KilnCMS.Accounts.SecondFactor.check/2`, which is the *only*
+  releaser for a 2FA account since #742), a completed password reset, a passkey
+  sign-in. A locked-out owner whose only remedy was the thing being blocked
+  would have no remedy at all.
   """
   @spec forgive(String.t()) :: :ok
   def forgive(identifier), do: drop(key("signin", identifier), window())

@@ -21,19 +21,24 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   runs once, when the read actually executes, which is the only thing that is an
   attempt.
 
-  ## Charge the attempt, forgive the success
+  ## Charge the attempt, forgive the *completed* sign-in
 
   `AccountThrottle.consume/1` is one atomic increment-and-compare, run before the
   read. A preparation can't observe *why* a read failed — `SignInPreparation`
   returns its `AuthenticationFailed` from an `after_action` hook, and a hook that
-  errors ends the chain — so every attempt is charged and a genuine success
+  errors ends the chain — so every attempt is charged and a completed sign-in
   refunds the whole counter.
 
-  "Genuine" is checked rather than assumed: the record is forgiven only if it
-  carries the sign-in token `SignInPreparation` mints once the password verifies.
-  Ash appends `after_action` hooks only when `read_action_after_action_hooks_in_order?`
-  is set (it is, in `config/config.exs`); reading the token means the wrong order
-  degrades to "forgives nothing" rather than to "forgives a failed attempt".
+  Two things are checked rather than assumed. The record must carry the sign-in
+  token `SignInPreparation` mints once the password verifies — Ash appends
+  `after_action` hooks only when `read_action_after_action_hooks_in_order?` is
+  set (it is, in `config/config.exs`), so reading the token means the wrong
+  order degrades to "forgives nothing" rather than to "forgives a failed
+  attempt". And the account must not owe a **second factor** (#742): for a 2FA
+  account the password succeeding is not the sign-in succeeding, and forgiving
+  there handed an attacker who holds a stuffed password an unlimited supply of
+  first-factor steps. `KilnCMS.Accounts.SecondFactor.check/2` forgives it at the
+  step that actually completes.
 
   ## The refusal costs an attacker the same as a wrong guess
 
@@ -150,9 +155,29 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
 
   defp forgive_on_success(query, identifier) do
     Query.after_action(query, fn _query, records ->
-      if Enum.any?(records, &signed_in?/1), do: AccountThrottle.forgive(identifier)
+      if Enum.any?(records, &completed_sign_in?/1), do: AccountThrottle.forgive(identifier)
       {:ok, records}
     end)
+  end
+
+  # A password that is not the whole sign-in does not clear the counter (#742).
+  #
+  # For a 2FA account the first factor succeeding proves nothing about whoever
+  # sent it finishing — and forgiving there left this budget with no grip on the
+  # one attacker it most needs it for. Someone holding a stuffed password for an
+  # account they cannot pass could loop `POST /api/auth/sign_in`: the password
+  # *succeeds*, so the counter reset every time, and the only remaining bound
+  # was the per-IP `:auth` bucket — the axis #478 exists precisely because
+  # attackers rotate. Each of those calls also mints and stores a token row
+  # nobody will ever hold, because `store_all_tokens?` writes it before this
+  # controller learns the account owes a code.
+  #
+  # So the counter is held, and `KilnCMS.Accounts.SecondFactor.check/2` forgives
+  # it when the second factor actually lands. A user who abandons the code
+  # prompt ten times in a window is refused for its tail, which is the same
+  # bargain every other account here makes.
+  defp completed_sign_in?(record) do
+    signed_in?(record) and not KilnCMS.Accounts.totp_enabled?(record)
   end
 
   # The per-IP refusal, which is deliberately *not* the per-account one.

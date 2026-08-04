@@ -91,8 +91,22 @@ defmodule KilnCMS.Accounts.SecondFactor do
   # same id — `:consume_totp_recovery_code` only rewrites the hash list — but
   # forgiving what was actually proved is the reading that stays correct if that
   # ever changes.
+  #
+  # The **sign-in** counter is forgiven here too (#742) — and for an account
+  # that owes a second factor, this is the only place it is
+  # (`ForgiveSignInThrottle` and the passkey path forgive it as well, but
+  # neither is reachable by finishing a code prompt).
+  # `ThrottleSignIn` charges it at the password step and no longer clears it for
+  # a 2FA account, because a first factor that stops at the code prompt is not a
+  # completed sign-in — it is exactly what an attacker holding a stuffed
+  # password produces, over and over, resetting the counter each time. This is
+  # the moment the sign-in is genuinely complete, so this is where it is
+  # cleared. Keyed on the address rather than the id, matching what
+  # `ThrottleSignIn` charged; `AccountThrottle.digest/1` normalizes both, so a
+  # differently-cased submission still resolves to the same bucket.
   defp forgive_on_success({:ok, verified}) do
     AccountThrottle.forgive_second_factor(verified.id)
+    AccountThrottle.forgive(to_string(verified.email))
     {:ok, verified}
   end
 

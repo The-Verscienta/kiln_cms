@@ -452,6 +452,37 @@ migration, a rewritten column, a dropped config key).
   reach into a sibling's private plumbing this replaces. No behaviour change.
   (#745)
 
+- **A password that stops at the code prompt no longer clears the account's
+  sign-in budget.** #478 bounds guesses per account and clears the counter on a
+  successful password, which is right when the password *is* the sign-in. For a
+  2FA account it was the hole: the password succeeds, so the counter reset on
+  every attempt, and the per-account bound simply did not apply to the one
+  attacker it most needed to.
+
+  Someone holding a stuffed password for an account they cannot pass could loop
+  `POST /api/auth/sign_in` unboundedly — the only remaining limit was the per-IP
+  `:auth` bucket, which is the axis #478 exists *because* attackers rotate. Each
+  pass also mints and stores a token row nobody will ever hold: `User` sets
+  `store_all_tokens?`, so the JWT is written before the controller learns the
+  account owes a code, and an abandoned exchange leaves it live for its natural
+  lifetime. Nothing turns those rows into a credential today (they are AES-GCM
+  encrypted in a blob the caller cannot read), but they were unbounded growth in
+  `tokens` for an account of the attacker's choosing, and a store of live
+  credentials that a later tokens-table read or `secret_key_base` compromise
+  would upgrade a password-only position into.
+
+  The counter is now held until `SecondFactor.check/2` sees the second factor
+  actually land, and cleared there. An account with no second factor is
+  unchanged — its password still clears the counter, because for it the
+  password is the whole sign-in. The visible cost is that abandoning the code
+  prompt ten times inside one window is refused for the tail of it, which is
+  the same bargain every other account here already makes.
+
+  This does not stop the rows being written; it bounds how many an attacker can
+  cause. Not minting until the second factor verifies is the deeper fix and
+  fights `require_token_presence_for_authentication?` — still open on #742's
+  own terms. (#742)
+
 - **A second-factor lockout now tells the owner.** #478 mails an account owner
   when their *password* is being guessed at. #714 added the equivalent budget
   for the *second factor* and mailed nobody, which is backwards on signal
@@ -460,12 +491,14 @@ migration, a rewritten column, a dropped config key).
   second-factor lockout is not "someone is guessing at your account" — it is
   "someone got in far enough to be asked for a code".
 
-  It was worse than an unwired notification. The password alert *cannot* fire in
-  that scenario: to keep grinding codes an attacker must keep minting pending
-  tokens, which means re-running the first factor, and that step succeeds — so
-  `ThrottleSignIn` forgives the sign-in counter every time and its budget is
-  never reached. Net: in the one case where a primary credential was provably in
-  someone else's hands, the owner received nothing at all.
+  It was worse than an unwired notification. The password alert *could not* fire
+  in that scenario either: to keep grinding codes an attacker must keep minting
+  pending tokens, which means re-running the first factor, and that step
+  succeeds — so `ThrottleSignIn` forgave the sign-in counter every time and its
+  budget was never reached. Net: in the one case where a primary credential was
+  provably in someone else's hands, the owner received nothing at all. (#742,
+  above, closes that reset, so both alerts now fire on this attack. This one
+  still rings first, because the second-factor budget is the tighter.)
 
   `KilnCMS.Accounts.SecondFactor.check/2` now fires the alert for **both**
   sign-in gates — the browser prompt and the headless

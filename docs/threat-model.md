@@ -124,23 +124,39 @@ build if a resource is ever registered without that authorizer.
   Tighter because six digits and a skew window are guessable in a way a password
   is not, and because whoever is at that prompt has already got past the first
   factor. It keys on the account rather than on the pending token for the same
-  reason: the pending token's five-minute life bounds nothing on its own, since re-running the
-  password step mints a fresh token *and* — because that step succeeds — clears
-  the sign-in counter, so an attacker holding the password renews the window for
-  free. TOTP codes and recovery codes share the budget; two would be one budget
+  reason: the pending token's five-minute life bounds nothing on its own, since
+  re-running the password step mints a fresh one. Since #742 that renewal costs
+  a unit of the *sign-in* budget rather than being free — it no longer clears
+  on a password that stops at the code prompt — so the two budgets now compose
+  rather than one cancelling the other. TOTP codes and recovery codes share the budget; two would be one budget
   twice as large. This refusal is a plain 429 that says so, unlike every other
   refusal in the auth flow: the account is already known to whoever is asking,
   so there is nothing to hide, and a generic "that code isn't valid" would tell
   a legitimate user their correct code was wrong.
 
+  Since #742 the sign-in budget and the second-factor budget **compose**: a
+  password that stops at the code prompt no longer clears the first, so an
+  account whose second factor is locked out spends first-factor budget on every
+  retry — and both controllers tell a refused user to do exactly that. The
+  owner can reach this state alone, because #727 shares the second-factor
+  bucket with `/editor/settings`: fumble five codes regenerating recovery
+  codes, then retry the password ten times, and the first factor locks too, for
+  the tail of its own window. A password reset clears both and is the remedy to
+  offer. The alternative — refunding the first-factor unit when the second
+  factor refuses — reopens the unbounded token-minting loop #742 exists to
+  close, so it is not a free change; the lever, if this is judged too harsh, is
+  the budget itself.
+
   A lockout at either sign-in gate **mails the owner** (#728), and it is a much
   stronger signal than the password alert above: reaching that prompt requires
   a pending token, and a pending token is only minted once a **first factor has
-  already succeeded**. That case is also structurally invisible to the password
-  alert — sustaining the grind means re-running the first factor, which
-  succeeds and forgives the sign-in counter every time, so its budget is never
-  reached. Before #728 the one case where a primary credential was provably in
-  someone else's hands produced no notification at all.
+  already succeeded**. That case used to be structurally invisible to the
+  password alert — sustaining the grind means re-running the first factor,
+  which succeeds and forgave the sign-in counter every time, so its budget was
+  never reached. Before #728 the one case where a primary credential was
+  provably in someone else's hands produced no notification at all. #742 closed
+  that reset, so the password alert can now fire on the same attack too; this
+  one still rings first, because the second-factor budget is the tighter.
 
   The copy is careful about two things the obvious wording gets wrong. It does
   **not** say "someone has your password": `AuthController.success/4` is the
@@ -298,10 +314,13 @@ build if a resource is ever registered without that authorizer.
     The second factor gates whether the caller ever receives it. Say it that way
     round: "no token is issued" would tell an incident responder that a
     password-alone compromise leaves nothing to revoke, and it leaves something.
-    *Residual:* an abandoned exchange leaves a live token row nobody holds, for
-    the JWT's natural lifetime. Bounded by the per-IP `:auth` bucket only — the
-    per-account sign-in budget does not bite, because the password *succeeded*
-    and success forgives that counter. Tracked in #742.
+    *Residual:* an abandoned exchange still leaves a live token row nobody
+    holds, for the JWT's natural lifetime. The **rate** is now bounded — #742
+    stopped a password that stops at the code prompt from clearing the
+    per-account sign-in counter, so an attacker gets `@budget` of them per
+    window per account rather than as many as their IP pool allows. Not minting
+    the token until the second factor verifies is the deeper fix and fights
+    `require_token_presence_for_authentication?`; #742 stays open for it.
   - The pending blob is **encrypted** (`Phoenix.Token.encrypt/4`), not signed.
     The browser's equivalent can be signed because it lives in the encrypted
     session cookie; this one is handed to the client, and signing it would
@@ -326,8 +345,8 @@ build if a resource is ever registered without that authorizer.
     per-account bucket** the browser prompt charges. Per-surface budgets would
     let an attacker double their guesses by alternating endpoints, and the
     five-minute pending lifetime bounds nothing on its own — re-running the
-    password step mints a fresh token, and succeeding also forgives the sign-in
-    counter. That bucket is per node too (residual risk #9 below), so the real
+    password step mints a fresh token. Since #742 each of those costs a unit of
+    the sign-in budget, so the renewal is bounded rather than free. That bucket is per node too (residual risk #9 below), so the real
     ceiling is 5 × nodes per window.
     *Residual:* reaching that bucket used to require a browser session and a
     CSRF token. It now takes five `curl` calls from anyone holding the password,

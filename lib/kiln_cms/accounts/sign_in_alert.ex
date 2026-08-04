@@ -21,13 +21,18 @@ defmodule KilnCMS.Accounts.SignInAlert do
   "someone got in far enough to be asked for a code, and is now working on the
   only thing still in their way".
 
-  It is also structurally impossible for `account_locked/1` to cover that case.
-  To keep grinding codes an attacker must keep minting pending tokens, which
-  means re-running the first factor — and that step *succeeds*, so
-  `ThrottleSignIn`'s `after_action` calls `AccountThrottle.forgive/1` and resets
-  the sign-in counter every time. It never reaches its budget, so the password
-  alert never fires. Net, before #728: in the one case where a primary
-  credential was provably in someone else's hands, the owner got nothing at all.
+  `account_locked/1` used to be structurally unable to cover that case. To keep
+  grinding codes an attacker must keep minting pending tokens, which means
+  re-running the first factor — and that step *succeeds*, so `ThrottleSignIn`
+  forgave the sign-in counter every time and it never reached its budget. Net,
+  before #728: in the one case where a primary credential was provably in
+  someone else's hands, the owner got nothing at all.
+
+  #742 closed that reset, so the sign-in counter now survives a first factor
+  that stops at the code prompt and the password alert *can* eventually fire on
+  the same attack. It still fires second and says less — the second-factor
+  budget is the tighter of the two — so this remains the alert that carries the
+  news. What changed is that the older one is no longer silent alongside it.
 
   ## What the mail may and may not claim
 
@@ -84,6 +89,26 @@ defmodule KilnCMS.Accounts.SignInAlert do
   the window it claimed if the delivery then fails
   (`AccountThrottle.forget_second_factor_alert/1`), so a wedged queue costs one
   mail rather than six hours of them.
+
+  ## Why `account_locked/1`'s copy says "attempts", never "your password"
+
+  It used to be able to say the password had not been used successfully, because
+  the counter only ever reached its budget on failed passwords. Since #742 it
+  also reaches it on *successful* passwords that stopped at the code prompt — so
+  for a 2FA account the password may well have been used, repeatedly, and the
+  old sentence was exactly backwards.
+
+  What both cases share is that no attempt **completed** a sign-in, because a
+  completed one clears the counter. That is what the mail claims, and it is
+  scoped to those attempts rather than to the window: a user who signs in
+  successfully and then abandons the code prompt ten times has completed one,
+  minutes earlier, and the mail must not tell them otherwise.
+
+  It also means an owner can now trigger this mail about themselves — spend the
+  second-factor budget, retry the password while locked out, and the first-factor
+  counter fills with attempts that cannot complete. The copy has to read sanely
+  for that person too, which is the other reason it describes rather than
+  accuses.
 
   The mail names no attacker detail — not the source IP, not the attempt count.
   Those come from the request, and echoing request-controlled data into an email
@@ -229,12 +254,12 @@ defmodule KilnCMS.Accounts.SignInAlert do
     url = url(~p"/reset")
 
     """
-    <p>Someone has made repeated failed sign-in attempts against your #{site} account.</p>
+    <p>Repeated sign-in attempts to your #{site} account have not succeeded.</p>
     <p>Sign-in for this account is paused briefly. If that was you, nothing is wrong —
     wait a few minutes and try again, or reset your password:</p>
     <p><a href="#{url}">#{url}</a></p>
-    <p>If it wasn't you, your password has not been used successfully. Resetting it,
-    and turning on two-factor authentication or a passkey, will end the attempts.</p>
+    <p>If it wasn't you, none of those attempts completed a sign-in. Resetting your
+    password, and turning on two-factor authentication or a passkey, will end them.</p>
     """
   end
 
@@ -248,8 +273,8 @@ defmodule KilnCMS.Accounts.SignInAlert do
     )
   end
 
-  # Deliberately not a variation on `body/1`: that mail's "your password has not
-  # been used successfully" is the one thing that cannot be said here.
+  # Deliberately not a variation on `body/1`. That mail describes attempts that
+  # did not succeed; the whole premise here is that one of them did.
   #
   # Equally deliberately, it does not say "someone has your password". See the
   # moduledoc — the first factor may have been a magic link or an SSO

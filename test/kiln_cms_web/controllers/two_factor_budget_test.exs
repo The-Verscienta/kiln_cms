@@ -122,8 +122,10 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     # The whole budget spent through a SINGLE pending token, so the next request
     # is the only thing that varies. `PendingSignIn.max_age/0` is five minutes and
     # this window is longer, so a token-keyed budget would be no bound at all:
-    # re-running the password step mints a new token and — because that step
-    # succeeds — also forgives the sign-in counter, making the refresh free.
+    # re-running the password step mints a new one. (Until #742 that step also
+    # forgave the sign-in counter, making the refresh entirely free; it now
+    # costs a unit of that budget, which is a looser second ceiling on the same
+    # attack rather than a replacement for this one.)
     conn = with_pending(build_conn(), user)
 
     Enum.reduce(1..@budget, conn, fn _, conn ->
