@@ -79,17 +79,33 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
      |> assign(:step_content_options, content_options(type, socket, socket.assigns.actor))}
   end
 
+  # `pick_step_type` and `add_step` are two separate round trips sharing one
+  # form: a type switch that hasn't repainted `#step-content` yet could still
+  # submit the PREVIOUS type's selected id against the NEW `step_type`. Since
+  # `content_type`/`content_id` are FK-less (no DB constraint catches a
+  # mismatched pair), re-checking the id actually belongs to `step_type` here
+  # is the only guard — an undetected mismatch would silently resolve to
+  # "(deleted)" forever (`Titles.title_for/3`) rather than erroring.
   def handle_event("add_step", %{"content_id" => content_id}, socket) when content_id != "" do
-    attrs = %{
-      funnel_id: socket.assigns.funnel.id,
-      content_type: socket.assigns.step_type,
-      content_id: content_id,
-      position: next_position(socket.assigns.steps)
-    }
+    type = socket.assigns.step_type
 
-    case Analytics.create_funnel_step(attrs, actor_opts(socket)) do
-      {:ok, _step} -> {:noreply, reload_steps(socket)}
-      {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error))}
+    case ContentTypes.get_record(type, content_id, actor_opts(socket)) do
+      {:ok, _record} ->
+        attrs = %{
+          funnel_id: socket.assigns.funnel.id,
+          content_type: type,
+          content_id: content_id,
+          position: next_position(socket.assigns.steps)
+        }
+
+        case Analytics.create_funnel_step(attrs, actor_opts(socket)) do
+          {:ok, _step} -> {:noreply, reload_steps(socket)}
+          {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error))}
+        end
+
+      {:error, _error} ->
+        {:noreply,
+         put_flash(socket, :error, gettext("That item is no longer available — pick again."))}
     end
   end
 

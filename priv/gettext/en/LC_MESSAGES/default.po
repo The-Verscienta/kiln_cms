@@ -541,7 +541,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex:579
 #: lib/kiln_cms_web/live/form_builder_live.ex:639
 #: lib/kiln_cms_web/live/form_live.ex:175
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:214
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:230
 #: lib/kiln_cms_web/live/funnel_live.ex:117
 #: lib/kiln_cms_web/live/newsletter_live.ex:342
 #: lib/kiln_cms_web/live/taxonomy_live.ex:392
@@ -691,7 +691,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex:686
 #: lib/kiln_cms_web/live/form_builder_live.ex:706
 #: lib/kiln_cms_web/live/form_builder_live.ex:724
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:239
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:255
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:454
 #: lib/kiln_cms_web/live/presentation_live.ex:376
 #: lib/kiln_cms_web/live/taxonomy_live.ex:532
@@ -750,7 +750,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex:5133
 #: lib/kiln_cms_web/live/form_builder_live.ex:649
 #: lib/kiln_cms_web/live/form_live.ex:179
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:224
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:240
 #: lib/kiln_cms_web/live/funnel_live.ex:121
 #: lib/kiln_cms_web/live/newsletter_live.ex:343
 #: lib/kiln_cms_web/live/taxonomy_live.ex:397
@@ -1048,7 +1048,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/api_key_live.ex:110
 #: lib/kiln_cms_web/live/billing_live.ex:539
 #: lib/kiln_cms_web/live/billing_live.ex:607
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:236
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:252
 #: lib/kiln_cms_web/live/webhook_live.ex:298
 #: lib/kiln_cms_web/live/webhook_live.ex:384
 #, elixir-autogen, elixir-format
@@ -1341,7 +1341,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex:620
 #: lib/kiln_cms_web/components/layouts.ex:874
 #: lib/kiln_cms_web/live/content_editor_live.ex:6061
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:208
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:224
 #: lib/kiln_cms_web/live/settings_live.ex:21
 #: lib/kiln_cms_web/live/settings_live.ex:325
 #, elixir-autogen, elixir-format
@@ -1494,7 +1494,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live.ex:360
 #: lib/kiln_cms_web/live/field_definition_live.ex:320
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:295
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:311
 #: lib/kiln_cms_web/live/slug_regen_live.ex:144
 #, elixir-autogen, elixir-format
 msgid "Content type"
@@ -2704,7 +2704,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex:289
 #: lib/kiln_cms_web/live/form_builder_live.ex:323
 #: lib/kiln_cms_web/live/form_live.ex:144
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:185
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:201
 #: lib/kiln_cms_web/live/funnel_live.ex:86
 #: lib/kiln_cms_web/live/mail_settings_live.ex:325
 #, elixir-autogen, elixir-format
@@ -3049,7 +3049,7 @@ msgid "Add segment"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4582
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:319
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:335
 #, elixir-autogen, elixir-format
 msgid "Add step"
 msgstr ""
@@ -7548,12 +7548,12 @@ msgstr ""
 msgid "Add a funnel"
 msgstr ""
 
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:314
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:330
 #, elixir-autogen, elixir-format
 msgid "Choose…"
 msgstr ""
 
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:312
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:328
 #, elixir-autogen, elixir-format
 msgid "Content item"
 msgstr ""
@@ -7594,7 +7594,7 @@ msgid "Funnel deleted."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:549
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:202
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:218
 #: lib/kiln_cms_web/live/funnel_live.ex:21
 #: lib/kiln_cms_web/live/funnel_live.ex:105
 #, elixir-autogen, elixir-format
@@ -7606,27 +7606,27 @@ msgstr ""
 msgid "No funnels yet."
 msgstr ""
 
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:251
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:267
 #, elixir-autogen, elixir-format
 msgid "No steps yet — add one below."
 msgstr ""
 
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:97
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:113
 #, elixir-autogen, elixir-format
 msgid "Pick a content item first."
 msgstr ""
 
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:284
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:300
 #, elixir-autogen, elixir-format
 msgid "Remove step %{title}"
 msgstr ""
 
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:270
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:286
 #, elixir-autogen, elixir-format
 msgid "Reorder step %{title}"
 msgstr ""
 
-#: lib/kiln_cms_web/live/funnel_builder_live.ex:245
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:261
 #, elixir-autogen, elixir-format
 msgid "Steps"
 msgstr ""
@@ -7639,4 +7639,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/funnel_live.ex:137
 #, elixir-autogen, elixir-format
 msgid "Your funnels"
+msgstr ""
+
+#: lib/kiln_cms_web/live/funnel_builder_live.ex:108
+#, elixir-autogen, elixir-format
+msgid "That item is no longer available — pick again."
 msgstr ""

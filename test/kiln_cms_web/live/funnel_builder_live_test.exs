@@ -113,6 +113,24 @@ defmodule KilnCMSWeb.FunnelBuilderLiveTest do
     assert step.content_id == page.id
   end
 
+  test "a stale content id from a since-switched-away type is rejected, not silently mismatched",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    page = CMS.create_page!(%{title: "About", slug: "funb-stale-#{slug()}"}, actor: admin)
+
+    {funnel, [], lv, _html} = builder(conn, admin)
+
+    # Switch the server's current type to "post" — as if the type dropdown
+    # changed after the page id was already selected in the DOM.
+    lv |> element("#step-type") |> render_change(%{"type" => "post"})
+
+    # The submit races ahead with the stale page id instead of a post id.
+    html = render_submit(lv, "add_step", %{"content_id" => page.id})
+
+    assert html =~ "That item is no longer available"
+    assert Analytics.funnel_steps_for!(funnel.id, authorize?: false) == []
+  end
+
   test "adding a step without picking an item shows an error", %{conn: conn} do
     admin = authed_user(:admin)
     {funnel, [], lv, _html} = builder(conn, admin)
