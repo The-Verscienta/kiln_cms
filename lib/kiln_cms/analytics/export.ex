@@ -51,7 +51,7 @@ defmodule KilnCMS.Analytics.Export do
   end
 
   @doc "One CSV row's fields for a view bucket."
-  @spec csv_row(ContentViewDay.t(), map(), term()) :: [term()]
+  @spec csv_row(map(), map(), term()) :: [term()]
   def csv_row(row, titles, org) do
     [
       Date.to_iso8601(row.day),
@@ -63,7 +63,7 @@ defmodule KilnCMS.Analytics.Export do
   end
 
   @doc "One JSON row (a plain map) for a view bucket."
-  @spec json_row(ContentViewDay.t(), map(), term()) :: map()
+  @spec json_row(map(), map(), term()) :: map()
   def json_row(row, titles, org) do
     %{
       day: row.day,
