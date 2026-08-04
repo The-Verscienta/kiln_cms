@@ -117,9 +117,16 @@ defmodule KilnCMSWeb.Endpoint do
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :kiln_cms
   end
 
-  plug Phoenix.LiveDashboard.RequestLogger,
-    param_key: "request_logger",
-    cookie_key: "request_logger"
+  # Gated on `dev_routes` — the same flag that mounts `/dashboard` in the
+  # router — rather than `code_reloading?`: this plug exists only to serve
+  # that route, and every production request otherwise paid a `fetch_cookies`
+  # plus a `request_logger` cookie lookup for a dashboard that isn't mounted
+  # there, plus a second unprefixed cookie name on the endpoint (#702).
+  if Application.compile_env(:kiln_cms, :dev_routes) do
+    plug Phoenix.LiveDashboard.RequestLogger,
+      param_key: "request_logger",
+      cookie_key: "request_logger"
+  end
 
   # Resolve the real client IP from X-Forwarded-For when behind a trusted proxy,
   # before anything (rate limiting, logging) reads conn.remote_ip.
