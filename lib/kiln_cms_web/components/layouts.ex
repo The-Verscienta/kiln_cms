@@ -508,6 +508,15 @@ defmodule KilnCMSWeb.Layouts do
         label: gettext("Analytics"),
         path: ~p"/editor/analytics",
         icon: "hero-chart-bar"
+      },
+      # Outbound broken links (#474). In the author group, not the admin one:
+      # fixing a dead citation is editorial work. The opt-in switch on the page
+      # is what admins own.
+      %{
+        key: :links,
+        label: gettext("Links"),
+        path: ~p"/editor/links",
+        icon: "hero-link-slash"
       }
     ]
 

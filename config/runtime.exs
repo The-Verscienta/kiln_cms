@@ -290,6 +290,21 @@ if config_env() != :test do
   end
 end
 
+# ## Outbound link checking (#474)
+#
+# When the sweep runs, and who it says it is. Both are safe to leave alone:
+# checking is opt-in per site, so an unconfigured deployment makes no outbound
+# requests at all. The user-agent is worth setting on a public site — it is what
+# an operator on the receiving end reads before deciding whether to block you,
+# and a contact URL of your own beats Kiln's.
+if cron = System.get_env("KILN_LINK_CHECK_CRON") do
+  config :kiln_cms, :link_check_cron, cron
+end
+
+if user_agent = System.get_env("KILN_LINK_CHECK_USER_AGENT") do
+  config :kiln_cms, KilnCMS.Links.External, user_agent: user_agent
+end
+
 # ## Signed provenance / C2PA-style content manifests (#340)
 #
 # `KilnCMS.Provenance` was configured in `config/config.exs` alone, which is

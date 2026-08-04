@@ -40,6 +40,10 @@ defmodule KilnCMS.Application do
       # until someone asks for a generation, and starting it lazily would mean
       # the first request raced the supervisor.
       {KilnCMS.LLM.Budget, clean_period: :timer.minutes(5)},
+      # Per-domain pacing for the external link checker (#474). Keyed by remote
+      # host, so the table grows with the number of distinct hosts a sweep
+      # touches — cleaned on the same schedule as the rest.
+      {KilnCMS.Links.Throttle, clean_period: :timer.minutes(5)},
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
       # Host→org resolution, on its own eviction schedule and the only cache
@@ -135,18 +139,63 @@ defmodule KilnCMS.Application do
     |> Keyword.update(:queues, Kiln.Plugins.oban_queues(), fn queues ->
       Keyword.merge(Kiln.Plugins.oban_queues(), queues)
     end)
-    |> Keyword.update(:plugins, [], &with_governance_cron/1)
+    |> Keyword.update(:plugins, [], &with_cron_entries/1)
   end
 
-  # The governance checkpoint schedule (#666), assembled here rather than
-  # written into `config :kiln_cms, Oban` so a runtime override sets a flat
-  # `:governance_checkpoint_cron` key. `Config` deep-merges keyword lists, so
-  # overriding one entry inside a nested plugin tuple from `runtime.exs` is the
-  # shape that silently deleted config in #608.
+  # Scheduled work, assembled here rather than written into `config :kiln_cms,
+  # Oban` so a runtime override sets a flat `:kiln_cms` key. `Config`
+  # deep-merges keyword lists, so overriding one entry inside a nested plugin
+  # tuple from `runtime.exs` is the shape that silently deleted config in #608.
   #
-  # `false` (or nil) leaves the crontab alone, for a deployment that drives
-  # `mix kiln.audit.checkpoint` from its own scheduler.
-  #
+  # Each entry names its config key, its worker, and the env var an operator
+  # would have set — the last so a rejected expression can say which variable to
+  # fix rather than "a cron expression somewhere is wrong".
+  @cron_schedules [
+    {:governance_checkpoint_cron, KilnCMS.Governance.CheckpointWorker,
+     "KILN_GOVERNANCE_CHECKPOINT_CRON",
+     "governance checkpoints will NOT be minted on a schedule. See #666."},
+    {:link_check_cron, KilnCMS.Links.SweepWorker, "KILN_LINK_CHECK_CRON",
+     "outbound links will NOT be checked on a schedule. See #474."}
+  ]
+
+  # `false` (or nil) on any key leaves that entry out, for a deployment driving
+  # the work from its own scheduler.
+  defp with_cron_entries(plugins) do
+    case Enum.flat_map(@cron_schedules, &cron_entry/1) do
+      [] -> plugins
+      entries -> inject_crontab(plugins, entries)
+    end
+  end
+
+  defp cron_entry({key, worker, env_var, consequence}) do
+    case Application.get_env(:kiln_cms, key, false) do
+      cron when is_binary(cron) ->
+        case validated_cron(String.trim(cron), env_var, consequence) do
+          nil -> []
+          valid -> [{valid, worker}]
+        end
+
+      _disabled ->
+        []
+    end
+  end
+
+  defp inject_crontab(plugins, entries) do
+    {plugins, injected?} =
+      Enum.map_reduce(plugins, false, fn
+        {Oban.Plugins.Cron, opts}, _ ->
+          {{Oban.Plugins.Cron, Keyword.update(opts, :crontab, entries, &(entries ++ &1))}, true}
+
+        plugin, injected? ->
+          {plugin, injected?}
+      end)
+
+    # Silently doing nothing when the Cron plugin isn't there would stop
+    # checkpoints being minted with no signal at all, which is the failure
+    # mode #666 is least able to afford.
+    if injected?, do: plugins, else: [{Oban.Plugins.Cron, crontab: entries} | plugins]
+  end
+
   # The expression is VALIDATED here rather than handed to Oban raw. Oban parses
   # its crontab with a bang and raises out of `Oban.Config.new/1`, so an
   # unparseable value takes the whole supervision tree down — and the two values
@@ -155,42 +204,11 @@ defmodule KilnCMS.Application do
   # literal `false` the config comment names as the way to switch this off, which
   # arrives from the environment as the *string* `"false"`. A misconfigured
   # schedule must cost the schedule, never the boot.
-  defp with_governance_cron(plugins) do
-    case checkpoint_cron() do
-      nil ->
-        plugins
+  defp validated_cron("", _env_var, _consequence), do: nil
 
-      cron ->
-        entry = {cron, KilnCMS.Governance.CheckpointWorker}
+  defp validated_cron(cron, _env_var, _consequence) when cron in ~w(false off no 0), do: nil
 
-        {plugins, injected?} =
-          Enum.map_reduce(plugins, false, fn
-            {Oban.Plugins.Cron, opts}, _ ->
-              {{Oban.Plugins.Cron, Keyword.update(opts, :crontab, [entry], &[entry | &1])}, true}
-
-            plugin, injected? ->
-              {plugin, injected?}
-          end)
-
-        # Silently doing nothing when the Cron plugin isn't there would stop
-        # checkpoints being minted with no signal at all, which is the failure
-        # mode #666 is least able to afford.
-        if injected?, do: plugins, else: [{Oban.Plugins.Cron, crontab: [entry]} | plugins]
-    end
-  end
-
-  defp checkpoint_cron do
-    case Application.get_env(:kiln_cms, :governance_checkpoint_cron, false) do
-      cron when is_binary(cron) -> validated_cron(String.trim(cron))
-      _disabled -> nil
-    end
-  end
-
-  defp validated_cron(""), do: nil
-
-  defp validated_cron(cron) when cron in ~w(false off no 0), do: nil
-
-  defp validated_cron(cron) do
+  defp validated_cron(cron, env_var, consequence) do
     case Oban.Cron.Expression.parse(cron) do
       {:ok, _expression} ->
         cron
@@ -198,8 +216,7 @@ defmodule KilnCMS.Application do
       {:error, _reason} ->
         IO.puts(
           :standard_error,
-          "KILN_GOVERNANCE_CHECKPOINT_CRON=#{inspect(cron)} is not a valid cron expression - " <>
-            "governance checkpoints will NOT be minted on a schedule. See #666."
+          "#{env_var}=#{inspect(cron)} is not a valid cron expression - " <> consequence
         )
 
         nil

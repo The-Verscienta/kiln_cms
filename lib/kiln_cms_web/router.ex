@@ -288,6 +288,10 @@ defmodule KilnCMSWeb.Router do
       live "/editor/search", SearchPaletteLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
       live "/editor/analytics", AnalyticsLive, :index
+      # Site-wide broken outbound links (#474). Editorial, so it lives here
+      # rather than under the admin session; the opt-in switch on the page is
+      # admin-gated by the resource policy, not by the route.
+      live "/editor/links", LinkReportLive, :index
       live "/editor/settings", SettingsLive, :index
       # Generic editor route — works for any content type (incl. ones generated
       # by `mix kiln.gen.content`). The `:page`/`:post` routes are kept as

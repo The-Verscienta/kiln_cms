@@ -224,7 +224,7 @@ defmodule Kiln.Advisory.Body do
   # A Portable Text node: headings by `style`, paragraphs otherwise, plus any
   # link annotations hanging off `markDefs`.
   defp collect_pt(%{} = node, acc) do
-    acc = node |> mark_def_hrefs() |> Enum.reduce(acc, &add_link(&2, &1))
+    acc = node |> node_hrefs() |> Enum.reduce(acc, &add_link(&2, &1))
     text = pt_text(node)
 
     case heading_level(node["style"]) do
@@ -244,8 +244,23 @@ defmodule Kiln.Advisory.Body do
 
   defp heading_level(_style), do: nil
 
+  @doc """
+  Every link href on one Portable Text node, including the ones inside a table's
+  cells.
+
+  Public because the external link checker (`KilnCMS.Links.Extract`) walks the
+  same annotations from a background job, and two copies of "where a link hides
+  in Portable Text" would drift the first time a new nested node type lands —
+  tables already made that mistake available once.
+
+  Returns hrefs of every kind: same-origin paths, absolute URLs, `mailto:`.
+  Deciding which are interesting is the caller's job.
+  """
+  @spec node_hrefs(term()) :: [String.t()]
+  def node_hrefs(node)
+
   # Tables keep their spans (and markDefs) one level deeper, inside cells.
-  defp mark_def_hrefs(%{"_type" => "table"} = node) do
+  def node_hrefs(%{"_type" => "table"} = node) do
     node
     |> Map.get("rows", [])
     |> List.wrap()
@@ -253,7 +268,7 @@ defmodule Kiln.Advisory.Body do
     |> Enum.flat_map(&hrefs/1)
   end
 
-  defp mark_def_hrefs(node), do: hrefs(node)
+  def node_hrefs(node), do: hrefs(node)
 
   defp hrefs(%{} = node) do
     node

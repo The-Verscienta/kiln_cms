@@ -30,6 +30,14 @@ config :kiln_cms, KilnCMS.OEmbed,
 # Webhook URL validation: skip DNS resolution for Req.Test stub hosts.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: false, resolve_dns: false
 
+# Outbound link checking (#474). Every request goes to a Req.Test stub; nothing
+# in the suite may reach the real web. The per-host throttle is widened to
+# effectively off, because pacing is tested directly (`Links.Throttle`) and
+# leaving it at its two-second production window would make any test that
+# checks two URLs on one stub host wait for it.
+config :kiln_cms, KilnCMS.Links.External, req_options: [plug: {Req.Test, KilnCMS.Links.External}]
+config :kiln_cms, KilnCMS.Links.Throttle, per_host: {10_000, 1_000}
+
 # S3 storage adapter: dummy credentials + route ExAws HTTP through a Req.Test
 # stub, so the adapter is exercised end-to-end (signing included) with no live S3.
 config :ex_aws, access_key_id: "test", secret_access_key: "test", region: "us-east-1"
