@@ -388,7 +388,17 @@ defmodule KilnCMS.CMS do
       define :create_form_submission, action: :create
       define :get_form_submission, action: :read, get_by: [:id]
       define :recent_form_submissions, action: :recent_for_form, args: [:form_id]
+      define :export_form_submissions, action: :for_export, args: [:form_id]
+      define :mark_form_submission_spam, action: :mark_spam
+      define :mark_form_submission_reviewed, action: :mark_reviewed
       define :destroy_form_submission, action: :destroy
+    end
+
+    # Per-org disallowed-keyword list for the form spam scorer (#477).
+    resource KilnCMS.CMS.FormSpamSettings do
+      define :list_form_spam_settings, action: :read
+      define :save_form_spam_settings, action: :save
+      define :reset_form_spam_settings, action: :destroy
     end
 
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).

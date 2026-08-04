@@ -388,6 +388,11 @@ defmodule KilnCMSWeb.Router do
     get "/editor/governance/:type/:id/export.json", GovernanceController, :export
     get "/editor/governance/:type/:id/export.csv", GovernanceController, :export_csv
 
+    # Form entries export (#477) — file download, admin-gated in the
+    # controller (submissions are visitor-provided data, frequently PII;
+    # FormSubmission's own policy is admin-only).
+    get "/editor/forms/:id/entries/export.csv", FormEntriesExportController, :export_csv
+
     # Analytics export (#618, phase 1) — streamed file downloads, editor-gated
     # (not admin-only like governance above: `AnalyticsLive` itself is
     # editor-visible, so this route has to be declared outside `:editor_routes`

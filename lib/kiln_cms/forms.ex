@@ -11,11 +11,13 @@ defmodule KilnCMS.Forms do
     * **coercion + validation** per `FormField` (required, type coercion to
       JSON-native values, select membership, email shape), unknown keys
       dropped;
-    * **storage** as a `FormSubmission` (privacy-first: no IP/user agent);
-    * **notification** — when the form has a `notify_email`, an Oban job on
-      the `:mail` queue delivers a summary;
+    * **storage** as a `FormSubmission` (privacy-first: no IP/user agent),
+      scored against the `Kiln.Forms.SpamCheck` registry (#477);
+    * **notification** — when the form has a `notify_email` and the
+      submission wasn't scored `:spam`, an Oban job on the `:mail` queue
+      delivers a summary;
     * **webhook** — dispatches the `form.submitted` event with the form slug
-      and coerced data.
+      and coerced data, same `:spam` exclusion.
 
   Rate limiting happens at the controller (`KilnCMSWeb.RateLimit`, `:form`
   bucket) so the transient IP never reaches this module.
@@ -24,10 +26,65 @@ defmodule KilnCMS.Forms do
   alias KilnCMS.CMS
 
   @honeypot_field "website"
+  @rendered_at_field "_kiln_rendered_at"
+  @rendered_at_salt "form_rendered_at"
+  # Bounds how long a rendered-but-unsubmitted form is honored, so the token
+  # can't be replayed indefinitely — not a security boundary (nothing sensitive
+  # rides in it, just a millisecond timestamp), only a sanity window.
+  @rendered_at_max_age :timer.hours(24)
 
   @doc "The honeypot input name rendered into public forms."
   @spec honeypot_field() :: String.t()
   def honeypot_field, do: @honeypot_field
+
+  @doc "The fill-time token's hidden input name, rendered into public forms."
+  @spec rendered_at_field() :: String.t()
+  def rendered_at_field, do: @rendered_at_field
+
+  @doc """
+  A signed token carrying "now", minted when a public form renders — the
+  fill-time spam signal (#477, `Kiln.Forms.SpamCheck.Checks.FillTime`).
+  Signed (not encrypted): the value itself, a millisecond timestamp, is not
+  sensitive; signing only stops a submitter from just supplying their own
+  "I rendered ages ago" timestamp.
+  """
+  @spec rendered_at_token() :: String.t()
+  def rendered_at_token,
+    do:
+      Phoenix.Token.sign(KilnCMSWeb.Endpoint, @rendered_at_salt, System.system_time(:millisecond))
+
+  @doc """
+  How long ago (in milliseconds) a form carrying `token` was rendered, or
+  `nil` when the token is missing, forged, older than
+  #{div(@rendered_at_max_age, 60_000)} minutes, or the computed delta is
+  negative — a headless/JSON caller with no rendered page to time simply
+  sends none, and gets `nil` here rather than an error.
+
+  The negative case is deliberate, not a stray guard: on a multi-node
+  deployment, the node that minted the token and the node verifying it can
+  disagree by however much their clocks have drifted. Flooring a negative
+  delta to `0` would read as "submitted instantly" on every request that
+  happens to land on a node running slightly behind — indistinguishable from
+  a genuine bot and, unlike a bot, load-bearing on nothing the visitor did.
+  `nil` (no signal) is the honest answer to "we can't tell."
+  """
+  @spec fill_time_ms(term()) :: non_neg_integer() | nil
+  def fill_time_ms(token) when is_binary(token) do
+    case Phoenix.Token.verify(KilnCMSWeb.Endpoint, @rendered_at_salt, token,
+           max_age: div(@rendered_at_max_age, 1000)
+         ) do
+      {:ok, rendered_at_ms} ->
+        case System.system_time(:millisecond) - rendered_at_ms do
+          delta when delta >= 0 -> delta
+          _negative -> nil
+        end
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  def fill_time_ms(_token), do: nil
 
   @doc """
   One active form by slug within `org` (the request's site — epic #336), fields
@@ -51,6 +108,12 @@ defmodule KilnCMS.Forms do
     * `{:error, errors}` — a `%{"field" => "message"}` map for re-rendering.
 
   `opts`: `:locale` (recorded on the submission).
+
+  The fill-time spam signal (#477) is read straight from `params` here
+  (`rendered_at_field/0`), not from `opts` — unlike `:locale`, which the
+  controller derives from request context, this rides on the form itself as
+  an ordinary field, so a JSON caller with no rendered page to time simply
+  omits it.
   """
   @spec submit(struct(), map(), keyword()) ::
           {:ok, struct() | :discarded} | {:error, %{optional(String.t()) => String.t()}}
@@ -64,7 +127,7 @@ defmodule KilnCMS.Forms do
 
       true ->
         case coerce(fields(form), params) do
-          {:ok, data} -> {:ok, record(form, data, opts)}
+          {:ok, data} -> {:ok, record(form, data, params, opts)}
           {:error, errors} -> {:error, errors}
         end
     end
@@ -81,18 +144,29 @@ defmodule KilnCMS.Forms do
   defp fields(%{fields: fields}) when is_list(fields), do: fields
   defp fields(form), do: CMS.form_fields_for!(form.id, authorize?: false, tenant: form.org_id)
 
-  defp record(form, data, opts) do
+  defp record(form, data, params, opts) do
     # Every write here is scoped to the form's own site (epic #336): the
     # submission lands in the form's org, and the webhook dispatch is scoped to it.
     submission =
       CMS.create_form_submission!(
-        %{form_id: form.id, data: data, locale: Keyword.get(opts, :locale)},
+        %{
+          form_id: form.id,
+          data: data,
+          locale: Keyword.get(opts, :locale),
+          fill_time_ms: fill_time_ms(Map.get(params, @rendered_at_field))
+        },
         authorize?: false,
         tenant: form.org_id
       )
 
-    notify(form, data)
-    KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
+    # #477: a submission the scorer flagged never reaches the autoresponder or
+    # the webhook — mailing a spammer back (sender-reputation risk) or firing
+    # an integration on payload that was never worth acting on.
+    unless submission.status == :spam do
+      notify(form, data)
+      KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
+    end
+
     submission
   end
 

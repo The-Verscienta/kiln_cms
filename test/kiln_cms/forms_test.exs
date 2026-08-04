@@ -158,4 +158,136 @@ defmodule KilnCMS.FormsTest do
 
     assert html == ~s(<div data-kiln-form="contact"></div>)
   end
+
+  describe "spam scoring (#477)" do
+    test "a clean submission is stored :new with a zero score" do
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+      assert {:ok, submission} = Forms.submit(form, %{"message" => "Hi, I'd like a quote."})
+      assert submission.status == :new
+      assert submission.spam_score == 0
+    end
+
+    test "a submission that clears the threshold is stored :spam" do
+      # Link density (40) alone sits under the default 50 threshold — weights
+      # are meant to combine, so this pairs it with an instant fill time (30)
+      # to genuinely clear it, rather than relying on one check's exact number.
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+      assert {:ok, submission} =
+               Forms.submit(form, %{
+                 "message" => "Buy now http://a.co http://b.co http://c.co",
+                 Forms.rendered_at_field() => Forms.rendered_at_token()
+               })
+
+      assert submission.status == :spam
+      assert submission.spam_score >= 50
+    end
+
+    test "no rendered-at token means no fill-time signal, not an error" do
+      # A headless/JSON caller with no rendered page to time.
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+      assert {:ok, submission} = Forms.submit(form, %{"message" => "Hello there"})
+      assert submission.status == :new
+    end
+
+    test "a submission filled faster than any human could contributes to the score" do
+      # Fill-time alone (30) sits under the default 50 threshold — this checks
+      # the signal fires and adds weight, not that it single-handedly flags.
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+      assert {:ok, submission} =
+               Forms.submit(form, %{
+                 "message" => "hi",
+                 Forms.rendered_at_field() => Forms.rendered_at_token()
+               })
+
+      # Rendered and submitted in the same call — effectively 0ms fill time.
+      assert submission.status == :new
+      assert submission.spam_score > 0
+    end
+
+    test "a plausible human fill time is not flagged on that signal alone" do
+      old_token =
+        Phoenix.Token.sign(
+          KilnCMSWeb.Endpoint,
+          "form_rendered_at",
+          System.system_time(:millisecond) - 8_000
+        )
+
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+      assert {:ok, submission} =
+               Forms.submit(form, %{"message" => "hi", Forms.rendered_at_field() => old_token})
+
+      assert submission.status == :new
+    end
+
+    test "a rendered-at token minted slightly in the future (clock skew) gives no fill-time signal" do
+      # A different node's clock running ahead is not evidence of a bot —
+      # Forms.fill_time_ms/1 must not floor this to 0 and flag it as instant.
+      future_token =
+        Phoenix.Token.sign(
+          KilnCMSWeb.Endpoint,
+          "form_rendered_at",
+          System.system_time(:millisecond) + 5_000
+        )
+
+      assert Forms.fill_time_ms(future_token) == nil
+
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+      assert {:ok, submission} =
+               Forms.submit(form, %{"message" => "hi", Forms.rendered_at_field() => future_token})
+
+      assert submission.spam_score == 0
+    end
+
+    test "a :spam submission never queues a notification or fires the webhook" do
+      CMS.create_webhook_endpoint!(
+        %{url: "https://example.test/hook", events: ["form.submitted"]},
+        actor: admin()
+      )
+
+      form =
+        form!(%{notify_email: "team@example.com"}, [
+          %{name: "message", label: "Message", field_type: :text}
+        ])
+
+      assert {:ok, submission} =
+               Forms.submit(form, %{
+                 "message" => "Buy now http://a.co http://b.co http://c.co",
+                 Forms.rendered_at_field() => Forms.rendered_at_token()
+               })
+
+      assert submission.status == :spam
+      refute_enqueued(worker: KilnCMS.Forms.NotificationWorker)
+      assert CMS.recent_webhook_deliveries!(authorize?: false) == []
+    end
+
+    test "an org's disallowed keywords flag a submission that mentions one" do
+      admin = admin()
+      form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+      CMS.save_form_spam_settings!(%{keywords: ["cryptobucks"]}, actor: admin)
+
+      assert {:ok, submission} =
+               Forms.submit(form, %{"message" => "Earn free CryptoBucks today"})
+
+      assert submission.status == :spam
+      assert :disallowed_keyword in reasons_for(submission)
+    end
+  end
+
+  defp reasons_for(submission) do
+    context =
+      Kiln.Forms.SpamCheck.Context.new(submission.data,
+        locale: submission.locale,
+        keywords: ["cryptobucks"]
+      )
+
+    context
+    |> Kiln.Forms.SpamCheck.Registry.run()
+    |> Kiln.Forms.SpamCheck.Registry.reasons()
+  end
 end

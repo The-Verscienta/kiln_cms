@@ -12,9 +12,13 @@ and review submissions in the same builder.
 - `FormField` — machine name (the key in each submission), label, type
   (`string`, `text`, `email`, `integer`, `boolean`, `date`, `select`),
   required flag, select options, help text, order.
-- `FormSubmission` — the coerced `data` map plus a timestamp. **Privacy-first:
-  no IP, no user agent** (rate limiting uses the IP transiently). Admin-only
-  to read or delete; deleting a form removes its submissions.
+- `FormSubmission` — the coerced `data` map, a moderation `status`
+  (`new`/`reviewed`/`spam`) and `spam_score`, plus a timestamp.
+  **Privacy-first: no IP, no user agent** (rate limiting uses the IP
+  transiently). Admin-only to read, moderate, or delete; deleting a form
+  removes its submissions.
+- `FormSpamSettings` — one row per org, a disallowed-keyword list for the
+  spam scorer below. Admin-only, never delivered.
 
 ## Rendering
 
@@ -83,8 +87,42 @@ couldn't carry a token). Instead:
 - **rate limit** — the tight per-IP `form` bucket (20/min);
 - server-side validation of every declared field (unknown keys dropped).
 
+## Spam moderation (#477)
+
+Post-storage triage on top of the pre-storage defenses above: every accepted
+submission is scored by the `Kiln.Forms.SpamCheck` registry (the
+`Kiln.Advisory` shape, adapted to a weighted score instead of a
+severity-tiered finding — see the module docs for the plugin contract).
+Shipped core checks:
+
+| Check | Signal | Weight |
+| --- | --- | --- |
+| `LinkDensity` | 3+ links in the free-text fields | 40 |
+| `DisallowedKeywords` | matches the org's own keyword list (`FormSpamSettings`, `/editor/forms` has no UI for it yet — manage it via `/admin`) | 50 |
+| `FillTime` | submitted in under 1.5s of the form rendering (a signed, unforgeable "now" token rides in a hidden field) | 30 |
+| `LocaleMismatch` | predominantly non-Latin script against a Latin-script declared locale | 35 |
+
+Weights sum; a submission at or past `Kiln.Forms.SpamCheck.threshold/0`
+(default 50) is stored `:spam` — never a hard reject, since the score can be
+wrong and the row is still worth an admin's eyes. A `:spam` submission never
+reaches the autoresponder or the `form.submitted` webhook (see Side effects
+below); everything else about it — CSV export inclusion, retention — is an
+admin decision, not automatic.
+
+The builder's **Entries** tab filters by status, marks a submission
+spam/reviewed individually or in bulk, and exports a CSV
+(`/editor/forms/:id/entries/export.csv`, admin-gated, `?status=` filterable).
+`:spam` rows are pruned after `spam_retention_days` (config, default 30) by a
+nightly job; `:new`/`:reviewed` rows are kept indefinitely, same as before
+this feature.
+
+A third-party provider (Akismet-style) plugs in as a `Kiln.Forms.SpamCheck`
+module, declared from the plugin's `spam_checks/0` callback — see
+`Kiln.Plugin`.
+
 ## Side effects
 
-Each accepted submission optionally mails `notify_email` (Oban `:mail`
-queue, HTML-escaped) and fires the `form.submitted` webhook event (selectable
-per endpoint at `/editor/webhooks`) with `{form: slug, data: {...}}`.
+Each accepted submission that wasn't scored `:spam` optionally mails
+`notify_email` (Oban `:mail` queue, HTML-escaped) and fires the
+`form.submitted` webhook event (selectable per endpoint at `/editor/webhooks`)
+with `{form: slug, data: {...}}`.
