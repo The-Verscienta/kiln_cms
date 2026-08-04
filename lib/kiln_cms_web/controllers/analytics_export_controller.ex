@@ -16,12 +16,13 @@ defmodule KilnCMSWeb.AnalyticsExportController do
   section: it is the one analytics table holding free text that can
   incidentally carry PII.
 
-  Streams via `KilnCMS.Analytics.Export.stream_rows/4` and, when referrer
-  attribution is enabled, `stream_referrer_rows/4` (`Ash.stream!` +
-  `send_chunked/2`) rather than materializing the window: both `:in_range`
-  reads are keyset-paginated for exactly this, and the requested span is
-  capped at the bucket retention window so a request can't ask for an
-  unbounded scan.
+  Streams via `KilnCMS.Analytics.Export.stream_rows/4`, `stream_referrer_rows/4`
+  (when referrer attribution is enabled) and `stream_funnel_rows/4` (#622)
+  (`Ash.stream!` + `send_chunked/2`) rather than materializing the window:
+  both bucket `:in_range` reads are keyset-paginated for exactly this, and
+  the requested span is capped at the bucket retention window so a request
+  can't ask for an unbounded scan. The funnel stream is a single eager batch
+  instead — see `Export.stream_funnel_rows/4`'s docs for why that's fine.
   """
   use KilnCMSWeb, :controller
 
@@ -61,7 +62,8 @@ defmodule KilnCMSWeb.AnalyticsExportController do
     body_stream =
       [
         Export.stream_rows(from, to, org, actor),
-        Export.stream_referrer_rows(from, to, org, actor)
+        Export.stream_referrer_rows(from, to, org, actor),
+        Export.stream_funnel_rows(from, to, org, actor)
       ]
       |> Stream.concat()
       |> Stream.map(fn {rows, titles} ->
@@ -89,7 +91,8 @@ defmodule KilnCMSWeb.AnalyticsExportController do
     body_stream =
       [
         Export.stream_rows(from, to, org, actor),
-        Export.stream_referrer_rows(from, to, org, actor)
+        Export.stream_referrer_rows(from, to, org, actor),
+        Export.stream_funnel_rows(from, to, org, actor)
       ]
       |> Stream.concat()
       |> Stream.transform(false, fn {rows, titles}, sent_any? ->

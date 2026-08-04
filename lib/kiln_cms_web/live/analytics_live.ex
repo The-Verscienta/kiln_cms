@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
   import KilnCMSWeb.ChartComponents, only: [bar_chart: 1, category_chart: 1, referrer_bar: 1]
 
   alias KilnCMS.Analytics
+  alias KilnCMS.Analytics.FunnelReport
   alias KilnCMS.CMS.ContentTypes
 
   @top_limit 50
@@ -70,6 +71,22 @@ defmodule KilnCMSWeb.AnalyticsLive do
         {rows, []}
       end
 
+    # Funnel reports (#622) — derived from the same bucket table as the rest
+    # of the page, never a separate counter. Each funnel is independently
+    # small (a handful of admin-authored steps), so reporting on every
+    # *active* funnel costs one targeted read per distinct step content type,
+    # not a scan. Inactive funnels are omitted, same as the dashboard would
+    # hide any other disabled feature.
+    funnels =
+      Analytics.list_funnels!(
+        actor: actor,
+        tenant: org,
+        query: [filter: [active: true], sort: [inserted_at: :asc]]
+      )
+
+    funnel_reports =
+      Enum.map(funnels, &{&1, FunnelReport.report(&1, since, Date.utc_today(), org, actor)})
+
     {:noreply,
      socket
      |> assign(:range, range)
@@ -79,7 +96,8 @@ defmodule KilnCMSWeb.AnalyticsLive do
      |> assign(:rows, rows)
      |> assign(:referrers_enabled, referrers_enabled)
      |> assign(:referrer_chart_entries, referrer_chart_entries)
-     |> assign(:low_count_threshold, Analytics.low_count_threshold())}
+     |> assign(:low_count_threshold, Analytics.low_count_threshold())
+     |> assign(:funnel_reports, funnel_reports)}
   end
 
   # An unknown or hostile `?range=` falls back to the default rather than
@@ -298,6 +316,12 @@ defmodule KilnCMSWeb.AnalyticsLive do
 
   defp humanize(dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
 
+  # No denominator (first step, or a zero-view previous step) and a
+  # suppressed count both render as an em dash — neither is "0%", which
+  # would misreport an unmeasurable ratio as a real, measured drop.
+  defp ratio_label(nil), do: "—"
+  defp ratio_label(ratio), do: "#{ratio}%"
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -417,6 +441,42 @@ defmodule KilnCMSWeb.AnalyticsLive do
               n: @low_count_threshold
             )}
           </p>
+        </div>
+
+        <div :if={@funnel_reports != []} class="space-y-6">
+          <div>
+            <h2 class="mb-1 text-lg font-medium">{gettext("Funnels")}</h2>
+            <p class="text-xs text-base-content/60">
+              {gettext(
+                "Steps are counted independently — this is not a per-visitor conversion rate. A later step's count includes traffic that never saw an earlier one, so a ratio can read above 100%."
+              )}
+            </p>
+          </div>
+
+          <div :for={{funnel, steps} <- @funnel_reports} class="card card-pad">
+            <h3 class="mb-3 font-medium">{funnel.name}</h3>
+
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">{gettext("Step")}</th>
+                  <th scope="col" class="text-right">
+                    {ngettext("Views (%{count}d)", "Views (%{count}d)", @range, count: @range)}
+                  </th>
+                  <th scope="col" class="text-right">{gettext("vs. previous step")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={{step, index} <- Enum.with_index(steps, 1)}>
+                  <td>
+                    <span class="text-base-content/50">{index}.</span> {step.title}
+                  </td>
+                  <td class="text-right tabular-nums">{step.display}</td>
+                  <td class="text-right tabular-nums">{ratio_label(step.ratio)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div>

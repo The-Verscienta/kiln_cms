@@ -357,4 +357,101 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
 
     assert html =~ "No views in the last 7 days."
   end
+
+  describe "funnels (#622)" do
+    defp bucket!(content_type, content_id, views) do
+      Ash.Seed.seed!(KilnCMS.Analytics.ContentViewDay, %{
+        content_type: content_type,
+        content_id: content_id,
+        day: Date.utc_today(),
+        views: views
+      })
+    end
+
+    defp funnel_with_steps!(admin, steps) do
+      funnel =
+        Analytics.create_funnel!(
+          %{name: "Signup", slug: "ana-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      for {content_type, content_id, position} <- steps do
+        Analytics.create_funnel_step!(
+          %{
+            funnel_id: funnel.id,
+            content_type: content_type,
+            content_id: content_id,
+            position: position
+          },
+          actor: admin
+        )
+      end
+
+      funnel
+    end
+
+    test "shows no funnels section when the org has none", %{conn: conn} do
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      refute html =~ "Funnels</h2>"
+    end
+
+    test "an active funnel reports each step's window views and ratio", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      landing =
+        CMS.create_page!(
+          %{title: "Landing", slug: "ana-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      pricing =
+        CMS.create_page!(
+          %{title: "Pricing", slug: "ana-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      bucket!("page", landing.id, 20)
+      bucket!("page", pricing.id, 5)
+
+      funnel_with_steps!(admin, [{"page", landing.id, 0}, {"page", pricing.id, 1}])
+
+      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/analytics")
+
+      assert html =~ "Signup"
+      assert html =~ "Landing"
+      assert html =~ "Pricing"
+      assert html =~ "25.0%"
+      assert html =~ "not a per-visitor conversion rate"
+    end
+
+    test "an inactive funnel is excluded from the report", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      funnel =
+        Analytics.create_funnel!(
+          %{name: "Hidden", slug: "ana-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      Analytics.update_funnel!(funnel, %{active: false}, actor: admin)
+
+      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/analytics")
+
+      refute html =~ "Hidden"
+    end
+
+    test "a step whose content was deleted still shows a row, titled as deleted", %{conn: conn} do
+      admin = authed_user(:admin)
+      gone_id = Ash.UUID.generate()
+      bucket!("page", gone_id, 3)
+
+      funnel_with_steps!(admin, [{"page", gone_id, 0}])
+
+      {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/analytics")
+
+      assert html =~ "(deleted)"
+    end
+  end
 end

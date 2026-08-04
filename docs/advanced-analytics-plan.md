@@ -402,7 +402,7 @@ config gate. **This table is the status of record.**
 | **2** | #619 | done | `ReferrerSource.classify/2` + `ReferrerDay` + retention trigger + runtime config gate; write joins the existing view task | — |
 | **3** | #620 | done | Referrer breakdown UI on `AnalyticsLive` (with low-count suppression); export gains referrer columns | 2, and 1 for the export half |
 | **4** | #621 | done | `Funnel`/`FunnelStep` definitions + admin CRUD | — |
-| **5** | #622 | not started | Funnel report derived from `ContentViewDay` + labelled ratios; export gains a funnel sheet | 4, and 1 for the export half |
+| **5** | #622 | done | Funnel report derived from `ContentViewDay` + labelled ratios; export gains a funnel sheet | 4, and 1 for the export half |
 | **6** | #623 | not started | Month roll-up job (only if multi-year history is wanted) | — |
 
 **Cut line:** Phase 1 alone is worth shipping — it makes the existing numbers
