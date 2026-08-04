@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.FormController do
   alias KilnCMS.Forms
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Embed
+  alias KilnCMSWeb.Params
   alias KilnCMSWeb.Tenant
 
   # The embed page is public and changes only when an admin edits the form, so a
@@ -148,7 +149,7 @@ defmodule KilnCMSWeb.FormController do
         :not_found
 
       form ->
-        case Forms.submit(form, params, locale: params["locale"]) do
+        case Forms.submit(form, params, locale: Params.string(params, "locale")) do
           # A tripped honeypot reports success too — bots learn nothing.
           {:ok, _submission_or_discarded} -> {:ok, form}
           {:error, errors} -> {:error, form, errors}

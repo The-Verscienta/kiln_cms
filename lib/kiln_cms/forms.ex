@@ -130,6 +130,13 @@ defmodule KilnCMS.Forms do
 
   defp blank?(value), do: value in [nil, ""] or (is_binary(value) and String.trim(value) == "")
 
+  # A submitted value arrives from a query string or a JSON body, so the client
+  # chooses its shape: `message[a]=hi` is a map. Nothing below has a clause for
+  # one and `to_string/1` raises on it, which would 500 an anonymous,
+  # CSRF-exempt endpoint. Rejected as invalid input, which is what it is.
+  defp cast(_field, value) when is_list(value) or is_map(value),
+    do: {:error, "is not valid"}
+
   defp cast(%{field_type: type}, value) when type in [:string, :text] do
     {:ok, value |> to_string() |> String.trim()}
   end

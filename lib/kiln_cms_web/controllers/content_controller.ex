@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Feeds
   alias KilnCMS.I18n
+  alias KilnCMSWeb.Params
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
 
@@ -283,7 +284,7 @@ defmodule KilnCMSWeb.ContentController do
   # entries (media isn't part of the public site).
   def search(conn, params) do
     locale = locale(conn)
-    query = params["q"] |> to_string() |> String.trim()
+    query = params |> Params.string("q", "") |> String.trim()
     # Scope search to the request's org (#336); content sections are per-site.
     org = KilnCMSWeb.Tenant.current_org(conn)
     org_id = org.id
@@ -405,8 +406,8 @@ defmodule KilnCMSWeb.ContentController do
 
   # Zero-based page index from `?page=N` (1-based in the URL for humans).
   # Anything missing or invalid is page 0; anything beyond @max_page is clamped.
-  defp page_param(%{"page" => raw}) do
-    case Integer.parse(to_string(raw)) do
+  defp page_param(%{"page" => raw}) when is_binary(raw) do
+    case Integer.parse(raw) do
       {n, _} when n > 1 -> min(n - 1, @max_page)
       _ -> 0
     end

@@ -12,12 +12,13 @@ defmodule KilnCMSWeb.RelatedController do
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Search.Related
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Params
 
   @max_age_seconds 300
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
-    locale = params["locale"] || KilnCMS.I18n.default_locale()
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale) do
@@ -54,10 +55,5 @@ defmodule KilnCMSWeb.RelatedController do
     end
   end
 
-  defp limit(params) do
-    case Integer.parse(params["limit"] || "") do
-      {n, ""} when n in 1..20 -> n
-      _ -> 5
-    end
-  end
+  defp limit(params), do: Params.integer(params, "limit", 5, 1..20)
 end

@@ -14,29 +14,33 @@ defmodule KilnCMSWeb.AskController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Ask
+  alias KilnCMSWeb.Params
 
   def ask(conn, params) do
     result =
-      params["q"]
-      |> to_string()
+      params
+      |> Params.string("q", "")
       |> Ask.answer(
         actor: conn.assigns[:current_user],
         authorize?: true,
         # Scope RAG retrieval to the request's org (#336).
         tenant: KilnCMSWeb.Tenant.current_org_id(conn),
-        locale: params["locale"],
-        limit: parse_limit(params["limit"])
+        locale: Params.string(params, "locale"),
+        limit: parse_limit(Params.string(params, "limit"))
       )
 
     json(conn, result)
   end
 
+  # Left unclamped on purpose: `Ask.answer/2` clamps it against its own ceiling,
+  # so bounding it a second time here would be two numbers to keep in step. The
+  # shape is `Params`' business; the range is the callee's.
   defp parse_limit(value) when is_binary(value) do
     case Integer.parse(value) do
       {n, ""} -> n
-      _ -> nil
+      _other -> nil
     end
   end
 
-  defp parse_limit(_), do: nil
+  defp parse_limit(_absent), do: nil
 end

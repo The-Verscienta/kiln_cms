@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.SearchApiController do
   alias KilnCMS.I18n
   alias KilnCMS.Search
   alias KilnCMS.Search.Highlight
+  alias KilnCMSWeb.Params
 
   @max_limit 25
   @default_limit 10
@@ -35,9 +36,9 @@ defmodule KilnCMSWeb.SearchApiController do
   @suggest_below 3
 
   def index(conn, params) do
-    query = params["q"] |> to_string() |> String.trim()
-    locale = validated_locale(params["locale"])
-    limit = clamped_limit(params["limit"])
+    query = params |> Params.string("q", "") |> String.trim()
+    locale = validated_locale(Params.string(params, "locale"))
+    limit = Params.integer(params, "limit", @default_limit, 1..@max_limit)
 
     if query == "" do
       json(conn, %{query: query, locale: locale, results: empty_sections(), suggestion: nil})
@@ -167,12 +168,5 @@ defmodule KilnCMSWeb.SearchApiController do
 
   defp validated_locale(locale) do
     if locale in I18n.locales(), do: locale, else: I18n.default_locale()
-  end
-
-  defp clamped_limit(limit) do
-    case Integer.parse(to_string(limit)) do
-      {n, ""} when n in 1..@max_limit -> n
-      _other -> @default_limit
-    end
   end
 end
