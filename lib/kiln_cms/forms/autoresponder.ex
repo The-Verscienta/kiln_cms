@@ -23,11 +23,13 @@ defmodule KilnCMS.Forms.Autoresponder do
   Token definitions for `fields` — `[field:<name>]` per declared field plus
   `[form-name]`. `escape?` HTML-escapes every resolved value (for the email
   body); the subject line is a mail header, never HTML, so callers building
-  it pass `escape?: false`.
+  it pass `escape?: false` — but a mail header still can't tolerate a raw
+  CR/LF (an anonymous submitter's field value could otherwise smuggle extra
+  headers into the subject), so that path strips line breaks instead.
   """
   @spec definitions([field()], String.t(), boolean()) :: [Kiln.Tokens.definition()]
   def definitions(fields, form_name, escape?) do
-    wrap = if escape?, do: &h/1, else: &to_string/1
+    wrap = if escape?, do: &h/1, else: &plain/1
 
     field_definitions =
       Enum.map(fields, fn field ->
@@ -86,4 +88,6 @@ defmodule KilnCMS.Forms.Autoresponder do
   defp h(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end
+
+  defp plain(value), do: value |> to_string() |> String.replace(~r/[\r\n]+/, " ")
 end

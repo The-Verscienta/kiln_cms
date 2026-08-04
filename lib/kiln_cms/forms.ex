@@ -237,10 +237,17 @@ defmodule KilnCMS.Forms do
     {:ok, value |> to_string() |> String.trim()}
   end
 
+  # The HTML5 `<input type="email">` pattern (WHATWG living standard) —
+  # deliberately tighter than "not whitespace or @": the autoresponder (#468)
+  # hands this value straight to Swoosh as a literal SMTP recipient, and
+  # `,`/`;` are valid in `[^\s@]+` but not in a real address, which would let
+  # a submitted value smuggle in an extra recipient.
+  @email_pattern ~r/\A[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+\z/
+
   defp cast(%{field_type: :email}, value) do
     str = value |> to_string() |> String.trim()
 
-    if Regex.match?(~r/\A[^\s@]+@[^\s@]+\.[^\s@]+\z/, str),
+    if Regex.match?(@email_pattern, str),
       do: {:ok, str},
       else: {:error, "must be an email address"}
   end

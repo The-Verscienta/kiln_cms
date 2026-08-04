@@ -89,7 +89,6 @@ defmodule Kiln.Tokens do
       @capture_regex
       |> Regex.scan(pattern, capture: :all_but_first)
       |> List.flatten()
-      |> Enum.uniq()
       |> Enum.reject(&known?(&1, definitions))
 
     if unknown == [], do: :ok, else: {:error, unknown}

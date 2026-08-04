@@ -102,6 +102,16 @@ defmodule KilnCMS.FormsTest do
     assert errors["topic"] =~ "allowed options"
   end
 
+  test "an email field rejects a comma-separated address (#468 autoresponder hardening)" do
+    # The autoresponder hands this value straight to Swoosh as a literal SMTP
+    # recipient — a comma is invalid in a real address, and letting it
+    # through would risk smuggling in an extra recipient.
+    form = form!([%{name: "email", label: "Email", field_type: :email, required: true}])
+
+    assert {:error, %{"email" => _}} =
+             Forms.submit(form, %{"email" => "a@example.com,evil@example.com"})
+  end
+
   test "required fields reject blank; optional blanks are skipped" do
     form =
       form!([

@@ -60,8 +60,10 @@ defmodule Kiln.TokensTest do
       assert Enum.sort(unknown) == ["a", "b"]
     end
 
-    test "duplicate unknown tokens are reported once" do
-      assert {:error, ["typo"]} = Tokens.validate("[typo] and [typo] again", definitions())
+    test "a repeated unknown token is reported once per occurrence" do
+      # Matches `KilnCMS.Slug.Pattern`'s pre-#468 behavior exactly — no dedup.
+      assert {:error, ["typo", "typo"]} =
+               Tokens.validate("[typo] and [typo] again", definitions())
     end
 
     test "the empty-bracket pattern is caught as unknown, not silently accepted" do

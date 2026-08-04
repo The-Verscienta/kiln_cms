@@ -99,12 +99,15 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   defp actor_display("returned_to_draft", who), do: reviewer(who)
   defp actor_display(_event, who), do: who
 
-  # Raw values — a mail header, never HTML.
+  # Raw values — a mail header, never HTML. Still stripped of embedded
+  # CR/LF: `title`/`actor_display` are author-supplied, and a raw line break
+  # in a `subject/2` value would smuggle extra headers into the message
+  # (same reasoning as `KilnCMS.Automation.RuleWorker`'s `:text` escape).
   defp plain_definitions do
     [
-      %{match: "title", resolve: fn _token, ctx -> ctx.title end},
-      %{match: "kind", resolve: fn _token, ctx -> ctx.kind end},
-      %{match: "actor-name", resolve: fn _token, ctx -> ctx.actor_display end},
+      %{match: "title", resolve: fn _token, ctx -> plain(ctx.title) end},
+      %{match: "kind", resolve: fn _token, ctx -> plain(ctx.kind) end},
+      %{match: "actor-name", resolve: fn _token, ctx -> plain(ctx.actor_display) end},
       %{match: "url", resolve: fn _token, ctx -> ctx.url end}
     ]
   end
@@ -134,6 +137,8 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   defp h(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end
+
+  defp plain(value), do: value |> to_string() |> String.replace(~r/[\r\n]+/, " ")
 
   defp submitter(nil), do: "An editor"
   defp submitter(who), do: who

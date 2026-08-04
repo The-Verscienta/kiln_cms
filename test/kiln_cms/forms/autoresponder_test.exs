@@ -38,6 +38,22 @@ defmodule KilnCMS.Forms.AutoresponderTest do
                  email_field()
                ])
     end
+
+    test "with multiple email fields, the first (by the caller's own field order) wins" do
+      # `eligible?/3` doesn't re-sort `fields` — it trusts the order the caller
+      # already fetched them in (`Form.fields`'s `position, name` sort, or
+      # `FormField.for_form`'s matching sort), so this only documents that
+      # `Enum.find/2` picks the first match rather than, say, erroring or
+      # picking a "primary" field some other way.
+      form = %{autoresponder_enabled: true}
+
+      assert {true, "first@example.com"} =
+               Autoresponder.eligible?(
+                 form,
+                 %{"first" => "first@example.com", "second" => "second@example.com"},
+                 [email_field("first"), email_field("second")]
+               )
+    end
   end
 
   describe "definitions/3" do
@@ -78,6 +94,27 @@ defmodule KilnCMS.Forms.AutoresponderTest do
 
       assert subject == "Thanks, Ada <script>!"
       assert body == "<p>Hi Ada &lt;script&gt;, from Contact &lt;Us&gt;.</p>"
+    end
+
+    test "a submitted field value can't smuggle a CR/LF into the subject header" do
+      # The subject is a mail header, not HTML — HTML-escaping wouldn't touch
+      # a raw newline anyway. A submitter putting "Ada\r\nBcc: evil@x.com" in
+      # a field the template references must not reach Swoosh's subject/2
+      # with the line break intact (header injection).
+      form = %{
+        name: "Contact",
+        autoresponder_subject: "Thanks, [field:name]!",
+        autoresponder_body: "b"
+      }
+
+      {subject, _body} =
+        Autoresponder.render(form, [text_field("name")], %{
+          "name" => "Ada\r\nBcc: evil@example.com"
+        })
+
+      refute subject =~ "\r"
+      refute subject =~ "\n"
+      assert subject == "Thanks, Ada Bcc: evil@example.com!"
     end
   end
 end
