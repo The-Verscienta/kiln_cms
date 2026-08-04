@@ -350,6 +350,11 @@ defmodule KilnCMSWeb.Router do
       live "/editor/governance/:type/:id", GovernanceLive, :show
       live "/editor/forms", FormLive, :index
       live "/editor/forms/:id", FormBuilderLive, :edit
+      # Funnel definitions (#621, phase 4 of docs/advanced-analytics-plan.md) —
+      # admin-only like the rest of this block; the derived report (#622) is
+      # editor-visible on the analytics dashboard.
+      live "/editor/funnels", FunnelLive, :index
+      live "/editor/funnels/:id", FunnelBuilderLive, :edit
       live "/editor/api-keys", ApiKeyLive, :index
       # Which Kiln core this instance runs, and whether upstream has a newer
       # release. Reports only — updating is `mix kiln.update` (see SystemLive).
