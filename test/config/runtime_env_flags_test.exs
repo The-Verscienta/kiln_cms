@@ -43,6 +43,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   @vars ~w(
             DATABASE_SSL DATABASE_SSL_CACERTFILE ECTO_IPV6 PHX_SERVER
             VISUAL_EDITING_ENABLED KILN_UPDATE_CHECK KILN_ANALYTICS_REFERRERS
+            KILN_ANALYTICS_LOW_COUNT_THRESHOLD
             KILN_AUDIT_ANCHOR_EVERY_WRITE
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
@@ -308,6 +309,48 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     test "an unrecognized value leaves the setting alone" do
       referrers = analytics_referrers("enabled")
       assert referrers == nil or not Keyword.has_key?(referrers, :enabled)
+    end
+  end
+
+  describe "KILN_ANALYTICS_LOW_COUNT_THRESHOLD (#620)" do
+    # Not a boolean, so this doesn't go through KilnCMS.Config.Env — same
+    # `Integer.parse` + positive-guard shape as KILN_READING_TIME_WPM.
+    defp low_count_threshold(value) do
+      {config, stderr} = eval_io(%{"KILN_ANALYTICS_LOW_COUNT_THRESHOLD" => value}, :prod)
+      {get_in(config, [:kiln_cms, :analytics_referrers, :low_count_threshold]), stderr}
+    end
+
+    test "unset writes nothing, so the compiled default (5) stands" do
+      assert {nil, _stderr} = low_count_threshold(nil)
+    end
+
+    test "a positive integer is written" do
+      assert {12, _stderr} = low_count_threshold("12")
+    end
+
+    test "surrounding whitespace is trimmed" do
+      assert {7, _stderr} = low_count_threshold("  7  ")
+    end
+
+    test "zero, a negative number, or a non-integer value keeps the default and warns" do
+      for value <- ["0", "-1", "five", "3.5", ""] do
+        {threshold, stderr} = low_count_threshold(value)
+
+        assert threshold == nil,
+               "KILN_ANALYTICS_LOW_COUNT_THRESHOLD=#{inspect(value)} must not be interpreted"
+
+        assert stderr =~ "KILN_ANALYTICS_LOW_COUNT_THRESHOLD must be a positive integer",
+               "#{inspect(value)} should warn rather than be silently swallowed"
+      end
+    end
+
+    test "it deep-merges with KILN_ANALYTICS_REFERRERS rather than clobbering it" do
+      config =
+        eval(%{"KILN_ANALYTICS_REFERRERS" => "true", "KILN_ANALYTICS_LOW_COUNT_THRESHOLD" => "3"})
+
+      referrers = get_in(config, [:kiln_cms, :analytics_referrers])
+      assert referrers[:enabled] == true
+      assert referrers[:low_count_threshold] == 3
     end
   end
 

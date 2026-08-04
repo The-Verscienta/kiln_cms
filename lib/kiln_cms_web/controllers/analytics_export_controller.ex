@@ -16,10 +16,12 @@ defmodule KilnCMSWeb.AnalyticsExportController do
   section: it is the one analytics table holding free text that can
   incidentally carry PII.
 
-  Streams via `KilnCMS.Analytics.Export.stream_rows/4` (`Ash.stream!` +
-  `send_chunked/2`) rather than materializing the window: `ContentViewDay.:in_range`
-  is keyset-paginated for exactly this, and the requested span is capped at
-  the bucket retention window so a request can't ask for an unbounded scan.
+  Streams via `KilnCMS.Analytics.Export.stream_rows/4` and, when referrer
+  attribution is enabled, `stream_referrer_rows/4` (`Ash.stream!` +
+  `send_chunked/2`) rather than materializing the window: both `:in_range`
+  reads are keyset-paginated for exactly this, and the requested span is
+  capped at the bucket retention window so a request can't ask for an
+  unbounded scan.
   """
   use KilnCMSWeb, :controller
 
@@ -57,7 +59,12 @@ defmodule KilnCMSWeb.AnalyticsExportController do
       |> send_chunked(200)
 
     body_stream =
-      Stream.map(Export.stream_rows(from, to, org, actor), fn {rows, titles} ->
+      [
+        Export.stream_rows(from, to, org, actor),
+        Export.stream_referrer_rows(from, to, org, actor)
+      ]
+      |> Stream.concat()
+      |> Stream.map(fn {rows, titles} ->
         Enum.map_join(rows, &CSV.line(Export.csv_row(&1, titles, org)))
       end)
 
@@ -80,11 +87,15 @@ defmodule KilnCMSWeb.AnalyticsExportController do
       |> send_chunked(200)
 
     body_stream =
-      Stream.transform(Export.stream_rows(from, to, org, actor), false, fn
-        {rows, titles}, sent_any? ->
-          prefix = if sent_any?, do: ",", else: ""
-          json = Enum.map_join(rows, ",", &Jason.encode!(Export.json_row(&1, titles, org)))
-          {[prefix <> json], true}
+      [
+        Export.stream_rows(from, to, org, actor),
+        Export.stream_referrer_rows(from, to, org, actor)
+      ]
+      |> Stream.concat()
+      |> Stream.transform(false, fn {rows, titles}, sent_any? ->
+        prefix = if sent_any?, do: ",", else: ""
+        json = Enum.map_join(rows, ",", &Jason.encode!(Export.json_row(&1, titles, org)))
+        {[prefix <> json], true}
       end)
 
     ["["]

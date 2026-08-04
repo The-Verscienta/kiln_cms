@@ -462,6 +462,36 @@ with {:ok, enabled?} <- Env.fetch("KILN_ANALYTICS_REFERRERS") do
   config :kiln_cms, :analytics_referrers, enabled: enabled?
 end
 
+# ## Low-count suppression threshold (#620, phase 3 of docs/advanced-analytics-plan.md)
+#
+# A referrer category's hit count below this renders — in the dashboard and
+# the export — as "< n" rather than an exact number, because a single-digit
+# bucket can describe one visitor's arrival (design doc, "Where 'aggregate'
+# gets thin: low counts"). Runtime-readable for the same reason as the gate
+# above: an operator tightening or loosening this must not need a rebuild.
+# `KilnCMS.Config.Env` only parses booleans, so this is a plain integer parse
+# in the same shape as `KILN_READING_TIME_WPM` above — an unparseable or
+# non-positive value keeps the default and warns rather than being
+# interpreted (e.g. silently disabling suppression at threshold 0).
+#
+# This `config` call deep-merges with the `enabled:` one above (`Config`
+# merges successive calls for the same key rather than overwriting), so both
+# land in the same `:analytics_referrers` keyword list — see #608 for why
+# that merge behavior matters here and can also bite.
+if threshold = System.get_env("KILN_ANALYTICS_LOW_COUNT_THRESHOLD") do
+  case Integer.parse(String.trim(threshold)) do
+    {parsed, ""} when parsed > 0 ->
+      config :kiln_cms, :analytics_referrers, low_count_threshold: parsed
+
+    _ ->
+      IO.warn(
+        "KILN_ANALYTICS_LOW_COUNT_THRESHOLD must be a positive integer " <>
+          "(got #{inspect(threshold)}); keeping the default.",
+        []
+      )
+  end
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

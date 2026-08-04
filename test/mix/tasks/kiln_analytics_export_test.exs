@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
   import ExUnit.CaptureIO
 
   alias KilnCMS.Analytics.ContentViewDay
+  alias KilnCMS.Analytics.ReferrerDay
   alias Mix.Tasks.Kiln.Analytics.Export
 
   defp seed_bucket(attrs) do
@@ -15,6 +16,27 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
       ContentViewDay,
       Map.merge(%{content_type: "page", content_id: Ash.UUID.generate(), views: 1}, attrs)
     )
+  end
+
+  defp seed_referrer_bucket(attrs) do
+    Ash.Seed.seed!(
+      ReferrerDay,
+      Map.merge(
+        %{content_type: "page", content_id: Ash.UUID.generate(), source: :direct, hits: 1},
+        attrs
+      )
+    )
+  end
+
+  defp enable_referrers(threshold) do
+    original = Application.get_env(:kiln_cms, :analytics_referrers, [])
+
+    Application.put_env(:kiln_cms, :analytics_referrers,
+      enabled: true,
+      low_count_threshold: threshold
+    )
+
+    on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
   end
 
   defp today, do: Date.utc_today()
@@ -27,11 +49,39 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
         Export.run(["--from=#{today()}", "--to=#{today()}"])
       end)
 
-    assert String.starts_with?(output, "day,content_type,content_id,title,views\r\n")
-    assert output =~ ",5\r\n"
+    assert String.starts_with?(
+             output,
+             "kind,day,content_type,content_id,title,views,source,hits\r\n"
+           )
+
+    assert output =~ ",5,,\r\n"
     # The "Exported ..." summary goes to stderr, never stdout — stdout carries
     # only the export itself, so a piped/redirected run stays parseable.
     refute output =~ "Exported"
+  end
+
+  test "includes referrer rows when the phase-2 gate is on, suppressed as \"< n\" when appropriate" do
+    enable_referrers(5)
+    id = Ash.UUID.generate()
+    seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 2})
+
+    output =
+      capture_io(fn ->
+        Export.run(["--from=#{today()}", "--to=#{today()}"])
+      end)
+
+    assert output =~ "referrer,#{today()},page,#{id},(deleted),,search,< 5"
+  end
+
+  test "omits referrer rows when the phase-2 gate is off, even if buckets exist" do
+    seed_referrer_bucket(%{day: today(), source: :search, hits: 9})
+
+    output =
+      capture_io(fn ->
+        Export.run(["--from=#{today()}", "--to=#{today()}"])
+      end)
+
+    refute output =~ "referrer,"
   end
 
   test "writes a JSON export when --format=json, with nothing else on stdout" do
@@ -93,7 +143,7 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
 
     on_exit(fn -> File.rm(path) end)
 
-    assert File.read!(path) =~ ",3\r\n"
+    assert File.read!(path) =~ ",3,,\r\n"
   end
 
   test "raises when --from is after --to" do
