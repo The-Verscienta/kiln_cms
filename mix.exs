@@ -141,6 +141,7 @@ defmodule KilnCMS.MixProject do
       "docs/visual-editing-bridge.md": [],
       "docs/static-export.md": [],
       "docs/resilient-delivery.md": [],
+      "docs/webhooks.md": [],
       # Search
       "docs/meilisearch.md": [title: "Meilisearch backend"],
       # Operations & deployment
@@ -241,7 +242,8 @@ defmodule KilnCMS.MixProject do
         "docs/rag.md",
         "docs/visual-editing-bridge.md",
         "docs/static-export.md",
-        "docs/resilient-delivery.md"
+        "docs/resilient-delivery.md",
+        "docs/webhooks.md"
       ],
       Search: ["docs/meilisearch.md"],
       "Operations & deployment": [

@@ -49,7 +49,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
 | **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
 | **Feeds**              | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content.  | [§ Feeds](#feeds) |
-| **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [§ Webhooks](#webhooks) |
+| **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [webhooks.md](webhooks.md) |
 | **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
 
 ## Authentication
@@ -358,6 +358,9 @@ can **redeliver** any recorded delivery (a fresh ledger row, same payload) and
 endpoint is disabled. Delivery history is pruned after 30 days; both knobs are
 configurable (`config :kiln_cms, KilnCMS.Webhooks, auto_disable_after: …` and
 `config :kiln_cms, :webhooks, delivery_retention_days: …`).
+
+See [**Webhooks**](webhooks.md) for event names and payload shapes, signature
+verification, and the SSRF/egress protections applied to endpoint URLs.
 
 ## Preview tokens
 

@@ -476,8 +476,11 @@ build if a resource is ever registered without that authorizer.
 
 ### Webhooks (outbound)
 - **SSRF** — mitigated by `SafeUrl` with IP pinning (see Controls).
-- **Replay / forgery at the receiver** — deliveries are HMAC-signed; receivers
-  must verify the signature and timestamp.
+- **Forgery at the receiver** — deliveries are HMAC-SHA256-signed over the raw
+  body; a receiver that verifies `x-kilncms-signature` knows a delivery is
+  genuinely from Kiln with unmodified content. There is no timestamp or nonce
+  in the scheme, so this proves origin and integrity, not freshness — see
+  residual risk 14 and [webhooks.md](webhooks.md#verifying-the-signature).
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**
@@ -743,6 +746,17 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     `Phoenix.PubSub`'s default adapter carries it to every node — but nothing
     verifies that, so treat multi-node eviction as untested rather than
     unsupported.
+14. **Webhook deliveries have no anti-replay.** The signature
+    (`x-kilncms-signature`, HMAC-SHA256 over the raw body) proves a delivery's
+    origin and integrity, not its freshness — there is no timestamp or nonce
+    binding it to a point in time, so anyone who captures one signed request
+    (TLS would have to fail first) can replay it to the receiver indefinitely.
+    Accepted for now: the payload is either already-public content
+    (`published`/`unpublished`/`updated`) or a receiver-defined form submission,
+    so a replay re-announces old state rather than forging new access. A
+    receiver with exactly-once requirements should dedupe on its own terms
+    (the content payload's `id`/`updated_at`, or a delivery id tracked out of
+    band) — see [webhooks.md](webhooks.md#verifying-the-signature).
 
 ## Operating the dependency audit
 
