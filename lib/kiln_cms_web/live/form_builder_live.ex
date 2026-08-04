@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.FormField
+  alias KilnCMS.Forms.Autoresponder
 
   import KilnCMSWeb.BlockComponents, only: [public_form_field: 1, field_width_class: 1]
 
@@ -434,6 +435,12 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   defp error_message(_error), do: gettext("Something went wrong.")
 
+  defp autoresponder_token_hint(form, fields) do
+    Autoresponder.definitions(fields, form.name || "", false)
+    |> Kiln.Tokens.names()
+    |> Enum.map_join(", ", &"[#{&1}]")
+  end
+
   defp tab_label(:fields), do: gettext("Fields")
   defp tab_label(:general), do: gettext("General")
   defp tab_label(:notifications), do: gettext("Notifications")
@@ -833,6 +840,49 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 {gettext("Shown on the thank-you page after a successful submission.")}
               </p>
             </div>
+
+            <div class="divider" />
+
+            <label class="flex items-center gap-2 text-sm">
+              <input type="hidden" name="form[autoresponder_enabled]" value="false" />
+              <input
+                type="checkbox"
+                name="form[autoresponder_enabled]"
+                value="true"
+                checked={@form.autoresponder_enabled}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {gettext("Email the submitter a confirmation")}
+            </label>
+            <p class="text-xs text-base-content/60">
+              {gettext("Only sends when the form has an email field and the visitor filled it in.")}
+            </p>
+
+            <div>
+              <label for="cf-ar-subject" class="text-sm font-medium">{gettext("Subject")}</label>
+              <input
+                id="cf-ar-subject"
+                name="form[autoresponder_subject]"
+                value={@form.autoresponder_subject}
+                placeholder={gettext("Thanks for reaching out, [field:name]!")}
+                class="field-input mt-1"
+              />
+            </div>
+            <div>
+              <label for="cf-ar-body" class="text-sm font-medium">{gettext("Body")}</label>
+              <textarea
+                id="cf-ar-body"
+                name="form[autoresponder_body]"
+                rows="4"
+                class="field-input mt-1"
+              >{@form.autoresponder_body}</textarea>
+            </div>
+            <p class="text-xs text-base-content/60">
+              {gettext("Available tokens: %{tokens}",
+                tokens: autoresponder_token_hint(@form, @fields)
+              )}
+            </p>
+
             <.button type="submit" variant="primary">{gettext("Save")}</.button>
           </form>
         </section>

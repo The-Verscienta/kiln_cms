@@ -40,6 +40,20 @@ defmodule KilnCMS.FormsTest do
     Forms.get_active(form.slug)
   end
 
+  # Autoresponder subject/body reference `[field:<name>]` tokens, and the
+  # config-time validation only knows a form's fields as of *this* save — so,
+  # unlike `form!/2`, the fields must exist before the autoresponder attrs are
+  # set, not alongside them at creation.
+  defp autoresponder_form!(autoresponder_attrs, fields) do
+    form = form!(fields)
+
+    CMS.update_form!(CMS.get_form!(form.id, authorize?: false), autoresponder_attrs,
+      authorize?: false
+    )
+
+    Forms.get_active(form.slug)
+  end
+
   test "coerces and validates each declared field type" do
     form =
       form!([
@@ -86,6 +100,16 @@ defmodule KilnCMS.FormsTest do
     assert errors["email"] =~ "email"
     assert errors["guests"] =~ "whole number"
     assert errors["topic"] =~ "allowed options"
+  end
+
+  test "an email field rejects a comma-separated address (#468 autoresponder hardening)" do
+    # The autoresponder hands this value straight to Swoosh as a literal SMTP
+    # recipient — a comma is invalid in a real address, and letting it
+    # through would risk smuggling in an extra recipient.
+    form = form!([%{name: "email", label: "Email", field_type: :email, required: true}])
+
+    assert {:error, %{"email" => _}} =
+             Forms.submit(form, %{"email" => "a@example.com,evil@example.com"})
   end
 
   test "required fields reject blank; optional blanks are skipped" do
@@ -144,6 +168,80 @@ defmodule KilnCMS.FormsTest do
     assert delivery.endpoint_id == endpoint.id
     assert delivery.event == "form.submitted"
     assert delivery.payload["form"] == form.slug
+  end
+
+  test "an enabled autoresponder queues a mail job addressed to the submitter (#468)" do
+    form =
+      autoresponder_form!(
+        %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:name]!",
+          autoresponder_body: "<p>We got your message, from [form-name].</p>"
+        },
+        [
+          %{name: "name", label: "Name", field_type: :string},
+          %{name: "email", label: "Email", field_type: :email}
+        ]
+      )
+
+    assert {:ok, _} = Forms.submit(form, %{"name" => "Ada", "email" => "ada@example.com"})
+
+    assert_enqueued(
+      worker: KilnCMS.Forms.AutoresponderWorker,
+      args: %{"to" => "ada@example.com"}
+    )
+  end
+
+  test "the autoresponder stays quiet when off, when there's no email field, or when it's blank" do
+    off =
+      autoresponder_form!(%{autoresponder_enabled: false}, [
+        %{name: "email", label: "Email", field_type: :email}
+      ])
+
+    assert {:ok, _} = Forms.submit(off, %{"email" => "a@example.com"})
+    refute_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
+
+    no_email_field =
+      autoresponder_form!(
+        %{autoresponder_enabled: true, autoresponder_subject: "s", autoresponder_body: "b"},
+        [%{name: "message", label: "Message", field_type: :text}]
+      )
+
+    assert {:ok, _} = Forms.submit(no_email_field, %{"message" => "hi"})
+    refute_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
+
+    blank_email =
+      autoresponder_form!(
+        %{autoresponder_enabled: true, autoresponder_subject: "s", autoresponder_body: "b"},
+        [%{name: "email", label: "Email", field_type: :email}]
+      )
+
+    assert {:ok, _} = Forms.submit(blank_email, %{})
+    refute_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
+  end
+
+  test "a spam-scored submission never triggers the autoresponder" do
+    form =
+      autoresponder_form!(
+        %{autoresponder_enabled: true, autoresponder_subject: "s", autoresponder_body: "b"},
+        [
+          %{name: "email", label: "Email", field_type: :email},
+          %{name: "message", label: "Message", field_type: :text}
+        ]
+      )
+
+    # Link density (40) alone sits under the default 50 threshold — pair it
+    # with an instant fill time (30) to genuinely clear it, same as the
+    # "spam scoring" describe block below.
+    assert {:ok, submission} =
+             Forms.submit(form, %{
+               "email" => "a@example.com",
+               "message" => "Buy now http://a.co http://b.co http://c.co",
+               Forms.rendered_at_field() => Forms.rendered_at_token()
+             })
+
+    assert submission.status == :spam
+    refute_enqueued(worker: KilnCMS.Forms.AutoresponderWorker)
   end
 
   test "form.submitted is a selectable webhook event" do

@@ -199,4 +199,20 @@ defmodule KilnCMS.NotificationsTest do
     refute review.html_body =~ "<img src=x onerror=alert(1)>"
     assert review.html_body =~ "&lt;img src=x onerror=alert(1)&gt;"
   end
+
+  test "an author-controlled title can't smuggle a CR/LF into the subject header" do
+    _admin = user(:admin)
+    editor = user(:editor)
+    marker = "CRLF#{System.unique_integer([:positive])}"
+    title = "#{marker}\r\nBcc: evil@example.com"
+
+    page = CMS.create_page!(%{title: title, slug: slug()}, actor: editor)
+    CMS.submit_page_for_review!(page, %{}, actor: editor)
+    drain()
+
+    assert [review] = sent_emails(marker)
+    refute review.subject =~ "\r"
+    refute review.subject =~ "\n"
+    assert review.subject == "Review requested: #{marker} Bcc: evil@example.com"
+  end
 end
