@@ -13,15 +13,18 @@ compilation and before the system starts.
 > sit outside the `if config_env() == :prod` block in `runtime.exs` — are:
 >
 > `PHX_SERVER`, `PORT`, `CSP_IMG_SRC`, `UNSPLASH_ACCESS_KEY`, `CORS_ORIGINS`,
-> `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, `PRESENTATION_PREVIEW_URL`,
-> the `KILN_UPDATE_*` group (plus `KILN_PIN_PATH`), `KILN_ANALYTICS_REFERRERS`,
+> `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, `KILN_LINK_CHECK_CRON` /
+> `KILN_LINK_CHECK_USER_AGENT`, `PRESENTATION_PREVIEW_URL`, the `KILN_UPDATE_*`
+> group (plus `KILN_PIN_PATH`), `KILN_ANALYTICS_REFERRERS`,
 > `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`, `SENTRY_DSN` / `SENTRY_ENV` /
-> `RELEASE_VSN`, the `OTEL_*` group, and `KILN_ENV_LABEL` / `KILN_ENV_COLOR`.
+> `RELEASE_VSN`, and the `OTEL_*` group.
 >
-> Four more are read in every environment **except `:test`**, where they are
+> Several more are read in every environment **except `:test`**, where they are
 > skipped so the suite cannot depend on a developer's exported shell:
-> `EMBED_ORIGINS`, `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`,
-> and the `KILN_PROVENANCE_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
+> `KILN_ENV_LABEL` / `KILN_ENV_COLOR`, `EMBED_ORIGINS`,
+> `KILN_AUDIT_ANCHORS_ENABLED`, `KILN_AUDIT_ANCHOR_EVERY_WRITE`, the
+> `KILN_GOVERNANCE_WITNESS*` group (plus `KILN_GOVERNANCE_CHECKPOINT_CRON`), and
+> the `KILN_PROVENANCE_*` group. `MIX_TEST_PARTITION` and `KILN_STRICT_TEST`
 > are the reverse — test-only.
 
 ## On/off variables
@@ -459,9 +462,9 @@ page then reports the version alone.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests. | [`config/runtime.exs:443`](../config/runtime.exs#L443) |
-| `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`Kiln.Updates`](../lib/kiln/updates.ex) |
-| `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`Kiln.Updates`](../lib/kiln/updates.ex) |
-| `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](../projects/README.md). | [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`config/runtime.exs:473`](../config/runtime.exs#L473), [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`config/runtime.exs:479`](../config/runtime.exs#L479), [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](../projects/README.md). | [`config/runtime.exs:456`](../config/runtime.exs#L456), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 
