@@ -77,13 +77,30 @@ defmodule KilnCMS.Config.Env do
   `loadpaths`/`compile`, so no project module is on the code path — measured,
   not assumed: `Code.ensure_loaded?/1` on this module from `config/test.exs`
   returns `false` (`:non_existing`) even when the `.beam` already exists from a
-  previous build. That is why `config/test.exs`'s `KILN_STRICT_TEST` read stays
-  a raw `System.get_env/1` comparison and must not be "finished off" to use
-  this module — doing so breaks every clean build.
+  previous build. `config/test.exs`'s `KILN_STRICT_TEST` read (#646) can't
+  "finish off" and call this module for that reason — doing so breaks every
+  clean build — so it goes through the standalone `config/strict_test_flag.exs`
+  instead, a `.exs` with the same spelling table but zero project dependencies,
+  loaded via `Code.require_file/2`. `true_values/0`/`false_values/0` below
+  exist so that snippet's copy can be checked against this module's, rather
+  than trusted to stay in sync by hand.
   """
 
   @true_values ~w(true 1 yes on)
   @false_values ~w(false 0 no off)
+
+  @doc """
+  The recognized "on" spellings, for `config/strict_test_flag.exs`'s sync test
+  (#646) — that snippet cannot call this module (see "`runtime.exs` only"
+  above), so it carries a literal copy instead; this is what keeps the copy
+  honest.
+  """
+  @spec true_values() :: [String.t()]
+  def true_values, do: @true_values
+
+  @doc "The recognized \"off\" spellings — see `true_values/0`."
+  @spec false_values() :: [String.t()]
+  def false_values, do: @false_values
 
   @typedoc """
   The three outcomes of reading a flag: an operator-supplied boolean, nothing
