@@ -104,4 +104,74 @@ defmodule KilnCMS.Storage.S3Test do
 
     assert {:error, _reason} = S3.store("denied.png", src)
   end
+
+  describe "private storage (#481)" do
+    test "unavailable — and every private operation errors — when no private bucket is configured" do
+      refute S3.private_available?()
+
+      assert {:error, :private_storage_not_configured} = S3.store_private("k", tmp_source("x"))
+      assert {:error, :private_storage_not_configured} = S3.fetch_private("k")
+      assert {:error, :private_storage_not_configured} = S3.delete_private("k")
+    end
+
+    test "available, and requests target the configured private bucket, once configured" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Storage.S3,
+        [private_bucket: "kiln-private"] ++ original
+      )
+
+      assert S3.private_available?()
+
+      stub(200)
+      assert {:ok, "doc.pdf"} = S3.store_private("doc.pdf", tmp_source("secret-bytes"))
+
+      assert_received {:s3, "PUT", path, "secret-bytes", headers}
+      assert path =~ "kiln-private"
+      assert path =~ "doc.pdf"
+      # No cache-control/content-disposition metadata — a private object is
+      # never served directly, so there's no client to carry those for.
+      refute Map.has_key?(headers, "cache-control")
+      refute Map.has_key?(headers, "content-disposition")
+    end
+
+    test "fetch_private reads the object body from the private bucket" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Storage.S3,
+        [private_bucket: "kiln-private"] ++ original
+      )
+
+      Req.Test.stub(KilnCMS.Storage.S3, fn conn ->
+        assert conn.method == "GET"
+        assert conn.request_path =~ "kiln-private"
+        Plug.Conn.send_resp(conn, 200, "secret-bytes")
+      end)
+
+      assert {:ok, "secret-bytes"} = S3.fetch_private("doc.pdf")
+    end
+
+    test "delete_private issues a DELETE against the private bucket" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Storage.S3,
+        [private_bucket: "kiln-private"] ++ original
+      )
+
+      stub(200)
+      assert :ok = S3.delete_private("doc.pdf")
+
+      assert_received {:s3, "DELETE", path, _body, _headers}
+      assert path =~ "kiln-private"
+    end
+  end
 end

@@ -116,7 +116,8 @@ defmodule KilnCMS.CMS.MediaItem do
       :storage_key,
       :url,
       :focal_x,
-      :focal_y
+      :focal_y,
+      :audience
     ]
 
     # Primary read, paginated for the headless JSON:API media library (offset +
@@ -153,6 +154,31 @@ defmodule KilnCMS.CMS.MediaItem do
       accept []
       require_atomic? false
       change set_attribute(:archived_at, nil)
+    end
+
+    # System-only counter write (#481), same posture as
+    # `KilnCMS.Analytics.ContentView`'s upserting counters — never in
+    # `default_accept`, called only with `authorize?: false` from
+    # `KilnCMSWeb.MediaDownloadController`.
+    update :increment_downloads do
+      accept []
+      # Not atomic: `MigrateMediaStorage`'s `on: [:update]` hook applies to
+      # every update-type action (mirrors `:restore` above, which sets the
+      # same flag for the same reason) — and once an action isn't atomic,
+      # `atomic_update/2`'s SQL expression is never sent, so the increment
+      # has to be computed in Elixir instead (a `before_action` read of
+      # `changeset.data`, same pattern `GenerateDkim` uses for a conditional
+      # attribute write). This trades the single-statement atomicity of a
+      # real `download_count + 1` for a rare lost-increment race under truly
+      # concurrent downloads of the same document — the same tolerance
+      # `KilnCMS.Analytics.ContentView`'s counters already accept.
+      require_atomic? false
+
+      change fn changeset, _context ->
+        Ash.Changeset.before_action(changeset, fn cs ->
+          Ash.Changeset.force_change_attribute(cs, :download_count, cs.data.download_count + 1)
+        end)
+      end
     end
 
     # Permanent hard delete (bypasses archival). The caller is responsible for
@@ -217,10 +243,17 @@ defmodule KilnCMS.CMS.MediaItem do
       authorize_if always()
     end
 
-    # Media is world-readable — items are referenced by published content and
-    # served to public/headless frontends.
+    # Media is world-readable **by default** — items are referenced by
+    # published content and served to public/headless frontends. `audience`
+    # (#481) narrows that for a gated document: editors always see the full
+    # library (they need it to pick media for content, gated or not), a
+    # `:public` item stays open to everyone, and anything else is checked
+    # against the actor's held audiences the same way gated content is
+    # (`Checks.MediaInAudience`).
     policy action_type(:read) do
-      authorize_if always()
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if expr(^ref(:audience) == :public)
+      authorize_if KilnCMS.CMS.Checks.MediaInAudience
     end
 
     # Uploading and editing media metadata is reserved for editors (and admins
@@ -239,6 +272,14 @@ defmodule KilnCMS.CMS.MediaItem do
     policy action([:trashed, :restore]) do
       forbid_if always()
     end
+
+    # The download counter is written exclusively by
+    # `KilnCMSWeb.MediaDownloadController` with `authorize?: false` — no actor
+    # should ever be able to bump it directly (mirrors `ContentView`'s
+    # system-only counter writes).
+    policy action([:increment_downloads]) do
+      forbid_if always()
+    end
   end
 
   # A media write can invalidate any page that embeds this item's enriched media
@@ -246,6 +287,9 @@ defmodule KilnCMS.CMS.MediaItem do
   # published-content cache on every create/update/destroy.
   changes do
     change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :update, :destroy]
+    # Not atomic: relocates the blob between public/private storage — see the
+    # module (#481).
+    change KilnCMS.CMS.Changes.MigrateMediaStorage, on: [:update]
   end
 
   # Multi-tenancy (epic #336): media is per-site, partitioned by `org_id` (Ash
@@ -302,6 +346,32 @@ defmodule KilnCMS.CMS.MediaItem do
     # Focal point (0.0–1.0) for smart cropping.
     attribute :focal_x, :float, default: 0.5, public?: true
     attribute :focal_y, :float, default: 0.5, public?: true
+
+    # Consumer-facing access tier (#481, `KilnCMS.CMS.Audiences`) — the same
+    # gate published content uses, applied to a document instead. `:public`
+    # (the default) keeps every image and unrestricted document world-
+    # readable, matching pre-#481 behavior exactly. Changing it moves the
+    # underlying blob between public/private storage — see
+    # `Changes.MigrateMediaStorage`; only a non-image item may hold a
+    # non-public value (enforced there, not here, since the change needs to
+    # know the transition to give a useful error).
+    attribute :audience, :atom do
+      constraints one_of: KilnCMS.CMS.Audiences.all()
+      default :public
+      allow_nil? false
+      public? true
+    end
+
+    # Aggregate, count-only download total (#481) — privacy-first like every
+    # other counter in this codebase (no per-viewer identity). Written only
+    # by the `:increment_downloads` action from
+    # `KilnCMSWeb.MediaDownloadController`; never accepted from outside.
+    attribute :download_count, :integer do
+      default 0
+      allow_nil? false
+      public? true
+      writable? false
+    end
 
     timestamps()
   end

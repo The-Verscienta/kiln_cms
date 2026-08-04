@@ -71,6 +71,26 @@ defmodule KilnCMS.Storage.S3 do
       `Content-Disposition`, `Cache-Control`, …) and anything else comes back
       prefixed as `x-amz-meta-*`. Serve it from the CDN or bucket instead; see
       the "Production storage & CDN" section of `docs/media-pipeline.md`.
+
+  ## Private storage (#481)
+
+  Gated documents need a bucket the app can read but the public can't — this
+  adapter's public `bucket` doesn't qualify, since "public read is
+  bucket-level" (above) means every object in it is reachable at
+  `public_base_url/<key>` regardless of what this app ever links to.
+  `store_private/2`/`fetch_private/1`/`delete_private/1` operate against a
+  **separate, operator-configured** bucket instead:
+
+      config :kiln_cms, KilnCMS.Storage.S3, private_bucket: "my-private-bucket"
+
+  That bucket needs no public-read config, no CDN, and no `public_base_url` —
+  this app is the only reader, authenticated with the same `ex_aws`
+  credentials as the public bucket, fetching object bytes server-side
+  (`ExAws.S3.get_object/2`) and streaming them through
+  `KilnCMSWeb.MediaDownloadController` rather than ever handing out a direct
+  URL. Without `:private_bucket` configured, `private_available?/0` is
+  `false` and gating a document is refused rather than silently falling back
+  to the public bucket.
   """
   @behaviour KilnCMS.Storage
 
@@ -115,6 +135,42 @@ defmodule KilnCMS.Storage.S3 do
   @impl true
   def url(key), do: "#{public_base_url()}/#{key}"
 
+  @impl true
+  # source_path is a server-side upload temp file, not user input.
+  # sobelow_skip ["Traversal.FileModule"]
+  def store_private(key, source_path) do
+    with {:ok, bucket} <- private_bucket(),
+         {:ok, body} <- File.read(source_path),
+         {:ok, _resp} <- put_private_object(bucket, key, body) do
+      {:ok, key}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def fetch_private(key) do
+    with {:ok, bucket} <- private_bucket() do
+      case bucket |> ExAws.S3.get_object(key) |> ExAws.request() do
+        {:ok, %{body: body}} -> {:ok, body}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @impl true
+  def delete_private(key) do
+    with {:ok, bucket} <- private_bucket() do
+      case bucket |> ExAws.S3.delete_object(key) |> ExAws.request() do
+        {:ok, _resp} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @impl true
+  def private_available?, do: match?({:ok, _bucket}, private_bucket())
+
   defp put_object(key, body) do
     opts =
       [
@@ -125,6 +181,17 @@ defmodule KilnCMS.Storage.S3 do
 
     bucket()
     |> ExAws.S3.put_object(key, body, opts)
+    |> ExAws.request()
+  end
+
+  # No cache-control/content-disposition metadata: a private object is only
+  # ever read server-side via `fetch_private/1` and streamed by
+  # `MediaDownloadController`, which sets its own response headers per
+  # request (including the original filename) — S3 object metadata is never
+  # seen by a client here, unlike the public bucket's `url/1` path.
+  defp put_private_object(bucket, key, body) do
+    bucket
+    |> ExAws.S3.put_object(key, body)
     |> ExAws.request()
   end
 
@@ -156,6 +223,13 @@ defmodule KilnCMS.Storage.S3 do
 
       url ->
         String.trim_trailing(url, "/")
+    end
+  end
+
+  defp private_bucket do
+    case Keyword.get(config(), :private_bucket) do
+      nil -> {:error, :private_storage_not_configured}
+      bucket -> {:ok, bucket}
     end
   end
 

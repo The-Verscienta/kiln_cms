@@ -7,15 +7,26 @@ defmodule KilnCMS.StorageTest do
 
   setup do
     root = Path.join(System.tmp_dir!(), "kiln_storage_#{System.unique_integer([:positive])}")
+
+    private_root =
+      Path.join(System.tmp_dir!(), "kiln_storage_priv_#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(root)
-    Application.put_env(:kiln_cms, KilnCMS.Storage.Local, root: root, base_url: "/uploads")
+    File.mkdir_p!(private_root)
+
+    Application.put_env(:kiln_cms, KilnCMS.Storage.Local,
+      root: root,
+      private_root: private_root,
+      base_url: "/uploads"
+    )
 
     on_exit(fn ->
       File.rm_rf!(root)
+      File.rm_rf!(private_root)
       Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
     end)
 
-    %{root: root}
+    %{root: root, private_root: private_root}
   end
 
   defp tmp_source(contents) do
@@ -64,5 +75,50 @@ defmodule KilnCMS.StorageTest do
     refute File.exists?(Path.join(root, key))
     # Deleting a missing blob is still :ok.
     assert :ok = Storage.delete(key)
+  end
+
+  describe "private storage (#481)" do
+    test "the Local adapter is always available", %{} do
+      assert Storage.private_available?() == true
+    end
+
+    test "store_private writes under the SEPARATE private root, not the public one", %{
+      root: root,
+      private_root: private_root
+    } do
+      src = tmp_source("secret")
+      key = Storage.generate_key("doc.pdf")
+
+      assert {:ok, ^key} = Storage.store_private(key, src)
+      assert File.read!(Path.join(private_root, key)) == "secret"
+      refute File.exists?(Path.join(root, key))
+    end
+
+    test "fetch_private reads the stored bytes back, and errors for a missing/unsafe key" do
+      key = Storage.generate_key("doc.pdf")
+      {:ok, _} = Storage.store_private(key, tmp_source("private-bytes"))
+
+      assert {:ok, "private-bytes"} = Storage.fetch_private(key)
+      assert {:error, :enoent} = Storage.fetch_private(Storage.generate_key("missing.pdf"))
+      assert {:error, :invalid_key} = Storage.fetch_private("../escape.pdf")
+    end
+
+    test "a public fetch can't read a private blob, and vice versa" do
+      key = Storage.generate_key("doc.pdf")
+      {:ok, _} = Storage.store_private(key, tmp_source("private-bytes"))
+
+      assert {:error, :enoent} = Storage.fetch(key)
+    end
+
+    test "delete_private removes the file and is idempotent", %{private_root: private_root} do
+      src = tmp_source("x")
+      key = Storage.generate_key("doc.pdf")
+      {:ok, _} = Storage.store_private(key, src)
+      assert File.exists?(Path.join(private_root, key))
+
+      assert :ok = Storage.delete_private(key)
+      refute File.exists?(Path.join(private_root, key))
+      assert :ok = Storage.delete_private(key)
+    end
   end
 end

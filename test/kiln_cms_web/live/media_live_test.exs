@@ -88,11 +88,18 @@ defmodule KilnCMSWeb.MediaLiveTest do
     end
 
     # The heading reports the true library size, not just the loaded page —
-    # "Library (60 of 61)" until Load more exhausts it (then "Library (61)").
+    # "Library (<page size> of N)" until Load more exhausts it (then "Library
+    # (N)"). Seeds relative to whatever's already there (the shared sandbox
+    # can carry rows from other async: false tests — see
+    # [[test-suite-shared-sandbox-flakiness]]) rather than assuming zero, so
+    # the total lands exactly one item past the (private) page size of 60
+    # regardless of what else is in the library.
     test "the heading shows loaded vs total across pages", %{conn: conn} do
-      for i <- 1..61, do: seed_media("bulk-#{i}.png")
+      editor = authed_user(:editor)
+      existing = length(CMS.list_media_items!(actor: editor))
+      for i <- 1..(61 - existing), do: seed_media("bulk-#{i}.png")
 
-      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/media")
       assert html =~ "Library (60 of 61)"
 
       html = lv |> element(~s(button[phx-click="load_more"])) |> render_click()
@@ -353,9 +360,12 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       html = lv |> element("#upload-form") |> render_submit()
       # The flash names the file and the reason, not just a count (audit U-M5).
+      # "unsupported file format", not "...image format" (#481): the content
+      # fails BOTH ImageProcessor and DocumentProcessor now, and the reason
+      # returned is the latter's (type-neutral wording either way).
       assert html =~ "Upload failed"
       assert html =~ "fake.png"
-      assert html =~ "not a valid image"
+      assert html =~ "unsupported file format"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
       refute File.exists?(Path.join(root, "fake.png"))
     end
@@ -402,6 +412,78 @@ defmodule KilnCMSWeb.MediaLiveTest do
       processed = CMS.get_media_item!(item.id, actor: editor)
       assert processed.width == 1
       assert processed.height == 1
+    end
+
+    test "uploading a PDF stores it as a document, not an image (#481)", %{
+      conn: conn,
+      root: root
+    } do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      pdf = "%PDF-1.7\n%\xE2\xE3\xCF\xD3\nsome pdf content"
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "brochure.pdf", content: pdf, type: "application/pdf"}
+        ])
+
+      assert render_upload(input, "brochure.pdf")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "brochure.pdf"
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.filename == "brochure.pdf"
+      assert item.content_type == "application/pdf"
+      assert item.width == nil
+      assert item.audience == :public
+      assert File.exists?(Path.join(root, item.storage_key))
+    end
+
+    test "a file with a .pdf name but non-PDF bytes is rejected, not silently accepted", %{
+      conn: conn
+    } do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "fake.pdf", content: "just some text, not a real pdf", type: "application/pdf"}
+        ])
+
+      assert render_upload(input, "fake.pdf")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "Upload failed"
+      assert html =~ "fake.pdf"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+    end
+
+    test "a document under the document cap but over the (smaller) image cap still uploads", %{
+      conn: conn
+    } do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      # 11MB: over the 10MB image cap, under the 25MB document cap — proves
+      # the per-type size cap is real, not the tighter image cap applied to
+      # everything (#481).
+      big_pdf = "%PDF-1.7\n" <> :binary.copy(<<0>>, 11_000_000)
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "big.pdf", content: big_pdf, type: "application/pdf"}
+        ])
+
+      assert render_upload(input, "big.pdf")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "big.pdf"
+      refute html =~ "Upload failed"
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.filename == "big.pdf"
     end
   end
 

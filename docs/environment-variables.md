@@ -211,13 +211,14 @@ CDN deployment guide.
 |----------|---------|---------|-----------------|
 | `S3_BUCKET` | unset | Enables the S3 adapter. Leave unset to use local storage. | [`config/runtime.exs:733`](../config/runtime.exs#L733) |
 | `S3_PUBLIC_BASE_URL` | — | Public base URL objects are served from — the CDN hostname, including the bucket path if the provider's URLs carry one. **Required when `S3_BUCKET` is set** (raises otherwise). | [`config/runtime.exs:740`](../config/runtime.exs#L740) |
-| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:755`](../config/runtime.exs#L755) |
-| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:756`](../config/runtime.exs#L756) |
-| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:758`](../config/runtime.exs#L758) |
+| `AWS_ACCESS_KEY_ID` | — | S3 access key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:766`](../config/runtime.exs#L766) |
+| `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. **Required when `S3_BUCKET` is set** (`fetch_env!`). | [`config/runtime.exs:767`](../config/runtime.exs#L767) |
+| `AWS_REGION` | `us-east-1` | Region. Use `auto` for Cloudflare R2; a real region for B2/Wasabi/AWS. | [`config/runtime.exs:769`](../config/runtime.exs#L769) |
 | `S3_ACL` | unset | Per-object canned ACL (e.g. `public_read`). Only needed if the bucket isn't public at the bucket level. | [`config/runtime.exs:747`](../config/runtime.exs#L747) |
-| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:762`](../config/runtime.exs#L762) |
-| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:764`](../config/runtime.exs#L764) |
-| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:766`](../config/runtime.exs#L766) |
+| `S3_PRIVATE_BUCKET` | unset | A separate bucket for gated documents (#481) — this app's own AWS credentials read it directly, so it needs no public-read config, CDN, or public-base-URL equivalent. Without it, gating a document is refused rather than silently falling back to the public bucket. | [`config/runtime.exs:758`](../config/runtime.exs#L758) |
+| `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime.exs:773`](../config/runtime.exs#L773) |
+| `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime.exs:775`](../config/runtime.exs#L775) |
+| `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. | [`config/runtime.exs:777`](../config/runtime.exs#L777) |
 
 Media objects are uploaded with `Cache-Control: public, max-age=31536000,
 immutable` — there is no env var for it, because storage keys are write-once
@@ -258,16 +259,16 @@ outbound port 25.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:915`](../config/runtime.exs#L915) |
-| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:955`](../config/runtime.exs#L955) |
-| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:987`](../config/runtime.exs#L987) |
-| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:916`](../config/runtime.exs#L916) |
-| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:947`](../config/runtime.exs#L947) |
-| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:948`](../config/runtime.exs#L948) |
-| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:949`](../config/runtime.exs#L949) |
-| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:950`](../config/runtime.exs#L950) |
-| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:933`](../config/runtime.exs#L933) |
-| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:963`](../config/runtime.exs#L963) |
+| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:926`](../config/runtime.exs#L926) |
+| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:966`](../config/runtime.exs#L966) |
+| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:998`](../config/runtime.exs#L998) |
+| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:927`](../config/runtime.exs#L927) |
+| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:958`](../config/runtime.exs#L958) |
+| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:959`](../config/runtime.exs#L959) |
+| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:960`](../config/runtime.exs#L960) |
+| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:961`](../config/runtime.exs#L961) |
+| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:944`](../config/runtime.exs#L944) |
+| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:974`](../config/runtime.exs#L974) |
 | `DKIM_PRIVATE_KEY` | unset | Direct mode's DKIM signing key (PKCS#1 RSA PEM, same shape as the provenance key). **Most deployments should not set this**: `/editor/mail` generates the keypair, picks a selector, prints the TXT record to publish and then verifies it against DNS alongside SPF, DMARC, PTR and outbound port 25. This variable exists for a deployment whose policy forbids a private key in the database — select the env provider on that page (it falls back to this variable name when none is given, [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex#L4)) and supply the PEM yourself, because that provider is read-only and the Generate button can no longer help. A blank value counts as unset. Being a multi-line PEM it carries the same `.env`-parser caveat as `KILN_PROVENANCE_PRIVATE_KEY`, so the file provider is the better of the two escape hatches. Generate with `openssl genrsa -traditional -out kiln-dkim.pem 2048`, and stay at 2048 bits — a 4096-bit public half overflows the 255-byte TXT string limit. See [direct-email-delivery.md](direct-email-delivery.md). | [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex) |
 
 ## Optional — search (Meilisearch)
@@ -278,9 +279,9 @@ after enabling. See [`docs/meilisearch.md`](meilisearch.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:775`](../config/runtime.exs#L775) |
-| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:779`](../config/runtime.exs#L779), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
-| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:780`](../config/runtime.exs#L780) |
+| `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime.exs:786`](../config/runtime.exs#L786) |
+| `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime.exs:790`](../config/runtime.exs#L790), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
+| `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime.exs:791`](../config/runtime.exs#L791) |
 
 ## Optional — AI-assisted SEO drafting
 
@@ -294,8 +295,8 @@ and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md)
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime.exs:795`](../config/runtime.exs#L795) |
-| `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs:797`](../config/runtime.exs#L797) |
+| `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime.exs:806`](../config/runtime.exs#L806) |
+| `SEO_GENERATOR` | `KilnCMS.Seo.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Seo.Generator`. | [`config/runtime.exs:808`](../config/runtime.exs#L808) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | unset | Provider credentials. **Read by `req_llm`, never by Kiln** — they don't enter Kiln's config or database. | `req_llm` |
 
 ## Optional — AI block assist in the editor
@@ -308,8 +309,8 @@ boot warning for a hosted provider. See [`docs/ai-assist.md`](ai-assist.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs:818`](../config/runtime.exs#L818) |
-| `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs:820`](../config/runtime.exs#L820) |
+| `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs:829`](../config/runtime.exs#L829) |
+| `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs:831`](../config/runtime.exs#L831) |
 
 ## Optional — rich embed cards (oEmbed, #489)
 
@@ -327,8 +328,8 @@ thumbnail are stored, and the thumbnail must be on that provider's own CDN.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `OEMBED_ENABLED` | `false` | Resolve oEmbed metadata so embeds render as cards. | [`config/runtime.exs:847`](../config/runtime.exs#L847) |
-| `OEMBED_PROVIDERS` | unset (all) | Comma-separated provider names to **narrow** the built-in list. Cannot add one — a new provider is a host this server dials, so it is a code change. | [`config/runtime.exs:849`](../config/runtime.exs#L849) |
+| `OEMBED_ENABLED` | `false` | Resolve oEmbed metadata so embeds render as cards. | [`config/runtime.exs:858`](../config/runtime.exs#L858) |
+| `OEMBED_PROVIDERS` | unset (all) | Comma-separated provider names to **narrow** the built-in list. Cannot add one — a new provider is a host this server dials, so it is a code change. | [`config/runtime.exs:860`](../config/runtime.exs#L860) |
 
 ## Optional — outbound link checking (#474)
 

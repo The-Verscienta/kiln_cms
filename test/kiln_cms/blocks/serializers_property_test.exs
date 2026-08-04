@@ -9,6 +9,8 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
   alias KilnCMS.Blocks
   alias KilnCMS.Blocks.{Accordion, Claim, Columns, Custom, Divider, Embed, Faq, Form}
   alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText}
+  # Not aliased bare as `File` — that would shadow the stdlib module.
+  alias KilnCMS.Blocks.File, as: FileBlock
 
   defp text, do: StreamData.string(:printable, max_length: 40)
 
@@ -93,7 +95,19 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
         ]),
         fn cols -> %Columns{columns: cols, layout: "1-1"} end
       ),
-      StreamData.map(text(), fn lt -> %Custom{legacy_type: lt, content: "x", data: %{}} end)
+      StreamData.map(text(), fn lt -> %Custom{legacy_type: lt, content: "x", data: %{}} end),
+      StreamData.map(
+        StreamData.tuple({text(), text(), text(), StreamData.integer(0..9_999_999)}),
+        fn {mid, title, filename, size} ->
+          %FileBlock{
+            media_id: mid,
+            title: title,
+            filename: filename,
+            content_type: "application/pdf",
+            byte_size: size
+          }
+        end
+      )
     ])
   end
 

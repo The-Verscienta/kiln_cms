@@ -250,6 +250,7 @@ defmodule KilnCMS.CMS do
       define :list_trashed_media_items, action: :trashed
       define :restore_media_item, action: :restore
       define :purge_media_item, action: :purge
+      define :increment_media_downloads, action: :increment_downloads
     end
 
     resource KilnCMS.CMS.WebhookEndpoint do
