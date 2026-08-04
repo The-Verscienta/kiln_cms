@@ -1322,6 +1322,28 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **`KILN_STRICT_TEST=true` ran the test suite without strict tenancy, and said
+  nothing.** The flag was matched as `== "1"` while
+  `docs/environment-variables.md` teaches `true`/`1`/`yes`/`on` for every other
+  boolean, so the documented spelling compiled the suite **fail-open** (#646).
+  It now accepts the same spellings as everything else, through the standalone
+  `config/strict_test_flag.exs` — `config/test.exs` is evaluated before any
+  project module is on the code path, so it cannot call `KilnCMS.Config.Env`,
+  and `test/test_helper.exs` reads the same snippet instead of carrying a second
+  copy of the comparison.
+
+  An unrecognized value now **warns on stderr** rather than passing silently for
+  an unset one. That distinction is what the flag's failure mode demands: a
+  quiet misparse leaves the strict leg selecting `--only strict_tenancy` against
+  a fail-open build, which runs zero tests and exits 0 — indistinguishable from
+  never having invoked it, and impossible for any test to catch, since the
+  strict-tagged file is excluded.
+
+  The whole failure class here is silence. `--only strict_tenancy` kept
+  selecting the tagged tests and they kept passing, against precisely the
+  configuration they exist to catch, so a contributor working on epic #336's
+  multi-tenancy could believe they had exercised the strict build and had not.
+
 - **Every `config/runtime.exs` line anchor in `docs/environment-variables.md`
   points at the right line again, and a test keeps it that way.** The document
   cites its source by line number for each variable, so any insertion shifts
