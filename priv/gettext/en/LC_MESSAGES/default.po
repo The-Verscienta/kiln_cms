@@ -7487,7 +7487,7 @@ msgstr ""
 msgid "Other"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:465
+#: lib/kiln_cms_web/live/analytics_live.ex:462
 #, elixir-autogen, elixir-format
 msgid "Referrer breakdown"
 msgstr ""
