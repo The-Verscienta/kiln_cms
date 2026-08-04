@@ -189,7 +189,7 @@ defmodule KilnCMSWeb.ContentController do
     # Canonical is the DOCUMENT's own URL, never the join page: a paywall that
     # canonicalised elsewhere would have search engines index the wrong URL.
     |> assign(:canonical_url, teaser.url)
-    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, org)))
+    |> assign(:json_ld, json_ld_script(StructuredData.teaser(teaser, record, org)))
     |> put_view(KilnCMSWeb.ContentHTML)
     |> render(:teaser, teaser: teaser)
   end

@@ -3,13 +3,17 @@ defmodule KilnCMSWeb.StructuredData do
   Builds schema.org JSON-LD for published content, embedded in the page head by
   `ContentController` for richer search/social results.
 
-  Posts map to `BlogPosting`, every other content type to `WebPage`. A content
-  page emits the main entity plus a `BreadcrumbList`; the blog index emits a
+  The `@type` is resolved through `KilnCMS.Firing.SchemaOrg.resolve/1` — the
+  same authority the fired `:json_ld` artifact uses (#357, #480) — so a type's
+  declared `schema_org_type` (e.g. `MedicalWebPage`, `MusicEvent`) reaches the
+  markup crawlers actually read, not just the headless one. A content page
+  emits the main entity plus a `BreadcrumbList`; the blog index emits a
   `CollectionPage`. The result is serialized with
   `Jason.encode!(escape: :html_safe)` at the call site so it is safe to inline in
   a `<script type="application/ld+json">` block.
   """
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Firing.SchemaOrg
 
   @doc """
   The JSON-LD for a content page: the main entity (`BlogPosting`/`WebPage`) plus
@@ -30,11 +34,12 @@ defmodule KilnCMSWeb.StructuredData do
   @spec build(struct(), ContentTypes.t(), term()) :: map()
   def build(record, ct, org \\ nil) do
     url = url(record, ct, org)
+    type = SchemaOrg.resolve(record)
 
     %{
       "@context" => "https://schema.org",
-      "@type" => schema_type(ct),
-      title_key(ct) => record.title,
+      "@type" => type,
+      title_key(type) => record.title,
       "url" => url,
       "mainEntityOfPage" => url,
       # The `publisher` is the SITE, which is per-org under white-labelling
@@ -43,12 +48,38 @@ defmodule KilnCMSWeb.StructuredData do
       "publisher" => %{"@type" => "Organization", "name" => site_name(org)}
     }
     |> maybe_put("description", record.seo_description)
-    |> maybe_put("keywords", record.seo_keywords)
     |> maybe_put("image", record.seo_image)
-    |> maybe_put("datePublished", iso8601(record.published_at))
-    |> maybe_put("dateModified", iso8601(record.updated_at))
     |> maybe_put("author", author(record))
+    |> maybe_creative_work_fields(type, record)
+    |> maybe_event_schedule(type, record)
     |> maybe_paywalled(record)
+  end
+
+  # `keywords`/`datePublished`/`dateModified` are CreativeWork properties (the
+  # article/page families); an Event is not a CreativeWork, and emitting them
+  # on one produces a node with properties schema.org doesn't define for it —
+  # mirrors `Firing.SchemaOrg.base_node/3`, the fired producer's own rule.
+  defp maybe_creative_work_fields(node, type, record) do
+    if SchemaOrg.event_type?(type) do
+      node
+    else
+      node
+      |> maybe_put("keywords", record.seo_keywords)
+      |> maybe_put("datePublished", iso8601(record.published_at))
+      |> maybe_put("dateModified", iso8601(record.updated_at))
+    end
+  end
+
+  # `startDate`/`endDate`/`eventSchedule` from the type's `datetime_range`
+  # field (#480), same as the fired `:json_ld` artifact — so the markup a
+  # crawler reads on the served page carries the same event dates as the
+  # headless one.
+  defp maybe_event_schedule(node, type, record) do
+    if SchemaOrg.event_type?(type) do
+      Map.merge(node, KilnCMS.Events.schema_org_schedule(record))
+    else
+      node
+    end
   end
 
   # A gated document is marked paywalled even when the reader IS entitled, so the
@@ -67,26 +98,56 @@ defmodule KilnCMSWeb.StructuredData do
 
   The **same** flags are emitted on the entitled member's full render (see
   `document/3`), because a crawler and a subscriber disagreeing about whether a
-  page is free is exactly the cloaking signal search engines penalise.
+  page is free is exactly the cloaking signal search engines penalise — which is
+  also why `@type` and the Event dates below must agree with `build/3` rather
+  than default to `WebPage`: an operator's declared `MusicEvent` (and its dates)
+  is not itself gated content, so hiding it from the reader who can't yet read
+  the body is the same disagreement `paywall_markers/0` exists to avoid.
+
+  `record` is the gated document `teaser` was projected from (#769) — used only
+  to resolve the declared `@type` and Event schedule, never for display, so this
+  does not widen what a paywalled reader's markup reveals: `record` carries no
+  more than `teaser` already summarises, plus the type declaration itself, which
+  is public admin configuration, not gated content.
   """
-  @spec teaser(KilnCMSWeb.Teaser.t(), term()) :: [map()]
-  def teaser(teaser, org \\ nil) do
+  @spec teaser(KilnCMSWeb.Teaser.t(), struct() | nil, term()) :: [map()]
+  def teaser(teaser, record \\ nil, org \\ nil) do
+    type = if record, do: SchemaOrg.resolve(record), else: "WebPage"
+
     node =
       %{
         "@context" => "https://schema.org",
-        "@type" => "WebPage",
-        "name" => teaser.title,
+        "@type" => type,
+        title_key(type) => teaser.title,
         "url" => teaser.url,
         "mainEntityOfPage" => teaser.url,
         "publisher" => %{"@type" => "Organization", "name" => site_name(org)}
       }
       |> maybe_put("description", teaser.summary || teaser.seo_description)
       |> maybe_put("image", teaser.seo_image)
-      |> maybe_put("datePublished", iso8601(teaser.published_at))
-      |> maybe_put("dateModified", iso8601(teaser.updated_at))
+      |> maybe_teaser_dates(type, teaser)
+      |> maybe_teaser_event_schedule(type, record)
       |> Map.merge(paywall_markers())
 
     [node]
+  end
+
+  defp maybe_teaser_dates(node, type, teaser) do
+    if SchemaOrg.event_type?(type) do
+      node
+    else
+      node
+      |> maybe_put("datePublished", iso8601(teaser.published_at))
+      |> maybe_put("dateModified", iso8601(teaser.updated_at))
+    end
+  end
+
+  defp maybe_teaser_event_schedule(node, type, record) do
+    if record && SchemaOrg.event_type?(type) do
+      Map.merge(node, KilnCMS.Events.schema_org_schedule(record))
+    else
+      node
+    end
   end
 
   @doc """
@@ -165,12 +226,11 @@ defmodule KilnCMSWeb.StructuredData do
     end)
   end
 
-  defp schema_type(%{type: :post}), do: "BlogPosting"
-  defp schema_type(_ct), do: "WebPage"
-
-  # BlogPosting uses `headline`; WebPage uses `name`.
-  defp title_key(%{type: :post}), do: "headline"
-  defp title_key(_ct), do: "name"
+  # Article-family types (BlogPosting/Article/NewsArticle/TechArticle) use
+  # `headline`; every other family (WebPage, Event, ...) uses `name`.
+  defp title_key(type) do
+    if SchemaOrg.article_type?(type), do: "headline", else: "name"
+  end
 
   # Prefer an editor-set canonical URL; otherwise build the public URL the same
   # way the sitemap does (base + the type's path prefix + slug).

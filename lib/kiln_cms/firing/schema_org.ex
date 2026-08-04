@@ -32,6 +32,10 @@ defmodule KilnCMS.Firing.SchemaOrg do
   @spec event_type?(String.t()) :: boolean()
   def event_type?(type), do: type in @event_types
 
+  @doc "Whether `type` is one of the schema.org Article (CreativeWork) family."
+  @spec article_type?(String.t()) :: boolean()
+  def article_type?(type), do: type in @article_types
+
   @doc "The default main-node @type."
   @spec default_type() :: String.t()
   def default_type, do: "Article"
@@ -41,10 +45,17 @@ defmodule KilnCMS.Firing.SchemaOrg do
   types), else its module's `__kiln_schema_org_type__/0` (compiled types), else
   `Article`. Unknown/stale declarations fall back to the default rather than
   firing an unvetted @type.
+
+  The definition read is tenant-strict (#419), same as `Engine.public_type/1`:
+  scoped to the document's own org, else it raises under strict tenancy and the
+  document silently degrades to the default @type.
   """
   @spec resolve(struct()) :: String.t()
-  def resolve(%{type_definition_id: id}) when not is_nil(id) do
-    case KilnCMS.CMS.get_type_definition(id, authorize?: false) do
+  def resolve(%{type_definition_id: id} = document) when not is_nil(id) do
+    case KilnCMS.CMS.get_type_definition(id,
+           authorize?: false,
+           tenant: Map.get(document, :org_id)
+         ) do
       {:ok, %{schema_org_type: type}} -> normalize(type)
       _ -> default_type()
     end
