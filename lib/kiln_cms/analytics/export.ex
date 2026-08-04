@@ -98,7 +98,11 @@ defmodule KilnCMS.Analytics.Export do
   @spec stream_funnel_rows(Date.t(), Date.t(), term(), term()) :: Enumerable.t()
   def stream_funnel_rows(from, to, org, actor) do
     funnels =
-      Analytics.list_funnels!(actor: actor, tenant: org, query: [filter: [active: true]])
+      Analytics.list_funnels!(
+        actor: actor,
+        tenant: org,
+        query: [filter: [active: true], sort: [inserted_at: :asc]]
+      )
 
     case funnels do
       [] ->
