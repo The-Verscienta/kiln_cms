@@ -107,13 +107,13 @@ defmodule KilnCMSWeb.SettingsLive do
 
     case Accounts.setup_totp(user, %{}, actor: user) do
       {:ok, user} ->
-        uri = Totp.otpauth_uri(user.totp_secret, to_string(user.email))
+        uri = Totp.otpauth_uri(user.totp_pending_secret, to_string(user.email))
 
         {:noreply,
          socket
          |> assign(:current_user, user)
          |> assign(:enrolling, %{
-           secret: Totp.base32_encode(user.totp_secret),
+           secret: Totp.base32_encode(user.totp_pending_secret),
            uri: uri,
            qr_svg: qr_svg(uri)
          })}

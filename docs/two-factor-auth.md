@@ -9,12 +9,23 @@ every sign-in, after the first factor.
 ## How it works
 
 - **Self-service enrolment** at `/editor/settings` → "Two-factor authentication":
-  1. *Enable* generates a fresh secret (`setup_totp`) and shows a setup key + an
-     `otpauth://` provisioning URI.
+  1. *Enable* generates a fresh secret (`setup_totp`) into a **pending** slot
+     (`totp_pending_secret`) and shows a setup key + an `otpauth://`
+     provisioning URI. The live secret and enforcement state are untouched by
+     this step, so starting (or restarting) enrolment can never by itself
+     weaken an already-confirmed account (#754).
   2. The user adds it to their authenticator app and enters a current code to
-     confirm (`confirm_totp`). Only then is 2FA enforced.
-  3. *Disable* (`disable_totp`) requires a current code, so a walk-up attacker on
-     an open session still can't remove the factor.
+     confirm (`confirm_totp`), which is checked against the *pending* secret.
+     Only on success is it promoted to the live secret and 2FA enforced —
+     `setup_totp` alone never flips that switch.
+  3. *Disable* (`disable_totp`) requires a current *live* code, so a walk-up
+     attacker on an open session still can't remove the factor — and clears any
+     abandoned pending secret along with it.
+
+  Re-enrolling on an account that already has a confirmed factor works the same
+  way, which is also what makes it self-service for someone who lost their
+  device: a recovery-code sign-in gets them a session but no live code to
+  prove, and re-enrolment asks for none — only a code from the *new* device.
 - **Sign-in gate (browser):** `KilnCMSWeb.AuthController.success/4` diverts a
   2FA-enabled account to `/sign-in/verify` instead of establishing a session. A
   short-lived (5-minute), signed pending token carries the user id + the
@@ -151,7 +162,11 @@ test vectors (`KilnCMS.Accounts.TotpTest`). Defaults: 6 digits, 30-second period
 The raw secret is stored as `users.totp_secret` (`bytea`, `sensitive?`,
 `public? false`); it is never exposed on any API surface and is read only by the
 sign-in gate and the owner's enrolment UI. 2FA is "enabled" iff
-`totp_confirmed_at` is set.
+`totp_confirmed_at` is set. `users.totp_pending_secret` holds an in-progress,
+not-yet-proven enrolment in the same shape — `setup_totp` writes only this
+one, `confirm_totp` is the only action that ever copies it into `totp_secret`,
+and it is what a code is checked against while an enrolment is in progress
+(#754).
 
 ## Recovery codes & QR (Phase 2, shipped)
 

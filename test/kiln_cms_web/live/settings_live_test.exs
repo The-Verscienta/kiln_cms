@@ -147,8 +147,14 @@ defmodule KilnCMSWeb.SettingsLiveTest do
     alias KilnCMS.Accounts.RecoveryCodes
     alias KilnCMS.Accounts.Totp
 
-    defp current_code(user),
-      do: Totp.code_at(reload(user).totp_secret, System.system_time(:second))
+    defp current_code(user) do
+      reloaded = reload(user)
+
+      Totp.code_at(
+        reloaded.totp_pending_secret || reloaded.totp_secret,
+        System.system_time(:second)
+      )
+    end
 
     test "enrolment shows a QR code; confirming mints show-once recovery codes", %{conn: conn} do
       user = authed_user(:editor)
@@ -174,7 +180,7 @@ defmodule KilnCMSWeb.SettingsLiveTest do
     test "regenerating replaces the set; disabling clears it", %{conn: conn} do
       user = authed_user(:editor)
       {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
-      code = Totp.code_at(user.totp_secret, System.system_time(:second))
+      code = Totp.code_at(user.totp_pending_secret, System.system_time(:second))
       {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
       original = reload(user).totp_recovery_hashes
 
@@ -200,7 +206,7 @@ defmodule KilnCMSWeb.SettingsLiveTest do
 
       user = authed_user(:editor)
       {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
-      code = Totp.code_at(user.totp_secret, System.system_time(:second))
+      code = Totp.code_at(user.totp_pending_secret, System.system_time(:second))
       {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
 
       {:ok, lv, _html} = live(log_in(conn, user), ~p"/editor/settings")

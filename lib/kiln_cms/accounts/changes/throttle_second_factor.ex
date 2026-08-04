@@ -62,18 +62,18 @@ defmodule KilnCMS.Accounts.Changes.ThrottleSecondFactor do
 
   ## All three actions, including `:confirm_totp`
 
-  Enrolment looks exempt and is not. The reasoning that exempts it — *an
-  attacker with a session calls `:setup_totp`, gets a secret of their own, and
-  confirms it with their own code, so there is nothing to guess* — holds only
-  if the attacker chooses to go through `:setup_totp`. Nothing makes them.
+  Since #754, `:confirm_totp` checks `totp_pending_secret` — the secret staged
+  by `:setup_totp`, not yet promoted — rather than the live one. An attacker
+  who calls `:setup_totp` themselves gets a secret of their own and confirms
+  it with their own code, so there is nothing there to guess or to budget.
 
-  `:confirm_totp` is not scoped to an enrolment in progress. Run against an
-  account that is already enrolled, `ValidTotpCode` checks the **live** secret,
-  and a correct guess runs `GenerateRecoveryCodes` — handing back a fresh
-  recovery-code set and invalidating the owner's — while leaving `totp_secret`
-  and `totp_confirmed_at` unchanged. That is `:regenerate_totp_recovery_codes`'
-  exact prize, on the same account, and the owner's authenticator keeps working
-  so nothing looks wrong.
+  What remains is a narrower race: the *real* owner calls `:setup_totp`,
+  leaving an unconfirmed secret sitting in `totp_pending_secret` while they
+  reach for their authenticator app, and a second, attacker-held session on
+  the same account could otherwise grind the 6-digit space for that same
+  pending secret and confirm it before the owner does — hijacking an
+  enrolment the owner started but had not yet finished. The budget bounds that
+  window the same way it bounds the other two.
 
   Charging it does cost a legitimate enroller with a skewed device clock five
   attempts out of the budget that gates their next sign-in. That is the same

@@ -14,21 +14,27 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
     })
   end
 
-  defp current_code(user), do: Totp.code_at(user.totp_secret, System.system_time(:second))
+  # Pending during enrolment, live once confirmed — either way this is "the
+  # code that should currently work".
+  defp current_code(user),
+    do: Totp.code_at(user.totp_pending_secret || user.totp_secret, System.system_time(:second))
 
   test "setup then confirm enables 2FA; a wrong code is rejected" do
     user = user()
     refute Accounts.totp_enabled?(user)
 
     {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
-    assert is_binary(user.totp_secret)
-    # A generated-but-unconfirmed secret does not yet enforce 2FA.
+    assert is_binary(user.totp_pending_secret)
+    # #754: setup stages a pending secret and touches nothing else — the live
+    # secret and confirmation stay untouched until a code proves the pending one.
+    assert is_nil(user.totp_secret)
     refute Accounts.totp_enabled?(user)
 
     assert {:error, _} = Accounts.confirm_totp(user, %{code: "000000"}, actor: user)
 
     {:ok, confirmed} = Accounts.confirm_totp(user, %{code: current_code(user)}, actor: user)
     assert Accounts.totp_enabled?(confirmed)
+    assert is_nil(confirmed.totp_pending_secret)
   end
 
   test "disabling requires a valid current code" do
@@ -48,5 +54,47 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
     actor = user()
     other = user()
     assert {:error, _} = Accounts.setup_totp(other, %{}, actor: actor)
+  end
+
+  # #754: `:setup_totp` used to write straight into `totp_secret` and null
+  # `totp_confirmed_at` in the same call — any session on the account could
+  # turn 2FA off with zero code guesses. Pins that a confirmed account's
+  # `totp_confirmed_at` survives a re-enrolment attempt no matter how far it
+  # gets, short of an actual `:confirm_totp`.
+  describe "re-enrolling a confirmed account (#754)" do
+    test "setup_totp alone cannot turn 2FA off" do
+      user = user()
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      {:ok, enrolled} = Accounts.confirm_totp(user, %{code: current_code(user)}, actor: user)
+      assert Accounts.totp_enabled?(enrolled)
+
+      # A second `setup_totp` — e.g. from a stolen session, or the owner
+      # starting to switch devices — stages a new pending secret but must not
+      # touch the live one.
+      {:ok, restarted} = Accounts.setup_totp(enrolled, %{}, actor: enrolled)
+
+      assert Accounts.totp_enabled?(restarted)
+      assert restarted.totp_secret == enrolled.totp_secret
+      assert restarted.totp_confirmed_at == enrolled.totp_confirmed_at
+      assert is_binary(restarted.totp_pending_secret)
+      refute restarted.totp_pending_secret == enrolled.totp_secret
+
+      reloaded = Accounts.get_user!(user.id, authorize?: false)
+      assert Accounts.totp_enabled?(reloaded)
+    end
+
+    test "confirm_totp without a pending secret is refused, even with the live code" do
+      user = user()
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      {:ok, enrolled} = Accounts.confirm_totp(user, %{code: current_code(user)}, actor: user)
+
+      live_code = Totp.code_at(enrolled.totp_secret, System.system_time(:second))
+
+      assert {:error, _} = Accounts.confirm_totp(enrolled, %{code: live_code}, actor: enrolled)
+
+      reloaded = Accounts.get_user!(user.id, authorize?: false)
+      assert Accounts.totp_enabled?(reloaded)
+      assert reloaded.totp_secret == enrolled.totp_secret
+    end
   end
 end
