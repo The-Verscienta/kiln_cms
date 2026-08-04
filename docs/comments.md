@@ -10,8 +10,7 @@ unbuilt piece of the collaboration epic
 ## Using it
 
 In the content editor, every block carries a **Comment** control in its
-chrome, alongside its move/duplicate/delete buttons. Clicking it opens an
-inline panel:
+chrome, below its own content. Clicking it opens an inline panel:
 
 - With no comments yet, it reads "Comment" — click it, write something, hit
   **Send**.
