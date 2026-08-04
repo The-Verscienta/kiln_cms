@@ -184,6 +184,57 @@ defmodule KilnCMSWeb.BracketedParamsTest do
     end
   end
 
+  describe "a bracketed query parameter never 500s /api/json (#763)" do
+    # Each shape the ash_json_api sweep found raising, verified against the
+    # real router: page[limit]/page[offset] via Integer.parse/1 (no clause
+    # for a list or map), a non-object `page` via Map.fetch/2 (no clause for
+    # a non-map), and sort/include via String.Chars/String.split (no clause
+    # for either). filter[...] and fields[...] are deliberately absent —
+    # ash_json_api already handles those shapes correctly (400, not 500).
+    @bad_shapes [
+      {"page[limit][]", "page[limit][]=1"},
+      {"page[limit][a]", "page[limit][a]=1"},
+      {"page[offset][]", "page[offset][]=1"},
+      {"page[offset][a]", "page[offset][a]=1"},
+      {"a scalar page", "page=1"},
+      {"a listed page", "page[]=1"},
+      {"sort[]", "sort[]=title"},
+      {"sort[a]", "sort[a]=title"},
+      {"include[]", "include[]=tags"},
+      {"include[a]", "include[a]=tags"}
+    ]
+
+    for {label, query} <- @bad_shapes do
+      @query query
+
+      test "#{label}" do
+        conn =
+          build_conn()
+          |> put_req_header("accept", "application/vnd.api+json")
+          |> get("/api/json/posts?#{@query}")
+
+        refute conn.status == 500,
+               "?#{@query} answered 500 — a client-chosen parameter shape must not " <>
+                 "reach a parser that has no clause for it"
+
+        assert %{"errors" => [%{"status" => "400", "code" => code} | _]} =
+                 json_response(conn, 400)
+
+        assert code in ~w(invalid_pagination invalid_sort invalid_includes),
+               "?#{@query} answered code #{inspect(code)}, expected one ash_json_api itself uses"
+      end
+    end
+
+    test "legitimate page/sort/include values are unaffected" do
+      conn =
+        build_conn()
+        |> put_req_header("accept", "application/vnd.api+json")
+        |> get("/api/json/posts?page[limit]=10&page[offset]=0&sort=-inserted_at&include=tags")
+
+      assert conn.status == 200
+    end
+  end
+
   describe "the collab socket token is read before any authentication" do
     test "a bracketed token is refused rather than raising in Plug.Crypto" do
       # `Phoenix.Token.verify/4` requires a binary and only has a fallback for

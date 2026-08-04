@@ -95,6 +95,14 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.ApiDocs
   end
 
+  # `:api` plus a guard against the specific query-param shapes `ash_json_api`
+  # 1.6.6 has no parser clause for (#763) — a separate pipeline because the
+  # guard is meaningless for our own hand-written `/api` handlers, which
+  # already go through `KilnCMSWeb.Params` (#751).
+  pipeline :ash_json_api do
+    plug KilnCMSWeb.Plugs.AshJsonApiParams
+  end
+
   # Headless sign-in — exchanges credentials for a bearer token (issue #37).
   # Tight per-IP `:auth` limit to slow credential stuffing; no bearer/actor
   # plugs (this is the endpoint that *issues* the token).
@@ -433,7 +441,7 @@ defmodule KilnCMSWeb.Router do
   # `/api/json/open_api` follows the same `:api_docs` flag as the explorer
   # above (#567); the content routes are unaffected.
   scope "/api/json" do
-    pipe_through [:api]
+    pipe_through [:api, :ash_json_api]
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
   end
