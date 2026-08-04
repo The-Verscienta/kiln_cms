@@ -595,6 +595,16 @@ defmodule KilnCMSWeb.Router do
     get "/:plural/feed.xml", FeedController, :type
     get "/:plural/feed.json", FeedController, :type_json
 
+    # iCalendar for event-shaped types (#480). Same `:plural` wildcard and the
+    # same reason: which types have a calendar is data (a type carrying a
+    # `datetime_range` field), not a compile-time fact. The document route is
+    # `/<plural>/<slug>/calendar.ics` rather than a `.ics` suffix on the page
+    # URL, so it cannot collide with a slug that happens to end in `.ics`.
+    get "/calendar.ics", CalendarController, :index
+    get "/:plural/calendar.ics", CalendarController, :type
+    get "/:plural/tags/:tag/calendar.ics", CalendarController, :tag
+    get "/:plural/:slug/calendar.ics", CalendarController, :show
+
     # Web app manifest for the installable editor PWA (#65). Per-org, so it's a
     # controller rather than a `priv/static` file. Unauthenticated by necessity
     # (the browser fetches it as a page subresource) and cheap — a cached

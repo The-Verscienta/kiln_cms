@@ -151,6 +151,12 @@ config :kiln_cms, KilnCMS.Search,
 # (`model: "ollama:llama3.1"`); a hosted provider works too, and is announced at
 # boot and in the editor. API keys are resolved by `req_llm` from its own
 # environment, never read or stored by Kiln. See docs/seo.md.
+# Timezone database (#480). Elixir ships none, so `DateTime.shift_zone/2` and
+# anything wall-clock returns `{:error, :utc_only_time_zone_database}` without
+# it. Set globally rather than per-call: a caller that forgets does not get a
+# subtly-UTC answer, it gets an error.
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 # Editorial advisory checks (#476, #495) — the non-blocking advice panel in the
 # content editor. Order here is display order. Plugins append their own via the
 # `advisories/0` callback on `Kiln.Plugin`; a check that raises is dropped and

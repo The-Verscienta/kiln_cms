@@ -551,7 +551,10 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:og_type, "article")
     |> assign(:hreflang, hreflang_alternates(ct, translations, base_url))
     |> assign(:locale_links, locale_links(ct, translations, record.locale, base_url))
-    |> assign(:feeds, feed_alternates(ct, org, base_url))
+    |> assign(
+      :feeds,
+      feed_alternates(ct, org, base_url) ++ calendar_alternates(ct, org, base_url)
+    )
     |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org)))
     |> render(template, record: record, blocks: blocks)
   end
@@ -583,6 +586,33 @@ defmodule KilnCMSWeb.ContentController do
           href: base_url <> KilnCMSWeb.FeedController.feed_path(scope, format)
         }
       end
+    end
+  end
+
+  # Calendar autodiscovery (#480), riding the same `rel="alternate"` block. Built
+  # from `CalendarController.calendar_path/1` for the reason the feeds are: the
+  # advertised URL and the routed one cannot drift.
+  #
+  # Without this the `.ics` routes exist and nothing links to them, so a visitor
+  # can only reach an event calendar by guessing the URL — the inert-surface
+  # shape a round-one review caught on #489.
+  defp calendar_alternates(ct, org, base_url) do
+    case KilnCMS.Events.calendar_types(org.id) do
+      [] ->
+        []
+
+      types ->
+        site = KilnCMS.Branding.for_org(org.id).site_name
+        scope = Enum.find(types, &(to_string(&1.type) == to_string(ct.type)))
+
+        [{nil, site} | if(scope, do: [{scope, "#{site} — #{scope.label}"}], else: [])]
+        |> Enum.map(fn {descriptor, title} ->
+          %{
+            type: "text/calendar",
+            title: title,
+            href: base_url <> KilnCMSWeb.CalendarController.calendar_path(descriptor)
+          }
+        end)
     end
   end
 

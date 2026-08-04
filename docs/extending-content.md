@@ -19,7 +19,8 @@ UI" workflow, scoped to fields.
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
   `help_text`, `position`, `default`, `compute`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
-  `:select`, `:media`, `:reference`, `:geolocation`, `:computed` — plus
+  `:select`, `:media`, `:reference`, `:geolocation`, `:datetime_range`,
+  `:recurrence`, `:computed` — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Store**: values live in the `custom_fields` map on each content record.
@@ -71,6 +72,25 @@ transposed pair is usually caught rather than silently relocated.
 On the fired `:json_ld` surface each populated geolocation field becomes the
 document's `contentLocation` — a schema.org `Place` carrying `GeoCoordinates`
 — so structured data falls out of the type with no per-type wiring.
+
+### Date-range and recurrence fields
+
+A `:datetime_range` field is what makes a content type an **event**: when
+something starts and ends, in a named timezone, optionally all-day. A
+`:recurrence` field alongside it makes that event repeat.
+
+```elixir
+CMS.create_field_definition!(%{
+  type_definition_id: td.id, name: "when", label: "When",
+  field_type: :datetime_range
+}, actor: admin)
+```
+
+Values are stored as **local wall time plus an IANA zone**, not as a UTC
+instant, and expansion is wall-clock so a weekly event holds its local time
+across a DST change. A type carrying one gets `.ics` calendar routes
+automatically; set the type's `schema_org_type` to `Event` (or a subtype) to
+also fire a `schema.org/Event` node. See [events.md](events.md).
 
 ### Computed fields
 

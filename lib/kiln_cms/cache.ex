@@ -172,9 +172,25 @@ defmodule KilnCMS.Cache do
   """
   @spec bust_type_registry(Ash.UUID.t()) :: :ok
   def bust_type_registry(org_id) do
-    if enabled?(), do: Cachex.del(@cache, type_registry_key(org_id))
+    if enabled?() do
+      Cachex.del(@cache, type_registry_key(org_id))
+      Cachex.del(@cache, calendar_types_key(org_id))
+    end
+
     :ok
   end
+
+  @doc """
+  Cache key for which of a site's content types are event-shaped (#480).
+
+  Its own key rather than a slice of the type registry, because the answer
+  depends on `FieldDefinition` rows and not on `TypeDefinition` ones — a
+  `datetime_range` field being added is what changes it. Both writes bust it
+  (`Changes.BustTypeRegistry` runs on each), so the TTL is a backstop rather
+  than the mechanism.
+  """
+  @spec calendar_types_key(Ash.UUID.t()) :: String.t()
+  def calendar_types_key(org_id), do: "content_types:calendar:#{org_id}"
 
   @doc """
   Cache key for a site's resolved white-label branding tokens (#48). Per-org:
@@ -248,10 +264,15 @@ defmodule KilnCMS.Cache do
   Cache key for a generated feed (#486).
 
   `type` is the content-type name for a per-type feed (`/blog/feed.xml`) or
-  `nil` for the site-wide one; `format` is `:atom` or `:json`. Per-org, like
-  every other aggregate key here.
+  `nil` for the site-wide one; `format` is `:atom`, `:json` or `:ics`. Per-org,
+  like every other aggregate key here.
+
+  The calendar routes (#480) narrow `type` further — `"gigs/tag/jazz"` for a
+  tag-scoped calendar — which `bust_feeds/2` deliberately does not enumerate:
+  it drops the keys anyone is actually subscribed to and lets the TTL reclaim
+  the rest.
   """
-  @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json) :: String.t()
+  @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json | :ics) :: String.t()
   def feed_key(org_id, type, format), do: "feed:#{org_id}:#{type || "all"}:#{format}"
 
   @doc """
@@ -269,7 +290,9 @@ defmodule KilnCMS.Cache do
   def bust_feeds(org_id, type) do
     if enabled?() do
       for name <- Enum.uniq([nil, type && to_string(type)]),
-          format <- [:atom, :json] do
+          # `:ics` rides along (#480): a published event must appear in a
+          # subscribed calendar on the same hook that refreshes the feeds.
+          format <- [:atom, :json, :ics] do
         Cachex.del(@cache, feed_key(org_id, name, format))
       end
     end
