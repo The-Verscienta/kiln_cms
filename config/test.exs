@@ -218,6 +218,12 @@ config :kiln_cms, KilnCMS.Accounts.Scoping, memo_ttl_ms: 0
 
 # Strict tenancy (#419) is COMPILE-TIME; the main suite predates it and calls
 # interfaces tenant-less (resolving the default org), so tests compile
-# fail-open. The strict CI leg sets KILN_STRICT_TEST=1 and runs the
-# @moduletag :strict_tenancy smoke suite against a strict-compiled build.
-config :kiln_cms, :strict_tenancy, System.get_env("KILN_STRICT_TEST") == "1"
+# fail-open. The strict CI leg sets KILN_STRICT_TEST=true (or 1/yes/on) and
+# runs the @moduletag :strict_tenancy smoke suite against a strict-compiled
+# build. Parsed by the standalone snippet in strict_test_flag.exs — see its
+# header for why this can't just call KilnCMS.Config.Env (#646).
+Code.require_file("strict_test_flag.exs", __DIR__)
+
+config :kiln_cms,
+       :strict_tenancy,
+       KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST"))
