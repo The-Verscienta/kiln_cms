@@ -370,6 +370,11 @@ defmodule KilnCMS.Accounts.User do
     create :register_with_password do
       description "Register a new user with a email and password."
 
+      # Bounded per client address (#724). The form submits over `/live`, so it
+      # passes no router pipeline and no plug can reach it — one websocket
+      # replaying `submit` was unlimited account creation.
+      change KilnCMS.Accounts.Changes.ThrottleRegistration
+
       # Invite-only mode: reject self-registration when
       # `config :kiln_cms, :registration_enabled` is false.
       validate KilnCMS.Accounts.Validations.RegistrationEnabled
@@ -409,6 +414,21 @@ defmodule KilnCMS.Accounts.User do
       end
     end
 
+    # Written out rather than generated, so a per-address budget can go in front
+    # of it (#724). `MagicLink.Transformer` builds this action only when the
+    # resource does not already define it, and what it builds is exactly the two
+    # entities below — one argument and its own preparation. Ours runs first.
+    read :request_magic_link do
+      description "Send a magic sign-in link to a user if they exist."
+
+      argument :email, :ci_string do
+        allow_nil? false
+      end
+
+      prepare KilnCMS.Accounts.Preparations.ThrottleMagicLink
+      prepare AshAuthentication.Strategy.MagicLink.RequestPreparation
+    end
+
     action :request_password_reset_token do
       description "Send password reset instructions to a user if they exist."
 
@@ -416,8 +436,11 @@ defmodule KilnCMS.Accounts.User do
         allow_nil? false
       end
 
-      # creates a reset token and invokes the relevant senders
-      run {AshAuthentication.Strategy.Password.RequestPasswordReset, action: :get_by_email}
+      # Creates a reset token and invokes the relevant senders — behind a
+      # per-address budget (#724), because this form submits over `/live` too.
+      # A generic action has no `prepare`/`change` hook, so the charge wraps the
+      # run rather than sitting beside it.
+      run {KilnCMS.Accounts.ThrottledPasswordResetRequest, action: :get_by_email}
     end
 
     read :get_by_email do

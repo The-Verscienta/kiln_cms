@@ -147,7 +147,10 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
-    plug KilnCMSWeb.Plugs.RateLimit, :auth
+    # `:auth`, except on the registration POST, which gets its own tighter
+    # bucket so the two registration doors agree (#724) — see
+    # `KilnCMSWeb.Plugs.AuthRateLimit`.
+    plug KilnCMSWeb.Plugs.AuthRateLimit
     # Remember-me is read *only* here, not on `:browser` (#699), and the reason
     # is the public delivery surface. `sign_in_with_remember_me` signs the
     # visitor in by writing the session, so `Plug.Session` emits `Set-Cookie` —

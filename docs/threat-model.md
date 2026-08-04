@@ -61,9 +61,9 @@ the router so preflights are answered before route matching).
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
 | Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
 | Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
-| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`; password sign-in also per-account (#478) |
+| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
-| Sign-in submit over `/live` | LiveView `"submit"` on `/sign-in` | credentials → session | `:auth`, charged on the action (#715) + per-account (#478) |
+| Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | none (except the sign-in submit, above) |
@@ -96,18 +96,37 @@ build if a resource is ever registered without that authorizer.
   JSON:API without resolver changes. A host matching neither falls back to the
   default org unless `TENANT_STRICT_HOST=true`, which 404s it instead — see
   residual risk 2.
-- **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across eight
-  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. The browser sign-in is
-  the one credential path no plug can reach: AshAuthentication's form is a
-  LiveComponent that calls `AshPhoenix.Form.submit/2` in-process, so the
-  credentials arrive as a `/live` event and pass no pipeline. It is charged the
-  same `:auth` bucket anyway (#715) — `KilnCMSWeb.SignInLive` attaches the
+- **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across nine
+  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. **The credential forms
+  submit where no plug can reach them:** each is an AshAuthentication
+  LiveComponent calling `AshPhoenix.Form.submit/2` in-process, so the
+  credentials arrive as a `/live` event and pass no pipeline. (`auth_routes`
+  also generates a POST route per strategy action as the non-JS fallback; those
+  *are* plug-reachable, which is why the registration one is charged
+  `:register` there too — see `KilnCMSWeb.Plugs.AuthRateLimit`.) And all four —
+  sign-in, register, reset-request, magic-link — render on all three of
+  `/sign-in`, `/register` and `/reset`, hidden from each other only by a CSS
+  class, so which page a caller is on bounds nothing.
+
+  They are charged on the *action* instead (#715 for sign-in, #724 for the
+  other three) — `KilnCMSWeb.SignInLive` attaches the
   socket's own client address (`:peer_data`/`:x_headers`, resolved through the
   same trusted-proxy rule `Plugs.ClientIp` applies) to the form's context, and
   `Preparations.ThrottleSignIn` charges it on the action. Same bucket as the
   HTTP form, so switching transport buys no second budget; charged only when
   that context is present, so a request that already paid the plug is not
-  charged twice. Password sign-in is limited on a second axis by
+  charged twice. Every one of these charges from a `before_action` hook rather
+  than from the `prepare`/`change` body, because those run per changeset build
+  and `AshPhoenix.Form.validate/2` builds one **per keystroke** on a
+  `phx-change` form — a charge there would lock a user out while they typed.
+
+  **Registration gets its own `:register` bucket** rather than a share of
+  `:auth` (#724): it was the unbounded one, at a bcrypt hash and a confirmation
+  mail per socket event, but sharing would let a burst of legitimate sign-ups
+  lock *sign-in* for everyone behind one office NAT — the shared-NAT trade
+  residual risk 4 records. It carries no per-*account* budget, because there is
+  no account yet and the address being registered is attacker-chosen: keying on
+  it would let anyone deny a specific address its first registration. Password sign-in is limited on a second axis by
   `KilnCMS.Accounts.AccountThrottle` (#478): a flat per-**account** budget,
   which IP rotation cannot escape. The IP is charged first and a refusal spends
   no account budget — otherwise a flood from one address could lock out every

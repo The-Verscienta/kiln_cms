@@ -1,12 +1,19 @@
 defmodule KilnCMSWeb.SignInRateLimitTest do
   @moduledoc """
-  The browser sign-in is charged the per-IP `:auth` bucket (#715).
+  Every credential form on the auth pages is charged a per-IP bucket
+  (#715, #724).
 
-  It submits inside a LiveComponent over `/live`, so it passes no plug and the
-  router's `:auth` limit never sees it — the limit is charged on the action
+  They submit inside LiveComponents over `/live`, so they pass no plug and the
+  router's limits never see them — the limit is charged on the *action*
   instead, from a client address `KilnCMSWeb.SignInLive` attaches to the form's
   context. These tests cover both halves: that the view attaches it, and that
-  the action charges it.
+  each action charges it.
+
+  #715 wired only `sign_in_with_password`; #724 found the other three. Note that
+  all four forms render on **all three** of `/sign-in`, `/register` and
+  `/reset` — `Components.Password` emits the sign-in block unconditionally and
+  hides the rest with a CSS class — so which page a caller is on does not bound
+  which form they can submit, and each needs its own charge.
 
   The `:auth` limit is left at its real value and each test spends its own
   address's bucket by hand. Tightening the limit app-wide would be the obvious
@@ -56,10 +63,12 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
   # How much of the address's budget has been charged. Reads Hammer's own table,
   # whose rows are `{{key, window}, count, expiry}`, because nothing else can
   # distinguish "charged once" from "charged eleven times" below the limit.
-  defp spent(ip) do
+  defp spent(ip), do: spent("auth", ip)
+
+  defp spent(bucket, ip) do
     KilnCMSWeb.RateLimit
     |> :ets.tab2list()
-    |> Enum.filter(fn {{key, _window}, _count, _expiry} -> key == "auth:" <> ip end)
+    |> Enum.filter(fn {{key, _window}, _count, _expiry} -> key == "#{bucket}:" <> ip end)
     |> Enum.map(fn {_key, count, _expiry} -> count end)
     |> Enum.sum()
   end
@@ -258,6 +267,76 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       |> render_submit()
 
       assert spent("127.0.0.1") == before + 1
+    end
+
+    test "a real registration through the page charges :register exactly once", %{conn: conn} do
+      # The seam that matters most: registration was the unbounded one, and the
+      # form is reachable from every auth page. Walks view context ->
+      # Components.SignIn -> Components.Password -> RegisterForm ->
+      # AshPhoenix.Form -> the changeset context -> the change.
+      {:ok, view, _html} = live(conn, ~p"/register")
+      before = spent("register", "127.0.0.1")
+      address = email()
+
+      params = %{email: address, password: @password, password_confirmation: @password}
+
+      view
+      |> form("#user-password-register-with-password-wrapper form", user: params)
+      |> render_change()
+
+      assert spent("register", "127.0.0.1") == before,
+             "a phx-change must not spend the budget — the form is phx-change, so a " <>
+               "charge at build time costs one unit per keystroke"
+
+      view
+      |> form("#user-password-register-with-password-wrapper form", user: params)
+      |> render_submit()
+
+      assert spent("register", "127.0.0.1") == before + 1
+    end
+
+    test "a real reset request through the page charges :auth once", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/reset")
+      before = spent("auth", "127.0.0.1")
+
+      view
+      |> form("#user-password-request-password-reset-token-wrapper form", user: %{email: email()})
+      |> render_submit()
+
+      assert spent("auth", "127.0.0.1") == before + 1
+    end
+
+    test "a real magic-link request through the page charges :auth once", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/sign-in")
+      before = spent("auth", "127.0.0.1")
+
+      view
+      # Selected by its action rather than an id: unlike the other three, the
+      # magic-link component renders no wrapper with a stable id.
+      |> form(~s(form[action="/auth/user/magic_link/request"]), user: %{email: email()})
+      |> render_submit()
+
+      assert spent("auth", "127.0.0.1") == before + 1
+    end
+
+    test "every credential form is reachable from every auth page", %{conn: conn} do
+      # The reason each one needs its own charge rather than relying on the
+      # page it "belongs" to. If this ever stops being true the three tests
+      # above are testing less than they look like they are.
+      wrappers = [
+        "user-password-sign-in-with-password-wrapper",
+        "user-password-register-with-password-wrapper",
+        "user-password-request-password-reset-token-wrapper",
+        "user-magic-link-request-magic-link"
+      ]
+
+      for path <- [~p"/sign-in", ~p"/register", ~p"/reset"] do
+        {:ok, _view, html} = live(conn, path)
+
+        for wrapper <- wrappers do
+          assert html =~ wrapper, "#{wrapper} is not rendered on #{path}"
+        end
+      end
     end
 
     test "the endpoint gives the socket what the address is resolved from" do

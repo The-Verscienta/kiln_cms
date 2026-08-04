@@ -111,6 +111,18 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   @spec client_ip_context(String.t()) :: map()
   def client_ip_context(client_ip) when is_binary(client_ip), do: %{@context_key => client_ip}
 
+  @doc """
+  The context key an address is written under.
+
+  Exported so `KilnCMS.Accounts.ClientIpBudget` — which charges the same
+  address for the *other* credential forms (#724) — reads the key this module
+  writes, rather than a second spelling of it. Two spellings fail silently,
+  because "no address in context" is a legitimate state meaning "a plug already
+  charged this".
+  """
+  @spec context_key() :: atom()
+  def context_key, do: @context_key
+
   @impl true
   def prepare(query, opts, context) do
     Query.before_action(query, &charge(&1, opts, context))
