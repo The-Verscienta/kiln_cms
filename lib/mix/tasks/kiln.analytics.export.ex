@@ -111,13 +111,20 @@ defmodule Mix.Tasks.Kiln.Analytics.Export do
   defp destination(nil), do: " to stdout"
   defp destination(path), do: " to #{path}"
 
+  defp rows(from, to, org_id) do
+    Stream.concat([
+      Export.stream_rows(from, to, org_id, @actor),
+      Export.stream_referrer_rows(from, to, org_id, @actor)
+    ])
+  end
+
   defp write_csv(device, from, to, org_id) do
     IO.write(device, CSV.line(Export.csv_header()))
 
     from
-    |> Export.stream_rows(to, org_id, @actor)
-    |> Enum.each(fn {rows, titles} ->
-      IO.write(device, Enum.map_join(rows, &CSV.line(Export.csv_row(&1, titles, org_id))))
+    |> rows(to, org_id)
+    |> Enum.each(fn {batch, titles} ->
+      IO.write(device, Enum.map_join(batch, &CSV.line(Export.csv_row(&1, titles, org_id))))
     end)
   end
 
@@ -126,10 +133,10 @@ defmodule Mix.Tasks.Kiln.Analytics.Export do
 
     _ =
       from
-      |> Export.stream_rows(to, org_id, @actor)
-      |> Enum.reduce(false, fn {rows, titles}, sent_any? ->
+      |> rows(to, org_id)
+      |> Enum.reduce(false, fn {batch, titles}, sent_any? ->
         prefix = if sent_any?, do: ",", else: ""
-        json = Enum.map_join(rows, ",", &Jason.encode!(Export.json_row(&1, titles, org_id)))
+        json = Enum.map_join(batch, ",", &Jason.encode!(Export.json_row(&1, titles, org_id)))
         IO.write(device, prefix <> json)
         true
       end)

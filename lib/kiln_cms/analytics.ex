@@ -39,6 +39,7 @@ defmodule KilnCMS.Analytics do
 
     resource KilnCMS.Analytics.ReferrerDay do
       define :record_referrer, action: :record, args: [:content_type, :content_id, :source]
+      define :referrers_since, action: :in_window, args: [:since]
     end
 
     resource KilnCMS.Analytics.SearchQuery do
@@ -58,5 +59,38 @@ defmodule KilnCMS.Analytics do
   @spec referrers_enabled?() :: boolean()
   def referrers_enabled? do
     Application.get_env(:kiln_cms, :analytics_referrers, [])[:enabled] == true
+  end
+
+  @default_low_count_threshold 5
+
+  @doc """
+  The low-count suppression threshold (#620): a referrer category below this
+  many hits renders — in the dashboard **and** the export — as `"< n"` rather
+  than an exact number, because a `(content, source, day, hits: 1)` row can
+  describe a single visitor's arrival (design doc, "Where 'aggregate' gets
+  thin: low counts"). Runtime-readable like `referrers_enabled?/0`, so an
+  operator can tighten or loosen it without a rebuild; defaults to 5.
+  """
+  @spec low_count_threshold() :: pos_integer()
+  def low_count_threshold do
+    Application.get_env(:kiln_cms, :analytics_referrers, [])[:low_count_threshold] ||
+      @default_low_count_threshold
+  end
+
+  @doc """
+  Formats a referrer hit count for display or export: the exact integer at or
+  above `low_count_threshold/0`, or the string `"< n"` below it. The only
+  sanctioned way to surface a referrer count — never read `hits` directly for
+  anything a user or an export file will see.
+
+  A true zero is never suppressed: an absent category describes no one — the
+  privacy concern is a *small but real* count, not the lack of one.
+  """
+  @spec suppress_low_count(non_neg_integer()) :: non_neg_integer() | String.t()
+  def suppress_low_count(0), do: 0
+
+  def suppress_low_count(hits) do
+    threshold = low_count_threshold()
+    if hits < threshold, do: "< #{threshold}", else: hits
   end
 end

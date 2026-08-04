@@ -3,7 +3,11 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
   The analytics dashboard is editor/admin only and shows recorded view counts.
   Public delivery records a view per request.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  # async: false — the "referrer breakdown" describe block below mutates the
+  # global :analytics_referrers Application env, which an async: true sibling
+  # test (e.g. KilnCMS.AnalyticsTest's "off by default" assertion) could
+  # observe mid-mutation. See #620 review.
+  use KilnCMSWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
@@ -127,6 +131,205 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
       # Only today has a view, so the other six days must still appear as rows.
       six_days_ago = Date.add(Date.utc_today(), -6)
       assert html =~ Date.to_iso8601(six_days_ago)
+    end
+  end
+
+  describe "referrer breakdown (#620)" do
+    setup do
+      original = Application.get_env(:kiln_cms, :analytics_referrers, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
+      :ok
+    end
+
+    defp enable_referrers(threshold \\ 5) do
+      Application.put_env(:kiln_cms, :analytics_referrers,
+        enabled: true,
+        low_count_threshold: threshold
+      )
+    end
+
+    # The breakdown only renders once @window_total > 0 (no separate empty
+    # state — see analytics_live.ex), and the "Most viewed" table only shows
+    # content with a ContentView row — so every test below records all three
+    # counters, mirroring what `ViewTracking.record/4` does in one call.
+    defp record_referrers(page, source, count) do
+      Analytics.record_view!("page", page.id, authorize?: false)
+      Analytics.record_view_day!("page", page.id, authorize?: false)
+
+      for _ <- 1..count,
+          do: Analytics.record_referrer!("page", page.id, source, authorize?: false)
+    end
+
+    defp new_page(title) do
+      CMS.create_page!(
+        %{title: title, slug: "ana-#{System.unique_integer([:positive])}"},
+        authorize?: false
+      )
+    end
+
+    test "hidden entirely when the phase-2 gate is off", %{conn: conn} do
+      Application.put_env(:kiln_cms, :analytics_referrers, enabled: false)
+      page = new_page("No Referrers")
+      record_referrers(page, :search, 1)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      refute html =~ "Where readers came from"
+      refute html =~ "Referrers</th>"
+    end
+
+    test "shows the site-wide breakdown and honestly labels :direct", %{conn: conn} do
+      enable_referrers()
+      page = new_page("Referred Page")
+      record_referrers(page, :search, 6)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      assert html =~ "Where readers came from"
+      assert html =~ "referring site chose not to send"
+      # Non-suppressed (>= threshold), and no complementary suppression is
+      # needed here — nothing else is nonzero, so the SVG <title> renders the
+      # exact count.
+      assert html =~ "<title>Search: 6</title>"
+    end
+
+    test "suppresses a count below the threshold as \"< n\", not the exact number", %{
+      conn: conn
+    } do
+      enable_referrers(5)
+      page = new_page("Quiet Page")
+      record_referrers(page, :social, 2)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      assert html =~ "<title>Social: &lt; 5</title>"
+      refute html =~ "Social: 2"
+    end
+
+    # The vulnerability the #620 review found: publishing exactly one
+    # suppressed category next to four EXACT zeros (which sum, with the
+    # suppressed one, to the row's own exact view total) makes that one
+    # category's true count recoverable by subtraction. Closing it means a
+    # second category must also stop reading as an exact "0".
+    test "a lone suppressed category forces a second category into complementary suppression",
+         %{conn: conn} do
+      enable_referrers(5)
+      page = new_page("Complementary")
+      record_referrers(page, :social, 2)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      # social stays "< 5" (it was already below threshold); some other
+      # category — direct, first in source order — no longer reads as an
+      # honest exact "0", which would have given social away by subtraction.
+      assert html =~ "<title>Social: &lt; 5</title>"
+      assert html =~ "<title>Direct: hidden</title>"
+      refute html =~ "<title>Direct: 0</title>"
+    end
+
+    test "two or more naturally-suppressed categories need no complementary help", %{conn: conn} do
+      enable_referrers(5)
+      page = new_page("Two Low")
+      Analytics.record_view_day!("page", page.id, authorize?: false)
+      Analytics.record_referrer!("page", page.id, :search, authorize?: false)
+      Analytics.record_referrer!("page", page.id, :social, authorize?: false)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      # Two unknowns, one equation: internal/other genuinely have nothing to
+      # hide and read as exact zeros; direct does too (it's not adjacent to
+      # the lone-suppressed case above).
+      assert html =~ "<title>Search: &lt; 5</title>"
+      assert html =~ "<title>Social: &lt; 5</title>"
+      assert html =~ "<title>Direct: 0</title>"
+      assert html =~ "<title>Internal: 0</title>"
+      assert html =~ "<title>Other: 0</title>"
+    end
+
+    test "suppressed and complementarily-suppressed bars render at the same size, unlike an exact one",
+         %{conn: conn} do
+      enable_referrers(5)
+      page = new_page("Bar Sizes")
+      record_referrers(page, :social, 2)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      # Both the naturally-suppressed and the complementarily-suppressed
+      # segment must be identically sized — a regression that clamped only
+      # one of them (or clamped to the raw hit count) would produce two
+      # different `width:` percentages here instead of one repeated value.
+      widths = Regex.scan(~r/width: ([\d.]+)%/, html) |> Enum.map(&List.last/1)
+      assert length(Enum.uniq(widths)) == 1
+    end
+
+    test "the per-row table gains a Referrers column with each row's breakdown", %{conn: conn} do
+      enable_referrers()
+      page = new_page("Row Breakdown")
+      record_referrers(page, :internal, 7)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      assert html =~ "Referrers</th>"
+      # The `title="..."` attribute form is unique to the per-row bar
+      # (`referrer_bar/1`) — the site-wide chart's own "Internal: 7" lives in
+      # an SVG <title> *element*, a different string, so this can't pass
+      # merely because the site-wide chart (which, with only one page
+      # recorded, shows the same total) rendered correctly.
+      assert html =~ ~s(title="Internal: 7")
+    end
+
+    test "a bucket outside the selected range is excluded from the breakdown", %{conn: conn} do
+      enable_referrers()
+      page = new_page("Old Referrer")
+
+      Analytics.record_view_day!("page", page.id, authorize?: false)
+
+      Ash.Seed.seed!(KilnCMS.Analytics.ReferrerDay, %{
+        content_type: "page",
+        content_id: page.id,
+        source: :search,
+        day: Date.add(Date.utc_today(), -10),
+        hits: 9
+      })
+
+      {:ok, _lv, html_7} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics?range=7")
+
+      refute html_7 =~ "<title>Search: 9</title>"
+
+      {:ok, _lv, html_30} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics?range=30")
+
+      assert html_30 =~ "<title>Search: 9</title>"
+    end
+
+    test "the range toggle keeps working with referrers on", %{conn: conn} do
+      enable_referrers()
+      page = new_page("Range Toggle")
+      record_referrers(page, :direct, 1)
+
+      conn = log_in(conn, authed_user(:editor))
+
+      {:ok, _lv, html_30} = live(conn, ~p"/editor/analytics?range=30")
+      assert html_30 =~ "Last 30 days"
+      assert html_30 =~ "Where readers came from"
+
+      {:ok, _lv, html_7} = live(conn, ~p"/editor/analytics?range=7")
+      assert html_7 =~ "Last 7 days"
+      assert html_7 =~ "Where readers came from"
+    end
+
+    test "the range toggle keeps working with referrers off", %{conn: conn} do
+      Application.put_env(:kiln_cms, :analytics_referrers, enabled: false)
+      conn = log_in(conn, authed_user(:editor))
+
+      {:ok, _lv, html_30} = live(conn, ~p"/editor/analytics?range=30")
+      assert html_30 =~ "Last 30 days"
+      refute html_30 =~ "Where readers came from"
+
+      {:ok, _lv, html_7} = live(conn, ~p"/editor/analytics?range=7")
+      assert html_7 =~ "Last 7 days"
+      refute html_7 =~ "Where readers came from"
     end
   end
 

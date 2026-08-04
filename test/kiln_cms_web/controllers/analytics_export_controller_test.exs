@@ -4,7 +4,12 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
   governance's export — `AnalyticsLive` itself is editor-visible), streamed
   CSV/JSON downloads of daily view buckets with titles resolved.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  # async: false — the "referrer export" describe block below mutates the
+  # global :analytics_referrers Application env, which an async: true sibling
+  # test (e.g. KilnCMS.AnalyticsTest's "off by default" assertion, or this
+  # file's own "off by default" test) could observe mid-mutation. See #620
+  # review.
+  use KilnCMSWeb.ConnCase, async: false
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.Analytics.ContentViewDay
@@ -91,8 +96,8 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       assert response.resp_headers |> List.keyfind("content-type", 0) |> elem(1) =~ "text/csv"
 
       body = response.resp_body
-      assert String.starts_with?(body, "day,content_type,content_id,title,views")
-      assert body =~ "post,#{post.id},\"Exported, \"\"Post\"\"\",7"
+      assert String.starts_with?(body, "kind,day,content_type,content_id,title,views,source,hits")
+      assert body =~ "view,#{today()},post,#{post.id},\"Exported, \"\"Post\"\"\",7,,"
     end
 
     test "content that has since been deleted exports as \"(deleted)\"", %{conn: conn} do
@@ -108,7 +113,7 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
         )
         |> Map.fetch!(:resp_body)
 
-      assert body =~ "post,#{missing_id},(deleted),2"
+      assert body =~ "view,#{today()},post,#{missing_id},(deleted),2,,"
     end
 
     test "an empty window still returns just the header", %{conn: conn} do
@@ -123,7 +128,7 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
         )
         |> Map.fetch!(:resp_body)
 
-      assert body == "day,content_type,content_id,title,views\r\n"
+      assert body == "kind,day,content_type,content_id,title,views,source,hits\r\n"
     end
   end
 
@@ -199,6 +204,125 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
 
       rows = Jason.decode!(body)
       assert length(rows) == 600
+    end
+  end
+
+  describe "referrer export (#620)" do
+    alias KilnCMS.Analytics.ReferrerDay
+
+    setup do
+      original = Application.get_env(:kiln_cms, :analytics_referrers, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, :analytics_referrers, original) end)
+      :ok
+    end
+
+    defp enable_referrers(threshold \\ 5) do
+      Application.put_env(:kiln_cms, :analytics_referrers,
+        enabled: true,
+        low_count_threshold: threshold
+      )
+    end
+
+    defp seed_referrer_bucket(attrs) do
+      Ash.Seed.seed!(
+        ReferrerDay,
+        Map.merge(
+          %{content_type: "page", content_id: Ash.UUID.generate(), source: :direct, hits: 1},
+          attrs
+        )
+      )
+    end
+
+    test "off by default: no referrer rows even when buckets exist", %{conn: conn} do
+      seed_referrer_bucket(%{day: today(), source: :search, hits: 9})
+
+      body =
+        conn
+        |> log_in(authed_user(:admin))
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      refute body =~ "referrer,"
+    end
+
+    test "CSV: a referrer row is kind-tagged, with views left blank", %{conn: conn} do
+      enable_referrers()
+      id = Ash.UUID.generate()
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 9})
+
+      body =
+        conn
+        |> log_in(authed_user(:admin))
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      assert body =~ "referrer,#{today()},page,#{id},(deleted),,search,9"
+    end
+
+    test "CSV: a referrer count below the threshold is suppressed as \"< n\"", %{conn: conn} do
+      enable_referrers(5)
+      id = Ash.UUID.generate()
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
+
+      body =
+        conn
+        |> log_in(authed_user(:admin))
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      assert body =~ "referrer,#{today()},page,#{id},(deleted),,social,< 5"
+      refute body =~ ",social,2"
+    end
+
+    test "JSON: view and referrer rows are both present, kind-tagged", %{conn: conn} do
+      enable_referrers()
+      admin = authed_user(:admin)
+
+      post = CMS.create_post!(%{title: "With Referrers", slug: slug()}, actor: admin)
+      CMS.publish_post!(post, %{}, actor: admin)
+
+      seed_bucket(%{content_type: "post", content_id: post.id, day: today(), views: 4})
+      seed_referrer_bucket(%{content_id: post.id, day: today(), source: :internal, hits: 6})
+
+      body =
+        conn
+        |> log_in(admin)
+        |> get(
+          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      rows = Jason.decode!(body)
+      assert Enum.find(rows, &(&1["kind"] == "view" and &1["views"] == 4))
+
+      assert Enum.find(
+               rows,
+               &(&1["kind"] == "referrer" and &1["source"] == "internal" and &1["hits"] == 6)
+             )
+    end
+
+    test "JSON: a suppressed referrer count exports as the \"< n\" string, not the exact number",
+         %{conn: conn} do
+      enable_referrers(5)
+      id = Ash.UUID.generate()
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 1})
+
+      body =
+        conn
+        |> log_in(authed_user(:admin))
+        |> get(
+          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      assert [row] = Jason.decode!(body)
+      assert row["hits"] == "< 5"
     end
   end
 

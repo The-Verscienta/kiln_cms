@@ -41,12 +41,11 @@ defmodule KilnCMS.Analytics.ReferrerDay do
     # The `(org_id, day)` companion index `ContentViewDay` keeps for its own
     # `:in_window` dashboard read — the `:unique_referrer_day` identity index
     # leads with `content_type`/`content_id`/`source`, so `day` alone can't be
-    # range-seeked from it. This resource has no reader for it yet (#619 is
-    # definitions + ingestion only; the breakdown read is #620's), but the
-    # phase 3 UI will need exactly this shape, and adding an index later means
-    # a second migration plus a build-time table scan on an existing table —
-    # cheaper to add once, now, on an empty one. NOT for the retention purge,
-    # which filters `inserted_at`, not `day` (see `:expired` below).
+    # range-seeked from it. Added ahead of #620's `:in_window`/`:in_range`
+    # reads below (added in #619, before either action existed) so growing
+    # into it never means a second migration plus a build-time table scan.
+    # NOT for the retention purge, which filters `inserted_at`, not `day`
+    # (see `:expired` below).
     #
     # Deliberately NO index on `hits`, for the same heap-only-tuple reason
     # `ContentViewDay` gives: this is the second and later hit of a row, which
@@ -92,6 +91,39 @@ defmodule KilnCMS.Analytics.ReferrerDay do
       upsert_fields [:hits]
       accept [:content_type, :content_id, :source]
       change atomic_update(:hits, expr(hits + 1))
+    end
+
+    # Buckets on or after `since`, oldest first — the dashboard's breakdown
+    # source (#620). Mirrors `ContentViewDay.:in_window` exactly, including
+    # why `since` is a `:date` argument rather than `ago(n, :day)`: `ago/2`
+    # returns a `:utc_datetime_usec`, and `Date` only compares against `Date`.
+    read :in_window do
+      description "Daily referrer buckets on or after the given day, oldest first."
+      argument :since, :date, allow_nil?: false
+      filter expr(day >= ^arg(:since))
+
+      prepare build(
+                sort: [day: :asc],
+                select: [:day, :content_type, :content_id, :source, :hits]
+              )
+    end
+
+    # The export's source read (#620, extending #618's `ContentViewDay.:in_range`
+    # precedent to referrer buckets). `id` breaks ties within a day for a
+    # stable keyset cursor — `day` alone is not unique. The caller is
+    # responsible for capping the span at `retention_days/0`, same contract
+    # as `ContentViewDay.:in_range`.
+    read :in_range do
+      description "Daily referrer buckets between two days inclusive, oldest first, keyset-paginated."
+      argument :from, :date, allow_nil?: false
+      argument :to, :date, allow_nil?: false
+      pagination keyset?: true, required?: false
+      filter expr(day >= ^arg(:from) and day <= ^arg(:to))
+
+      prepare build(
+                sort: [day: :asc, id: :asc],
+                select: [:id, :day, :content_type, :content_id, :source, :hits]
+              )
     end
 
     # Buckets first written before the retention window. Keyset pagination

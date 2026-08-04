@@ -100,6 +100,72 @@ defmodule KilnCMS.Analytics.ReferrerDayTest do
     refute Ash.can?({ReferrerDay, :record, input}, nil)
   end
 
+  describe "in_window" do
+    defp in_window!(since, opts) do
+      ReferrerDay
+      |> Ash.Query.for_read(:in_window, %{since: since})
+      |> Ash.read!(opts)
+    end
+
+    test "returns buckets on or after the given day, oldest first" do
+      inside = Date.add(today(), -3)
+      outside = Date.add(today(), -10)
+
+      seed_bucket(%{day: outside, source: :search, hits: 9})
+      seed_bucket(%{day: inside, source: :social, hits: 2})
+
+      buckets = in_window!(Date.add(today(), -6), authorize?: false)
+
+      assert [%{day: ^inside, source: :social, hits: 2}] = buckets
+    end
+
+    test "buckets are visible to editors/admins but not viewers" do
+      seed_bucket(%{day: today()})
+
+      assert [_] = in_window!(today(), actor: user(:editor))
+      assert [_] = in_window!(today(), actor: user(:admin))
+      assert [] = in_window!(today(), actor: user(:viewer))
+    end
+  end
+
+  describe "in_range" do
+    defp in_range!(from, to, opts) do
+      ReferrerDay
+      |> Ash.Query.for_read(:in_range, %{from: from, to: to})
+      |> Ash.read!(opts)
+    end
+
+    test "returns buckets within the inclusive window, oldest first" do
+      inside_start = Date.add(today(), -5)
+      inside_end = Date.add(today(), -1)
+      before_window = Date.add(today(), -6)
+      after_window = Date.add(today(), 1)
+
+      seed_bucket(%{day: before_window})
+      seed_bucket(%{day: inside_start})
+      seed_bucket(%{day: inside_end})
+      seed_bucket(%{day: after_window})
+
+      buckets = in_range!(inside_start, inside_end, authorize?: false)
+
+      assert Enum.map(buckets, & &1.day) == [inside_start, inside_end]
+    end
+
+    test "streams through Ash.stream! (keyset pagination)" do
+      for offset <- 0..2, do: seed_bucket(%{day: Date.add(today(), -offset), hits: offset + 1})
+
+      from = Date.add(today(), -2)
+
+      rows =
+        ReferrerDay
+        |> Ash.Query.for_read(:in_range, %{from: from, to: today()})
+        |> Ash.stream!(authorize?: false, batch_size: 1)
+        |> Enum.to_list()
+
+      assert length(rows) == 3
+    end
+  end
+
   describe "retention" do
     defp bucket_at(inserted_at) do
       Ash.Seed.seed!(ReferrerDay, %{

@@ -43,8 +43,7 @@ defmodule KilnCMS.Analytics.Titles do
   from `titles` (deleted, or unreadable by the actor `resolve/3` was called
   with), or the resolved title otherwise.
   """
-  @spec title_for(%{content_type: String.t(), content_id: Ash.UUID.t()}, map(), term()) ::
-          String.t()
+  @spec title_for(map(), map(), term()) :: String.t()
   def title_for(row, titles, org) do
     case ContentTypes.get(row.content_type, org_id(org)) do
       nil -> "(unknown type: #{row.content_type})"
