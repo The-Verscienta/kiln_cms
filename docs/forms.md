@@ -8,7 +8,8 @@ and review submissions in the same builder.
 ## Model
 
 - `Form` — name, public `slug`, description, `active` flag, success message,
-  optional `notify_email`.
+  optional `notify_email`, optional submitter autoresponder (subject/body +
+  on/off toggle — see Side effects below).
 - `FormField` — machine name (the key in each submission), label, type
   (`string`, `text`, `email`, `integer`, `boolean`, `date`, `select`),
   required flag, select options, help text, order.
@@ -123,6 +124,27 @@ module, declared from the plugin's `spam_checks/0` callback — see
 ## Side effects
 
 Each accepted submission that wasn't scored `:spam` optionally mails
-`notify_email` (Oban `:mail` queue, HTML-escaped) and fires the
-`form.submitted` webhook event (selectable per endpoint at `/editor/webhooks`)
-with `{form: slug, data: {...}}`.
+`notify_email` (Oban `:mail` queue, HTML-escaped), optionally autoresponds to
+the submitter (below), and fires the `form.submitted` webhook event
+(selectable per endpoint at `/editor/webhooks`) with `{form: slug, data: {...}}`.
+
+### Autoresponder (#468)
+
+The builder's **Confirmations** tab can turn on a confirmation email back to
+the *submitter* — separate from `notify_email`, which mails the admin.
+It only ever fires when the form declares an `:email` field *and* the
+submission filled it in (`KilnCMS.Forms.Autoresponder.eligible?/3` is the one
+place that decides this, so the send path and the config-time validation
+below can't drift on it); a `:spam`-scored submission is excluded the same as
+`notify_email` and the webhook.
+
+Subject and body are `Kiln.Tokens` patterns using the same `[token]` bracket
+syntax as slug/alias patterns (`KilnCMS.Slug.Pattern`), not `{{field}}`
+mustache — one substitution syntax across the app. Available tokens are every
+declared field as `[field:<name>]`, plus `[form-name]`; the tab lists them
+live as a hint. The body is HTML (values are escaped); the subject is a mail
+header (values are not — HTML in a subject would just show as literal tags).
+Saving with the toggle on requires a non-blank subject and body, both
+referencing only tokens the form currently has; saving with it off skips both
+checks, so a draft template — even one written against a field you haven't
+added yet — never blocks an unrelated save.

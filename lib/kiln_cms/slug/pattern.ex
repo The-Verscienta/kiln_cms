@@ -1,6 +1,9 @@
 defmodule KilnCMS.Slug.Pattern do
   @moduledoc """
-  Pathauto-style URL patterns.
+  Pathauto-style URL patterns, built on the shared `Kiln.Tokens` engine
+  (#468) — this module owns the slug/alias *vocabulary* and the
+  slug-specific post-processing (hyphenation, `Slug.slugify/1`); `Kiln.Tokens`
+  owns bracket parsing and substitution.
 
   **Slug patterns** (#454) compose the URL's final segment, e.g.
   `"[yyyy]-[mm]-[title]"` → `2026-07-my-post` (so a post URL becomes
@@ -31,6 +34,7 @@ defmodule KilnCMS.Slug.Pattern do
   entry point both the resource change and the editor use.
   """
 
+  alias Kiln.Tokens
   alias KilnCMS.Slug
 
   @tokens ~w(title focus-keyphrase category yyyy mm dd)
@@ -51,8 +55,7 @@ defmodule KilnCMS.Slug.Pattern do
 
   @doc "Whether `pattern` mentions `token` (used to skip needless lookups)."
   @spec uses?(String.t() | nil, String.t()) :: boolean()
-  def uses?(nil, _token), do: false
-  def uses?(pattern, token), do: String.contains?(pattern, "[#{token}]")
+  def uses?(pattern, token), do: Tokens.uses?(pattern, token)
 
   @doc "Whether `pattern` mentions any date token."
   @spec uses_dates?(String.t() | nil) :: boolean()
@@ -61,8 +64,8 @@ defmodule KilnCMS.Slug.Pattern do
   @doc ~S/Expand `pattern` against `context` into a slug ("" when nothing usable)./
   @spec expand(String.t(), context()) :: String.t()
   def expand(pattern, context) do
-    ~r/\[([a-z0-9:_-]+)\]/
-    |> Regex.replace(pattern, fn _match, token -> token_value(token, context) end)
+    pattern
+    |> Tokens.expand(definitions(), context)
     |> String.replace(~r{[/._\s]+}, "-")
     |> Slug.slugify()
   end
@@ -100,26 +103,17 @@ defmodule KilnCMS.Slug.Pattern do
   def validate(pattern, opts) when is_binary(pattern) do
     usage = Keyword.get(opts, :usage, :slug)
 
-    # `*` (not `+`) so the empty-bracket pattern "[]" is caught as an unknown
-    # token instead of slipping through and expanding to "" on every record.
-    unknown =
-      ~r/\[([^\]]*)\]/
-      |> Regex.scan(pattern, capture: :all_but_first)
-      |> List.flatten()
-      |> Enum.reject(&allowed_token?(&1, usage))
-
-    cond do
-      unknown != [] ->
+    case Tokens.validate(pattern, allowed_definitions(usage)) do
+      {:error, unknown} ->
         {:error,
          "unknown token(s) #{Enum.map_join(unknown, ", ", &"[#{&1}]")} — supported: " <>
            Enum.map_join(@tokens, ", ", &"[#{&1}]") <>
            ", [field:<name>]" <> if(usage == :alias, do: ", [slug]", else: "")}
 
-      String.trim(pattern) == "" ->
-        {:error, "can't be blank — leave it unset for the default derivation"}
-
-      true ->
-        :ok
+      :ok ->
+        if String.trim(pattern) == "",
+          do: {:error, "can't be blank — leave it unset for the default derivation"},
+          else: :ok
     end
   end
 
@@ -132,39 +126,48 @@ defmodule KilnCMS.Slug.Pattern do
     end
   end
 
-  defp allowed_token?(token, usage) do
-    token in @tokens or Regex.match?(@field_token, token) or
-      (usage == :alias and token == "slug")
+  # Every token `expand/2` can resolve, regardless of usage — `[slug]`
+  # included. Whether a *pattern* may contain `[slug]` is a save-time rule
+  # (`allowed_definitions/1`, below); by the time a pattern reaches `expand/2`
+  # it has already passed that check for its own usage, and a `content`
+  # struct passed here always carries whatever `:slug` the caller put in the
+  # context regardless of which kind of pattern is expanding.
+  defp definitions do
+    [
+      %{match: "title", resolve: fn _token, ctx -> Slug.derive(ctx[:title] || "") end},
+      %{match: "focus-keyphrase", resolve: &focus_keyphrase/2},
+      %{
+        match: "category",
+        resolve: fn _token, ctx -> Slug.slugify(ctx[:category_slug] || "") end
+      },
+      %{match: "yyyy", resolve: fn _token, ctx -> ctx |> date() |> then(& &1.year) |> pad(4) end},
+      %{match: "mm", resolve: fn _token, ctx -> ctx |> date() |> then(& &1.month) |> pad(2) end},
+      %{match: "dd", resolve: fn _token, ctx -> ctx |> date() |> then(& &1.day) |> pad(2) end},
+      %{match: @field_token, resolve: &field_value/2},
+      %{match: "slug", resolve: fn _token, ctx -> Slug.slugify(to_string(ctx[:slug] || "")) end}
+    ]
   end
 
-  defp token_value("title", context), do: Slug.derive(context[:title] || "")
+  # The subset a *pattern* may validly contain for `usage`. `[slug]` is
+  # circular in a slug pattern, so it's excluded there — alias-only.
+  defp allowed_definitions(:alias), do: definitions()
+  defp allowed_definitions(_usage), do: Enum.reject(definitions(), &(&1.match == "slug"))
 
-  defp token_value("focus-keyphrase", context) do
-    case Slug.focus_keyphrase(context[:seo_keywords]) do
-      "" -> Slug.derive(context[:title] || "")
+  defp focus_keyphrase(_token, ctx) do
+    case Slug.focus_keyphrase(ctx[:seo_keywords]) do
+      "" -> Slug.derive(ctx[:title] || "")
       keyphrase -> Slug.derive(keyphrase)
     end
   end
 
-  defp token_value("category", context), do: Slug.slugify(context[:category_slug] || "")
-
-  defp token_value("yyyy", context), do: context |> date() |> then(& &1.year) |> pad(4)
-  defp token_value("mm", context), do: context |> date() |> then(& &1.month) |> pad(2)
-  defp token_value("dd", context), do: context |> date() |> then(& &1.day) |> pad(2)
-
-  defp token_value("slug", context), do: Slug.slugify(to_string(context[:slug] || ""))
-
   # Scalar custom-field values only; lists/maps (multi-selects) expand empty.
-  defp token_value("field:" <> name, context) do
-    case Map.get(context[:custom_fields] || %{}, name) do
+  defp field_value("field:" <> name, ctx) do
+    case Map.get(ctx[:custom_fields] || %{}, name) do
       value when is_binary(value) -> Slug.slugify(value)
       value when is_number(value) -> value |> to_string() |> Slug.slugify()
       _other -> ""
     end
   end
-
-  # Unknown tokens are rejected at write/compile time; expand nils them out.
-  defp token_value(_unknown, _context), do: ""
 
   defp date(%{date: %DateTime{} = datetime}), do: DateTime.to_date(datetime)
   defp date(%{date: %Date{} = date}), do: date

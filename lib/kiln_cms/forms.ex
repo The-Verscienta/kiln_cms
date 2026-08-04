@@ -16,6 +16,10 @@ defmodule KilnCMS.Forms do
     * **notification** — when the form has a `notify_email` and the
       submission wasn't scored `:spam`, an Oban job on the `:mail` queue
       delivers a summary;
+    * **autoresponder** (#468) — when the form has one turned on and declares
+      an `:email` field the submission filled in, a token-templated
+      confirmation email goes back to the *submitter* — see
+      `KilnCMS.Forms.Autoresponder`. Same `:spam` exclusion;
     * **webhook** — dispatches the `form.submitted` event with the form slug
       and coerced data, same `:spam` exclusion.
 
@@ -24,6 +28,7 @@ defmodule KilnCMS.Forms do
   """
 
   alias KilnCMS.CMS
+  alias KilnCMS.Forms.Autoresponder
 
   @honeypot_field "website"
   @rendered_at_field "_kiln_rendered_at"
@@ -126,8 +131,10 @@ defmodule KilnCMS.Forms do
         {:ok, :discarded}
 
       true ->
-        case coerce(fields(form), params) do
-          {:ok, data} -> {:ok, record(form, data, params, opts)}
+        form_fields = fields(form)
+
+        case coerce(form_fields, params) do
+          {:ok, data} -> {:ok, record(form, form_fields, data, params, opts)}
           {:error, errors} -> {:error, errors}
         end
     end
@@ -144,7 +151,7 @@ defmodule KilnCMS.Forms do
   defp fields(%{fields: fields}) when is_list(fields), do: fields
   defp fields(form), do: CMS.form_fields_for!(form.id, authorize?: false, tenant: form.org_id)
 
-  defp record(form, data, params, opts) do
+  defp record(form, form_fields, data, params, opts) do
     # Every write here is scoped to the form's own site (epic #336): the
     # submission lands in the form's org, and the webhook dispatch is scoped to it.
     submission =
@@ -164,6 +171,7 @@ defmodule KilnCMS.Forms do
     # an integration on payload that was never worth acting on.
     unless submission.status == :spam do
       notify(form, data)
+      autorespond(form, form_fields, data)
       KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
     end
 
@@ -178,6 +186,20 @@ defmodule KilnCMS.Forms do
   end
 
   defp notify(_form, _data), do: :ok
+
+  # #468: the submitter's confirmation email — `Autoresponder.eligible?/3` is
+  # the single place that decides whether there's anyone to send it to.
+  defp autorespond(form, form_fields, data) do
+    case Autoresponder.eligible?(form, data, form_fields) do
+      {true, to} ->
+        %{form_id: form.id, org_id: form.org_id, to: to, data: data}
+        |> KilnCMS.Forms.AutoresponderWorker.new()
+        |> Oban.insert!()
+
+      false ->
+        :ok
+    end
+  end
 
   # --- coercion ---------------------------------------------------------------
 

@@ -40,7 +40,10 @@ defmodule KilnCMS.CMS.Form do
       :active,
       :success_message,
       :notify_email,
-      :submit_label
+      :submit_label,
+      :autoresponder_enabled,
+      :autoresponder_subject,
+      :autoresponder_body
     ]
 
     create :create, primary?: true
@@ -95,6 +98,8 @@ defmodule KilnCMS.CMS.Form do
       where present(:notify_email)
       message "must be an email address"
     end
+
+    validate KilnCMS.CMS.Validations.FormAutoresponderTokens
   end
 
   # Multi-tenancy (epic #336): a form belongs to one site, so its slug is unique
@@ -138,6 +143,24 @@ defmodule KilnCMS.CMS.Form do
 
     # Submit-button text; nil falls back to the translated "Submit".
     attribute :submit_label, :string, public?: true
+
+    # The autoresponder (#468, docs/form-builder-plan.md phase 6): a
+    # confirmation email sent to the *submitter*, not the admin — separate
+    # from `notify_email` above. Only ever fires when the form actually has
+    # an `:email` field and the submission gave it a non-blank value; see
+    # `KilnCMS.Forms.Autoresponder.eligible?/3`.
+    attribute :autoresponder_enabled, :boolean do
+      allow_nil? false
+      default false
+      public? true
+    end
+
+    # `Kiln.Tokens` patterns (#468) — `[field:<name>]` per the form's own
+    # fields plus `[form-name]`, validated by
+    # `KilnCMS.CMS.Validations.FormAutoresponderTokens`. Required (non-blank)
+    # only while `autoresponder_enabled` is true.
+    attribute :autoresponder_subject, :string, public?: true
+    attribute :autoresponder_body, :string, public?: true
 
     timestamps()
   end

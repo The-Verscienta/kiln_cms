@@ -110,12 +110,32 @@ defmodule Kiln.FieldType do
   """
   @callback input_parts(definition :: struct()) :: [input_part()]
 
-  # `input_parts/1` was added after this contract shipped. `use Kiln.FieldType`
-  # defaults it, but a plugin that hand-rolls `@behaviour Kiln.FieldType` is
-  # explicitly sanctioned (`mix kiln.plugins.doctor` requires only `cast/2` and
-  # `name/0`), and such a module would otherwise fail to compile under
-  # `--warnings-as-errors` on upgrade. Optional here, defaulted there.
-  @optional_callbacks input_parts: 1
+  @doc """
+  Extra `Kiln.Tokens` (#468) definitions this type can offer beyond the
+  generic `[field:<name>]` substitution the slug/alias pattern engine
+  (`KilnCMS.Slug.Pattern`) already gives every custom field for free — that
+  generic path slugifies a scalar value and expands a map/list one empty,
+  which is the honest answer for most types but not a **composite** one (a
+  coordinate pair, a price-and-currency): those want to expose their own
+  named parts (`[field:location.lat]`) or a custom string form instead of
+  going blank.
+
+  Defaults to `[]`. **Not wired into `KilnCMS.Slug.Pattern` yet** — doing so
+  needs the slug engine's context-building step
+  (`KilnCMS.CMS.Slugs.record_context/1`) to carry each custom field's *type*
+  alongside its value, which it doesn't today (it only sees the field's
+  stored value, not which `Kiln.FieldType` produced it). This callback is the
+  extension point issue #468 asked for; connecting it is tracked separately.
+  """
+  @callback tokens(definition :: struct()) :: [Kiln.Tokens.definition()]
+
+  # `input_parts/1` and `tokens/1` were added after this contract shipped.
+  # `use Kiln.FieldType` defaults them, but a plugin that hand-rolls
+  # `@behaviour Kiln.FieldType` is explicitly sanctioned (`mix
+  # kiln.plugins.doctor` requires only `cast/2` and `name/0`), and such a
+  # module would otherwise fail to compile under `--warnings-as-errors` on
+  # upgrade. Optional here, defaulted there.
+  @optional_callbacks input_parts: 1, tokens: 1
 
   defmacro __using__(_opts) do
     quote do
@@ -148,7 +168,15 @@ defmodule Kiln.FieldType do
       @impl Kiln.FieldType
       def input_parts(_definition), do: []
 
-      defoverridable name: 0, label: 0, input_type: 0, input_attrs: 1, input_parts: 1
+      @impl Kiln.FieldType
+      def tokens(_definition), do: []
+
+      defoverridable name: 0,
+                     label: 0,
+                     input_type: 0,
+                     input_attrs: 1,
+                     input_parts: 1,
+                     tokens: 1
     end
   end
 end

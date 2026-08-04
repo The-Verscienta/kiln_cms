@@ -244,6 +244,58 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert updated.description == "Say hi."
   end
 
+  test "the confirmations tab saves the autoresponder settings", %{conn: conn} do
+    {form, [field], lv, _html} =
+      builder(conn, authed_user(:admin), %{}, [
+        %{name: "email", label: "Email", field_type: :email}
+      ])
+
+    lv |> element(~s(nav button[phx-value-tab="confirmations"])) |> render_click()
+
+    html = lv |> element("section") |> render()
+    assert html =~ "[field:#{field.name}]"
+    assert html =~ "[form-name]"
+
+    html =
+      lv
+      |> form("section form[phx-submit=save_form]", %{
+        form: %{
+          success_message: "Thanks!",
+          autoresponder_enabled: "true",
+          autoresponder_subject: "Thanks, [field:email]!",
+          autoresponder_body: "<p>We got it, from [form-name].</p>"
+        }
+      })
+      |> render_submit()
+
+    assert html =~ "Saved."
+    updated = CMS.get_form!(form.id, authorize?: false)
+    assert updated.autoresponder_enabled == true
+    assert updated.autoresponder_subject == "Thanks, [field:email]!"
+    assert updated.autoresponder_body == "<p>We got it, from [form-name].</p>"
+  end
+
+  test "the confirmations tab rejects an unknown token", %{conn: conn} do
+    {form, [], lv, _html} = builder(conn, authed_user(:admin))
+
+    lv |> element(~s(nav button[phx-value-tab="confirmations"])) |> render_click()
+
+    html =
+      lv
+      |> form("section form[phx-submit=save_form]", %{
+        form: %{
+          autoresponder_enabled: "true",
+          autoresponder_subject: "Hi [field:nope]",
+          autoresponder_body: "body"
+        }
+      })
+      |> render_submit()
+
+    assert html =~ "unknown token"
+    updated = CMS.get_form!(form.id, authorize?: false)
+    assert updated.autoresponder_enabled == false
+  end
+
   test "the embed tab shows a copyable snippet", %{conn: conn} do
     {form, [], lv, _html} = builder(conn, authed_user(:admin))
 
