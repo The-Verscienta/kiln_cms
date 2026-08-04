@@ -327,6 +327,19 @@ defmodule KilnCMS.CMS do
       define :destroy_consent, action: :destroy
     end
 
+    # Editorial comments anchored to a block, one thread per block (#404).
+    resource KilnCMS.CMS.Comment do
+      define :add_comment, action: :add
+      define :resolve_comment, action: :resolve
+      define :unresolve_comment, action: :unresolve
+      define :get_comment, action: :read, get_by: [:id]
+      define :list_comments_for, action: :for_content, args: [:content_type, :content_id]
+
+      define :list_comments_for_block,
+        action: :for_block,
+        args: [:content_type, :content_id, :block_id]
+    end
+
     # Signed, append-only anchors over a document's version history (#356,
     # tamper-evident half). Minted on publish; see KilnCMS.Governance.Chain.
     resource KilnCMS.CMS.HistoryAnchor do
