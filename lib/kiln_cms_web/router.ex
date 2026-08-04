@@ -30,7 +30,8 @@ defmodule KilnCMSWeb.Router do
     "content-security-policy" => "script-src 'self' 'unsafe-inline' 'unsafe-eval'; #{@base_csp}"
   }
 
-  # CSP for the Swagger UI explorer (always available — issue #37). Swagger UI
+  # CSP for the Swagger UI explorer (issue #37; gated by `:api_docs` since
+  # #567 — this policy is one reason not to ship it to production). Swagger UI
   # loads its bundle/CSS from cdnjs and runs one inline boot script, which gets a
   # per-request nonce (see `put_swagger_csp`). `style-src` keeps 'unsafe-inline'
   # because swagger-ui injects un-nonced inline styles.
@@ -88,6 +89,10 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth
+    # The OpenAPI document is served from inside the `KilnCMSWeb.AshJsonApiRouter`
+    # forward below, so there is no route here to gate. This plug knows the two
+    # documentation paths and passes every other `/api` request through (#567).
+    plug KilnCMSWeb.Plugs.ApiDocs
   end
 
   # Headless sign-in — exchanges credentials for a bearer token (issue #37).
@@ -117,10 +122,16 @@ defmodule KilnCMSWeb.Router do
   # a per-request nonce for swagger-ui's inline boot script.
   pipeline :swagger_ui do
     plug :accepts, ["html"]
-    # Bound unauthenticated browsing of the always-on docs explorer (#225). The
-    # `docs` bucket is generous enough for interactive use but caps sustained
-    # crawler traffic against the UI + forwarded spec.
+    # Bound unauthenticated browsing of the docs explorer (#225). The `docs`
+    # bucket is generous enough for interactive use but caps sustained crawler
+    # traffic against the UI + forwarded spec.
+    #
+    # Before the `:api_docs` gate, deliberately: a refusal is still a request,
+    # and an unmetered 404 is an unauthenticated endpoint someone can hammer
+    # for free.
     plug KilnCMSWeb.Plugs.RateLimit, :docs
+    # Off in production by default (#567) — see `KilnCMSWeb.Plugs.ApiDocs`.
+    plug KilnCMSWeb.Plugs.ApiDocs
     plug :fetch_session
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @swagger_csp_headers
@@ -381,9 +392,10 @@ defmodule KilnCMSWeb.Router do
     forward "/", Absinthe.Plug, @graphql_opts
   end
 
-  # Interactive API docs — Swagger UI over the published OpenAPI spec. Always
-  # available (issue #37). Registered BEFORE the `/api/json` catch-all forward
-  # below so the forward can't shadow `/swaggerui`.
+  # Interactive API docs — Swagger UI over the published OpenAPI spec (issue
+  # #37), served only where `config :kiln_cms, :api_docs` is on: off in
+  # production by default since #567. Registered BEFORE the `/api/json`
+  # catch-all forward below so the forward can't shadow `/swaggerui`.
   scope "/api/json" do
     pipe_through :swagger_ui
 
@@ -394,8 +406,9 @@ defmodule KilnCMSWeb.Router do
       default_model_expand_depth: 4
   end
 
-  # Headless JSON:API — always available, including the OpenAPI spec served by
-  # the router itself at `/api/json/open_api`.
+  # Headless JSON:API. The OpenAPI spec the router itself serves at
+  # `/api/json/open_api` follows the same `:api_docs` flag as the explorer
+  # above (#567); the content routes are unaffected.
   scope "/api/json" do
     pipe_through [:api]
 

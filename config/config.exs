@@ -268,6 +268,14 @@ config :kiln_cms, :branding, []
 # expose a full schema map for reconnaissance.
 config :kiln_cms, :graphql_introspection, true
 
+# The API documentation surface: the OpenAPI 3 document at
+# `/api/json/open_api` and the Swagger UI explorer over it. Enabled by default
+# for local/dev tooling; disabled in production (config/prod.exs) for the same
+# reason introspection is, since #330 made the described surface include the
+# write routes. `API_DOCS_ENABLED` overrides at runtime for operators
+# publishing a public API. See `KilnCMSWeb.Plugs.ApiDocs`.
+config :kiln_cms, :api_docs, true
+
 # Open self-registration. `true` (default) lets anyone create a `:viewer`
 # account via `/register`; set to `false` for an invite-only / internal CMS,
 # which hides the registration route and rejects the registration action.

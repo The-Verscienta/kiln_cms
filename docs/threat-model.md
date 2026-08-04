@@ -53,7 +53,7 @@ the router so preflights are answered before route matching).
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
-| OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | **none, all envs** | `:docs` |
+| OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567) | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
 | Headless second factor | `POST /api/auth/sign_in/verify` | encrypted pending token + TOTP or recovery code | `:auth`; the same per-account second-factor budget as the browser prompt (#714, #726) |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
@@ -546,10 +546,19 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    **raises** when the `:current_org` assign is missing rather than reading the
    default org, so a forgotten `SetTenant` plug or `:assign_current_org`
    on_mount fails loudly in test instead of serving the wrong tenant in
-   production.3. **The OpenAPI spec and Swagger explorer are unauthenticated in every
-   environment**, production included. They describe the write surface. This is
-   a disclosure convenience; gate them at the proxy if that is not wanted.
-   Tracked in #567.
+   production.3. **The OpenAPI spec and Swagger explorer describe the write surface** —
+   *closed (#567).* Both were unauthenticated in every environment, production
+   included, while GraphQL introspection was already disabled there for the
+   same reconnaissance reason. They now follow `config :kiln_cms, :api_docs`:
+   on in dev and test, off in a production build, and back on with
+   `API_DOCS_ENABLED=true` for an operator publishing a public API. Disabled,
+   both answer 404 rather than 403, so the instance is indistinguishable from
+   one built without the surface. *Residual:* the gate is a plug on the `:api`
+   pipeline that knows the two documentation paths, because the spec is served
+   from inside the `AshJsonApiRouter` forward and has no route of its own to
+   hang a pipeline on — so a future rename of either path has to be made in
+   `KilnCMSWeb.Plugs.ApiDocs` too. A test pins that the content routes it sits
+   in front of are unaffected.
 4. **Rate limiting keys on `remote_ip`.** Behind a proxy with `TRUSTED_PROXIES`
    unset, every request shares one bucket — which throttles all clients together
    and makes per-IP limits meaningless. Set `TRUSTED_PROXIES`. **No longer

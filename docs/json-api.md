@@ -9,7 +9,7 @@ see [Writing](#writing-330). This document covers the read query params
 **Post** and **MediaItem** (tuned in Phase 5, issue #33) — and the write routes.
 
 > The machine-readable OpenAPI spec (`/api/json/open_api`) and its interactive
-> Swagger UI (`/api/json/swaggerui`) are published in **all environments** (dev
+> Swagger UI (`/api/json/swaggerui`) are published in dev and test, and in production only with `API_DOCS_ENABLED` (#567) (dev
 > and prod). See [api.md](api.md) for the full API documentation index
 > (authentication, GraphQL, webhooks, preview tokens, rate limits).
 

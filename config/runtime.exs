@@ -9,7 +9,7 @@ import Config
 #
 # ## Boolean environment variables
 #
-# All seven on/off variables below go through `KilnCMS.Config.Env` — one
+# All eight on/off variables below go through `KilnCMS.Config.Env` — one
 # parser, one set of accepted spellings, one rule for a value it cannot read
 # (#607). Do not hand-roll an eighth: matching the raw value is how
 # `DATABASE_SSL=True` came to silently disable Postgres TLS (#606) and
@@ -592,6 +592,14 @@ if config_env() == :prod do
   # multi-org deployment most likely to have set it. See `KilnCMS.Config.Env`.
   with {:ok, strict_host?} <- KilnCMS.Config.Env.fetch("TENANT_STRICT_HOST") do
     config :kiln_cms, :tenant_strict_host, strict_host?
+  end
+
+  # API documentation surface — the OpenAPI document and the Swagger explorer
+  # (#567). Off in a production build; an operator publishing a public API
+  # turns it back on here. `fetch/1` rather than `flag/2` for the reason above:
+  # an unset variable must not rewrite a project overlay's own setting.
+  with {:ok, api_docs?} <- Env.fetch("API_DOCS_ENABLED") do
+    config :kiln_cms, :api_docs, api_docs?
   end
 
   # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer

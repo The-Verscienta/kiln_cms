@@ -2,9 +2,16 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
   @moduledoc """
   Route availability for the headless API explorers.
 
-  The **GraphQL playground** stays a dev-only convenience. The **OpenAPI spec**
-  and its **Swagger UI** are published in every environment (issue #37), so this
-  suite — which runs with `dev_routes` false — asserts they are reachable here.
+  The **GraphQL playground** stays a dev-only convenience, compile-gated to
+  `dev_routes`. The **OpenAPI spec** and its **Swagger UI** are not: they follow
+  `config :kiln_cms, :api_docs` at runtime (#567), which is on here and off in
+  a production build.
+
+  So this suite — which runs with `dev_routes` false — asserts that the two
+  documentation routes are reachable *independently of* `dev_routes`, which is
+  the distinction that matters: gating them on `dev_routes` instead would have
+  removed the operator's ability to publish them.
+  `KilnCMSWeb.ApiDocsTest` owns the flag's own behaviour.
   """
   use KilnCMSWeb.ConnCase, async: true
 
@@ -19,7 +26,7 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
     refute explorer_html?(conn)
   end
 
-  test "Swagger UI is served in all environments" do
+  test "Swagger UI does not depend on dev_routes" do
     refute dev_routes?()
 
     conn = get(build_conn(), "/api/json/swaggerui")
@@ -32,7 +39,7 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
     refute csp =~ "unsafe-eval"
   end
 
-  test "OpenAPI spec is served in all environments" do
+  test "the OpenAPI spec does not depend on dev_routes" do
     refute dev_routes?()
 
     conn = get(build_conn(), "/api/json/open_api")

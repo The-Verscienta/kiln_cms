@@ -18,7 +18,7 @@ defmodule KilnCMSWeb.OpenApi do
       published content is world-readable, a bearer token only *widens* access
       to drafts.
 
-  The result is published at `/api/json/open_api` in every environment and is
+  The result is published at `/api/json/open_api` wherever `:api_docs` is on (#567) and is
   the spec backing the Swagger UI at `/api/json/swaggerui`.
   """
 
