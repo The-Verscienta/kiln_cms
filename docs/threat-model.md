@@ -631,11 +631,28 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 7. **Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**
    Policies still run, so the audience and published filters hold, but the
    tenant boundary does not for that request.
-8. **A block field policy can be cleared by omission.** `EnforceBlockFieldPolicy`
-   stops an editor setting an admin-only block field, but a headless client that
-   submits a block tree without ids and omits the field gets the declared
-   default — which silently clears an admin-set value. Enforcing more requires
-   stable block identity on the headless write path. Tracked in #566.
+8. **A block field policy could be cleared by omission** — *closed for the
+   reported case (#566).* `EnforceBlockFieldPolicy` stopped an editor *setting*
+   an admin-only block field, but a headless client that submitted a block tree
+   without ids and omitted the field got the declared default, silently
+   clearing an admin-set value. A **wholly id-less** tree that omits such a
+   field is now refused when any stored block of that type holds a non-default
+   value for it, with a message naming the remedy (send the ids).
+
+   The rule only ever refuses: it never permits a write that used to fail and
+   never writes a value nobody submitted. Both alternatives considered were
+   worse — pairing id-less blocks by position looks like identity and is not
+   (it hands the featured slot to whatever new content lands there, and refuses
+   an editor merely inserting a block above a featured one), and carrying the
+   value forward silently writes something the client never sent.
+
+   *Residual, all about **which block an id names** rather than what a field may
+   hold:* an editor can still reuse the id of another block **of the same type**
+   to move an admin-set field off the block that had it, and an empty
+   `block_tree` deletes the block outright. Both predate this and need the write
+   path to verify a submitted id belongs to the block it claims. Nested
+   `columns` children have no identity at all and remain on the stricter
+   default-value rule.
 9. **Per-account throttling is per node, in memory, and keyed on
    attacker-chosen strings.** `AccountThrottle` (#478) holds its budgets in ETS,
    so a restart forgives every accumulated attempt and a second node would carry
