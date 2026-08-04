@@ -56,6 +56,13 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
 
   defp valid_code, do: Totp.code_at(@secret, System.system_time(:second))
 
+  defp with_pending(user) do
+    pending = :crypto.strong_rand_bytes(20)
+    Ash.Seed.update!(user, %{totp_pending_secret: pending})
+  end
+
+  defp pending_code(user), do: Totp.code_at(user.totp_pending_secret, System.system_time(:second))
+
   defp throttled?({:error, %{errors: errors}}),
     do: Enum.any?(errors, &match?(%SecondFactorThrottled{}, &1))
 
@@ -66,6 +73,19 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
       apply(Accounts, action, [user, %{code: "000000"}, [actor: user]])
     end)
   end
+
+  # `:confirm_totp` (#754) has no "correct code" against `enabled_user`'s live
+  # secret — it checks `totp_pending_secret`, which is only ever set by staging
+  # a re-enrolment. Give it one so the generic tests below still exercise "the
+  # code that would otherwise succeed", the same property they check for the
+  # other two actions against the live secret.
+  defp fresh_valid_attempt(:confirm_totp, user) do
+    pending = :crypto.strong_rand_bytes(20)
+    updated = Ash.Seed.update!(user, %{totp_pending_secret: pending})
+    {updated, Totp.code_at(pending, System.system_time(:second))}
+  end
+
+  defp fresh_valid_attempt(_action, user), do: {user, valid_code()}
 
   for action <- [:disable_totp, :regenerate_totp_recovery_codes, :confirm_totp] do
     describe "#{action}" do
@@ -89,20 +109,22 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
         # correct code would sail through a spent budget — and an attacker who
         # guessed right on attempt 5,000 would still win.
         user = enabled_user()
+        {user, code} = fresh_valid_attempt(@action, user)
         exhaust(user, @action)
 
-        assert throttled?(apply(Accounts, @action, [user, %{code: valid_code()}, [actor: user]]))
+        assert throttled?(apply(Accounts, @action, [user, %{code: code}, [actor: user]]))
       end
 
       test "a correct code clears the counter" do
         user = enabled_user()
+        {user, code} = fresh_valid_attempt(@action, user)
 
         # One wrong, then right: the next run must get a full budget back,
         # rather than carrying the failure into it.
         apply(Accounts, @action, [user, %{code: "000000"}, [actor: user]])
 
         assert {:ok, user} =
-                 apply(Accounts, @action, [user, %{code: valid_code()}, [actor: user]])
+                 apply(Accounts, @action, [user, %{code: code}, [actor: user]])
 
         AccountThrottle.forgive_second_factor(user.id)
         refute throttled?(apply(Accounts, @action, [user, %{code: "000000"}, [actor: user]]))
@@ -144,29 +166,25 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
   end
 
   describe "confirm_totp on an already-enrolled account" do
-    # The reason enrolment looked exempt, and why it isn't. `:confirm_totp` is
-    # not scoped to an enrolment in progress, so on an enrolled account it
-    # checks the *live* secret and mints a fresh recovery-code set — the same
-    # prize as `:regenerate_totp_recovery_codes`, from a differently-named door.
-    # Budgeting one and not the other would have bolted the front and left the
-    # side open.
-    test "grinds the live secret, so it is charged like its twin" do
+    # #754: `:confirm_totp` now checks `totp_pending_secret`, not the live
+    # secret — an enrolled account with no re-enrolment in progress has no
+    # pending secret at all, so nothing here can be guessed *or* proven, the
+    # live code included.
+    test "without a pending secret, no code is accepted — not even the live one" do
+      user = enabled_user()
+
+      assert {:error, _} = Accounts.confirm_totp(user, %{code: valid_code()}, actor: user)
+
+      reloaded = Ash.get!(User, user.id, authorize?: false)
+      assert reloaded.totp_secret == @secret
+      assert reloaded.totp_confirmed_at == user.totp_confirmed_at
+    end
+
+    test "still charges the budget on a guess, even though nothing can match" do
       user = enabled_user()
       exhaust(user, :confirm_totp)
 
       assert throttled?(Accounts.confirm_totp(user, %{code: "000000"}, actor: user))
-    end
-
-    test "a correct code hands back a working recovery set without touching the secret" do
-      # Pins the mechanism, so that if a future change scopes `:confirm_totp` to
-      # enrolment this test fails and the budget can be reconsidered on purpose.
-      user = enabled_user()
-
-      assert {:ok, updated} =
-               Accounts.confirm_totp(user, %{code: valid_code()}, actor: user)
-
-      assert length(Ash.Resource.get_metadata(updated, :recovery_codes)) == 10
-      assert updated.totp_secret == @secret
     end
 
     test "spending it there refuses disable_totp too" do
@@ -174,6 +192,30 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
       exhaust(user, :confirm_totp)
 
       assert throttled?(Accounts.disable_totp(user, %{code: "000000"}, actor: user))
+    end
+  end
+
+  describe "confirming a re-enrolment (pending secret) on an already-enrolled account (#754)" do
+    # The scenario the budget still guards on this action: the owner starts
+    # switching devices (`:setup_totp` stages a pending secret) and a second,
+    # attacker-held session on the same account tries to confirm it first.
+    test "a correct code for the pending secret promotes it, replacing the live one" do
+      user = enabled_user() |> with_pending()
+
+      assert {:ok, updated} =
+               Accounts.confirm_totp(user, %{code: pending_code(user)}, actor: user)
+
+      assert updated.totp_secret == user.totp_pending_secret
+      refute updated.totp_secret == @secret
+      assert is_nil(updated.totp_pending_secret)
+      assert length(Ash.Resource.get_metadata(updated, :recovery_codes)) == 10
+    end
+
+    test "grinding the pending secret is charged and eventually throttled" do
+      user = enabled_user() |> with_pending()
+      exhaust(user, :confirm_totp)
+
+      assert throttled?(Accounts.confirm_totp(user, %{code: "000000"}, actor: user))
     end
   end
 end

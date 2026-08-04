@@ -516,19 +516,31 @@ defmodule KilnCMS.Accounts.User do
 
     # --- Two-factor authentication (TOTP) self-service (issue #331) ---
 
-    # Begin enrolment: mint a fresh secret (unconfirmed). The caller (the user
-    # themselves) reads back `totp_secret` to show the authenticator QR/URI.
+    # Begin enrolment: mint a fresh secret into `totp_pending_secret`, entirely
+    # separate from whatever `totp_secret`/`totp_confirmed_at` currently hold.
+    # The caller (the user themselves) reads back `totp_pending_secret` to show
+    # the authenticator QR/URI.
+    #
+    # #754: this used to write straight into `totp_secret` and null
+    # `totp_confirmed_at` in the same call — one unauthenticated, unthrottled
+    # request from any session on the account turned 2FA off. Staging into a
+    # separate attribute means `:setup_totp` cannot weaken an already-confirmed
+    # account by itself: nothing about the live factor changes until
+    # `:confirm_totp` proves the *new* secret and promotes it. That is also
+    # what makes re-enrolment self-service for someone who lost their device —
+    # they hold a session (from a recovery-code sign-in) but no code to prove,
+    # and this asks for none.
     update :setup_totp do
       description "Start 2FA enrolment by generating a new TOTP secret."
       accept []
       require_atomic? false
-      change set_attribute(:totp_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
-      change set_attribute(:totp_confirmed_at, nil)
+      change set_attribute(:totp_pending_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
     end
 
-    # Finish enrolment by proving a code from the new secret; only then is 2FA
-    # actually enforced at sign-in. Also mints the one-time recovery-code set
-    # (#331 phase 2) — plaintext codes ride back once as `:recovery_codes`
+    # Finish enrolment by proving a code from the *pending* secret, then
+    # promote it to `totp_secret` and stamp `totp_confirmed_at` — only then is
+    # 2FA actually enforced at sign-in. Also mints the one-time recovery-code
+    # set (#331 phase 2) — plaintext codes ride back once as `:recovery_codes`
     # metadata; only hashes are stored.
     update :confirm_totp do
       description "Confirm 2FA enrolment with a code from the authenticator app."
@@ -537,17 +549,18 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
-      # Budgeted like the other two (#727), and not because enrolment is
-      # sensitive. On an account that is *already* enrolled this action is a
-      # second `:regenerate_totp_recovery_codes` wearing a different name:
-      # nothing scopes it to an enrolment in progress, so `ValidTotpCode` runs
-      # against the **live** secret and a correct guess hands back a fresh
-      # recovery-code set while leaving the secret and `totp_confirmed_at`
-      # untouched. The owner's authenticator keeps working and nothing looks
-      # wrong. Leaving the code here unbudgeted would have left the door it is
-      # next to bolted and this one open.
+      # Budgeted like the other two (#727). Not because a stolen-session
+      # attacker can grind this into a bypass — they would have to have called
+      # `:setup_totp` themselves first, in which case they already know the
+      # code and have nothing to guess — but because a *legitimate* enrolment
+      # in progress is itself something worth budgeting: while the real owner
+      # holds an unconfirmed pending secret waiting to be typed in, a second,
+      # attacker-held session on the same account could otherwise grind the
+      # 6-digit space for that same pending secret and confirm it out from
+      # under them.
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
-      validate KilnCMS.Accounts.Validations.ValidTotpCode
+      validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret}
+      change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
     end
@@ -589,11 +602,11 @@ defmodule KilnCMS.Accounts.User do
     # an attacker on a stolen session can't remove the second factor by grinding
     # six digits at socket speed either (#727). Five attempts per account per
     # fifteen minutes, shared with the sign-in prompt so the two can't be spent
-    # independently.
+    # independently. `:setup_totp` above no longer has a door of its own to
+    # turn the factor off (#754) — it cannot touch `totp_confirmed_at` at all.
     #
-    # That is the whole of what this action relies on. `:setup_totp` above
-    # clears `totp_confirmed_at` with no code at all, which turns the second
-    # factor off by a different door — tracked as #754, not fixed here.
+    # Also drops any staged `totp_pending_secret`, so an abandoned re-enrolment
+    # (started, never confirmed) doesn't outlive the factor it was replacing.
     update :disable_totp do
       description "Disable 2FA (requires a current code)."
       accept []
@@ -606,6 +619,7 @@ defmodule KilnCMS.Accounts.User do
       change set_attribute(:totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)
       change set_attribute(:totp_recovery_hashes, [])
+      change set_attribute(:totp_pending_secret, nil)
     end
   end
 
@@ -812,6 +826,16 @@ defmodule KilnCMS.Accounts.User do
     end
 
     attribute :totp_confirmed_at, :utc_datetime_usec do
+      public? false
+    end
+
+    # A staged secret from `:setup_totp`, not yet proven (#754). Lets
+    # enrolment run without touching `totp_secret`/`totp_confirmed_at` until
+    # `:confirm_totp` proves the caller holds it and promotes it — so
+    # generating one can never by itself weaken or disable an existing,
+    # confirmed factor.
+    attribute :totp_pending_secret, :binary do
+      sensitive? true
       public? false
     end
 

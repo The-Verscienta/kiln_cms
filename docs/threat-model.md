@@ -420,20 +420,34 @@ build if a resource is ever registered without that authorizer.
   got the per-IP `:auth` bucket: a stolen session could push the event in a
   loop and grind 10^6 at socket speed. On a hit `disable_totp` removes the
   second factor outright, and either of the other two hands over a working
-  recovery-code set — `confirm_totp` included, because it is not scoped to an
-  enrolment in progress, so on an enrolled account it checks the *live* secret
-  and mints codes while leaving the secret and `totp_confirmed_at` untouched.
-  Nothing notifies the owner in any case. *Mitigated (#727):* all three charge
+  recovery-code set. *Mitigated (#727):* all three charge
   `AccountThrottle.consume_second_factor/1` — five per account per fifteen
   minutes, the **same** bucket `/sign-in/verify` uses, so they cannot be spent
   independently. The charge lives on the Ash action rather than in the
   `handle_event` clauses, so a future caller inherits it.
-  *Watch:* the bound is per node (residual risk 9). It bounds *guessing* only —
-  `setup_totp` still clears `totp_confirmed_at` with no code at all, removing
-  the second factor without guessing anything (#754). And it hands a stolen
-  session a small denial-of-service it did not have: five wrong codes here deny
-  the real owner `/sign-in/verify` for the rest of the window. That is strictly
-  less than what the session already grants, so the trade is accepted.
+  *Watch:* the bound is per node (residual risk 9), and it bounds *guessing*
+  only. It hands a stolen session a small denial-of-service it did not have:
+  five wrong codes here deny the real owner `/sign-in/verify` for the rest of
+  the window. That is strictly less than what the session already grants, so
+  the trade is accepted.
+- **`setup_totp` as a second, code-free door to the same removal** —
+  `confirm_totp` was never scoped to an enrolment in progress, so on an already
+  -enrolled account it checked the account's **live** secret; a session that
+  called `setup_totp` first got a fresh secret written straight into
+  `totp_secret` with `totp_confirmed_at` nulled in the same call — turning 2FA
+  off with zero code guesses, no budget charged, and nothing telling the owner
+  the account had stopped asking (#754). *Mitigated (#754):* `setup_totp` now
+  stages the new secret into a separate `totp_pending_secret` attribute and
+  touches nothing else; only `confirm_totp` — checked against the *pending*
+  secret and still budgeted (#727) — ever promotes it to `totp_secret` and
+  stamps `totp_confirmed_at`. Enrolling (or re-enrolling) can therefore never
+  by itself disable an existing factor. *Watch:* a session that completes both
+  `setup_totp` and `confirm_totp` with a code of its own choosing still
+  replaces *which* secret backs the account's 2FA — `totp_confirmed_at` never
+  goes false, but the owner's own authenticator silently stops working. That
+  swap is not new here (the pre-fix `setup_totp`+`confirm_totp` pair could
+  reach the same end state, just via a moment where 2FA visibly dropped) and is
+  tracked separately rather than folded into this fix.
 
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
