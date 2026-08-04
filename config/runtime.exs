@@ -187,6 +187,26 @@ with {:ok, enabled?} <- Env.fetch("VISUAL_EDITING_ENABLED") do
   config :kiln_cms, :visual_editing_enabled, enabled?
 end
 
+# ## Tamper-evident history — master kill switch (#356, #611)
+#
+# `:audit_anchors_enabled` gates BOTH publish-time anchor minting AND the
+# `:audit_anchor_every_write` extension below — `Chain.extend/2` requires
+# both, so `KILN_AUDIT_ANCHOR_EVERY_WRITE=true` was a complete no-op whenever
+# this stayed off with no runtime override to recover it, contradicting its
+# documented status (docs/deploy-p3.md) as an operator-facing kill switch
+# reversible without a rebuild.
+#
+# Compiled default is `true` (anchoring on unless an operator turns it off),
+# so an unrecognized value keeps history signed — the safe side, opposite of
+# `KILN_AUDIT_ANCHOR_EVERY_WRITE`'s.
+#
+# Skipped under :test for the same reason as KILN_AUDIT_ANCHOR_EVERY_WRITE.
+if config_env() != :test do
+  with {:ok, enabled?} <- Env.fetch("KILN_AUDIT_ANCHORS_ENABLED") do
+    config :kiln_cms, :audit_anchors_enabled, enabled?
+  end
+end
+
 # ## Tamper-evident history — anchor every write (#356)
 #
 # Anchors are always minted at publish. This additionally extends the signed
