@@ -40,7 +40,7 @@ Once it boots, the surfaces worth opening:
 | `/editor` | the authoring UI — this is the product |
 | `/admin` | AshAdmin raw CRUD (dev only) |
 | `/gql` · `/gql/playground` | GraphQL endpoint and playground |
-| `/api/json/swaggerui` | JSON:API browser over the OpenAPI spec |
+| `/api/json/swaggerui` | JSON:API browser over the OpenAPI spec (dev/test; `API_DOCS_ENABLED` in prod) |
 | `/mcp` | the MCP endpoint for LLM authoring |
 
 ## 2. Read the architecture

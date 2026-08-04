@@ -1,15 +1,29 @@
 # KilnCMS API documentation
 
 KilnCMS ships a **published, machine-readable OpenAPI 3 spec** for its headless
-JSON:API surface, plus an interactive **Swagger UI** explorer. Both are reachable
-in **every environment** (dev and prod) — the spec describes a read surface whose
-published content is already world-readable.
+JSON:API surface, plus an interactive **Swagger UI** explorer.
+
+Both are served in development and test, and **off in production by default**
+since #567. Set `API_DOCS_ENABLED=true` to publish them from a production
+deployment. When they are off, both paths answer **404** — not 403, which would
+confirm the route exists and is merely closed.
+
+The reason is the same one that already disables GraphQL introspection in
+production: since #330 the described surface includes the **write** routes, so
+the document is a complete machine-readable map of the mutation API. It grants
+nothing — every route it describes is still enforced by the Ash policies and
+the API key's access scope — but it removes the guesswork, and shipping it
+beside a disabled introspection endpoint was an inconsistency rather than a
+decision.
 
 | Resource              | URL                            | Notes                                   |
 |-----------------------|--------------------------------|-----------------------------------------|
 | **OpenAPI 3 spec**    | `GET /api/json/open_api`       | JSON, machine-readable. Import into any OpenAPI tool. |
 | **Swagger UI**        | `GET /api/json/swaggerui`      | Interactive explorer over the spec.     |
 | **GraphQL playground**| `GET /gql/playground`          | **Dev-only** convenience UI.            |
+
+The first two follow `API_DOCS_ENABLED`; the playground is compile-gated to
+`dev_routes` and is never built into a production release.
 
 Locally: <http://localhost:4000/api/json/swaggerui>.
 

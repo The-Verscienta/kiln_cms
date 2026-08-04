@@ -422,6 +422,42 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The OpenAPI document and Swagger explorer are no longer served in
+  production by default.** Both shipped unauthenticated in *every* environment
+  — unlike `/dev/dashboard`, `/dev/mailbox`, `/admin` and the GraphQL
+  playground, which are all behind `dev_routes`. Since #330 the surface they
+  describe includes the **write** routes, so the document is a complete,
+  machine-readable map of the mutation API: which actions exist, what they
+  accept, what they return.
+
+  Disclosure rather than access — every route it documents is still enforced by
+  the Ash policies and the API key's access scope, so serving it granted
+  nothing. What it removed was the guesswork, and it sat beside a GraphQL
+  endpoint whose introspection production already disables for exactly that
+  reason. The inconsistency was the bug.
+
+  `config :kiln_cms, :api_docs` follows the same posture: on in dev and test,
+  off in a production build, and back on with `API_DOCS_ENABLED=true` for an
+  operator publishing a public API. Disabled, both paths answer **404**, not
+  403 — a 403 confirms the route exists and is merely closed, which is the one
+  thing a closed docs endpoint should not volunteer.
+
+  The explorer's relaxed CSP, which allows `https://cdnjs.cloudflare.com` for
+  its bundle, is a second and smaller reason not to ship it to production; it
+  now goes with it.
+
+  Review caught the gate being walked past: `Phoenix.Router` decodes each path
+  segment to pick a route but leaves `conn.path_info` raw, so
+  `/api/json/%73waggerui` matched the `forward` while missing a literal
+  comparison in the plug — serving the whole explorer with the flag off. It
+  compares decoded segments now, and a test covers five encoded spellings, the
+  sub-paths under the explorer, and every HTTP verb.
+
+  **Upgrading:** if you rely on `/api/json/open_api` or `/api/json/swaggerui`
+  from a production deployment, set `API_DOCS_ENABLED=true`. Nothing else
+  changes; the content routes are unaffected, and a test pins each one's
+  expected status rather than merely that it is not a 500. (#567)
+
 - **A bracketed query parameter no longer 500s a public route.** Plug's query
   decoder hands the caller the *type* as well as the value — `?q=x` is a
   binary, `?q[]=x` a list, `?q[a]=x` a map — and a `%{"slug" => slug}` function
@@ -1048,6 +1084,20 @@ migration, a rewritten column, a dropped config key).
   partner site in never takes the CMS's own host out. (#562)
 
 ### Fixed
+
+- **Every `config/runtime.exs` line anchor in `docs/environment-variables.md`
+  points at the right line again, and a test keeps it that way.** The document
+  cites its source by line number for each variable, so any insertion shifts
+  every anchor below it at once — and nothing checked them, because
+  `mix docs --warnings-as-errors` verifies cross-references between docs and
+  *modules*, not offsets into source. 54 were wrong; `TOKEN_SIGNING_SECRET`
+  pointed at a Bandit documentation URL, and the branding rows at a comment
+  block.
+
+  This has been re-filed three times (#610, #645, #657), which is itself the
+  symptom: it was correct when written every time, and wrong by the commit. The
+  new test resolves every anchor against the current source and carries its own
+  self-check, so the next insertion fails the build instead of the reader.
 
 - **A rate-limited request now answers the same error envelope as everything
   else it sits in front of.** `{"errors": [{"status", "code", "detail"}]}` was
