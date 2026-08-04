@@ -8,11 +8,13 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
   pending token and that token is only minted once a first factor has already
   succeeded.
 
-  The password alert cannot cover the case either: to keep grinding, an attacker
-  keeps minting pending tokens, which means re-running the first factor — and
-  that step succeeds, so `ThrottleSignIn` forgives the sign-in counter every
-  time and its budget is never reached. That is asserted here rather than
-  argued, because it is the whole reason this alert exists.
+  The password alert could not cover the case either: to keep grinding, an
+  attacker keeps minting pending tokens, which means re-running the first
+  factor — and that step succeeds, so `ThrottleSignIn` forgave the sign-in
+  counter every time and its budget was never reached. #742 closed that reset,
+  so both alerts can now fire on the same attack; this one still rings first,
+  because the second-factor budget is the tighter of the two.
+  `KilnCMS.Accounts.SignInCounterTest` owns the counter behaviour itself.
 
   A third of these tests are about what the mail may **not** say. "Someone has
   your password" is the obvious sentence and it is wrong twice: the first factor
@@ -304,22 +306,34 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
     end
   end
 
-  describe "why the password alert cannot cover this" do
-    test "re-running the password step to mint a fresh token forgives its counter" do
-      # The structural claim in #728. If this ever stops being true, the
-      # second-factor alert is no longer the *only* warning and the reasoning in
-      # SignInAlert's moduledoc needs revisiting.
+  describe "which alarm rings first" do
+    test "the second-factor budget is reached first, from one pending token" do
+      # #728's original claim was that the password alert could *never* fire on
+      # this attack, because re-running the first factor forgave its counter.
+      # #742 closed that reset, so it can now fire — eventually. This alert is
+      # still the one that carries the news, because the whole second-factor
+      # budget is spendable against a SINGLE pending token, i.e. one first
+      # factor, so it is reached long before the sign-in budget has been
+      # touched more than once.
+      #
+      # (`KilnCMS.Accounts.SignInCounterTest` owns the held-counter behaviour
+      # itself; this only pins the ordering.)
       {user, _secret} = enabled_user()
       cleanup(user)
       address = to_string(user.email)
 
-      # Spend most of the sign-in budget with wrong passwords...
-      Enum.each(1..3, fn _ -> AccountThrottle.consume(address) end)
+      # One real first factor, then the whole code budget against its token.
+      pending = headless_pending(user)
+      Enum.each(1..(@budget + 1), fn _ -> headless_verify(pending, "000000") end)
+      drain_oban()
 
-      # ...then one *successful* password step, which is what minting a pending
-      # token requires.
-      headless_pending(user)
+      assert_email_sent(fn mail ->
+        refute mail.subject =~ @password_alert_subject
+        assert mail.subject =~ @subject
+      end)
 
+      # And the sign-in budget has barely been touched: one unit, held rather
+      # than forgiven (#742), with the shipped budget of ten still to go.
       assert :allow = AccountThrottle.consume(address)
     end
 

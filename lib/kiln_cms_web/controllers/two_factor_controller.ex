@@ -77,10 +77,10 @@ defmodule KilnCMSWeb.TwoFactorController do
         redirect(conn, to: ~p"/sign-in")
 
       # `SecondFactor.check/2` has already alerted the owner: whoever is here
-      # got past a first factor, and #478's alert structurally cannot fire in
-      # this scenario (re-running that step to mint a fresh pending token
-      # *succeeds*, which forgives the sign-in counter). The user comes back
-      # through the tuple because a `with`'s `else` cannot see clause bindings.
+      # got past a first factor, which is news #478's alert cannot carry (it
+      # could not even fire here until #742 stopped a password that stops at
+      # this prompt from clearing its counter). The user comes back through the
+      # tuple because a `with`'s `else` cannot see clause bindings.
       {:deny, _user, retry_after_ms} ->
         # The pending token is left in the session rather than cleared — the
         # caller has not failed authentication, so bouncing them to `/sign-in`

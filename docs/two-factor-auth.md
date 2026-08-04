@@ -122,11 +122,13 @@ What an operator should know when a user reports it:
   logged when the mail goes and when it is suppressed; if delivery then fails,
   the window is handed back so the next refusal can try again.
 
-  Note the password alert (#478) structurally *cannot* fire in this scenario: to
-  keep grinding codes, an attacker must keep re-running the first factor, and
-  that step succeeds, which forgives the sign-in counter every time. Before
-  #728, the one case where a primary credential was provably in someone else's
-  hands produced no notification at all.
+  Note the password alert (#478) used to be structurally unable to fire in this
+  scenario: to keep grinding codes an attacker must keep re-running the first
+  factor, and that step succeeds, which forgave the sign-in counter every time.
+  Before #728, the one case where a primary credential was provably in someone
+  else's hands produced no notification at all. #742 closed that reset, so both
+  alerts can now fire on the same attack — this one first, because the
+  second-factor budget is the tighter of the two.
 
   A lockout that happens *entirely* at `/editor/settings` — with no sign-in
   attempt afterwards — still sends nothing, because the person there holds a
