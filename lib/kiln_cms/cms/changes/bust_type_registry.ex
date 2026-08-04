@@ -4,6 +4,12 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   depends on which types exist) after any `TypeDefinition` write — create,
   update (incl. restore), or archive.
 
+  Also runs on `FieldDefinition` writes (#480). It is a field, not a type, that
+  decides whether a type is event-shaped and so has an `.ics` calendar, so the
+  cached answer to that question has to drop when a `datetime_range` field is
+  added or removed — otherwise a new event type has no calendar until a TTL
+  passes, with nothing to explain why.
+
   Published payloads of an archived type may linger under their own
   `{name, slug}` cache keys until their short TTL passes; `get_by_path/2`
   stops resolving the type immediately, so only already-cached responses ride

@@ -45,10 +45,10 @@ defmodule KilnCMS.CMS.ContentTypes do
   # scope, so a record whose slug is `feed.xml` would be permanently shadowed by
   # its own type's feed — the silent-shadowing failure `Validations.SlugAvailable`
   # exists to prevent.
-  @reserved_path_segments ~w(account admin api auth billing blog content dev
-                             editor feed.json feed.xml gql locale mailbox media
-                             membership playground preview register reset search
-                             sign_in swaggerui up)
+  @reserved_path_segments ~w(account admin api auth billing blog calendar.ics
+                             content dev editor feed.json feed.xml gql locale
+                             mailbox media membership playground preview register
+                             reset search sign_in swaggerui up)
 
   @doc "The Ash domains scanned for content types (default `[KilnCMS.CMS]`)."
   @spec content_domains() :: [module()]

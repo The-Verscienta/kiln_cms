@@ -141,6 +141,29 @@ defmodule KilnCMS.EventsTest do
                DatetimeRange.cast(%{"start" => "2026-03-15T00:00", "all_day" => true}, nil)
     end
 
+    test "an untouched optional widget stays blank, so the field stays optional", ctx do
+      # The composite renderer briefly paired the checkbox with a hidden
+      # `value="false"`, the usual Phoenix idiom. `blank_for?/2` calls a
+      # composite empty only when EVERY part is blank, and `"false"` is not
+      # blank — so an untouched widget looked filled in, and every document of
+      # a type with an *optional* `datetime_range` field became unsaveable with
+      # "start is required".
+      assert {:ok, entry} =
+               CMS.create_entry(
+                 %{
+                   title: "No date on this one",
+                   slug: "nd-#{System.unique_integer([:positive])}",
+                   type_definition_id: ctx.td.id,
+                   custom_fields: %{
+                     "when" => %{"start" => "", "end" => "", "time_zone" => "", "all_day" => ""}
+                   }
+                 },
+                 actor: ctx.admin
+               )
+
+      refute entry.custom_fields["when"]
+    end
+
     test "a stored all-day event survives a save that does not touch it", ctx do
       event =
         event!(ctx, %{
@@ -153,6 +176,30 @@ defmodule KilnCMS.EventsTest do
         CMS.update_entry!(event, %{title: "Renamed"}, actor: ctx.admin)
 
       assert updated.custom_fields["when"]["all_day"] == true
+    end
+  end
+
+  describe "an inline EXDATE in the rule box" do
+    test "is kept, not silently dropped on save", ctx do
+      add_recurrence(ctx.td, ctx.admin)
+
+      # `parse/1` accepts an inline EXDATE but `to_rrule/1` — which is what gets
+      # stored — renders none, so it used to save cleanly and vanish, and the
+      # editor's cancelled date came back for every subscriber.
+      event =
+        event!(ctx, %{
+          "when" => %{"start" => "2026-03-01T19:00", "time_zone" => @london},
+          "repeats" => %{"rrule" => "FREQ=DAILY;EXDATE=20260303"}
+        })
+
+      assert "2026-03-03" in event.custom_fields["repeats"]["exdates"]
+
+      dates =
+        event
+        |> Occurrences.for_record(utc("2026-03-01T00:00:00"), utc("2026-03-05T00:00:00"))
+        |> Enum.map(&DateTime.to_date(&1.starts_at))
+
+      refute ~D[2026-03-03] in dates
     end
   end
 
@@ -371,6 +418,77 @@ defmodule KilnCMS.EventsTest do
       assert ics =~ "X-WR-CALNAME:What's on"
       assert ics |> String.split("BEGIN:VEVENT") |> length() == 3
       refute ics =~ "SUMMARY:No schedule"
+    end
+
+    test "folds a line of any length, and terminates", ctx do
+      # The fold width used to shrink by one per continuation, so past ~2850
+      # octets no grapheme fit, the remainder stopped shrinking and the
+      # recursion never returned — a hang on an anonymous GET, latched by one
+      # stored record. `title` and `seo_description` are both unbounded strings.
+      event =
+        event!(ctx, %{"when" => %{"start" => "2026-03-15T19:00"}}, %{
+          title: String.duplicate("a", 4000)
+        })
+
+      ics = ICS.event(event, org_id: ctx.org)
+
+      for line <- String.split(ics, "\r\n") do
+        assert byte_size(line) <= 76, "line over 75 octets: #{byte_size(line)}"
+      end
+
+      assert String.replace(ics, "\r\n ", "") =~ "SUMMARY:" <> String.duplicate("a", 4000)
+    end
+
+    test "a timed EXDATE is a DATE-TIME at the event's own time of day", ctx do
+      add_recurrence(ctx.td, ctx.admin)
+
+      event =
+        event!(ctx, %{
+          "when" => %{"start" => "2026-03-15T19:00", "time_zone" => @london},
+          "repeats" => %{"rrule" => "FREQ=WEEKLY;BYDAY=SU", "exdates" => ["2026-04-05"]}
+        })
+
+      ics = ICS.event(event, org_id: ctx.org)
+
+      # `EXDATE` defaults to DATE-TIME, so `TZID` on a bare date is malformed —
+      # and a lenient client still matches nothing, since every occurrence is at
+      # 19:00 rather than midnight.
+      assert ics =~ "EXDATE;TZID=Europe/London:20260405T190000"
+    end
+
+    test "a timed rule's UNTIL is a UTC DATE-TIME, matching its DTSTART", ctx do
+      add_recurrence(ctx.td, ctx.admin)
+
+      event =
+        event!(ctx, %{
+          "when" => %{"start" => "2026-03-15T19:00", "time_zone" => @london},
+          "repeats" => %{"rrule" => "FREQ=WEEKLY;BYDAY=SU;UNTIL=20260405"}
+        })
+
+      ics = ICS.event(event, org_id: ctx.org)
+
+      assert ics =~ "DTSTART;TZID=Europe/London:"
+      assert ics =~ "UNTIL=20260405T235959Z"
+    end
+
+    test "a zone that bypassed the field-type cast cannot inject calendar lines", ctx do
+      # `schedule_value/2` reads jsonb directly, so a seed, an importer or an
+      # overlay can put a string there that `cast/2` would have refused.
+      event = event!(ctx, %{"when" => %{"start" => "2026-03-15T19:00"}})
+
+      poisoned = %{
+        event
+        | custom_fields: %{
+            "when" => %{
+              "start" => "2026-03-15T19:00:00",
+              "time_zone" => "Etc/UTC\r\nSUMMARY:injected"
+            }
+          }
+      }
+
+      ics = ICS.event(poisoned, org_id: ctx.org)
+
+      refute ics =~ "SUMMARY:injected"
     end
 
     test "filename/1 is safe for a Content-Disposition header", ctx do

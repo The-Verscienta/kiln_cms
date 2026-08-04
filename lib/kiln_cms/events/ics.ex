@@ -105,6 +105,10 @@ defmodule KilnCMS.Events.ICS do
     all_day? = DatetimeRange.all_day?(schedule)
     zone = Map.get(schedule, "time_zone") || Events.default_time_zone()
     url = url_for(record, opts)
+    # Read once. `rrule_line/2` and `exdate_line/4` each used to ask
+    # `Events.recurrence_rule/2` for themselves, which is a field-definition
+    # query and an RRULE re-parse per line, per record.
+    rule = Events.recurrence_rule(record, org_id)
 
     [
       "BEGIN:VEVENT",
@@ -116,8 +120,8 @@ defmodule KilnCMS.Events.ICS do
     ]
     |> maybe(url && "URL:#{escape(url)}")
     |> maybe(description(record))
-    |> maybe(rrule_line(record, org_id))
-    |> maybe(exdate_line(record, org_id, zone, all_day?))
+    |> maybe(rrule_line(rule, all_day?))
+    |> maybe(exdate_line(rule, start_utc, zone, all_day?))
     |> Kernel.++(["END:VEVENT"])
     # `dtend/4` is legitimately nil for an open-ended event, and it sits in the
     # literal list above rather than the `maybe/2` chain. One reject at the
@@ -129,7 +133,7 @@ defmodule KilnCMS.Events.ICS do
   # means, and it is what lets a client re-derive the right wall time if the
   # zone's rules change after publication.
   defp dtstart(start_utc, zone, false),
-    do: "DTSTART;TZID=#{zone}:#{local_stamp(start_utc, zone)}"
+    do: "DTSTART;TZID=#{escape_param(zone)}:#{local_stamp(start_utc, zone)}"
 
   defp dtstart(start_utc, zone, true),
     do: "DTSTART;VALUE=DATE:#{date_stamp(start_utc, zone)}"
@@ -137,7 +141,7 @@ defmodule KilnCMS.Events.ICS do
   defp dtend(_start, nil, _zone, false), do: nil
 
   defp dtend(_start, end_utc, zone, false),
-    do: "DTEND;TZID=#{zone}:#{local_stamp(end_utc, zone)}"
+    do: "DTEND;TZID=#{escape_param(zone)}:#{local_stamp(end_utc, zone)}"
 
   # An all-day DTEND is *exclusive* in RFC 5545 — a one-day event ends on the
   # following day. Omitting the +1 makes every all-day event render a day short,
@@ -147,25 +151,35 @@ defmodule KilnCMS.Events.ICS do
     "DTEND;VALUE=DATE:#{Calendar.strftime(Date.add(last_day, 1), "%Y%m%d")}"
   end
 
-  defp rrule_line(record, org_id) do
-    case Events.recurrence_rule(record, org_id) do
-      nil -> nil
-      rule -> "RRULE:#{Recurrence.to_rrule(rule)}"
-    end
-  end
+  # `UNTIL` must carry the same value type as `DTSTART` (RFC 5545 §3.3.10), so
+  # the rule renders against the same all-day flag the DTSTART used.
+  defp rrule_line(nil, _all_day?), do: nil
+
+  defp rrule_line(rule, all_day?),
+    do: "RRULE:#{Recurrence.to_rrule(rule, until: until_type(all_day?))}"
 
   # The skipped dates ride as EXDATE so the client honours them too — otherwise
   # a subscriber sees the occurrences an editor explicitly cancelled.
-  defp exdate_line(record, org_id, zone, all_day?) do
-    case Events.recurrence_rule(record, org_id) do
-      %{ex_dates: [_ | _] = dates} ->
-        stamps = Enum.map_join(dates, ",", &Calendar.strftime(&1, "%Y%m%d"))
-        if all_day?, do: "EXDATE;VALUE=DATE:#{stamps}", else: "EXDATE;TZID=#{zone}:#{stamps}"
-
-      _other ->
-        nil
+  #
+  # They must be **DATE-TIME** for a timed event. `EXDATE` defaults to
+  # DATE-TIME, so a `TZID` parameter on a bare `20260407` is not legal — and a
+  # client lenient enough to take it still matches nothing, because every
+  # occurrence is at 19:00 and not at midnight. So a timed EXDATE carries
+  # DTSTART's own local time-of-day, which is what lines it up with an instance.
+  defp exdate_line(%{ex_dates: [_ | _] = dates}, start_utc, zone, all_day?) do
+    if all_day? do
+      "EXDATE;VALUE=DATE:#{Enum.map_join(dates, ",", &Calendar.strftime(&1, "%Y%m%d"))}"
+    else
+      time = start_utc |> DateTime.shift_zone!(zone) |> Calendar.strftime("%H%M%S")
+      stamps = Enum.map_join(dates, ",", &"#{Calendar.strftime(&1, "%Y%m%d")}T#{time}")
+      "EXDATE;TZID=#{escape_param(zone)}:#{stamps}"
     end
   end
+
+  defp exdate_line(_rule, _start_utc, _zone, _all_day?), do: nil
+
+  defp until_type(true), do: :date
+  defp until_type(false), do: :datetime
 
   defp description(record) do
     case Map.get(record, :seo_description) || Map.get(record, :excerpt) do
@@ -189,6 +203,15 @@ defmodule KilnCMS.Events.ICS do
   end
 
   # --- formatting ------------------------------------------------------------
+
+  # A zone name reaches the wire as a property **parameter**, where the rules
+  # are not the value's: a parameter may not contain CR, LF, `;`, `:` or a
+  # double quote at all. `cast/2` gates the zone through `known_time_zone?/1`
+  # today, but `schedule_value/2` reads jsonb directly — a seed, an importer or
+  # an overlay that skips the field-type cast would otherwise inject arbitrary
+  # calendar lines. This must not depend on a validation elsewhere staying
+  # shaped as it is.
+  defp escape_param(value), do: String.replace(to_string(value), ~r{[^A-Za-z0-9_+/-]}, "")
 
   defp utc_stamp(datetime), do: Calendar.strftime(datetime, "%Y%m%dT%H%M%SZ")
 
@@ -216,33 +239,48 @@ defmodule KilnCMS.Events.ICS do
   # RFC 5545 §3.1: fold at 75 **octets**, continuation lines starting with a
   # space. Splitting on characters would fold mid-codepoint on any multi-byte
   # title, producing a file some parsers reject and others render as mojibake.
+  #
+  # The continuation width is a **constant** `@fold_at - 1` (the leading space
+  # costs one octet), not a per-line decrement. Decrementing walks the width
+  # down to zero after 75 chunks, at which point no grapheme fits, the chunk
+  # comes back empty, the remainder never shrinks, and the recursion does not
+  # terminate — a hang on any line past ~2850 octets, on an anonymous route,
+  # with `title` and `seo_description` both unbounded strings.
+  def fold(line) when byte_size(line) <= @fold_at, do: line
+
   def fold(line) do
-    if byte_size(line) <= @fold_at do
-      line
-    else
-      line |> take_octets(@fold_at, []) |> Enum.join("\r\n ")
+    case split_at_octets(line, @fold_at) do
+      # A single grapheme wider than 75 octets, which no encoding produces —
+      # but returning the line whole is the safe answer if one ever did, since
+      # looping is not.
+      {"", _rest} -> line
+      {first, rest} -> Enum.join([first | continuations(rest, [])], "\r\n ")
     end
   end
 
-  defp take_octets("", _limit, acc), do: Enum.reverse(acc)
+  defp continuations("", acc), do: Enum.reverse(acc)
 
-  defp take_octets(rest, limit, acc) do
-    {chunk, remainder} = split_at_octets(rest, limit)
-    take_octets(remainder, limit - 1, [chunk | acc])
+  defp continuations(rest, acc) do
+    case split_at_octets(rest, @fold_at - 1) do
+      {"", _remainder} -> Enum.reverse([rest | acc])
+      {chunk, remainder} -> continuations(remainder, [chunk | acc])
+    end
   end
 
-  # Walks graphemes, accumulating while the byte total stays under the limit —
-  # so a chunk never ends inside a codepoint.
+  # One grapheme walk that counts how many fit, then a single `String.split_at/2`
+  # — so a chunk never ends inside a codepoint. The previous form rebuilt the
+  # chunk byte by byte and re-scanned the whole remainder with
+  # `replace_prefix/3`, which made folding a long line quadratic.
   defp split_at_octets(string, limit) do
-    {taken, _size} =
+    {count, _size} =
       string
       |> String.graphemes()
-      |> Enum.reduce_while({"", 0}, fn grapheme, {acc, size} ->
+      |> Enum.reduce_while({0, 0}, fn grapheme, {count, size} ->
         next = size + byte_size(grapheme)
-        if next > limit, do: {:halt, {acc, size}}, else: {:cont, {acc <> grapheme, next}}
+        if next > limit, do: {:halt, {count, size}}, else: {:cont, {count + 1, next}}
       end)
 
-    {taken, String.replace_prefix(string, taken, "")}
+    String.split_at(string, count)
   end
 
   defp maybe(lines, nil), do: lines

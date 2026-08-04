@@ -95,10 +95,11 @@ defmodule KilnCMS.CMS.FieldTypes.DatetimeRange do
         attrs: %{placeholder: Events.default_time_zone()}
       },
       # The editor's composite renderer treats a `checkbox` part as a real
-      # checkbox — fixed `value="true"`, `checked` from the stored value, plus a
-      # hidden `false` companion so unticking submits something. `truthy?/1`
-      # below accepts either spelling, since a value also arrives as a real
-      # boolean when it is round-tripped out of jsonb.
+      # checkbox — fixed `value="true"`, `checked` from the stored value, and no
+      # hidden companion, so an unticked box submits nothing at all and
+      # `truthy?(nil)` below reads it as false. That absence is also what keeps
+      # an untouched widget *blank*, which is how an optional field stays
+      # optional.
       %{key: "all_day", label: "All day", type: "checkbox", required?: false, attrs: %{}}
     ]
   end

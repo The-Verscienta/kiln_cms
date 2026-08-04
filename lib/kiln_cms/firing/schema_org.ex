@@ -66,24 +66,32 @@ defmodule KilnCMS.Firing.SchemaOrg do
   def main_node(document, body) do
     type = resolve(document)
 
+    # Only `description` and `inLanguage` are shared: both are properties every
+    # Thing carries. Everything else is family-specific.
     type
     |> base_node(document, body)
     |> put_if("description", Map.get(document, :seo_description))
-    |> put_if("keywords", Map.get(document, :seo_keywords))
     |> put_if("inLanguage", Map.get(document, :locale))
-    |> put_if("datePublished", iso(Map.get(document, :published_at)))
-    |> put_if("dateModified", iso(Map.get(document, :updated_at)))
   end
 
   # An Event's headline is its `name`, and it has no body — `articleBody` on an
   # Event is not a property schema.org defines, and emitting it makes the node
   # invalid rather than merely verbose.
+  #
+  # `keywords`, `datePublished` and `dateModified` go with it, for exactly the
+  # same reason: all three are CreativeWork properties. Half-enforcing the rule
+  # would leave the node just as invalid, and an invalid Event node produces no
+  # rich result at all — which is the entire point of emitting one.
   defp base_node(type, document, _body) when type in @event_types,
     do: %{"@type" => type, "name" => Map.get(document, :title)}
 
   defp base_node(type, document, body) do
     body_key = if type in @article_types, do: "articleBody", else: "text"
+
     %{"@type" => type, "headline" => Map.get(document, :title), body_key => body}
+    |> put_if("keywords", Map.get(document, :seo_keywords))
+    |> put_if("datePublished", iso(Map.get(document, :published_at)))
+    |> put_if("dateModified", iso(Map.get(document, :updated_at)))
   end
 
   defp normalize(type)

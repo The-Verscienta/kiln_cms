@@ -385,4 +385,102 @@ defmodule KilnCMS.Events.RecurrenceTest do
              )
     end
   end
+
+  describe "parts a frequency cannot honour are refused, not ignored" do
+    test "BYDAY with DAILY" do
+      # It used to save, expand to every day, and re-emit BYDAY to the client —
+      # two different calendars from one rule, with nothing to tell an editor.
+      assert {:error, message} = Recurrence.parse("FREQ=DAILY;BYDAY=MO,WE,FR")
+      assert message =~ "BYDAY"
+    end
+
+    test "BYMONTHDAY with DAILY or WEEKLY" do
+      assert {:error, _} = Recurrence.parse("FREQ=DAILY;BYMONTHDAY=1")
+      assert {:error, _} = Recurrence.parse("FREQ=WEEKLY;BYMONTHDAY=1")
+    end
+
+    test "an ordinal BYDAY anywhere in the list, not just at its head" do
+      assert {:error, message} = Recurrence.parse("FREQ=WEEKLY;BYDAY=MO,2TU")
+      assert message =~ "ordinal"
+    end
+
+    test "an ordinal of zero, or one no month can satisfy" do
+      assert {:error, _} = Recurrence.parse("FREQ=MONTHLY;BYDAY=0TU")
+      # -6TU used to reach `Enum.at/2`, whose negative indexing counts from the
+      # end — silently becoming some other Tuesday rather than none.
+      assert {:error, _} = Recurrence.parse("FREQ=MONTHLY;BYDAY=-6TU")
+      assert {:ok, _} = Recurrence.parse("FREQ=MONTHLY;BYDAY=-1FR")
+    end
+
+    test "a week start this module does not actually honour" do
+      assert {:ok, _} = Recurrence.parse("FREQ=WEEKLY;BYDAY=SU;WKST=MO")
+      assert {:error, message} = Recurrence.parse("FREQ=WEEKLY;BYDAY=SU;WKST=SU")
+      assert message =~ "Monday"
+    end
+
+    test "an impossible date is a form error, not a crash" do
+      # `Date.new/3` answers `{:error, :invalid_date}`, which no caller matched.
+      assert {:error, message} = Recurrence.parse("FREQ=DAILY;UNTIL=20260230")
+      assert message =~ "UNTIL"
+      assert {:error, _} = Recurrence.parse("FREQ=DAILY;EXDATE=20260431")
+    end
+  end
+
+  describe "BYMONTH" do
+    test "is supported, as the docs say" do
+      assert {:ok, rule} = Recurrence.parse("FREQ=MONTHLY;BYMONTHDAY=15;BYMONTH=3,6")
+      assert rule.by_month == [3, 6]
+      assert Recurrence.to_rrule(rule) =~ "BYMONTH=3,6"
+    end
+
+    test "restricts expansion to those months" do
+      {:ok, rule} = Recurrence.parse("FREQ=MONTHLY;BYMONTHDAY=15;BYMONTH=3,6")
+
+      months =
+        rule
+        |> Recurrence.expand(
+          ~N[2026-01-15 12:00:00],
+          "Etc/UTC",
+          ~U[2026-01-01 00:00:00Z],
+          ~U[2026-12-31 00:00:00Z]
+        )
+        |> Enum.map(&(&1 |> DateTime.to_date() |> Map.fetch!(:month)))
+
+      assert months == [3, 6]
+    end
+  end
+
+  describe "EXDATE is subtracted after COUNT, per RFC 5545" do
+    test "a skipped date does not backfill from the tail" do
+      {:ok, rule} = Recurrence.parse("FREQ=DAILY;COUNT=10;EXDATE=20260303")
+
+      dates =
+        rule
+        |> Recurrence.expand(
+          ~N[2026-03-01 19:00:00],
+          "Etc/UTC",
+          ~U[2026-01-01 00:00:00Z],
+          ~U[2027-01-01 00:00:00Z]
+        )
+        |> Enum.map(&DateTime.to_date/1)
+
+      # Nine, ending on the 10th — COUNT generates the set, EXDATE subtracts
+      # from it. Rejecting first gave ten ending on the 11th, so the site
+      # advertised a date no subscribed client had.
+      assert length(dates) == 9
+      assert List.last(dates) == ~D[2026-03-10]
+      refute ~D[2026-03-03] in dates
+    end
+  end
+
+  describe "UNTIL renders against DTSTART's value type" do
+    test "date form for storage, UTC datetime form for a timed event" do
+      {:ok, rule} = Recurrence.parse("FREQ=WEEKLY;BYDAY=TU;UNTIL=20260303")
+
+      assert Recurrence.to_rrule(rule) =~ "UNTIL=20260303"
+      # End-of-day, because the stored UNTIL is an inclusive date: midnight
+      # would silently drop 3 March, which Kiln's own expansion keeps.
+      assert Recurrence.to_rrule(rule, until: :datetime) =~ "UNTIL=20260303T235959Z"
+    end
+  end
 end

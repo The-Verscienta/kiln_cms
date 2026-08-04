@@ -111,8 +111,15 @@ keeps showing occurrences past whatever window Kiln happened to expand, and a
 subscriber who syncs once a year does not lose the tail. Skipped dates ride as
 `EXDATE`, so a cancelled occurrence stays cancelled on the client too.
 
-Responses are cached for five minutes and dropped by the same publish hooks that
-drop the Atom feeds.
+Responses are cached for five minutes, carry a matching `Cache-Control`, and are
+dropped by the same publish hooks that drop the Atom feeds. Delivery pages
+advertise them with `<link rel="alternate" type="text/calendar">`, so a client
+finds the calendar without being handed the URL.
+
+A recurring event's `UNTIL` and `EXDATE` are rendered in `DTSTART`'s own value
+type — DATE for an all-day event, DATE-TIME at the event's local time otherwise.
+A date-only `EXDATE` on a 19:00 event matches no occurrence, which is the
+classic way a cancelled date comes back.
 
 ## Structured data
 

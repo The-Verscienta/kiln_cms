@@ -147,6 +147,43 @@ defmodule KilnCMSWeb.CalendarControllerTest do
     end
   end
 
+  describe "a compiled content type can be event-shaped too" do
+    setup ctx do
+      # `type_definition_id` exists only on the dynamic tier, so a select that
+      # names it unconditionally 500s the moment an operator attaches a
+      # `datetime_range` field to a compiled type — which is what the docs
+      # invite. And `scope_for/1` stringifies the type name while a descriptor
+      # carries the atom, so the URL lookup missed for exactly these records.
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "when", label: "When", field_type: "datetime_range"},
+        actor: ctx.admin
+      )
+
+      :ok
+    end
+
+    test "serves its calendar with a URL per event", %{conn: conn} = ctx do
+      page =
+        CMS.create_page!(
+          %{
+            title: "Open day",
+            slug: "open-day",
+            custom_fields: %{
+              "when" => %{"start" => "2026-03-15T19:00", "time_zone" => @london}
+            }
+          },
+          actor: ctx.admin
+        )
+
+      CMS.publish_page!(page, actor: ctx.admin)
+
+      body = conn |> get("/pages/calendar.ics") |> response(200)
+
+      assert body =~ "SUMMARY:Open day"
+      assert body =~ "URL:"
+    end
+  end
+
   describe "the site-wide calendar" do
     test "mixes every event-shaped type", %{conn: conn} = ctx do
       ctx |> event!(%{title: "The gig"}) |> publish!(ctx)

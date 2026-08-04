@@ -59,6 +59,7 @@ defmodule KilnCMS.Events.Recurrence do
           until: Date.t() | nil,
           by_day: [{integer() | nil, 1..7}],
           by_month_day: [integer()],
+          by_month: [1..12],
           ex_dates: [Date.t()]
         }
 
@@ -68,6 +69,7 @@ defmodule KilnCMS.Events.Recurrence do
             until: nil,
             by_day: [],
             by_month_day: [],
+            by_month: [],
             ex_dates: []
 
   @doc "The default ceiling on how many occurrences a single expansion returns."
@@ -99,20 +101,36 @@ defmodule KilnCMS.Events.Recurrence do
 
   def parse(_rrule), do: {:error, "must be a string"}
 
-  @doc "Render a rule back to an RRULE string — what ICS and storage carry."
-  @spec to_rrule(t()) :: String.t()
-  def to_rrule(%__MODULE__{} = rule) do
+  @doc """
+  Render a rule back to an RRULE string — what ICS and storage carry.
+
+  `:until` picks `UNTIL`'s value type: `:date` (the default, and what storage
+  round-trips through `parse/1`) or `:datetime`. RFC 5545 §3.3.10 requires
+  `UNTIL` to match `DTSTART`'s value type, so a timed event's rule must render
+  the datetime form — a date-only `UNTIL` against a DATE-TIME `DTSTART` is
+  malformed, and a client that coerces it to midnight drops the last day of the
+  series that Kiln's own expansion (which compares dates inclusively) keeps.
+  """
+  @spec to_rrule(t(), keyword()) :: String.t()
+  def to_rrule(%__MODULE__{} = rule, opts \\ []) do
     [
       "FREQ=#{rule.freq |> to_string() |> String.upcase()}",
       rule.interval > 1 && "INTERVAL=#{rule.interval}",
       rule.count && "COUNT=#{rule.count}",
-      rule.until && "UNTIL=#{Calendar.strftime(rule.until, "%Y%m%d")}",
+      rule.until && "UNTIL=#{render_until(rule.until, Keyword.get(opts, :until, :date))}",
+      rule.by_month != [] && "BYMONTH=" <> Enum.join(rule.by_month, ","),
       rule.by_day != [] && "BYDAY=" <> Enum.map_join(rule.by_day, ",", &render_day/1),
       rule.by_month_day != [] && "BYMONTHDAY=" <> Enum.join(rule.by_month_day, ",")
     ]
     |> Enum.filter(& &1)
     |> Enum.join(";")
   end
+
+  defp render_until(date, :date), do: Calendar.strftime(date, "%Y%m%d")
+
+  # End-of-day UTC, because the stored `until` is an inclusive *date* and that
+  # is how expansion treats it: `20260303T000000Z` would silently drop 3 March.
+  defp render_until(date, :datetime), do: Calendar.strftime(date, "%Y%m%dT235959Z")
 
   @doc """
   Occurrences of `rule` starting at `dtstart`, within `[from, until]`, in
@@ -136,20 +154,35 @@ defmodule KilnCMS.Events.Recurrence do
 
     # The rule's own UNTIL and the caller's window are both ceilings; walking to
     # the earlier of them is what makes "until: 9999" cost nothing.
-    stop_date = earliest_date(rule.until, DateTime.to_date(until))
+    # `+1` day on the window end, because candidate *dates* are local while
+    # `until` is a UTC instant: in a zone ahead of UTC the local date can be a
+    # day past the UTC date while the instant is still inside the window, and
+    # the walk would stop one occurrence early. `in_window?/3` below does the
+    # real filtering on instants, so the extra day costs one wasted candidate,
+    # never an extra result. The rule's own UNTIL is a local date already and
+    # needs no such padding.
+    window_end = until |> DateTime.to_date() |> Date.add(1)
+    stop_date = earliest_date(rule.until, window_end)
 
     start_date = NaiveDateTime.to_date(dtstart)
 
     rule
     |> default_by_day(start_date)
     |> candidate_dates(start_date, stop_date)
-    |> Stream.reject(&MapSet.member?(ex_dates, &1))
-    |> Stream.map(&at_local_time(&1, NaiveDateTime.to_time(dtstart), time_zone))
-    |> Stream.reject(&is_nil/1)
     # COUNT is counted from the series start, not from the window — an occurrence
     # before `from` still consumes one, or a window into the middle of a
     # `COUNT=10` series would report ten more.
+    #
+    # And it is counted BEFORE the exclusions: RFC 5545 §3.8.5.1 generates the
+    # set from the RRULE, COUNT included, and subtracts EXDATE from *that*.
+    # Rejecting first silently backfills each cancelled date with an extra one
+    # at the tail, so `COUNT=10` with one EXDATE gave Kiln ten occurrences and
+    # every subscribed client nine — a date the site advertises and the
+    # calendar does not have.
     |> take_count(rule.count)
+    |> Stream.reject(&MapSet.member?(ex_dates, &1))
+    |> Stream.map(&at_local_time(&1, NaiveDateTime.to_time(dtstart), time_zone))
+    |> Stream.reject(&is_nil/1)
     |> Stream.filter(&in_window?(&1, from, until))
     |> Enum.take(max)
   end
@@ -255,6 +288,21 @@ defmodule KilnCMS.Events.Recurrence do
     end
   end
 
+  defp put_part(rule, seen, "BYMONTH", value) do
+    value
+    |> String.split(",", trim: true)
+    |> Enum.reduce_while({:ok, []}, fn month, {:ok, acc} ->
+      case Integer.parse(month) do
+        {n, ""} when n in 1..12 -> {:cont, {:ok, [n | acc]}}
+        _other -> {:halt, {:error, "BYMONTH #{month} must be 1..12"}}
+      end
+    end)
+    |> case do
+      {:ok, months} -> {:cont, {:ok, %{rule | by_month: Enum.reverse(months)}, seen}}
+      {:error, message} -> {:halt, {:error, message}}
+    end
+  end
+
   defp put_part(rule, seen, "EXDATE", value) do
     value
     |> String.split(",", trim: true)
@@ -277,7 +325,15 @@ defmodule KilnCMS.Events.Recurrence do
        when key in ~w(BYSETPOS BYWEEKNO BYYEARDAY BYHOUR BYMINUTE BYSECOND),
        do: {:halt, {:error, "#{key} isn't supported"}}
 
-  defp put_part(rule, seen, "WKST", _value), do: {:cont, {:ok, rule, seen}}
+  # Expansion walks Monday-start weeks (`Date.day_of_week/1`'s default), so MO is
+  # the only week start this module actually honours. Any other value changes
+  # which fortnight an `INTERVAL=2;BYDAY=SU` occurrence lands in, so it is
+  # refused rather than accepted and ignored — the one part that was silently
+  # reinterpreted in a module whose whole thesis is that none are.
+  defp put_part(rule, seen, "WKST", "MO"), do: {:cont, {:ok, rule, seen}}
+
+  defp put_part(_rule, _seen, "WKST", value),
+    do: {:halt, {:error, "WKST=#{value} isn't supported — weeks start on Monday"}}
 
   defp put_part(_rule, _seen, key, _value),
     do: {:halt, {:error, "#{key} isn't a known rule part"}}
@@ -285,16 +341,43 @@ defmodule KilnCMS.Events.Recurrence do
   defp validate(%{count: count, until: until}) when not is_nil(count) and not is_nil(until),
     do: {:error, "use COUNT or UNTIL, not both"}
 
-  defp validate(%{freq: freq, by_day: [{ordinal, _} | _]})
-       when freq not in [:monthly, :yearly] and not is_nil(ordinal),
-       do: {:error, "an ordinal BYDAY like 2TU only works with MONTHLY or YEARLY"}
+  # `Enum.any?` over the whole list, not a match on its head: `BYDAY=MO,2TU`
+  # slipped through a head-only check, then expanded as "every Tuesday" while
+  # `to_rrule/1` re-emitted the ordinal a client would reject.
+  defp validate(%{freq: freq, by_day: by_day} = rule)
+       when freq not in [:monthly, :yearly] do
+    if Enum.any?(by_day, fn {ordinal, _weekday} -> not is_nil(ordinal) end) do
+      {:error, "an ordinal BYDAY like 2TU only works with MONTHLY or YEARLY"}
+    else
+      validate_ignored(rule)
+    end
+  end
 
-  defp validate(rule), do: {:ok, rule}
+  defp validate(rule), do: validate_ignored(rule)
 
+  # A part the chosen frequency does not read is a part that would be *silently
+  # reinterpreted*: `FREQ=DAILY;BYDAY=MO,WE,FR` expanded to every day here while
+  # `to_rrule/1` handed the subscriber's client Mon/Wed/Fri. Two different
+  # calendars from one saved rule, with nothing to tell an editor.
+  defp validate_ignored(%{freq: :daily, by_day: [_ | _]}),
+    do: {:error, "BYDAY isn't supported with FREQ=DAILY — use FREQ=WEEKLY"}
+
+  defp validate_ignored(%{freq: :daily, by_month_day: [_ | _]}),
+    do: {:error, "BYMONTHDAY isn't supported with FREQ=DAILY — use FREQ=MONTHLY"}
+
+  defp validate_ignored(%{freq: :weekly, by_month_day: [_ | _]}),
+    do: {:error, "BYMONTHDAY isn't supported with FREQ=WEEKLY — use FREQ=MONTHLY"}
+
+  defp validate_ignored(rule), do: {:ok, rule}
+
+  # The ordinal is bounded to ±1..5. `0TU` has no meaning, and both it and an
+  # out-of-range `-6TU` used to reach `Enum.at/2`, whose *negative* indexing
+  # counts from the end — so `-6TU` in a four-Tuesday month silently became the
+  # third Tuesday, and `0TU` made the event vanish from every surface.
   defp parse_day(day) do
     case Regex.run(~r/\A(-?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)\z/, day) do
       [_, "", code] -> {:ok, {nil, @weekdays[code]}}
-      [_, ordinal, code] -> {:ok, {String.to_integer(ordinal), @weekdays[code]}}
+      [_, ordinal, code] -> ordinal_day(String.to_integer(ordinal), @weekdays[code])
       [_, code] -> {:ok, {nil, @weekdays[code]}}
       _other -> :error
     end
@@ -304,10 +387,23 @@ defmodule KilnCMS.Events.Recurrence do
   # part matters here, since UNTIL is compared against candidate dates.
   defp parse_date(value) do
     case Regex.run(~r/\A(\d{4})(\d{2})(\d{2})/, value) do
-      [_, y, m, d] -> Date.new(String.to_integer(y), String.to_integer(m), String.to_integer(d))
-      _other -> :error
+      # `Date.new/3` answers `{:error, :invalid_date}`, not `:error`, so a real
+      # calendar impossibility (`20260230`) has to be collapsed here. Leaving it
+      # raw made every caller's `:error` clause miss and turned a named form
+      # error into a `CaseClauseError` 500 — on a per-keystroke validate.
+      [_, y, m, d] ->
+        case Date.new(String.to_integer(y), String.to_integer(m), String.to_integer(d)) do
+          {:ok, date} -> {:ok, date}
+          {:error, _reason} -> :error
+        end
+
+      _other ->
+        :error
     end
   end
+
+  defp ordinal_day(n, weekday) when n in -5..5 and n != 0, do: {:ok, {n, weekday}}
+  defp ordinal_day(_n, _weekday), do: :error
 
   defp render_day({nil, weekday}), do: weekday_code(weekday)
   defp render_day({ordinal, weekday}), do: "#{ordinal}#{weekday_code(weekday)}"
@@ -359,6 +455,13 @@ defmodule KilnCMS.Events.Recurrence do
     |> Enum.sort(Date)
   end
 
+  defp dates_in_period(%{freq: freq, by_month: [_ | _] = months} = rule, period_start)
+       when freq in [:monthly, :yearly] do
+    if period_start.month in months,
+      do: dates_in_period(%{rule | by_month: []}, period_start),
+      else: []
+  end
+
   defp dates_in_period(%{freq: freq} = rule, period_start) when freq in [:monthly, :yearly] do
     days_of_month = Date.days_in_month(period_start)
 
@@ -398,6 +501,17 @@ defmodule KilnCMS.Events.Recurrence do
       _other -> nil
     end
   end
+
+  @doc """
+  A local wall time in `time_zone`, as a UTC instant.
+
+  Public because it is the **one** definition of how this codebase resolves a
+  DST gap and a DST ambiguity — `KilnCMS.Events.to_utc/2` delegates here rather
+  than keeping a second copy. A range and its recurrences disagreeing about what
+  "01:30" meant is the bug that would cause.
+  """
+  @spec to_utc(NaiveDateTime.t(), String.t()) :: {:ok, DateTime.t()} | :error
+  def to_utc(naive, time_zone), do: resolve_local(naive, time_zone)
 
   defp resolve_local(naive, time_zone) do
     case DateTime.from_naive(naive, time_zone) do

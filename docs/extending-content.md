@@ -88,8 +88,9 @@ CMS.create_field_definition!(%{
 
 Values are stored as **local wall time plus an IANA zone**, not as a UTC
 instant, and expansion is wall-clock so a weekly event holds its local time
-across a DST change. A type carrying one gets `.ics` calendar routes and a
-`schema.org/Event` node for free. See [events.md](events.md).
+across a DST change. A type carrying one gets `.ics` calendar routes
+automatically; set the type's `schema_org_type` to `Event` (or a subtype) to
+also fire a `schema.org/Event` node. See [events.md](events.md).
 
 ### Computed fields
 

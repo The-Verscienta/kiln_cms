@@ -45,9 +45,14 @@ defmodule KilnCMS.CMS.FieldTypes.Recurrence do
   @impl Kiln.FieldType
   def cast(value, _definition) do
     with {:ok, parts} <- parts(value),
-         {:ok, rrule} <- rrule(parts),
+         {:ok, rrule, inline_exdates} <- rrule(parts),
          {:ok, exdates} <- exdates(parts) do
-      {:ok, %{"rrule" => rrule, "exdates" => exdates}}
+      # An inline `EXDATE=` typed into the rule box is *moved* into the exdates
+      # list rather than dropped. `parse/1` accepts it, but `to_rrule/1` — which
+      # is what gets stored — renders no EXDATE, so it used to save cleanly and
+      # vanish, and the editor's cancelled Christmas came back for every
+      # subscriber. Exactly the silent reinterpretation this module refuses.
+      {:ok, %{"rrule" => rrule, "exdates" => merge_exdates(inline_exdates, exdates)}}
     end
   end
 
@@ -113,14 +118,8 @@ defmodule KilnCMS.CMS.FieldTypes.Recurrence do
 
   defp rrule(parts) do
     case Map.get(parts, "rrule") do
-      value when is_binary(value) ->
-        case value |> String.trim() |> normalize() do
-          {:ok, normalized} -> {:ok, normalized}
-          {:error, message} -> {:error, message}
-        end
-
-      _other ->
-        {:error, "needs a repeat rule like FREQ=WEEKLY;BYDAY=TU"}
+      value when is_binary(value) -> value |> String.trim() |> normalize()
+      _other -> {:error, "needs a repeat rule like FREQ=WEEKLY;BYDAY=TU"}
     end
   end
 
@@ -128,9 +127,17 @@ defmodule KilnCMS.CMS.FieldTypes.Recurrence do
 
   defp normalize(value) do
     case Recurrence.parse(value) do
-      {:ok, rule} -> {:ok, Recurrence.to_rrule(rule)}
+      {:ok, rule} -> {:ok, Recurrence.to_rrule(rule), rule.ex_dates}
       {:error, message} -> {:error, message}
     end
+  end
+
+  defp merge_exdates(inline, exdates) do
+    inline
+    |> Enum.map(&Date.to_iso8601/1)
+    |> Enum.concat(exdates)
+    |> Enum.uniq()
+    |> Enum.take(@max_exdates)
   end
 
   # Accepts a list (API) or a comma/space-separated string (the editor's text

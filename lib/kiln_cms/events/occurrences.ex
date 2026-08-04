@@ -60,7 +60,7 @@ defmodule KilnCMS.Events.Occurrences do
       zone = Map.get(schedule, "time_zone") || Events.default_time_zone()
 
       record
-      |> starts(schedule, org_id, from, until, max)
+      |> starts(start_utc, zone, org_id, from, until, max)
       |> Enum.map(&occurrence(&1, duration, all_day?, zone))
     else
       _other -> []
@@ -85,9 +85,11 @@ defmodule KilnCMS.Events.Occurrences do
   end
 
   # The series start instants, from the recurrence rule if there is one.
-  defp starts(record, schedule, org_id, from, until, max) do
-    {start_utc, _end} = DatetimeRange.to_utc(schedule)
-
+  #
+  # `start_utc` and `zone` are passed in rather than re-derived: the caller has
+  # both, and re-deriving meant a second ISO parse and a second zone-database
+  # resolution per record.
+  defp starts(record, start_utc, zone, org_id, from, until, max) do
     case Events.recurrence_rule(record, org_id) do
       nil ->
         # A series of one. Still window-filtered, so a past event does not turn
@@ -95,8 +97,6 @@ defmodule KilnCMS.Events.Occurrences do
         if in_window?(start_utc, from, until), do: [start_utc], else: []
 
       rule ->
-        zone = Map.get(schedule, "time_zone") || Events.default_time_zone()
-
         # The rule repeats from the schedule's *local* start — expansion is
         # wall-clock, so it must be handed local time, not the UTC instant.
         local_start =

@@ -46,12 +46,8 @@ defmodule KilnCMSWeb.CalendarController do
 
   @cache_ttl :timer.minutes(5)
 
-  # `type_definition_id` is not decoration: it is how a record resolves to the
-  # field definitions that hold its schedule, and a select that omits it hands
-  # `Events.scope_for/1` an `%Ash.NotLoaded{}` instead of an id.
   @base_fields [
     :id,
-    :type_definition_id,
     :title,
     :slug,
     :path_alias,
@@ -117,6 +113,12 @@ defmodule KilnCMSWeb.CalendarController do
   defp send_ics(conn, body) do
     conn
     |> put_resp_content_type("text/calendar")
+    # The one delivery surface designed to be re-fetched by every subscriber on
+    # a timer, forever, is the one that most needs a CDN and a client
+    # conditional request to absorb it. Matching the response TTL: a calendar
+    # that is five minutes stale is a calendar, and the per-IP `:probe` bucket
+    # does nothing about many subscribers each fetching once.
+    |> put_resp_header("cache-control", "public, max-age=#{div(@cache_ttl, 1000)}")
     |> send_resp(200, body)
   end
 
@@ -179,12 +181,31 @@ defmodule KilnCMSWeb.CalendarController do
 
   defp not_found(conn), do: conn |> put_status(404) |> text("")
 
+  # `type_definition_id` exists only on the dynamic tier — the Content macro
+  # emits the `belongs_to` under `if dynamic?` — so naming it unconditionally
+  # makes `Ash.Query.select/2` raise `NoSuchAttribute` the moment an operator
+  # attaches a `datetime_range` field to a *compiled* type, which is exactly
+  # what the docs invite. It is also not optional on the dynamic tier: it is how
+  # a record resolves to the field definitions holding its schedule, and a
+  # select that omits it hands `Events.scope_for/1` an `%Ash.NotLoaded{}`.
+  #
+  # `FeedController.select_fields/1` branches for the same class of reason.
+  defp select_fields(%{source: :dynamic}), do: [:type_definition_id | @base_fields]
+  defp select_fields(_descriptor), do: @base_fields
+
   # ── records ───────────────────────────────────────────────────────────────
 
   defp records(org, types, tag) do
     limit = Feeds.entry_limit()
 
-    Enum.flat_map(types, &type_records(&1, org, tag, limit))
+    types
+    |> Enum.flat_map(&type_records(&1, org, tag, limit))
+    # Ordered and capped on the SAME key the per-type reads selected on, like
+    # the feeds. Without the final take, `limit` bounded each type rather than
+    # the calendar, so an org with twelve event types served twelve times the
+    # documented ceiling from an anonymous URL that clients poll on a timer.
+    |> Enum.sort_by(& &1.published_at, {:desc, DateTime})
+    |> Enum.take(limit)
   end
 
   defp type_records(descriptor, org, tag, limit) do
@@ -204,7 +225,7 @@ defmodule KilnCMSWeb.CalendarController do
         # by date itself (see #766 for the JSON index, where it does matter).
         sort: [published_at: :desc],
         limit: limit,
-        select: @base_fields
+        select: select_fields(descriptor)
       ]
     )
   end
@@ -215,14 +236,19 @@ defmodule KilnCMSWeb.CalendarController do
   defp filter(tag),
     do: [audience: :public, locale: KilnCMS.I18n.default_locale(), tags: [id: tag.id]]
 
+  # The locale is part of a document's identity — the slug alone is not unique
+  # across translations — so without it `limit: 1` with no `sort:` downloads
+  # whichever row Postgres happened to return, and the filename and UID are
+  # identical either way, so a client that re-fetches silently rewrites the
+  # event with a different language's summary.
   defp record_by_slug(descriptor, org, slug) do
     ContentTypes.list!(descriptor,
       authorize?: true,
       tenant: org.id,
       query: [
-        filter: [slug: slug, audience: :public],
+        filter: [slug: slug, audience: :public, locale: KilnCMS.I18n.default_locale()],
         limit: 1,
-        select: @base_fields
+        select: select_fields(descriptor)
       ]
     )
     |> List.first()

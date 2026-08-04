@@ -26,6 +26,7 @@ defmodule KilnCMS.Events do
   alias KilnCMS.CMS.FieldDefinition
 
   @default_time_zone "Etc/UTC"
+  @registry_ttl :timer.minutes(10)
 
   @doc """
   The deployment's default timezone for events with no explicit one.
@@ -56,20 +57,14 @@ defmodule KilnCMS.Events do
   @doc """
   A local wall time in `zone`, as a UTC instant.
 
-  DST gaps and ambiguities resolve exactly as
-  `KilnCMS.Events.Recurrence` resolves them — forward past a gap, first of an
-  ambiguous pair — because a range and its recurrences must not disagree about
-  what "01:30" meant.
+  DST gaps and ambiguities resolve exactly as `KilnCMS.Events.Recurrence`
+  resolves them — forward past a gap, first of an ambiguous pair — because a
+  range and its recurrences must not disagree about what "01:30" meant. That is
+  a delegation, not a promise: two identical copies stay identical only by
+  luck.
   """
   @spec to_utc(NaiveDateTime.t(), String.t()) :: {:ok, DateTime.t()} | :error
-  def to_utc(naive, zone) do
-    case DateTime.from_naive(naive, zone) do
-      {:ok, dt} -> {:ok, DateTime.shift_zone!(dt, "Etc/UTC")}
-      {:ambiguous, first, _second} -> {:ok, DateTime.shift_zone!(first, "Etc/UTC")}
-      {:gap, _before, just_after} -> {:ok, DateTime.shift_zone!(just_after, "Etc/UTC")}
-      {:error, _reason} -> :error
-    end
-  end
+  defdelegate to_utc(naive, zone), to: KilnCMS.Events.Recurrence
 
   @typedoc """
   How to find a type's field definitions.
@@ -111,12 +106,19 @@ defmodule KilnCMS.Events do
   @doc """
   The scope a *content-type descriptor's* field definitions live under.
 
-  The descriptor half of `scope_for/1`: a dynamic type is named by the id of the
-  `TypeDefinition` it was described from, a compiled one by its atom name.
+  The descriptor half of `scope_for/1`, and it must agree with it *exactly* —
+  callers key a map by one and look it up with the other. A compiled
+  descriptor's `:type` is the raw atom `:post` while `ContentTypes.type_name/1`
+  stringifies, so the name is normalised here: `{:content_type, :post}` and
+  `{:content_type, "post"}` are different map keys, and the mismatch was
+  invisible everywhere else because `definitions/2` accepts both spellings.
   """
   @spec scope_for_descriptor(map()) :: scope() | nil
   def scope_for_descriptor(%{source: :dynamic, definition: %{id: id}}), do: {:definition, id}
-  def scope_for_descriptor(%{type: type}) when not is_nil(type), do: {:content_type, type}
+
+  def scope_for_descriptor(%{type: type}) when not is_nil(type),
+    do: {:content_type, to_string(type)}
+
   def scope_for_descriptor(_descriptor), do: nil
 
   @doc """
@@ -129,8 +131,16 @@ defmodule KilnCMS.Events do
   """
   @spec calendar_types(Ash.UUID.t()) :: [map()]
   def calendar_types(org_id) do
-    (ContentTypes.all() ++ ContentTypes.dynamic_all(org_id))
-    |> Enum.filter(&event_type?(scope_for_descriptor(&1), org_id))
+    # Cached, because this is one field-definition read *per content type* and
+    # it runs on the public `.ics` routes before the response cache is even
+    # consulted — so an org with twenty types paid twenty queries on every
+    # request, cache hits and 404s included. Busted by `BustTypeRegistry`, which
+    # now runs on `FieldDefinition` writes too, since a field is what decides
+    # the answer.
+    KilnCMS.Cache.fetch(KilnCMS.Cache.calendar_types_key(org_id), @registry_ttl, fn ->
+      (ContentTypes.all() ++ ContentTypes.dynamic_all(org_id))
+      |> Enum.filter(&event_type?(scope_for_descriptor(&1), org_id))
+    end)
   end
 
   @doc """

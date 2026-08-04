@@ -172,9 +172,25 @@ defmodule KilnCMS.Cache do
   """
   @spec bust_type_registry(Ash.UUID.t()) :: :ok
   def bust_type_registry(org_id) do
-    if enabled?(), do: Cachex.del(@cache, type_registry_key(org_id))
+    if enabled?() do
+      Cachex.del(@cache, type_registry_key(org_id))
+      Cachex.del(@cache, calendar_types_key(org_id))
+    end
+
     :ok
   end
+
+  @doc """
+  Cache key for which of a site's content types are event-shaped (#480).
+
+  Its own key rather than a slice of the type registry, because the answer
+  depends on `FieldDefinition` rows and not on `TypeDefinition` ones — a
+  `datetime_range` field being added is what changes it. Both writes bust it
+  (`Changes.BustTypeRegistry` runs on each), so the TTL is a backstop rather
+  than the mechanism.
+  """
+  @spec calendar_types_key(Ash.UUID.t()) :: String.t()
+  def calendar_types_key(org_id), do: "content_types:calendar:#{org_id}"
 
   @doc """
   Cache key for a site's resolved white-label branding tokens (#48). Per-org:

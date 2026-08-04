@@ -3412,15 +3412,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # reopens unchecked, and a stored `false` renders `value="false"`, so ticking
   # the box submits the string "false" and the flag can never be turned on.
   #
-  # So: a fixed `value="true"`, `checked` from the stored value, and a hidden
-  # companion so that unticking submits something rather than nothing. The
-  # hidden field is what makes "off" distinguishable from "the part was never
-  # rendered", which matters because a field type's `cast/2` sees only the parts
-  # that arrive.
+  # So: a fixed `value="true"` and `checked` from the stored value.
+  #
+  # And deliberately **no** hidden `false` companion, which is the usual Phoenix
+  # pairing. `ApplyCustomFields.blank_for?/2` calls a composite field empty when
+  # every part is blank, and `"false"` is not blank — so the companion made an
+  # untouched widget look filled-in, and an *optional* `datetime_range` field
+  # made every document of its type unsaveable with "start is required". An
+  # absent key already means false to `cast/2`, so unticking needs nothing.
   defp composite_part(%{part: %{type: "checkbox"}} = assigns) do
     ~H"""
     <label class="mt-5 flex items-center gap-2 text-xs text-base-content/70">
-      <input type="hidden" name={"#{@name}[#{@part.key}]"} value="false" />
       <input
         id={cf_part_id(@definition, @part)}
         type="checkbox"
@@ -3428,7 +3430,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         value="true"
         checked={composite_part_checked?(@value, @part.key)}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
-        class="checkbox checkbox-sm"
+        class="size-4 rounded border border-base-content/30 accent-primary"
         {Map.get(@part, :attrs, %{})}
       />
       {@part.label}
