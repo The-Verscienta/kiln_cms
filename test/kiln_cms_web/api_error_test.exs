@@ -124,11 +124,7 @@ defmodule KilnCMSWeb.ApiErrorTest do
     # to this list is the decision; hand-writing the envelope is not.
     @allowed %{
       # The implementation, plus the moduledoc that shows the shape.
-      "lib/kiln_cms_web/api_error.ex" => "the one implementation",
-      # Phoenix's fallback view for *raised* errors. Renders `errors` as an
-      # object rather than an array, so it does not match this contract at all
-      # — tracked separately rather than changed in passing (#750).
-      "lib/kiln_cms_web/controllers/error_json.ex" => "raised-error fallback, see #750"
+      "lib/kiln_cms_web/api_error.ex" => "the one implementation"
     }
 
     test "no module under lib/kiln_cms_web/ writes the envelope by hand" do

@@ -76,7 +76,18 @@ defmodule KilnCMSWeb.ResolveTest do
   end
 
   test "rejects a path without a leading slash", %{conn: conn} do
-    assert conn |> get("/api/resolve?path=blog/x") |> json_response(400)
-    assert conn |> get("/api/resolve") |> json_response(400)
+    # Both inputs hit the same controller clause, and both are an ERROR
+    # (there is no path to answer a verdict about) — so both answer
+    # KilnCMSWeb.ApiError's envelope, unlike the 404 above, which is a
+    # verdict (#750).
+    for response <- [
+          conn |> get("/api/resolve?path=blog/x") |> json_response(400),
+          conn |> get("/api/resolve") |> json_response(400)
+        ] do
+      assert %{"errors" => [%{"status" => "400", "code" => "missing_path", "detail" => detail}]} =
+               response
+
+      assert detail =~ "path"
+    end
   end
 end

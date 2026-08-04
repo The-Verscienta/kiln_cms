@@ -13,6 +13,21 @@ defmodule KilnCMSWeb.ResolveController do
   Mirrors delivery semantics exactly: only published content resolves, content
   always beats a stale redirect, and redirects point at the record's *current*
   URL (no chains).
+
+  ## `status` here is a verdict, not `KilnCMSWeb.ApiError`'s status code (#750)
+
+  `"ok"` / `"moved"` / `"not_found"` is a three-valued answer to "what is at
+  this path", not an HTTP status that happens to be spelled oddly — the 404
+  above is a **response**, not an **error**: the path resolved cleanly to
+  "nothing here", the same way a 200 resolves to "here it is". Kept as-is
+  (not renamed to avoid colliding with the envelope's numeric `status`)
+  because every one of these three answers already shares the same key, and
+  splitting only the 404 case out would make the *consistent* member of the
+  trio the odd one.
+
+  A missing/malformed `?path=` **is** an error (there is no path to answer a
+  verdict about), and answers `KilnCMSWeb.ApiError`'s envelope like every
+  other headless surface.
   """
   use KilnCMSWeb, :controller
 
@@ -52,9 +67,12 @@ defmodule KilnCMSWeb.ResolveController do
   end
 
   def show(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: "pass ?path=/... (leading slash required)"})
+    KilnCMSWeb.ApiError.send(
+      conn,
+      :bad_request,
+      "missing_path",
+      "pass ?path=/... (leading slash required)"
+    )
   end
 
   defp resolve_alias_or_redirect(conn, path, locale, org_id) do
