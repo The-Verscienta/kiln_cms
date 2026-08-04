@@ -60,7 +60,7 @@ msgstr ""
 msgid "%{count} selected"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:189
+#: lib/kiln_cms_web/live/analytics_live.ex:177
 #: lib/kiln_cms_web/live/api_key_live.ex:125
 #: lib/kiln_cms_web/live/automation_live.ex:221
 #: lib/kiln_cms_web/live/billing_live.ex:352
@@ -83,7 +83,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:508
 #: lib/kiln_cms_web/live/analytics_live.ex:25
-#: lib/kiln_cms_web/live/analytics_live.ex:191
+#: lib/kiln_cms_web/live/analytics_live.ex:179
 #, elixir-autogen, elixir-format
 msgid "Analytics"
 msgstr ""
@@ -111,7 +111,7 @@ msgid "Cancel"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:490
-#: lib/kiln_cms_web/live/analytics_live.ex:273
+#: lib/kiln_cms_web/live/analytics_live.ex:269
 #: lib/kiln_cms_web/live/editor_live.ex:32
 #: lib/kiln_cms_web/live/editor_live.ex:459
 #: lib/kiln_cms_web/live/editor_live.ex:504
@@ -148,12 +148,12 @@ msgstr ""
 msgid "Editor"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:279
+#: lib/kiln_cms_web/live/analytics_live.ex:275
 #, elixir-autogen, elixir-format
 msgid "Last viewed"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:265
+#: lib/kiln_cms_web/live/analytics_live.ex:261
 #, elixir-autogen, elixir-format
 msgid "Most viewed"
 msgstr ""
@@ -164,8 +164,8 @@ msgstr ""
 msgid "New %{type}"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:233
-#: lib/kiln_cms_web/live/analytics_live.ex:267
+#: lib/kiln_cms_web/live/analytics_live.ex:229
+#: lib/kiln_cms_web/live/analytics_live.ex:263
 #, elixir-autogen, elixir-format
 msgid "No views recorded yet."
 msgstr ""
@@ -181,7 +181,7 @@ msgstr ""
 msgid "Nothing matches the current filter."
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:193
+#: lib/kiln_cms_web/live/analytics_live.ex:181
 #, elixir-autogen, elixir-format
 msgid "Privacy-first content views — aggregate counts only, no visitor tracking."
 msgstr ""
@@ -227,7 +227,7 @@ msgstr ""
 msgid "Taxonomy"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:200
+#: lib/kiln_cms_web/live/analytics_live.ex:196
 #, elixir-autogen, elixir-format
 msgid "Total views"
 msgstr ""
@@ -240,7 +240,7 @@ msgstr ""
 msgid "Trash"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:274
+#: lib/kiln_cms_web/live/analytics_live.ex:270
 #: lib/kiln_cms_web/live/form_builder_live.ex:544
 #: lib/kiln_cms_web/live/media_live.ex:1220
 #: lib/kiln_cms_web/live/slug_regen_live.ex:225
@@ -1416,7 +1416,7 @@ msgstr ""
 msgid "%{count} results for “%{query}”."
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:296
+#: lib/kiln_cms_web/live/analytics_live.ex:292
 #: lib/kiln_cms_web/live/content_editor_live.ex:5042
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:470
 #, elixir-autogen, elixir-format
@@ -6100,26 +6100,26 @@ msgstr ""
 msgid "Use this in content. Pasting it into the address bar downloads the file instead of displaying it."
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:227
+#: lib/kiln_cms_web/live/analytics_live.ex:223
 #, elixir-autogen, elixir-format, fuzzy
 msgid "%{count} day"
 msgid_plural "%{count} days"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:203
+#: lib/kiln_cms_web/live/analytics_live.ex:199
 #, elixir-autogen, elixir-format, fuzzy
 msgid "All time"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:248
+#: lib/kiln_cms_web/live/analytics_live.ex:244
 #, elixir-autogen, elixir-format
 msgid "Content views per day for the last %{count} day"
 msgid_plural "Content views per day for the last %{count} days"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:258
+#: lib/kiln_cms_web/live/analytics_live.ex:254
 #, elixir-autogen, elixir-format
 msgid "Daily buckets use UTC calendar days; today's bar is still filling. History starts when this feature was deployed."
 msgstr ""
@@ -6129,43 +6129,43 @@ msgstr ""
 msgid "Day"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:211
+#: lib/kiln_cms_web/live/analytics_live.ex:207
 #, elixir-autogen, elixir-format
 msgid "Last %{count} day"
 msgid_plural "Last %{count} days"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:236
+#: lib/kiln_cms_web/live/analytics_live.ex:232
 #, elixir-autogen, elixir-format
 msgid "No views in the last %{count} day."
 msgid_plural "No views in the last %{count} days."
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:219
+#: lib/kiln_cms_web/live/analytics_live.ex:215
 #, elixir-autogen, elixir-format
 msgid "Trend range"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:276
+#: lib/kiln_cms_web/live/analytics_live.ex:272
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Views (%{count}d)"
 msgid_plural "Views (%{count}d)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:278
+#: lib/kiln_cms_web/live/analytics_live.ex:274
 #, elixir-autogen, elixir-format
 msgid "Views (all time)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:207
+#: lib/kiln_cms_web/live/analytics_live.ex:203
 #, elixir-autogen, elixir-format
 msgid "Views in range"
 msgstr ""
 
-#: lib/kiln_cms_web/live/analytics_live.ex:218
+#: lib/kiln_cms_web/live/analytics_live.ex:214
 #, elixir-autogen, elixir-format
 msgid "Views over time"
 msgstr ""
@@ -7445,3 +7445,13 @@ msgid "%{paths} points at content that isn't published yet."
 msgid_plural "%{count} links point at content that isn't published yet: %{paths}"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:188
+#, elixir-autogen, elixir-format
+msgid "Export (CSV)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex:185
+#, elixir-autogen, elixir-format
+msgid "Export (JSON)"
+msgstr ""

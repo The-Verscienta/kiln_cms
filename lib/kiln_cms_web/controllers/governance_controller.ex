@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.GovernanceController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Governance
+  alias KilnCMSWeb.CSV
 
   def export(conn, %{"type" => type, "id" => id}) do
     with_trail(conn, type, id, fn conn, trail ->
@@ -118,25 +119,7 @@ defmodule KilnCMSWeb.GovernanceController do
           ]
         end)
 
-    Enum.map_join([~w(kind at action who publish changed reference note) | rows], &csv_line/1)
-  end
-
-  defp csv_line(fields), do: Enum.map_join(fields, ",", &csv_field/1) <> "\r\n"
-
-  # RFC 4180: quote a field when it holds a comma, quote, or newline; quotes
-  # double. Prefix any formula-leading character so a spreadsheet app never
-  # executes a cell that came from user-entered content (CSV injection).
-  defp csv_field(nil), do: ""
-
-  defp csv_field(value) do
-    value = to_string(value)
-    value = if String.match?(value, ~r/\A[=+\-@\t\r]/), do: "'" <> value, else: value
-
-    if String.contains?(value, [",", "\"", "\n", "\r"]) do
-      "\"" <> String.replace(value, "\"", "\"\"") <> "\""
-    else
-      value
-    end
+    Enum.map_join([~w(kind at action who publish changed reference note) | rows], &CSV.line/1)
   end
 
   defp chain_status({:tampered, reason}), do: "tampered: #{reason}"

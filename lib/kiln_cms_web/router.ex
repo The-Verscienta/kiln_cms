@@ -363,6 +363,13 @@ defmodule KilnCMSWeb.Router do
     # controller against the `:browser`-loaded user.
     get "/editor/governance/:type/:id/export.json", GovernanceController, :export
     get "/editor/governance/:type/:id/export.csv", GovernanceController, :export_csv
+
+    # Analytics export (#618, phase 1) — streamed file downloads, editor-gated
+    # (not admin-only like governance above: `AnalyticsLive` itself is
+    # editor-visible, so this route has to be declared outside `:editor_routes`
+    # to be reachable as a controller download while keeping the same tier).
+    get "/editor/analytics/export.json", AnalyticsExportController, :export
+    get "/editor/analytics/export.csv", AnalyticsExportController, :export_csv
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only
