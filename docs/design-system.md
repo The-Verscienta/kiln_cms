@@ -4,11 +4,14 @@ A small, self-owned Tailwind design system for the admin/editor UI — **no
 DaisyUI**. Two pieces: semantic **color tokens** (in `assets/css/app.css`) and
 shared **HEEx component patterns** (in `lib/kiln_cms_web/components/`).
 
-**Visual identity — "kiln" (warm clay).** A fired-clay terracotta brand
-(`primary`) on warm bisque surfaces, with an ember `accent`, tuned to evoke the
-product name. Light and dark are both first-class. Type is a refined system
-stack (no web-font dependency); radii are slightly softened
-(`--radius-*`).
+**Visual identity — "ember".** A `#FF6200` ember brand (`primary`) on
+neutral-gray surfaces. Light and dark are both first-class — dark mode uses a
+brighter ember with the same hue. Type is a refined system stack (no
+web-font dependency); radii are slightly softened (`--radius-*`).
+
+This page is the token/component *reference*. For the brand principles, the
+class-based component kit (`.btn`, `.card`, `.field-*`, …), and the console
+app shell, see [Design language](design-language.md).
 
 ## Color tokens
 

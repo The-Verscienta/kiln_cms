@@ -70,7 +70,7 @@ declarative, so the module *is* the specification.
 | Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
 | Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
 | Wire up an external front end | [Visual-editing bridge](visual-editing-bridge.md), [Static export](static-export.md) |
-| Style the admin UI | [Design system](design-system.md) |
+| Style the admin UI | [Design language](design-language.md), [Design system](design-system.md) |
 | Write a plugin | [Runtime extensibility](plugin-extensibility.md) |
 | Configure an install | [Environment variables](environment-variables.md) |
 | Operate it in production | [Backups](backups.md), [Observability](observability.md), [Performance](performance.md), [Resilient delivery](resilient-delivery.md) |

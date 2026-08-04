@@ -128,6 +128,7 @@ defmodule KilnCMS.MixProject do
       # Modeling & extending
       "docs/extending-content.md": [],
       "docs/events.md": [title: "Events"],
+      "docs/design-language.md": [],
       "docs/design-system.md": [],
       "docs/plugin-extensibility.md": [],
       "docs/frontend-assets.md": [],
@@ -165,7 +166,6 @@ defmodule KilnCMS.MixProject do
       "docs/advanced-analytics-plan.md": [],
       "docs/collaborative-editing-spike.md": [],
       "docs/content-editor-modernization.md": [],
-      "docs/design-language.md": [],
       "docs/dynamic-content-types-plan.md": [],
       "docs/form-builder-plan.md": [],
       "docs/mobile-admin-spike.md": [],
@@ -228,6 +228,7 @@ defmodule KilnCMS.MixProject do
       "Modeling & extending": [
         "docs/extending-content.md",
         "docs/events.md",
+        "docs/design-language.md",
         "docs/design-system.md",
         "docs/plugin-extensibility.md",
         "docs/frontend-assets.md"
@@ -267,7 +268,6 @@ defmodule KilnCMS.MixProject do
         "docs/advanced-analytics-plan.md",
         "docs/collaborative-editing-spike.md",
         "docs/content-editor-modernization.md",
-        "docs/design-language.md",
         "docs/dynamic-content-types-plan.md",
         "docs/form-builder-plan.md",
         "docs/mobile-admin-spike.md",
