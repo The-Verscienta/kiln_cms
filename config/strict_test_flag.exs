@@ -31,27 +31,57 @@ defmodule KilnCMS.Config.StrictTestFlag do
   def false_values, do: @false_values
 
   @doc """
-  Whether `KILN_STRICT_TEST` selects strict tenancy: an on-spelling enables
-  it, anything else (unset, blank, an off-spelling, or unrecognized) does not.
+  Whether `KILN_STRICT_TEST` selects strict tenancy: an on-spelling enables it,
+  an off-spelling, a blank value or an unset variable does not, and anything
+  else stays non-strict **and says so on stderr**.
 
-  Deliberately does not warn on an unrecognized value, unlike
-  `KilnCMS.Config.Env.fetch/1` — `Logger` and `:standard_error` warnings are
-  indistinguishable from ordinary compiler noise this early. This narrows the
-  original bug (#646) to the four blessed spellings rather than eliminating
-  its shape entirely: a value that is neither a recognized on- nor
-  off-spelling (a typo, not one of `true`/`1`/`yes`/`on`/`false`/`0`/`no`/`off`)
-  still silently selects the NON-strict build, exactly like an unset variable
-  — `test_helper.exs`'s `--only strict_tenancy` selection then runs zero
-  tests, exit 0, with nothing to distinguish it from "the leg wasn't invoked".
-  `KilnCMS.StrictTenancyTest` does NOT catch this: an excluded test file
-  cannot fail. CI hardcodes the literal `"1"`, so this residual only matters
-  for a contributor invoking the strict leg by hand with a mistyped value.
+  That last clause is the whole difference from the first cut of this parser,
+  which treated a typo exactly like an unset variable and stayed silent. Its own
+  documentation named the cost: `test_helper.exs` then selects `--only
+  strict_tenancy` against a fail-open build, which runs zero tests and exits 0,
+  indistinguishable from "the leg was never invoked". `KilnCMS.StrictTenancyTest`
+  cannot catch it — an excluded test file has nothing to fail — so a silent
+  misparse here has no observable symptom at all. That is the #646 shape
+  surviving in miniature: the value you typed produced the opposite of what you
+  asked for, quietly.
+
+  The objection to warning was that stderr this early is indistinguishable from
+  compiler noise. Fair, and it is why the message names the variable, quotes the
+  value back, and states the consequence rather than just complaining — but the
+  comparison is not "warning versus clean output", it is "warning versus
+  nothing". `KilnCMS.Config.Env` writes to stderr for exactly this case, and
+  `KilnCMS.Application` does the same for an unparseable cron expression, so a
+  reader who greps for either finds the same shape.
+
+  Distinguishing a typo from a deliberate `false` is what makes the message
+  possible, and it is why `@false_values` is now load-bearing rather than a list
+  that existed only to be compared in a test.
   """
   @spec strict?(String.t() | nil) :: boolean()
   def strict?(raw) do
-    case raw do
+    case raw && raw |> String.trim() |> String.downcase() do
       nil -> false
-      value -> String.downcase(String.trim(value)) in @true_values
+      # A blank `KILN_STRICT_TEST=` is the routine `.env` artifact: unset, not a
+      # mistake, and not worth a warning.
+      "" -> false
+      value when value in @true_values -> true
+      value when value in @false_values -> false
+      _typo -> unrecognized(raw)
     end
+  end
+
+  # `raw`, not the normalized form: trimming and downcasing are exactly what
+  # caused the mismatch, so echoing the operator's own bytes is the only clue
+  # they can grep their shell history or CI config for. Same reasoning, and the
+  # same wording, as `KilnCMS.Config.Env.fetch/1`.
+  defp unrecognized(raw) do
+    IO.puts(
+      :standard_error,
+      "KILN_STRICT_TEST is set to an unrecognized value (#{inspect(raw)}); " <>
+        "compiling WITHOUT strict tenancy, so the strict leg would run no tests. " <>
+        "Use one of: #{Enum.join(@true_values, "/")}, #{Enum.join(@false_values, "/")}."
+    )
+
+    false
   end
 end
