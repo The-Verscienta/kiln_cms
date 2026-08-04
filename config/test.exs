@@ -90,6 +90,11 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
   limits: %{
     api: {1_000_000, :timer.minutes(1)},
     auth: {200, :timer.minutes(1)},
+    # Raised for the same reason `:auth` is: every request in the suite comes
+    # from 127.0.0.1, so the shipped 5/min would start refusing the sixth
+    # page-level registration added anywhere — landing as a failure in an
+    # unrelated file (#724).
+    register: {200, :timer.minutes(1)},
     delivery: {1_000_000, :timer.minutes(1)},
     gql: {1_000_000, :timer.minutes(1)},
     probe: {1_000_000, :timer.minutes(1)}

@@ -8,6 +8,12 @@ defmodule KilnCMSWeb.RateLimit do
     gql: {60, :timer.minutes(1)},
     api: {120, :timer.minutes(1)},
     auth: {20, :timer.minutes(1)},
+    # Account creation (#724). Its own bucket rather than a share of `:auth`,
+    # so a burst of legitimate sign-ups from one office NAT cannot lock
+    # *sign-in* for everyone behind it. Tighter in absolute terms because
+    # registering is rarer and more expensive than attempting a sign-in: a
+    # bcrypt hash and a confirmation mail per request.
+    register: {5, :timer.minutes(1)},
     # Public HTML delivery — generous, just a flood/abuse ceiling per IP.
     delivery: {300, :timer.minutes(1)},
     # Signed preview links — tight, to slow token enumeration / draft scraping.

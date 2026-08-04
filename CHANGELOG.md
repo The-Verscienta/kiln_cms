@@ -422,6 +422,60 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **Registration, password-reset and magic-link forms are bounded per client
+  address.** #715 closed this for the sign-in submit: AshAuthentication's forms
+  are LiveComponents calling `AshPhoenix.Form.submit/2` in-process, so the
+  credentials arrive as a `/live` event, pass no router pipeline, and no plug
+  can reach them. The same argument covered three more forms and none was
+  wired.
+
+  Registration was the sharp one: one websocket replaying `submit` was
+  **unlimited account creation** — a bcrypt hash and a confirmation mail per
+  event, from a single address, with nothing counting.
+  `register_with_password` carried `RegistrationEnabled`, `HashPasswordChange`
+  and `GenerateTokenChange`, and no budget of any kind. It is worth knowing that
+  all four forms render on all three of `/sign-in`, `/register` and `/reset` —
+  `Components.Password` emits the sign-in block unconditionally and hides the
+  rest with a CSS class — so which page a caller is on bounded nothing.
+
+  Registration now charges a new **`:register`** bucket, tighter than `:auth`
+  and separate from it: sharing would let a burst of legitimate sign-ups lock
+  *sign-in* for everyone behind one office NAT. It gets no per-*account* budget,
+  because there is no account yet and the address is attacker-chosen — keying on
+  it would let anyone deny a specific address its first registration.
+
+  Reset and magic-link requests charge `:auth`, alongside the sign-in they sit
+  beside. The per-address mail budget already capped the mailbomb; what was
+  uncapped was the request rate, and each one is a database read plus a token
+  mint. This also makes `docs/threat-model.md`'s `/register` and `/reset` rows
+  honest again — after #715 they were true only of the GETs.
+
+  Registration has a second door, which review caught: `auth_routes` also
+  generates `POST /auth/user/password/register` as the non-JS fallback, and it
+  ran through the pipeline's `:auth` plug at **20/min** — four times the stated
+  ceiling — while the action's charge saw no client-IP context and did nothing.
+  So a scripted client got the looser limit *and* spent the sign-in bucket
+  doing it, which is the coupling `:register` exists to prevent. That path now
+  charges `:register` **instead of** `:auth`; charging both would leave the
+  coupling in place.
+
+  A refused registration also rendered nothing at all — `AuthenticationFailed`
+  is a forbidden-class error, which `AshPhoenix.Form` surfaces as no field
+  error, so the Register button appeared to do nothing. It now carries an
+  `:invalid`-class error on the email field, because a registration refusal has
+  no secret to keep: it says only that the caller's own address is out of
+  budget, which they know.
+
+  Each of the three needed a different hook, which is why they are three
+  modules over a shared `KilnCMS.Accounts.ClientIpBudget`: a create takes a
+  `change`, the magic-link request is a read and takes a `prepare`, and the
+  reset is a *generic* action with neither, so its charge wraps the run. All of
+  them charge from `before_action` rather than the callback body, because those
+  run per changeset build and `AshPhoenix.Form.validate/2` builds one per
+  keystroke on a `phx-change` form — a charge there would lock a user out while
+  they typed their password. A test walks the whole seam for each form, from the
+  rendered page through to the bucket. (#724)
+
 - **The OpenAPI document and Swagger explorer are no longer served in
   production by default.** Both shipped unauthenticated in *every* environment
   — unlike `/dev/dashboard`, `/dev/mailbox`, `/admin` and the GraphQL
