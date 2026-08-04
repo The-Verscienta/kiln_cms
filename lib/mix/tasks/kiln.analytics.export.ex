@@ -114,7 +114,8 @@ defmodule Mix.Tasks.Kiln.Analytics.Export do
   defp rows(from, to, org_id) do
     Stream.concat([
       Export.stream_rows(from, to, org_id, @actor),
-      Export.stream_referrer_rows(from, to, org_id, @actor)
+      Export.stream_referrer_rows(from, to, org_id, @actor),
+      Export.stream_funnel_rows(from, to, org_id, @actor)
     ])
   end
 

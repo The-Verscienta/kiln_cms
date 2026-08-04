@@ -3,23 +3,26 @@ defmodule KilnCMS.Analytics.Export do
   Shared row-shaping and streaming for the analytics export (#618): the
   browser controller (`KilnCMSWeb.AnalyticsExportController`) and
   `mix kiln.analytics.export` both page through `ContentViewDay.:in_range`
-  (and, since #620, `ReferrerDay.:in_range`) and resolve titles the same way,
-  so the two consumers can't drift on what a row looks like — only on how
-  each writes it (chunked HTTP response vs a device). #622's funnel sheet
-  extends the row shape here once, not in each caller.
+  (since #620, `ReferrerDay.:in_range` too; since #622, `FunnelReport.report/5`
+  per funnel) and resolve titles the same way, so the consumers can't drift
+  on what a row looks like — only on how each writes it (chunked HTTP
+  response vs a device).
 
-  View rows and referrer rows are two different grains (one per content item
-  per day; one per content item per day per source) sharing one export,
-  mirroring `KilnCMSWeb.GovernanceController`'s `kind`-tagged CSV precedent:
-  one fixed-width header, a `kind` column naming the row, irrelevant columns
+  View, referrer and funnel-step rows are three different grains (one per
+  content item per day; one per content item per day per source; one per
+  funnel step over the whole requested window) sharing one export, mirroring
+  `KilnCMSWeb.GovernanceController`'s `kind`-tagged CSV precedent: one
+  fixed-width header, a `kind` column naming the row, irrelevant columns
   left blank per kind. `csv_row/3`/`json_row/3` dispatch on the row's own
-  shape (a view row has `:views`; a referrer row has `:source`/`:hits`)
-  rather than taking an explicit kind argument, so an existing caller passing
-  a `ContentViewDay` row is unaffected.
+  shape (a view row has `:views`; a referrer row has `:source`/`:hits`; a
+  funnel-step row has `:funnel_slug`) rather than taking an explicit kind
+  argument, so an existing caller passing a `ContentViewDay` row is
+  unaffected.
   """
 
   alias KilnCMS.Analytics
   alias KilnCMS.Analytics.ContentViewDay
+  alias KilnCMS.Analytics.FunnelReport
   alias KilnCMS.Analytics.ReferrerDay
   alias KilnCMS.Analytics.Titles
 
@@ -82,7 +85,38 @@ defmodule KilnCMS.Analytics.Export do
     end
   end
 
-  @doc "One CSV row's fields — a view bucket or a referrer bucket, kind-tagged."
+  @doc """
+  Streams one row per funnel (#622), each carrying its full step report from
+  `FunnelReport.report/5` — targeted per-funnel reads, not a page through a
+  bucket table, so this is a single eager batch rather than `@batch_size`
+  pages: the number of funnels an org defines is small by construction (an
+  admin authors each one), unlike the potentially-thousands of daily
+  buckets `stream_rows/4` pages through. Empty when the org has no *active*
+  funnels — an inactive funnel is excluded the same way the dashboard would
+  hide it, not exported as a stale row.
+  """
+  @spec stream_funnel_rows(Date.t(), Date.t(), term(), term()) :: Enumerable.t()
+  def stream_funnel_rows(from, to, org, actor) do
+    funnels =
+      Analytics.list_funnels!(actor: actor, tenant: org, query: [filter: [active: true]])
+
+    case funnels do
+      [] ->
+        []
+
+      funnels ->
+        rows =
+          Enum.flat_map(funnels, fn funnel ->
+            funnel
+            |> FunnelReport.report(from, to, org, actor)
+            |> Enum.map(&Map.put(&1, :funnel_slug, funnel.slug))
+          end)
+
+        [{rows, %{}}]
+    end
+  end
+
+  @doc "One CSV row's fields — a view bucket, a referrer bucket, or a funnel step, kind-tagged."
   @spec csv_row(map(), map(), term()) :: [term()]
   def csv_row(%{views: views} = row, titles, org) do
     [
@@ -92,6 +126,8 @@ defmodule KilnCMS.Analytics.Export do
       row.content_id,
       Titles.title_for(row, titles, org),
       views,
+      nil,
+      nil,
       nil,
       nil
     ]
@@ -106,11 +142,28 @@ defmodule KilnCMS.Analytics.Export do
       Titles.title_for(row, titles, org),
       nil,
       source,
-      Analytics.suppress_low_count(hits)
+      Analytics.suppress_low_count(hits),
+      nil,
+      nil
     ]
   end
 
-  @doc "One JSON row (a plain map) — a view bucket or a referrer bucket, kind-tagged."
+  def csv_row(%{funnel_slug: funnel_slug} = row, _titles, _org) do
+    [
+      "funnel_step",
+      nil,
+      row.step.content_type,
+      row.step.content_id,
+      row.title,
+      row.display,
+      nil,
+      nil,
+      funnel_slug,
+      row.ratio
+    ]
+  end
+
+  @doc "One JSON row (a plain map) — a view bucket, a referrer bucket, or a funnel step, kind-tagged."
   @spec json_row(map(), map(), term()) :: map()
   def json_row(%{views: views} = row, titles, org) do
     %{
@@ -135,7 +188,24 @@ defmodule KilnCMS.Analytics.Export do
     }
   end
 
-  @doc "The fixed CSV header for `csv_row/3`'s field order (view and referrer rows share it)."
+  def json_row(%{funnel_slug: funnel_slug} = row, _titles, _org) do
+    %{
+      kind: "funnel_step",
+      funnel_slug: funnel_slug,
+      content_type: row.step.content_type,
+      content_id: row.step.content_id,
+      title: row.title,
+      views: row.display,
+      ratio: row.ratio
+    }
+  end
+
+  @doc """
+  The fixed CSV header for `csv_row/3`'s field order (view, referrer and
+  funnel-step rows share it — `funnel_slug`/`ratio` are blank outside the
+  `funnel_step` kind, and `day`/`source`/`hits` are blank within it).
+  """
   @spec csv_header() :: [String.t()]
-  def csv_header, do: ~w(kind day content_type content_id title views source hits)
+  def csv_header,
+    do: ~w(kind day content_type content_id title views source hits funnel_slug ratio)
 end

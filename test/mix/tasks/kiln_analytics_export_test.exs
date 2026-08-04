@@ -51,10 +51,10 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
 
     assert String.starts_with?(
              output,
-             "kind,day,content_type,content_id,title,views,source,hits\r\n"
+             "kind,day,content_type,content_id,title,views,source,hits,funnel_slug,ratio\r\n"
            )
 
-    assert output =~ ",5,,\r\n"
+    assert output =~ ",5,,,,\r\n"
     # The "Exported ..." summary goes to stderr, never stdout — stdout carries
     # only the export itself, so a piped/redirected run stays parseable.
     refute output =~ "Exported"
@@ -143,7 +143,7 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
 
     on_exit(fn -> File.rm(path) end)
 
-    assert File.read!(path) =~ ",3,,\r\n"
+    assert File.read!(path) =~ ",3,,,,\r\n"
   end
 
   test "raises when --from is after --to" do
@@ -163,6 +163,40 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
   test "raises on an unknown --format" do
     assert_raise Mix.Error, ~r/unknown --format/, fn ->
       capture_io(fn -> Export.run(["--format=xml"]) end)
+    end
+  end
+
+  describe "funnel rows (#622)" do
+    defp admin do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "kae-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+    end
+
+    test "includes a funnel step row alongside view rows" do
+      id = Ash.UUID.generate()
+      seed_bucket(%{content_id: id, day: today(), views: 8})
+
+      funnel =
+        KilnCMS.Analytics.create_funnel!(
+          %{name: "Signup", slug: "kae-#{System.unique_integer([:positive])}"},
+          actor: admin()
+        )
+
+      KilnCMS.Analytics.create_funnel_step!(
+        %{funnel_id: funnel.id, content_type: "page", content_id: id, position: 0},
+        actor: admin()
+      )
+
+      output =
+        capture_io(fn ->
+          Export.run(["--from=#{today()}", "--to=#{today()}"])
+        end)
+
+      assert output =~ "funnel_step,,page,#{id},(deleted),8,,,#{funnel.slug},\r\n"
     end
   end
 end

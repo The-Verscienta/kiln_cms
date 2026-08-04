@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
   use KilnCMSWeb.ConnCase, async: false
 
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Analytics
   alias KilnCMS.Analytics.ContentViewDay
   alias KilnCMS.CMS
 
@@ -128,7 +129,8 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
         )
         |> Map.fetch!(:resp_body)
 
-      assert body == "kind,day,content_type,content_id,title,views,source,hits\r\n"
+      assert body ==
+               "kind,day,content_type,content_id,title,views,source,hits,funnel_slug,ratio\r\n"
     end
   end
 
@@ -323,6 +325,108 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
 
       assert [row] = Jason.decode!(body)
       assert row["hits"] == "< 5"
+    end
+  end
+
+  describe "funnel export (#622)" do
+    defp funnel_with_steps!(admin, steps) do
+      funnel =
+        Analytics.create_funnel!(
+          %{name: "Signup", slug: "aec-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      for {content_type, content_id, position} <- steps do
+        Analytics.create_funnel_step!(
+          %{
+            funnel_id: funnel.id,
+            content_type: content_type,
+            content_id: content_id,
+            position: position
+          },
+          actor: admin
+        )
+      end
+
+      funnel
+    end
+
+    test "CSV: a funnel step row is kind-tagged, with day/source/hits left blank",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      id = Ash.UUID.generate()
+      seed_bucket(%{content_type: "page", content_id: id, day: today(), views: 8})
+      funnel = funnel_with_steps!(admin, [{"page", id, 0}])
+
+      body =
+        conn
+        |> log_in(admin)
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      assert body =~ "funnel_step,,page,#{id},(deleted),8,,,#{funnel.slug},\r\n"
+    end
+
+    test "CSV: the ratio column carries the population-ratio percent", %{conn: conn} do
+      admin = authed_user(:admin)
+      landing = Ash.UUID.generate()
+      pricing = Ash.UUID.generate()
+      seed_bucket(%{content_type: "page", content_id: landing, day: today(), views: 20})
+      seed_bucket(%{content_type: "page", content_id: pricing, day: today(), views: 5})
+
+      funnel_with_steps!(admin, [{"page", landing, 0}, {"page", pricing, 1}])
+
+      body =
+        conn
+        |> log_in(admin)
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      assert body =~ "funnel_step,,page,#{pricing},(deleted),5,,,"
+      assert body =~ ",25.0\r\n"
+    end
+
+    test "an inactive funnel is omitted from the export", %{conn: conn} do
+      admin = authed_user(:admin)
+      id = Ash.UUID.generate()
+      seed_bucket(%{content_type: "page", content_id: id, day: today(), views: 1})
+      funnel = funnel_with_steps!(admin, [{"page", id, 0}])
+      Analytics.update_funnel!(funnel, %{active: false}, actor: admin)
+
+      body =
+        conn
+        |> log_in(admin)
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      refute body =~ "funnel_step,"
+    end
+
+    test "JSON: a funnel step row carries funnel_slug and ratio, no day key", %{conn: conn} do
+      admin = authed_user(:admin)
+      id = Ash.UUID.generate()
+      seed_bucket(%{content_type: "page", content_id: id, day: today(), views: 8})
+      funnel = funnel_with_steps!(admin, [{"page", id, 0}])
+
+      body =
+        conn
+        |> log_in(admin)
+        |> get(
+          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      rows = Jason.decode!(body)
+      assert [row] = Enum.filter(rows, &(&1["kind"] == "funnel_step"))
+      assert row["funnel_slug"] == funnel.slug
+      assert row["views"] == 8
+      refute Map.has_key?(row, "day")
     end
   end
 
