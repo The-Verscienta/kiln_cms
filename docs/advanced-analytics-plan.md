@@ -403,7 +403,7 @@ config gate. **This table is the status of record.**
 | **3** | #620 | done | Referrer breakdown UI on `AnalyticsLive` (with low-count suppression); export gains referrer columns | 2, and 1 for the export half |
 | **4** | #621 | done | `Funnel`/`FunnelStep` definitions + admin CRUD | — |
 | **5** | #622 | done | Funnel report derived from `ContentViewDay` + labelled ratios; export gains a funnel sheet | 4, and 1 for the export half |
-| **6** | #623 | not started | Month roll-up job (only if multi-year history is wanted) | — |
+| **6** | #623 | closed, not built | Month roll-up job (only if multi-year history is wanted) — closed per its own "don't build speculatively" guidance; no deployment has asked for multi-year trend | — |
 
 **Cut line:** Phase 1 alone is worth shipping — it makes the existing numbers
 portable and lands the shared CSV writer. Phases 2–3 are the highest
