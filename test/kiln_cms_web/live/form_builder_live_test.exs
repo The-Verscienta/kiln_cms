@@ -309,6 +309,106 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert CMS.recent_form_submissions!(form.id, authorize?: false) == []
   end
 
+  describe "entries moderation (#477)" do
+    test "shows a status badge and score, and can filter by status", %{conn: conn} do
+      admin = authed_user(:admin)
+      {form, [], lv, _html} = builder(conn, admin)
+
+      CMS.create_form_submission!(
+        %{form_id: form.id, data: %{"message" => "Hi there"}},
+        authorize?: false
+      )
+
+      spam =
+        CMS.create_form_submission!(
+          %{
+            form_id: form.id,
+            data: %{"message" => "Buy now http://a.co http://b.co http://c.co"},
+            fill_time_ms: 100
+          },
+          authorize?: false
+        )
+
+      html = lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+      assert html =~ "Hi there"
+      assert html =~ "Buy now"
+      assert html =~ "Spam"
+
+      filtered = render_click(lv, "filter_status", %{"status" => "spam"})
+      refute filtered =~ "Hi there"
+      assert filtered =~ "Buy now"
+
+      # And the other direction: filtering to "new" hides the spam one.
+      filtered_new = render_click(lv, "filter_status", %{"status" => "new"})
+      assert filtered_new =~ "Hi there"
+      refute filtered_new =~ "Buy now"
+
+      reloaded = CMS.get_form_submission!(spam.id, authorize?: false)
+      assert reloaded.status == :spam
+    end
+
+    test "mark as spam / mark as reviewed flip status from the entry itself", %{conn: conn} do
+      admin = authed_user(:admin)
+      {form, [], lv, _html} = builder(conn, admin)
+
+      submission =
+        CMS.create_form_submission!(
+          %{form_id: form.id, data: %{"message" => "Hi there"}},
+          authorize?: false
+        )
+
+      lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+
+      html =
+        lv
+        |> element(~s(button[phx-click="mark_submission_spam"][phx-value-id="#{submission.id}"]))
+        |> render_click()
+
+      assert html =~ "Spam"
+      assert CMS.get_form_submission!(submission.id, authorize?: false).status == :spam
+
+      html =
+        lv
+        |> element(
+          ~s(button[phx-click="mark_submission_reviewed"][phx-value-id="#{submission.id}"])
+        )
+        |> render_click()
+
+      assert html =~ "Reviewed"
+      assert CMS.get_form_submission!(submission.id, authorize?: false).status == :reviewed
+    end
+
+    test "bulk-marking the selected submissions as reviewed", %{conn: conn} do
+      admin = authed_user(:admin)
+      {form, [], lv, _html} = builder(conn, admin)
+
+      s1 =
+        CMS.create_form_submission!(%{form_id: form.id, data: %{"a" => "1"}}, authorize?: false)
+
+      s2 =
+        CMS.create_form_submission!(%{form_id: form.id, data: %{"a" => "2"}}, authorize?: false)
+
+      lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+      selected_html = render_click(lv, "select_all_visible", %{})
+      assert selected_html =~ "2 selected"
+
+      html = render_click(lv, "bulk_mark_reviewed", %{})
+
+      refute html =~ "2 selected"
+      refute html =~ ~s(phx-click="bulk_mark_reviewed")
+      assert CMS.get_form_submission!(s1.id, authorize?: false).status == :reviewed
+      assert CMS.get_form_submission!(s2.id, authorize?: false).status == :reviewed
+    end
+
+    test "the CSV export link is present and admin-gated at the controller", %{conn: conn} do
+      admin = authed_user(:admin)
+      {form, [], lv, _html} = builder(conn, admin)
+      html = lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+
+      assert html =~ ~s(/editor/forms/#{form.id}/entries/export.csv)
+    end
+  end
+
   test "the public form renders placeholder, default, width and submit label", %{conn: conn} do
     admin = authed_user(:admin)
 

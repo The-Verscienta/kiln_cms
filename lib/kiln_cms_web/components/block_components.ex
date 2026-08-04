@@ -227,6 +227,15 @@ defmodule KilnCMSWeb.BlockComponents do
       <%!-- Underscore-prefixed so it can't collide with an admin-defined field name. --%>
       <input :if={@embed} type="hidden" name="_kiln_embed" value="1" />
 
+      <%!-- The fill-time spam signal (#477): a signed "now", so the submit
+            handler can tell how long the visitor actually had the form open.
+            Also underscore-prefixed. --%>
+      <input
+        type="hidden"
+        name={KilnCMS.Forms.rendered_at_field()}
+        value={KilnCMS.Forms.rendered_at_token()}
+      />
+
       <%!-- Honeypot: hidden from humans, irresistible to bots. --%>
       <div style="position:absolute;left:-9999px" aria-hidden="true">
         <label>

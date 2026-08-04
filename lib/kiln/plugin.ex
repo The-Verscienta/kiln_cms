@@ -15,6 +15,9 @@ defmodule Kiln.Plugin do
     * `field_types/0` — `Kiln.FieldType` modules: custom-field value types
       admins can pick in the fields admin, coerced/validated by the plugin's
       `cast/2` on every content write.
+    * `spam_checks/0` — `Kiln.Forms.SpamCheck` modules (#477): a plugin's own
+      heuristic (or an external-provider check) run alongside the core scorer
+      on every public form submission, appended after the core checks.
     * `nav_items/0` — links in the admin top nav
       (`%{label: "...", path: "/editor/...", role: :editor | :admin}`).
     * `admin_routes/0` — LiveViews mounted in the admin-gated live session
@@ -70,6 +73,7 @@ defmodule Kiln.Plugin do
   @callback blocks() :: [module()]
   @callback field_types() :: [module()]
   @callback advisories() :: [module()]
+  @callback spam_checks() :: [module()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
   @callback editor_routes() :: [admin_route()]
@@ -113,6 +117,9 @@ defmodule Kiln.Plugin do
       def advisories, do: []
 
       @impl Kiln.Plugin
+      def spam_checks, do: []
+
+      @impl Kiln.Plugin
       def nav_items, do: []
 
       @impl Kiln.Plugin
@@ -138,6 +145,7 @@ defmodule Kiln.Plugin do
                      blocks: 0,
                      field_types: 0,
                      advisories: 0,
+                     spam_checks: 0,
                      nav_items: 0,
                      admin_routes: 0,
                      editor_routes: 0,

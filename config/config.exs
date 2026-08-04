@@ -179,6 +179,20 @@ config :kiln_cms, Kiln.Advisory,
     Kiln.Advisory.Checks.InternalLinks
   ]
 
+# Form submission spam scoring (#477) — post-storage triage on top of the
+# honeypot/rate-limit pre-storage defenses in `KilnCMS.Forms`. Order here is
+# irrelevant (weights just sum); a check that raises is dropped and logged
+# rather than failing a visitor's submission. Plugins append their own via
+# the `spam_checks/0` callback on `Kiln.Plugin`. See `Kiln.Forms.SpamCheck`.
+config :kiln_cms, Kiln.Forms.SpamCheck,
+  threshold: 50,
+  checks: [
+    Kiln.Forms.SpamCheck.Checks.LinkDensity,
+    Kiln.Forms.SpamCheck.Checks.DisallowedKeywords,
+    Kiln.Forms.SpamCheck.Checks.FillTime,
+    Kiln.Forms.SpamCheck.Checks.LocaleMismatch
+  ]
+
 # `req_llm` (and its `llm_db` catalog) source a `.env` from the working
 # directory into the OS environment at application start, unconditionally —
 # including on a default install with drafting off. That would let a stray

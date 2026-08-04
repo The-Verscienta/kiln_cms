@@ -42,6 +42,11 @@ defmodule KilnCMSWeb.FormBuilderLive do
        |> assign(:tab, :fields)
        |> assign(:selected_id, nil)
        |> assign(:submissions, [])
+       # Entries moderation (#477): nil = every status; a submission id set
+       # for the bulk mark actions, cleared on every filter change or reload
+       # so a stale selection can't act on rows no longer in view.
+       |> assign(:status_filter, nil)
+       |> assign(:selected_submissions, MapSet.new())
        |> reload_fields()}
     else
       {:error, _error} ->
@@ -172,7 +177,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
-  # --- submissions -------------------------------------------------------------
+  # --- submissions (moderation, #477) ------------------------------------------
 
   def handle_event("delete_submission", %{"id" => id}, socket) do
     opts = actor_opts(socket)
@@ -182,6 +187,57 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
 
     {:noreply, reload_submissions(socket)}
+  end
+
+  def handle_event("filter_status", %{"status" => status}, socket) do
+    {:noreply,
+     socket
+     |> assign(:status_filter, parse_status(status))
+     |> assign(:selected_submissions, MapSet.new())
+     |> reload_submissions()}
+  end
+
+  def handle_event("toggle_select", %{"id" => id}, socket) do
+    selected = socket.assigns.selected_submissions
+
+    updated =
+      if MapSet.member?(selected, id),
+        do: MapSet.delete(selected, id),
+        else: MapSet.put(selected, id)
+
+    {:noreply, assign(socket, :selected_submissions, updated)}
+  end
+
+  def handle_event("select_all_visible", _params, socket) do
+    ids = socket.assigns.submissions |> Enum.map(& &1.id) |> MapSet.new()
+    {:noreply, assign(socket, :selected_submissions, ids)}
+  end
+
+  def handle_event("clear_selection", _params, socket),
+    do: {:noreply, assign(socket, :selected_submissions, MapSet.new())}
+
+  def handle_event("mark_submission_spam", %{"id" => id}, socket),
+    do: {:noreply, mark(socket, [id], :mark_form_submission_spam)}
+
+  def handle_event("mark_submission_reviewed", %{"id" => id}, socket),
+    do: {:noreply, mark(socket, [id], :mark_form_submission_reviewed)}
+
+  def handle_event("bulk_mark_spam", _params, socket),
+    do:
+      {:noreply,
+       mark(
+         socket,
+         MapSet.to_list(socket.assigns.selected_submissions),
+         :mark_form_submission_spam
+       )}
+
+  def handle_event("bulk_mark_reviewed", _params, socket) do
+    {:noreply,
+     mark(
+       socket,
+       MapSet.to_list(socket.assigns.selected_submissions),
+       :mark_form_submission_reviewed
+     )}
   end
 
   # --- embed -------------------------------------------------------------------
@@ -204,6 +260,53 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # the allowlist rather than claiming this org's site is on it.
   defp cross_site_embedding?, do: KilnCMSWeb.Embed.cross_site?()
   defp allowed_embed_origins, do: KilnCMSWeb.Embed.allowed_origins_label()
+
+  # --- submissions: moderation helpers (#477) -----------------------------------
+
+  defp mark(socket, ids, action) do
+    opts = actor_opts(socket)
+
+    Enum.each(ids, fn id ->
+      with {:ok, submission} <- CMS.get_form_submission(id, opts) do
+        apply(CMS, action, [submission, %{}, opts])
+      end
+    end)
+
+    socket |> assign(:selected_submissions, MapSet.new()) |> reload_submissions()
+  end
+
+  defp parse_status("all"), do: nil
+
+  defp parse_status(status) when status in ~w(new reviewed spam),
+    do: String.to_existing_atom(status)
+
+  defp parse_status(_status), do: nil
+
+  # A function (not an attribute) so gettext resolves per-request locale,
+  # same reasoning as `palette/0`.
+  defp status_filters do
+    [
+      {"all", gettext("All")},
+      {"new", gettext("New")},
+      {"reviewed", gettext("Reviewed")},
+      {"spam", gettext("Spam")}
+    ]
+  end
+
+  defp export_query(nil), do: []
+  defp export_query(status), do: [status: status]
+
+  # Same `bg-<tone>/15 text-<tone>-ink` convention as
+  # `content_editor_live.ex`'s `state_badge_class/1` — the hand-authored kit
+  # has no `.badge-*` classes, so a DaisyUI-named one here would render with
+  # no styling at all.
+  defp status_badge_class(:new), do: "bg-info/15 text-info-ink"
+  defp status_badge_class(:reviewed), do: "bg-success/15 text-success-ink"
+  defp status_badge_class(:spam), do: "bg-error/15 text-error-ink"
+
+  defp status_label(:new), do: gettext("New")
+  defp status_label(:reviewed), do: gettext("Reviewed")
+  defp status_label(:spam), do: gettext("Spam")
 
   # --- data --------------------------------------------------------------------
 
@@ -250,11 +353,14 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   defp reload_submissions(socket) do
-    assign(
-      socket,
-      :submissions,
-      CMS.recent_form_submissions!(socket.assigns.form.id, actor_opts(socket))
-    )
+    submissions =
+      CMS.recent_form_submissions!(
+        socket.assigns.form.id,
+        %{status: socket.assigns.status_filter},
+        actor_opts(socket)
+      )
+
+    assign(socket, :submissions, submissions)
   end
 
   # Persist a full id ordering as 0-based positions, skipping no-op updates.
@@ -770,16 +876,105 @@ defmodule KilnCMSWeb.FormBuilderLive do
           </p>
         </section>
 
-        <section :if={@tab == :entries} class="max-w-3xl">
+        <section :if={@tab == :entries} class="max-w-3xl space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div role="group" aria-label={gettext("Filter by status")} class="flex gap-1">
+              <button
+                :for={{value, label} <- status_filters()}
+                type="button"
+                phx-click="filter_status"
+                phx-value-status={value}
+                aria-pressed={to_string(@status_filter == parse_status(value))}
+                class={[
+                  "rounded border px-2 py-1 text-xs",
+                  if(@status_filter == parse_status(value),
+                    do: "border-primary bg-primary text-primary-content",
+                    else: "border-base-content/20 hover:bg-base-200"
+                  )
+                ]}
+              >
+                {label}
+              </button>
+            </div>
+
+            <a
+              href={~p"/editor/forms/#{@form.id}/entries/export.csv?#{export_query(@status_filter)}"}
+              class="rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+            >
+              <.icon name="hero-arrow-down-tray" class="mr-1 size-3.5" />{gettext("Export CSV")}
+            </a>
+          </div>
+
+          <div
+            :if={MapSet.size(@selected_submissions) > 0}
+            class="flex items-center gap-2 rounded border border-base-content/15 bg-base-200/50 p-2 text-xs"
+          >
+            <span>
+              {ngettext("%{count} selected", "%{count} selected", MapSet.size(@selected_submissions),
+                count: MapSet.size(@selected_submissions)
+              )}
+            </span>
+            <button
+              type="button"
+              phx-click="bulk_mark_spam"
+              class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+            >
+              {gettext("Mark as spam")}
+            </button>
+            <button
+              type="button"
+              phx-click="bulk_mark_reviewed"
+              class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+            >
+              {gettext("Mark as reviewed")}
+            </button>
+            <button
+              type="button"
+              phx-click="clear_selection"
+              class="text-base-content/60 underline hover:text-base-content"
+            >
+              {gettext("Clear")}
+            </button>
+          </div>
+
           <p :if={@submissions == []} class="text-sm text-base-content/60">
             {gettext("None yet.")}
           </p>
+
+          <button
+            :if={@submissions != []}
+            type="button"
+            phx-click="select_all_visible"
+            class="text-xs text-base-content/60 underline hover:text-base-content"
+          >
+            {gettext("Select all visible")}
+          </button>
+
           <ul :if={@submissions != []} class="space-y-2">
             <li
               :for={submission <- @submissions}
               class="card rounded border border-base-content/10 p-3 text-sm"
             >
               <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    phx-click="toggle_select"
+                    phx-value-id={submission.id}
+                    checked={MapSet.member?(@selected_submissions, submission.id)}
+                    aria-label={gettext("Select this submission")}
+                    class="size-4 rounded border-base-content/30 accent-primary"
+                  />
+                  <span class={[
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                    status_badge_class(submission.status)
+                  ]}>
+                    {status_label(submission.status)}
+                  </span>
+                  <span :if={submission.spam_score > 0} class="text-xs text-base-content/50">
+                    {gettext("score %{score}", score: submission.spam_score)}
+                  </span>
+                </div>
                 <time
                   id={"submission-#{submission.id}"}
                   phx-hook="LocalTime"
@@ -788,16 +983,6 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 >
                   {Calendar.strftime(submission.inserted_at, "%Y-%m-%d %H:%M")} UTC
                 </time>
-                <button
-                  type="button"
-                  phx-click="delete_submission"
-                  phx-value-id={submission.id}
-                  data-confirm={gettext("Delete this submission?")}
-                  aria-label={gettext("Delete submission")}
-                  class="btn btn-sm btn-ghost hover:text-error"
-                >
-                  <.icon name="hero-trash" class="size-3.5" />
-                </button>
               </div>
               <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
                 <div :for={{key, value} <- submission.data} class="flex gap-2">
@@ -805,6 +990,36 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   <dd class="min-w-0 break-words text-base-content/80">{to_string(value)}</dd>
                 </div>
               </dl>
+              <div class="mt-2 flex items-center gap-2 text-xs">
+                <button
+                  :if={submission.status != :spam}
+                  type="button"
+                  phx-click="mark_submission_spam"
+                  phx-value-id={submission.id}
+                  class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+                >
+                  {gettext("Mark as spam")}
+                </button>
+                <button
+                  :if={submission.status != :reviewed}
+                  type="button"
+                  phx-click="mark_submission_reviewed"
+                  phx-value-id={submission.id}
+                  class="rounded border border-base-content/20 px-2 py-0.5 hover:bg-base-200"
+                >
+                  {gettext("Mark as reviewed")}
+                </button>
+                <button
+                  type="button"
+                  phx-click="delete_submission"
+                  phx-value-id={submission.id}
+                  data-confirm={gettext("Delete this submission?")}
+                  aria-label={gettext("Delete submission")}
+                  class="ml-auto rounded p-1 hover:bg-base-200 hover:text-error"
+                >
+                  <.icon name="hero-trash" class="size-3.5" />
+                </button>
+              </div>
             </li>
           </ul>
         </section>
