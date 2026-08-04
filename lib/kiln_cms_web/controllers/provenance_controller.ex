@@ -23,6 +23,7 @@ defmodule KilnCMSWeb.ProvenanceController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Provenance
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Params
 
   @surfaces KilnCMS.Firing.Surfaces.name_map()
   @max_age_seconds 300
@@ -73,7 +74,7 @@ defmodule KilnCMSWeb.ProvenanceController do
   # (not just the body) since the manifest needs `fired_at`/`source_version_id`.
   defp with_artifact(conn, %{"type" => type, "slug" => slug} = params, fun) do
     if Provenance.enabled?() do
-      locale = params["locale"] || KilnCMS.I18n.default_locale()
+      locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
       surface = Map.get(@surfaces, params["surface"] || "json")
       org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 

@@ -25,9 +25,10 @@ defmodule KilnCMSWeb.VisualEditingController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.VisualEditing
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Params
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
-    locale = params["locale"] || KilnCMS.I18n.default_locale()
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
     actor = Ash.PlugHelpers.get_actor(conn)
 
     with true <- VisualEditing.enabled?(),

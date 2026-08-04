@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.CollabSocket do
   @max_age 60 * 60 * 24
 
   @impl true
-  def connect(%{"token" => token}, socket, connect_info) do
+  def connect(%{"token" => token}, socket, connect_info) when is_binary(token) do
     with {:ok, user_id} <-
            Phoenix.Token.verify(KilnCMSWeb.Endpoint, "collab", token, max_age: @max_age),
          # The struct match matters: a `not_found_error?: false` interface would

@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Params
   alias KilnCMSWeb.ViewTracking
 
   @surfaces KilnCMS.Firing.Surfaces.name_map()
@@ -35,7 +36,7 @@ defmodule KilnCMSWeb.ArtifactController do
   def show(conn, %{"as_of" => _} = params), do: show_point_in_time(conn, params)
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
-    locale = params["locale"] || KilnCMS.I18n.default_locale()
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
     # The request's tenant, resolved from the host by KilnCMSWeb.Plugs.SetTenant
     # (epic #336). Delivery is scoped to this org so one site's slug never serves
     # another's content.
@@ -164,17 +165,12 @@ defmodule KilnCMSWeb.ArtifactController do
   end
 
   # Bounded page size for the historical index.
-  defp index_limit(params) do
-    case Integer.parse(params["limit"] || "") do
-      {n, ""} when n in 1..500 -> n
-      _ -> 100
-    end
-  end
+  defp index_limit(params), do: Params.integer(params, "limit", 100, 1..500)
 
   # The content must still be resolvable now (lookup is by the current record's
   # id); see the module for scope.
   defp show_point_in_time(conn, %{"type" => type, "slug" => slug} = params) do
-    locale = params["locale"] || KilnCMS.I18n.default_locale()
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
     org_id = current_org_id(conn)
 
     # The storage resource comes from the resolved RECORD, not the registry
@@ -215,6 +211,14 @@ defmodule KilnCMSWeb.ArtifactController do
         ApiError.send(conn, :not_found, "not_found", "Content not found.")
     end
   end
+
+  # A client picks the *shape* of a query param, not just its value: `?as_of[]=`
+  # arrives as a list and `?as_of[a]=` as a map, neither of which
+  # `DateTime.from_iso8601/1` has a clause for. Refused as invalid rather than
+  # read as absent (`KilnCMSWeb.Params`), because absent here means "serve the
+  # live document" — the wrong answer to a compliance reader asking what this
+  # said on a date.
+  defp parse_as_of(raw) when not is_binary(raw), do: :error
 
   # Accept a full ISO 8601 datetime, or a bare date (treated as the end of that
   # day, UTC — "as of that day" captures the last publish during it).

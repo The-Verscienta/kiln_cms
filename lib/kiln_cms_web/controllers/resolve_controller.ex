@@ -19,9 +19,14 @@ defmodule KilnCMSWeb.ResolveController do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Redirects
   alias KilnCMS.I18n
+  alias KilnCMSWeb.Params
 
   def show(conn, %{"path" => "/" <> _ = path} = params) do
-    locale = params["locale"] || I18n.default_locale()
+    # Shape-checked only. `I18n.normalize/1` is right there and does validate,
+    # but substituting the default for an unknown locale would answer 200 with
+    # the English document where `/api/content/...?locale=de` answers 404 — two
+    # readings of the same question, which is the drift #751 is about.
+    locale = Params.string(params, "locale", I18n.default_locale())
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
     case lookup_content(path, locale, org_id) do

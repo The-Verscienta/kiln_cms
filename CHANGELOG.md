@@ -422,6 +422,49 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **A bracketed query parameter no longer 500s a public route.** Plug's query
+  decoder hands the caller the *type* as well as the value — `?q=x` is a
+  binary, `?q[]=x` a list, `?q[a]=x` a map — and a `%{"slug" => slug}` function
+  head constrains the key, never the value. Ten public, unauthenticated entry
+  points passed one of those straight into a parser with no clause for it, so
+  `GET /api/content/page?as_of[]=2020-01-01` answered **500** where `?as_of=`
+  answers a documented 400. Neither `FunctionClauseError` nor
+  `Protocol.UndefinedError` is a `Plug.Exception`, so each request was also one
+  error-tracker event: an anonymous report generator, the same shape #700 was
+  worth fixing on its own.
+
+  Two ways of forgetting, which is why a sweep found four times what the issue
+  named. A bare parser (`Integer.parse/1`, `DateTime.from_iso8601/1`) raises on
+  both shapes. `to_string/1` quietly *absorbs* the list — `to_string(["x"])` is
+  `"x"` — and raises only on the map, so a site could look exercised and still
+  be one bracket from a 500.
+
+  `KilnCMSWeb.Params.string/3` is now the reader: a value the client sent in a
+  shape the parameter does not have reads as **absent**, which is what every
+  one of these already had a documented fallback for. `?as_of=` is the
+  exception and keeps its guard on the parser, because reading it as absent
+  would serve the live document to a compliance reader asking what it said on a
+  date — worse than the crash.
+
+  Covered: fired artifacts (`as_of`, `limit`, `locale`, `surface`), related
+  content, search, ask, resolve, provenance, visual editing, the on-site search
+  and blog pages, form submissions, newsletter subscribe, and the collab
+  socket's `token` — that last one read **before** any authentication. A test
+  drives every one through the real router in all three shapes; it fails 16
+  ways against the old code.
+
+  `Params.integer/4` covers the other half — the bounded numeric parameters
+  that were each a hand-rolled `Integer.parse(to_string(…))` plus a range
+  match. And because a helper every call site must *remember* is the same
+  "convention enforced nowhere" #744 was filed about, a source scan fails the
+  build when a controller or channel reaches for `to_string/1` on a request
+  parameter, with a self-check proving the scan can fire.
+
+  One behaviour change worth naming: `?q[]=hello` used to search for `hello`,
+  by accident of `to_string/1`. It now searches for nothing, because `?q[]=` is
+  not a spelling of `?q=` and one request meaning two things depending on which
+  helper the handler reached for is the drift worth removing. (#751)
+
 - **The two sign-in gates no longer carry their own copy of the pending-token
   plumbing.** Not a bug fix — a prediction. #726 unified the code *check* into
   `KilnCMS.Accounts.SecondFactor`, so the browser prompt and the headless
