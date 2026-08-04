@@ -471,6 +471,10 @@ endpoints — **and from the 429 when you exceed a rate-limit bucket**
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
 new endpoint writes its own (#190, #744).
 
+An unrouted `/api` path and an unhandled exception on any JSON-negotiated
+request answer this same envelope (`KilnCMSWeb.ErrorJSON`), so a client that
+only special-cases the routes above still gets a body it can parse.
+
 Three responses on these paths are deliberately **not** this envelope:
 
 - **`/api/json/*`** (JSON:API proper) carries the same three fields plus the
@@ -478,14 +482,11 @@ Three responses on these paths are deliberately **not** this envelope:
 - **Field-level validation errors** from `POST /api/forms/:slug` are
   `{"ok": false, "errors": {"<field>": "…"}}` — a per-field map. The envelope
   says the request failed; this says which input was wrong.
-- **`GET /api/resolve`** answers a verdict, not an error:
-  `{"status": "ok" | "moved" | "not_found"}`. That `status` is the verdict and
-  is *not* an HTTP code.
-
-Two further shapes are known gaps rather than intentional (#750): an unrouted
-`/api` path or an unhandled 500 answers `{"errors": {"detail": "…"}}`, where
-`errors` is an object rather than an array; and `/api/resolve`'s 400 answers a
-singular `{"error": "…"}`. Don't write a client that depends on either.
+- **`GET /api/resolve`**'s 200/301-equivalent and 404 responses are a verdict,
+  not an error: `{"status": "ok" | "moved" | "not_found"}`. That `status` is
+  the verdict and is *not* an HTTP code. A missing/malformed `?path=` **is**
+  an error, though, and answers the envelope like everything else — `code:
+  "missing_path"`.
 
 GraphQL follows the GraphQL spec's top-level `errors` array instead.
 
