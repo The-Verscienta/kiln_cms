@@ -52,7 +52,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
      |> assign(:series, series(buckets, since, range))
      |> assign(:total, total_views(actor, org))
      |> assign(:window_total, buckets |> Enum.map(& &1.views) |> Enum.sum())
-     |> assign(:rows, rows |> decorate_all(org) |> Enum.map(&add_window(&1, window)))}
+     |> assign(:rows, rows |> decorate_all(org, actor) |> Enum.map(&add_window(&1, window)))}
   end
 
   # An unknown or hostile `?range=` falls back to the default rather than
@@ -65,6 +65,18 @@ defmodule KilnCMSWeb.AnalyticsLive do
   end
 
   defp range_from(_params), do: @default_range
+
+  # The export links (#618) mirror the dashboard's own current window, so
+  # "Export CSV" downloads exactly what's on screen rather than a separate
+  # default.
+  defp export_href(:csv, range), do: ~p"/editor/analytics/export.csv?#{export_query(range)}"
+  defp export_href(:json, range), do: ~p"/editor/analytics/export.json?#{export_query(range)}"
+
+  defp export_query(range) do
+    to = Date.utc_today()
+    from = Date.add(to, -(range - 1))
+    [from: Date.to_iso8601(from), to: Date.to_iso8601(to)]
+  end
 
   # A continuous series, oldest → newest, with days that saw no views filled in
   # as zero. Without the fill the chart would close the gaps and misstate the
@@ -108,36 +120,12 @@ defmodule KilnCMSWeb.AnalyticsLive do
 
   # Resolve counter rows to display data with one id-batched query per content
   # type (instead of a point query per row), tolerating content that has since
-  # been deleted or whose type was removed.
-  defp decorate_all(rows, org) do
-    titles =
-      rows
-      |> Enum.group_by(& &1.content_type)
-      |> Enum.flat_map(fn {type, type_rows} ->
-        case ContentTypes.get(type, org_id(org)) do
-          nil -> []
-          ct -> batch_lookup(ct, Enum.map(type_rows, & &1.content_id), org)
-        end
-      end)
-      |> Map.new()
-
+  # been deleted or whose type was removed. Shared with the analytics export
+  # (#618) via `KilnCMS.Analytics.Titles`, so both apply the same fallback.
+  defp decorate_all(rows, org, actor) do
+    titles = Analytics.Titles.resolve(rows, org, actor)
     Enum.map(rows, &decorate(&1, titles))
   end
-
-  # The title-resolution read is tenant-strict (#419) — scope to the dashboard's
-  # own org, like every other read on this page.
-  defp batch_lookup(ct, ids, org) do
-    ct.type
-    |> ContentTypes.list!(
-      authorize?: false,
-      tenant: org,
-      query: [filter: [id: [in: ids]], select: [:id, :title, :slug]]
-    )
-    |> Enum.map(&{&1.id, {&1.title, &1.slug}})
-  end
-
-  defp org_id(%{id: id}), do: id
-  defp org_id(id), do: id
 
   defp decorate(row, titles) do
     case ContentTypes.get(row.content_type) do
@@ -192,6 +180,14 @@ defmodule KilnCMSWeb.AnalyticsLive do
           <p class="text-sm text-base-content/60">
             {gettext("Privacy-first content views — aggregate counts only, no visitor tracking.")}
           </p>
+          <div class="mt-3 flex gap-2">
+            <a href={export_href(:json, @range)} class="btn btn-sm btn-default" download>
+              <.icon name="hero-arrow-down-tray" class="size-4" /> {gettext("Export (JSON)")}
+            </a>
+            <a href={export_href(:csv, @range)} class="btn btn-sm btn-default" download>
+              <.icon name="hero-arrow-down-tray" class="size-4" /> {gettext("Export (CSV)")}
+            </a>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">

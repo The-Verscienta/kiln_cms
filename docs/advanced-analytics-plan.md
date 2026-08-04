@@ -390,7 +390,7 @@ config gate. **This table is the status of record.**
 
 | Phase | Issue | Status | Scope | Depends on |
 |---|---|---|---|---|
-| **1** | #618 | not started | `KilnCMSWeb.CSV` extraction (+ governance switched to it), `ContentViewDay.:in_range` paginated read, streamed CSV/JSON export with title resolution, `mix kiln.analytics.export` | — |
+| **1** | #618 | done | `KilnCMSWeb.CSV` extraction (+ governance switched to it), `ContentViewDay.:in_range` paginated read, streamed CSV/JSON export with title resolution, `mix kiln.analytics.export` | — |
 | **2** | #619 | not started | `ReferrerSource.classify/2` + `ReferrerDay` + retention trigger + runtime config gate; write joins the existing view task | — |
 | **3** | #620 | not started | Referrer breakdown UI on `AnalyticsLive` (with low-count suppression); export gains referrer columns | 2, and 1 for the export half |
 | **4** | #621 | not started | `Funnel`/`FunnelStep` definitions + admin CRUD | — |
