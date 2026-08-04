@@ -42,7 +42,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   # otherwise get a red suite for a reason unrelated to what is asserted.
   @vars ~w(
             DATABASE_SSL DATABASE_SSL_CACERTFILE ECTO_IPV6 PHX_SERVER
-            VISUAL_EDITING_ENABLED KILN_UPDATE_CHECK
+            VISUAL_EDITING_ENABLED KILN_UPDATE_CHECK KILN_ANALYTICS_REFERRERS
             KILN_AUDIT_ANCHOR_EVERY_WRITE
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
@@ -277,6 +277,37 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     test "an unrecognized value leaves the setting alone" do
       updates = update_check("nope")
       assert updates == nil or not Keyword.has_key?(updates, :enabled)
+    end
+  end
+
+  describe "KILN_ANALYTICS_REFERRERS (#619)" do
+    defp analytics_referrers(value) do
+      %{"KILN_ANALYTICS_REFERRERS" => value}
+      |> eval()
+      |> get_in([:kiln_cms, :analytics_referrers])
+    end
+
+    test "unset writes nothing, so the compiled default (disabled) stands" do
+      referrers = analytics_referrers(nil)
+      assert referrers == nil or not Keyword.has_key?(referrers, :enabled)
+    end
+
+    test "on-spellings enable it in any case" do
+      for value <- ["true", "True", "1", "yes", "On"] do
+        assert analytics_referrers(value)[:enabled] == true,
+               "KILN_ANALYTICS_REFERRERS=#{inspect(value)} should enable referrer attribution"
+      end
+    end
+
+    test "off-spellings leave it disabled, explicitly" do
+      for value <- ["false", "FALSE", "Off", "0", "no"] do
+        assert analytics_referrers(value)[:enabled] == false
+      end
+    end
+
+    test "an unrecognized value leaves the setting alone" do
+      referrers = analytics_referrers("enabled")
+      assert referrers == nil or not Keyword.has_key?(referrers, :enabled)
     end
   end
 

@@ -38,6 +38,7 @@ your deployment.
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
 | Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
+| Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). |
 
 ## What data leaves the system
 
@@ -90,7 +91,7 @@ rather than relying on leaving something unset.
 
 ## Retention & automated purge
 
-All four retention jobs are AshOban triggers wired through the Oban `Cron`
+All five retention jobs are AshOban triggers wired through the Oban `Cron`
 plugin; they run as trusted system jobs (no actor).
 
 | Data | Default retention | Trigger (cron) | Config key |
@@ -98,6 +99,7 @@ plugin; they run as trusted system jobs (no actor).
 | Expired auth tokens | purged within ~24h of expiry | `Token` `:expunge_expired` (`0 4 * * *`) | — (driven by token expiry) |
 | Recorded search queries | 90 days since last search | `SearchQuery` `:purge_expired` (`0 3 * * *`) | `config :kiln_cms, :search_analytics, retention_days: 90` |
 | Daily view buckets | 400 days since first recorded | `ContentViewDay` `:purge_expired` (`15 3 * * *`) | `config :kiln_cms, :view_analytics, retention_days: 400` |
+| Daily referrer buckets | 400 days since first recorded | `ReferrerDay` `:purge_expired` (`30 3 * * *`) | `config :kiln_cms, :view_analytics, retention_days: 400` (shared with view buckets) |
 | Trashed (soft-deleted) content | 30 days | `Page`/`Post` `:purge_trashed` (`0 3 * * *`) | `config :kiln_cms, :trash, retention_days: 30` |
 
 View buckets keep a longer window than search queries on purpose: a bucket is
@@ -237,8 +239,11 @@ not impose one because it is jurisdiction- and policy-dependent.
 - [ ] Decided on Meilisearch / S3 / Stripe — listed as subprocessors if enabled.
 - [ ] If memberships are sold: know that erasing a member does **not** cancel
       their subscription at the provider — do that in the provider's dashboard.
-- [ ] Set `search_analytics.retention_days`, `view_analytics.retention_days` and
-      `trash.retention_days` to policy.
+- [ ] Set `search_analytics.retention_days`, `view_analytics.retention_days`
+      (shared by daily view and referrer buckets) and `trash.retention_days`
+      to policy.
+- [ ] Decided whether referrer attribution is worth enabling
+      (`KILN_ANALYTICS_REFERRERS`, off by default, #619).
 - [ ] Documented your content-version (PaperTrail) audit-retention period.
 - [ ] Know the two subject-rights paths: self-export (`/editor/settings`) and
       admin erasure (`anonymize_user`).

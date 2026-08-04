@@ -403,6 +403,12 @@ config :kiln_cms, :search_analytics, retention_days: 90
 # year-plus keeps year-over-year comparisons resolvable (#45).
 config :kiln_cms, :view_analytics, retention_days: 400
 
+# Referrer attribution (KilnCMS.Analytics.ReferrerDay, #619) — off by default.
+# Runtime-readable (`Application.get_env/3`, not `compile_env`): set
+# KILN_ANALYTICS_REFERRERS=true to enable without a rebuild. See
+# config/runtime.exs and docs/environment-variables.md.
+config :kiln_cms, :analytics_referrers, enabled: false
+
 config :ash_graphql, authorize_update_destroy_with_error?: true
 
 # GraphQL subscriptions (real-time headless): the DSL is opt-in while beta.

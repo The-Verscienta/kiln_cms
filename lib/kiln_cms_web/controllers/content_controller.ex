@@ -106,7 +106,7 @@ defmodule KilnCMSWeb.ContentController do
     if is_binary(alias_path) and conn.request_path != alias_path do
       moved_permanently(conn, alias_path)
     else
-      ViewTracking.track(:html, type_string, payload.record.id, payload.record.org_id)
+      ViewTracking.track(conn, :html, type_string, payload.record.id, payload.record.org_id)
       render_content(conn, view, payload, ct, audiences)
     end
   end

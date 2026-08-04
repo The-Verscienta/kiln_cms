@@ -75,8 +75,15 @@ defmodule KilnCMS.Application do
       # limit and exhausting the DB pool (start_child returns {:error,
       # :max_children}, which callers treat as a dropped sample). Raised from 50
       # when page-view tracking gained its daily bucket (#45): each analytics
-      # task now makes two round trips instead of one, so the same cap would
-      # have halved the concurrency headroom before views start being dropped.
+      # task made two round trips instead of one, so the same cap would have
+      # halved the concurrency headroom before views start being dropped.
+      #
+      # Referrer attribution (#619) adds a third round trip to that same task
+      # when `KILN_ANALYTICS_REFERRERS` is on — off by default, so this cap is
+      # unchanged for now, but each task then lives measurably longer under
+      # load and the same cap starts shedding samples sooner at a given
+      # arrival rate. Revisit this number if a deployment enables the flag and
+      # sees view/day-bucket undercounting increase.
       {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 100},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,

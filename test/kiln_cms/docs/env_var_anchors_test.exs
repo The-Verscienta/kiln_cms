@@ -63,6 +63,38 @@ defmodule KilnCMS.Docs.EnvVarAnchorsTest do
     assert [] = check_row("| not a variable row | at all |")
   end
 
+  # `check_row/1` above only sees table rows (the `@row` regex requires a
+  # leading `` | `VAR` `` ) — a prose anchor like the "Note on ports"
+  # blockquote is invisible to it and rotted silently (#619 review). This
+  # can't check "mentions the right variable" for prose (there may be no
+  # single variable name to check against), but it catches the cheaper half:
+  # every `#Lnnn` anchor in the file must point at a real, non-blank line.
+  test "every anchor (table row or prose) points at a real, non-blank line" do
+    problems =
+      @doc_path
+      |> File.read!()
+      |> then(&Regex.scan(@anchor, &1))
+      |> Enum.flat_map(&check_anchor_target/1)
+      |> Enum.uniq()
+
+    assert problems == [],
+           """
+           These anchors in #{@doc_path} point past the end of the file or at a
+           blank line — almost certainly stale:
+
+           #{Enum.map_join(problems, "\n", &"  - #{&1}")}
+           """
+  end
+
+  defp check_anchor_target([_full, label_path, _label_line, path, link_line]) do
+    n = String.to_integer(link_line)
+
+    case path |> File.read!() |> String.split("\n") |> Enum.at(n - 1) do
+      nil -> ["#{label_path}:#{n} is past the end of #{path}"]
+      text -> if String.trim(text) == "", do: ["#{label_path}:#{n} is a blank line"], else: []
+    end
+  end
+
   defp check_row(line) do
     case Regex.run(@row, line) do
       [_, var] -> line |> then(&Regex.scan(@anchor, &1)) |> Enum.flat_map(&check_anchor(var, &1))

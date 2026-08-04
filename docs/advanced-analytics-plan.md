@@ -176,9 +176,17 @@ takes the header value plus the request host:
 2. `URI.parse/1`, **keep the host, drop everything else immediately** — scheme,
    port, path, query, fragment. UTM/campaign parameters and any PII hiding in a
    query string die here, before the value is ever passed on.
-3. Host equals the request host (or an operator-configured alias) → `:internal`.
-4. Host matches the built-in search-engine or social allowlist → `:search` /
-   `:social`.
+3. Host equals the request host → `:internal`. **Shipped without the operator-
+   configured alias floated here** — #619's actual scope is `classify/2`,
+   comparing against exactly one host (the request's own); a multi-domain
+   site (e.g. a bare and `www.` pair, or mid domain-migration) currently sees
+   the other spelling misclassify as `:other`. See open question 6.
+4. Host equals, or is a subdomain of, an entry in the built-in search-engine
+   or social allowlist → `:search` / `:social`. Matching is exact-or-subdomain
+   (`news.google.com` matches `google.com`; `google.com.attacker.net` does
+   not), so a handful of Google's higher-traffic country-code domains are
+   listed explicitly as their own entries — a genuinely different registrable
+   domain, not a subdomain.
 5. Anything else → `:other`. **The unmatched host is not stored.** A long-tail
    host is itself identifying (a private intranet, a niche forum, a shared
    document URL), so only the *fact* of an unrecognized referrer survives.
@@ -391,7 +399,7 @@ config gate. **This table is the status of record.**
 | Phase | Issue | Status | Scope | Depends on |
 |---|---|---|---|---|
 | **1** | #618 | done | `KilnCMSWeb.CSV` extraction (+ governance switched to it), `ContentViewDay.:in_range` paginated read, streamed CSV/JSON export with title resolution, `mix kiln.analytics.export` | — |
-| **2** | #619 | not started | `ReferrerSource.classify/2` + `ReferrerDay` + retention trigger + runtime config gate; write joins the existing view task | — |
+| **2** | #619 | done | `ReferrerSource.classify/2` + `ReferrerDay` + retention trigger + runtime config gate; write joins the existing view task | — |
 | **3** | #620 | not started | Referrer breakdown UI on `AnalyticsLive` (with low-count suppression); export gains referrer columns | 2, and 1 for the export half |
 | **4** | #621 | not started | `Funnel`/`FunnelStep` definitions + admin CRUD | — |
 | **5** | #622 | not started | Funnel report derived from `ContentViewDay` + labelled ratios; export gains a funnel sheet | 4, and 1 for the export half |
@@ -406,9 +414,16 @@ confusing in practice.
 
 ## Open questions
 
-1. **Referrer allowlist maintenance** — ship a curated built-in search/social
-   list (which goes stale) or make it operator-only (which is useless out of the
-   box)? Leaning built-in + an `extra_allowlist` config merge.
+1. **Referrer allowlist maintenance — resolved, built-in only, no config merge.**
+   `KilnCMSWeb.ReferrerSource` ships a curated, compile-time list with
+   exact-or-subdomain matching (#619) and explicitly does **not** take a config
+   merge: an operator-added host would be a classifier output added without a
+   code review, and the built-in/config split precedent in this codebase
+   (`KilnCMS.OEmbed.Provider`) is the same — config may narrow a built-in list,
+   never extend it with a new host. A missing host falls through to `:other`
+   (the accepted long-tail cost) rather than staying unclassifiable; the list
+   is maintained the same way any other compiled allowlist in this codebase is,
+   by a PR.
 2. **Is `content_id` in the referrer key worth the rows?** The schema above
    commits to per-content referrers (up to 5× the view buckets); a site-wide
    variant would be ~5 rows/day total but could not answer "where does *this
@@ -424,6 +439,13 @@ confusing in practice.
    worth it?
 5. **Funnel definition scope** — org-wide only, or per-locale? A translated
    funnel is a different set of content ids.
+6. **The `:internal` alias cut from #619's `classify/2`.** A site reachable at
+   more than one hostname (bare + `www.`, or mid domain-migration) sees
+   navigation from the "other" spelling misclassify as `:other` today. The
+   cheapest fix, if this proves to matter in practice, is comparing against
+   the same host set `CHECK_ORIGINS` already derives (it already means "other
+   hostnames this same app is served from") rather than adding a second,
+   separately-configured alias list.
 
 ## Non-goals
 

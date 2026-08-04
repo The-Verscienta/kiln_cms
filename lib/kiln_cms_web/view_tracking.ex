@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.ViewTracking do
   """
 
   alias KilnCMS.Analytics
+  alias KilnCMSWeb.ReferrerSource
 
   # Bounds the `surface` metric tag. The delivery controllers only pass a
   # validated surface name, but this is a Prometheus label: an unrecognized
@@ -35,7 +36,7 @@ defmodule KilnCMSWeb.ViewTracking do
 
   @doc """
   Record a view of `id` (a document of `type`, owned by `org_id`) served over
-  `surface`.
+  `surface`, from the request `conn` that served it.
 
   Best-effort and **off the request path**: the upsert runs in a supervised,
   unlinked task so a slow DB pool (or a crawler spike) can't queue delivery.
@@ -47,9 +48,14 @@ defmodule KilnCMSWeb.ViewTracking do
   task would run outside the ExUnit SQL sandbox connection (leaking a
   connection past the owning test and racing assertions). Running it inline
   keeps the upsert on the request's sandbox-owned connection.
+
+  When referrer attribution is enabled (`KilnCMS.Analytics.referrers_enabled?/0`,
+  #619), the `referer` header is read and classified **here**, before the task
+  boundary — the raw header must never cross into the spawned closure. Off by
+  default, the header is never even read: zero added work on the hot path.
   """
-  @spec track(surface(), String.t(), Ecto.UUID.t(), Ecto.UUID.t()) :: :ok
-  def track(surface, type, id, org_id) do
+  @spec track(Plug.Conn.t(), surface(), String.t(), Ecto.UUID.t(), Ecto.UUID.t()) :: :ok
+  def track(conn, surface, type, id, org_id) do
     # Emitted synchronously, before the task branch, and independently of
     # `:async_analytics`: it is an in-process dispatch with no IO, it stays
     # inside the request's OTel span, and it still fires when the supervisor
@@ -67,25 +73,41 @@ defmodule KilnCMSWeb.ViewTracking do
       %{type: type, content_id: id, surface: surface_tag(surface)}
     )
 
+    source = referrer_source(conn)
+
     if Application.get_env(:kiln_cms, :async_analytics, true) do
-      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn -> record(type, id, org_id) end)
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+        record(type, id, org_id, source)
+      end)
     else
-      record(type, id, org_id)
+      record(type, id, org_id, source)
     end
 
     :ok
   end
 
-  # Both counters land in the viewed record's own site (epic #336): the all-time
-  # total and today's bucket. Two independent single-row upserts sharing one
-  # supervised task — deliberately not wrapped in a transaction, which would
-  # hold the hot totals row's lock across both statements and halve its
-  # throughput ceiling. Sharing the task also means overload drops both together,
-  # so they under-count consistently instead of drifting apart.
-  defp record(type, id, org_id) do
+  # nil when the gate is off — record/4 then skips the third upsert entirely,
+  # so a disabled deployment does no extra header read, no URI.parse, no extra
+  # write. See KilnCMSWeb.ReferrerSource for the classification itself.
+  defp referrer_source(conn) do
+    if Analytics.referrers_enabled?() do
+      referer = conn |> Plug.Conn.get_req_header("referer") |> List.first()
+      ReferrerSource.classify(referer, conn.host)
+    end
+  end
+
+  # Counters land in the viewed record's own site (epic #336): the all-time
+  # total, today's bucket, and (when enabled) today's referrer bucket. Three
+  # independent single-row upserts sharing one supervised task — deliberately
+  # not wrapped in a transaction, which would hold the hot totals row's lock
+  # across every statement and lower its throughput ceiling. Sharing the task
+  # also means overload drops them together, so they under-count consistently
+  # instead of drifting apart.
+  defp record(type, id, org_id, source) do
     opts = [authorize?: false, tenant: org_id]
     Analytics.record_view(type, id, opts)
     Analytics.record_view_day(type, id, opts)
+    if source, do: Analytics.record_referrer(type, id, source, opts)
   rescue
     _ -> :ok
   end
