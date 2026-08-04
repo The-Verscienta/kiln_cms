@@ -23,9 +23,12 @@ defmodule KilnCMS.Accounts.SecondFactor do
   pivot to the recovery codes, and two budgets would simply be one budget twice
   as large.
 
-  Charging that budget happens in `charge/1`, which both gates call before
-  `verify/2` — see `KilnCMS.Accounts.AccountThrottle`'s moduledoc on why the
-  gate must be the counter rather than a check followed by a later increment.
+  `check/2` is the whole public surface, and it owns charge → verify → forgive
+  so that ordering is a property of this module rather than of two call sites —
+  see `KilnCMS.Accounts.AccountThrottle`'s moduledoc on why the gate must be
+  the counter rather than a check followed by a later increment. The code check
+  alone is private: there is no caller for an unbudgeted one, and offering it
+  would be offering the check-then-count shape back.
 
   ## A missing secret must not take the recovery codes with it
 
@@ -45,30 +48,35 @@ defmodule KilnCMS.Accounts.SecondFactor do
   alias KilnCMS.Accounts.Totp
 
   @doc """
-  Charges one second-factor attempt at a **sign-in gate**, and alerts the owner
-  when that spends the budget (#714, #728).
+  The whole second-factor step for a sign-in gate: charge, verify, forgive
+  (#714, #726, #728, #745).
 
-  Returns `:allow`, or `{:deny, user, retry_after_ms}` — carrying the user back
-  out because a `with`'s `else` cannot see its clause bindings, and the refusal
-  branch needs it for the `retry-after` header.
+      :ok             -> {:ok, user}
+      wrong code      -> :invalid
+      budget spent    -> {:deny, user, retry_after_ms}
 
-  Here rather than written out per controller because it is three coupled
-  pieces, not one: the charge, the alert, and the deny shape. Two copies means
-  the next edit lands on whichever gate its author was looking at — which is
-  what #726 was, and what #745 is about at a larger scale. A gate that quietly
-  stopped alerting would look exactly like a working gate.
+  One function because the **order** is the thing worth protecting, and it was
+  previously enforced by prose in two places. `AccountThrottle`'s moduledoc
+  names check-then-count as the bug class it exists to prevent: the charge has
+  to land before the code is looked at, or a burst of simultaneous submissions
+  all read "under budget" and all get a full verification. Getting it backwards
+  fails *silently* — still 401ing wrong codes, just with an unbounded budget.
+  As a property of this module it cannot be got backwards at a call site.
 
-  The alert belongs to *this* function and not to the budget itself, because
+  The refusal carries the user back out because a `with`'s `else` cannot see
+  its clause bindings, and both gates need it for the `retry-after` header.
+
+  The owner alert (#728) belongs here rather than to the budget itself:
   `KilnCMS.Accounts.Changes.ThrottleSecondFactor` charges the same bucket from
-  `/editor/settings` (#727) and that refusal is different news: the person there
-  holds a session, not a first factor. See #757.
+  `/editor/settings` (#727), and that refusal is different news — the person
+  there holds a session, not a first factor. See #757.
   """
-  @spec charge(Accounts.User.t()) ::
-          :allow | {:deny, Accounts.User.t(), non_neg_integer()}
-  def charge(user) do
+  @spec check(Accounts.User.t(), term()) ::
+          {:ok, Accounts.User.t()} | :invalid | {:deny, Accounts.User.t(), non_neg_integer()}
+  def check(user, code) do
     case AccountThrottle.consume_second_factor(user.id) do
       :allow ->
-        :allow
+        forgive_on_success(verify(user, code))
 
       {:deny, retry_after_ms} ->
         SignInAlert.second_factor_locked(user)
@@ -76,16 +84,26 @@ defmodule KilnCMS.Accounts.SecondFactor do
     end
   end
 
-  @doc """
-  Verifies `code` against `user`'s TOTP secret, falling back to their recovery
-  codes.
+  # Someone whose authenticator was a minute out of sync, or who fumbled a
+  # recovery code, has now proved they hold the factor; carrying those failures
+  # into their next sign-in would lock out the person the budget protects.
+  # Keyed on the verified record rather than the one passed in. They are the
+  # same id — `:consume_totp_recovery_code` only rewrites the hash list — but
+  # forgiving what was actually proved is the reading that stays correct if that
+  # ever changes.
+  defp forgive_on_success({:ok, verified}) do
+    AccountThrottle.forgive_second_factor(verified.id)
+    {:ok, verified}
+  end
 
-  Returns `{:ok, user}` — the *updated* record when a recovery code was burned,
-  carrying the caller's `__metadata__` (and so the first-factor token) forward —
-  or `:invalid`.
-  """
+  defp forgive_on_success(:invalid), do: :invalid
+
+  # Verifies `code` against `user`'s TOTP secret, falling back to their recovery
+  # codes. `{:ok, user}` — the *updated* record when a recovery code was burned,
+  # carrying the caller's `__metadata__` (and so the first-factor token)
+  # forward — or `:invalid`.
   @spec verify(Accounts.User.t(), term()) :: {:ok, Accounts.User.t()} | :invalid
-  def verify(user, code) when is_binary(code) do
+  defp verify(user, code) when is_binary(code) do
     if is_binary(user.totp_secret) and Totp.valid?(user.totp_secret, code) do
       {:ok, user}
     else
@@ -93,7 +111,7 @@ defmodule KilnCMS.Accounts.SecondFactor do
     end
   end
 
-  def verify(_user, _code), do: :invalid
+  defp verify(_user, _code), do: :invalid
 
   # An empty set is checked here rather than left to the action: with no hashes
   # stored there is nothing a code could match, and skipping the changeset keeps

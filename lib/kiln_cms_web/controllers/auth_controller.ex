@@ -3,13 +3,8 @@ defmodule KilnCMSWeb.AuthController do
   use AshAuthentication.Phoenix.Controller
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMSWeb.SafeRedirect
-
-  # Salt + lifetime for the short-lived token that carries "this account passed
-  # the first factor and is awaiting its TOTP code" across the redirect. It is
-  # NOT a session — the user isn't signed in until the second factor verifies.
-  @pending_2fa_salt "two-factor pending"
-  @pending_2fa_max_age 300
 
   # Same flag the session cookie rides, for the same reason: `__Host-` is only
   # honoured alongside `Secure`, and dev/test/e2e serve over plain HTTP.
@@ -28,7 +23,10 @@ defmodule KilnCMSWeb.AuthController do
 
       conn
       |> withhold_remember_me()
-      |> put_session(:pending_2fa, sign_pending(conn, user, token, remember_me?))
+      |> put_session(
+        :pending_2fa,
+        PendingSignIn.mint(:session, conn, user, token: token, remember_me?: remember_me?)
+      )
       |> redirect(to: ~p"/sign-in/verify")
     else
       complete_sign_in(conn, user, message_for(activity))
@@ -174,28 +172,6 @@ defmodule KilnCMSWeb.AuthController do
       KilnCMSWeb.SessionCookie.remember_me_options(@secure_cookies)
     )
   end
-
-  @doc """
-  Sign a pending-2FA token binding the sign-in to a user id + first-factor token.
-
-  `remember_me?` carries the ticked checkbox across the code prompt. It is the
-  *intent* only — the cookie itself was withheld at the first factor and is
-  issued by `put_remember_me/2` once the code verifies.
-  """
-  def sign_pending(conn, user, token, remember_me? \\ false) do
-    Phoenix.Token.sign(conn, @pending_2fa_salt, %{
-      "user_id" => user.id,
-      "token" => token,
-      "remember_me" => remember_me?
-    })
-  end
-
-  @doc ~S'Verify a pending-2FA token, returning `{:ok, %{"user_id" => _, "token" => _}}` or an error.'
-  def verify_pending(conn, pending) when is_binary(pending) do
-    Phoenix.Token.verify(conn, @pending_2fa_salt, pending, max_age: @pending_2fa_max_age)
-  end
-
-  def verify_pending(_conn, _pending), do: {:error, :missing}
 
   defp message_for({:confirm_new_user, :confirm}),
     do: gettext("Your email address has now been confirmed")

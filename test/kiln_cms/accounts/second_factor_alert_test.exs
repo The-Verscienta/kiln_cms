@@ -29,6 +29,7 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
   import Swoosh.TestAssertions
 
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.User
 
@@ -71,11 +72,14 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
     {user, secret}
   end
 
-  # Mirrors `AuthController.sign_pending/4`: the state a browser is in after the
+  # The state a browser is in after the first factor and before the second —
   # first factor and before the second.
   defp with_pending(user) do
-    payload = %{"user_id" => user.id, "token" => "stub.jwt.token", "remember_me" => false}
-    token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "two-factor pending", payload)
+    token =
+      PendingSignIn.mint(:session, KilnCMSWeb.Endpoint, %{
+        user
+        | __metadata__: %{token: "stub.jwt.token"}
+      })
 
     build_conn()
     |> Plug.Conn.put_private(:plug_skip_csrf_protection, true)

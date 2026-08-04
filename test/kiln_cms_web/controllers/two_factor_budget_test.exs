@@ -58,11 +58,14 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     {user, codes}
   end
 
-  # Mirrors `AuthController.sign_pending/3`: the state a browser is in after the
+  # The state a browser is in after the first factor and before the second —
   # first factor and before the second.
   defp with_pending(conn, user) do
-    payload = %{"user_id" => user.id, "token" => "stub.jwt.token"}
-    token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "two-factor pending", payload)
+    token =
+      PendingSignIn.mint(:session, KilnCMSWeb.Endpoint, %{
+        user
+        | __metadata__: %{token: "stub.jwt.token"}
+      })
 
     conn
     |> put_private(:plug_skip_csrf_protection, true)
@@ -117,7 +120,7 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
 
     # The whole budget spent through a SINGLE pending token, so the next request
-    # is the only thing that varies. `@pending_2fa_max_age` is five minutes and
+    # is the only thing that varies. `PendingSignIn.max_age/0` is five minutes and
     # this window is longer, so a token-keyed budget would be no bound at all:
     # re-running the password step mints a new token and — because that step
     # succeeds — also forgives the sign-in counter, making the refresh free.
@@ -176,7 +179,11 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     # payload shape or the salt breaks this loudly instead of leaving it asserting
     # against a blob the controller can no longer read.
     defp api_verify(user, code) do
-      pending = PendingSignIn.mint(KilnCMSWeb.Endpoint, %{user | __metadata__: %{token: "stub"}})
+      pending =
+        PendingSignIn.mint(:encrypted, KilnCMSWeb.Endpoint, %{
+          user
+          | __metadata__: %{token: "stub"}
+        })
 
       build_conn()
       |> put_req_header("content-type", "application/json")

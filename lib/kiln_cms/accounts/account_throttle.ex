@@ -63,7 +63,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   they can grind the six-digit space — 10^6, and TOTP accepts a skew window — at
   whatever rate their IP pool allows.
 
-  `@pending_2fa_max_age` is no bound on that. Re-running the password step mints
+  `PendingSignIn.max_age/0` is no bound on that. Re-running the password step mints
   a fresh pending token, and because that step *succeeds* it also calls
   `forgive/1` and clears the sign-in counter — so the five-minute window costs an
   attacker who has the password precisely nothing to renew. That is why this

@@ -34,7 +34,7 @@ every sign-in, after the first factor.
   sentence at the top of this page — "a valid code is required at every sign-in"
   — is only now true. API keys remain the recommended credential for unattended
   server-to-server use, and carry no second factor by design.
-- **Where the code is checked:** `KilnCMS.Accounts.SecondFactor.verify/2`, for
+- **Where the code is checked:** `KilnCMS.Accounts.SecondFactor.check/2`, for
   both gates, so neither can drift on what counts as a valid submission.
   Whitespace normalization sits one level lower still, in
   `KilnCMS.Accounts.Totp.valid?/3`, because the enrolment and disable forms

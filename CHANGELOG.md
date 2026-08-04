@@ -422,6 +422,36 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **The two sign-in gates no longer carry their own copy of the pending-token
+  plumbing.** Not a bug fix — a prediction. #726 unified the code *check* into
+  `KilnCMS.Accounts.SecondFactor`, so the browser prompt and the headless
+  `POST /api/auth/sign_in/verify` could not disagree about what counts as a
+  valid submission. Everything *around* it was still written twice: the mint,
+  the resolve, the five-minute lifetime, and the charge → verify → forgive
+  ordering. Four places for the next hardening on that step to land on
+  whichever door its author was looking at, which is what #726 itself was.
+
+  The ordering is the sharp one. `AccountThrottle`'s moduledoc names
+  check-then-count as the bug class it exists to prevent, and the correct order
+  was enforced by prose in two files. Getting it backwards fails *silently* —
+  still refusing wrong codes, just with an unbounded budget.
+
+  Now `KilnCMS.Accounts.PendingSignIn` owns the blob for both, taking a mode:
+  `:session` signs (the browser's blob lives in the encrypted session, so the
+  client never sees it) and `:encrypted` encrypts (the headless client holds
+  it, and the payload carries the first-factor JWT — signing would publish the
+  credential the second factor exists to withhold). Distinct salts keep the two
+  non-interchangeable, and each mode carries only the fields its own door has:
+  a `jti` for single use, which the browser gets free by deleting the session
+  key, and the remember-me intent, which a headless client has no cookie for.
+  `SecondFactor.check/2` owns charge → verify → forgive, so the ordering is a
+  property of the module rather than of two call sites.
+
+  `AuthController.sign_pending/4` and `verify_pending/2` are gone. The second
+  of those was called from `TwoFactorController`, which is the cross-controller
+  reach into a sibling's private plumbing this replaces. No behaviour change.
+  (#745)
+
 - **A second-factor lockout now tells the owner.** #478 mails an account owner
   when their *password* is being guessed at. #714 added the equivalent budget
   for the *second factor* and mailed nobody, which is backwards on signal
@@ -437,7 +467,7 @@ migration, a rewritten column, a dropped config key).
   never reached. Net: in the one case where a primary credential was provably in
   someone else's hands, the owner received nothing at all.
 
-  `KilnCMS.Accounts.SecondFactor.charge/1` now fires the alert for **both**
+  `KilnCMS.Accounts.SecondFactor.check/2` now fires the alert for **both**
   sign-in gates — the browser prompt and the headless
   `POST /api/auth/sign_in/verify`. Shared rather than written out per
   controller because it is three coupled pieces (the charge, the alert, the

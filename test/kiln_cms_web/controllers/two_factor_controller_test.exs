@@ -4,6 +4,7 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
 
   import Plug.Conn
 
+  alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.Totp
 
   # A fixed secret so the test can compute the matching code.
@@ -23,10 +24,13 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
   # Simulate the post-first-factor state AuthController.success/4 sets: a signed
   # pending token in the session (and skip CSRF for the direct POST).
   defp with_pending(conn, user) do
-    # Mirrors AuthController.sign_pending/3: the payload carries the user id + the
+    # The state a browser is in after the first factor — minted through
     # first-factor token (a stand-in here — store_in_session doesn't validate it).
-    payload = %{"user_id" => user.id, "token" => "stub.jwt.token"}
-    token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "two-factor pending", payload)
+    token =
+      PendingSignIn.mint(:session, KilnCMSWeb.Endpoint, %{
+        user
+        | __metadata__: %{token: "stub.jwt.token"}
+      })
 
     conn
     |> put_private(:plug_skip_csrf_protection, true)
