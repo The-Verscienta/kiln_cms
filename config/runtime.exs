@@ -447,6 +447,21 @@ if releases_url != "" do
   config :kiln_cms, Kiln.Updates, releases_url: releases_url
 end
 
+# ## Referrer attribution (#619, phase 2 of docs/advanced-analytics-plan.md)
+#
+# Off by default. This gate is a plain operator switch (unlike
+# `:view_analytics`'s `retention_days`, which is baked into an AshOban `where`
+# expression and stays `compile_env`), so it must be — and is — readable at
+# runtime: `KilnCMS.Analytics.referrers_enabled?/0` calls
+# `Application.get_env/3`, never `compile_env`. See #608 for the defect class
+# this avoids.
+#
+# Only a recognized spelling writes config, so an unset var keeps the
+# compiled `false` default. See the header for the accepted spellings.
+with {:ok, enabled?} <- Env.fetch("KILN_ANALYTICS_REFERRERS") do
+  config :kiln_cms, :analytics_referrers, enabled: enabled?
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

@@ -63,7 +63,7 @@ defmodule KilnCMSWeb.ArtifactController do
       # near-zero, which is the gap this closes. Only live delivery counts:
       # `?as_of=` snapshots (compliance reads) and the draft visual-editing
       # surface deliberately do not.
-      ViewTracking.track(surface_name, to_string(ct.type), record.id, record.org_id)
+      ViewTracking.track(conn, surface_name, to_string(ct.type), record.id, record.org_id)
 
       serve(conn, record, surface_name, body)
     else
