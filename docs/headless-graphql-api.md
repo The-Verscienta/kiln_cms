@@ -197,8 +197,11 @@ populate every input field must omit it rather than null it); empty merge lists
 do not count and are simply ignored.
 
 The merge verbs are on `update*` only — `create*` has nothing to merge against
-and takes `tagIds` alone. `relatedPostIds` and the other relationship arrays
-still replace.
+and takes `tagIds` alone. The related-content arrays carry the same verbs
+(#637): alongside `relatedPostIds` there are `addRelatedPostIds` /
+`removeRelatedPostIds`, with the same rules, and the sibling
+`addRelatedPageIds` / `removeRelatedPageIds` (and `…RelatedEntryIds` on the
+dynamic tier).
 
 ### Writing body content — the `blockTree` argument
 

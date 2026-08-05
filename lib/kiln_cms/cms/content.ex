@@ -127,6 +127,11 @@ defmodule KilnCMS.CMS.Content do
     resource = __CALLER__.module
     related_name = :"related_#{type}s"
     related_arg = :"related_#{type}_ids"
+    # Non-destructive merge verbs for the related array, mirroring the tag ones
+    # (#637): `add_related_<type>_ids` appends, `remove_related_<type>_ids`
+    # unrelates. Only on `:update`/`:autosave` — a create has nothing to merge.
+    add_related_arg = :"add_related_#{type}_ids"
+    remove_related_arg = :"remove_related_#{type}_ids"
 
     # AshOban worker/scheduler module names (kept identical to hand-written ones).
     pub_worker = Module.concat([resource, Workers, PublishScheduled])
@@ -1238,7 +1243,10 @@ defmodule KilnCMS.CMS.Content do
           # so `tag_ids` is unambiguously the whole set (#521).
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
-          change KilnCMS.CMS.Changes.NormalizeTagArguments
+
+          change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+                  arguments: [:tag_ids, unquote(related_arg)]}
+
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
 
           change manage_relationship(unquote(related_arg), unquote(related_name),
@@ -1276,26 +1284,39 @@ defmodule KilnCMS.CMS.Content do
           argument :tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
 
-          # Non-destructive tag verbs (#521). `tag_ids` is the *complete* set,
-          # so a partial-update caller (REST/GraphQL/MCP) that only knows the
-          # one tag it cares about detaches every other tag by omission. These
-          # two merge against the current links instead: `add_tag_ids` relates
-          # what is listed and leaves the rest alone, `remove_tag_ids` unrelates
-          # what is listed and is a no-op for ids that aren't attached (so it
-          # stays idempotent). Combining them with `tag_ids` is refused outright
-          # by `TagMergeArguments` rather than resolved by declaration order.
+          # Non-destructive merge verbs (#521 for tags, #637 for the related
+          # array). The complete-set argument (`tag_ids` / `related_*_ids`) is
+          # exactly that — a whole set — so a partial-update caller
+          # (REST/GraphQL/MCP) that only knows the one link it cares about
+          # detaches every other by omission. The verbs merge against the
+          # current links instead: `add_*` relates what is listed and leaves the
+          # rest alone, `remove_*` unrelates what is listed and is a no-op for
+          # ids that aren't attached (so it stays idempotent). Combining a
+          # complete-set argument with its verbs is refused outright by
+          # `MergeArguments` rather than resolved by declaration order.
           argument :add_tag_ids, {:array, :uuid}
           argument :remove_tag_ids, {:array, :uuid}
+          argument unquote(add_related_arg), {:array, :uuid}
+          argument unquote(remove_related_arg), {:array, :uuid}
 
           # Must precede every `manage_relationship` below: those changes read
           # the argument at change-time and snapshot it onto the changeset, so
           # a later `set_argument` would normalize nothing.
-          change KilnCMS.CMS.Changes.NormalizeTagArguments
+          change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+                  arguments: [
+                    :tag_ids,
+                    :add_tag_ids,
+                    :remove_tag_ids,
+                    unquote(related_arg),
+                    unquote(add_related_arg),
+                    unquote(remove_related_arg)
+                  ]}
+
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
           change manage_relationship(:add_tag_ids, :tags, type: :append)
 
           # Not `type: :remove`, whose `on_no_match: :error` would turn removing
-          # an already-detached tag into a failure; the rest are Ash defaults,
+          # an already-detached link into a failure; the rest are Ash defaults,
           # spelled out because idempotency is the documented contract here.
           change manage_relationship(:remove_tag_ids, :tags,
                    on_lookup: :ignore,
@@ -1306,6 +1327,17 @@ defmodule KilnCMS.CMS.Content do
 
           change manage_relationship(unquote(related_arg), unquote(related_name),
                    type: :append_and_remove
+                 )
+
+          change manage_relationship(unquote(add_related_arg), unquote(related_name),
+                   type: :append
+                 )
+
+          change manage_relationship(unquote(remove_related_arg), unquote(related_name),
+                   on_lookup: :ignore,
+                   on_match: :unrelate,
+                   on_no_match: :ignore,
+                   on_missing: :ignore
                  )
 
           # Headless block-body writes (#330) — see `:create`. Omitted argument
@@ -1326,7 +1358,15 @@ defmodule KilnCMS.CMS.Content do
           # write-through, in-context editing) would leave the fired artifact
           # stale. `only_when: :published` keeps draft edits/autosaves silent.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
-          validate KilnCMS.CMS.Validations.TagMergeArguments
+
+          validate {KilnCMS.CMS.Validations.MergeArguments,
+                    complete: :tag_ids, add: :add_tag_ids, remove: :remove_tag_ids}
+
+          validate {KilnCMS.CMS.Validations.MergeArguments,
+                    complete: unquote(related_arg),
+                    add: unquote(add_related_arg),
+                    remove: unquote(remove_related_arg)}
+
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -1359,7 +1399,19 @@ defmodule KilnCMS.CMS.Content do
           argument :add_tag_ids, {:array, :uuid}
           argument :remove_tag_ids, {:array, :uuid}
           argument unquote(related_arg), {:array, :uuid}
-          change KilnCMS.CMS.Changes.NormalizeTagArguments
+          argument unquote(add_related_arg), {:array, :uuid}
+          argument unquote(remove_related_arg), {:array, :uuid}
+
+          change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+                  arguments: [
+                    :tag_ids,
+                    :add_tag_ids,
+                    :remove_tag_ids,
+                    unquote(related_arg),
+                    unquote(add_related_arg),
+                    unquote(remove_related_arg)
+                  ]}
+
           change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
           change manage_relationship(:add_tag_ids, :tags, type: :append)
 
@@ -1374,7 +1426,25 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
 
-          validate KilnCMS.CMS.Validations.TagMergeArguments
+          change manage_relationship(unquote(add_related_arg), unquote(related_name),
+                   type: :append
+                 )
+
+          change manage_relationship(unquote(remove_related_arg), unquote(related_name),
+                   on_lookup: :ignore,
+                   on_match: :unrelate,
+                   on_no_match: :ignore,
+                   on_missing: :ignore
+                 )
+
+          validate {KilnCMS.CMS.Validations.MergeArguments,
+                    complete: :tag_ids, add: :add_tag_ids, remove: :remove_tag_ids}
+
+          validate {KilnCMS.CMS.Validations.MergeArguments,
+                    complete: unquote(related_arg),
+                    add: unquote(add_related_arg),
+                    remove: unquote(remove_related_arg)}
+
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
