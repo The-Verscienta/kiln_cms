@@ -79,6 +79,7 @@ defmodule KilnCMS.CMS.HistoryAnchor do
         :source_id,
         :chain_hash,
         :version_count,
+        :attribution_hash,
         :last_version_id,
         :last_version_at,
         :published_version_id,
@@ -147,6 +148,17 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     # (ascending), and the last version it covers.
     attribute :chain_hash, :string, allow_nil?: false, public?: true
     attribute :version_count, :integer, allow_nil?: false, public?: true
+
+    # A second fold over the covered versions' attribution — author and action
+    # type — kept separate from `chain_hash` so it can be added without
+    # invalidating every anchor already minted (#713). `chain_hash`'s
+    # `item_digest` never covered `user_id`, so rewriting a version row's author
+    # left the chain reading `:verified` next to attribution that had been
+    # changed. Inside the SIGNED payload from `v: 5` on, so on a keyed deployment
+    # it can't be repointed without breaking the signature. Null on anchors
+    # minted before #713 — their attribution is simply not attested, the honest
+    # pre-fix state, and they keep verifying.
+    attribute :attribution_hash, :string, public?: true
 
     # Where the next incremental fold resumes (#598): the full sort key of the
     # last version this anchor covered, in the `(version_inserted_at, id)` order

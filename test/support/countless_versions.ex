@@ -46,6 +46,10 @@ defmodule KilnCMS.CountlessVersions do
 
       attribute :version_source_id, :uuid, public?: true
       attribute :version_action_name, :string, public?: true
+      # The attribution fold (#713) reads these off a version too, so the stand-in
+      # carries them like a real PaperTrail version does.
+      attribute :version_action_type, :atom, public?: true
+      attribute :user_id, :uuid, public?: true
       attribute :version_inserted_at, :utc_datetime_usec, public?: true
       attribute :changes, :map, public?: true
     end
