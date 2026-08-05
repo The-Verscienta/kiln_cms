@@ -2011,6 +2011,52 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert kept == tag.id
     end
 
+    # `@tags` is loaded once at mount; `record.tags` is refreshed on every
+    # autosave. A tag attached AFTER mount (a collaborator, a second tab) is in
+    # the record but not `@tags`, so the picker used to render no checkbox for
+    # it — and the next save submitted `tag_ids` without it, detaching it
+    # (#522). The union of the two must always give an attached tag a control.
+    test "a tag attached after mount is not detached on the next save", %{conn: conn} do
+      editor = authed_user(:editor)
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      # Mount before any tag exists, so the mount-time `@tags` is empty and the
+      # picker renders no `tag_ids` field at all.
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # A collaborator attaches a newly-created tag after this mount. Seed the
+      # join row directly rather than through `add_tag_ids`: that would bump the
+      # post's optimistic `lock_version`, so the editor's autosave below would
+      # hit a stale-conflict and never re-fetch — masking the very split the bug
+      # needs (fresh `record.tags`, stale `@tags`).
+      latecomer = Ash.Seed.seed!(Tag, %{name: "latecomer", slug: "t-#{uniq()}"})
+
+      Ash.Seed.seed!(KilnCMS.CMS.Tagging, %{
+        org_id: post.org_id,
+        subject_id: post.id,
+        tag_id: latecomer.id
+      })
+
+      # An edit + autosave re-fetches `record.tags` (now the latecomer) while
+      # `@tags` stays the empty mount-time list. The autosave submits no
+      # `tag_ids` (the field wasn't rendered), so it leaves the link alone.
+      lv |> form("#post-editor", form: %{title: "Edited"}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      # The latecomer now renders, checked — before the fix, `@tags == []` hid
+      # the whole picker body and the tag had no control.
+      assert html =~
+               ~r/<input[^>]*value="#{latecomer.id}"[^>]*checked|checked[^>]*value="#{latecomer.id}"/
+
+      # A save that never touches the tag field must keep the link.
+      lv |> form("#post-editor", form: %{title: "Final"}) |> render_submit()
+
+      saved = CMS.get_post!(post.id, authorize?: false, load: [:tags])
+      assert [%{id: kept}] = saved.tags
+      assert kept == latecomer.id
+    end
+
     # The rescue section is keyed on the record's PERSISTED tags, not on the
     # live checkbox state. Keying it on the latter meant unchecking a tag there
     # emptied the section, which the empty-section reject then deleted from the

@@ -3531,6 +3531,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # delete its own checkbox.
     attached = assigns.record.tags |> current_ids() |> Enum.map(&to_string/1)
 
+    # `@tags` is loaded once at mount and never refreshed, but `record.tags` is
+    # (every autosave's `fetch!`). So a tag created and attached after mount — a
+    # collaborator, another tab — is in `record.tags` but not `@tags`, renders
+    # no checkbox, and the next save submits `tag_ids` without it, which
+    # `append_and_remove` reads as "detach me" (#522). Render from the union of
+    # the two so every attached tag always has a control; the sections and the
+    # empty-state guard both key on it, not on the stale `@tags` alone.
+    pickable = all_pickable_tags(assigns.tags, assigns.record.tags)
+
     selected =
       assigns.form
       |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
@@ -3539,24 +3548,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assigns =
       assigns
       |> assign(:selected, selected)
+      |> assign(:no_tags?, pickable == [])
       |> assign(
         :sections,
-        tag_sections(assigns.tags, assigns.tag_groups, assigns.kind, selected, attached)
+        tag_sections(pickable, assigns.tag_groups, assigns.kind, selected, attached)
       )
       |> assign(:name, assigns.form[:tag_ids].name <> "[]")
 
     ~H"""
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
       <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
-      <p :if={@tags == []} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
+      <p :if={@no_tags?} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
 
       <%!-- Browsers omit an all-unchecked checkbox group from the payload
             entirely, which `selected_ids/3` can only read as "untouched" — so
             the last tag could never be removed. This sentinel keeps the key
             present; `normalize_tag_ids/1` drops it before the changeset. --%>
-      <input :if={@tags != []} type="hidden" name={@name} value="" />
+      <input :if={not @no_tags?} type="hidden" name={@name} value="" />
 
-      <div :if={@tags != []} class="space-y-2">
+      <div :if={not @no_tags?} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
               phx-update="ignore" so a re-render can't clobber what's typed.
               Unnamed does NOT stop the enclosing form's phx-change from firing,
@@ -3617,6 +3627,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
       </div>
     </fieldset>
     """
+  end
+
+  # The org's tags (loaded at mount) unioned with the ones this record actually
+  # carries (refreshed on every autosave), deduplicated by id and preserving the
+  # org order so the sections still sort as before. A record tag missing from
+  # the org list is one attached since mount — without it the picker can't
+  # render its checkbox, and an unrendered checkbox is a silent detach (#522).
+  defp all_pickable_tags(org_tags, record_tags) do
+    known = MapSet.new(org_tags, & &1.id)
+    org_tags ++ Enum.reject(record_tags, &MapSet.member?(known, &1.id))
   end
 
   # Bucket the org's tags into the picker's sections.
