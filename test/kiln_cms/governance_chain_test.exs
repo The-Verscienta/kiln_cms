@@ -1821,4 +1821,106 @@ defmodule KilnCMS.Governance.ChainTest do
       assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
     end
   end
+
+  describe "forged head anchors (#708)" do
+    # The verdict's baseline is the head anchor, and INSERT on history_anchors
+    # is enough to supply the head: chain_hash refolded over the doctored
+    # table, link columns recomputed from the predecessor's public columns —
+    # neither needs the signing key. Before #708 such a head read `:unsigned`
+    # (or `:unverifiable` with a bogus key_id), which `mix kiln.audit.verify`
+    # counts as a pass.
+    test "an inserted unsigned head cannot downgrade a tamper verdict to :unsigned" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      doctor_versions!(page)
+      forge_head!(page, %{signature: nil, key_id: nil})
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "newest attested anchor"
+
+      # The trail's loaded-list twin must reach the same verdict, or the
+      # dashboard and `mix kiln.audit.verify` disagree about the document.
+      trail = KilnCMS.Governance.trail("page", page.id, page.org_id)
+      assert {:tampered, ^reason} = trail.chain
+    end
+
+    # The other mask: a head signed by a key nobody holds is `:unverifiable`,
+    # which the sweep also passes — same insertion, one more forged column.
+    test "an inserted head under an unknown key cannot hide behind :unverifiable" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      doctor_versions!(page)
+
+      forge_head!(page, %{
+        signature: Base.encode64("not a signature"),
+        key_id: "sha256:" <> String.duplicate("ab", 32)
+      })
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "newest attested anchor"
+    end
+
+    # Evidence decides, not key configuration: an honest head minted unsigned
+    # (`sign/1` stores the anchor unsigned and logs when the key fails to
+    # resolve) over history the attested prefix still reproduces must keep
+    # reading `:unsigned` — turning every key hiccup into a permanent
+    # `{:tampered, …}` would train operators to ignore red.
+    test "an honest unsigned head over intact attested history stays :unsigned" do
+      actor = admin()
+      page = published_page(actor)
+
+      # The hiccup is mint-time only: the key is back for verification, or the
+      # signed prefix would read :unverifiable rather than attested.
+      prev = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+      Application.put_env(:kiln_cms, KilnCMS.Provenance, Keyword.delete(prev, :signing_key))
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      capture_log(fn -> :ok = Chain.anchor(page) end)
+      Application.put_env(:kiln_cms, KilnCMS.Provenance, prev)
+
+      assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+  end
+
+  # What an attacker with INSERT can compute without the signing key: the fold
+  # over the (doctored) version table, and the predecessor digest over the
+  # current head's public columns.
+  defp forge_head!(page, attrs) do
+    [head | _] = Chain.anchors("page", page.id, page.org_id)
+    refolded = Chain.compute(Page, page.id, page.org_id)
+
+    Ash.Seed.seed!(
+      KilnCMS.CMS.HistoryAnchor,
+      Map.merge(
+        %{
+          org_id: page.org_id,
+          resource_type: "page",
+          source_id: page.id,
+          chain_hash: refolded.chain_hash,
+          version_count: refolded.version_count,
+          last_version_id: refolded.last_version_id,
+          last_version_at: refolded.last_version_at,
+          prev_anchor_id: head.id,
+          prev_anchor_digest: Chain.anchor_digest(head),
+          sequence: head.sequence + 1
+        },
+        attrs
+      )
+    )
+  end
+
+  defp doctor_versions!(page) do
+    KilnCMS.Repo.update_all(
+      from(v in "pages_versions",
+        where: v.version_source_id == type(^page.id, :binary_id),
+        update: [set: [changes: type(^%{"title" => "Doctored"}, :map)]]
+      ),
+      []
+    )
+  end
 end
