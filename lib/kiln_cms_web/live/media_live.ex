@@ -7,22 +7,32 @@ defmodule KilnCMSWeb.MediaLive do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias KilnCMS.AVProcessor
   alias KilnCMS.CMS
   alias KilnCMS.DocumentProcessor
   alias KilnCMS.ImageProcessor
+  alias KilnCMS.MediaKind
   alias KilnCMS.Storage
   alias KilnCMS.Unsplash
 
-  @accept ~w(.jpg .jpeg .png .webp .gif .pdf)
+  @accept ~w(.jpg .jpeg .png .webp .gif .pdf .mp4 .m4a .webm .mp3 .vtt)
   @max_entries 10
   # Phoenix's `allow_upload` takes one ceiling for every entry (there's no
-  # per-accept-type cap in the API), so this is the LARGER of the two
-  # per-type caps below — `check_size/2` enforces the tighter one for
-  # whichever type an upload turns out to be, after `ImageProcessor`/
-  # `DocumentProcessor` has byte-sniffed it.
+  # per-accept-type cap in the API), so this is the LARGEST of the per-type
+  # caps below — `check_size/2` enforces the tighter one for whichever type an
+  # upload turns out to be, after `ImageProcessor`/`DocumentProcessor`/
+  # `AVProcessor` has byte-sniffed it.
   @max_image_size 10_000_000
   @max_document_size 25_000_000
-  @max_file_size 25_000_000
+  # Video is the outlier and the reason the ceiling moved (#494): a few
+  # minutes of web-ready H.264 is comfortably past every other cap here.
+  # There is no transcoding, so this is also the practical statement of "how
+  # big a file will Kiln accept" — see docs/media-pipeline.md.
+  @max_video_size 500_000_000
+  @max_audio_size 100_000_000
+  # A caption track is text; anything remotely this size is not a `.vtt`.
+  @max_captions_size 2_000_000
+  @max_file_size 500_000_000
   # Server-side page size: the grid loads pages of newest-first items and any
   # older item is reachable via Load more or the (server-side) filter.
   @page_size 60
@@ -383,10 +393,13 @@ defmodule KilnCMSWeb.MediaLive do
 
   # --- helpers ---------------------------------------------------------------
 
-  # Tries the image path first (the common case), then falls back to the
-  # document path (#481) — the two byte-sniffers are independent and a file
-  # can only ever satisfy one, so trying both costs nothing an outright
-  # rejection wouldn't already cost.
+  # Tries the image path first (the common case), then A/V (#494), then
+  # documents (#481) — the byte-sniffers are independent and a file can only
+  # ever satisfy one, so trying each in turn costs nothing an outright
+  # rejection wouldn't already cost. The *last* sniffer's error is the one
+  # reported, which is why documents go last: "unsupported format" from the
+  # narrowest validator is the least misleading message for a file that
+  # matched nothing.
   #
   # `source`, when removed, is the server-built stripped temp file (UUID path),
   # never user input — the File.rm traversal warning is a false positive.
@@ -396,8 +409,23 @@ defmodule KilnCMSWeb.MediaLive do
   defp store_entry(path, entry, actor, org) do
     case ImageProcessor.validate_upload(path) do
       {:ok, %{ext: ext, content_type: content_type}} ->
-        with :ok <- check_size(entry, @max_image_size) do
+        with :ok <- check_size(path, @max_image_size) do
           store_image(path, ext, content_type, entry, actor, org)
+        end
+
+      {:error, _reason} ->
+        store_entry_as_av(path, entry, actor, org)
+    end
+  end
+
+  defp store_entry_as_av(path, entry, actor, org) do
+    case AVProcessor.validate_upload(path) do
+      {:ok, %{ext: ext, content_type: content_type, kind: kind}} ->
+        with :ok <- check_size(path, av_size_cap(kind)) do
+          # No metadata-stripping step, same as the document path: an MP4's
+          # metadata atoms need container-specific tooling this codebase
+          # doesn't have (tracked separately).
+          store_as_is(path, ext, content_type, entry, actor, org)
         end
 
       {:error, _reason} ->
@@ -405,11 +433,15 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
+  defp av_size_cap(:video), do: @max_video_size
+  defp av_size_cap(:audio), do: @max_audio_size
+  defp av_size_cap(:captions), do: @max_captions_size
+
   defp store_entry_as_document(path, entry, actor, org) do
     case DocumentProcessor.validate_upload(path) do
       {:ok, %{ext: ext, content_type: content_type}} ->
-        with :ok <- check_size(entry, @max_document_size) do
-          store_document(path, ext, content_type, entry, actor, org)
+        with :ok <- check_size(path, @max_document_size) do
+          store_as_is(path, ext, content_type, entry, actor, org)
         end
 
       {:error, reason} ->
@@ -417,8 +449,38 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  defp check_size(entry, max),
-    do: if(entry.client_size <= max, do: :ok, else: {:error, :too_large})
+  # Measured from the RECEIVED FILE, not `entry.client_size`.
+  #
+  # `client_size` is a number the browser put in the upload payload; a modified
+  # client can declare anything. LiveView enforces the real byte count only
+  # against `allow_upload`'s single `max_file_size`, which is the largest cap
+  # here (500 MB, for video) — so trusting `client_size` would make every
+  # tighter per-kind cap advisory, and a "2 MB" caption track could be 500 MB
+  # of anything. `File.stat` is the only number nobody outside this server
+  # chose.
+  #
+  # `path` is LiveView's own server-generated upload temp file — the traversal
+  # warning is the same false positive as elsewhere in this module.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp check_size(path, max) do
+    case File.stat(path) do
+      {:ok, %{size: size}} when size <= max -> :ok
+      {:ok, _stat} -> {:error, :too_large}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The stored blob's real size, for `MediaItem.byte_size`. Same reasoning as
+  # `check_size/2`: what gets recorded should be what a reader will actually
+  # download, which for an image is the *stripped* copy rather than what the
+  # client uploaded or claimed.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp stored_size(path) do
+    case File.stat(path) do
+      {:ok, %{size: size}} -> size
+      _ -> nil
+    end
+  end
 
   defp store_image(path, ext, content_type, entry, actor, org) do
     key = Storage.generate_key_with_ext(ext)
@@ -428,8 +490,11 @@ defmodule KilnCMSWeb.MediaLive do
 
     try do
       case Storage.store(key, source) do
-        {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
-        _ -> {:error, :storage_failed}
+        {:ok, ^key} ->
+          create_from_upload(key, content_type, stored_size(source), entry, actor, org)
+
+        _ ->
+          {:error, :storage_failed}
       end
     after
       if stripped?, do: File.rm(source)
@@ -438,13 +503,14 @@ defmodule KilnCMSWeb.MediaLive do
 
   # No metadata-stripping step (#481 follow-up: PDF metadata needs
   # PDF-specific tooling this codebase doesn't have yet, unlike
-  # ImageProcessor's libvips-based strip) — the upload's own temp file is
-  # stored as-is, matching what the image path does when stripping fails.
-  defp store_document(path, ext, content_type, entry, actor, org) do
+  # ImageProcessor's libvips-based strip; the same is true of MP4 atoms) —
+  # the upload's own temp file is stored as-is, matching what the image path
+  # does when stripping fails. Shared by the document and A/V paths.
+  defp store_as_is(path, ext, content_type, entry, actor, org) do
     key = Storage.generate_key_with_ext(ext)
 
     case Storage.store(key, path) do
-      {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
+      {:ok, ^key} -> create_from_upload(key, content_type, stored_size(path), entry, actor, org)
       _ -> {:error, :storage_failed}
     end
   end
@@ -514,11 +580,11 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  defp create_from_upload(key, content_type, entry, actor, org) do
+  defp create_from_upload(key, content_type, byte_size, entry, actor, org) do
     attrs = %{
       filename: entry.client_name,
       content_type: content_type,
-      byte_size: entry.client_size,
+      byte_size: byte_size,
       storage_key: key,
       url: Storage.url(key)
     }
@@ -534,15 +600,29 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  # Queue background dimension/variant processing (keeps libvips off the upload
-  # request). The worker re-fetches the original from storage, so there's no
-  # node-local temp hand-off.
+  # Queue background dimension/variant processing (keeps libvips and ffmpeg
+  # off the upload request). The worker re-fetches the original from storage,
+  # so there's no node-local temp hand-off.
+  #
+  # A/V goes to `Media.AVWorker` instead (#494), and a caption track / a
+  # document goes nowhere at all: neither has anything to derive, and
+  # `VariantWorker` would just fetch the blob to discover libvips can't read
+  # it.
   defp enqueue_processing(item) do
     # Carry the item's org so the worker re-fetches/updates under its tenant
     # (epic #336) — future-proof for the strict `global?: false` flip.
-    %{media_item_id: item.id, org_id: item.org_id}
-    |> KilnCMS.Media.VariantWorker.new()
-    |> Oban.insert!()
+    args = %{media_item_id: item.id, org_id: item.org_id}
+
+    cond do
+      MediaKind.playable?(item.content_type) ->
+        args |> KilnCMS.Media.AVWorker.new() |> Oban.insert!()
+
+      MediaKind.of(item.content_type) == :image ->
+        args |> KilnCMS.Media.VariantWorker.new() |> Oban.insert!()
+
+      true ->
+        :ok
+    end
   end
 
   defp delete_variant_blobs(variants) do
@@ -585,9 +665,44 @@ defmodule KilnCMSWeb.MediaLive do
   # else the original — or `nil` for a document (no `width`, so nothing was
   # ever generated to preview) or a gated item (no public `url` — #481), so
   # the caller falls back to a file badge instead of a broken/blank `<img>`.
-  defp thumb_src(%{variants: %{"thumb" => %{"url" => url}}}), do: url
-  defp thumb_src(%{width: nil}), do: nil
-  defp thumb_src(item), do: item.url
+  #
+  # Dispatching on kind FIRST matters for A/V (#494): a video ffprobe measured
+  # has a `width` exactly like an image does, so the image rules below would
+  # otherwise put an `.mp4` in an `<img src>`. Its generated poster frame,
+  # when it has one, is the only image a video has.
+  defp thumb_src(item) do
+    case MediaKind.of(item.content_type) do
+      :image -> image_thumb_url(item)
+      :video -> poster_url(item)
+      _kind -> nil
+    end
+  end
+
+  defp poster_url(%{variants: %{"poster" => %{"url" => url}}}), do: url
+  defp poster_url(_item), do: nil
+
+  defp image_thumb_url(%{variants: %{"thumb" => %{"url" => url}}}), do: url
+  defp image_thumb_url(%{width: nil}), do: nil
+  defp image_thumb_url(item), do: item.url
+
+  defp image?(item), do: MediaKind.of(item.content_type) == :image
+
+  # `nil` (rather than "—") when there's nothing measured, so the caller can
+  # drop the whole row: an unprobed video with no ffmpeg installed shouldn't
+  # advertise a Duration field it will never fill in.
+  defp duration_label(item), do: MediaKind.humanize_duration(item.duration_seconds)
+
+  # The placeholder icon when there is no thumbnail to show — a document, an
+  # unprobed video, a gated item. Naming the kind is the difference between
+  # "this file is broken" and "this is a video with no poster yet".
+  defp kind_icon(item) do
+    case MediaKind.of(item.content_type) do
+      :video -> "hero-film"
+      :audio -> "hero-musical-note"
+      :captions -> "hero-language"
+      _kind -> "hero-document"
+    end
+  end
 
   defp file_ext(filename) do
     case filename && Path.extname(filename) do
@@ -795,7 +910,9 @@ defmodule KilnCMSWeb.MediaLive do
         <div class="flex items-end justify-between gap-4">
           <div>
             <h1 class="text-2xl font-semibold">{gettext("Media library")}</h1>
-            <p class="text-sm text-base-content/70">{gettext("Upload and manage images.")}</p>
+            <p class="text-sm text-base-content/70">
+              {gettext("Upload and manage images, documents, video and audio.")}
+            </p>
           </div>
           <div :if={@is_admin or @unsplash_enabled?} class="tabs" role="tablist">
             <button
@@ -855,12 +972,28 @@ defmodule KilnCMSWeb.MediaLive do
             <.icon name="hero-arrow-up-tray" class="mx-auto size-8 text-base-content/70" />
             <p class="mt-2 text-sm">
               <label for={@uploads.media.ref} class="cursor-pointer font-medium underline">
-                {gettext("Choose images")}
+                {gettext("Choose files")}
               </label>
               {gettext("or drag and drop")}
             </p>
+            <%!-- The accepted set is worth spelling out per kind rather than
+                  as one list: the caps differ by an order of magnitude, and
+                  A/V is the one where "why was this rejected" is otherwise
+                  unanswerable — there is no transcoding, so the container
+                  matters (#494). --%>
             <p class="mt-1 text-xs text-base-content/70">
-              {gettext("PNG, JPG, WEBP or GIF up to 10 MB")}
+              {gettext("Images: PNG, JPG, WEBP, GIF up to 10 MB")}
+            </p>
+            <p class="text-xs text-base-content/70">
+              {gettext("Documents: PDF up to 25 MB")}
+            </p>
+            <p class="text-xs text-base-content/70">
+              {gettext(
+                "Video: MP4, WebM up to 500 MB · Audio: MP3, M4A up to 100 MB · Captions: WebVTT"
+              )}
+            </p>
+            <p class="text-xs text-base-content/50">
+              {gettext("Video and audio are served as uploaded — export web-ready H.264/AAC.")}
             </p>
             <.live_file_input upload={@uploads.media} class="sr-only" />
           </div>
@@ -953,7 +1086,7 @@ defmodule KilnCMSWeb.MediaLive do
             icon="hero-photo"
             title={gettext("No media yet")}
           >
-            {gettext("Upload an image above to start building your library.")}
+            {gettext("Upload a file above to start building your library.")}
           </.empty_state>
           <p :if={@media == [] and @filtering?} class="text-sm text-base-content/60">
             {gettext("No media matches “%{query}”.", query: @query)}
@@ -983,14 +1116,15 @@ defmodule KilnCMSWeb.MediaLive do
                   loading="lazy"
                   class="aspect-square w-full object-cover"
                 />
-                <%!-- A document (no width, so no thumbnail variant) or a gated
-                      item (no public `url` to preview — #481) gets a file
-                      badge instead of a broken/blank <img>. --%>
+                <%!-- A document (no width, so no thumbnail variant), a gated
+                      item (no public `url` to preview — #481) or an A/V item
+                      with no poster frame (#494) gets a kind badge instead of
+                      a broken/blank <img>. --%>
                 <div
                   :if={!thumb_src(item)}
                   class="flex aspect-square w-full flex-col items-center justify-center gap-1 bg-base-200 text-base-content/60"
                 >
-                  <.icon name="hero-document" class="size-8" />
+                  <.icon name={kind_icon(item)} class="size-8" />
                   <span class="text-[10px] font-medium uppercase">{file_ext(item.filename)}</span>
                 </div>
               </button>
@@ -1169,11 +1303,21 @@ defmodule KilnCMSWeb.MediaLive do
       >
         <li :for={item <- @items} id={"trash-#{item.id}"} class="flex items-center gap-4 p-3">
           <img
+            :if={thumb_src(item)}
             src={thumb_src(item)}
             alt={item.alt || item.filename}
             loading="lazy"
             class="size-12 shrink-0 rounded object-cover"
           />
+          <%!-- Same kind badge the grid uses: a trashed document or A/V item
+               has no thumbnail, and an <img> with a nil src renders as a
+               broken image. --%>
+          <div
+            :if={!thumb_src(item)}
+            class="flex size-12 shrink-0 items-center justify-center rounded bg-base-200 text-base-content/60"
+          >
+            <.icon name={kind_icon(item)} class="size-5" />
+          </div>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">{item.filename}</p>
             <p class="text-xs text-base-content/70">
@@ -1242,8 +1386,13 @@ defmodule KilnCMSWeb.MediaLive do
 
         <%!-- Raster images get the focal-point editor: click (or focus and use
              arrow keys) to move the point crops center on. Non-images keep a
-             plain preview. --%>
-        <div :if={@item.width} class="mt-4 flex justify-center">
+             plain preview.
+
+             Gated on `image?/1` as well as `width`, not `width` alone (#494):
+             ffprobe writes `width`/`height` for a video too, and neither a
+             focal point nor the rotate/flip controls below mean anything for
+             one — `Media.Transform` runs libvips, which can't open an MP4. --%>
+        <div :if={image?(@item) and @item.width} class="mt-4 flex justify-center">
           <div
             id={"focal-editor-#{@item.id}"}
             phx-hook="FocalPoint"
@@ -1261,14 +1410,39 @@ defmodule KilnCMSWeb.MediaLive do
             />
           </div>
         </div>
+        <%!-- A/V (#494) previews in a real player rather than an <img>, and
+             plays through the authorized stream route so a gated item
+             previews here exactly as it would on a page. `preload="metadata"`
+             keeps opening the drawer from pulling down a whole video. --%>
+        <video
+          :if={MediaKind.of(@item.content_type) == :video}
+          id={"media-preview-#{@item.id}"}
+          src={~p"/media/#{@item.id}/stream"}
+          poster={poster_url(@item)}
+          controls
+          playsinline
+          preload="metadata"
+          class="mt-4 max-h-64 w-full rounded bg-black"
+        />
+        <audio
+          :if={MediaKind.of(@item.content_type) == :audio}
+          id={"media-preview-#{@item.id}"}
+          src={~p"/media/#{@item.id}/stream"}
+          controls
+          preload="metadata"
+          class="mt-4 w-full"
+        />
         <img
-          :if={!@item.width}
+          :if={image?(@item) and !@item.width}
           src={@item.url}
           alt={@item.alt || @item.filename}
           class="mt-4 max-h-64 w-full rounded object-contain"
         />
 
-        <div :if={@item.width} class="mt-2 flex flex-wrap items-center justify-center gap-1">
+        <div
+          :if={image?(@item) and @item.width}
+          class="mt-2 flex flex-wrap items-center justify-center gap-1"
+        >
           <button
             :for={
               {op, label, icon} <- [
@@ -1299,6 +1473,8 @@ defmodule KilnCMSWeb.MediaLive do
           <dd>{humanize_bytes(@item.byte_size)}</dd>
           <dt :if={@item.width} class="text-base-content/70">{gettext("Dimensions")}</dt>
           <dd :if={@item.width}>{@item.width} × {@item.height} px</dd>
+          <dt :if={duration_label(@item)} class="text-base-content/70">{gettext("Duration")}</dt>
+          <dd :if={duration_label(@item)}>{duration_label(@item)}</dd>
           <dt class="text-base-content/70">{gettext("Uploaded")}</dt>
           <dd>
             <time

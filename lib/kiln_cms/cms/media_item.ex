@@ -7,6 +7,11 @@ defmodule KilnCMS.CMS.MediaItem do
   media library); `Media.Transform` provides in-admin rotate/flip edits — see
   docs/media-pipeline.md.
 
+  Not every item is an image: #481 added documents and #494 added video, audio
+  and WebVTT caption tracks, each with its own upload validator and (for A/V)
+  its own background worker, `Media.AVWorker`. `KilnCMS.MediaKind.of/1` is the
+  one place that decides which kind a row is, from its `content_type`.
+
   Deletes are soft (AshArchival): `destroy` stamps `archived_at` and hides the
   row from reads, but keeps both the record and its storage blobs intact. That
   preserves referential integrity for published content still pointing at the
@@ -107,6 +112,7 @@ defmodule KilnCMS.CMS.MediaItem do
     :byte_size,
     :width,
     :height,
+    :duration_seconds,
     :variants,
     :alt,
     :caption,
@@ -331,9 +337,18 @@ defmodule KilnCMS.CMS.MediaItem do
     attribute :content_type, :string, public?: true
     attribute :byte_size, :integer, public?: true
 
-    # Intrinsic pixel dimensions of the original (nil for non-raster uploads).
+    # Intrinsic pixel dimensions of the original. Written by
+    # `Media.VariantWorker` for a raster image and by `Media.AVWorker` for a
+    # video (#494); nil for audio, documents, and anything neither worker
+    # could measure (no ffmpeg installed, an unreadable file).
     attribute :width, :integer, public?: true
     attribute :height, :integer, public?: true
+
+    # Playback duration in seconds (#494) — video and audio only, and only
+    # when ffprobe was available to measure it. Float rather than integer
+    # because that is what ffprobe reports and rounding at write time would
+    # lose the distinction between a 0.4s sting and an empty file.
+    attribute :duration_seconds, :float, public?: true
 
     # Generated responsive variants, keyed by label:
     # %{"thumb" => %{"key" => ..., "url" => ..., "width" => ..., "height" => ...}}

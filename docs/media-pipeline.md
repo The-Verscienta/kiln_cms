@@ -160,10 +160,112 @@ audience), serves the **original filename** rather than the UUID storage
 key, and bumps the aggregate, privacy-first `download_count` (no per-viewer
 identity — consistent with every other counter in this codebase).
 
-An image can never be gated in v1 (its responsive-variant pipeline —
-`Media.VariantWorker` — assumes public storage throughout); gating an
-existing document requires private storage to be configured first, same as
-a fresh upload.
+An **image** can never be gated (its responsive-variant pipeline —
+`Media.VariantWorker` — assumes public storage throughout). Documents and
+A/V both can; gating an existing item requires private storage to be
+configured first, same as a fresh upload.
+
+## Video and audio (#494)
+
+The library accepts self-hosted **video, audio and WebVTT caption tracks**,
+uploaded through the same `/media` picker and byte-validated by
+[`KilnCMS.AVProcessor`](../lib/kiln_cms/av_processor.ex) on the same
+deny-by-default, magic-bytes-only terms as images and PDFs.
+
+| Kind | Accepted | Stored `content_type` | Size cap |
+|------|----------|----------------------|----------|
+| Video | MP4 (ISO-BMFF, web brands only), WebM | `video/mp4`, `video/webm` | 500 MB |
+| Audio | MP3, M4A/M4B | `audio/mpeg`, `audio/mp4` | 100 MB |
+| Captions | WebVTT | `text/vtt` | 2 MB |
+
+### Upload web-ready files — there is no transcoding
+
+Kiln stores exactly what you give it. A QuickTime `.mov`, a Matroska `.mkv`
+and an HEIF-branded MP4 are all **rejected at upload**, even renamed to
+`.mp4`, because the browser could not play them and nothing here will convert
+them. Export H.264/AAC in an MP4 (or VP9/Opus in a WebM) first. Adaptive
+streaming (HLS/DASH), in-app transcoding and DRM are deliberately out of
+scope — that is a video platform, not a CMS; the `Kiln.Plugin` seam is where
+an external transcoder (Mux-style) would attach.
+
+### Duration and poster frames need ffmpeg — and work without it
+
+[`KilnCMS.Media.AVWorker`](../lib/kiln_cms/media/av_worker.ex) runs after
+upload (off the request, like `VariantWorker`), re-fetches the original from
+storage, and shells out to `ffprobe`/`ffmpeg` for the playback duration, the
+video's intrinsic dimensions, and a poster frame taken one second in.
+
+**ffmpeg is an optional system dependency, not a Mix dep.** Install it in
+your image (`apk add ffmpeg` / `apt-get install -y ffmpeg`) to get those
+three things. Without it every step no-ops: the upload still stores and still
+plays, it simply has no duration and no generated poster, and an editor picks
+a poster image by hand — which the `video` block supports either way.
+
+Note that ffprobe writes `width`/`height` for a video exactly as libvips does
+for an image, so **`width` alone does not mean "this is an image"** anywhere
+in this codebase. `KilnCMS.MediaKind.of/1` is the one place that decides an
+item's kind, from its `content_type`.
+
+### Blocks
+
+A/V is placed on content with the **`video`** and **`audio`** blocks —
+distinct from `embed`, which points at YouTube/Vimeo. The video block carries
+a poster image reference, a WebVTT caption track reference, and `autoplay` /
+`loop` flags (autoplay always renders muted, since no browser will autoplay
+sound).
+
+Neither block ever stores a storage URL. Their `src` is always
+`/media/<media_id>/stream`, for the same reason the `file` block's href is
+always `/media/<id>/download`: a gated item has no public URL to store, and a
+public one can be gated later, which would leave a baked URL pointing at a
+blob that has since moved. A pasted `url` field remains for media hosted
+somewhere else entirely, and is used only when no library item is set.
+
+### Streaming and `Range`
+
+`GET /media/:id/stream`
+([`MediaDownloadController.stream/2`](../lib/kiln_cms_web/controllers/media_download_controller.ex))
+serves playback bytes under the same authorization as the download route, and
+differs from it on three points:
+
+* **Inline, not `attachment`** — a `<video>` cannot play a response the
+  browser is told to save. Only content types on
+  `KilnCMS.MediaKind.inline_streamable?/1`'s exact allowlist are served that
+  way; anything else falls back to the attachment path, so an
+  editor-supplied `content_type` (it *is* writable through the API) can never
+  make this route an inline host for arbitrary content on the app's origin.
+* **`Range` requests** — seeking is a `Range:` request, and a player shows no
+  scrub bar without `Accept-Ranges`. Answered by `Storage.fetch_range/3`,
+  which reads only the requested slice (`:file.pread` locally, a ranged
+  `GET` on S3). Every response is capped at 8 MB, so a seek never pulls a
+  whole film into memory — and the cap holds on the *un-ranged* path too,
+  which streams the body in 8 MB chunks rather than buffering it. That
+  matters because omitting `Range` (or sending an unparseable one) would
+  otherwise be a one-header way to ask for a 500 MB allocation.
+* **No download counter** — one scrub is dozens of ranged requests;
+  `download_count` stays a download-only measure.
+
+### Gating A/V
+
+A video or audio item gates exactly like a document. One extra step applies:
+**gating discards the generated poster frame**, row and blob. A poster is
+written to *public* storage (it renders as a plain `<img>`), and a still from
+a members-only video should not stay world-readable once the video isn't.
+Un-gating does not bring it back — pick a poster image on the block.
+
+If you serve media from a CDN on another hostname, note that `CSP_IMG_SRC`
+widens the browser CSP's `media-src` as well as its `img-src`; without it,
+`default-src 'self'` blocks a cross-host `<video>`.
+
+### Large objects
+
+Nothing in the pipeline holds a whole video in memory. Uploads above 16 MB go
+to S3 as a streamed multipart upload (smaller ones keep the single `PUT`, so a
+4 KB thumbnail doesn't pay for three round trips); `Storage.copy_to_file/3`
+streams a blob to a temp file for `Media.AVWorker` and for the gating
+relocation; and the stream route chunks its responses as described above. The
+one deliberate exception is `GET /media/:id/download`, which is a whole-file
+response by definition — keep the document caps in mind if you raise them.
 
 ## Production storage & CDN
 

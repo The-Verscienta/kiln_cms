@@ -235,13 +235,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
            # is for an image block. Requires an EXPLICIT non-image
            # content_type (see the image filter's comment above) — a row
            # with no content_type at all defaults to the image bucket, not
-           # this one.
+           # this one. Documents only: video/audio/caption tracks (#494)
+           # have their own list below.
            CMS.list_media_items!(
              actor: actor,
              tenant: org,
              query: [
-               filter: expr(not is_nil(content_type) and not ilike(content_type, "image/%")),
+               filter: document_filter(),
                select: [:id, :filename, :content_type, :byte_size, :audience],
+               sort: [inserted_at: :desc],
+               limit: @max_media
+             ]
+           )
+         )
+         |> assign(
+           :av_media,
+           # Playable media (#494) — video and audio, for the video/audio
+           # block pickers. `duration_seconds` and `variants` come along
+           # because the picker shows the length and the poster thumbnail,
+           # and `duration_seconds` is denormalized onto the block at pick
+           # time for the JSON-LD `duration`.
+           CMS.list_media_items!(
+             actor: actor,
+             tenant: org,
+             query: [
+               filter: av_filter(),
+               select: [
+                 :id,
+                 :filename,
+                 :content_type,
+                 :byte_size,
+                 :audience,
+                 :duration_seconds,
+                 :variants
+               ],
                sort: [inserted_at: :desc],
                limit: @max_media
              ]
@@ -250,6 +277,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:file_picking, nil)
          |> assign(:picker_files, nil)
          |> assign(:file_query, "")
+         # The A/V picker fills one of three different field pairs on a video
+         # block (the media itself, its poster, its caption track), so it
+         # carries a `{block_id, field}` target rather than a bare block id
+         # like `@file_picking` does — see `open_av_picker`.
+         |> assign(:av_picking, nil)
+         |> assign(:picker_av, nil)
+         |> assign(:av_query, "")
          # Taxonomy pick-lists are scanned by eye, so they load in alphabetical
          # order rather than whatever Postgres hands back. Tags additionally
          # carry their group, which sections the picker (see `tag_picker/1`).
@@ -1690,6 +1724,68 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Open the A/V drawer to fill one field pair of a video/audio block (#494).
+  #
+  # `field` distinguishes the three things a video block picks from a library:
+  # the video itself, its poster image, and its WebVTT caption track. They
+  # need three different libraries (`:av`, `:image`, `:captions`) and write
+  # three different field pairs, so the target is `{block_id, field}` — one
+  # drawer parameterized, rather than three near-identical copies of the
+  # `@file_picking` machinery.
+  def handle_event("open_av_picker", %{"bid" => bid, "field" => field}, socket)
+      when is_binary(bid) and bid != "" and field in ~w(media poster captions) do
+    {:noreply, assign(socket, :av_picking, {bid, field})}
+  end
+
+  def handle_event("open_av_picker", _params, socket), do: {:noreply, socket}
+
+  def handle_event("close_av_picker", _params, socket), do: {:noreply, reset_picker(socket)}
+
+  # Live-filter the A/V picker grid as the user types, against whichever
+  # library the open target wants.
+  def handle_event("search_av_media", %{"q" => q}, socket) do
+    results =
+      if q == "",
+        do: nil,
+        else:
+          search_media(
+            q,
+            socket.assigns.actor,
+            socket.assigns.current_org,
+            av_picker_kind(socket.assigns.av_picking)
+          )
+
+    {:noreply, socket |> assign(:av_query, q) |> assign(:picker_av, results)}
+  end
+
+  # Fill the field pair identified by `@av_picking`. Everything denormalized
+  # onto the block is read server-side from the actor-authorized `MediaItem`,
+  # never trusted from the click payload — same reasoning as `pick_file`, and
+  # the same direct `get_media_item` rather than a lookup in the mounted list
+  # (a search result outside the mounted window lives only in `@picker_av`).
+  def handle_event("pick_av", %{"id" => media_id}, socket) do
+    with {bid, field} <- socket.assigns.av_picking,
+         {:ok, item} <-
+           CMS.get_media_item(media_id,
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           ),
+         index when not is_nil(index) <- block_index_by_id(socket.assigns.form, bid) do
+      blocks =
+        socket.assigns.form
+        |> full_blocks_input()
+        |> List.update_at(index, &Map.merge(&1, av_block_patch(field, item)))
+
+      params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put("blocks", blocks)
+
+      socket = socket |> revalidate(params) |> reset_picker()
+      broadcast_preview(socket)
+      {:noreply, mark_dirty(socket)}
+    else
+      _ -> {:noreply, reset_picker(socket)}
+    end
+  end
+
   # A columns block carries a socket-managed child tree, so it's inserted with a
   # stable id (seeded into `block_children`) and a default two-column layout.
   # `after` (a block id, "start", or absent) positions the new block (B2).
@@ -2965,6 +3061,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:file_picking, nil)
     |> assign(:file_query, "")
     |> assign(:picker_files, nil)
+    |> assign(:av_picking, nil)
+    |> assign(:av_query, "")
+    |> assign(:picker_av, nil)
   end
 
   # ── AI-assisted SEO drafting (#60) ────────────────────────────────────────
@@ -4537,16 +4636,74 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
   end
 
-  # Same image/document split as the mounted `@media`/`@file_media` lists
-  # above, by `content_type` rather than `width` — see that comment.
+  # Same kind split as the mounted `@media`/`@file_media`/`@av_media` lists
+  # above, by `content_type` rather than `width` — see that comment. Every
+  # clause here has a twin in the mount filters; `KilnCMS.MediaKind` is the
+  # prose version of the same rule, but a filter has to run in Postgres.
+  # Which library an open A/V drawer is browsing. `nil` (drawer closed) still
+  # has to answer something, and `:av` is the harmless default — the search
+  # result is discarded when the drawer isn't open.
+  defp av_picker_kind({_bid, "poster"}), do: :image
+  defp av_picker_kind({_bid, "captions"}), do: :captions
+  defp av_picker_kind(_target), do: :av
+
+  # The block fields each pick writes. `duration_seconds` rides along with the
+  # media itself (it feeds the JSON-LD `duration` and the editor's summary
+  # line) but is NOT written for the poster or the track — the poster's own
+  # length is meaningless and a `.vtt` has none.
+  defp av_block_patch("media", item) do
+    %{
+      "media_id" => item.id,
+      "duration_seconds" => item.duration_seconds,
+      # A pasted external URL and a library item are alternatives, not layers
+      # (see `KilnCMS.Blocks.Video`'s `src/1`): leaving a stale `url` behind
+      # would be invisible until the item was later cleared.
+      "url" => nil
+    }
+  end
+
+  defp av_block_patch("poster", item),
+    do: %{"poster_media_id" => item.id, "poster_url" => nil}
+
+  defp av_block_patch("captions", item),
+    do: %{"captions_media_id" => item.id, "captions_label" => item.alt || item.filename}
+
   defp search_kind_filter(:image, text_filter),
     do: expr((is_nil(content_type) or ilike(content_type, "image/%")) and ^text_filter)
 
+  # `:file` is "a document", NOT "not an image" — video, audio and caption
+  # tracks (#494) are all non-image and none of them belongs in a picker whose
+  # block renders a download link.
   defp search_kind_filter(:file, text_filter),
-    do: expr(not is_nil(content_type) and not ilike(content_type, "image/%") and ^text_filter)
+    do: expr(^document_filter() and ^text_filter)
+
+  defp search_kind_filter(:av, text_filter),
+    do: expr(^av_filter() and ^text_filter)
+
+  defp search_kind_filter(:captions, text_filter),
+    do: expr(content_type == "text/vtt" and ^text_filter)
 
   defp search_select(:image), do: [:id, :url, :alt, :caption, :filename]
   defp search_select(:file), do: [:id, :filename, :content_type, :byte_size, :audience]
+
+  defp search_select(kind) when kind in [:av, :captions],
+    do: [:id, :filename, :content_type, :byte_size, :audience, :duration_seconds, :variants]
+
+  @doc false
+  # Shared by the mount lists and the live search, so the two can't drift.
+  # Both are plain `content_type` predicates: a NULL content_type is an image
+  # (see the mount comment) and so is excluded from each.
+  def document_filter do
+    expr(
+      not is_nil(content_type) and not ilike(content_type, "image/%") and
+        not ilike(content_type, "video/%") and not ilike(content_type, "audio/%") and
+        content_type != "text/vtt"
+    )
+  end
+
+  @doc false
+  def av_filter,
+    do: expr(ilike(content_type, "video/%") or ilike(content_type, "audio/%"))
 
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
   # (browser opened from the chrome), an integer fills that existing block.
@@ -4903,6 +5060,145 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  # The A/V counterpart of `file_picker/1` (#494), and deliberately the same
+  # shape — single-select, no multi-pick, no "insert new" shortcut.
+  #
+  # One component covers three targets, because a video block picks from
+  # three different libraries: the video/audio itself (`@av_media`), a poster
+  # image (`@images`) and a WebVTT caption track (searched, since a `.vtt` is
+  # rare enough not to warrant its own mounted list). `@target` is the
+  # `{block_id, field}` from `@av_picking`, and it decides both the list shown
+  # and the copy — a drawer titled "Choose a video" that is actually offering
+  # poster images is worse than no drawer.
+  attr :target, :any, required: true
+  attr :items, :list, required: true
+  attr :images, :list, required: true
+  attr :results, :any, required: true
+  attr :query, :string, required: true
+
+  defp av_picker(assigns) do
+    {_bid, field} = assigns.target
+
+    mounted =
+      case field do
+        "poster" -> assigns.images
+        # No mounted list for caption tracks: `@results` (the search) is the
+        # only way to reach one, and an empty state below says so.
+        "captions" -> []
+        _media -> assigns.items
+      end
+
+    assigns =
+      assigns
+      |> assign(:field, field)
+      |> assign(:mounted, mounted)
+      |> assign(:visible, assigns.results || mounted)
+
+    ~H"""
+    <div class="fixed inset-0 z-50" phx-window-keydown="close_av_picker" phx-key="Escape">
+      <div class="absolute inset-0 bg-black/20" phx-click="close_av_picker" aria-hidden="true"></div>
+      <div
+        id="av-picker-dialog"
+        phx-hook="FocusTrap"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="av-picker-title"
+        tabindex="-1"
+        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
+      >
+        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
+          <h2 id="av-picker-title" class="text-lg font-medium">{av_picker_title(@field)}</h2>
+          <button
+            type="button"
+            phx-click="close_av_picker"
+            aria-label={gettext("Close")}
+            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4">
+          <form id="av-browser-filter" phx-change="search_av_media" class="mb-3">
+            <input
+              type="text"
+              name="q"
+              value={@query}
+              placeholder={gettext("Search by filename")}
+              aria-label={gettext("Search by filename")}
+              phx-debounce="150"
+              autocomplete="off"
+              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+            />
+          </form>
+
+          <p :if={@visible == [] and @query != ""} class="text-sm text-base-content/60">
+            {gettext("Nothing matches “%{query}”.", query: @query)}
+          </p>
+          <p :if={@visible == [] and @query == ""} class="text-sm text-base-content/60">
+            {av_picker_empty(@field)} <.link navigate={~p"/media"} class="underline">{gettext(
+                "media library"
+              )}</.link>.
+          </p>
+
+          <ul :if={@visible != []} class="space-y-1">
+            <li :for={item <- @visible}>
+              <button
+                type="button"
+                phx-click="pick_av"
+                phx-value-id={item.id}
+                title={item.filename}
+                class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+              >
+                <.icon
+                  name={av_item_icon(item)}
+                  class="size-5 shrink-0 text-base-content/60"
+                />
+                <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+                <span :if={av_item_duration(item)} class="shrink-0 text-xs text-base-content/60">
+                  {av_item_duration(item)}
+                </span>
+                <span
+                  :if={Map.get(item, :audience, :public) != :public}
+                  class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
+                >
+                  {gettext("Gated")}
+                </span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp av_picker_title("poster"), do: gettext("Choose a poster image")
+  defp av_picker_title("captions"), do: gettext("Choose a caption track")
+  defp av_picker_title(_field), do: gettext("Choose a video or audio file")
+
+  defp av_picker_empty("poster"), do: gettext("No images yet — upload one in the")
+
+  defp av_picker_empty("captions"),
+    do: gettext("Search for a WebVTT (.vtt) track you've uploaded to the")
+
+  defp av_picker_empty(_field),
+    do: gettext("No video or audio yet — upload an MP4, WebM, MP3 or M4A in the")
+
+  # The picker lists items from three different `select:`s, so nothing here may
+  # assume a field is loaded — `Map.get/3` throughout.
+  defp av_item_icon(item) do
+    case KilnCMS.MediaKind.of(Map.get(item, :content_type)) do
+      :video -> "hero-film"
+      :audio -> "hero-musical-note"
+      :captions -> "hero-language"
+      _kind -> "hero-photo"
+    end
+  end
+
+  defp av_item_duration(item),
+    do: KilnCMS.MediaKind.humanize_duration(Map.get(item, :duration_seconds))
+
   # 1-based position of a media id in the current selection, or nil.
   defp picked_position(picked, id) do
     case Enum.find_index(picked, &(&1.id == id)) do
@@ -5071,6 +5367,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("quote"), do: "hero-chat-bubble-bottom-center-text"
   defp block_icon("image"), do: "hero-photo"
   defp block_icon("file"), do: "hero-document-arrow-down"
+  defp block_icon("video"), do: "hero-film"
+  defp block_icon("audio"), do: "hero-musical-note"
   defp block_icon("embed"), do: "hero-code-bracket"
   defp block_icon("divider"), do: "hero-minus"
   defp block_icon("columns"), do: "hero-view-columns"
@@ -5089,6 +5387,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("quote"), do: gettext("Highlighted quotation")
   defp block_description("image"), do: gettext("Picture with alt text and caption")
   defp block_description("file"), do: gettext("Downloadable document, e.g. a PDF")
+
+  # Says what it is NOT, for the same reason `accordion` does: `embed` also
+  # produces a video player, and the difference an editor cares about is where
+  # the file lives, not what the block looks like.
+  defp block_description("video"),
+    do: gettext("Video from your media library — use Embed for YouTube or Vimeo")
+
+  defp block_description("audio"), do: gettext("Audio from your media library, e.g. a podcast")
   defp block_description("embed"), do: gettext("Embedded HTML or external content")
   defp block_description("divider"), do: gettext("Visual separator between sections")
   defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
@@ -5352,6 +5658,197 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # and with a screen reader — the same pairing `move_block/2` gives the
   # top-level list, and the reason it is not a "nice to have" is that a gallery
   # is *only* an ordering: an editor who cannot reorder it cannot use it.
+  # The video block's editor (#494). Three library picks (the media, a poster,
+  # a caption track), each writing a hidden `media_id`-shaped field, plus the
+  # display metadata and the two playback flags.
+  #
+  # Every picked id is carried in a hidden input rather than re-derived on
+  # save: the block's params round-trip through `AshPhoenix.Form`, and a field
+  # with no input in the DOM is a field the next `validate` drops.
+  attr :bf, :any, required: true
+
+  defp video_editor(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <input type="hidden" name={@bf[:media_id].name} value={@bf[:media_id].value} />
+      <input type="hidden" name={@bf[:poster_media_id].name} value={@bf[:poster_media_id].value} />
+      <input
+        type="hidden"
+        name={@bf[:captions_media_id].name}
+        value={@bf[:captions_media_id].value}
+      />
+      <input
+        type="hidden"
+        name={@bf[:duration_seconds].name}
+        value={@bf[:duration_seconds].value}
+      />
+      <%!-- `poster_url` (an externally-hosted poster, the counterpart of the
+            `url` field below) has no visible input: the picker is the only way
+            to set a poster from this screen, and a second URL box next to it
+            would be one more thing to explain than it is worth. It still needs
+            a hidden input, because a field with no input in the DOM is a field
+            the next `validate` DROPS — without this, opening any page whose
+            video block was written through the headless API would silently
+            erase its poster. The two captions text fields below are visible
+            only when a track is picked, and carry hidden twins for exactly the
+            same reason when they aren't. --%>
+      <input type="hidden" name={@bf[:poster_url].name} value={@bf[:poster_url].value} />
+      <input
+        :if={@bf[:captions_media_id].value in [nil, ""]}
+        type="hidden"
+        name={@bf[:captions_label].name}
+        value={@bf[:captions_label].value}
+      />
+      <input
+        :if={@bf[:captions_media_id].value in [nil, ""]}
+        type="hidden"
+        name={@bf[:captions_lang].name}
+        value={@bf[:captions_lang].value}
+      />
+
+      <%!-- The real player, not a still: the point of picking a video in the
+            editor is confirming you picked the right one, and a filename does
+            not tell you that. Streams through the authorized route, so a gated
+            item previews here exactly as it will on the page. --%>
+      <video
+        :if={@bf[:media_id].value not in [nil, ""]}
+        id={"video-preview-#{@bf[:id].value}"}
+        src={~p"/media/#{@bf[:media_id].value}/stream"}
+        controls
+        playsinline
+        preload="metadata"
+        class="max-h-48 w-full rounded bg-black"
+      />
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="media"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-film" class="mr-1 size-4" />{gettext("Choose video")}
+        </button>
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="poster"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-photo" class="mr-1 size-4" />{if @bf[:poster_media_id].value in [
+                                                               nil,
+                                                               ""
+                                                             ],
+                                                             do: gettext("Add poster"),
+                                                             else: gettext("Change poster")}
+        </button>
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="captions"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-language" class="mr-1 size-4" />{if @bf[:captions_media_id].value in [
+                                                                  nil,
+                                                                  ""
+                                                                ],
+                                                                do: gettext("Add captions"),
+                                                                else: gettext("Change captions")}
+        </button>
+      </div>
+
+      <%!-- Not a validation error — a video with no captions still publishes.
+            It is the one accessibility fact about this block an editor cannot
+            see by looking at it, so it is stated where the decision is made
+            rather than in a report nobody opens. --%>
+      <p
+        :if={@bf[:media_id].value not in [nil, ""] and @bf[:captions_media_id].value in [nil, ""]}
+        class="flex items-start gap-1 text-xs text-warning"
+      >
+        <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+        <span>
+          {gettext("No captions — this video isn't available to deaf and hard-of-hearing readers.")}
+        </span>
+      </p>
+
+      <.input
+        field={@bf[:url]}
+        label={gettext("Video URL")}
+        placeholder={gettext("…or paste a URL to a video hosted elsewhere")}
+      />
+      <.input field={@bf[:title]} label={gettext("Title")} />
+      <.input field={@bf[:caption]} label={gettext("Caption")} />
+      <div :if={@bf[:captions_media_id].value not in [nil, ""]} class="grid grid-cols-2 gap-2">
+        <.input field={@bf[:captions_label]} label={gettext("Captions label")} />
+        <.input
+          field={@bf[:captions_lang]}
+          label={gettext("Captions language")}
+          placeholder="en"
+        />
+      </div>
+      <div class="flex flex-wrap gap-4">
+        <%!-- The label says "muted" because the rendered element always is:
+              browsers refuse to autoplay a video with sound, so offering the
+              two as separate choices would offer one that does nothing. --%>
+        <.input
+          field={@bf[:autoplay]}
+          type="checkbox"
+          label={gettext("Autoplay (muted)")}
+        />
+        <.input field={@bf[:loop]} type="checkbox" label={gettext("Loop")} />
+      </div>
+    </div>
+    """
+  end
+
+  attr :bf, :any, required: true
+
+  defp audio_editor(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <input type="hidden" name={@bf[:media_id].name} value={@bf[:media_id].value} />
+      <input
+        type="hidden"
+        name={@bf[:duration_seconds].name}
+        value={@bf[:duration_seconds].value}
+      />
+
+      <audio
+        :if={@bf[:media_id].value not in [nil, ""]}
+        id={"audio-preview-#{@bf[:id].value}"}
+        src={~p"/media/#{@bf[:media_id].value}/stream"}
+        controls
+        preload="metadata"
+        class="w-full"
+      />
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          phx-click="open_av_picker"
+          phx-value-bid={@bf[:id].value}
+          phx-value-field="media"
+          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        >
+          <.icon name="hero-musical-note" class="mr-1 size-4" />{gettext("Choose audio")}
+        </button>
+      </div>
+
+      <.input
+        field={@bf[:url]}
+        label={gettext("Audio URL")}
+        placeholder={gettext("…or paste a URL to audio hosted elsewhere")}
+      />
+      <.input field={@bf[:title]} label={gettext("Title")} />
+      <.input field={@bf[:caption]} label={gettext("Caption")} />
+      <.input field={@bf[:loop]} type="checkbox" label={gettext("Loop")} />
+    </div>
+    """
+  end
+
   attr :bf, :any, required: true
 
   defp gallery_editor(assigns) do
@@ -6108,6 +6605,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       />
                       <.input field={bf[:description]} label={gettext("Description")} />
                     </div>
+                    <.video_editor :if={block_type_string(bf) == "video"} bf={bf} />
+                    <.audio_editor :if={block_type_string(bf) == "audio"} bf={bf} />
                     <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
                     <.columns_editor
                       :if={block_type_string(bf) == "columns"}
@@ -6120,6 +6619,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         "rich_text",
                         "image",
                         "file",
+                        "video",
+                        "audio",
                         "columns",
                         "gallery"
                       ]
@@ -6640,6 +7141,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
         files={@file_media}
         results={@picker_files}
         query={@file_query}
+      />
+
+      <.av_picker
+        :if={@av_picking != nil}
+        target={@av_picking}
+        items={@av_media}
+        images={@media}
+        results={@picker_av}
+        query={@av_query}
       />
 
       <.version_compare

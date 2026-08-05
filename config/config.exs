@@ -448,9 +448,22 @@ config :ash_graphql, authorize_update_destroy_with_error?: true
 # Fields are declared per content resource (see KilnCMS.CMS.Content).
 config :ash_graphql, :subscriptions, true
 
+# `audio/mp4` and `text/vtt` are absent from the `mime` package's table (#494),
+# and two things break without them: `allow_upload`'s `accept: ~w(.m4a .vtt)`
+# refuses to compile an extension it can't resolve to a type, and
+# `KilnCMS.Storage.S3` sets each object's stored `Content-Type` from
+# `MIME.from_path/1` — an `.m4a` would go up as `application/octet-stream` and
+# come back down as a file no browser will play.
+#
+# Note for anyone changing this: the `mime` package reads its config at COMPILE
+# time, so an edit here needs `mix deps.clean mime --build` to take effect.
 config :mime,
   extensions: %{"json" => "application/vnd.api+json"},
-  types: %{"application/vnd.api+json" => ["json"]}
+  types: %{
+    "application/vnd.api+json" => ["json"],
+    "audio/mp4" => ["m4a"],
+    "text/vtt" => ["vtt"]
+  }
 
 config :ash_json_api,
   show_public_calculations_when_loaded?: false,
