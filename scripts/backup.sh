@@ -31,7 +31,11 @@
 
 set -euo pipefail
 
+# Set by `die` so a failure manifest can record what actually went wrong.
+LAST_ERROR=""
+
 die() {
+  LAST_ERROR="$*"
   echo "error: $*" >&2
   exit 1
 }
@@ -84,13 +88,28 @@ record_artifact() {
   fi
 }
 
+# Escape a value for a JSON string: backslash, quote, and the control
+# characters JSON forbids raw. A literal newline in an error message used to
+# produce a manifest `Jason.decode` rejects — which the console renders as "No
+# backup has ever been recorded", the single most misleading thing it can say,
+# in response to a FAILED backup.
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' |
+    awk 'BEGIN{ORS=""} NR>1{print "\\n"} {print}'
+}
+
 write_manifest() {
   # $1 = "true"/"false" (did it succeed), $2 = error string (may be empty)
   local out="$BACKUP_DIR/manifest.json"
+  track_partial "${out}.partial"
   local err="null"
-  [ -n "${2:-}" ] && err="\"$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')\""
+  [ -n "${2:-}" ] && err="\"$(json_escape "$2")\""
   local offsite="null"
-  [ -n "${BACKUP_RCLONE_REMOTE:-}" ] && offsite="\"${BACKUP_RCLONE_REMOTE}\""
+  # Escaped too: these are operator-supplied strings, and an unescaped quote
+  # in either silently breaks the whole file.
+  [ -n "${BACKUP_RCLONE_REMOTE:-}" ] && offsite="\"$(json_escape "$BACKUP_RCLONE_REMOTE")\""
+  local trigger
+  trigger="$(json_escape "${BACKUP_TRIGGER:-cron}")"
 
   mkdir -p "$BACKUP_DIR"
   cat > "${out}.partial" <<JSON
@@ -98,7 +117,7 @@ write_manifest() {
   "version": 1,
   "started_at": "${STARTED_AT}",
   "finished_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "trigger": "${BACKUP_TRIGGER:-cron}",
+  "trigger": "${trigger}",
   "ok": $1,
   "artifacts": [${MANIFEST_ARTIFACTS}],
   "offsite": ${offsite},
@@ -126,11 +145,32 @@ JSON
 on_exit() {
   local status=$?
 
-  find "$BACKUP_DIR" -type f -name '*.partial' -delete 2>/dev/null || true
+  # Only OUR OWN partials, tracked as they are created — never a blanket
+  # `find … -name '*.partial' -delete`. Since #484 two writers share
+  # $BACKUP_DIR, and a blanket sweep here would unlink the in-progress dump of
+  # a concurrent in-app backup: pg_dump keeps writing to the unlinked inode,
+  # exits 0, and its verification then fails with ENOENT — a successful cron
+  # run reporting the app's run as failed.
+  local f
+  for f in $OWN_PARTIALS; do
+    [ -n "$f" ] && rm -f "$f"
+  done
 
   if [ "$status" -ne 0 ] && [ "${WRITE_MANIFEST:-0}" = "1" ]; then
-    write_manifest false "backup.sh exited ${status} — see the backup log"
+    # `die` sets LAST_ERROR; a command that failed under `set -e` (pg_dump,
+    # tar, rclone) never reaches it, so fall back to the exit status rather
+    # than recording an empty reason.
+    write_manifest false "${LAST_ERROR:-backup.sh exited ${status} - see the backup log}"
   fi
+}
+
+# Set by `die` so the manifest records what actually went wrong rather than
+# only an exit status. Anything that kills the script without going through
+# `die` (a pg_dump non-zero exit under `set -e`) falls back to the status.
+OWN_PARTIALS=""
+
+track_partial() {
+  OWN_PARTIALS="${OWN_PARTIALS} $1"
 }
 
 newest() {
@@ -143,6 +183,7 @@ cmd_db() {
   mkdir -p "$BACKUP_DIR/db"
   local out="$BACKUP_DIR/db/kiln-db-${STAMP}.dump"
 
+  track_partial "${out}.partial"
   echo "==> pg_dump → ${out}"
   # Custom format (-Fc): compressed, restorable table-by-table with pg_restore.
   # --no-owner/--no-privileges matches scripts/staging.sh: restores don't
@@ -168,6 +209,7 @@ cmd_media() {
   mkdir -p "$BACKUP_DIR/media"
   local out="$BACKUP_DIR/media/kiln-media-${STAMP}.tar.gz"
 
+  track_partial "${out}.partial"
   echo "==> Archiving media uploads → ${out}"
   # -C so the archive holds relative paths (restores anywhere). Same
   # .partial-then-rename discipline as the dump.

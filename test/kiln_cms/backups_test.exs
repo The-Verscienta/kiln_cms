@@ -203,12 +203,29 @@ defmodule KilnCMS.BackupsTest do
   end
 
   describe "the database URL" do
-    test "falls back to the Repo's own configuration" do
+    test "resolves to the database this app is actually connected to" do
       # An operator who configured the app's database should not have to state
       # the connection a second time for backups.
       assert url = Backups.database_url()
-      assert String.starts_with?(url, "postgres://")
       assert url =~ KilnCMS.Repo.config()[:database]
+    end
+
+    test "ignores a DATABASE_URL that points somewhere else" do
+      # `config/test.exs` configures discrete fields while a stale
+      # `DATABASE_URL` can linger in the shell. Backing up whatever that
+      # points at, rather than the database being served, is the worst
+      # possible way to be wrong about a backup.
+      original = System.get_env("DATABASE_URL")
+      System.put_env("DATABASE_URL", "postgres://someone:pw@elsewhere:5432/a_different_database")
+
+      on_exit(fn ->
+        if original,
+          do: System.put_env("DATABASE_URL", original),
+          else: System.delete_env("DATABASE_URL")
+      end)
+
+      refute Backups.database_url() =~ "a_different_database"
+      assert Backups.database_url() =~ KilnCMS.Repo.config()[:database]
     end
 
     test "an explicitly configured URL wins" do

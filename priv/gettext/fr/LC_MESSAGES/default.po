@@ -1140,7 +1140,7 @@ msgid "Webhook deleted."
 msgstr "Webhook supprimé."
 
 #: lib/kiln_cms_web/components/layouts.ex:564
-#: lib/kiln_cms_web/live/overview_live.ex:424
+#: lib/kiln_cms_web/live/overview_live.ex:445
 #: lib/kiln_cms_web/live/webhook_live.ex:22
 #: lib/kiln_cms_web/live/webhook_live.ex:241
 #, elixir-autogen, elixir-format
@@ -1681,8 +1681,8 @@ msgid "Manage your profile, password, and notification preferences."
 msgstr "Gérez votre profil, votre mot de passe et vos préférences de notification."
 
 #: lib/kiln_cms_web/components/layouts.ex:491
-#: lib/kiln_cms_web/live/backup_live.ex:213
-#: lib/kiln_cms_web/live/overview_live.ex:411
+#: lib/kiln_cms_web/live/backup_live.ex:237
+#: lib/kiln_cms_web/live/overview_live.ex:432
 #: lib/kiln_cms_web/live/search_palette_live.ex:151
 #, elixir-autogen, elixir-format
 msgid "Media"
@@ -2842,7 +2842,7 @@ msgstr "%{count} slugs seraient modifiés (%{pinned} définis manuellement ignor
 msgid "%{count} submissions"
 msgstr "%{count} soumissions"
 
-#: lib/kiln_cms_web/live/overview_live.ex:445
+#: lib/kiln_cms_web/live/overview_live.ex:466
 #, elixir-autogen, elixir-format
 msgid "%{count} submissions this week"
 msgstr "%{count} soumissions cette semaine"
@@ -2868,12 +2868,12 @@ msgstr "%{count} en attente de révision"
 msgid "%{count} webhook failures in 24h"
 msgstr "%{count} échecs de webhook en 24 h"
 
-#: lib/kiln_cms_web/live/overview_live.ex:382
+#: lib/kiln_cms_web/live/overview_live.ex:403
 #, elixir-autogen, elixir-format
 msgid "%{covered} of %{total} fully translated"
 msgstr "%{covered} sur %{total} entièrement traduits"
 
-#: lib/kiln_cms_web/live/overview_live.ex:428
+#: lib/kiln_cms_web/live/overview_live.ex:449
 #, elixir-autogen, elixir-format
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr "%{failed} en échec en 24 h · %{disabled} désactivés automatiquement"
@@ -2950,7 +2950,7 @@ msgstr "Clé API créée — copiez-la maintenant, elle ne sera plus affichée."
 msgid "API keys"
 msgstr "Clés API"
 
-#: lib/kiln_cms_web/live/overview_live.ex:494
+#: lib/kiln_cms_web/live/overview_live.ex:515
 #, elixir-autogen, elixir-format
 msgid "API keys · %{count} plugins active"
 msgstr "Clés API · %{count} plugins actifs"
@@ -3090,7 +3090,7 @@ msgstr "Tous les formulaires"
 msgid "All quiet."
 msgstr "Rien à signaler."
 
-#: lib/kiln_cms_web/live/overview_live.ex:398
+#: lib/kiln_cms_web/live/overview_live.ex:419
 #, elixir-autogen, elixir-format
 msgid "Analytics & search"
 msgstr "Statistiques et recherche"
@@ -3165,7 +3165,7 @@ msgstr "Créez des formulaires publics, placez-les dans votre contenu avec le bl
 #: lib/kiln_cms_web/components/layouts.ex:495
 #: lib/kiln_cms_web/components/layouts.ex:871
 #: lib/kiln_cms_web/live/calendar_live.ex:23
-#: lib/kiln_cms_web/live/overview_live.ex:477
+#: lib/kiln_cms_web/live/overview_live.ex:498
 #, elixir-autogen, elixir-format
 msgid "Calendar"
 msgstr "Calendrier"
@@ -3807,7 +3807,7 @@ msgstr "Aperçu du formulaire"
 #: lib/kiln_cms_web/components/layouts.ex:903
 #: lib/kiln_cms_web/live/form_live.ex:22
 #: lib/kiln_cms_web/live/form_live.ex:163
-#: lib/kiln_cms_web/live/overview_live.ex:442
+#: lib/kiln_cms_web/live/overview_live.ex:463
 #, elixir-autogen, elixir-format
 msgid "Forms"
 msgstr "Formulaires"
@@ -4756,7 +4756,7 @@ msgstr "Définissez PRESENTATION_PREVIEW_URL sur votre site public (par ex. http
 msgid "Set name"
 msgstr "Définir le nom"
 
-#: lib/kiln_cms_web/live/overview_live.ex:490
+#: lib/kiln_cms_web/live/overview_live.ex:511
 #, elixir-autogen, elixir-format
 msgid "Settings & keys"
 msgstr "Paramètres et clés"
@@ -4870,7 +4870,7 @@ msgstr "Guide pas à pas, publié en données structurées HowTo"
 msgid "Stop sending newsletters to %{email}?"
 msgstr "Cesser d'envoyer des newsletters à %{email} ?"
 
-#: lib/kiln_cms_web/live/overview_live.ex:456
+#: lib/kiln_cms_web/live/overview_live.ex:477
 #, elixir-autogen, elixir-format
 msgid "Structure"
 msgstr "Structure"
@@ -5119,7 +5119,7 @@ msgstr "Piste d'audit"
 #: lib/kiln_cms_web/components/layouts.ex:502
 #: lib/kiln_cms_web/components/layouts.ex:882
 #: lib/kiln_cms_web/live/content_editor_live.ex:7065
-#: lib/kiln_cms_web/live/overview_live.ex:377
+#: lib/kiln_cms_web/live/overview_live.ex:398
 #: lib/kiln_cms_web/live/translations_live.ex:26
 #: lib/kiln_cms_web/live/translations_live.ex:142
 #, elixir-autogen, elixir-format
@@ -5316,12 +5316,12 @@ msgstr "centre"
 msgid "confirmed"
 msgstr "confirmé"
 
-#: lib/kiln_cms_web/live/overview_live.ex:461
+#: lib/kiln_cms_web/live/overview_live.ex:482
 #, elixir-autogen, elixir-format
 msgid "content types · %{fields} fields · %{terms} taxonomy terms"
 msgstr "types de contenu · %{fields} champs · %{terms} termes de taxonomie"
 
-#: lib/kiln_cms_web/live/overview_live.ex:465
+#: lib/kiln_cms_web/live/overview_live.ex:486
 #, elixir-autogen, elixir-format
 msgid "content types · %{terms} taxonomy terms"
 msgstr "types de contenu · %{terms} termes de taxonomie"
@@ -5367,7 +5367,7 @@ msgstr "recherche hybride par mots-clés et sémantique sur tous les types de co
 msgid "in review"
 msgstr "en révision"
 
-#: lib/kiln_cms_web/live/overview_live.ex:413
+#: lib/kiln_cms_web/live/overview_live.ex:434
 #, elixir-autogen, elixir-format
 msgid "items in the library"
 msgstr "éléments dans la bibliothèque"
@@ -5423,7 +5423,7 @@ msgstr "est publié"
 msgid "read"
 msgstr "lecture"
 
-#: lib/kiln_cms_web/live/overview_live.ex:400
+#: lib/kiln_cms_web/live/overview_live.ex:421
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
 msgstr "vues de contenu enregistrées"
@@ -5453,7 +5453,7 @@ msgstr "send_email : to, subject, body. broadcast : topic. Les modèles prennent
 msgid "since"
 msgstr "depuis le"
 
-#: lib/kiln_cms_web/live/overview_live.ex:386
+#: lib/kiln_cms_web/live/overview_live.ex:407
 #, elixir-autogen, elixir-format
 msgid "single-locale site"
 msgstr "site à langue unique"
@@ -5478,7 +5478,7 @@ msgstr "l'artefact rendu : corps de blocs complet, précompilé et pouvant être
 msgid "to add blocks."
 msgstr "pour ajouter des blocs."
 
-#: lib/kiln_cms_web/live/overview_live.ex:479
+#: lib/kiln_cms_web/live/overview_live.ex:500
 #, elixir-autogen, elixir-format
 msgid "transitions in the next 7 days"
 msgstr "transitions dans les 7 prochains jours"
@@ -6112,8 +6112,8 @@ msgid "Use this in content. Pasting it into the address bar downloads the file i
 msgstr "Utilisez ceci dans le contenu. Le coller dans la barre d'adresse télécharge le fichier au lieu de l'afficher."
 
 #: lib/kiln_cms_web/live/analytics_live.ex:384
-#: lib/kiln_cms_web/live/backup_live.ex:218
-#: lib/kiln_cms_web/live/backup_live.ex:274
+#: lib/kiln_cms_web/live/backup_live.ex:242
+#: lib/kiln_cms_web/live/backup_live.ex:305
 #, elixir-autogen, elixir-format
 msgid "%{count} day"
 msgid_plural "%{count} days"
@@ -8355,103 +8355,103 @@ msgid_plural "%{count} links have text like “%{example}” that describes noth
 msgstr[0] "Le texte du lien « %{example} » ne décrit rien — le texte d'ancre indique aux moteurs de recherche le sujet d'une page."
 msgstr[1] "%{count} liens ont un texte comme « %{example} » qui ne décrit rien — le texte d'ancre indique aux moteurs de recherche le sujet d'une page."
 
-#: lib/kiln_cms_web/live/backup_live.ex:271
+#: lib/kiln_cms_web/live/backup_live.ex:302
 #, elixir-autogen, elixir-format
 msgid "%{count} hour"
 msgid_plural "%{count} hours"
 msgstr[0] "%{count} heure"
 msgstr[1] "%{count} heures"
 
-#: lib/kiln_cms_web/live/backup_live.ex:268
+#: lib/kiln_cms_web/live/backup_live.ex:299
 #, elixir-autogen, elixir-format
 msgid "%{count} minute"
 msgid_plural "%{count} minutes"
 msgstr[0] "%{count} minute"
 msgstr[1] "%{count} minutes"
 
-#: lib/kiln_cms_web/live/backup_live.ex:249
+#: lib/kiln_cms_web/live/backup_live.ex:280
 #, elixir-autogen, elixir-format
 msgid "%{size} · %{count} file(s) · %{trigger}"
 msgstr "%{size} · %{count} fichier(s) · %{trigger}"
 
-#: lib/kiln_cms_web/live/backup_live.ex:100
+#: lib/kiln_cms_web/live/backup_live.ex:121
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
 msgstr "Une sauvegarde ne peut pas s'exécuter sur cette installation."
 
-#: lib/kiln_cms_web/live/backup_live.ex:180
+#: lib/kiln_cms_web/live/backup_live.ex:204
 #, elixir-autogen, elixir-format
 msgid "Artifacts"
 msgstr "Fichiers produits"
 
-#: lib/kiln_cms_web/live/backup_live.ex:127
+#: lib/kiln_cms_web/live/backup_live.ex:148
 #, elixir-autogen, elixir-format
 msgid "Back up now"
 msgstr "Sauvegarder maintenant"
 
-#: lib/kiln_cms_web/live/backup_live.ex:246
+#: lib/kiln_cms_web/live/backup_live.ex:277
 #, elixir-autogen, elixir-format
 msgid "Backed up %{ago} ago"
 msgstr "Sauvegardé il y a %{ago}"
 
-#: lib/kiln_cms_web/live/backup_live.ex:127
+#: lib/kiln_cms_web/live/backup_live.ex:148
 #, elixir-autogen, elixir-format
 msgid "Backing up…"
 msgstr "Sauvegarde en cours…"
 
-#: lib/kiln_cms_web/live/backup_live.ex:48
+#: lib/kiln_cms_web/live/backup_live.ex:60
 #, elixir-autogen, elixir-format
 msgid "Backup started — this page updates when it finishes."
 msgstr "Sauvegarde lancée — cette page se met à jour à la fin."
 
 #: lib/kiln_cms_web/components/layouts.ex:588
-#: lib/kiln_cms_web/live/backup_live.ex:32
-#: lib/kiln_cms_web/live/backup_live.ex:109
+#: lib/kiln_cms_web/live/backup_live.ex:37
+#: lib/kiln_cms_web/live/backup_live.ex:130
 #, elixir-autogen, elixir-format
 msgid "Backups"
 msgstr "Sauvegardes"
 
-#: lib/kiln_cms_web/live/backup_live.ex:211
+#: lib/kiln_cms_web/live/backup_live.ex:235
 #, elixir-autogen, elixir-format
 msgid "Directory"
 msgstr "Répertoire"
 
-#: lib/kiln_cms_web/live/backup_live.ex:89
+#: lib/kiln_cms_web/live/backup_live.ex:110
 #, elixir-autogen, elixir-format
 msgid "In-app backups are turned off (BACKUP_ENABLED)."
 msgstr "Les sauvegardes depuis l'application sont désactivées (BACKUP_ENABLED)."
 
-#: lib/kiln_cms_web/live/backup_live.ex:243
+#: lib/kiln_cms_web/live/backup_live.ex:274
 #, elixir-autogen, elixir-format
 msgid "Last backup was %{ago} ago"
 msgstr "Dernière sauvegarde il y a %{ago}"
 
-#: lib/kiln_cms_web/live/backup_live.ex:171
+#: lib/kiln_cms_web/live/backup_live.ex:195
 #, elixir-autogen, elixir-format
 msgid "Last run failed"
 msgstr "La dernière exécution a échoué"
 
-#: lib/kiln_cms_web/live/backup_live.ex:238
+#: lib/kiln_cms_web/live/backup_live.ex:269
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
 msgstr "Aucune sauvegarde n'a jamais été enregistrée"
 
-#: lib/kiln_cms_web/live/overview_live.ex:351
+#: lib/kiln_cms_web/live/overview_live.ex:358
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded for this deployment."
 msgstr "Aucune sauvegarde n'a jamais été enregistrée pour cette installation."
 
-#: lib/kiln_cms_web/live/backup_live.ex:92
+#: lib/kiln_cms_web/live/backup_live.ex:113
 #, elixir-autogen, elixir-format
 msgid "No database connection is configured for backups."
 msgstr "Aucune connexion à la base de données n'est configurée pour les sauvegardes."
 
-#: lib/kiln_cms_web/live/backup_live.ex:155
+#: lib/kiln_cms_web/live/backup_live.ex:179
 #, elixir-autogen, elixir-format
 msgid "Nothing has written %{path} yet. Either no backup has run, or it writes somewhere else."
 msgstr "Rien n'a encore écrit %{path}. Soit aucune sauvegarde n'a été lancée, soit elle écrit ailleurs."
 
-#: lib/kiln_cms_web/live/backup_live.ex:220
+#: lib/kiln_cms_web/live/backup_live.ex:244
 #, elixir-autogen, elixir-format
 msgid "Off-site"
 msgstr "Hors site"
@@ -8461,74 +8461,81 @@ msgstr "Hors site"
 msgid "Open Backups to check the schedule or take one now."
 msgstr "Ouvrez Sauvegardes pour vérifier la planification ou en lancer une."
 
-#: lib/kiln_cms_web/live/backup_live.ex:96
+#: lib/kiln_cms_web/live/backup_live.ex:117
 #, elixir-autogen, elixir-format
 msgid "PostgreSQL client tools aren't installed in this image, so a backup can't run here. Cron backups on the host are unaffected."
 msgstr "Les outils client PostgreSQL ne sont pas installés dans cette image, une sauvegarde ne peut donc pas s'exécuter ici. Les sauvegardes cron sur l'hôte ne sont pas affectées."
 
-#: lib/kiln_cms_web/live/backup_live.ex:228
+#: lib/kiln_cms_web/live/backup_live.ex:252
 #, elixir-autogen, elixir-format
 msgid "Restoring is a documented operations procedure, not a button here — see docs/backups.md. Secrets (SECRET_KEY_BASE above all) are not in these files and must be kept separately."
 msgstr "La restauration est une procédure d'exploitation documentée, pas un bouton ici — voir docs/backups.md. Les secrets (SECRET_KEY_BASE avant tout) ne sont pas dans ces fichiers et doivent être conservés séparément."
 
-#: lib/kiln_cms_web/live/backup_live.ex:217
+#: lib/kiln_cms_web/live/backup_live.ex:241
 #, elixir-autogen, elixir-format
 msgid "Retention"
 msgstr "Rétention"
 
-#: lib/kiln_cms_web/live/overview_live.ex:367
+#: lib/kiln_cms_web/live/overview_live.ex:388
 #, elixir-autogen, elixir-format
 msgid "The backup status can't be determined."
 msgstr "L'état des sauvegardes ne peut pas être déterminé."
 
-#: lib/kiln_cms_web/live/backup_live.ex:111
+#: lib/kiln_cms_web/live/backup_live.ex:132
 #, elixir-autogen, elixir-format
 msgid "The database and, on local storage, your uploaded media."
 msgstr "La base de données et, en stockage local, vos fichiers importés."
 
-#: lib/kiln_cms_web/live/backup_live.ex:240
+#: lib/kiln_cms_web/live/backup_live.ex:271
 #, elixir-autogen, elixir-format
 msgid "The last backup failed"
 msgstr "La dernière sauvegarde a échoué"
 
-#: lib/kiln_cms_web/live/overview_live.ex:354
+#: lib/kiln_cms_web/live/overview_live.ex:361
 #, elixir-autogen, elixir-format
 msgid "The last backup failed."
 msgstr "La dernière sauvegarde a échoué."
 
-#: lib/kiln_cms_web/live/overview_live.ex:359
+#: lib/kiln_cms_web/live/overview_live.ex:379
 #, elixir-autogen, elixir-format
 msgid "The last backup was %{count} day ago."
 msgid_plural "The last backup was %{count} days ago."
 msgstr[0] "La dernière sauvegarde date d'il y a %{count} jour."
 msgstr[1] "La dernière sauvegarde date d'il y a %{count} jours."
 
-#: lib/kiln_cms_web/live/backup_live.ex:200
+#: lib/kiln_cms_web/live/backup_live.ex:224
 #, elixir-autogen, elixir-format
 msgid "Verified"
 msgstr "Vérifié"
 
-#: lib/kiln_cms_web/live/backup_live.ex:208
+#: lib/kiln_cms_web/live/backup_live.ex:232
 #, elixir-autogen, elixir-format
 msgid "Where backups go"
 msgstr "Où vont les sauvegardes"
 
-#: lib/kiln_cms_web/live/backup_live.ex:258
+#: lib/kiln_cms_web/live/backup_live.ex:289
 #, elixir-autogen, elixir-format
 msgid "an unknown time"
 msgstr "une durée inconnue"
 
-#: lib/kiln_cms_web/live/backup_live.ex:265
+#: lib/kiln_cms_web/live/backup_live.ex:296
 #, elixir-autogen, elixir-format
 msgid "less than a minute"
 msgstr "moins d'une minute"
 
-#: lib/kiln_cms_web/live/backup_live.ex:215
+#: lib/kiln_cms_web/live/backup_live.ex:239
 #, elixir-autogen, elixir-format
 msgid "not archived — object storage is backed up by the provider"
 msgstr "non archivé — le stockage objet est sauvegardé par le fournisseur"
 
-#: lib/kiln_cms_web/live/backup_live.ex:198
+#: lib/kiln_cms_web/live/backup_live.ex:222
 #, elixir-autogen, elixir-format
 msgid "Listed with pg_restore after writing, so it is a real backup"
 msgstr "Vérifié avec pg_restore après écriture — c'est donc une vraie sauvegarde"
+
+#: lib/kiln_cms_web/live/overview_live.ex:370
+#, elixir-autogen, elixir-format
+msgid "The last backup was %{count} hour ago."
+msgid_plural "The last backup was %{count} hours ago."
+msgstr[0] "La dernière sauvegarde date d'il y a %{count} heure."
+msgstr[1] "La dernière sauvegarde date d'il y a %{count} heures."

@@ -208,7 +208,7 @@ defmodule KilnCMSWeb.OverviewLive do
               one nobody reads, and its absence is what makes the red one
               land. --%>
         <.link
-          :if={@admin? and @backup_stale?}
+          :if={@admin? and @backup_alarming?}
           id="overview-backup-warning"
           navigate={~p"/editor/backups"}
           class="flex items-start gap-3 rounded-lg border border-error/30 bg-error/5 p-4 hover:bg-error/10"
@@ -343,9 +343,16 @@ defmodule KilnCMSWeb.OverviewLive do
     status = KilnCMS.Backups.status()
 
     socket
-    |> assign(:backup_stale?, status.stale?)
+    # NOT `status.stale?` alone. A backup that failed five minutes ago is not
+    # stale — it is recent and worthless — and gating on age let the overview
+    # stay clean while `/editor/backups` said "The last backup failed". Same
+    # trap as `BackupLive.alarming?/1`; it needed fixing in both places.
+    |> assign(:backup_alarming?, status.stale? or failed?(status))
     |> assign(:backup_headline, backup_headline(status))
   end
+
+  defp failed?(%{manifest: %{ok: false}}), do: true
+  defp failed?(_status), do: false
 
   defp backup_headline(%{manifest: nil}),
     do: gettext("No backup has ever been recorded for this deployment.")
@@ -354,14 +361,28 @@ defmodule KilnCMSWeb.OverviewLive do
     do: gettext("The last backup failed.")
 
   defp backup_headline(%{manifest: %{finished_at: %DateTime{} = at}}) do
-    days = DateTime.diff(DateTime.utc_now(), at, :day)
+    # Hours below a day: `DateTime.diff(:day)` truncates, so a deployment with
+    # `BACKUP_STALE_AFTER_HOURS` under 24 rendered "The last backup was 0 days
+    # ago" — a sentence that reads as a bug rather than a warning.
+    hours = DateTime.diff(DateTime.utc_now(), at, :hour)
 
-    ngettext(
-      "The last backup was %{count} day ago.",
-      "The last backup was %{count} days ago.",
-      days,
-      count: days
-    )
+    if hours < 24 do
+      ngettext(
+        "The last backup was %{count} hour ago.",
+        "The last backup was %{count} hours ago.",
+        hours,
+        count: hours
+      )
+    else
+      days = div(hours, 24)
+
+      ngettext(
+        "The last backup was %{count} day ago.",
+        "The last backup was %{count} days ago.",
+        days,
+        count: days
+      )
+    end
   end
 
   defp backup_headline(_status), do: gettext("The backup status can't be determined.")

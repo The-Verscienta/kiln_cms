@@ -25,12 +25,18 @@ defmodule KilnCMSWeb.BackupLive do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Manifest
 
+  # A backup takes minutes; 200 polls at 3s is ten of them, comfortably past
+  # any real run and finite when a run never reports back at all.
+  @poll_interval_ms 3_000
+  @max_polls 200
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, gettext("Backups"))
      |> assign(:running?, false)
+     |> assign(:polls_left, @max_polls)
      |> load_status()}
   end
 
@@ -45,6 +51,12 @@ defmodule KilnCMSWeb.BackupLive do
         {:noreply,
          socket
          |> assign(:running?, true)
+         # Captured HERE, not at mount: on a page left open for an hour, a
+         # cron backup that landed in the meantime would otherwise satisfy
+         # `finished_since?/2` on the first tick and be reported as the result
+         # of this click.
+         |> assign(:since, DateTime.utc_now())
+         |> assign(:polls_left, @max_polls)
          |> put_flash(:info, gettext("Backup started — this page updates when it finishes."))
          |> schedule_refresh()}
 
@@ -53,15 +65,24 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
-  def handle_event("refresh", _params, socket), do: {:noreply, load_status(socket)}
-
   @impl true
   def handle_info(:refresh, socket) do
     status = Backups.status()
-    # Stop polling once a run that started after this page loaded has landed.
-    running? = socket.assigns.running? and not finished_since?(status, socket.assigns.since)
+    polls_left = socket.assigns.polls_left - 1
 
-    socket = socket |> assign(:status, status) |> assign(:running?, running?)
+    # Give up after `@max_polls`, not only when the manifest updates. A job
+    # that never writes one — killed by Oban's timeout, lost to a node
+    # restart, or unable to write the file — would otherwise leave the tab
+    # polling every few seconds for as long as it stayed open.
+    running? =
+      socket.assigns.running? and polls_left > 0 and
+        not finished_since?(status, socket.assigns.since)
+
+    socket =
+      socket
+      |> assign(:status, status)
+      |> assign(:running?, running?)
+      |> assign(:polls_left, polls_left)
 
     {:noreply, if(running?, do: schedule_refresh(socket), else: socket)}
   end
@@ -76,7 +97,7 @@ defmodule KilnCMSWeb.BackupLive do
   # finishes in minutes, so one timer on an open admin page is cheaper than a
   # topic, a broadcast and a subscription that exist for this one screen.
   defp schedule_refresh(socket) do
-    if connected?(socket), do: Process.send_after(self(), :refresh, 3_000)
+    if connected?(socket), do: Process.send_after(self(), :refresh, @poll_interval_ms)
     socket
   end
 

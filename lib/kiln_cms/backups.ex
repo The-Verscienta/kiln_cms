@@ -69,6 +69,17 @@ defmodule KilnCMS.Backups do
   @spec media_dir() :: Path.t() | nil
   def media_dir, do: config(:media_dir, nil)
 
+  @doc """
+  The rclone remote to copy each backup to, or `nil` — the script's
+  `BACKUP_RCLONE_REMOTE`.
+
+  Not optional in spirit: a backup that only exists on the machine being
+  backed up is not a backup of that machine. It is `nil`-able only because
+  plenty of deployments handle off-siting outside Kiln entirely.
+  """
+  @spec rclone_remote() :: String.t() | nil
+  def rclone_remote, do: config(:rclone_remote, nil)
+
   @doc "Local retention in days — the script's `BACKUP_KEEP_DAYS`."
   @spec keep_days() :: pos_integer()
   def keep_days, do: config(:keep_days, 14)
@@ -157,46 +168,96 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  @doc "The database this deployment backs up. `nil` when nothing is configured."
+  @doc """
+  The connection string this deployment backs up. `nil` when none can be
+  determined, which `availability/0` reports rather than guessing.
+
+  Three sources, in order of trustworthiness:
+
+    1. an explicit `:database_url` config (the escape hatch for anything the
+       other two get wrong);
+    2. `DATABASE_URL` from the environment — what production actually sets,
+       and the *original* string, complete with its query parameters;
+    3. a URL rebuilt from `KilnCMS.Repo.config/0`.
+
+  The environment is consulted before the Repo deliberately.
+  Ecto's repo supervisor **pops** `:url` and merges the parsed fields back, so
+  `Repo.config/0` never contains it — the original string is simply not
+  recoverable from there, and rebuilding one is lossy: it drops the query
+  string (`?sslmode=require`) and has to re-encode a password Ecto already
+  decoded. Rebuilding is the fallback, not the plan.
+  """
   @spec database_url() :: String.t() | nil
   def database_url do
-    case config(:database_url) do
-      url when is_binary(url) and url != "" ->
-        url
-
-      _ ->
-        # Fall back to the Repo's own configuration rather than requiring the
-        # operator to state the connection twice — and rebuild a URL from it,
-        # because `pg_dump` takes a connection string, not a keyword list.
-        repo_url()
-    end
+    presence(config(:database_url)) || matching_env_url() || repo_url()
   end
 
-  defp repo_url do
-    config = KilnCMS.Repo.config()
-
-    case Keyword.get(config, :url) do
-      url when is_binary(url) and url != "" -> url
-      _ -> build_url(config)
-    end
-  end
-
-  defp build_url(config) do
-    with database when is_binary(database) <- Keyword.get(config, :database),
-         username when is_binary(username) <- Keyword.get(config, :username) do
-      host = Keyword.get(config, :hostname, "localhost")
-      port = Keyword.get(config, :port, 5432)
-      password = Keyword.get(config, :password)
-
-      auth = if password, do: "#{encode(username)}:#{encode(password)}", else: encode(username)
-
-      "postgres://#{auth}@#{host}:#{port}/#{database}"
+  # `DATABASE_URL` is preferred over a rebuild — but ONLY when it describes the
+  # database this application is actually connected to.
+  #
+  # In production the two are the same string (`runtime.exs` sets the Repo's
+  # `url:` from it), and the env var is the better source: it is the original,
+  # complete with the query parameters a rebuild drops. Elsewhere they can
+  # disagree — `config/test.exs` configures discrete fields while a stale
+  # `DATABASE_URL` lingers in the shell — and backing up whatever that stale
+  # value points at, rather than the database being served, is the worst
+  # possible way to be wrong about a backup.
+  defp matching_env_url do
+    with url when is_binary(url) <- presence(System.get_env("DATABASE_URL")),
+         %URI{path: "/" <> database} <- URI.parse(url),
+         ^database <- to_string(KilnCMS.Repo.config()[:database]) do
+      url
     else
       _ -> nil
     end
   end
 
-  defp encode(value), do: URI.encode_www_form(to_string(value))
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_value), do: nil
+
+  defp repo_url do
+    config = KilnCMS.Repo.config()
+
+    with database when is_binary(database) <- Keyword.get(config, :database),
+         host when is_binary(host) <- Keyword.get(config, :hostname) do
+      "postgres://#{userinfo(config)}#{host}:#{Keyword.get(config, :port, 5432)}/#{database}"
+    else
+      # No hostname means a unix-socket repo, which has no TCP URL to build —
+      # and inventing `localhost` would point `pg_dump` at a different server
+      # that may not exist, or none. An honest `nil`: `availability/0` reports
+      # `:no_database_url` and the operator sets `BACKUP_DATABASE_URL`.
+      #
+      # A missing USERNAME is fine by contrast — `userinfo/1` omits it and
+      # libpq falls back to `PGUSER`/the current user, which is exactly what a
+      # peer-auth deployment wants.
+      _ -> nil
+    end
+  end
+
+  # Percent-encoding, NOT form encoding. `URI.encode_www_form/1` turns a space
+  # into `+`, which libpq reads literally — so a password containing a space
+  # authenticates as `p+ss` and every backup fails on a deployment that is
+  # otherwise working perfectly.
+  defp userinfo(config) do
+    case Keyword.get(config, :username) do
+      username when is_binary(username) ->
+        case Keyword.get(config, :password) do
+          password when is_binary(password) -> "#{encode(username)}:#{encode(password)}@"
+          _ -> "#{encode(username)}@"
+        end
+
+      _ ->
+        ""
+    end
+  end
+
+  defp encode(value), do: URI.encode(to_string(value), &URI.char_unreserved?/1)
 
   defp config(key, default \\ nil) do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(key, default)
