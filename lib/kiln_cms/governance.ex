@@ -204,8 +204,12 @@ defmodule KilnCMS.Governance do
         timeline: timeline,
         publishes: for(e <- timeline, e.publish?, do: e.at),
         # Tamper-evidence (#356): does the anchored history still reproduce the
-        # signed chain hash minted at the last publish?
-        chain: KilnCMS.Governance.Chain.verify_loaded(versions, storage, id, record.org_id),
+        # signed chain hash minted at the last publish? One key resolution for
+        # the whole verification, not one per anchor signature checked (#643).
+        chain:
+          KilnCMS.Provenance.KeyRegistry.with_cache(fn ->
+            KilnCMS.Governance.Chain.verify_loaded(versions, storage, id, record.org_id)
+          end),
         # Edits since the last anchor — covered at the next publish.
         unanchored_tail: KilnCMS.Governance.Chain.unanchored_tail(versions, anchor),
         # Scoped to the record's own site (epic #336) so the trail only shows

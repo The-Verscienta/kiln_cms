@@ -42,14 +42,92 @@ defmodule KilnCMS.Provenance.KeyRegistry do
   Entries that can't be resolved are logged and skipped: one unreadable path
   must not take down verification for the keys that *are* readable.
 
-  Resolution is not memoized. Verification is a cold path (the governance
-  dashboard, the public verify endpoint, `mix kiln.audit.verify`), and a cache
+  ## Resolution is not cached across time, only within a scope
+
+  A resolution reads and PEM-decodes every configured key. A standing cache
   keyed on the config would go stale exactly when an operator rotates a key's
-  *contents* without editing the config that points at it.
+  *contents* at a path the config already points at — the one moment the audit
+  trail must not silently keep trusting the old key. So there is no such cache.
+
+  What there is, is `with_cache/1`: a caller that resolves the registry many
+  times in a tight loop over one consistent view of the config wraps that loop,
+  and `current/0` / `retired/0` resolve **once** inside it, reusing the result
+  for the rest of the block. The cache lives in the process dictionary and dies
+  with the block (`try/after`), so it cannot outlast the work it was scoped to —
+  a fresh `mix kiln.audit.verify` run, or a single governance request, each
+  re-reads from disk. Content rotated between runs is picked up on the next one,
+  no restart needed; content rotated *mid-run* is not, which is the correct
+  granularity for a sweep that is meant to judge one snapshot.
+
+  Without `with_cache/1`, resolution is uncached exactly as before — every
+  `verify/2` re-reads, which is what keeps a long-lived server fresh. The two
+  loops where the per-document cost and the per-document warning actually bit
+  (#643) opt in; nothing else changes.
   """
   require Logger
 
   alias KilnCMS.Keys
+
+  @cache_key __MODULE__.Cache
+
+  @doc """
+  Resolve `current/0` and `retired/0` at most once each for the duration of
+  `fun`, reusing the result within it (#643).
+
+  For a batch that verifies many signatures against one config snapshot — the
+  `mix kiln.audit.verify` sweep, a governance trail render — this collapses N
+  file reads and PEM parses (and N repeats of any unreadable-entry warning) to
+  one. Outside such a batch, leave resolution uncached so a running server
+  always reflects the current key material.
+
+  Nesting reuses the outer scope's cache rather than starting a new one, so it
+  is safe to wrap a batch whose callees also wrap.
+  """
+  @spec with_cache((-> result)) :: result when result: var
+  def with_cache(fun) when is_function(fun, 0) do
+    if Process.get(@cache_key) do
+      # Already inside a scope — do not start a nested one, or the inner
+      # `after` would tear down the outer scope's cache early.
+      fun.()
+    else
+      Process.put(@cache_key, %{})
+
+      try do
+        fun.()
+      after
+        Process.delete(@cache_key)
+      end
+    end
+  end
+
+  # Memoize `key`'s resolution for the lifetime of the enclosing `with_cache/1`
+  # block. With no such block the value is computed every call, unchanged from
+  # before #643. `store?` decides whether a computed value is worth caching —
+  # `current/0` caches only successes, so a transient read glitch on the first
+  # document of a sweep is retried rather than relabelling every current-key
+  # signature `:unverifiable` for the whole run.
+  #
+  # `compute.()` must NOT itself resolve the sibling cached function: this is a
+  # plain read-modify-write against the map snapshot taken before the compute,
+  # so a nested resolution's write would be clobbered here. Today neither
+  # `current/0` nor `retired/0` calls the other; keep it that way.
+  defp cached(key, compute, store? \\ fn _ -> true end) do
+    case Process.get(@cache_key) do
+      nil ->
+        compute.()
+
+      %{^key => value} ->
+        value
+
+      cache ->
+        value = compute.()
+        if store?.(value), do: Process.put(@cache_key, Map.put(cache, key, value))
+        value
+    end
+  end
+
+  defp ok?({:ok, _}), do: true
+  defp ok?(_), do: false
 
   @typedoc "A key that can verify signatures, and the fingerprint naming it."
   @type entry :: %{
@@ -65,10 +143,16 @@ defmodule KilnCMS.Provenance.KeyRegistry do
   """
   @spec current() :: {:ok, entry()} | {:error, term()}
   def current do
-    with {:ok, pem} <- Keys.fetch(:provenance),
-         {:ok, private_key} <- Keys.rsa_private_key(pem) do
-      {:ok, describe(Keys.rsa_public_key(private_key))}
-    end
+    cached(
+      :current,
+      fn ->
+        with {:ok, pem} <- Keys.fetch(:provenance),
+             {:ok, private_key} <- Keys.rsa_private_key(pem) do
+          {:ok, describe(Keys.rsa_public_key(private_key))}
+        end
+      end,
+      &ok?/1
+    )
   end
 
   @doc """
@@ -82,17 +166,19 @@ defmodule KilnCMS.Provenance.KeyRegistry do
   """
   @spec retired() :: [entry()]
   def retired do
-    config = Application.get_env(:kiln_cms, KilnCMS.Provenance, [])
+    cached(:retired, fn ->
+      config = Application.get_env(:kiln_cms, KilnCMS.Provenance, [])
 
-    from(config, :retired_keys)
-    |> Kernel.++(from(config, :retired_key_files))
-    |> Enum.map(fn {from, source} -> resolve(from, source) end)
-    |> Enum.reject(&is_nil/1)
-    # The same key can legitimately be registered both ways for a deploy or two
-    # while an operator moves a retired key out of source config and into the
-    # env var. Publishing it twice on /api/provenance/public-key would just tell
-    # consumers we hold a key we don't.
-    |> Enum.uniq_by(& &1.key_id)
+      from(config, :retired_keys)
+      |> Kernel.++(from(config, :retired_key_files))
+      |> Enum.map(fn {from, source} -> resolve(from, source) end)
+      |> Enum.reject(&is_nil/1)
+      # The same key can legitimately be registered both ways for a deploy or two
+      # while an operator moves a retired key out of source config and into the
+      # env var. Publishing it twice on /api/provenance/public-key would just tell
+      # consumers we hold a key we don't.
+      |> Enum.uniq_by(& &1.key_id)
+    end)
   end
 
   defp from(config, key), do: Enum.map(Keyword.get(config, key, []), &{key, &1})
