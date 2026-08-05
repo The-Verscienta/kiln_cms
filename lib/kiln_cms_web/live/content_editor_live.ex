@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Preferred display order for the block palette; any block type registered
   # beyond these is appended automatically (the palette is registry-driven, so
   # adding a `Kiln.Block` module needs no editor change).
-  @type_order ~w(rich_text heading quote image gallery embed divider columns accordion faq how_to claim custom)
+  @type_order ~w(rich_text heading quote image gallery file embed divider columns accordion faq how_to claim custom)
 
   # Block types edited by `item_rows_editor/1` — a repeating label + body row —
   # and the `{:array, :map}` param names those rows bind into. Both lists are
@@ -189,17 +189,56 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(
            :media,
            # The picker grid needs only these fields; a select keeps 500
-           # variants/EXIF-bearing rows out of the editor's heap.
+           # variants/EXIF-bearing rows out of the editor's heap. Images
+           # only (#481 added non-image documents to the library, which the
+           # image/gallery/featured/social-image pickers below have no way
+           # to render or insert as an `<img>`) — filtered on `content_type`,
+           # NOT `width`: a just-uploaded image has `width: nil` until
+           # `Media.VariantWorker` runs (see `media_live.ex`), and that
+           # window is common enough that a handful of pre-existing tests
+           # seed images without ever setting it. `width` is still the right
+           # signal for "does this item have a thumbnail to show" (the
+           # library grid, `thumb_src/1`) — just not for "is this an image".
+           #
+           # A NULL `content_type` counts as an image, not excluded: every
+           # row was implicitly an image before #481 (documents didn't
+           # exist), and plenty of seed data/tests still create rows without
+           # setting it. Only a row with a *known, non-image* content_type
+           # is confidently a document, below.
            CMS.list_media_items!(
              actor: actor,
              tenant: org,
              query: [
+               filter: expr(is_nil(content_type) or ilike(content_type, "image/%")),
                select: [:id, :url, :alt, :caption, :filename],
                sort: [inserted_at: :desc],
                limit: @max_media
              ]
            )
          )
+         |> assign(
+           :file_media,
+           # The document counterpart of `:media` above (#481) — for the
+           # file-block picker. `content_type`/`byte_size` are denormalized
+           # onto the block at pick time (see `pick_file/2`), same as `alt`
+           # is for an image block. Requires an EXPLICIT non-image
+           # content_type (see the image filter's comment above) — a row
+           # with no content_type at all defaults to the image bucket, not
+           # this one.
+           CMS.list_media_items!(
+             actor: actor,
+             tenant: org,
+             query: [
+               filter: expr(not is_nil(content_type) and not ilike(content_type, "image/%")),
+               select: [:id, :filename, :content_type, :byte_size, :audience],
+               sort: [inserted_at: :desc],
+               limit: @max_media
+             ]
+           )
+         )
+         |> assign(:file_picking, nil)
+         |> assign(:picker_files, nil)
+         |> assign(:file_query, "")
          # Taxonomy pick-lists are scanned by eye, so they load in alphabetical
          # order rather than whatever Postgres hands back. Tags additionally
          # carry their group, which sections the picker (see `tag_picker/1`).
@@ -1504,6 +1543,70 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Open the file-library drawer to fill a specific `:file` block (#481).
+  # Mirrors `open_picker`/"pick_image" for images, but a distinct assign
+  # (`@file_picking`) rather than reusing `@picking` — the two libraries
+  # (`@media` images-only, `@file_media` documents-only, see mount) are
+  # filtered opposites of each other, so one picker component can't serve
+  # both without threading a mode flag through every existing `@picking`
+  # match in this module.
+  def handle_event("open_file_picker", %{"bid" => bid}, socket) when is_binary(bid) and bid != "",
+    do: {:noreply, assign(socket, :file_picking, bid)}
+
+  def handle_event("open_file_picker", _params, socket), do: {:noreply, socket}
+
+  def handle_event("close_file_picker", _params, socket), do: {:noreply, reset_picker(socket)}
+
+  # Live-filter the file-picker grid as the user types.
+  def handle_event("search_file_media", %{"q" => q}, socket) do
+    results =
+      if q == "",
+        do: nil,
+        else: search_media(q, socket.assigns.actor, socket.assigns.current_org, :file)
+
+    {:noreply, socket |> assign(:file_query, q) |> assign(:picker_files, results)}
+  end
+
+  # Fill the file block identified by `@file_picking` from the library.
+  # `content_type`/`byte_size`/`filename` are looked up server-side from the
+  # actor-authorized `MediaItem` rather than trusted from the click payload —
+  # denormalizing a client-supplied size/type onto the block would let it
+  # display something that doesn't match what `MediaDownloadController`
+  # actually serves. A direct `get_media_item` here, not a lookup in
+  # `@file_media`/`@picker_files`: a search result outside the mounted
+  # window lives ONLY in `@picker_files`, and an id present in neither list
+  # (a stale click, or a co-editor's concurrent delete) must still resolve
+  # correctly rather than silently no-op.
+  def handle_event("pick_file", %{"id" => media_id}, socket) do
+    bid = socket.assigns.file_picking
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    with {:ok, item} <- CMS.get_media_item(media_id, actor: actor, tenant: org),
+         index when not is_nil(index) <- block_index_by_id(socket.assigns.form, bid) do
+      blocks =
+        socket.assigns.form
+        |> full_blocks_input()
+        |> List.update_at(
+          index,
+          &Map.merge(&1, %{
+            "media_id" => item.id,
+            "filename" => item.filename,
+            "content_type" => item.content_type,
+            "byte_size" => item.byte_size
+          })
+        )
+
+      params = socket.assigns.form |> AshPhoenix.Form.params() |> Map.put("blocks", blocks)
+
+      socket = socket |> revalidate(params) |> reset_picker()
+      broadcast_preview(socket)
+      {:noreply, mark_dirty(socket)}
+    else
+      _ -> {:noreply, reset_picker(socket)}
+    end
+  end
+
   # A columns block carries a socket-managed child tree, so it's inserted with a
   # stable id (seeded into `block_children`) and a default two-column layout.
   # `after` (a block id, "start", or absent) positions the new block (B2).
@@ -2737,6 +2840,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:picked, [])
     |> assign(:media_query, "")
     |> assign(:picker_media, nil)
+    |> assign(:file_picking, nil)
+    |> assign(:file_query, "")
+    |> assign(:picker_files, nil)
   end
 
   # ── AI-assisted SEO drafting (#60) ────────────────────────────────────────
@@ -4196,21 +4302,38 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # items beyond the mounted picker window, and matches partial input as the
   # user types (the library's `:search` action is whole-word tsquery, less
   # forgiving for a live picker). %, _ and \ in the input match literally.
-  defp search_media(q, actor, org) do
+  #
+  # `kind` filters to the same image/document split the mounted `@media`/
+  # `@file_media` lists use (#481) — the image picker must never surface a
+  # document it can't render as an `<img>`, and vice versa.
+  defp search_media(q, actor, org, kind \\ :image) do
     pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
+
+    text_filter =
+      expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern))
 
     CMS.list_media_items!(
       actor: actor,
       tenant: org,
       query: [
-        filter:
-          expr(ilike(filename, ^pattern) or ilike(alt, ^pattern) or ilike(caption, ^pattern)),
-        select: [:id, :url, :alt, :caption, :filename],
+        filter: search_kind_filter(kind, text_filter),
+        select: search_select(kind),
         sort: [inserted_at: :desc],
         limit: @max_media
       ]
     )
   end
+
+  # Same image/document split as the mounted `@media`/`@file_media` lists
+  # above, by `content_type` rather than `width` — see that comment.
+  defp search_kind_filter(:image, text_filter),
+    do: expr((is_nil(content_type) or ilike(content_type, "image/%")) and ^text_filter)
+
+  defp search_kind_filter(:file, text_filter),
+    do: expr(not is_nil(content_type) and not ilike(content_type, "image/%") and ^text_filter)
+
+  defp search_select(:image), do: [:id, :url, :alt, :caption, :filename]
+  defp search_select(:file), do: [:id, :filename, :content_type, :byte_size, :audience]
 
   # The `phx-value-index` for a pick button: "new" inserts a fresh image block
   # (browser opened from the chrome), an integer fills that existing block.
@@ -4469,6 +4592,104 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
+  # The document counterpart of `image_picker/1` (#481) — a single-select
+  # drawer over the (documents-only) file library, filling the `:file` block
+  # identified by `@file_picking`. No multi-select, no "insert new from
+  # chrome" shortcut, and no thumbnail grid (a badge per file instead) —
+  # deliberately smaller than the image picker, since a document doesn't
+  # preview the way an image does and v1 scopes to "pick from the palette,
+  # then fill it in", not every entry point images have.
+  attr :files, :list, required: true
+  attr :results, :any, required: true
+  attr :query, :string, required: true
+
+  defp file_picker(assigns) do
+    assigns = assign(assigns, :visible, assigns.results || assigns.files)
+
+    ~H"""
+    <div class="fixed inset-0 z-50" phx-window-keydown="close_file_picker" phx-key="Escape">
+      <div
+        class="absolute inset-0 bg-black/20"
+        phx-click="close_file_picker"
+        aria-hidden="true"
+      >
+      </div>
+      <div
+        id="file-picker-dialog"
+        phx-hook="FocusTrap"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="file-picker-title"
+        tabindex="-1"
+        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
+      >
+        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
+          <h2 id="file-picker-title" class="text-lg font-medium">{gettext("Choose a file")}</h2>
+          <button
+            type="button"
+            phx-click="close_file_picker"
+            aria-label={gettext("Close")}
+            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4">
+          <form
+            :if={@files != []}
+            id="file-browser-filter"
+            phx-change="search_file_media"
+            class="mb-3"
+          >
+            <input
+              type="text"
+              name="q"
+              value={@query}
+              placeholder={gettext("Search by filename")}
+              aria-label={gettext("Search by filename")}
+              phx-debounce="150"
+              autocomplete="off"
+              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+            />
+          </form>
+
+          <p :if={@files == []} class="text-sm text-base-content/60">
+            {gettext("No documents yet — upload a PDF in the")} <.link
+              navigate={~p"/media"}
+              class="underline"
+            >{gettext("media library")}</.link>.
+          </p>
+          <p :if={@files != [] and @visible == []} class="text-sm text-base-content/60">
+            {gettext("No documents match “%{query}”.", query: @query)}
+          </p>
+
+          <ul :if={@visible != []} class="space-y-1">
+            <li :for={item <- @visible}>
+              <button
+                type="button"
+                phx-click="pick_file"
+                phx-value-id={item.id}
+                title={item.filename}
+                class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+              >
+                <.icon name="hero-document" class="size-5 shrink-0 text-base-content/60" />
+                <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+                <span
+                  :if={item.audience != :public}
+                  class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
+                >
+                  {gettext("Gated")}
+                </span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
   # 1-based position of a media id in the current selection, or nil.
   defp picked_position(picked, id) do
     case Enum.find_index(picked, &(&1.id == id)) do
@@ -4636,6 +4857,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("heading"), do: "hero-hashtag"
   defp block_icon("quote"), do: "hero-chat-bubble-bottom-center-text"
   defp block_icon("image"), do: "hero-photo"
+  defp block_icon("file"), do: "hero-document-arrow-down"
   defp block_icon("embed"), do: "hero-code-bracket"
   defp block_icon("divider"), do: "hero-minus"
   defp block_icon("columns"), do: "hero-view-columns"
@@ -4653,6 +4875,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_description("heading"), do: gettext("Section title")
   defp block_description("quote"), do: gettext("Highlighted quotation")
   defp block_description("image"), do: gettext("Picture with alt text and caption")
+  defp block_description("file"), do: gettext("Downloadable document, e.g. a PDF")
   defp block_description("embed"), do: gettext("Embedded HTML or external content")
   defp block_description("divider"), do: gettext("Visual separator between sections")
   defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
@@ -5636,6 +5859,42 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <.input field={bf[:alt]} label={gettext("Alt text")} />
                       <.input field={bf[:caption]} label={gettext("Caption")} />
                     </div>
+                    <div :if={block_type_string(bf) == "file"} class="space-y-2">
+                      <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
+                      <input type="hidden" name={bf[:filename].name} value={bf[:filename].value} />
+                      <input
+                        type="hidden"
+                        name={bf[:content_type].name}
+                        value={bf[:content_type].value}
+                      />
+                      <input
+                        type="hidden"
+                        name={bf[:byte_size].name}
+                        value={bf[:byte_size].value}
+                      />
+                      <p :if={bf[:filename].value} class="flex items-center gap-2 text-sm">
+                        <.icon name="hero-document" class="size-4 shrink-0" />
+                        <span class="truncate">{bf[:filename].value}</span>
+                      </p>
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          phx-click="open_file_picker"
+                          phx-value-bid={bf[:id].value}
+                          class="rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+                        >
+                          <.icon name="hero-document-arrow-down" class="mr-1 size-4" />{gettext(
+                            "Choose from library"
+                          )}
+                        </button>
+                      </div>
+                      <.input
+                        field={bf[:title]}
+                        label={gettext("Title")}
+                        placeholder={bf[:filename].value}
+                      />
+                      <.input field={bf[:description]} label={gettext("Description")} />
+                    </div>
                     <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
                     <.columns_editor
                       :if={block_type_string(bf) == "columns"}
@@ -5644,7 +5903,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       child_types={@nested_child_types}
                     />
                     <div :if={
-                      block_type_string(bf) not in ["rich_text", "image", "columns", "gallery"]
+                      block_type_string(bf) not in [
+                        "rich_text",
+                        "image",
+                        "file",
+                        "columns",
+                        "gallery"
+                      ]
                     }>
                       <.dsl_block_fields
                         bf={bf}
@@ -6146,6 +6411,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         results={@picker_media}
         query={@media_query}
         picked={@picked}
+      />
+
+      <.file_picker
+        :if={@file_picking != nil}
+        files={@file_media}
+        results={@picker_files}
+        query={@file_query}
       />
 
       <.version_compare

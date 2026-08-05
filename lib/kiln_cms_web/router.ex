@@ -798,6 +798,17 @@ defmodule KilnCMSWeb.Router do
     end
   end
 
+  # Document downloads (#481) — anonymous-tolerant like the rest of public
+  # delivery (`:browser`'s `load_from_session` resolves `current_user` when a
+  # session cookie is present, without requiring one), but registered here,
+  # BEFORE the `/:slug` catch-all below, so `/media/<id>/download` can't be
+  # shadowed by it.
+  scope "/", KilnCMSWeb do
+    pipe_through [:browser, :delivery]
+
+    get "/media/:id/download", MediaDownloadController, :show
+  end
+
   # Public content delivery (HTML). Defined last among "/" routes so the
   # root-level `/:slug` page route can't shadow auth/editor/SEO/dev paths above.
   # Only published content is reachable (see ContentController).

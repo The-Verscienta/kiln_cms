@@ -6,6 +6,10 @@ decompression-bomb pixel budget), re-encoded with **all metadata stripped**
 S3/MinIO). A background worker (`Media.VariantWorker`) then derives the
 processing outputs; originals of non-raster uploads are simply served as-is.
 
+The library also holds **documents** (PDF, #481) — see below; everything
+through "Alt text and usage tracking" describes the image side, which is
+unchanged.
+
 ## Derived variants
 
 | label    | kind                    | size            |
@@ -105,6 +109,61 @@ reference removes the usage.
 
 The drawer lists at most 25 referrers plus a total, because a site logo can be
 referenced by every document on the site and each one costs its own fetch.
+
+## Documents (#481)
+
+The media library also accepts **documents** — PDF only in v1 — uploaded
+through the same `/media` picker (`.pdf` alongside the image extensions),
+byte-validated by `KilnCMS.DocumentProcessor` the same way images are by
+`ImageProcessor` (a magic-byte check — `%PDF-`, never the client's claimed
+filename/MIME — deny-by-default). A document has no `width`/`height`
+(that's the library's own image/document discriminator: `content_type
+LIKE 'image/%'`, with a `NULL` content_type defaulting to "image" for
+backward compatibility with rows written before #481), no responsive
+variants, and — deliberately, disclosed as a known gap rather than an
+oversight — **no metadata stripping**: PDF metadata (XMP, the `/Info` dict,
+embedded author/producer strings) needs PDF-specific tooling this codebase
+doesn't have yet.
+
+A document is placed on content with the **`file` block** (title,
+description, and a download link) — separate from the `image` block, which
+never renders a document.
+
+### Gated documents
+
+A document (not an image — v1 scopes the gate to the document library the
+issue asked for) can be restricted to a consumer-facing `audience`, the same
+tier published content already uses (`KilnCMS.CMS.Audiences`). Setting a
+non-`:public` audience — from the media library's item detail panel —
+**relocates the underlying blob to private storage**:
+
+* **Local adapter**: a second directory (`priv/private_uploads` by default)
+  that `KilnCMSWeb.Endpoint` has no `Plug.Static` mount for — nothing serves
+  it over HTTP at all. Always available, no configuration needed.
+* **S3 adapter**: a **separate bucket** (`S3_PRIVATE_BUCKET`) this app's own
+  AWS credentials read directly — it needs no public-read config, no CDN, and
+  no `S3_PUBLIC_BASE_URL` equivalent. **Not configuring it refuses gating
+  outright** rather than silently leaving the blob in the public bucket: the
+  public bucket is public at the *bucket* level (see "Production storage &
+  CDN" below), so an object sitting there is reachable at its plain URL
+  regardless of what the app ever links to — gating can't be faked on top of
+  that.
+
+Every download — gated or not — goes through
+[`KilnCMSWeb.MediaDownloadController`](../lib/kiln_cms_web/controllers/media_download_controller.ex)
+(`GET /media/:id/download`), never a direct storage URL: it's the one place
+that checks the reader's audience (`CMS.get_media_item/2`'s ordinary
+policy-checked read — a gated document simply isn't in an unauthorized
+reader's result set, so a denied/missing item both 404, never 403, and a
+gated document's existence isn't confirmed to a reader without its
+audience), serves the **original filename** rather than the UUID storage
+key, and bumps the aggregate, privacy-first `download_count` (no per-viewer
+identity — consistent with every other counter in this codebase).
+
+An image can never be gated in v1 (its responsive-variant pipeline —
+`Media.VariantWorker` — assumes public storage throughout); gating an
+existing document requires private storage to be configured first, same as
+a fresh upload.
 
 ## Production storage & CDN
 

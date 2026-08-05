@@ -749,6 +749,17 @@ if config_env() == :prod do
         acl -> Keyword.put(s3_opts, :acl, String.to_atom(acl))
       end
 
+    # Optional (#481): a SEPARATE bucket for gated documents — this app's own
+    # AWS credentials read it directly, so it needs no public-read config, no
+    # CDN, and no S3_PUBLIC_BASE_URL equivalent (see KilnCMS.Storage.S3 docs).
+    # Without it, gating a document is refused rather than silently falling
+    # back to the public bucket.
+    s3_opts =
+      case System.get_env("S3_PRIVATE_BUCKET") do
+        nil -> s3_opts
+        private_bucket -> Keyword.put(s3_opts, :private_bucket, private_bucket)
+      end
+
     config :kiln_cms, KilnCMS.Storage.S3, s3_opts
 
     config :ex_aws,

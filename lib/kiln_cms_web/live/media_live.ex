@@ -8,13 +8,21 @@ defmodule KilnCMSWeb.MediaLive do
   import Ash.Expr, only: [expr: 1]
 
   alias KilnCMS.CMS
+  alias KilnCMS.DocumentProcessor
   alias KilnCMS.ImageProcessor
   alias KilnCMS.Storage
   alias KilnCMS.Unsplash
 
-  @accept ~w(.jpg .jpeg .png .webp .gif)
+  @accept ~w(.jpg .jpeg .png .webp .gif .pdf)
   @max_entries 10
-  @max_file_size 10_000_000
+  # Phoenix's `allow_upload` takes one ceiling for every entry (there's no
+  # per-accept-type cap in the API), so this is the LARGER of the two
+  # per-type caps below — `check_size/2` enforces the tighter one for
+  # whichever type an upload turns out to be, after `ImageProcessor`/
+  # `DocumentProcessor` has byte-sniffed it.
+  @max_image_size 10_000_000
+  @max_document_size 25_000_000
+  @max_file_size 25_000_000
   # Server-side page size: the grid loads pages of newest-first items and any
   # older item is reachable via Load more or the (server-side) filter.
   @page_size 60
@@ -375,6 +383,11 @@ defmodule KilnCMSWeb.MediaLive do
 
   # --- helpers ---------------------------------------------------------------
 
+  # Tries the image path first (the common case), then falls back to the
+  # document path (#481) — the two byte-sniffers are independent and a file
+  # can only ever satisfy one, so trying both costs nothing an outright
+  # rejection wouldn't already cost.
+  #
   # `source`, when removed, is the server-built stripped temp file (UUID path),
   # never user input — the File.rm traversal warning is a false positive.
   # sobelow_skip ["Traversal.FileModule"]
@@ -383,22 +396,56 @@ defmodule KilnCMSWeb.MediaLive do
   defp store_entry(path, entry, actor, org) do
     case ImageProcessor.validate_upload(path) do
       {:ok, %{ext: ext, content_type: content_type}} ->
-        key = Storage.generate_key_with_ext(ext)
-        # Strip EXIF/GPS + the client filename before persisting (#215). On any
-        # strip failure we fall back to the original so a valid upload still saves.
-        {source, stripped?} = stripped_source(path, ext)
+        with :ok <- check_size(entry, @max_image_size) do
+          store_image(path, ext, content_type, entry, actor, org)
+        end
 
-        try do
-          case Storage.store(key, source) do
-            {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
-            _ -> {:error, :storage_failed}
-          end
-        after
-          if stripped?, do: File.rm(source)
+      {:error, _reason} ->
+        store_entry_as_document(path, entry, actor, org)
+    end
+  end
+
+  defp store_entry_as_document(path, entry, actor, org) do
+    case DocumentProcessor.validate_upload(path) do
+      {:ok, %{ext: ext, content_type: content_type}} ->
+        with :ok <- check_size(entry, @max_document_size) do
+          store_document(path, ext, content_type, entry, actor, org)
         end
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp check_size(entry, max),
+    do: if(entry.client_size <= max, do: :ok, else: {:error, :too_large})
+
+  defp store_image(path, ext, content_type, entry, actor, org) do
+    key = Storage.generate_key_with_ext(ext)
+    # Strip EXIF/GPS + the client filename before persisting (#215). On any
+    # strip failure we fall back to the original so a valid upload still saves.
+    {source, stripped?} = stripped_source(path, ext)
+
+    try do
+      case Storage.store(key, source) do
+        {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
+        _ -> {:error, :storage_failed}
+      end
+    after
+      if stripped?, do: File.rm(source)
+    end
+  end
+
+  # No metadata-stripping step (#481 follow-up: PDF metadata needs
+  # PDF-specific tooling this codebase doesn't have yet, unlike
+  # ImageProcessor's libvips-based strip) — the upload's own temp file is
+  # stored as-is, matching what the image path does when stripping fails.
+  defp store_document(path, ext, content_type, entry, actor, org) do
+    key = Storage.generate_key_with_ext(ext)
+
+    case Storage.store(key, path) do
+      {:ok, ^key} -> create_from_upload(key, content_type, entry, actor, org)
+      _ -> {:error, :storage_failed}
     end
   end
 
@@ -534,10 +581,20 @@ defmodule KilnCMSWeb.MediaLive do
     )
   end
 
-  # The thumbnail to show in the grid — the small variant when available, else
-  # the original.
+  # The thumbnail to show in the grid — the small variant when available,
+  # else the original — or `nil` for a document (no `width`, so nothing was
+  # ever generated to preview) or a gated item (no public `url` — #481), so
+  # the caller falls back to a file badge instead of a broken/blank `<img>`.
   defp thumb_src(%{variants: %{"thumb" => %{"url" => url}}}), do: url
+  defp thumb_src(%{width: nil}), do: nil
   defp thumb_src(item), do: item.url
+
+  defp file_ext(filename) do
+    case filename && Path.extname(filename) do
+      "." <> ext -> String.upcase(ext)
+      _ -> "FILE"
+    end
+  end
 
   # First page under the current filter.
   defp load_media(socket) do
@@ -703,10 +760,11 @@ defmodule KilnCMSWeb.MediaLive do
   end
 
   defp upload_failure_reason(:too_many_pixels), do: gettext("image dimensions are too large")
-  defp upload_failure_reason(:unsupported_format), do: gettext("unsupported image format")
+  defp upload_failure_reason(:unsupported_format), do: gettext("unsupported file format")
+  defp upload_failure_reason(:too_large), do: gettext("file is too large for its type")
   defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
   defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")
-  defp upload_failure_reason(_invalid), do: gettext("not a valid image")
+  defp upload_failure_reason(_invalid), do: gettext("not a supported file")
 
   defp humanize_bytes(nil), do: "—"
   defp humanize_bytes(b) when b < 1_024, do: gettext("%{size} B", size: b)
@@ -919,17 +977,35 @@ defmodule KilnCMSWeb.MediaLive do
                 class="block w-full focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <img
+                  :if={thumb_src(item)}
                   src={thumb_src(item)}
                   alt={item.alt || item.filename}
                   loading="lazy"
                   class="aspect-square w-full object-cover"
                 />
+                <%!-- A document (no width, so no thumbnail variant) or a gated
+                      item (no public `url` to preview — #481) gets a file
+                      badge instead of a broken/blank <img>. --%>
+                <div
+                  :if={!thumb_src(item)}
+                  class="flex aspect-square w-full flex-col items-center justify-center gap-1 bg-base-200 text-base-content/60"
+                >
+                  <.icon name="hero-document" class="size-8" />
+                  <span class="text-[10px] font-medium uppercase">{file_ext(item.filename)}</span>
+                </div>
               </button>
               <div class="p-2">
                 <p class="truncate text-xs font-medium">{item.filename}</p>
                 <p class="flex items-center gap-1 text-[10px] text-base-content/70">
                   <span :if={item.width}>{item.width}×{item.height}</span>
                   <span>{humanize_bytes(item.byte_size)}</span>
+                  <span
+                    :if={item.audience != :public}
+                    class="rounded bg-warning/15 px-1 py-px text-[9px] font-semibold uppercase text-warning-ink"
+                    title={gettext("Gated to the %{audience} audience", audience: item.audience)}
+                  >
+                    {gettext("Gated")}
+                  </span>
                   <%!-- `decorative` clears the warning (#403): an editor who has
                         correctly marked a divider must not watch the badge stay
                         lit, or they learn to ignore it on the images that

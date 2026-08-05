@@ -15,6 +15,10 @@ defmodule KilnCMS.Blocks do
   @core_blocks [
     heading: KilnCMS.Blocks.Heading,
     image: KilnCMS.Blocks.Image,
+    # A downloadable document attachment (#481) — deliberately not named
+    # "document" to avoid colliding with the unrelated "document" vocabulary
+    # elsewhere in the CMS (content types, the DB "documents").
+    file: KilnCMS.Blocks.File,
     rich_text: KilnCMS.Blocks.RichText,
     quote: KilnCMS.Blocks.Quote,
     embed: KilnCMS.Blocks.Embed,
