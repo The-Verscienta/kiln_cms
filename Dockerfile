@@ -140,8 +140,10 @@ RUN elixir -e ' \
 # ---- Runtime stage ----
 FROM ${RUNNER_IMAGE}
 
+# curl is here for the HEALTHCHECK below — it probes the HTTP endpoint, which
+# is the only thing that proves this container is actually serving (#647).
 RUN apt-get update -y \
-  && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates libvips42 \
+  && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates libvips42 curl \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
@@ -173,9 +175,28 @@ LABEL org.opencontainers.image.title="KilnCMS" \
 
 USER nobody
 
-# Healthcheck hits the Phoenix endpoint.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["/app/bin/kiln_cms", "rpc", "1 + 1"]
+# Healthcheck asserts the container is SERVING HTTP, not merely that the BEAM is
+# alive. `rpc 1 + 1` only proved the node was up, so a container booted with
+# PHX_SERVER unset — running migrations, answering rpc, serving zero HTTP —
+# reported healthy forever, to Docker, to Coolify, and to anything reading the
+# container status (#647; the runtime.exs PHX_SERVER note describes the same
+# hole). `/up` (KilnCMSWeb.HealthController :show) returns 200 only when the
+# endpoint is listening AND the database is reachable; with the endpoint down
+# the connection is refused. `curl -f` turns both a non-2xx and a refused
+# connection into a non-zero exit — the unhealthy signal. Shell form so
+# ${PORT} (default 4000, matching runtime.exs) is expanded.
+#
+# Probing 127.0.0.1 over http depends on config/prod.exs's `force_ssl` EXCLUDING
+# host "127.0.0.1" — without that exclude, `Plug.SSL` answers a 301 to https,
+# and `curl -f` treats a 3xx as success, so the check would pass without ever
+# confirming /up's 200. Keep the two in sync.
+#
+# start-period is generous: migrations run in the boot CMD before HTTP is up,
+# and a cold boot of the Ash + Nx/Axon/Bumblebee stack is not fast. Failures
+# during this window don't count toward --retries, so a longer period only
+# delays the first "healthy", it never causes a premature unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT:-4000}/up" || exit 1
 
 # Run pending migrations (KilnCMS.Release.migrate — see rel/overlays/bin/migrate)
 # before starting the server. Coolify's pre-deployment command hook only runs
