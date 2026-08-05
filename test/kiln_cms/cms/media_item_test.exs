@@ -78,6 +78,29 @@ defmodule KilnCMS.CMS.MediaItemTest do
     )
   end
 
+  defp video!(actor, attrs \\ %{}) do
+    key = KilnCMS.Storage.generate_key("clip.mp4")
+    put(key, "fake mp4 bytes")
+
+    CMS.create_media_item!(
+      Map.merge(
+        %{
+          filename: "clip.mp4",
+          content_type: "video/mp4",
+          # ffprobe writes these for a video exactly as libvips does for an
+          # image — which is why nothing may use `width` alone to mean "image".
+          width: 640,
+          height: 360,
+          duration_seconds: 12.5,
+          storage_key: key,
+          url: KilnCMS.Storage.url(key)
+        },
+        attrs
+      ),
+      actor: actor
+    )
+  end
+
   defp image!(actor, attrs \\ %{}) do
     key = KilnCMS.Storage.generate_key("photo.png")
     put(key, "fake png bytes")
@@ -127,12 +150,15 @@ defmodule KilnCMS.CMS.MediaItemTest do
   end
 
   describe "gating restrictions (MigrateMediaStorage)" do
-    test "an image cannot be gated — v1 scopes the audience gate to documents" do
+    # Images specifically, not "everything except documents": #494 made A/V
+    # gateable too (covered below), and only an image is excluded — its
+    # responsive-variant pipeline assumes public storage throughout.
+    test "an image cannot be gated" do
       actor = editor()
       pic = image!(actor)
 
       assert {:error, error} = CMS.update_media_item(pic, %{audience: :member}, actor: actor)
-      assert error_message(error) =~ "images"
+      assert error_message(error) =~ "an image may not be gated"
 
       unchanged = CMS.get_media_item!(pic.id, actor: actor)
       assert unchanged.audience == :public
@@ -241,6 +267,67 @@ defmodule KilnCMS.CMS.MediaItemTest do
 
       assert updated.storage_key == key
       assert updated.audience == :public
+    end
+  end
+
+  describe "gating A/V (#494)" do
+    test "a video may be gated — the restriction is images, not non-documents", %{
+      private_root: private_root
+    } do
+      actor = editor()
+      clip = video!(actor)
+
+      {:ok, gated} = CMS.update_media_item(clip, %{audience: :member}, actor: actor)
+
+      assert gated.audience == :member
+      assert gated.url == nil
+      assert File.exists?(Path.join(private_root, gated.storage_key))
+    end
+
+    test "gating a video discards its public poster frame, row and blob", %{root: root} do
+      actor = editor()
+      poster_key = KilnCMS.Storage.generate_key("poster.jpg")
+      put(poster_key, "fake jpeg bytes")
+
+      clip =
+        video!(actor, %{
+          variants: %{
+            "poster" => %{
+              "key" => poster_key,
+              "url" => KilnCMS.Storage.url(poster_key),
+              "width" => 640,
+              "height" => 360
+            }
+          }
+        })
+
+      assert File.exists?(Path.join(root, poster_key))
+
+      {:ok, gated} = CMS.update_media_item(clip, %{audience: :member}, actor: actor)
+
+      # A still from a members-only video must not stay world-readable.
+      assert gated.variants == %{}
+      refute File.exists?(Path.join(root, poster_key))
+    end
+
+    test "a caption track can be gated alongside the video it belongs to" do
+      actor = editor()
+      key = KilnCMS.Storage.generate_key("captions.vtt")
+      put(key, "WEBVTT\n\nhello")
+
+      track =
+        CMS.create_media_item!(
+          %{
+            filename: "captions.vtt",
+            content_type: "text/vtt",
+            storage_key: key,
+            url: KilnCMS.Storage.url(key)
+          },
+          actor: actor
+        )
+
+      assert {:ok, %{audience: :member}} =
+               CMS.update_media_item(track, %{audience: :member}, actor: actor)
     end
   end
 

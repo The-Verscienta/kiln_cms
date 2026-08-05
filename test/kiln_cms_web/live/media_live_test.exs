@@ -510,6 +510,201 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert html =~ "big.png"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
     end
+
+    # A minimal ISO-BMFF head — enough for `AVProcessor` to byte-sniff. There
+    # is no real video here and none is needed: the upload path never decodes
+    # the file (ffprobe runs in `Media.AVWorker`, off the request).
+    defp mp4_bytes, do: <<0, 0, 0, 0x20>> <> "ftypisom" <> :binary.copy(<<0>>, 64)
+
+    test "uploading an MP4 stores it as video, not as a document (#494)", %{
+      conn: conn,
+      root: root
+    } do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "clip.mp4", content: mp4_bytes(), type: "video/mp4"}
+        ])
+
+      assert render_upload(input, "clip.mp4")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "clip.mp4"
+      refute html =~ "Upload failed"
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.content_type == "video/mp4"
+      assert File.exists?(Path.join(root, item.storage_key))
+
+      # A/V goes to AVWorker, NOT the image VariantWorker — the whole point of
+      # `enqueue_processing/1`'s dispatch, and invisible without this.
+      assert [%Oban.Job{worker: "KilnCMS.Media.AVWorker", args: args}] =
+               KilnCMS.Repo.all(Oban.Job)
+
+      assert args["media_item_id"] == item.id
+    end
+
+    test "uploading an image still goes to the image VariantWorker", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "pixel.png", content: @png, type: "image/png"}
+        ])
+
+      assert render_upload(input, "pixel.png")
+      lv |> element("#upload-form") |> render_submit()
+
+      assert [%Oban.Job{worker: "KilnCMS.Media.VariantWorker"}] = KilnCMS.Repo.all(Oban.Job)
+    end
+
+    test "a caption track enqueues no job at all — there is nothing to derive", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "captions.vtt", content: "WEBVTT\n\nhello", type: "text/vtt"}
+        ])
+
+      assert render_upload(input, "captions.vtt")
+      lv |> element("#upload-form") |> render_submit()
+
+      assert KilnCMS.Repo.all(Oban.Job) == []
+    end
+
+    test "byte_size records the STORED file, not the client's declared size", %{
+      conn: conn,
+      root: root
+    } do
+      # The two differ for every image: what gets stored is the
+      # metadata-stripped copy, not the uploaded bytes. The recorded size
+      # should describe what a reader will actually download.
+      #
+      # (The stronger property — that a *lying* `client_size` can't slip past a
+      # per-kind cap — is what moving `check_size/2` onto `File.stat` buys, but
+      # `Phoenix.LiveViewTest` refuses to build an entry whose declared size
+      # disagrees with its content, so the lie itself isn't reachable from here.
+      # The oversized-`.vtt` test above covers the cap with honest bytes.)
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "pixel.png", content: @png, type: "image/png"}
+        ])
+
+      assert render_upload(input, "pixel.png")
+      lv |> element("#upload-form") |> render_submit()
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.byte_size == File.stat!(Path.join(root, item.storage_key)).size
+    end
+
+    test "uploading an MP3 stores it as audio", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      mp3 = "ID3" <> <<3, 0, 0, 0, 0, 0, 0>> <> :binary.copy(<<0>>, 64)
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "episode.mp3", content: mp3, type: "audio/mpeg"}
+        ])
+
+      assert render_upload(input, "episode.mp3")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      refute html =~ "Upload failed"
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.content_type == "audio/mpeg"
+    end
+
+    test "uploading a WebVTT caption track is accepted as its own kind", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nHello.\n"
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "captions.vtt", content: vtt, type: "text/vtt"}
+        ])
+
+      assert render_upload(input, "captions.vtt")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      refute html =~ "Upload failed"
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.content_type == "text/vtt"
+    end
+
+    test "a .mp4-named file with non-video bytes is rejected, not silently accepted", %{
+      conn: conn
+    } do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "fake.mp4", content: "not a video at all", type: "video/mp4"}
+        ])
+
+      assert render_upload(input, "fake.mp4")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "Upload failed"
+      assert html =~ "fake.mp4"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+    end
+
+    test "QuickTime bytes are rejected even under an .mp4 name — nothing transcodes them", %{
+      conn: conn
+    } do
+      # The `.mov` extension never reaches the server (`allow_upload`'s accept
+      # list stops it in the browser), so the case worth covering is the one
+      # that gets past that: a renamed file whose ftyp brand is `qt  `.
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      mov = <<0, 0, 0, 0x20>> <> "ftypqt  " <> :binary.copy(<<0>>, 64)
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "master.mp4", content: mov, type: "video/mp4"}
+        ])
+
+      assert render_upload(input, "master.mp4")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "Upload failed"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+    end
+
+    test "an oversized caption track is rejected under the (tiny) captions cap", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      # 3MB of "captions": well under the video cap, well over the 2MB one
+      # that actually applies. Proves the per-kind A/V caps are real.
+      vtt = "WEBVTT\n" <> :binary.copy("x", 3_000_000)
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "huge.vtt", content: vtt, type: "text/vtt"}
+        ])
+
+      assert render_upload(input, "huge.vtt")
+
+      html = lv |> element("#upload-form") |> render_submit()
+      assert html =~ "Upload failed"
+      refute Enum.any?(CMS.list_media_items!(actor: editor))
+    end
   end
 
   # Splices a private `teXt` ancillary chunk (safe for any PNG decoder to

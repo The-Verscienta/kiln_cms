@@ -23,10 +23,24 @@ defmodule KilnCMS.Media.Presentation do
   So the exclusion comes from `ImageProcessor.cropped_labels/0` rather than a
   hardcoded list here: a future cropped variant is excluded the day it is added,
   without anyone remembering this rule.
+
+  A video's poster frame (`AVProcessor.poster_label/0`, #494) shares the same
+  `variants` map and is excluded for a stronger version of the same reason: it
+  isn't an alternate rendering of the item at all, it's a still of something
+  the item plays.
   """
 
+  alias KilnCMS.AVProcessor
   alias KilnCMS.HTMLSanitizer
   alias KilnCMS.ImageProcessor
+
+  @doc """
+  Every `variants` label that must stay out of a `srcset` — the focal-aware
+  crops and the video poster frame. Exposed so the rule is assertable rather
+  than only enforceable.
+  """
+  @spec excluded_labels() :: [String.t()]
+  def excluded_labels, do: [AVProcessor.poster_label() | ImageProcessor.cropped_labels()]
 
   @doc """
   A responsive `srcset` for a media item — its non-cropped variants plus the
@@ -40,11 +54,11 @@ defmodule KilnCMS.Media.Presentation do
   """
   @spec srcset(map()) :: String.t() | nil
   def srcset(item) do
-    cropped = ImageProcessor.cropped_labels()
+    excluded = excluded_labels()
 
     variant_parts =
       for {label, %{"url" => url, "width" => w}} <- item.variants || %{},
-          label not in cropped,
+          label not in excluded,
           safe = HTMLSanitizer.safe_image_src(url),
           is_binary(safe),
           do: "#{safe} #{w}w"

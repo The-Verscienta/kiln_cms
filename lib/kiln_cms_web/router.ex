@@ -11,9 +11,17 @@ defmodule KilnCMSWeb.Router do
   # carry a nonce; everything else is locked to same-origin.
   @img_src_base "img-src 'self' data: blob:"
 
+  # `<video>`/`<audio>`/`<track>` sources (#494). Without an explicit
+  # `media-src` these fall back to `default-src 'self'`, which is correct for
+  # the app-served `/media/:id/stream` route but blocks a public item served
+  # from a CDN — so this carries the same operator-configured external hosts
+  # `img-src` does (see `base_csp/0`), because it is the same CDN.
+  @media_src_base "media-src 'self' blob:"
+
   @base_csp "default-src 'self'; " <>
               "style-src 'self' 'unsafe-inline'; " <>
               "#{@img_src_base}; " <>
+              "#{@media_src_base}; " <>
               "font-src 'self' data:; " <>
               "connect-src 'self' ws: wss:; " <>
               "frame-src 'self' https://www.youtube.com https://player.vimeo.com; " <>
@@ -799,15 +807,18 @@ defmodule KilnCMSWeb.Router do
     end
   end
 
-  # Document downloads (#481) — anonymous-tolerant like the rest of public
-  # delivery (`:browser`'s `load_from_session` resolves `current_user` when a
-  # session cookie is present, without requiring one), but registered here,
-  # BEFORE the `/:slug` catch-all below, so `/media/<id>/download` can't be
-  # shadowed by it.
+  # Document downloads (#481) and A/V playback (#494) — anonymous-tolerant
+  # like the rest of public delivery (`:browser`'s `load_from_session`
+  # resolves `current_user` when a session cookie is present, without
+  # requiring one), but registered here, BEFORE the `/:slug` catch-all below,
+  # so `/media/<id>/download` can't be shadowed by it.
   scope "/", KilnCMSWeb do
     pipe_through [:browser, :delivery]
 
     get "/media/:id/download", MediaDownloadController, :show
+    # Inline, Range-capable playback — the `src` of every video/audio block
+    # and of their caption `<track>`. Same authorization as the download.
+    get "/media/:id/stream", MediaDownloadController, :stream
   end
 
   # Public content delivery (HTML). Defined last among "/" routes so the
@@ -869,25 +880,34 @@ defmodule KilnCMSWeb.Router do
   # / `CSP_IMG_SRC` — for media libraries whose files serve from an external
   # CDN, e.g. Cloudflare Images) plus Unsplash's thumbnail host while the
   # media library's Unsplash integration is enabled.
+  #
+  # `media-src` (#494) gets the storage-CDN hosts too, but NOT the Unsplash /
+  # oEmbed thumbnail hosts: those serve thumbnails, and widening `media-src`
+  # to a host that will never hold a `<video>` source buys nothing.
   defp base_csp do
     # oEmbed card thumbnails (#489). Only the enabled providers' CDNs, and
     # only their *known* hosts — the resolver already refuses a thumbnail
     # URL that is not one of these, so the two lists cannot drift into
     # allowing something nothing renders (or rendering something the policy
     # blocks). Empty when the feature is off, which is the default.
-    extra =
-      Application.get_env(:kiln_cms, :csp_img_src, []) ++
-        KilnCMS.Unsplash.csp_img_src() ++
-        KilnCMS.OEmbed.Provider.thumbnail_hosts()
+    storage_hosts = Application.get_env(:kiln_cms, :csp_img_src, [])
 
-    case Enum.uniq(extra) do
-      [] ->
-        @base_csp
+    img_hosts =
+      Enum.uniq(
+        storage_hosts ++
+          KilnCMS.Unsplash.csp_img_src() ++
+          KilnCMS.OEmbed.Provider.thumbnail_hosts()
+      )
 
-      hosts ->
-        String.replace(@base_csp, @img_src_base, @img_src_base <> " " <> Enum.join(hosts, " "))
-    end
+    @base_csp
+    |> widen(@img_src_base, img_hosts)
+    |> widen(@media_src_base, Enum.uniq(storage_hosts))
   end
+
+  defp widen(csp, _directive, []), do: csp
+
+  defp widen(csp, directive, hosts),
+    do: String.replace(csp, directive, directive <> " " <> Enum.join(hosts, " "))
 
   # For pipelines that keep the static (nonce-less) `script-src 'self'` policy:
   # re-issue the same header as `@browser_csp_headers`, but with the runtime

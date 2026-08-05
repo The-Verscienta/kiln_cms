@@ -7,8 +7,8 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
   use ExUnitProperties
 
   alias KilnCMS.Blocks
-  alias KilnCMS.Blocks.{Accordion, Claim, Columns, Custom, Divider, Embed, Faq, Form}
-  alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText}
+  alias KilnCMS.Blocks.{Accordion, Audio, Claim, Columns, Custom, Divider, Embed, Faq, Form}
+  alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText, Video}
   # Not aliased bare as `File` — that would shadow the stdlib module.
   alias KilnCMS.Blocks.File, as: FileBlock
 
@@ -106,6 +106,40 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
             content_type: "application/pdf",
             byte_size: size
           }
+        end
+      ),
+      # A/V (#494): the interesting axis is which of the three `src` inputs is
+      # present, because `src/1` prefers `media_id` and only falls back to a
+      # pasted `url` — a generator that always sets both would never exercise
+      # the fallback, and one that always sets neither would never exercise
+      # the rendered element at all.
+      StreamData.map(
+        StreamData.tuple(
+          {StreamData.one_of([text(), StreamData.constant("")]),
+           StreamData.one_of([text(), StreamData.constant("")]), text(), text(),
+           StreamData.one_of([StreamData.float(min: 0.0, max: 7200.0), StreamData.constant(nil)])}
+        ),
+        fn {mid, url, title, caption, duration} ->
+          %Video{
+            media_id: mid,
+            url: url,
+            title: title,
+            caption: caption,
+            captions_media_id: mid,
+            duration_seconds: duration,
+            autoplay: false,
+            loop: false
+          }
+        end
+      ),
+      StreamData.map(
+        StreamData.tuple(
+          {StreamData.one_of([text(), StreamData.constant("")]),
+           StreamData.one_of([text(), StreamData.constant("")]), text(),
+           StreamData.one_of([StreamData.float(min: 0.0, max: 7200.0), StreamData.constant(nil)])}
+        ),
+        fn {mid, url, title, duration} ->
+          %Audio{media_id: mid, url: url, title: title, duration_seconds: duration, loop: false}
         end
       )
     ])

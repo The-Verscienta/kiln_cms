@@ -19,6 +19,12 @@ defmodule KilnCMS.Blocks do
     # "document" to avoid colliding with the unrelated "document" vocabulary
     # elsewhere in the CMS (content types, the DB "documents").
     file: KilnCMS.Blocks.File,
+    # Self-hosted A/V (#494) — distinct from `embed`, which points at
+    # YouTube/Vimeo. Two blocks rather than one with a kind flag: an
+    # `<audio>` has no poster and no captions track, so half a shared block's
+    # fields would be permanently inert on it.
+    video: KilnCMS.Blocks.Video,
+    audio: KilnCMS.Blocks.Audio,
     rich_text: KilnCMS.Blocks.RichText,
     quote: KilnCMS.Blocks.Quote,
     embed: KilnCMS.Blocks.Embed,

@@ -46,6 +46,49 @@ defmodule KilnCMS.Storage.Local do
   # adapter's private bucket — always available.
   def private_available?, do: true
 
+  @impl true
+  def fetch_range(key, first, last), do: read_range(root(), key, first, last)
+
+  @impl true
+  def fetch_private_range(key, first, last), do: read_range(private_root(), key, first, last)
+
+  # `:file.pread/3` reads straight out of the file at an offset, so a seek into
+  # the middle of a large video never materializes the bytes before it (#494).
+  # Path goes through `safe_path/2` first — the traversal warning is the same
+  # false positive as `read/2`'s above.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_range(dir, key, first, last) do
+    with {:ok, path} <- safe_path(dir, key),
+         {:ok, %{size: total}} <- File.stat(path),
+         {:ok, {first, last}} <- clamp_range(first, last, total),
+         {:ok, io} <- :file.open(path, [:read, :binary, :raw]) do
+      try do
+        case :file.pread(io, first, last - first + 1) do
+          {:ok, bytes} -> {:ok, %{bytes: bytes, first: first, last: last, total: total}}
+          # `eof` from a range we already clamped inside the file means the file
+          # shrank underneath us; report it as unreadable, not as an empty body.
+          :eof -> {:error, {:range_not_satisfiable, total}}
+          {:error, reason} -> {:error, reason}
+        end
+      after
+        :file.close(io)
+      end
+    end
+  end
+
+  # An empty blob has no satisfiable range at all (`first` 0 is already at the
+  # end), which is exactly what RFC 9110 says a byte-range request against a
+  # zero-length representation is.
+  #
+  # The total rides along in the error because RFC 9110 §14.4 requires a 416
+  # to state the resource's real length (`Content-Range: bytes */<total>`),
+  # and this is the only place that knows it.
+  defp clamp_range(first, _last, total) when total == 0 or first >= total,
+    do: {:error, {:range_not_satisfiable, total}}
+
+  defp clamp_range(first, :eof, total), do: {:ok, {first, total - 1}}
+  defp clamp_range(first, last, total), do: {:ok, {first, min(last, total - 1)}}
+
   # `dest`/`source_path` pass through `safe_path/2`'s basename-only guard
   # first (traversal segments rejected) — the false positive is sobelow
   # not following that check into this shared helper.

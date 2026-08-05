@@ -17,10 +17,23 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
       outright rather than silently leaving the blob in public storage while
       the row claims to be gated (see `KilnCMS.Storage.S3`'s moduledoc on why
       a public bucket can't fake this);
-    * **only a document may be gated, not an image** — v1's audience gate is
-      scoped to the document library the issue asked for; an image keeps its
-      responsive-variant pipeline, which assumes public storage throughout
+    * **an image may not be gated** — an image keeps its responsive-variant
+      pipeline, which assumes public storage throughout
       (`KilnCMS.Media.VariantWorker` re-fetches originals by public key).
+      Documents (#481) and A/V (#494) may both be gated; a members-only video
+      is exactly as reasonable as a members-only PDF.
+
+  ## Gating discards derived public blobs
+
+  Video items carry one derived artifact in `variants`: a poster frame
+  (`KilnCMS.Media.AVWorker`), written to **public** storage because a public
+  video's poster is a plain `<img src>`. A still from a members-only video is
+  not something that should stay world-readable once the video isn't, so
+  gating deletes those blobs and clears the map rather than relocating them —
+  a poster has no reader that could fetch it privately (`<img>` sends no
+  Range, needs no counter, and would need a whole second gated route to serve
+  from). Un-gating does not bring it back; the editor picks a poster image by
+  hand, which the `video` block already supports.
 
   ## Copy-then-delete, not move
 
@@ -68,7 +81,7 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
   defp gate_check(changeset, from, _to) do
     cond do
       not gateable?(changeset.data.content_type) ->
-        {:error, "only documents may be gated to a non-public audience, not images"}
+        {:error, "an image may not be gated to a non-public audience"}
 
       from == :public and not Storage.private_available?() ->
         {:error,
@@ -86,12 +99,15 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
         changeset
 
       from == :public ->
-        # public -> gated: no public URL to hand out once it's gated.
-        relocate(changeset, &Storage.fetch/1, &Storage.store_private/2, nil)
+        # public -> gated: no public URL to hand out once it's gated, and no
+        # public poster frame either (see the moduledoc).
+        changeset
+        |> Ash.Changeset.force_change_attribute(:variants, %{})
+        |> relocate(false, &Storage.store_private/2, nil)
 
       to == :public ->
         # gated -> public: restore the ordinary public URL.
-        relocate(changeset, &Storage.fetch_private/1, &Storage.store/2, &Storage.url/1)
+        relocate(changeset, true, &Storage.store/2, &Storage.url/1)
 
       true ->
         # gated -> a different gated audience: already in private storage.
@@ -111,21 +127,26 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
   # traversal warning is a false positive (same reasoning as ImageProcessor's
   # temp-file writes).
   # sobelow_skip ["Traversal.FileModule"]
-  defp relocate(changeset, fetch, store, url_fn) do
+  defp relocate(changeset, private_source?, store, url_fn) do
     old_key = changeset.data.storage_key
+    tmp = Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-media-migrate")
 
-    with {:ok, bytes} <- fetch.(old_key),
-         tmp = Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-media-migrate"),
-         :ok <- File.write(tmp, bytes),
-         new_key = Storage.generate_key(changeset.data.filename || old_key),
-         {:ok, ^new_key} <- store.(new_key, tmp) do
+    try do
+      # `copy_to_file/3` rather than a `fetch` + `File.write`: since #494 a
+      # media item can be a 500 MB video, and gating one is an ordinary editor
+      # action on the request path — reading the blob whole would put that
+      # much on the LiveView process's heap.
+      with :ok <- Storage.copy_to_file(old_key, tmp, private?: private_source?),
+           new_key = Storage.generate_key(changeset.data.filename || old_key),
+           {:ok, ^new_key} <- store.(new_key, tmp) do
+        changeset
+        |> Ash.Changeset.force_change_attribute(:storage_key, new_key)
+        |> Ash.Changeset.force_change_attribute(:url, url_fn && url_fn.(new_key))
+      else
+        {:error, reason} -> gate_error(changeset, "couldn't relocate storage: #{inspect(reason)}")
+      end
+    after
       File.rm(tmp)
-
-      changeset
-      |> Ash.Changeset.force_change_attribute(:storage_key, new_key)
-      |> Ash.Changeset.force_change_attribute(:url, url_fn && url_fn.(new_key))
-    else
-      {:error, reason} -> gate_error(changeset, "couldn't relocate storage: #{inspect(reason)}")
     end
   end
 
@@ -144,13 +165,30 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
     if old_key != record.storage_key do
       # The blob's OLD location is public exactly when its NEW audience is
       # gated (it came FROM public); otherwise it came from private storage.
-      if record.audience == :public,
-        do: Storage.delete_private(old_key),
-        else: Storage.delete(old_key)
+      if record.audience == :public do
+        Storage.delete_private(old_key)
+      else
+        Storage.delete(old_key)
+        # The row's `variants` were cleared on the way in (#494); the blobs
+        # they named are public objects that outlive the map unless something
+        # deletes them, and this is the same post-commit point the original
+        # is deleted at.
+        delete_variant_blobs(changeset.data.variants)
+      end
     end
 
     result
   end
 
   defp cleanup_old_blob(_changeset, result), do: result
+
+  # Tolerant of a malformed/absent map: `variants` is a plain `:map`
+  # attribute, so a hand-edited row could hold anything, and a cleanup pass
+  # is the wrong place to raise.
+  defp delete_variant_blobs(variants) when is_map(variants) do
+    for {_label, %{"key" => key}} <- variants, is_binary(key), do: Storage.delete(key)
+    :ok
+  end
+
+  defp delete_variant_blobs(_variants), do: :ok
 end
