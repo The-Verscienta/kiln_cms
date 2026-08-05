@@ -847,21 +847,24 @@ defmodule KilnCMS.Governance.Chain do
   # rescued because unlike `anchor/2` and `extend/2` the read path has no
   # blanket rescue: `mix kiln.audit.verify` walks every document in every org,
   # and one unreadable count must not abort the run on the one verdict that
-  # matters most.
+  # matters most. The rescue must sit INSIDE the closure — the queries run when
+  # `mismatch_reason/2` invokes it, not while this function builds it (#705).
   defp covered_by_query(scope, anchor) do
     fn ->
-      case boundary_of(anchor) do
-        nil -> nil
-        key -> count_versions(scope) - count_after(scope, key)
+      try do
+        case boundary_of(anchor) do
+          nil -> nil
+          key -> count_versions(scope) - count_after(scope, key)
+        end
+      rescue
+        error ->
+          Logger.warning(
+            "History chain range count failed, reporting a bare mismatch: #{inspect(error)}"
+          )
+
+          nil
       end
     end
-  rescue
-    error ->
-      Logger.warning(
-        "History chain range count failed, reporting a bare mismatch: #{inspect(error)}"
-      )
-
-      fn -> nil end
   end
 
   # Same question against an already-loaded ASCENDING list — free, no query.

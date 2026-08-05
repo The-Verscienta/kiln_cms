@@ -846,6 +846,44 @@ defmodule KilnCMS.Governance.ChainTest do
       assert {:tampered, ^reason} = trail.chain
     end
 
+    # The counts the closure defers can themselves fail — the realistic case is
+    # a statement timeout on a large version table mid-audit. The rescue has to
+    # catch at invocation time, not construction time: `mix kiln.audit.verify`
+    # walks every document, and before #705 this raise aborted the sweep on
+    # exactly the verdict it exists to surface.
+    test "a failing range count degrades to the bare mismatch instead of raising" do
+      page = published_page(admin())
+      anchor = Chain.latest_anchor("page", page.id, page.org_id)
+
+      # `CountlessVersions` reads fine but raises on `Ash.count!`. Feed it
+      # enough rows that the fold reproduces a full-length history whose hash
+      # cannot match the anchor's, so the verdict reaches the mismatch branch
+      # and invokes the count closure.
+      rows =
+        for offset <- 1..(anchor.version_count + 1) do
+          %KilnCMS.CountlessVersions.Version{
+            id: Ash.UUID.generate(),
+            version_source_id: page.id,
+            version_action_name: "update",
+            version_inserted_at: DateTime.add(~U[2001-01-01 00:00:00.000000Z], offset, :hour),
+            changes: %{"title" => "Fabricated #{offset}"}
+          }
+        end
+
+      on_exit(&KilnCMS.CountlessVersions.clear_rows/0)
+      KilnCMS.CountlessVersions.put_rows(rows)
+
+      {verdict, log} =
+        with_log(fn ->
+          Chain.verify(KilnCMS.CountlessVersions, "page", page.id, page.org_id)
+        end)
+
+      assert {:tampered, reason} = verdict
+      assert reason == "anchored history does not reproduce the recorded chain hash"
+      refute reason =~ "sort inside the anchored range"
+      assert log =~ "History chain range count failed"
+    end
+
     test "ordinary content tampering is NOT relabelled as a range skew" do
       page = published_page(admin())
 
