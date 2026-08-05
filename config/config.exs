@@ -557,9 +557,21 @@ config :kiln_cms,
 config :kiln_cms, KilnCMSWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
+  # `root_layout` so error pages carry the same `<html>`/`<head>` shell —
+  # app.css, brand tokens, favicon, title — as an ordinary page (#681). Without
+  # it, a `NoRouteError` 404 or a 500 rendered by the endpoint's error renderer
+  # shipped the branded markup as raw unstyled HTML, while a `/:slug` 404 (an
+  # ordinary controller render through the `:browser` pipeline) came back fully
+  # styled — two 404s on one site that looked nothing alike. `layout: false`
+  # stays: the error templates supply their own inner `Layouts.public` chrome,
+  # so only the root shell is missing. The root layout's CSRF `<meta>` is now
+  # resolved through `Layouts.csrf_token/0`, which fails safe, so an error
+  # rendered from a conn outside the normal pipeline still renders the shell
+  # instead of risking a second failure inside the handler.
   render_errors: [
     formats: [html: KilnCMSWeb.ErrorHTML, json: KilnCMSWeb.ErrorJSON],
-    layout: false
+    layout: false,
+    root_layout: {KilnCMSWeb.Layouts, :root}
   ],
   pubsub_server: KilnCMS.PubSub,
   live_view: [signing_salt: "LPPY3qp7"]
