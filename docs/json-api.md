@@ -408,8 +408,14 @@ rather than resolved in some arbitrary order. "Alongside" includes
 client that always serializes all three keys still gets the replace path. The same three attributes exist on
 GraphQL's `updatePost` (`addTagIds` / `removeTagIds`) and on the MCP `update_*`
 tools. They are **update-only** — `POST` has no existing links to merge against,
-so a create takes `tag_ids` alone. `related_post_ids` and the other relationship
-arrays still replace on both verbs; they have no merge verbs yet.
+so a create takes `tag_ids` alone.
+
+The related-content arrays carry the **same** verbs (#637): `related_post_ids`
+replaces, and `add_related_post_ids` / `remove_related_post_ids` merge, with
+identical rules (an explicit `null` in the complete-set argument counts as
+replacing; the same id may not appear in both verbs). The sibling arrays follow
+the same naming — `add_related_page_ids` / `remove_related_page_ids`, and
+`add_related_entry_ids` / `remove_related_entry_ids` on the dynamic tier.
 
 ### Writing body content — the `block_tree` attribute
 

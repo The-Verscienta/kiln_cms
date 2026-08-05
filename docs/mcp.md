@@ -81,6 +81,13 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 > matches no tag, but `remove_tag_ids` swallows it. A successful `update_*` is
 > therefore not evidence a removal matched anything — call `read_tags` (or
 > re-read the record) if the outcome matters.
+>
+> **The related-content links carry the same verbs (#637).** Alongside
+> `related_post_ids` (which replaces), `update_post` takes `add_related_post_ids`
+> / `remove_related_post_ids`, and the sibling `add_related_page_ids` /
+> `remove_related_page_ids` (and `…_related_entry_ids` on `update_entry`). The
+> rules are identical — prefer the merge verbs for a partial update, don't
+> combine a complete-set argument with its verbs, and don't list one id in both.
 
 The tool set lives in the `tools` block on `KilnCMS.CMS` and the
 `config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile

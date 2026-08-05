@@ -246,7 +246,7 @@ defmodule KilnCMS.CMS.RelationshipsTest do
                  actor: ctx.editor
                )
 
-      assert Exception.message(error) =~ "same tag"
+      assert Exception.message(error) =~ "cannot list the same id as add_tag_ids"
       assert current_tags(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
     end
 
@@ -318,6 +318,129 @@ defmodule KilnCMS.CMS.RelationshipsTest do
 
       assert [%{id: rel_id}] = a.related_pages
       assert rel_id == b.id
+    end
+  end
+
+  # The same non-destructive merge verbs the tags got in #521, generalized to
+  # the related-content arrays (#637). Before this, a partial writer sending
+  # `related_post_ids: ["<one>"]` detached every other related link by omission,
+  # with no verb to add or remove one link in isolation.
+  describe "add_related_*_ids / remove_related_*_ids (merge semantics, #637)" do
+    setup do
+      editor = user(:editor)
+      post = CMS.create_post!(%{title: "Src", slug: slug()}, actor: editor)
+      a = CMS.create_post!(%{title: "A", slug: slug()}, actor: editor)
+      b = CMS.create_post!(%{title: "B", slug: slug()}, actor: editor)
+      c = CMS.create_post!(%{title: "C", slug: slug()}, actor: editor)
+
+      post =
+        CMS.update_post!(post, %{related_post_ids: [a.id, b.id]},
+          actor: editor,
+          load: [:related_posts]
+        )
+
+      %{editor: editor, post: post, a: a, b: b, c: c}
+    end
+
+    defp related_ids(record), do: MapSet.new(record.related_posts, & &1.id)
+
+    defp current_related(post, actor),
+      do: post.id |> CMS.get_post!(actor: actor, load: [:related_posts]) |> related_ids()
+
+    test "add relates the listed link and leaves the rest attached", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_related_post_ids: [ctx.c.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
+    end
+
+    test "remove unrelates the listed link and is idempotent", ctx do
+      once =
+        CMS.update_post!(ctx.post, %{remove_related_post_ids: [ctx.a.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(once) == MapSet.new([ctx.b.id])
+
+      # Removing an already-detached link is a no-op, not an error.
+      twice =
+        CMS.update_post!(once, %{remove_related_post_ids: [ctx.a.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(twice) == MapSet.new([ctx.b.id])
+    end
+
+    test "a metadata-only update leaves the related links untouched", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{title: "Retitled"},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "combining related_post_ids with a merge verb is refused", ctx do
+      for params <- [
+            %{related_post_ids: [ctx.a.id], add_related_post_ids: [ctx.c.id]},
+            %{related_post_ids: [ctx.a.id], remove_related_post_ids: [ctx.b.id]},
+            # An explicit null still counts as replacing — the #521 SDK shape.
+            %{related_post_ids: nil, add_related_post_ids: [ctx.c.id]}
+          ] do
+        assert {:error, error} = CMS.update_post(ctx.post, params, actor: ctx.editor)
+        assert Exception.message(error) =~ "cannot be combined", inspect(params)
+      end
+
+      assert current_related(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "listing the same id in both verbs is refused", ctx do
+      assert {:error, error} =
+               CMS.update_post(
+                 ctx.post,
+                 %{add_related_post_ids: [ctx.c.id], remove_related_post_ids: [ctx.c.id]},
+                 actor: ctx.editor
+               )
+
+      assert Exception.message(error) =~ "cannot list the same id as add_related_post_ids"
+      assert current_related(ctx.post, ctx.editor) == MapSet.new([ctx.a.id, ctx.b.id])
+    end
+
+    test "a repeated id within one verb is de-duplicated, not rejected", ctx do
+      updated =
+        CMS.update_post!(ctx.post, %{add_related_post_ids: [ctx.c.id, ctx.c.id]},
+          actor: ctx.editor,
+          load: [:related_posts]
+        )
+
+      assert related_ids(updated) == MapSet.new([ctx.a.id, ctx.b.id, ctx.c.id])
+    end
+
+    test "the verbs are on pages too, keyed to the page relationship", ctx do
+      p1 = CMS.create_page!(%{title: "P1", slug: slug()}, actor: ctx.editor)
+      p2 = CMS.create_page!(%{title: "P2", slug: slug()}, actor: ctx.editor)
+
+      p1 =
+        CMS.update_page!(p1, %{related_page_ids: [p2.id]},
+          actor: ctx.editor,
+          load: [:related_pages]
+        )
+
+      p3 = CMS.create_page!(%{title: "P3", slug: slug()}, actor: ctx.editor)
+
+      updated =
+        CMS.update_page!(p1, %{add_related_page_ids: [p3.id]},
+          actor: ctx.editor,
+          load: [:related_pages]
+        )
+
+      assert MapSet.new(updated.related_pages, & &1.id) == MapSet.new([p2.id, p3.id])
     end
   end
 
