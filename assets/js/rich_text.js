@@ -8,12 +8,16 @@
 //   * an expanded toolbar with live active-state highlighting
 //   * a slash-command menu ("/") that both transforms the current text and, in
 //     the block editor, inserts a new Kiln block below (B3 — one "/" for both)
+//   * links: the Link mark StarterKit v2 leaves out, plus the ⌘K popover that
+//     authors them and one href gate mirroring the server's (#823)
 //
 // Every command here produces only tags already on the server-side allowlist
 // (KilnCMS.HTMLSanitizer.RichText) — including the code-block language class,
 // which the allowlist admits as `language-<tag>` (#503).
-import {Editor} from "@tiptap/core"
+import {Editor, Extension} from "@tiptap/core"
+import {Plugin, PluginKey} from "@tiptap/pm/state"
 import StarterKit from "@tiptap/starter-kit"
+import Link from "@tiptap/extension-link"
 import Table from "@tiptap/extension-table"
 import TableRow from "@tiptap/extension-table-row"
 import TableHeader from "@tiptap/extension-table-header"
@@ -34,6 +38,110 @@ const TABLE_EXTENSIONS = [
   TableRow,
   TableHeader.extend(cellSchema),
   TableCell.extend(cellSchema),
+]
+
+// Mirror of `KilnCMS.HTMLSanitizer.safe_href/1`: returns the trimmed URL when
+// the CMS will store it, `null` when it won't. Allowed are same-origin relative
+// paths, `http(s)://` and `mailto:` — everything else (`javascript:`, `data:`,
+// `ftp:`, protocol-relative `//host`, `#anchor`) is rejected.
+//
+// This has to agree with the server (#823). `PortableText.sanitize_def/1`
+// blanks the href of any link mark it doesn't like, and a blanked href renders
+// as plain text — so an href the editor accepts but the server rejects is a
+// link the author watches vanish on the next reload. Rejecting it here instead
+// says so while they can still fix it.
+function safeHref(url) {
+  if (typeof url !== "string") return null
+  const trimmed = url.trim()
+  if (!trimmed) return null
+
+  // Relative first, exactly as the server orders it: `/blog/x` never reaches
+  // the URL parser.
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//") && !trimmed.includes("..")) {
+    return trimmed
+  }
+
+  let parsed
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+
+  // The server's `javascript:` substring check, kept for the same reason: a
+  // `mailto:` whose body smuggles one in.
+  if (trimmed.toLowerCase().includes("javascript:")) return null
+
+  const scheme = parsed.protocol.replace(/:$/, "")
+  if ((scheme === "http" || scheme === "https") && parsed.host) return trimmed
+  if (scheme === "mailto") return trimmed
+  return null
+}
+
+// Pasting a URL over a selection turns that selection into a link. This is our
+// own handler rather than the Link extension's `linkOnPaste`, for two reasons:
+// upstream applies the mark with a bare `setMark`, which skips the `href` gate
+// entirely (it would happily make an `ftp://` link the server then blanks —
+// the same silent loss as #823 itself), and it detects URLs with linkify,
+// which doesn't consider `/refunds` a URL at all. In a CMS an internal path is
+// the most common thing an author pastes.
+const LinkOnPaste = Extension.create({
+  name: "kilnLinkOnPaste",
+
+  addProseMirrorPlugins() {
+    const {editor} = this
+
+    return [
+      new Plugin({
+        key: new PluginKey("kilnLinkOnPaste"),
+        props: {
+          handlePaste: (view, event) => {
+            if (view.state.selection.empty) return false
+
+            const text = ((event.clipboardData && event.clipboardData.getData("text/plain")) || "").trim()
+            // A bare URL, not a sentence that happens to contain one — pasting
+            // prose over a selection must stay an ordinary paste.
+            if (!text || /\s/.test(text)) return false
+
+            const href = safeHref(text)
+            if (!href) return false
+
+            // `setLink` (not `setMark`) so this path goes through the same
+            // `isAllowedUri` gate as the toolbar and ⌘K.
+            return editor.commands.setLink({href})
+          },
+        },
+      }),
+    ]
+  },
+})
+
+// Links (#823). StarterKit v2 has no Link mark — it only moved into StarterKit
+// in v3 — so before this every editor mount parsed the anchors out of the HTML
+// it was seeded with, and the autosave persisted prose with the links gone.
+//
+// `autolink` stays OFF deliberately: it rewrites what the author typed, turning
+// a bare "example.com" mentioned in passing into a live link nobody asked for.
+// That is the same class of silent mutation as the bug being fixed, and it
+// feeds `Kiln.Advisory.Checks.LinkText`'s `link_text_bare_url` warning with
+// links the author never made. Pasting (above) is an explicit gesture over an
+// explicit selection, so that one is on.
+const LINK_EXTENSIONS = [
+  Link.configure({
+    // Clicking a link inside the editor should put the caret in it, not
+    // navigate away from the page being edited.
+    openOnClick: false,
+    linkOnPaste: false,
+    autolink: false,
+    // Portable Text stores a link as an href and nothing else, so rendering
+    // `target`/`rel` here would show authors attributes that don't survive the
+    // save. Null clears the extension's defaults rather than adding to them.
+    HTMLAttributes: {target: null, rel: null, class: null},
+    // The extension consults this when parsing seeded HTML, when rendering,
+    // and inside `setLink` — one gate covering every way a link can appear.
+    isAllowedUri: url => safeHref(url) !== null,
+  }),
+  LinkOnPaste,
 ]
 
 // Code-block language choices (#503). The value is the tag stored on the
@@ -62,12 +170,15 @@ const LANGUAGES = [
 ]
 
 // Toolbar buttons. `active` (optional) lights the button when the mark/node is
-// applied at the cursor; `run` receives a focused command chain.
+// applied at the cursor; `run` receives a focused command chain. `prompt`
+// entries open the hook's floating link editor instead — the href can't come
+// from a command chain, it has to be typed.
 const TOOLBAR = [
   {label: "B", title: "Bold (⌘B)", active: e => e.isActive("bold"), run: c => c.toggleBold()},
   {label: "I", title: "Italic (⌘I)", active: e => e.isActive("italic"), run: c => c.toggleItalic()},
   {label: "S", title: "Strikethrough (⌘⇧S)", active: e => e.isActive("strike"), run: c => c.toggleStrike()},
   {label: "</>", title: "Inline code (⌘E)", active: e => e.isActive("code"), run: c => c.toggleCode()},
+  {label: "Link", title: "Link (⌘K)", active: e => e.isActive("link"), prompt: true},
   {label: "H1", title: "Heading 1 (⌘⌥1)", active: e => e.isActive("heading", {level: 1}), run: c => c.toggleHeading({level: 1})},
   {label: "H2", title: "Heading 2 (⌘⌥2)", active: e => e.isActive("heading", {level: 2}), run: c => c.toggleHeading({level: 2})},
   {label: "H3", title: "Heading 3 (⌘⌥3)", active: e => e.isActive("heading", {level: 3}), run: c => c.toggleHeading({level: 3})},
@@ -149,7 +260,7 @@ const SLASH_INSERTS = [
   {label: "Claim", hint: "Insert a claim block", keywords: "claim citation source", insert: "claim"},
   {label: "Embed", hint: "Insert an embed block", keywords: "embed iframe video external", insert: "embed"},
 ]
-const toolbarButton = (editor, item) => {
+const toolbarButton = (hook, item) => {
   const b = document.createElement("button")
   b.type = "button"
   b.textContent = item.label
@@ -160,9 +271,179 @@ const toolbarButton = (editor, item) => {
   b.className = "rounded border border-base-content/20 px-2 py-0.5 text-xs hover:bg-base-200"
   b.addEventListener("click", e => {
     e.preventDefault()
-    item.run(editor.chain().focus()).run()
+    if (item.prompt) {
+      hook.linkPrompt.open()
+    } else {
+      item.run(hook.editor.chain().focus()).run()
+    }
   })
   return b
+}
+
+// Unique per-instance ids, same reason as the slash menu's: several editors can
+// be mounted at once and each popover labels its own input.
+let linkPromptCount = 0
+
+// The floating link editor (#823) — ⌘K, or the toolbar's "Link" button.
+//
+// A hand-rolled popover rather than `window.prompt`: prompt() can't explain why
+// a URL was rejected, blocks the whole tab, and is suppressed outright in some
+// embedded contexts. It follows the slash menu's shape — one element in
+// document.body, positioned at the caret — so it escapes the block card's
+// overflow the same way.
+class LinkPrompt {
+  constructor(editor) {
+    this.editor = editor
+    this.open_ = false
+    this.id = `rt-link-prompt-${++linkPromptCount}`
+
+    this.el = document.createElement("div")
+    this.el.id = this.id
+    this.el.className = "rt-link-prompt"
+    this.el.setAttribute("role", "dialog")
+    this.el.setAttribute("aria-label", "Link")
+    this.el.hidden = true
+
+    this.input = document.createElement("input")
+    this.input.type = "text"
+    this.input.className = "rt-link-input"
+    this.input.placeholder = "https://example.com or /page"
+    this.input.setAttribute("aria-label", "Link URL")
+    this.input.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault()
+        this.submit()
+      } else if (e.key === "Escape") {
+        e.preventDefault()
+        this.close()
+      }
+    })
+
+    this.applyBtn = this.button("Apply", () => this.submit())
+    this.removeBtn = this.button("Remove", () => this.unlink())
+
+    this.error = document.createElement("p")
+    this.error.className = "rt-link-error"
+    // The message names the one thing that went wrong with what was typed, so
+    // it should interrupt rather than wait for the next focus move.
+    this.error.setAttribute("role", "alert")
+    this.error.hidden = true
+
+    this.el.append(this.input, this.applyBtn, this.removeBtn, this.error)
+    document.body.appendChild(this.el)
+
+    this.onKeyDown = this.onKeyDown.bind(this)
+    this.onDocumentMouseDown = this.onDocumentMouseDown.bind(this)
+    // Capture, like the slash menu, so ⌘K is claimed before ProseMirror (and
+    // the browser's own ⌘K) sees it.
+    editor.view.dom.addEventListener("keydown", this.onKeyDown, true)
+    document.addEventListener("mousedown", this.onDocumentMouseDown)
+  }
+
+  button(label, onClick) {
+    const b = document.createElement("button")
+    b.type = "button"
+    b.textContent = label
+    // Don't let the browser move focus to the button on mousedown: the click
+    // ends with the caret back in the prose, and a stranded focus ring on a
+    // now-hidden popover leaves a keyboard user with nowhere to tab from.
+    b.addEventListener("mousedown", e => e.preventDefault())
+    b.addEventListener("click", e => {
+      e.preventDefault()
+      onClick()
+    })
+    return b
+  }
+
+  open() {
+    const {editor} = this
+    // Editing an existing link acts on the whole link, not the fragment the
+    // caret happens to sit in — otherwise "Apply" splits one link into two.
+    if (editor.isActive("link")) editor.chain().extendMarkRange("link").run()
+
+    this.input.value = editor.getAttributes("link").href || ""
+    this.removeBtn.hidden = !editor.isActive("link")
+    this.error.hidden = true
+    this.open_ = true
+    this.el.hidden = false
+    this.position()
+    this.input.focus()
+    this.input.select()
+  }
+
+  close({focus = true} = {}) {
+    if (!this.open_) return
+    this.open_ = false
+    // Put the caret back BEFORE hiding, and with `view.focus()` rather than
+    // `commands.focus()`. Hiding an element that still contains the focused
+    // input makes the browser reset focus to <body> in a later task, which
+    // would undo a focus call made after it; and `commands.focus()` defers to a
+    // requestAnimationFrame, so it loses that race too. Either way an author
+    // who applied a link with Enter would be left typing into nothing.
+    if (focus) this.editor.view.focus()
+    this.el.hidden = true
+  }
+
+  position() {
+    const coords = this.editor.view.coordsAtPos(this.editor.state.selection.from)
+    this.el.style.top = `${window.scrollY + coords.bottom + 4}px`
+    this.el.style.left = `${window.scrollX + coords.left}px`
+  }
+
+  submit() {
+    const href = safeHref(this.input.value)
+
+    if (!href) {
+      this.error.textContent =
+        "Use an http(s):// URL, a mailto: address, or a path starting with /."
+      this.error.hidden = false
+      return
+    }
+
+    const {editor} = this
+
+    if (editor.state.selection.empty && !editor.isActive("link")) {
+      // Nothing selected and no link under the caret, so there is no text to
+      // wrap: insert the URL as its own label. The advisory panel will (rightly)
+      // ask for a better one — `link_text_bare_url` — but an author who pressed
+      // ⌘K on an empty line gets a link rather than nothing.
+      editor
+        .chain()
+        .focus()
+        .insertContent([{type: "text", text: href, marks: [{type: "link", attrs: {href}}]}])
+        .run()
+    } else {
+      editor.chain().focus().extendMarkRange("link").setLink({href}).run()
+    }
+
+    this.close()
+  }
+
+  unlink() {
+    this.editor.chain().focus().extendMarkRange("link").unsetLink().run()
+    this.close()
+  }
+
+  onKeyDown(e) {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+    if (e.key !== "k" && e.key !== "K") return
+    e.preventDefault()
+    e.stopPropagation()
+    this.open()
+  }
+
+  // Clicking anywhere else dismisses the popover, so it can't be left stranded
+  // over the page after the author moves on. Focus stays where they clicked.
+  onDocumentMouseDown(e) {
+    if (!this.open_ || this.el.contains(e.target)) return
+    this.close({focus: false})
+  }
+
+  destroy() {
+    this.editor.view.dom.removeEventListener("keydown", this.onKeyDown, true)
+    document.removeEventListener("mousedown", this.onDocumentMouseDown)
+    this.el.remove()
+  }
 }
 
 // A small language dropdown for code blocks (#503). Hidden until the caret is
@@ -405,7 +686,7 @@ export function mount(hook) {
   if (collabToken && collabTopic && collabFragment) {
     mountCollab(hook, {token: collabToken, topic: collabTopic, fragment: collabFragment})
   } else {
-    buildEditor(hook, [StarterKit, ...TABLE_EXTENSIONS], hook.el.dataset.content || "")
+    buildEditor(hook, [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS], hook.el.dataset.content || "")
   }
 }
 
@@ -432,6 +713,7 @@ async function mountCollab(hook, {token, topic, fragment}) {
   buildEditor(hook, [
     // Yjs owns undo/redo semantics under collaboration.
     StarterKit.configure({history: false}),
+    ...LINK_EXTENSIONS,
     ...TABLE_EXTENSIONS,
     Collaboration.configure({document: handle.doc, field: fragment}),
     // Remote carets labeled with each collaborator's initials, in the same
@@ -467,7 +749,7 @@ export function mountInline(hook) {
 
   const editor = new Editor({
     element: hook.el,
-    extensions: [StarterKit, ...TABLE_EXTENSIONS],
+    extensions: [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS],
     content: seed,
     editorProps: {
       attributes: {
@@ -499,6 +781,7 @@ export function mountInline(hook) {
 
   hook.editor = editor
   hook.slash = new SlashMenu(editor)
+  hook.linkPrompt = new LinkPrompt(editor)
   buildInlineToolbar(hook)
 }
 
@@ -523,7 +806,7 @@ function buildInlineToolbar(hook) {
   bar.addEventListener("mousedown", e => e.preventDefault())
 
   hook.toolbarButtons = TOOLBAR.map(item => {
-    const b = toolbarButton(hook.editor, item)
+    const b = toolbarButton(hook, item)
     bar.appendChild(b)
     return {item, b}
   })
@@ -650,6 +933,7 @@ function buildEditor(hook, extensions, content = null) {
     onInsert: type =>
       hook.pushEvent("add_block", {type, after: hook.el.dataset.blockId}),
   })
+  hook.linkPrompt = new LinkPrompt(editor)
 
   // Block-level AI assist (#60). The server never writes generated prose into
   // the block itself — it would force the document back into TipTap mid-edit,
@@ -691,7 +975,7 @@ function buildEditor(hook, extensions, content = null) {
   })
 
   hook.toolbarButtons = TOOLBAR.map(item => {
-    const b = toolbarButton(editor, item)
+    const b = toolbarButton(hook, item)
     toolbarEl.appendChild(b)
     return {item, b}
   })

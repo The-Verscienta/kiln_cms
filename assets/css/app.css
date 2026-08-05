@@ -441,6 +441,21 @@
   border: none;
   border-top: 1px solid var(--color-base-300);
 }
+/* Links in the editor (#823). Tailwind's preflight resets `a` to inherit both
+   color and decoration, so without this a link looks exactly like the prose
+   around it — the author has no way to see one is there, let alone put the
+   caret in it to edit it. Same two-theme treatment as `.kiln-block a`, so
+   linked prose looks in the editor the way it will on the page. `cursor: text`
+   because clicking here places the caret (openOnClick is off), not navigates. */
+.ProseMirror a {
+  color: color-mix(in oklch, var(--color-primary) 68%, black);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: text;
+}
+[data-theme="dark"] .ProseMirror a {
+  color: var(--color-primary);
+}
 /* Tables in the editor (#475). TipTap wraps each table in .tableWrapper and
    marks multi-cell selections with .selectedCell. */
 .ProseMirror .tableWrapper {
@@ -729,6 +744,47 @@ pre.highlight .gs {
 .rt-slash-hint {
   font-size: 0.75rem;
   color: color-mix(in oklch, var(--color-base-content) 60%, transparent);
+}
+
+/* Floating link editor (⌘K, or the toolbar's "Link" button — #823). Same
+   body-mounted, caret-positioned treatment as the slash menu, so it escapes the
+   block card's overflow. Above it in the stack: ⌘K can be pressed while the
+   slash menu is open. */
+.rt-link-prompt {
+  position: absolute;
+  z-index: 51;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+.rt-link-input {
+  width: 18rem;
+  max-width: 60vw;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.8rem;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-sm);
+}
+.rt-link-prompt button {
+  border: 1px solid color-mix(in oklch, var(--color-base-content) 20%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+}
+.rt-link-prompt button:hover {
+  background: var(--color-base-200);
+}
+.rt-link-error {
+  flex-basis: 100%;
+  font-size: 0.7rem;
+  color: var(--color-error-ink);
 }
 
 /* Floating formatting toolbar for in-context rich-text editing (#354). Rendered
