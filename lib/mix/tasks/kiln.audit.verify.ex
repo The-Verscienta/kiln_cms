@@ -18,11 +18,23 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Governance.Chain
+  alias KilnCMS.Provenance.KeyRegistry
 
   @requirements ["app.start"]
 
   @impl Mix.Task
   def run(_args) do
+    # One signing-key resolution for the whole sweep, not one per anchor (#643).
+    # Every `Chain.verify` below resolves the active + retired keys to check an
+    # anchor's signature; across all orgs × types × records that is the same
+    # file reads and PEM parses repeated per document, and an unreadable retired
+    # path warns once per document — burying the TAMPERED lines this task exists
+    # to surface. The scope is this run only, so a key rotated before the next
+    # run is still picked up.
+    KeyRegistry.with_cache(&verify_all/0)
+  end
+
+  defp verify_all do
     # Strict tenancy (#419): verify per org — the content/version reads and the
     # dynamic-type registry both require a tenant.
     results =
