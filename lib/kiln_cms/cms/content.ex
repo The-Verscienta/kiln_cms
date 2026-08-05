@@ -1371,6 +1371,19 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
+
+          # The alt-text gate is on publish (#403), but `:update` re-fires
+          # artifacts for an already-published record — so editing a live page
+          # to show an alt-less image bypassed the gate entirely (#722). Re-run
+          # it here, but only when it can matter: the record is (still)
+          # published, and the body is in the params at all — a metadata-only
+          # PATCH, and every draft edit, stays untouched. `only_new: true` scopes
+          # it to images this edit newly leaves undescribed, so a page that
+          # already carried one (published before the gate) stays editable.
+          # Autosave is deliberately exempt (a draft in progress is not an
+          # assertion the page is done).
+          validate {KilnCMS.CMS.Validations.MediaAltText, only_new: true},
+            where: [changing(:blocks), attribute_equals(:state, :published)]
         end
 
         # Debounced draft autosave from the editor. Writes the same content as
