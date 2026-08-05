@@ -1425,6 +1425,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
+          change KilnCMS.CMS.Changes.AutoCompleteTasks
         end
 
         update :publish_scheduled do
@@ -1444,6 +1445,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.FireArtifacts
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
+          change KilnCMS.CMS.Changes.AutoCompleteTasks
         end
 
         update :restore_version do

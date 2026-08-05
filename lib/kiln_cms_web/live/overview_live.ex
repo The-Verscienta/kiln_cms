@@ -81,6 +81,10 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:webhooks, if(admin?, do: webhook_health(actor, org)))
     |> assign(:forms, if(admin?, do: form_activity(actor, org)))
     |> assign(:keys_count, if(admin?, do: count(ApiKey, actor, org)))
+    |> assign(
+      :my_open_tasks,
+      length(CMS.list_tasks_for_assignee!(actor.id, actor: actor, tenant: org))
+    )
   end
 
   # One narrow-select fetch per content type; every content-shaped metric
@@ -215,6 +219,16 @@ defmodule KilnCMSWeb.OverviewLive do
               )}
             </p>
             <ul class="mt-1 space-y-1 text-xs">
+              <li :if={@my_open_tasks > 0}>
+                <.link navigate={~p"/editor/tasks"} class="text-primary hover:underline">
+                  {ngettext(
+                    "%{count} task assigned to you",
+                    "%{count} tasks assigned to you",
+                    @my_open_tasks,
+                    count: @my_open_tasks
+                  )}
+                </.link>
+              </li>
               <li :if={Map.get(@by_state, :in_review, 0) > 0}>
                 <.link navigate={~p"/editor?status=in_review"} class="text-primary hover:underline">
                   {gettext("%{count} waiting for review", count: Map.get(@by_state, :in_review, 0))}
@@ -240,7 +254,8 @@ defmodule KilnCMSWeb.OverviewLive do
               </li>
               <li
                 :if={
-                  Map.get(@by_state, :in_review, 0) == 0 and @stale == 0 and @upcoming == 0 and
+                  @my_open_tasks == 0 and Map.get(@by_state, :in_review, 0) == 0 and
+                    @stale == 0 and @upcoming == 0 and
                     (is_nil(@webhooks) or @webhooks.failed_24h == 0)
                 }
                 class="text-base-content/50"

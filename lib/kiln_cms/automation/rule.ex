@@ -20,7 +20,23 @@ defmodule KilnCMS.Automation.Rule do
   # webhook system emits (`KilnCMS.CMS.WebhookEndpoint.verbs/0`), which is where
   # automation is evaluated from. `:in_review` / `:returned_to_draft` are the
   # review-workflow transitions (#375), so "on `in_review` → notify" rules work.
-  @triggers [:published, :unpublished, :updated, :in_review, :returned_to_draft]
+  #
+  # `:assigned` / `:overdue` (#501) are task-domain, not content-type-domain —
+  # `KilnCMS.Notifications.Tasks` dispatches them as `"task.assigned"` /
+  # `"task.overdue"` through the same `KilnCMS.Webhooks.dispatch/3` funnel.
+  # `Automation.handle_event/3` only ever splits the event string on its first
+  # "." and matches the verb against this list, so a literal `"task"` type
+  # works with no executor changes — a rule scoped to `content_type: "task"`
+  # matches exactly like one scoped to `content_type: "page"`.
+  @triggers [
+    :published,
+    :unpublished,
+    :updated,
+    :in_review,
+    :returned_to_draft,
+    :assigned,
+    :overdue
+  ]
 
   # Reactions. HTTP/Slack notifications are the (signed, SSRF-safe) webhook
   # feature's job; automation adds the reactions webhooks can't do.

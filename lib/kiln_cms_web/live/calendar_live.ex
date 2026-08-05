@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
   import Ash.Expr
 
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
 
   # Per-type cap for one month's events — far above any real editorial volume,
@@ -52,10 +53,47 @@ defmodule KilnCMSWeb.CalendarLive do
     to = DateTime.new!(Date.add(Date.end_of_month(month), 1), ~T[00:00:00], "Etc/UTC")
 
     # Scope the whole calendar to the editor's current site (epic #336).
-    (ContentTypes.all() ++ ContentTypes.dynamic_all(org.id))
-    |> Enum.flat_map(&month_events(&1, actor, org, from, to))
+    content_events =
+      (ContentTypes.all() ++ ContentTypes.dynamic_all(org.id))
+      |> Enum.flat_map(&month_events(&1, actor, org, from, to))
+
+    (content_events ++ task_events(actor, org, month))
     |> Enum.sort_by(& &1.at, DateTime)
     |> Enum.group_by(&DateTime.to_date(&1.at))
+  end
+
+  # Task due dates (#501) — a different content axis from publish/unpublish:
+  # every editor already has read access to every org task (same policy as
+  # comments), so this isn't per-actor filtered beyond that. Content titles
+  # are resolved live (see `TaskLive`'s moduledoc for why) rather than
+  # denormalized onto the task.
+  defp task_events(actor, org, month) do
+    CMS.list_tasks_open_due_between!(
+      Date.beginning_of_month(month),
+      Date.end_of_month(month),
+      actor: actor,
+      tenant: org
+    )
+    |> Enum.map(fn task ->
+      title =
+        case ContentTypes.get_record(task.content_type, task.content_id,
+               actor: actor,
+               tenant: org,
+               query: [select: [:id, :title]]
+             ) do
+          {:ok, record} -> record.title
+          _ -> task.content_type
+        end
+
+      %{
+        id: task.content_id,
+        type: task.content_type,
+        label: task.content_type,
+        title: title,
+        kind: :task_due,
+        at: DateTime.new!(task.due_on, ~T[00:00:00], "Etc/UTC")
+      }
+    end)
   end
 
   defp month_events(ct, actor, org, from, to) do
@@ -114,10 +152,12 @@ defmodule KilnCMSWeb.CalendarLive do
   defp kind_label(:publish), do: gettext("publishes")
   defp kind_label(:unpublish), do: gettext("unpublishes")
   defp kind_label(:published), do: gettext("went live")
+  defp kind_label(:task_due), do: gettext("task due")
 
   defp kind_class(:publish), do: "border-warning/40 bg-warning/10"
   defp kind_class(:unpublish), do: "border-error/40 bg-error/10"
   defp kind_class(:published), do: "border-success/40 bg-success/10"
+  defp kind_class(:task_due), do: "border-info/40 bg-info/10"
 
   # --- render -----------------------------------------------------------------
 
@@ -168,6 +208,10 @@ defmodule KilnCMSWeb.CalendarLive do
           <span class="flex items-center gap-1.5">
             <span class={["inline-block size-3 rounded border", kind_class(:published)]} />
             {gettext("Went live")}
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class={["inline-block size-3 rounded border", kind_class(:task_due)]} />
+            {gettext("Task due")}
           </span>
         </p>
 

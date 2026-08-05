@@ -16,12 +16,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   """
   use KilnCMSWeb, :live_view
 
+  require Ash.Query
   require Logger
 
   import Ash.Expr, only: [expr: 1]
   import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
   import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
 
+  alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.VersionDiff
@@ -81,6 +83,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   @impl true
   def mount(%{"id" => id} = params, _session, socket) do
+    # Deep-linked from the content list's "Assign" button (#501): open
+    # straight to the Settings tab with the assignment form expanded.
+    assign_deep_link? = params["assign"] in ["1", "true"]
+
     case content_kind(params, socket) do
       nil ->
         {:ok, push_navigate(socket, to: ~p"/editor")}
@@ -135,7 +141,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:compare, nil)
          # Right inspector rail (Theme A): which panel is showing. All panels stay
          # mounted (form fields must survive submit) — the tab only toggles CSS
-         # visibility, never `:if`.
+         # visibility, never `:if`. Always mounts as `:preview` here (even for
+         # the `?assign=1` deep link, switched to `:settings` further below,
+         # AFTER `assign_record/2`) — `refresh_preview_html/2` only computes
+         # `@preview_html` when `inspector_tab` is `nil`/`:preview` at mount, so
+         # defaulting straight to `:settings` left it unassigned and crashed
+         # the Preview panel, which stays rendered (CSS-hidden) either way.
          |> assign(:inspector_tab, :preview)
          # Preview render is only refreshed while the Preview tab is showing;
          # this tracks whether an off-tab edit left it needing a re-render.
@@ -264,9 +275,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # (#655).
          |> assign(:collab_topic, "collab:#{kind}:#{record.id}")
          |> assign(:siblings, siblings(kind, id, actor, org))
-         |> assign_record(record)}
+         # Editorial tasks (#501): open tasks on this record (usually zero or
+         # one), plus the org members eligible to be assigned one. Reloaded
+         # after assign/complete; the assignee list is loaded once (an org's
+         # editor roster doesn't change mid-session).
+         |> assign(:tasks, load_tasks(kind, record.id, actor, org))
+         |> assign(:assignable_users, assignable_users())
+         |> assign(:task_assign_open?, assign_deep_link?)
+         |> assign(:task_draft, %{})
+         |> assign_record(record)
+         |> open_settings_if_deep_linked(assign_deep_link?)}
     end
   end
+
+  # See the `:inspector_tab` mount comment above for why this runs AFTER
+  # `assign_record/2` rather than being folded into the initial assign.
+  defp open_settings_if_deep_linked(socket, true), do: assign(socket, :inspector_tab, :settings)
+  defp open_settings_if_deep_linked(socket, false), do: socket
 
   # The content type being edited: from the `:type` param on the generic
   # `/editor/content/:type/:id` route, or the `live_action` on the legacy
@@ -1422,6 +1447,64 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("comment_unresolve", %{"id" => id}, socket),
     do: resolve_comment_thread(socket, id, :unresolve_comment)
 
+  # ── Editorial tasks (#501) ───────────────────────────────────────────────
+  def handle_event("task_assign_open", _params, socket),
+    do: {:noreply, socket |> assign(:task_assign_open?, true) |> assign(:task_draft, %{})}
+
+  def handle_event("task_assign_close", _params, socket),
+    do: {:noreply, socket |> assign(:task_assign_open?, false) |> assign(:task_draft, %{})}
+
+  def handle_event("task_draft_change", %{"task_assignee_id" => v}, socket),
+    do: {:noreply, put_task_draft(socket, "assignee_id", v)}
+
+  def handle_event("task_draft_change", %{"task_due_on" => v}, socket),
+    do: {:noreply, put_task_draft(socket, "due_on", v)}
+
+  def handle_event("task_draft_change", %{"task_note" => v}, socket),
+    do: {:noreply, put_task_draft(socket, "note", v)}
+
+  def handle_event("task_draft_change", _params, socket), do: {:noreply, socket}
+
+  def handle_event("task_assign_submit", _params, socket) do
+    draft = socket.assigns.task_draft
+
+    attrs = %{
+      content_type: to_string(socket.assigns.kind),
+      content_id: socket.assigns.record.id,
+      assignee_id: draft["assignee_id"],
+      due_on: blank_to_nil(draft["due_on"]),
+      note: blank_to_nil(draft["note"])
+    }
+
+    case CMS.assign_task(attrs, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
+      {:ok, _task} ->
+        {:noreply,
+         socket
+         |> reload_tasks()
+         |> assign(:task_assign_open?, false)
+         |> assign(:task_draft, %{})}
+
+      {:error, _error} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't assign that task."))}
+    end
+  end
+
+  def handle_event("task_complete", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.tasks, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      task ->
+        case CMS.complete_task(task, %{}, actor: socket.assigns.actor) do
+          {:ok, _task} ->
+            {:noreply, reload_tasks(socket)}
+
+          {:error, _error} ->
+            {:noreply, put_flash(socket, :error, gettext("Couldn't update that task."))}
+        end
+    end
+  end
+
   # The gallery's picker is multi-select (#482): a gallery is built from several
   # images at once, and re-opening a drawer per image turns "add these eight" into
   # eight round trips through a modal.
@@ -2140,6 +2223,45 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
     |> Ash.load!(:author, authorize?: false, tenant: org)
   end
+
+  # ── Editorial tasks (#501): handle_event helpers ────────────────────────────
+
+  defp load_tasks(kind, record_id, actor, org) do
+    to_string(kind)
+    |> CMS.list_tasks_for!(record_id, actor: actor, tenant: org)
+    |> Enum.filter(&(&1.status == :open))
+    |> Ash.load!(:assignee, authorize?: false, tenant: org)
+  end
+
+  defp reload_tasks(socket) do
+    tasks =
+      load_tasks(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    assign(socket, :tasks, tasks)
+  end
+
+  defp put_task_draft(socket, key, value),
+    do: assign(socket, :task_draft, Map.put(socket.assigns.task_draft, key, value))
+
+  # Org editors/admins — the roster a task can be assigned to (viewers can't
+  # act on content, so they're excluded). `authorize?: false`: OrgMembership's
+  # read policy is self-only (same reasoning as `load_comments/4`'s author
+  # load), so listing the roster for a dropdown needs a system read.
+  defp assignable_users do
+    Accounts.User
+    |> Ash.Query.filter(role in [:editor, :admin])
+    |> Ash.read!(authorize?: false)
+    |> Enum.sort_by(&user_label/1)
+    |> Enum.map(&{user_label(&1), &1.id})
+  end
+
+  defp user_label(%{name: name}) when is_binary(name) and name != "", do: name
+  defp user_label(%{email: email}), do: to_string(email)
 
   defp close_comment_panel(socket) do
     socket
@@ -4044,6 +4166,97 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Dismiss")}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :tasks, :list, required: true
+  attr :open?, :boolean, required: true
+  attr :draft, :map, required: true
+  attr :assignable_users, :list, required: true
+
+  # Editorial tasks (#501): the whole record's open tasks (usually zero or
+  # one — v1 doesn't cap it), plus an inline "+ Assign" form. Document-level,
+  # not block-level (unlike `comment_panel/1` below) — a task is "who owns
+  # getting this whole piece of content done," not feedback on one block.
+  #
+  # No `<form>` here, same reason `comment_panel/1` avoids one (see its own
+  # moduledoc note): this whole section lives inside the page's own
+  # `id="page-editor"` form, and HTML doesn't allow nested forms — a nested
+  # `<form phx-submit=…>` silently gets dropped by the parser (its child
+  # inputs survive, the tag itself vanishes), so `phx-submit` never fires.
+  # Each field tracks its own `phx-change` into `@draft`; the submit button
+  # is a plain `phx-click` reading that assign server-side.
+  defp task_list(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <p :if={@tasks == []} class="text-xs text-base-content/60">
+        {gettext("No open tasks.")}
+      </p>
+
+      <ul :if={@tasks != []} class="space-y-2">
+        <li :for={task <- @tasks} class="rounded border border-base-content/15 p-2 text-xs">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-medium">{user_label(task.assignee)}</span>
+            <button
+              type="button"
+              phx-click="task_complete"
+              phx-value-id={task.id}
+              class="text-primary hover:underline"
+            >
+              {gettext("Mark done")}
+            </button>
+          </div>
+          <p :if={task.due_on} class="text-base-content/60">
+            {gettext("Due %{date}", date: Date.to_iso8601(task.due_on))}
+          </p>
+          <p :if={task.note} class="mt-1 text-base-content/70">{task.note}</p>
+        </li>
+      </ul>
+
+      <button
+        :if={!@open?}
+        type="button"
+        phx-click="task_assign_open"
+        class="btn btn-sm btn-default"
+      >
+        {gettext("+ Assign")}
+      </button>
+
+      <div :if={@open?} class="space-y-2 rounded border border-base-content/15 p-2">
+        <select name="task_assignee_id" phx-change="task_draft_change" class="select select-sm w-full">
+          <option value="">{gettext("Assign to…")}</option>
+          <option
+            :for={{label, id} <- @assignable_users}
+            value={id}
+            selected={@draft["assignee_id"] == id}
+          >
+            {label}
+          </option>
+        </select>
+        <input
+          type="date"
+          name="task_due_on"
+          phx-change="task_draft_change"
+          value={@draft["due_on"]}
+          class="input input-sm w-full"
+        />
+        <textarea
+          name="task_note"
+          phx-change="task_draft_change"
+          phx-debounce="blur"
+          placeholder={gettext("Note (optional)")}
+          class="textarea textarea-sm w-full"
+        >{@draft["note"]}</textarea>
+        <div class="flex justify-end gap-2">
+          <button type="button" phx-click="task_assign_close" class="btn btn-sm btn-default">
+            {gettext("Cancel")}
+          </button>
+          <button type="button" phx-click="task_assign_submit" class="btn btn-sm btn-primary">
+            {gettext("Assign")}
+          </button>
         </div>
       </div>
     </div>
@@ -5983,6 +6196,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
             <%!-- ── Settings ────────────────────────────────────────────── --%>
             <div class={["space-y-4", @inspector_tab != :settings && "hidden"]}>
+              <.inspector_section title={gettext("Assignment")}>
+                <.task_list
+                  tasks={@tasks}
+                  open?={@task_assign_open?}
+                  draft={@task_draft}
+                  assignable_users={@assignable_users}
+                />
+              </.inspector_section>
+
               <.inspector_section title={gettext("Organization & relationships")}>
                 <.input
                   field={@form[:category_id]}

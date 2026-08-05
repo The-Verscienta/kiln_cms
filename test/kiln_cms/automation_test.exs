@@ -68,6 +68,22 @@ defmodule KilnCMS.AutomationTest do
       assert :ok = Automation.dispatch("form.submitted", payload())
       assert :ok = Automation.dispatch("garbage", payload())
     end
+
+    # #501: task.assigned/task.overdue are task-domain events, not
+    # content-type-domain — but `handle_event/2`/`dispatch/2` only ever split
+    # the event string on its first "." and match the verb, so a literal
+    # `content_type: "task"` rule works with no executor changes.
+    test "a rule scoped to content_type \"task\" matches task.assigned" do
+      r = rule(%{trigger_event: :assigned, action: :broadcast, content_type: "task"})
+      Automation.dispatch("task.assigned", payload())
+      assert_enqueued(worker: RuleWorker, args: %{"rule_id" => r.id, "event" => "task.assigned"})
+    end
+
+    test "task.overdue matches an :overdue-triggered rule" do
+      r = rule(%{trigger_event: :overdue, action: :broadcast, content_type: "task"})
+      Automation.dispatch("task.overdue", payload())
+      assert_enqueued(worker: RuleWorker, args: %{"rule_id" => r.id, "event" => "task.overdue"})
+    end
   end
 
   describe "RuleWorker reactions" do

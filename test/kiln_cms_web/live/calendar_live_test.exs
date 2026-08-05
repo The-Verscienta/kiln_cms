@@ -132,4 +132,31 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     assert html =~ entry.title
     assert html =~ ~p"/editor/content/#{definition.name}/#{entry.id}"
   end
+
+  test "a task's due date shows a chip linking to its content (#501)", %{conn: conn} do
+    admin = authed_admin()
+    this_month_middle = Date.beginning_of_month(Date.utc_today()) |> Date.add(14)
+
+    page =
+      CMS.create_page!(
+        %{title: "Task-due page #{System.unique_integer([:positive])}", slug: slug()},
+        actor: admin
+      )
+
+    CMS.assign_task!(
+      %{
+        content_type: "page",
+        content_id: page.id,
+        assignee_id: admin.id,
+        due_on: this_month_middle
+      },
+      actor: admin
+    )
+
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/calendar")
+
+    assert html =~ page.title
+    assert html =~ ~p"/editor/content/page/#{page.id}"
+    assert html =~ "Task due"
+  end
 end
