@@ -46,6 +46,7 @@ defmodule KilnCMSWeb.OverviewLive do
      socket
      |> assign(:actor, socket.assigns.current_user)
      |> assign(:admin?, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
+     |> assign_backup_warning()
      |> assign(:page_title, gettext("Overview"))
      |> load_metrics()}
   end
@@ -195,6 +196,32 @@ defmodule KilnCMSWeb.OverviewLive do
           </p>
         </div>
 
+        <%!-- Stale-backup warning (#484). A strip above the grid rather than a
+              ninth tile: the bagua is a fixed 3×3 with the centre taken, so
+              there is no ninth position — and this is an alert, which wants to
+              be read before the eight steady-state numbers rather than
+              alongside them.
+
+              Admin-only, matching `/editor/backups`: an editor can't act on
+              it and shouldn't be told the deployment is unprotected. Absent
+              entirely when backups are healthy — a permanent green banner is
+              one nobody reads, and its absence is what makes the red one
+              land. --%>
+        <.link
+          :if={@admin? and @backup_alarming?}
+          id="overview-backup-warning"
+          navigate={~p"/editor/backups"}
+          class="flex items-start gap-3 rounded-lg border border-error/30 bg-error/5 p-4 hover:bg-error/10"
+        >
+          <.icon name="hero-exclamation-triangle" class="mt-0.5 size-5 shrink-0 text-error" />
+          <span class="min-w-0">
+            <span class="block text-sm font-medium">{@backup_headline}</span>
+            <span class="block text-xs text-base-content/70">
+              {gettext("Open Backups to check the schedule or take one now.")}
+            </span>
+          </span>
+        </.link>
+
         <div class="grid gap-4 lg:grid-cols-3">
           <div
             id="bagua-center"
@@ -307,6 +334,58 @@ defmodule KilnCMSWeb.OverviewLive do
   # come from the metrics. `value: nil` renders as “—” (admin-only numbers
   # seen by an editor, or coverage on a single-locale site).
   @tile_order [:xun, :li, :kun, :zhen, :dui, :gen, :kan, :qian]
+
+  # Reads the backup manifest — one small file, no query. Computed at mount
+  # rather than per render, and only the two values the strip needs, so the
+  # whole `Backups.status/0` map isn't held in the socket for a banner that is
+  # usually absent.
+  defp assign_backup_warning(socket) do
+    status = KilnCMS.Backups.status()
+
+    socket
+    # NOT `status.stale?` alone. A backup that failed five minutes ago is not
+    # stale — it is recent and worthless — and gating on age let the overview
+    # stay clean while `/editor/backups` said "The last backup failed". Same
+    # trap as `BackupLive.alarming?/1`; it needed fixing in both places.
+    |> assign(:backup_alarming?, status.stale? or failed?(status))
+    |> assign(:backup_headline, backup_headline(status))
+  end
+
+  defp failed?(%{manifest: %{ok: false}}), do: true
+  defp failed?(_status), do: false
+
+  defp backup_headline(%{manifest: nil}),
+    do: gettext("No backup has ever been recorded for this deployment.")
+
+  defp backup_headline(%{manifest: %{ok: false}}),
+    do: gettext("The last backup failed.")
+
+  defp backup_headline(%{manifest: %{finished_at: %DateTime{} = at}}) do
+    # Hours below a day: `DateTime.diff(:day)` truncates, so a deployment with
+    # `BACKUP_STALE_AFTER_HOURS` under 24 rendered "The last backup was 0 days
+    # ago" — a sentence that reads as a bug rather than a warning.
+    hours = DateTime.diff(DateTime.utc_now(), at, :hour)
+
+    if hours < 24 do
+      ngettext(
+        "The last backup was %{count} hour ago.",
+        "The last backup was %{count} hours ago.",
+        hours,
+        count: hours
+      )
+    else
+      days = div(hours, 24)
+
+      ngettext(
+        "The last backup was %{count} day ago.",
+        "The last backup was %{count} days ago.",
+        days,
+        count: days
+      )
+    end
+  end
+
+  defp backup_headline(_status), do: gettext("The backup status can't be determined.")
 
   defp tiles(assigns), do: Enum.map(@tile_order, &tile_spec(&1, assigns))
 

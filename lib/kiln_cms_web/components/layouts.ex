@@ -583,6 +583,12 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/automation",
             icon: "hero-cpu-chip"
           },
+          %{
+            key: :backups,
+            label: gettext("Backups"),
+            path: ~p"/editor/backups",
+            icon: "hero-archive-box"
+          },
           %{key: :mail, label: gettext("Mail"), path: ~p"/editor/mail", icon: "hero-envelope"},
           %{
             key: :newsletter,

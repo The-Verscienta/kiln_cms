@@ -10,10 +10,30 @@
 # that could silently disagree.
 Code.require_file(Path.expand("../config/strict_test_flag.exs", __DIR__))
 
+# In-app backups (#484) really shell out to pg_dump/pg_restore — a mocked
+# backup proves nothing, since the whole premise is that the file it writes is
+# one `scripts/restore.sh` can restore. Where the client tools are missing (or
+# older than the server, which makes pg_dump refuse outright) those tests are
+# EXCLUDED rather than wrapped in a conditional: an excluded test is reported
+# in the run summary, whereas `if tools_available? do … end` turns a machine
+# with no pg_dump into a green run that asserted nothing.
+pg_tools_exclusion =
+  if KilnCMS.Backups.availability() == :ok do
+    []
+  else
+    IO.puts(
+      :stderr,
+      "note: excluding :pg_tools tests — pg_dump/pg_restore unavailable " <>
+        "(#{inspect(KilnCMS.Backups.availability())})"
+    )
+
+    [:pg_tools]
+  end
+
 if KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST")) do
   ExUnit.start(include: [strict_tenancy: true], exclude: [:test])
 else
-  ExUnit.start(exclude: [strict_tenancy: true])
+  ExUnit.start(exclude: [strict_tenancy: true] ++ pg_tools_exclusion)
 end
 
 Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)

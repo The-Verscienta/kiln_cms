@@ -142,9 +142,40 @@ FROM ${RUNNER_IMAGE}
 
 # curl is here for the HEALTHCHECK below — it probes the HTTP endpoint, which
 # is the only thing that proves this container is actually serving (#647).
+# postgresql-client ships `pg_dump`/`pg_restore` for in-app backups (#484).
+# Without it the "Backup now" button has nothing to call and
+# `KilnCMS.Backups.availability/0` reports `:no_pg_dump` — the console says so
+# rather than failing at the point of use.
+#
+# The MAJOR VERSION MUST MATCH THE SERVER. `pg_dump` refuses to run against a
+# newer server ("aborting because of server version mismatch"), so this pin
+# tracks the Postgres this deployment targets — bump both together. Debian's
+# own `postgresql-client` metapackage would float to whatever the base image's
+# suite carries, which is precisely how this breaks silently on a base-image
+# bump; `postgresql-client-17` is explicit. See docs/backups.md.
+# Base packages FIRST, including curl/ca-certificates/gnupg — the pgdg step
+# below needs all three, and a `-slim` Debian ships none of them. (An earlier
+# revision fetched the signing key with curl three lines before installing
+# curl; CI doesn't build this image, so nothing would have caught it.)
 RUN apt-get update -y \
-  && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates libvips42 curl \
+  && apt-get install -y --no-install-recommends \
+     libstdc++6 openssl libncurses5 locales ca-certificates libvips42 curl gnupg \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# `set -o pipefail` so a truncated download can't produce an empty keyring
+# that rides through to apt-get update. HTTPS for the repo as well as the key:
+# apt verifies the signature either way, but cleartext leaks which packages
+# this host installs and permits a downgrade to an older signed Release.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+     | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+     > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update -y \
+  && apt-get install -y --no-install-recommends postgresql-client-17 \
+  && apt-get purge -y gnupg && apt-get autoremove -y \
+  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+SHELL ["/bin/sh", "-c"]
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
