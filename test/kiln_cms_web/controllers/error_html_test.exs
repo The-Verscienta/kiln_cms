@@ -84,6 +84,43 @@ defmodule KilnCMSWeb.ErrorHTMLTest do
       assert html =~ "Powered by Acme Tenant."
     end
 
+    # The root layout — <!DOCTYPE>, the app.css link, the brand tokens, the
+    # <title> — wraps a /:slug 404 (an ordinary controller render through the
+    # :browser pipeline) but used NOT to wrap a NoRouteError 404 or a 500, which
+    # the endpoint's render_errors renderer produced with `layout: false` and no
+    # root layout. The two 404s on one host looked nothing alike (#681).
+    test "a NoRouteError 404 renders the full page chrome, not raw unstyled markup",
+         %{conn: conn} do
+      html =
+        conn
+        |> post("/definitely-no-route-#{System.unique_integer([:positive])}")
+        |> html_response(404)
+
+      assert html =~ "<!DOCTYPE html"
+      assert html =~ "/assets/css/app.css"
+      assert html =~ "<title"
+      # The inner chrome is still there too — root wraps Layouts.public, not
+      # replaces it.
+      assert html =~ "Powered by"
+    end
+
+    test "the two 404 surfaces on one host render with the same chrome", %{conn: conn} do
+      slug_404 =
+        conn
+        |> get("/no-such-page-#{System.unique_integer([:positive])}")
+        |> html_response(404)
+
+      route_404 =
+        conn
+        |> post("/no-route-#{System.unique_integer([:positive])}")
+        |> html_response(404)
+
+      for marker <- ["<!DOCTYPE html", "/assets/css/app.css"] do
+        assert slug_404 =~ marker, "the /:slug 404 is missing #{marker}"
+        assert route_404 =~ marker, "the NoRouteError 404 is missing #{marker}"
+      end
+    end
+
     test "a request with no resolved tenant still renders, on the operator defaults" do
       # Not every error page has a tenant behind it: an exception raised before
       # `SetTenant` runs, a template rendered directly. This guards the shape

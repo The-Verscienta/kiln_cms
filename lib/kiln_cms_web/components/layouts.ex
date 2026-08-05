@@ -14,6 +14,27 @@ defmodule KilnCMSWeb.Layouts do
   alias KilnCMS.Branding
 
   @doc """
+  The masked CSRF token for the `<meta>` tag in `root.html.heex`, or `nil` if
+  one can't be produced (#681).
+
+  The root layout now also wraps error pages (`render_errors: [root_layout:
+  …]`), which can render from a conn that never reached the normal pipeline — a
+  raise from an endpoint-level plug ahead of `Plug.Session` hands the error
+  renderer the endpoint's *entry* conn. `get_csrf_token/0` happens not to raise
+  there today (it mints a token from the process dictionary), but the error
+  handler is the one place a second failure is least acceptable, so token
+  resolution fails safe rather than trusting that. An error page carries no
+  form to protect, so `nil` is a fine answer; on every normal path a session is
+  present and this returns the real token, unchanged.
+  """
+  @spec csrf_token() :: String.t() | nil
+  def csrf_token do
+    get_csrf_token()
+  rescue
+    _ -> nil
+  end
+
+  @doc """
   Emits the request org's brand colour tokens as an **unlayered** `<style>`
   block, or nothing at all when the site is unbranded (#48).
 
