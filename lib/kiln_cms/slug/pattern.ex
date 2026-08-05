@@ -57,6 +57,24 @@ defmodule KilnCMS.Slug.Pattern do
   @spec uses?(String.t() | nil, String.t()) :: boolean()
   def uses?(pattern, token), do: Tokens.uses?(pattern, token)
 
+  @field_in_pattern ~r/\[field:([a-z0-9_]+)\]/
+
+  @doc """
+  The custom-field names referenced by `[field:<name>]` tokens in `pattern`,
+  de-duplicated (empty for a `nil` or token-free pattern). Lets a caller resolve
+  only the fields a pattern actually reads — e.g. deriving a `:computed` field on
+  demand for slug/alias expansion (#616).
+  """
+  @spec field_names(String.t() | nil) :: [String.t()]
+  def field_names(nil), do: []
+
+  def field_names(pattern) when is_binary(pattern) do
+    @field_in_pattern
+    |> Regex.scan(pattern, capture: :all_but_first)
+    |> List.flatten()
+    |> Enum.uniq()
+  end
+
   @doc "Whether `pattern` mentions any date token."
   @spec uses_dates?(String.t() | nil) :: boolean()
   def uses_dates?(pattern), do: Enum.any?(~w(yyyy mm dd), &uses?(pattern, &1))

@@ -217,6 +217,115 @@ defmodule KilnCMSWeb.PathAliasTest do
     end
   end
 
+  # A `[field:<name>]` token that points at a `:computed` field (#616). The
+  # value is derived by `ApplyCustomFields`, which runs AFTER alias derivation,
+  # so before the fix the token read the empty (create) or stale (update) value:
+  # the alias collapsed to `/` on create and lagged one save behind on update.
+  describe "computed custom-field tokens (#616)" do
+    defp url_key_type(actor) do
+      type =
+        CMS.create_type_definition!(
+          %{
+            name: "keyed#{uniq()}",
+            label: "Keyed",
+            alias_pattern: "/library/[field:url_key]"
+          },
+          actor: actor
+        )
+
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: type.id,
+          name: "url_key",
+          label: "URL key",
+          field_type: :computed,
+          compute: "{{ slugify(title) }}"
+        },
+        actor: actor
+      )
+
+      type
+    end
+
+    test "resolves to the derived value on create, with the key absent from the payload" do
+      actor = admin()
+      type = url_key_type(actor)
+
+      # No `custom_fields` key at all — a computed field takes none, which is
+      # exactly the create-via-API shape the token used to expand to "".
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(type.name, %{title: "Fine Bindings"}, actor: actor)
+
+      assert entry.path_alias == "/library/fine-bindings"
+    end
+
+    test "follows the title on update rather than lagging one save behind" do
+      actor = admin()
+      type = url_key_type(actor)
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(type.name, %{title: "First Title"}, actor: actor)
+
+      assert entry.path_alias == "/library/first-title"
+
+      # Clear the alias so it re-derives, and rename in the same write: the token
+      # must see the NEW title's computed value, not the stored one.
+      {:ok, updated} =
+        KilnCMS.CMS.ContentTypes.update(
+          type.name,
+          entry,
+          %{title: "Second Title", path_alias: ""},
+          actor: actor
+        )
+
+      assert updated.path_alias == "/library/second-title"
+    end
+
+    test "a computed field that turns blank on update reads absent, not the stale value" do
+      actor = admin()
+
+      type =
+        CMS.create_type_definition!(
+          %{name: "keyed#{uniq()}", label: "Keyed", alias_pattern: "/library/[field:key]"},
+          actor: actor
+        )
+
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: type.id,
+          name: "key",
+          label: "Key",
+          field_type: :computed,
+          compute: "{{ slugify(seo_title) }}"
+        },
+        actor: actor
+      )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          type.name,
+          %{title: "T #{uniq()}", seo_title: "Alpha Beta"},
+          actor: actor
+        )
+
+      assert entry.path_alias == "/library/alpha-beta"
+
+      # Clear the field the formula reads, and re-derive the alias — WITHOUT
+      # sending `custom_fields`, so the raw map the token would read is the
+      # STORED one, still carrying the stale computed `key` ("alpha-beta"). It
+      # must not leak into the token now that the derivation is blank.
+      {:ok, updated} =
+        KilnCMS.CMS.ContentTypes.update(
+          type.name,
+          entry,
+          %{seo_title: "", path_alias: ""},
+          actor: actor
+        )
+
+      assert updated.path_alias == "/library"
+    end
+  end
+
   test "validation rejects malformed, reserved, and colliding aliases" do
     actor = admin()
     page = CMS.create_page!(%{title: "Alias Valid #{uniq()}"}, actor: actor)

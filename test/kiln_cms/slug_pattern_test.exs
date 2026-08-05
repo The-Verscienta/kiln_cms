@@ -64,6 +64,18 @@ defmodule KilnCMS.Slug.PatternTest do
     end
   end
 
+  describe "field_names/1 (#616)" do
+    test "extracts the field names a pattern references, de-duplicated" do
+      assert Pattern.field_names("/library/[field:url_key]/[title]") == ["url_key"]
+      assert Pattern.field_names("[field:a]-[field:b]-[field:a]") == ["a", "b"]
+    end
+
+    test "is empty for a nil or token-free pattern" do
+      assert Pattern.field_names(nil) == []
+      assert Pattern.field_names("[yyyy]-[title]") == []
+    end
+  end
+
   describe "expand_path/2 (alias patterns, #485 follow-up)" do
     test "literal segments plus field tokens" do
       assert Pattern.expand_path("/acupuncture/needle/size/[field:size]", %{

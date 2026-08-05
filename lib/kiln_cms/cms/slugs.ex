@@ -237,7 +237,7 @@ defmodule KilnCMS.CMS.Slugs do
       seo_keywords: changeset_attribute(changeset, :seo_keywords),
       category_slug: changeset_category_slug(changeset, pattern),
       slug: Ash.Changeset.get_attribute(changeset, :slug),
-      custom_fields: changeset_attribute(changeset, :custom_fields),
+      custom_fields: changeset_custom_fields(changeset, pattern),
       # Stable date anchor: publish date when set, else the scheduled date,
       # else the record's creation date (nil on create → today, which then IS
       # the creation date). Never re-read from the wall clock afterwards.
@@ -303,6 +303,95 @@ defmodule KilnCMS.CMS.Slugs do
       category.slug
     else
       _ -> nil
+    end
+  end
+
+  # The custom-field values a `[field:<name>]` token resolves against.
+  #
+  # For an editable field the raw payload carries the value, so it is read
+  # straight off the changeset. A `:computed` field (#601) has none — the write
+  # pass derives it in `Changes.ApplyCustomFields`, which runs AFTER slug/alias
+  # derivation, so the token would otherwise read an empty value on create and a
+  # one-save-stale value on update (#616). Derive any computed field the pattern
+  # references here, fresh, through the same evaluator the write pass uses.
+  #
+  # Value parity with the write pass holds for a formula over the document (the
+  # common `{{ slugify(title) }}` case); a formula referencing a *sibling*
+  # editable field sees that field pre-coercion here (raw payload) versus
+  # post-coercion at write time, so a number posted as a string can slugify
+  # differently. That is the known tradeoff of resolving on demand rather than
+  # reordering the whole write pass.
+  #
+  # Bounded: the definitions read and evaluation happen only when the pattern
+  # actually carries a `[field:…]` token — a plain `[title]` slug pays nothing.
+  # (An editable-only `[field:…]` pattern still pays one definitions read to
+  # learn it has no computed fields; the value it reads is unchanged.)
+  defp changeset_custom_fields(changeset, pattern) do
+    raw = changeset_attribute(changeset, :custom_fields)
+
+    case KilnCMS.Slug.Pattern.field_names(pattern) do
+      [] -> raw
+      referenced -> merge_computed_fields(changeset, referenced, raw)
+    end
+  end
+
+  defp merge_computed_fields(changeset, referenced, raw) do
+    # String keys, matching what the write pass evaluates against and what the
+    # `[field:<name>]` token itself looks up — an atom-keyed payload from an
+    # Elixir/MCP caller would otherwise miss its own sibling fields.
+    base = stringify_keys(raw)
+
+    computed =
+      changeset
+      |> field_definitions()
+      |> Enum.filter(&(&1.field_type == :computed and &1.name in referenced))
+
+    case computed do
+      [] ->
+        base
+
+      defs ->
+        # Drop the computed keys before deriving, so a formula that now
+        # evaluates blank reads as ABSENT (the token expands to "") rather than
+        # as the stale stored value `raw` still carries on an update — the write
+        # pass builds its map from scratch and so never leaks a stale value.
+        cleared = Map.drop(base, Enum.map(defs, & &1.name))
+        context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleared)
+        derive_into(defs, context, cleared)
+    end
+  end
+
+  defp derive_into(defs, context, fields) do
+    Enum.reduce(defs, fields, fn definition, acc ->
+      case KilnCMS.CMS.Computed.evaluate(definition.compute || "", context) do
+        blank when blank in [nil, ""] -> acc
+        value -> Map.put(acc, definition.name, value)
+      end
+    end)
+  end
+
+  defp stringify_keys(map) when is_map(map),
+    do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
+
+  defp stringify_keys(_not_a_map), do: %{}
+
+  # The FieldDefinition rows for the changeset's content type — compiled types by
+  # their content-type marker, dynamic entries by their TypeDefinition id. Mirror
+  # of `ApplyCustomFields`'s own lookup; kept private since only the computed-slug
+  # path here needs it.
+  defp field_definitions(%{resource: resource} = changeset) do
+    tenant = changeset.to_tenant
+
+    if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
+      case changeset_attribute(changeset, :type_definition_id) do
+        nil -> []
+        id -> KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+      end
+    else
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(),
+        authorize?: false,
+        tenant: tenant
+      )
     end
   end
 
