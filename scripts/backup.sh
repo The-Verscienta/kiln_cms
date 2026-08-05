@@ -20,6 +20,11 @@
 #                        each new backup is copied off-site after it verifies
 #   BACKUP_PING_URL      optional URL curl'd on success (healthchecks.io-style
 #                        dead-man's switch; the check fires when pings STOP)
+#   BACKUP_TRIGGER       label recorded in the manifest (default: "cron")
+#
+# `all` writes $BACKUP_DIR/manifest.json — the file the in-app backup panel
+# reads (#484). Kept in the same format KilnCMS.Backups.Manifest writes, so
+# either path can produce it and the console reports on whichever ran last.
 #
 # Every dump is verified (pg_restore --list) before it counts as a backup.
 # Plain shell + pg_dump/tar so it behaves the same on a laptop and on the VPS.
@@ -36,6 +41,7 @@ require() {
 }
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/kiln}"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 
@@ -51,6 +57,79 @@ offsite() {
 ping_ok() {
   if [ -n "${BACKUP_PING_URL:-}" ]; then
     curl -fsS -m 10 --retry 3 -o /dev/null "$BACKUP_PING_URL" || true
+  fi
+}
+
+# --- manifest (#484) --------------------------------------------------------
+#
+# The console reads this to report the last backup — including this one, which
+# it never saw run. Kept in sync with KilnCMS.Backups.Manifest: same file, same
+# keys, same relative paths. Written atomically (.partial then mv) for the same
+# reason the dumps are: a reader catching a half-written manifest would report
+# a backup that did not happen.
+MANIFEST_ARTIFACTS=""
+
+record_artifact() {
+  # $1 = kind ("db"/"media"), $2 = absolute path to the verified artifact
+  local bytes
+  bytes="$(wc -c < "$2" | tr -d ' ')"
+  local entry
+  entry="$(printf '{"kind":"%s","path":"%s/%s","bytes":%s,"verified":true}' \
+    "$1" "$1" "$(basename "$2")" "$bytes")"
+
+  if [ -n "$MANIFEST_ARTIFACTS" ]; then
+    MANIFEST_ARTIFACTS="${MANIFEST_ARTIFACTS},${entry}"
+  else
+    MANIFEST_ARTIFACTS="$entry"
+  fi
+}
+
+write_manifest() {
+  # $1 = "true"/"false" (did it succeed), $2 = error string (may be empty)
+  local out="$BACKUP_DIR/manifest.json"
+  local err="null"
+  [ -n "${2:-}" ] && err="\"$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')\""
+  local offsite="null"
+  [ -n "${BACKUP_RCLONE_REMOTE:-}" ] && offsite="\"${BACKUP_RCLONE_REMOTE}\""
+
+  mkdir -p "$BACKUP_DIR"
+  cat > "${out}.partial" <<JSON
+{
+  "version": 1,
+  "started_at": "${STARTED_AT}",
+  "finished_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "trigger": "${BACKUP_TRIGGER:-cron}",
+  "ok": $1,
+  "artifacts": [${MANIFEST_ARTIFACTS}],
+  "offsite": ${offsite},
+  "keep_days": ${BACKUP_KEEP_DAYS},
+  "error": ${err}
+}
+JSON
+  mv "${out}.partial" "$out"
+}
+
+# ONE exit trap for the whole script, installed once. It has to be one:
+# `cmd_db` and `cmd_media` used to install their own `trap … EXIT` to clean up
+# a `.partial`, which REPLACED any trap the caller had set and then cleared it
+# outright with `trap - EXIT`. A failure-manifest trap set by `cmd_all` would
+# therefore never have run — the exact silent-failure shape this file exists
+# to prevent.
+#
+# Two jobs, in order: never leave a `.partial` behind (an unverified artifact
+# must not survive to look like a backup), and — for `all` only — record the
+# failure, so the console stops showing the last SUCCESSFUL backup as though
+# it answered the question.
+#
+# Only `all` writes a manifest, because only `all` is a backup: a hand-run
+# `backup.sh db` would otherwise record "the last backup" as database-only.
+on_exit() {
+  local status=$?
+
+  find "$BACKUP_DIR" -type f -name '*.partial' -delete 2>/dev/null || true
+
+  if [ "$status" -ne 0 ] && [ "${WRITE_MANIFEST:-0}" = "1" ]; then
+    write_manifest false "backup.sh exited ${status} — see the backup log"
   fi
 }
 
@@ -70,7 +149,6 @@ cmd_db() {
   # depend on the production role existing on the target.
   # Dump to a .partial name and rename only after verification, so an aborted
   # or unverified dump can never be picked up as a backup.
-  trap 'rm -f "${out}.partial"' EXIT
   pg_dump --format=custom --no-owner --no-privileges \
     --file="${out}.partial" "$DATABASE_URL"
 
@@ -78,9 +156,9 @@ cmd_db() {
   pg_restore --list "${out}.partial" >/dev/null ||
     die "dump failed verification and was removed — this backup did NOT succeed"
   mv "${out}.partial" "$out"
-  trap - EXIT
 
   echo "    ok: $(du -h "$out" | cut -f1) $(basename "$out")"
+  record_artifact db "$out"
   offsite "$out"
 }
 
@@ -93,16 +171,15 @@ cmd_media() {
   echo "==> Archiving media uploads → ${out}"
   # -C so the archive holds relative paths (restores anywhere). Same
   # .partial-then-rename discipline as the dump.
-  trap 'rm -f "${out}.partial"' EXIT
   tar -czf "${out}.partial" -C "$MEDIA_DIR" .
 
   echo "==> Verifying archive (tar -tzf)"
   tar -tzf "${out}.partial" >/dev/null ||
     die "media archive failed verification and was removed"
   mv "${out}.partial" "$out"
-  trap - EXIT
 
   echo "    ok: $(du -h "$out" | cut -f1) $(basename "$out")"
+  record_artifact media "$out"
   offsite "$out"
 }
 
@@ -114,6 +191,7 @@ cmd_all() {
     echo "==> MEDIA_DIR not set — skipping media archive (S3-adapter deployments back up the bucket instead)"
   fi
   cmd_prune
+  write_manifest true ""
   ping_ok
 }
 
@@ -141,9 +219,9 @@ cmd_prune() {
 }
 
 case "${1:-}" in
-  db) cmd_db ;;
-  media) cmd_media ;;
-  all) cmd_all ;;
+  db) trap on_exit EXIT; cmd_db ;;
+  media) trap on_exit EXIT; cmd_media ;;
+  all) WRITE_MANIFEST=1; trap on_exit EXIT; cmd_all ;;
   verify) cmd_verify ;;
   prune) cmd_prune ;;
   *) die "usage: $0 {db|media|all|verify|prune}" ;;

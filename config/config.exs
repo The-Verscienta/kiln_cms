@@ -44,6 +44,12 @@ config :kiln_cms, Oban,
     # KilnCMS.Links.Throttle, and a wide queue would just produce more jobs
     # snoozing on the same buckets.
     link_check: 3,
+    # In-app backups (#484). Concurrency ONE: two simultaneous `pg_dump`s of
+    # the same database is never what anyone wanted, and the panel's whole
+    # premise is that there is a most-recent backup. Its own queue so a dump
+    # that runs for minutes can't leave a publish or a password-reset email
+    # queued behind it.
+    backups: 1,
     default: 10
   ],
   repo: KilnCMS.Repo,
@@ -117,6 +123,19 @@ config :kiln_cms,
   # Default "from" address for transactional email (auth confirmation/reset).
   # Override per environment in runtime.exs for production.
   email_from: {"KilnCMS", "noreply@kilncms.dev"}
+
+# In-app backups (#484). Defaults mirror `scripts/backup.sh`'s, so the cron
+# path and the app path land in the same directory with the same retention
+# without an operator stating either twice. `media_dir` stays nil on an S3
+# deployment: the bucket is backed up provider-side, and tarring the wrong
+# directory produces something that looks like a media backup and restores
+# nothing. Overridden from the environment in runtime.exs.
+config :kiln_cms, KilnCMS.Backups,
+  enabled: true,
+  dir: "/var/backups/kiln",
+  media_dir: nil,
+  keep_days: 14,
+  stale_after_hours: 36
 
 # Media blob storage. Swap the adapter for S3/MinIO in production (configure
 # the bucket/endpoint/credentials in runtime.exs).

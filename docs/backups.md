@@ -80,6 +80,62 @@ Rules that make this a strategy rather than a script:
   Coolify's built-in scheduled backups to S3 — belt and braces; the host cron
   works regardless of how PG is run.
 
+## In-app backups (#484)
+
+The console has a **Backups** page (`/editor/backups`, admin only) showing when
+the last backup ran, how big it was, which files it produced and whether each
+verified — plus a **Back up now** button. The bagua overview grows a red strip
+when the newest backup is older than `BACKUP_STALE_AFTER_HOURS` (default 36),
+or when there has never been one.
+
+### It reports on cron's backups too
+
+The panel reads `$BACKUP_DIR/manifest.json`, and **`backup.sh all` writes it**.
+That is the whole design: cron remains the canonical path, and a panel that
+only knew about app-triggered runs would show "never" on precisely the
+deployments that are backing up correctly.
+
+A failed run overwrites the manifest with `"ok": false` and the error, rather
+than leaving the last successful one on screen — "is my data safe right now"
+is the question the page is being asked, and the previous backup does not
+answer it.
+
+### The app path and the shell path produce the same files
+
+`KilnCMS.Backups.Worker` runs the same `pg_dump --format=custom --no-owner
+--no-privileges`, writes to the same `db/kiln-db-<stamp>.dump` and
+`media/kiln-media-<stamp>.tar.gz` under the same `$BACKUP_DIR`, uses the same
+`.partial`-then-rename discipline, and verifies with the same `pg_restore
+--list` / `tar -tzf`. `backup.sh verify` and `restore.sh` work on an app-made
+backup, and this page reports on a cron-made one, because there is one format —
+not two.
+
+That constraint is why the worker shells out to `pg_dump` rather than
+implementing a dump in Elixir: a hand-rolled export would be a second format
+with a second restore procedure, and the restore path is where a backup system
+earns its keep.
+
+### It needs the client tools in the image
+
+The worker calls `pg_dump`/`pg_restore`, so the runtime image installs
+`postgresql-client-17`. **Its major version must match the server** — `pg_dump`
+refuses to run against a newer one — so bump the pin in the `Dockerfile`
+alongside your Postgres upgrade.
+
+Where they are absent, the page says so and the button is disabled rather than
+failing at the point of use. Cron backups on the host are unaffected either
+way.
+
+### What it deliberately does not do
+
+**Restore.** That is the runbook below, and it stays a documented operations
+procedure: an in-app restore means taking the application down and replacing
+the database underneath a running BEAM, with a credible answer for a failure
+halfway. Akeeba-class complexity, and Akeeba-class risk.
+
+**Secrets.** `SECRET_KEY_BASE` and friends are not in these files and never
+will be — see the table above.
+
 ## Restore runbook (full loss → serving)
 
 Scenario: the VPS is gone; you have off-site dumps + media archives and the
@@ -141,12 +197,19 @@ Record each drill here:
 
 ## Environment reference
 
+The `backup` rows are read by **both** paths — `scripts/backup.sh` and the app
+(`config/runtime.exs` → `KilnCMS.Backups`), by the same names, so a deployment
+configured for cron needs nothing extra for the console.
+
 | Variable | Script | Meaning |
 |---|---|---|
 | `DATABASE_URL` | backup | source DB (read-only) |
-| `BACKUP_DIR` | backup | local backup root (default `/var/backups/kiln`) |
-| `MEDIA_DIR` | backup | uploads root (Local adapter only; omit on S3) |
-| `BACKUP_KEEP_DAYS` | backup | local retention (default 14) |
+| `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
+| `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3) |
+| `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14) |
+| `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
+| `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36) |
+| `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup | off-site rclone remote (strongly recommended) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill` |

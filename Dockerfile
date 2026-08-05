@@ -142,8 +142,28 @@ FROM ${RUNNER_IMAGE}
 
 # curl is here for the HEALTHCHECK below — it probes the HTTP endpoint, which
 # is the only thing that proves this container is actually serving (#647).
+# postgresql-client ships `pg_dump`/`pg_restore` for in-app backups (#484).
+# Without it the "Backup now" button has nothing to call and
+# `KilnCMS.Backups.availability/0` reports `:no_pg_dump` — the console says so
+# rather than failing at the point of use.
+#
+# The MAJOR VERSION MUST MATCH THE SERVER. `pg_dump` refuses to run against a
+# newer server ("aborting because of server version mismatch"), so this pin
+# tracks the Postgres this deployment targets — bump both together. Debian's
+# own `postgresql-client` metapackage would float to whatever the base image's
+# suite carries, which is precisely how this breaks silently on a base-image
+# bump; `postgresql-client-17` is explicit. See docs/backups.md.
 RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends gnupg \
+  && echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+     > /etc/apt/sources.list.d/pgdg.list \
+  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+     | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+  && sed -i 's|deb http|deb [signed-by=/usr/share/keyrings/postgresql.gpg] http|' \
+     /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update -y \
   && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates libvips42 curl \
+     postgresql-client-17 \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen

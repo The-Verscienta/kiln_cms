@@ -359,6 +359,10 @@ defmodule KilnCMSWeb.Router do
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
       live "/editor/code-injection", CodeInjectionLive, :index
+      # In-app backups (#484) — status, "back up now", retention. Admin-only:
+      # the artifact list names the database dump, and an editor has no action
+      # to take on it. Restore stays a documented ops procedure.
+      live "/editor/backups", BackupLive, :index
       live "/editor/mail", MailSettingsLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus

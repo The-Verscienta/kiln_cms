@@ -737,6 +737,55 @@ if config_env() == :prod do
   #
   # Opt into the S3 adapter by setting S3_BUCKET. Works with AWS S3, Cloudflare
   # R2, Backblaze B2, Wasabi, MinIO, etc. For any non-AWS provider, also set
+  # In-app backups (#484). Every one of these mirrors an environment variable
+  # `scripts/backup.sh` already reads, and by the same name — the cron path and
+  # the app path are two front doors to one backup directory, and an operator
+  # who configured the script should not have to configure this separately.
+  #
+  # BACKUP_ENABLED=false turns the in-app path off (the panel then explains
+  # why) without touching the cron one.
+  # `Env.flag/2` for the boolean (the one shared parser — see the header of
+  # this file); plain `Integer.parse` for the two counts, in the same shape as
+  # `KILN_ANALYTICS_LOW_COUNT_THRESHOLD` above, because `Env` parses only
+  # booleans. An unparseable or non-positive value keeps the default and warns
+  # rather than being interpreted — `BACKUP_KEEP_DAYS=0` read literally would
+  # delete every backup it just took.
+  backup_int = fn var, default ->
+    case System.get_env(var) do
+      nil ->
+        default
+
+      raw ->
+        case Integer.parse(String.trim(raw)) do
+          {parsed, ""} when parsed > 0 ->
+            parsed
+
+          _ ->
+            IO.warn("#{var} must be a positive integer — keeping the default of #{default}")
+            default
+        end
+    end
+  end
+
+  backup_opts =
+    [
+      enabled: Env.flag("BACKUP_ENABLED", true),
+      dir: System.get_env("BACKUP_DIR") || "/var/backups/kiln",
+      keep_days: backup_int.("BACKUP_KEEP_DAYS", 14),
+      stale_after_hours: backup_int.("BACKUP_STALE_AFTER_HOURS", 36)
+    ]
+
+  # Unset on an S3 deployment, deliberately — the bucket is backed up
+  # provider-side, and tarring the wrong directory yields an archive that
+  # looks like a media backup and restores nothing.
+  backup_opts =
+    case System.get_env("MEDIA_DIR") do
+      nil -> backup_opts
+      media_dir -> Keyword.put(backup_opts, :media_dir, media_dir)
+    end
+
+  config :kiln_cms, KilnCMS.Backups, backup_opts
+
   # S3_ENDPOINT_HOST (see KilnCMS.Storage.S3 docs for per-provider hosts).
   if bucket = System.get_env("S3_BUCKET") do
     config :kiln_cms, KilnCMS.Storage, adapter: KilnCMS.Storage.S3
