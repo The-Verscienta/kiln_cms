@@ -103,6 +103,7 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
       changeset
       |> restore_fields(state, restorable)
       |> revalidate(context)
+      |> revalidate_alt_text(context)
       |> validate_references(restorable, org_id)
     else
       :error ->
@@ -152,6 +153,26 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
         {:error, error} -> Ash.Changeset.add_error(acc, error)
       end
     end)
+  end
+
+  # Restoring `blocks` onto a PUBLISHED record can ship an alt-less image just
+  # as an ordinary edit can (#722). This action force-changes blocks in a
+  # `before_action`, so the publish gate (a plain `validate`) never sees them —
+  # re-run it by hand after the fold, like the `@revalidate` set. Gated on the
+  # record being published, since a draft restore makes no public claim and
+  # `state` isn't restorable, so `changeset.data.state` is the effective state.
+  defp revalidate_alt_text(changeset, context) do
+    if changeset.data.state == :published do
+      # `only_new: true`, like the `:update` gate: a restore that reintroduces an
+      # image already live undescribed is not this write's doing, but one that
+      # brings back an undescribed image the current page had fixed is refused.
+      case Validations.MediaAltText.validate(changeset, [only_new: true], context) do
+        :ok -> changeset
+        {:error, error} -> Ash.Changeset.add_error(changeset, error)
+      end
+    else
+      changeset
+    end
   end
 
   # ── References ────────────────────────────────────────────────────────────

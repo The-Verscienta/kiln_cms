@@ -185,6 +185,131 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
     end
   end
 
+  # The publish gate was the whole story until #722: `:update` re-fires
+  # artifacts for an already-published record, so editing a live page to show
+  # an alt-less image shipped it with the gate never running. `:update` now
+  # re-runs the check — but only when the record is published AND the body is
+  # actually changing.
+  describe "the update gate (#722)" do
+    # A published page carrying an alt-less image, seeded past the publish gate
+    # the way a page published before the feature was switched on would be.
+    defp published_with_altless do
+      Ash.Seed.seed!(
+        KilnCMS.CMS.Page,
+        %{
+          title: "Live #{System.unique_integer([:positive])}",
+          slug: "alt-live-#{System.unique_integer([:positive])}",
+          state: :published,
+          blocks: [image_block(image())]
+        }
+      )
+    end
+
+    test "editing a published page to show an alt-less image is refused" do
+      require_alt!()
+      actor = admin()
+      # Publish clean, then swap in an image with no alt.
+      published = page(%{blocks: [image_block(image(), alt: "described")]}, actor)
+      {:ok, published} = CMS.publish_page(published, actor: actor)
+
+      img = image()
+
+      assert {:error, error} =
+               CMS.update_page(published, %{blocks: [image_block(img)]}, actor: actor)
+
+      assert Exception.message(error) =~ img.url
+      assert Exception.message(error) =~ "no alt text"
+    end
+
+    test "a metadata-only update of a published page is not gated" do
+      require_alt!()
+      actor = admin()
+      published = published_with_altless()
+
+      # The body isn't changing, so the gate must not fire even though the live
+      # page already carries an alt-less image.
+      assert {:ok, _} = CMS.update_page(published, %{title: "Retitled"}, actor: actor)
+    end
+
+    # The editor's Save resubmits the WHOLE form — `blocks` included — on every
+    # save, so the metadata-only exemption rests on `changing(:blocks)` seeing
+    # an unchanged (re-cast) blocks value as not-a-change. A page published with
+    # an alt-less image before the feature was switched on must stay editable
+    # for a title-only save, not become permanently un-saveable.
+    test "resubmitting identical blocks plus a title change is not gated" do
+      actor = admin()
+
+      # Publish the alt-less image while the gate is OFF — a pre-feature page —
+      # so its blocks are stored canonically through the normal write path.
+      page = page(%{blocks: [image_block(image())]}, actor)
+      {:ok, published} = CMS.publish_page(page, actor: actor)
+      published = CMS.get_page!(published.id, authorize?: false)
+
+      require_alt!()
+
+      # A title-only editor save resubmits the loaded (unchanged) blocks.
+      assert {:ok, _} =
+               CMS.update_page(
+                 published,
+                 %{title: "Retitled", blocks: published.blocks},
+                 actor: actor
+               )
+    end
+
+    test "editing a DRAFT with an alt-less image is allowed — no public claim yet" do
+      require_alt!()
+      actor = admin()
+      draft = page(%{blocks: [image_block(image(), alt: "described")]}, actor)
+
+      assert {:ok, _} =
+               CMS.update_page(draft, %{blocks: [image_block(image())]}, actor: actor)
+    end
+
+    test "autosave is exempt, so an in-progress draft is never blocked" do
+      require_alt!()
+      actor = admin()
+      draft = page(%{blocks: [image_block(image(), alt: "described")]}, actor)
+
+      assert {:ok, _} =
+               draft
+               |> Ash.Changeset.for_update(:autosave, %{blocks: [image_block(image())]},
+                 actor: actor
+               )
+               |> Ash.update()
+    end
+
+    # `:restore_version` force-changes blocks from a snapshot in a
+    # `before_action`, so the ordinary publish/update `validate` never sees
+    # them (#722) — the check is re-run by hand after the fold, gated on the
+    # record being published (a draft restore makes no public claim).
+    test "restoring a published page to an alt-less version is refused" do
+      require_alt!()
+      actor = admin()
+
+      # v1 (create): an alt-less image, legal while a draft.
+      bad = image()
+      draft = page(%{blocks: [image_block(bad)]}, actor)
+
+      # v2: fix it, then publish the good version.
+      fixed =
+        CMS.update_page!(draft, %{blocks: [image_block(image(), alt: "described")]}, actor: actor)
+
+      {:ok, published} = CMS.publish_page(fixed, actor: actor)
+
+      # Rolling back to v1 would put the alt-less image on the live page.
+      [create_version | _] =
+        CMS.list_page_versions!(actor: actor)
+        |> Enum.filter(&(&1.version_source_id == published.id))
+        |> Enum.sort_by(& &1.version_inserted_at, DateTime)
+
+      assert {:error, error} =
+               CMS.restore_page_version(published, %{version_id: create_version.id}, actor: actor)
+
+      assert Exception.message(error) =~ bad.url
+      assert Exception.message(error) =~ "no alt text"
+    end
+  end
+
   describe "usage tracking" do
     test "a published document's media shows up as a usage" do
       actor = admin()

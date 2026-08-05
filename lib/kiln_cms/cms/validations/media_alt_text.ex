@@ -53,35 +53,53 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
   alias KilnCMS.CMS.TypedBlocks
 
   @impl true
-  def validate(changeset, _opts, _context) do
+  def validate(changeset, opts, _context) do
     if required?() do
-      check(changeset)
+      check(changeset, opts[:only_new] == true)
     else
       :ok
     end
   end
 
-  defp check(changeset) do
-    case offenders(changeset) do
+  # `only_new?` is the difference between the publish gate and the edit gate
+  # (#722). At publish, every undescribed image the page is about to show is an
+  # offender. On an in-place edit of an already-published page, only the ones
+  # this write NEWLY leaves undescribed are — so a page that already shipped an
+  # alt-less image (published before the gate was switched on) stays editable,
+  # an unchanged-blocks resubmit (which the editor does on every save) is a
+  # no-op, and only adding or swapping in an undescribed image is refused.
+  # Diffing offenders rather than the raw blocks also sidesteps block-union
+  # `equal?` instability across a load-and-resubmit round-trip.
+  defp check(changeset, only_new?) do
+    new = offenders_in(Ash.Changeset.get_attribute(changeset, :blocks), changeset.data.org_id)
+
+    existing =
+      if only_new?, do: offenders_in(changeset.data.blocks, changeset.data.org_id), else: []
+
+    case new -- existing do
       [] ->
         :ok
 
       labels ->
-        {:error,
-         field: :state,
-         message:
-           "cannot publish: #{Enum.join(labels, ", ")} " <>
-             "#{if length(labels) == 1, do: "has", else: "have"} no alt text. " <>
-             "Add a description, or mark the image decorative."}
+        {
+          :error,
+          # "go live" rather than "publish": this now also guards edits to and
+          # restores of an already-published page (#722), not just the publish
+          # itself.
+          field: :state,
+          message:
+            "cannot go live: #{Enum.join(labels, ", ")} " <>
+              "#{if length(labels) == 1, do: "has", else: "have"} no alt text. " <>
+              "Add a description, or mark the image decorative."
+        }
     end
   end
 
-  defp offenders(changeset) do
-    # The blocks as they will be after this change — a publish that also edits
-    # the body must be judged on what it is about to show.
+  # The undescribed, non-decorative images a `blocks` value would render, as
+  # sorted labels — the offender identity the edit gate diffs on.
+  defp offenders_in(blocks_value, org_id) do
     blocks =
-      changeset
-      |> Ash.Changeset.get_attribute(:blocks)
+      blocks_value
       |> TypedBlocks.to_typed()
       |> flatten()
 
@@ -90,7 +108,7 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
         []
 
       candidates ->
-        decorative = decorative_ids(candidates, changeset.data.org_id)
+        decorative = decorative_ids(candidates, org_id)
 
         candidates
         |> Enum.reject(&(media_id(&1) in decorative))
