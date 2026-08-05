@@ -440,7 +440,11 @@ defmodule KilnCMS.Governance.Chain do
       the anchor's signature checks out against the key it names (the active
       signing key, or a registered retired one).
     * `:unsigned` — prefix intact, but the anchor carries no signature (no
-      signing key was configured when it was minted).
+      signing key was configured when it was minted, or the key failed to
+      resolve at mint time). When any anchor below the head IS attested, this
+      verdict is only reachable after the fold has also reproduced that
+      anchor — an unattested head never softens a verdict the attested
+      history contradicts (#708).
     * `:unverifiable` — prefix intact and the anchor IS signed, but no key
       matching the anchor's `key_id` is available: it was rotated out and
       never registered in `retired_keys`, or no key is configured at all.
@@ -451,8 +455,10 @@ defmodule KilnCMS.Governance.Chain do
       anchoring was enabled) **and** no checkpoint ever saw it anchored.
     * `{:tampered, reason}` — the anchored history no longer reproduces the
       hash (altered/deleted/reordered versions), the signature fails against a
-      key we DO hold, or the chain is shorter than the last checkpoint
-      witnessed. Not holding the key is `:unverifiable`, above.
+      key we DO hold, the chain is shorter than the last checkpoint witnessed,
+      or an unattested head sits over an attested anchor whose prefix no
+      longer reproduces (#708 — what an INSERTed forged head looks like).
+      Not holding the key is `:unverifiable`, above.
 
   Only the anchored prefix is covered — edits since the last publish anchor
   at the next publish. Callers that need to show that window use
@@ -461,19 +467,26 @@ defmodule KilnCMS.Governance.Chain do
   @spec verify(module(), String.t(), Ash.UUID.t(), Ash.UUID.t() | nil) :: verdict()
   def verify(resource, type, source_id, org_id) do
     all = anchors(type, source_id, org_id)
+    scope = %{resource: resource, source_id: source_id, org_id: org_id}
 
     with witnessed when is_atom(witnessed) <- witness_intact(all, type, source_id, org_id),
          [anchor | _] <- all,
-         attested when is_atom(attested) <- chain_intact(all) do
+         {:judged, attested, newest_attested} <- judged_chain(all),
+         :ok <-
+           attested_baseline(
+             anchor,
+             newest_attested,
+             &compute(resource, source_id, org_id, &1),
+             &covered_by_query(scope, &1),
+             type,
+             source_id
+           ) do
       verdict(
         anchor,
         compute(resource, source_id, org_id, anchor.version_count),
         type,
         source_id,
-        covered_by_query(
-          %{resource: resource, source_id: source_id, org_id: org_id},
-          anchor
-        )
+        covered_by_query(scope, anchor)
       )
       # ONE floor over both, not two chained calls. `floor_to/2` sets the verdict
       # rather than lowering it, so `|> floor_to(attested) |> floor_to(witnessed)`
@@ -616,12 +629,23 @@ defmodule KilnCMS.Governance.Chain do
   """
   @spec chain_intact([struct()]) :: :ok | :unsigned | :unverifiable | {:tampered, String.t()}
   def chain_intact(anchors) do
+    case judged_chain(anchors) do
+      {:judged, attested, _newest_attested} -> attested
+      {:tampered, _} = tampered -> tampered
+    end
+  end
+
+  # `chain_intact/1` plus the anchor that earned the judgement: the newest one
+  # whose signature verifies under a held key, or nil when none does. The
+  # verify functions need that anchor — not just the floor — to hold the
+  # verdict's baseline to attested evidence (#708).
+  defp judged_chain(anchors) do
     by_id = Map.new(anchors, &{&1.id, &1})
 
     with :ok <- links_intact(anchors, by_id),
-         attested when is_atom(attested) <- signatures_intact(anchors),
+         {:judged, _attested, _newest} = judged <- signatures_intact(anchors),
          :ok <- sequence_intact(anchors) do
-      attested
+      judged
     end
   end
 
@@ -654,17 +678,60 @@ defmodule KilnCMS.Governance.Chain do
   # That is also the honest answer for the benign cases it covers — a deployment
   # with no key, or one mid-rotation without the outgoing key registered. Both
   # already read that way from the head; now the whole chain has to earn it.
-  # Returns the weakest judgement across the chain, or halts on the first
-  # tampered one. Both answers come out of a single sweep: the RSA verification
+  # Returns the weakest judgement across the chain plus the newest anchor that
+  # VERIFIED (anchors arrive newest-first, so the first hit is the newest —
+  # what `attested_baseline/6` compares against, #708), or halts on the first
+  # tampered one. All of it comes out of a single sweep: the RSA verification
   # is the expensive part of `chain_intact/1`, and walking twice to compute the
   # floor separately would have doubled it.
   defp signatures_intact(anchors) do
-    Enum.reduce_while(anchors, :ok, fn anchor, weakest ->
+    Enum.reduce_while(anchors, {:judged, :ok, nil}, fn anchor, {:judged, weakest, attested} ->
       case anchor_signature(anchor) do
         {:tampered, _} = broken -> {:halt, broken}
-        judged -> {:cont, weaker(weakest, judged)}
+        :verified -> {:cont, {:judged, weaker(weakest, :verified), attested || anchor}}
+        judged -> {:cont, {:judged, weaker(weakest, judged), attested}}
       end
     end)
+  end
+
+  # The verdict's baseline is the head anchor, but `INSERT` on `history_anchors`
+  # is enough to supply the head (#708): mint a row whose `chain_hash` is the
+  # fold recomputed over doctored versions (needs no key), whose link columns
+  # are recomputed from the predecessor's public columns (needs no key either),
+  # and which either carries no signature or one under a key nobody holds.
+  # `verdict/5` then reads `:unsigned`/`:unverifiable` — which the fleet sweep
+  # passes — instead of the tamper verdict the signed history would earn.
+  #
+  # So when the head is not itself the newest attested anchor, the fold must
+  # ALSO reproduce that anchor. Evidence decides, not configuration: an honest
+  # chain whose head was minted unsigned (pre-key history, or a signing-key
+  # hiccup — `sign/1` stores the anchor unsigned, loudly, rather than failing
+  # the publish) still reproduces its attested prefix and keeps reading
+  # `:unsigned`; a forged head over doctored attested history cannot.
+  #
+  # When nothing in the chain verifies there is no evidence to hold the verdict
+  # to, and the floor (`:unsigned`/`:unverifiable`) already says exactly that.
+  defp attested_baseline(_head, nil, _compute_at, _covered_for, _type, _source_id), do: :ok
+
+  defp attested_baseline(%{id: id}, %{id: id}, _compute_at, _covered_for, _type, _source_id),
+    do: :ok
+
+  defp attested_baseline(_head, attested, compute_at, covered_for, type, source_id) do
+    case verdict(
+           attested,
+           compute_at.(attested.version_count),
+           type,
+           source_id,
+           covered_for.(attested)
+         ) do
+      {:tampered, reason} ->
+        {:tampered,
+         "the newest attested anchor (position #{attested.sequence}) is not reproduced: " <>
+           reason}
+
+      _judged ->
+        :ok
+    end
   end
 
   # `:ok`/`:verified` is the strongest, then `:unsigned`, then `:unverifiable` —
@@ -780,7 +847,16 @@ defmodule KilnCMS.Governance.Chain do
 
     with witnessed when is_atom(witnessed) <- witness_intact(all, type, source_id, org_id),
          [anchor | _] <- all,
-         attested when is_atom(attested) <- chain_intact(all) do
+         {:judged, attested, newest_attested} <- judged_chain(all),
+         :ok <-
+           attested_baseline(
+             anchor,
+             newest_attested,
+             &fold(Enum.take(versions, &1)),
+             &covered_loaded(versions, &1),
+             type,
+             source_id
+           ) do
       verdict(
         anchor,
         fold(Enum.take(versions, anchor.version_count)),
