@@ -241,16 +241,32 @@ defmodule KilnCMS.Governance.Chain do
   @doc """
   Fold the document's versions (ascending) into the chain — all of them, or
   only the first `count` (the prefix an earlier anchor covered). Returns
-  `%{chain_hash, version_count, last_version_id, last_version_at}`.
+  `%{chain_hash, attribution_hash, version_count, last_version_id, last_version_at}`.
   """
   @spec compute(module(), Ash.UUID.t(), Ash.UUID.t(), :all | non_neg_integer()) :: %{
           chain_hash: String.t(),
+          attribution_hash: String.t(),
           version_count: non_neg_integer(),
           last_version_id: Ash.UUID.t() | nil,
           last_version_at: DateTime.t() | nil
         }
   def compute(resource, source_id, org_id, count \\ :all) do
-    resource |> versions(source_id, count, org_id) |> fold()
+    versions = versions(resource, source_id, count, org_id)
+    with_attribution(fold(versions), versions)
+  end
+
+  # `chain_hash` is folded incrementally from a seed in `mint`, but
+  # `attribution_hash` is always over the whole covered set from genesis — so it
+  # is computed alongside `fold/1`'s from-genesis result and from `mint`'s full
+  # read, never from the incremental `fold_from/3`.
+  defp with_attribution(folded, versions),
+    do: Map.put(folded, :attribution_hash, attribution_hash(versions))
+
+  # The loaded-list twin of `compute/4` for `verify_loaded/4`: fold the first
+  # `count` versions and carry the attribution over that same prefix.
+  defp fold_loaded(versions, count) do
+    prefix = Enum.take(versions, count)
+    with_attribution(fold(prefix), prefix)
   end
 
   @doc "Fold an already-loaded ascending version list into the chain shape."
@@ -343,6 +359,14 @@ defmodule KilnCMS.Governance.Chain do
       boundary = boundary(computed, previous)
       prev_digest = anchor_digest(previous)
 
+      # Attribution (#713), extended over the fresh tail exactly as `chain_hash`
+      # is — O(new), which is what keeps `anchor_every_write` affordable. The
+      # seed is the predecessor's `attribution_hash` when it has one; the first
+      # v5 anchor (its predecessor is pre-#713, or there is none) has nothing to
+      # extend, so it folds the whole covered set from genesis this once, the
+      # same one-off `chain_hash` pays on a fresh chain.
+      attribution = mint_attribution(scope, previous, fresh, computed.version_count)
+
       # Publishes are the compliance-critical anchors and are rare, so they pay
       # one count to check the same invariant even when they did fold something.
       if allow_empty?, do: warn_on_skew(scope, type, previous, computed.version_count)
@@ -350,13 +374,25 @@ defmodule KilnCMS.Governance.Chain do
       sequence = next_sequence(previous)
 
       {signature, key_id} =
-        sign(anchor_payload(type, record.id, computed, previous, prev_digest, boundary, sequence))
+        sign(
+          anchor_payload_v5(
+            type,
+            record.id,
+            computed,
+            previous,
+            prev_digest,
+            boundary,
+            sequence,
+            attribution
+          )
+        )
 
       CMS.create_history_anchor!(
         %{
           resource_type: type,
           source_id: record.id,
           chain_hash: computed.chain_hash,
+          attribution_hash: attribution,
           version_count: computed.version_count,
           last_version_id: boundary.id,
           last_version_at: boundary.at,
@@ -378,6 +414,20 @@ defmodule KilnCMS.Governance.Chain do
 
   defp seed(nil), do: {@genesis, 0}
   defp seed(anchor), do: {anchor.chain_hash, anchor.version_count}
+
+  # Attribution for a new anchor (#713). A v5 predecessor's `attribution_hash`
+  # seeds the fold over the fresh tail — O(new), the same shape as `chain_hash`.
+  # A predecessor that is pre-#713 (nil) or absent has nothing to extend, so the
+  # first v5 anchor of a document folds its whole covered set from genesis once,
+  # reading it here; every anchor after it stays incremental.
+  defp mint_attribution(_scope, %{attribution_hash: seed}, fresh, _count) when is_binary(seed),
+    do: attribution_fold(seed, fresh)
+
+  defp mint_attribution(scope, _previous, _fresh, count) do
+    scope.resource
+    |> versions(scope.source_id, count, scope.org_id)
+    |> attribution_hash()
+  end
 
   # 1-based, assigned at write time (#666).
   #
@@ -852,14 +902,14 @@ defmodule KilnCMS.Governance.Chain do
            attested_baseline(
              anchor,
              newest_attested,
-             &fold(Enum.take(versions, &1)),
+             &fold_loaded(versions, &1),
              &covered_loaded(versions, &1),
              type,
              source_id
            ) do
       verdict(
         anchor,
-        fold(Enum.take(versions, anchor.version_count)),
+        fold_loaded(versions, anchor.version_count),
         type,
         source_id,
         covered_loaded(versions, anchor)
@@ -890,6 +940,23 @@ defmodule KilnCMS.Governance.Chain do
       computed.chain_hash != anchor.chain_hash ->
         {:tampered, mismatch_reason(anchor, covered)}
 
+      # Attribution (#713). A v5 anchor records a fold over the covered versions'
+      # author and action type; when it no longer reproduces, a `user_id` was
+      # rewritten while the chain hash — which never covered it — still checks
+      # out. Only for anchors that recorded one (v5+); a pre-#713 anchor carries
+      # nil and is not attested for attribution. On a keyed deployment the
+      # `attribution_hash` is inside the signed payload, so an attacker who also
+      # rewrites the column to match is caught below by `signature_verdict/3`.
+      #
+      # Attribution inherits the same truncation exposure as everything else in
+      # `verify/4`: on a document with pre-#713 (v4, nil-attribution) anchors
+      # underneath its v5 ones, deleting the v5 anchors back to a v4 head makes
+      # the head un-attested for attribution, and nothing INSIDE the anchor set
+      # distinguishes that from a younger chain — the Checkpoint witness (#666)
+      # is the mitigation, exactly as for a truncated `chain_hash`.
+      attribution_rewritten?(anchor, computed) ->
+        {:tampered, "recorded author attribution does not reproduce"}
+
       is_nil(anchor.signature) ->
         :unsigned
 
@@ -897,6 +964,11 @@ defmodule KilnCMS.Governance.Chain do
         signature_verdict(anchor, type, source_id)
     end
   end
+
+  defp attribution_rewritten?(%{attribution_hash: nil}, _computed), do: false
+
+  defp attribution_rewritten?(anchor, computed),
+    do: anchor.attribution_hash != Map.get(computed, :attribution_hash)
 
   # Tampering either way — a row spliced into the anchored range is exactly what
   # fabricated history looks like, so the verdict must not soften, and this says
@@ -999,6 +1071,18 @@ defmodule KilnCMS.Governance.Chain do
     prev = anchor.prev_anchor_id && %{id: anchor.prev_anchor_id}
     boundary = %{id: anchor.last_version_id, at: anchor.last_version_at}
 
+    v5 =
+      anchor_payload_v5(
+        type,
+        source_id,
+        computed,
+        prev,
+        anchor.prev_anchor_digest,
+        boundary,
+        anchor.sequence,
+        anchor.attribution_hash
+      )
+
     v4 =
       anchor_payload(
         type,
@@ -1027,13 +1111,22 @@ defmodule KilnCMS.Governance.Chain do
     v1 = legacy_anchor_payload(type, source_id, computed)
 
     cond do
+      # A recorded `attribution_hash` is the mark of a v5 anchor (#713) — `mint`
+      # is now the only writer and always signs v5 with one. The v5 payload
+      # differs byte for byte from every older shape, so this anchor can satisfy
+      # only the v5 candidate; there is nothing to fall back to, and offering an
+      # older shape as well would let its signature be re-used against a payload
+      # that omits the attribution it was minted to attest.
+      not is_nil(anchor.attribution_hash) ->
+        [v5]
+
       # v4 is offered on every branch, including the ones that predate the
-      # boundary column. `mint/3` signs v4 unconditionally, and it carries a nil
-      # boundary forward when its predecessor had one — so gating v4 on
-      # `last_version_at` made a freshly minted anchor unverifiable against its
-      # own signature, and since every anchor is now swept that would have been
-      # permanent, with no destroy action to repair it. An older shape can never
-      # match a v4 anchor anyway: the payloads differ byte for byte.
+      # boundary column. `mint/3` signed v4 unconditionally before #713, and it
+      # carries a nil boundary forward when its predecessor had one — so gating
+      # v4 on `last_version_at` made a freshly minted anchor unverifiable against
+      # its own signature, and since every anchor is now swept that would have
+      # been permanent, with no destroy action to repair it. An older shape can
+      # never match a v4 anchor anyway: the payloads differ byte for byte.
       #
       # Every anchor carries a `sequence`, but only those minted since #666 were
       # SIGNED with one — the rest were backfilled by the migration that added
@@ -1045,9 +1138,14 @@ defmodule KilnCMS.Governance.Chain do
       # position is not covered by its own signature. What holds it in place is
       # `chain_intact/1` — `version_count` rising with position, on columns that
       # ARE covered, so a short early anchor cannot be promoted to the head.
-      not is_nil(anchor.last_version_at) -> [v4, v3]
-      is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) -> [v4, v3, v2, v1]
-      true -> [v4, v3, v2]
+      not is_nil(anchor.last_version_at) ->
+        [v4, v3]
+
+      is_nil(anchor.prev_anchor_id) and is_nil(anchor.prev_anchor_digest) ->
+        [v4, v3, v2, v1]
+
+      true ->
+        [v4, v3, v2]
     end
   end
 
@@ -1274,6 +1372,33 @@ defmodule KilnCMS.Governance.Chain do
     })
   end
 
+  # A second running fold, over the fields `item_digest/1` leaves out but an
+  # editorial audit is most *for*: the author (`user_id`) and the action type
+  # (#713). Kept separate from `chain_hash` so it can be added without
+  # invalidating every anchor already minted — a v5 anchor records it, older
+  # anchors carry `nil` and are simply not attested for attribution.
+  #
+  # `verify/4` always recomputes from genesis, so `attribution_hash/1` folds the
+  # whole prefix. `mint` extends the predecessor's value over the fresh tail
+  # instead (`attribution_fold/2`), keeping the O(new) cost the incremental
+  # `chain_hash` has — and because folding the tail onto an honest prefix yields
+  # the same digest as folding from genesis, the two agree on intact history.
+  defp attribution_hash(versions), do: attribution_fold(@genesis, versions)
+
+  defp attribution_fold(seed, versions) do
+    Enum.reduce(versions, seed, fn version, prev ->
+      Canonical.digest(%{"prev" => prev, "item" => attribution_item(version)})
+    end)
+  end
+
+  defp attribution_item(version) do
+    Canonical.digest(%{
+      "version_id" => version.id,
+      "user_id" => Map.get(version, :user_id),
+      "action_type" => to_string(version.version_action_type)
+    })
+  end
+
   # `prev` and `prev_digest` are inside the SIGNED payload, which is what makes
   # the link unforgeable: an attacker who deletes an anchor cannot mint a
   # replacement whose successor still verifies, not without the signing key.
@@ -1287,6 +1412,27 @@ defmodule KilnCMS.Governance.Chain do
   # steers verification — it is the order `for_content` reads in and therefore
   # what picks the baseline — so it has to be attested (#666). The v3, v2 and v1
   # shapes below keep anchors minted by earlier releases verifying.
+  # `v: 5` (#713) is `v: 4` plus `attribution_hash`. What every version bump here
+  # shares: a field that must be attested joins the signed payload, and the older
+  # shapes stay so anchors minted by earlier releases keep verifying. Because the
+  # encoded payloads differ byte for byte, a v5 anchor's signature can only ever
+  # satisfy the v5 candidate — see `payload_candidates/3`.
+  defp anchor_payload_v5(type, source_id, computed, prev, prev_digest, boundary, sequence, attr) do
+    Canonical.encode(%{
+      "v" => 5,
+      "type" => type,
+      "source_id" => source_id,
+      "chain_hash" => computed.chain_hash,
+      "attribution_hash" => attr,
+      "version_count" => computed.version_count,
+      "prev_anchor_id" => prev && prev.id,
+      "prev_anchor_digest" => prev_digest,
+      "last_version_id" => boundary.id,
+      "last_version_at" => boundary.at && DateTime.to_iso8601(boundary.at),
+      "sequence" => sequence
+    })
+  end
+
   defp anchor_payload(type, source_id, computed, prev, prev_digest, boundary, sequence) do
     Canonical.encode(%{
       "v" => 4,

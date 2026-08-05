@@ -14,6 +14,8 @@ defmodule KilnCMS.Governance.ChainTest do
   alias KilnCMS.CMS.Page
   alias KilnCMS.Governance.Chain
   alias KilnCMS.Governance.Checkpoint
+  alias KilnCMS.Provenance.Canonical
+  alias KilnCMS.Provenance.Signer
 
   # A real signing key so anchors are signed (the provenance key source).
   setup do
@@ -1922,5 +1924,162 @@ defmodule KilnCMS.Governance.ChainTest do
       ),
       []
     )
+  end
+
+  defp rewrite_author!(page, user_id) do
+    KilnCMS.Repo.update_all(
+      from(v in "pages_versions",
+        where: v.version_source_id == type(^page.id, :binary_id),
+        update: [set: [user_id: type(^user_id, :binary_id)]]
+      ),
+      []
+    )
+  end
+
+  # `item_digest/1` folds a version's changes and ordering but NOT its author, so
+  # rewriting `user_id` left the chain reading `:verified` next to attribution
+  # that had been changed — most of what an editorial audit is for. A v5 anchor
+  # (minted now) records a second fold over the covered versions' author and
+  # action type; a pre-#713 anchor recorded none and is honestly not attested.
+  describe "author attribution (#713)" do
+    test "rewriting a version row's author produces a tamper verdict" do
+      actor = admin()
+      other = admin()
+      page = published_page(actor)
+
+      # Clean, anchored, signed: verified.
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      rewrite_author!(page, other.id)
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "author attribution"
+
+      # The trail's loaded-list twin must reach the same verdict, or the
+      # dashboard and `mix kiln.audit.verify` disagree about the document.
+      trail = KilnCMS.Governance.trail("page", page.id, page.org_id)
+      assert {:tampered, ^reason} = trail.chain
+    end
+
+    # The compatibility guarantee: an anchor minted before #713 recorded no
+    # attribution, so it must not be attribution-checked — it keeps verifying,
+    # and a rewrite of an author it never attested is (honestly) not caught.
+    # Unsigned so nulling the column doesn't also break a signature — which is
+    # exactly what would catch the tamper on a keyed deployment.
+    test "an anchor with no recorded attribution is not attribution-checked" do
+      unsign!()
+      actor = admin()
+      other = admin()
+      page = published_page(actor)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.source_id == type(^page.id, :binary_id)),
+        set: [attribution_hash: nil]
+      )
+
+      # Still verifies (as an unsigned anchor did before this change)…
+      assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
+
+      # …and the un-attested author can be rewritten without a tamper verdict.
+      rewrite_author!(page, other.id)
+      assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # Attribution is folded incrementally in `mint` (seeded from the
+    # predecessor's `attribution_hash`) but from genesis in `verify` — so a
+    # chain of several v5 anchors is where the two must agree, and where a
+    # rewrite must still be caught.
+    test "attribution holds, and catches a rewrite, across a multi-anchor v5 chain" do
+      actor = admin()
+      other = admin()
+
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      assert length(Chain.anchors("page", page.id, page.org_id)) == 3
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+
+      rewrite_author!(page, other.id)
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "author attribution"
+    end
+
+    # The action type is folded into attribution alongside the author, so
+    # rewriting it is caught the same way — the other half of the digest.
+    test "rewriting a version's action type is caught" do
+      actor = admin()
+      page = published_page(actor)
+
+      KilnCMS.Repo.update_all(
+        from(v in "pages_versions",
+          where:
+            v.version_source_id == type(^page.id, :binary_id) and
+              v.version_action_type == "create"
+        ),
+        set: [version_action_type: "update"]
+      )
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "author attribution"
+    end
+
+    # The compatibility guarantee for a SIGNED legacy anchor: re-sign this
+    # anchor's own values under the pre-#713 `v: 4` payload shape and drop the
+    # attribution column — exactly what an anchor minted by an earlier release
+    # is — and it must still read `:verified`. Exercises the `[v4, v3]` signature
+    # candidates that a nil-attribution anchor still falls through to.
+    test "a signed anchor minted before #713 still verifies" do
+      actor = admin()
+      page = published_page(actor)
+      [anchor] = Chain.anchors("page", page.id, page.org_id)
+
+      v4_payload =
+        Canonical.encode(%{
+          "v" => 4,
+          "type" => "page",
+          "source_id" => page.id,
+          "chain_hash" => anchor.chain_hash,
+          "version_count" => anchor.version_count,
+          "prev_anchor_id" => anchor.prev_anchor_id,
+          "prev_anchor_digest" => anchor.prev_anchor_digest,
+          "last_version_id" => anchor.last_version_id,
+          "last_version_at" =>
+            anchor.last_version_at && DateTime.to_iso8601(anchor.last_version_at),
+          "sequence" => anchor.sequence
+        })
+
+      {:ok, v4_signature} = Signer.sign(v4_payload)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.id == type(^anchor.id, :binary_id)),
+        set: [signature: v4_signature, attribution_hash: nil]
+      )
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    # Rewriting the author AND the anchor's recorded hash to match is caught by
+    # the signature on a keyed deployment: `attribution_hash` is inside the v5
+    # signed payload, so the doctored column no longer verifies under the key.
+    test "rewriting the attribution_hash column to match is caught by the signature" do
+      actor = admin()
+      other = admin()
+      page = published_page(actor)
+
+      rewrite_author!(page, other.id)
+      forged = Chain.compute(Page, page.id, page.org_id).attribution_hash
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors", where: a.source_id == type(^page.id, :binary_id)),
+        set: [attribution_hash: forged]
+      )
+
+      # The attribution now reproduces, but the signature was over the ORIGINAL
+      # attribution_hash — so the anchor no longer verifies under the held key.
+      assert {:tampered, _} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
   end
 end
