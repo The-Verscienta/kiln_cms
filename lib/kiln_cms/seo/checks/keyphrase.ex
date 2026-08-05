@@ -16,6 +16,10 @@ defmodule KilnCMS.Seo.Checks.Keyphrase do
 
   alias Kiln.Advisory.Body
   alias Kiln.Advisory.Context
+
+  # Search-only — keyphrase density is not an accessibility property.
+  @impl Kiln.Advisory
+  def lenses, do: [:seo]
   alias KilnCMS.Slug
 
   @density_min 0.5

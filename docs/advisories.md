@@ -90,7 +90,58 @@ panel supplies only its own code-to-sentence table:
 ```
 
 `KilnCMSWeb.SeoComponents` is exactly that: the SEO message table plus two thin
-wrappers. An accessibility panel would be the same shape.
+wrappers. `KilnCMSWeb.AccessibilityComponents` is its sibling — same shape,
+different sentences, and it delegates any code it doesn't have its own wording
+for rather than restating two dozen clauses that would then drift.
+
+## Two panels, one set of checks (#495)
+
+The editor shows an **SEO & scheduling** panel and an **Accessibility** panel.
+They are two views over the same registry, not two registries.
+
+That matters because the overlap is large and load-bearing. A skipped heading
+level breaks the outline a screen-reader user navigates by *and* the one a
+search engine reads; an image with no alt text is a failure in both. Splitting
+the panels without splitting the checks is the whole point — an author fixing a
+heading should not have to find it twice, and the two panels can never disagree
+about what a heading problem is.
+
+Each check says where it belongs:
+
+```elixir
+@impl Kiln.Advisory
+def lenses, do: [:seo]          # search-only
+def lenses, do: [:accessibility] # a11y-only
+# omit it entirely for both — the default
+```
+
+**The default is both.** A plugin author who never considered the distinction
+gets a panel rather than silence, which is the failure that would be hard to
+notice.
+
+### When one check's findings don't all belong together
+
+`KilnCMS.Seo.Checks.Readability` reports long sentences, long paragraphs and
+hard-to-read prose — all WCAG 3.1.5 territory — alongside thin content, which
+is purely a search concern. A per-check lens forces it to pick one panel and be
+wrong in the other, so a single finding can narrow past its check:
+
+```elixir
+:warning
+|> finding(:thin_content, :body, %{count: count, min: @thin_content})
+|> lensed([:seo])
+```
+
+Reach for that only when it is genuinely true. A check that needs it for every
+finding should change its `lenses/0` instead.
+
+### Run once, split after
+
+`Kiln.Advisory.Registry.by_lens/2` filters outcomes that have already run. Running the
+registry twice — once per panel — would pay for every shared check twice on
+every keystroke, which is most of them. `KilnCMS.Seo.Analyzer.run/3` returns
+the un-lensed outcomes for exactly this reason; `analyze/3` is the
+already-filtered SEO view for callers that only want one.
 
 ## Facts: what a pure check cannot compute
 
@@ -169,18 +220,63 @@ per-domain throttling and a per-site opt-in, so it is a scheduled sweep with its
 own report at `/editor/links` rather than a check in this panel — see
 [Broken link checking](link-checking.md).
 
+## Accessibility checks (#495)
+
+Authoring-time checks, deliberately **not** a frontend overlay widget — those
+are [rightly considered harmful](https://overlayfactsheet.com/) by the
+accessibility community, because they paper over a page rather than fix it.
+What ships here produces findings an author can act on, in the editor, before
+anything is published.
+
+| Check | Finding | Severity |
+|---|---|---|
+| `Checks.ImageAlt` | image with no alt text | error |
+| `Checks.Headings` | no headings / skipped level / empty heading | warning |
+| `Checks.LinkText` | empty link text | error |
+| `Checks.LinkText` | uninformative ("click here") / bare URL as label | warning |
+| `Checks.AllCaps` | a run of capitalised words | warning |
+| `Seo.Checks.Readability` | long sentences, long paragraphs, hard-to-read prose | warning / info |
+
+Only `link_text_empty` and `images_missing_alt` are errors. The rest are
+judgement calls with real exceptions — "read more" under a card heading that
+supplies the context is genuinely fine — and an advisory that cries wolf on a
+defensible choice is one authors learn to dismiss, at which point it isn't
+catching the real ones either.
+
+> **`LinkText` is currently blind to editor-authored content** (#823). It reads
+> Portable Text `markDefs`, and the editor's TipTap build has no Link
+> extension, so opening a page strips its anchors and the autosave persists
+> that. Links written through the API, MCP or an import are checked normally.
+
+Two design notes worth knowing before changing them:
+
+* **`LinkText` matches whole text, never substrings.** "learn more" is a bad
+  link; "learn more about invoicing" is a good one. A substring match flags
+  both.
+* **`AllCaps` needs four consecutive capitalised words** of two letters or
+  more. That threshold is the whole design: without it the check flags every
+  acronym on a technical page. Words with no cased letters ("2024") are
+  *transparent* — they neither start a run nor break one — because treating
+  them as lowercase splits "THIS IS A REALLY IMPORTANT NOTICE" in two and lets
+  it pass.
+
+The hard enforcement of alt text at publish time is separate and opt-in —
+`KilnCMS.CMS.Validations.MediaAltText` (#403). This layer never blocks a save.
+
 ## Where things live
 
 | | |
 |---|---|
-| `Kiln.Advisory` | the behaviour, and `finding/4` |
+| `Kiln.Advisory` | the behaviour, `finding/4`, `lensed/2` |
 | `Kiln.Advisory.Context` | fields + body facts, feature-neutral |
-| `Kiln.Advisory.Body` | the block-tree walk (headings, images, sentences, links) |
-| `Kiln.Advisory.Registry` | discovery, execution, containment, tally |
-| `Kiln.Advisory.Checks.*` | feature-neutral checks (headings, image alt, internal links) |
+| `Kiln.Advisory.Body` | the block-tree walk (headings, images, sentences, link text) |
+| `Kiln.Advisory.Registry` | discovery, execution, containment, tally, `by_lens/2` |
+| `Kiln.Advisory.Report` | findings + tally + grade, shared by both panels |
+| `Kiln.Advisory.Checks.*` | feature-neutral checks (headings, image alt, internal links, link text, all caps) |
 | `KilnCMS.Links.Internal` | resolves a same-origin path the way delivery would |
 | `KilnCMS.Seo.Checks.*` | search-specific checks (meta, keyphrase, readability) |
-| `KilnCMS.Seo.Analyzer` | aggregates outcomes into the SEO report and grade |
+| `KilnCMS.Seo.Analyzer` | builds the context and runs the registry |
+| `KilnCMSWeb.SeoComponents` / `KilnCMSWeb.AccessibilityComponents` | one message table each |
 
 The split between the last two namespaces is deliberate: heading order and
 missing alt text are as much accessibility checks as SEO ones, so they sit where

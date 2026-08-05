@@ -133,6 +133,137 @@ defmodule Kiln.Advisory.BodyTest do
     end
   end
 
+  describe "link text (#495)" do
+    test "pairs each link with the text a reader actually sees" do
+      blocks = [
+        rich([
+          %{
+            "_type" => "block",
+            "style" => "normal",
+            "children" => [
+              %{"text" => "Read ", "marks" => []},
+              %{"text" => "our refund policy", "marks" => ["k1"]},
+              %{"text" => " or ", "marks" => []},
+              %{"text" => "click here", "marks" => ["k2"]}
+            ],
+            "markDefs" => [
+              %{"_type" => "link", "_key" => "k1", "href" => "/refunds"},
+              %{"_type" => "link", "_key" => "k2", "href" => "/help"}
+            ]
+          }
+        ])
+      ]
+
+      assert [
+               %{text: "our refund policy", href: "/refunds", index: 0},
+               %{text: "click here", href: "/help", index: 0}
+             ] = Body.compute(blocks).links
+    end
+
+    test "joins spans that share one annotation, and ignores other marks" do
+      blocks = [
+        rich([
+          %{
+            "_type" => "block",
+            "style" => "normal",
+            "children" => [
+              %{"text" => "the ", "marks" => ["k1"]},
+              %{"text" => "annual", "marks" => ["k1", "strong"]},
+              %{"text" => " report", "marks" => ["k1"]},
+              %{"text" => " (2024)", "marks" => ["em"]}
+            ],
+            "markDefs" => [%{"_type" => "link", "_key" => "k1", "href" => "/report"}]
+          }
+        ])
+      ]
+
+      assert [%{text: "the annual report"}] = Body.compute(blocks).links
+    end
+
+    test "an annotation with no matching span yields empty text, not a dropped link" do
+      # An orphaned markDef is exactly the "empty link" defect worth
+      # reporting, so losing it here would hide it.
+      blocks = [
+        rich([
+          %{
+            "_type" => "block",
+            "style" => "normal",
+            "children" => [%{"text" => "nothing linked", "marks" => []}],
+            "markDefs" => [%{"_type" => "link", "_key" => "orphan", "href" => "/x"}]
+          }
+        ])
+      ]
+
+      assert [%{text: "", href: "/x"}] = Body.compute(blocks).links
+    end
+
+    test "attributes a link to its TOP-LEVEL block index" do
+      blocks = [
+        para("first") |> then(&rich([&1])),
+        rich([
+          %{
+            "_type" => "block",
+            "style" => "normal",
+            "children" => [%{"text" => "go", "marks" => ["k"]}],
+            "markDefs" => [%{"_type" => "link", "_key" => "k", "href" => "/x"}]
+          }
+        ])
+      ]
+
+      assert [%{index: 1}] = Body.compute(blocks).links
+    end
+
+    test "internal_link_paths is still derived from the same walk" do
+      blocks = [
+        rich([
+          %{
+            "_type" => "block",
+            "style" => "normal",
+            "children" => [%{"text" => "a", "marks" => ["k1"]}],
+            "markDefs" => [
+              %{"_type" => "link", "_key" => "k1", "href" => "/internal"},
+              %{"_type" => "link", "_key" => "k2", "href" => "https://example.com"}
+            ]
+          }
+        ])
+      ]
+
+      body = Body.compute(blocks)
+      assert body.internal_link_paths == ["/internal"]
+      assert length(body.links) == 2
+    end
+  end
+
+  describe "empty headings (#495)" do
+    test "a blank heading block is recorded rather than silently dropped" do
+      blocks = [
+        %{"_type" => "heading", "level" => 2, "text" => "Real heading"},
+        %{"_type" => "heading", "level" => 2, "text" => "   "}
+      ]
+
+      body = Body.compute(blocks)
+
+      assert body.empty_headings == [1]
+      # It stays OUT of `headings`, so the level-order check isn't judging a
+      # heading with no text.
+      assert [%{text: "Real heading"}] = body.headings
+    end
+
+    test "a blank Portable Text heading counts too" do
+      blocks = [
+        rich([%{"_type" => "block", "style" => "h2", "children" => [%{"text" => ""}]}])
+      ]
+
+      assert Body.compute(blocks).empty_headings == [0]
+    end
+
+    test "no empty headings on a well-formed document" do
+      blocks = [%{"_type" => "heading", "level" => 2, "text" => "Fine"}]
+
+      assert Body.compute(blocks).empty_headings == []
+    end
+  end
+
   describe "syllable counting" do
     test "every word scores at least one syllable" do
       # An earlier whole-text version lost the per-word floor, scoring these

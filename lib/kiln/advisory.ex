@@ -69,11 +69,41 @@ defmodule Kiln.Advisory do
   """
   @callback check(Context.t()) :: outcome() | [outcome()]
 
+  @typedoc """
+  A panel a check's findings belong in.
+
+  `:seo` is #476's search-and-readability panel; `:accessibility` is #495's.
+  """
+  @type lens :: :seo | :accessibility
+
+  @doc """
+  Which panels this check's findings belong in. Defaults to **both**.
+
+  Two features share one registry (see above), and most checks genuinely
+  belong to both: a skipped heading level breaks the outline a screen-reader
+  user navigates by *and* the one a search engine reads. Splitting the panels
+  without splitting the checks is the whole point — an author fixing a heading
+  should not have to find it twice.
+
+  So the default is "show it in both", and a check narrows only when it has a
+  reason to: `KilnCMS.Seo.Checks.Keyphrase` has nothing to say about
+  accessibility, and `Kiln.Advisory.Checks.AllCaps` has nothing to say about
+  search. Defaulting the other way — each check picking exactly one home —
+  would mean a plugin author who never thought about the distinction silently
+  gets no panel at all.
+  """
+  @callback lenses() :: [lens()]
+
   defmacro __using__(_opts) do
     quote do
       @behaviour Kiln.Advisory
 
-      import Kiln.Advisory, only: [finding: 2, finding: 3, finding: 4]
+      import Kiln.Advisory, only: [finding: 2, finding: 3, finding: 4, lensed: 2]
+
+      @impl Kiln.Advisory
+      def lenses, do: [:seo, :accessibility]
+
+      defoverridable lenses: 0
     end
   end
 
@@ -87,4 +117,18 @@ defmodule Kiln.Advisory do
   def finding(severity, code, field \\ :body, args \\ %{}) do
     %Finding{severity: severity, code: code, field: field, args: args}
   end
+
+  @doc """
+  Narrow one finding to specific panels, overriding its check's `lenses/0`.
+
+  For a check whose findings don't all belong in the same place — see
+  `Kiln.Advisory.Finding`. Reach for it only when that is genuinely true: a
+  check that needs this for every finding should change its `lenses/0`
+  instead.
+
+      finding(:warning, :thin_content, :body, %{}) |> lensed([:seo])
+  """
+  @spec lensed(Finding.t(), [lens()]) :: Finding.t()
+  def lensed(%Finding{} = finding, lenses) when is_list(lenses),
+    do: %{finding | lenses: lenses}
 end
