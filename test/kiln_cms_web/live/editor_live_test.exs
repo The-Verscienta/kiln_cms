@@ -115,6 +115,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Media"
     end
 
+    # #501: each row's "Assign" button deep-links into the editor's
+    # Assignment panel (`?assign=1`), not a duplicate of "Edit".
+    test "each row has an Assign entry point into the editor", %{conn: conn} do
+      page = draft_page(%{title: "Assignable Row"})
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert html =~ ~s(href="/editor/content/page/#{page.id}?assign=1")
+      assert html =~ "Assign"
+    end
+
     # #155: workflow state labels are humanized and localized, not raw atoms.
     test "humanizes workflow state labels", %{conn: conn} do
       draft_page(%{title: "ReviewMe", state: :in_review})

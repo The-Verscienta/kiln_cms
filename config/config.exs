@@ -390,6 +390,13 @@ config :kiln_cms, :governance_checkpoint_cron, "40 3 * * *"
 # schedule for a deployment that drives `KilnCMS.Links.Sweep.run/0` itself.
 config :kiln_cms, :link_check_cron, "20 4 * * *"
 
+# When the task due-soon/overdue digest runs (#501): groups each org's open
+# tasks due today-or-earlier or within the next few days by assignee and
+# sends one email per assignee. Mornings, so the digest is waiting when an
+# editor starts their day rather than landing overnight. `false` disables the
+# schedule for a deployment that drives its own equivalent.
+config :kiln_cms, :task_digest_cron, "0 8 * * *"
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero

@@ -84,6 +84,41 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       assert rule.config == %{"topic" => "editorial"}
     end
 
+    test "an admin can scope a rule to task events (#501)", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/editor/automation")
+
+      # The content-type picker offers "Tasks" so a task.assigned/task.overdue
+      # rule can be scoped correctly, rather than left at "Any content type"
+      # (which would also match every content-publish event) or pointed at an
+      # actual content type (which `Rule.matching`'s exact string match would
+      # then never fire for).
+      assert html =~ "Tasks"
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "Notify on task assignment",
+          trigger_event: "assigned",
+          content_type: "task",
+          action: "broadcast",
+          config: ~s({"topic": "tasks"})
+        }
+      )
+      |> render_submit()
+
+      assert render(view) =~ "Notify on task assignment"
+      assert render(view) =~ "task.assigned"
+
+      rule =
+        Enum.find(
+          Automation.list_rules!(authorize?: false),
+          &(&1.name == "Notify on task assignment")
+        )
+
+      assert rule.trigger_event == :assigned
+      assert rule.content_type == "task"
+    end
+
     test "invalid JSON in the config is rejected with a flash", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/automation")
 

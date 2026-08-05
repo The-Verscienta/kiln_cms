@@ -763,6 +763,12 @@ defmodule KilnCMSWeb.EditorLive do
                 {gettext("Unarchive")}
               </button>
               <.link
+                navigate={edit_path(kind, record.id) <> "?assign=1"}
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Assign")}
+              </.link>
+              <.link
                 navigate={edit_path(kind, record.id)}
                 class="btn btn-sm btn-default"
               >

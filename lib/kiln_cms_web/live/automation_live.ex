@@ -185,7 +185,18 @@ defmodule KilnCMSWeb.AutomationLive do
 
   defp type_options(org) do
     types = ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org))
-    [{gettext("Any content type"), ""}] ++ Enum.map(types, &{&1.label, to_string(&1.type)})
+
+    # Editorial tasks (#501) aren't a content type — `task.assigned` /
+    # `task.overdue` are task-domain events dispatched through the same
+    # `<type>.<verb>` funnel with a literal "task" type (see
+    # `KilnCMS.Automation.Rule`'s `@triggers` moduledoc note). Without this,
+    # a rule triggered on `:assigned`/`:overdue` could only be left at "Any
+    # content type" (matches every event, not just task ones) or pointed at
+    # an existing content type — which `Rule.matching`'s exact-match filter
+    # then never fires for: a silently dead rule.
+    [{gettext("Any content type"), ""}] ++
+      Enum.map(types, &{&1.label, to_string(&1.type)}) ++
+      [{gettext("Tasks"), "task"}]
   end
 
   defp trigger_options, do: Enum.map(Rule.triggers(), &{Phoenix.Naming.humanize(&1), &1})

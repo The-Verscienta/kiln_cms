@@ -292,6 +292,7 @@ defmodule KilnCMSWeb.Router do
       live "/editor", EditorLive, :index
       live "/editor/overview", OverviewLive, :index
       live "/editor/calendar", CalendarLive, :index
+      live "/editor/tasks", TaskLive, :index
       live "/editor/translations", TranslationsLive, :index
       live "/editor/search", SearchPaletteLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index

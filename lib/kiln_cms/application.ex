@@ -155,7 +155,9 @@ defmodule KilnCMS.Application do
      "KILN_GOVERNANCE_CHECKPOINT_CRON",
      "governance checkpoints will NOT be minted on a schedule. See #666."},
     {:link_check_cron, KilnCMS.Links.SweepWorker, "KILN_LINK_CHECK_CRON",
-     "outbound links will NOT be checked on a schedule. See #474."}
+     "outbound links will NOT be checked on a schedule. See #474."},
+    {:task_digest_cron, KilnCMS.Notifications.TaskDigestWorker, "KILN_TASK_DIGEST_CRON",
+     "task due-soon/overdue digests will NOT be sent on a schedule. See #501."}
   ]
 
   # `false` (or nil) on any key leaves that entry out, for a deployment driving

@@ -28,8 +28,9 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   Every selectable event name: each registered content type — compiled and
   admin-defined dynamic (D17) — crossed with each lifecycle verb (e.g.
   `"page.published"`, `"recipe.updated"`), plus `form.submitted` for
-  admin-defined public forms. Derived at runtime so generated and
-  admin-defined types get events for free.
+  admin-defined public forms and `task.assigned`/`task.overdue` for editorial
+  tasks (#501). Derived at runtime so generated and admin-defined types get
+  events for free.
 
   Dynamic types are per-org (epic #336), so the console passes the request's
   org — `org_id` defaults to the sole org for tenant-less callers.
@@ -37,7 +38,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   def events(org_id \\ KilnCMS.Accounts.default_org_id()) do
     types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all(org_id)
     content = for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
-    content ++ ["form.submitted"]
+    content ++ ["form.submitted", "task.assigned", "task.overdue"]
   end
 
   @doc """

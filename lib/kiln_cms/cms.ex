@@ -341,6 +341,27 @@ defmodule KilnCMS.CMS do
         args: [:content_type, :content_id, :block_id]
     end
 
+    # Editorial tasks: assignments, due dates, a workload view (#501) — the
+    # ownership half of editorial collaboration (Comment above is discussion).
+    resource KilnCMS.CMS.Task do
+      define :assign_task, action: :assign
+      define :update_task, action: :update
+      define :complete_task, action: :complete
+      define :reopen_task, action: :reopen
+      define :mark_task_overdue_notified, action: :mark_overdue_notified
+      define :get_task, action: :read, get_by: [:id]
+      define :list_tasks, action: :read
+      define :list_tasks_for, action: :for_content, args: [:content_type, :content_id]
+      define :list_tasks_for_assignee, action: :for_assignee, args: [:assignee_id]
+
+      define :list_tasks_open_due_between,
+        action: :open_due_between,
+        args: [:from, :to]
+
+      define :list_tasks_due_within, action: :due_within, args: [:to]
+      define :list_newly_overdue_tasks, action: :newly_overdue
+    end
+
     # Signed, append-only anchors over a document's version history (#356,
     # tamper-evident half). Minted on publish; see KilnCMS.Governance.Chain.
     resource KilnCMS.CMS.HistoryAnchor do

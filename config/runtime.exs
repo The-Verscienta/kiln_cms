@@ -321,6 +321,14 @@ if cron = System.get_env("KILN_LINK_CHECK_CRON") do
   config :kiln_cms, :link_check_cron, cron
 end
 
+# ## Editorial tasks (#501)
+#
+# When the due-soon/overdue digest email runs. Safe to leave scheduled
+# everywhere: with no tasks assigned in any org, the sweep enqueues nothing.
+if cron = System.get_env("KILN_TASK_DIGEST_CRON") do
+  config :kiln_cms, :task_digest_cron, cron
+end
+
 if user_agent = System.get_env("KILN_LINK_CHECK_USER_AGENT") do
   config :kiln_cms, KilnCMS.Links.External, user_agent: user_agent
 end
