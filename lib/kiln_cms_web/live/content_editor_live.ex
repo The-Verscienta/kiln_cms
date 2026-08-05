@@ -20,9 +20,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   require Logger
 
   import Ash.Expr, only: [expr: 1]
+  import KilnCMSWeb.AccessibilityComponents, only: [a11y_findings: 1, a11y_grade_badge: 1]
   import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
   import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
 
+  alias Kiln.Advisory.Registry
+  alias Kiln.Advisory.Report
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
@@ -754,8 +757,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Cheap by comparison — string checks over a handful of short fields — so this
-  # runs on every keystroke while the body walk above only runs on a form change.
+  # Cheap by comparison — the checks compare precomputed facts and a handful of
+  # short fields — so this runs on every keystroke while the body walk above
+  # only runs on a form change.
+  #
+  # "Precomputed" is the load-bearing word, and the reason a check must never
+  # scan `body.text` itself: that puts full-document string work into every
+  # validate, including the ones that only touched the title. `AllCaps` reads
+  # `Body.capitalised_runs` for exactly this reason (#495).
   defp refresh_seo_report(socket) do
     form = socket.assigns.form
 
@@ -770,12 +779,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
       locale: form[:locale].value
     }
 
-    assign(
-      socket,
-      :seo_report,
-      KilnCMS.Seo.Analyzer.analyze(fields, socket.assigns.seo_body_stats,
+    # One registry run, two views (#495). The panels overlap heavily — headings,
+    # alt text and readability report into both — so running the checks once
+    # and splitting the outcomes by lens is the difference between paying for
+    # the shared ones once per keystroke and paying twice.
+    outcomes =
+      KilnCMS.Seo.Analyzer.run(fields, socket.assigns.seo_body_stats,
         facts: %{link_targets: socket.assigns[:link_targets] || %{}}
       )
+
+    body = socket.assigns.seo_body_stats
+
+    socket
+    |> assign(:seo_report, outcomes |> Registry.by_lens(:seo) |> Report.from_outcomes(body))
+    |> assign(
+      :a11y_report,
+      outcomes |> Registry.by_lens(:accessibility) |> Report.from_outcomes(body)
     )
   end
 
@@ -6290,6 +6309,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           editors={@editors}
           actor={@actor}
           word_count={@seo_body_stats.word_count}
+          a11y_report={@a11y_report}
         />
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -6754,6 +6774,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 />
               </.inspector_section>
 
+              <%!-- Accessibility (#495) sits in its own section rather than
+                    under SEO, because it is a different question with a
+                    different audience — and because a finding buried three
+                    sections into "SEO & scheduling" is one an author fixing
+                    accessibility will never look for. Same checks underneath;
+                    see `Kiln.Advisory`. --%>
+              <.inspector_section id="inspector-accessibility" title={gettext("Accessibility")}>
+                <:aside>
+                  <.a11y_grade_badge report={@a11y_report} />
+                </:aside>
+                <%!-- Advisory only — nothing here ever blocks a save. The
+                      hard gate on alt text is `Validations.MediaAltText`
+                      (#403), which is a separate, opt-in policy. --%>
+                <.a11y_findings
+                  :if={@a11y_report.findings != []}
+                  report={@a11y_report}
+                  class="rounded border border-base-content/10 bg-base-200/40 p-2"
+                />
+                <p :if={@a11y_report.findings == []} class="text-xs text-base-content/60">
+                  {ngettext(
+                    "No accessibility issues found in %{count} applicable check.",
+                    "No accessibility issues found in %{count} applicable checks.",
+                    @a11y_report.total,
+                    count: @a11y_report.total
+                  )}
+                </p>
+              </.inspector_section>
+
               <.inspector_section title={gettext("SEO & scheduling")}>
                 <:aside>
                   <.seo_grade_badge report={@seo_report} />
@@ -7203,6 +7251,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :editors, :list, required: true
   attr :actor, :any, required: true
   attr :word_count, :integer, required: true
+  attr :a11y_report, :map, required: true
 
   defp editor_action_bar(assigns) do
     # Resolved once per render rather than per interpolation: `words_per_minute/0`
@@ -7270,6 +7319,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
               count: @reading_minutes
             )}
           </span>
+
+          <%!-- Accessibility summary (#495). Up here rather than only in the
+                inspector rail because a panel three sections down is one an
+                author has to already care about to find — and the people this
+                helps are the ones who don't yet know there's a problem.
+                Free to render: the report is computed for the panel anyway.
+
+                A button, not a badge: it opens the Settings tab, where the
+                Accessibility section lives — the "expandable to the panel"
+                half of the ask. It reuses the tab strip's own event rather
+                than introducing a scroll hook, so there is one code path that
+                changes which panel is showing.
+
+                Hidden on a brand-new page: greeting an author with a verdict
+                on an empty draft is noise. NOT gated on `total`, which is a
+                trap — a check that passes counts as *applicable*, so an empty
+                document reports one passing check and the chip would render
+                "Accessible" on a page with nothing in it. Content, or a
+                finding to show, is the honest signal. --%>
+          <button
+            :if={@a11y_report.findings != [] or @word_count > 0}
+            id="a11y-chip"
+            type="button"
+            phx-click="switch_inspector_tab"
+            phx-value-tab="settings"
+            class={[
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium",
+              a11y_chip_class(@a11y_report.grade)
+            ]}
+            title={a11y_chip_title(@a11y_report)}
+          >
+            <.icon name={a11y_chip_icon(@a11y_report.grade)} class="size-3.5" />
+            {a11y_chip_label(@a11y_report)}
+          </button>
         </div>
 
         <div class="ml-auto flex flex-wrap items-center gap-2">
@@ -7296,6 +7379,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Same arithmetic as `KilnCMS.CMS.Calculations.ReadingTime`, applied to the
   # in-progress draft rather than the saved record — so the editor's number and
   # the one consumers read off the API agree once the draft is saved.
+  # Traffic-light vocabulary, shared with the grade pill in the panel
+  # (`KilnCMSWeb.AdvisoryComponents`) so the chip and the section it scrolls to
+  # can never disagree about what colour this document is.
+  defp a11y_chip_class(:good), do: "bg-success/15 text-success hover:bg-success/25"
+  defp a11y_chip_class(:ok), do: "bg-warning/20 text-warning-content hover:bg-warning/30"
+  defp a11y_chip_class(:poor), do: "bg-error/12 text-error hover:bg-error/20"
+
+  defp a11y_chip_icon(:good), do: "hero-check-circle"
+  defp a11y_chip_icon(_grade), do: "hero-exclamation-circle"
+
+  # The count, not the grade word: "2 issues" is the actionable number, and
+  # the colour already carries the severity.
+  defp a11y_chip_label(%{findings: []}), do: gettext("Accessible")
+
+  defp a11y_chip_label(%{findings: findings}) do
+    ngettext("%{count} a11y issue", "%{count} a11y issues", length(findings),
+      count: length(findings)
+    )
+  end
+
+  defp a11y_chip_title(%{findings: []}),
+    do: gettext("No accessibility issues found. Opens the Accessibility panel.")
+
+  defp a11y_chip_title(_report),
+    do: gettext("Opens the Accessibility panel.")
+
   defp reading_minutes(0, _wpm), do: 0
   defp reading_minutes(words, wpm), do: ceil(words / wpm)
 
@@ -7348,6 +7457,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `<details>` accordions with an always-expanded, clearly-labelled section —
   # the panel's tab already gates visibility, so no per-section collapsing.
   attr :title, :string, required: true
+  attr :id, :string, default: nil
   # Optional trailing content on the heading row — a status pill or counter that
   # belongs with the title rather than in the body.
   slot :aside
@@ -7355,7 +7465,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp inspector_section(assigns) do
     ~H"""
-    <section class="rounded-lg border border-base-content/10 p-4">
+    <section id={@id} class="rounded-lg border border-base-content/10 p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
           {@title}

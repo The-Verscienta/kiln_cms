@@ -1,6 +1,7 @@
 defmodule Kiln.Advisory.Checks.Headings do
   @moduledoc """
-  Heading structure: are there any, and do the levels descend without gaps?
+  Heading structure: are there any, do the levels descend without gaps, and
+  does each one actually say something?
 
   Lives in the neutral `Kiln.Advisory` namespace rather than under SEO because
   it is one of the checks #495's accessibility panel needs verbatim — a skipped
@@ -18,7 +19,7 @@ defmodule Kiln.Advisory.Checks.Headings do
 
   @impl Kiln.Advisory
   def check(%Context{body: body}) do
-    [headings_present(body), heading_order(body)]
+    [headings_present(body), heading_order(body), empty_headings(body)]
   end
 
   defp headings_present(%{word_count: count}) when count < @headings_expected_from, do: :n_a
@@ -32,6 +33,23 @@ defmodule Kiln.Advisory.Checks.Headings do
       nil -> :ok
       {from, to} -> finding(:warning, :heading_levels_skipped, :body, %{from: from, to: to})
     end
+  end
+
+  # An empty heading renders as a gap and announces to a screen reader as an
+  # unlabelled landmark — a heading that says nothing while still structuring
+  # the document. `Kiln.Advisory.Body` records these separately rather than
+  # putting them in `headings`, so the order check above isn't judging the
+  # level of a heading with no text.
+  defp empty_headings(%{empty_headings: []}), do: :ok
+
+  defp empty_headings(%{empty_headings: indexes}) do
+    # `count` is how many empty headings there are; `indexes` is where to jump,
+    # de-duplicated — one rich-text block can hold several, and three jump
+    # links to the same block is two too many. `Checks.LinkText` does the same.
+    finding(:warning, :headings_empty, :body, %{
+      count: length(indexes),
+      indexes: Enum.uniq(indexes)
+    })
   end
 
   defp skipped_level(levels) do

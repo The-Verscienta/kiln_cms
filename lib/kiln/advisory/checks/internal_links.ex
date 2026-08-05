@@ -38,6 +38,12 @@ defmodule Kiln.Advisory.Checks.InternalLinks do
 
   alias Kiln.Advisory.Context
 
+  # Search-only. A dead link is equally broken for everyone, so it is not an
+  # accessibility defect — WCAG has nothing to say about a 404, and putting it
+  # in that panel would dilute the findings that ARE about access.
+  @impl Kiln.Advisory
+  def lenses, do: [:seo]
+
   @impl Kiln.Advisory
   def check(%Context{body: %{internal_link_paths: []}}), do: :n_a
 

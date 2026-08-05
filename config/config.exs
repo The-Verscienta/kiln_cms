@@ -168,7 +168,9 @@ config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 # logged rather than taking the editor down. See `Kiln.Advisory`.
 #
 # `Kiln.Advisory.Checks.*` are feature-neutral (an accessibility panel wants
-# them verbatim); `KilnCMS.Seo.Checks.*` are search-specific.
+# them verbatim); `KilnCMS.Seo.Checks.*` are search-specific. Which panel each
+# one appears in is the check's own `lenses/0`, not this list — see
+# `Kiln.Advisory`.
 config :kiln_cms, Kiln.Advisory,
   checks: [
     KilnCMS.Seo.Checks.Meta,
@@ -176,7 +178,9 @@ config :kiln_cms, Kiln.Advisory,
     KilnCMS.Seo.Checks.Readability,
     Kiln.Advisory.Checks.Headings,
     Kiln.Advisory.Checks.ImageAlt,
-    Kiln.Advisory.Checks.InternalLinks
+    Kiln.Advisory.Checks.InternalLinks,
+    Kiln.Advisory.Checks.LinkText,
+    Kiln.Advisory.Checks.AllCaps
   ]
 
 # Form submission spam scoring (#477) — post-storage triage on top of the

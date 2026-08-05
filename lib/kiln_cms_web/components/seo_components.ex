@@ -200,6 +200,51 @@ defmodule KilnCMSWeb.SeoComponents do
   def finding_message(%{code: :og_image_missing}, _pinned?),
     do: gettext("No social image — links to this page will share without a preview picture.")
 
+  # ── Links, as an SEO concern (#495) ───────────────────────────────────────
+
+  # `Kiln.Advisory.Checks.LinkText` reports into BOTH panels, so these need a
+  # sentence here too — without one they fall to the catch-all at the bottom
+  # and render as the bare atom name. Framed for search rather than for a
+  # screen reader (`KilnCMSWeb.AccessibilityComponents` has that version):
+  # anchor text is a ranking signal, which is a different reason to care about
+  # the same defect.
+  def finding_message(%{code: :link_text_uninformative, args: a}, _pinned?) do
+    ngettext(
+      "Link text “%{example}” describes nothing — anchor text tells search engines what a page is about.",
+      "%{count} links have text like “%{example}” that describes nothing — anchor text tells search engines what a page is about.",
+      a.count,
+      count: a.count,
+      example: a.example
+    )
+  end
+
+  def finding_message(%{code: :link_text_empty, args: a}, _pinned?) do
+    ngettext(
+      "1 link has no text at all — there is no anchor text to read.",
+      "%{count} links have no text at all — there is no anchor text to read.",
+      a.count,
+      count: a.count
+    )
+  end
+
+  def finding_message(%{code: :link_text_bare_url, args: a}, _pinned?) do
+    ngettext(
+      "A link is labelled with its own URL — a descriptive phrase carries more signal.",
+      "%{count} links are labelled with their own URL — a descriptive phrase carries more signal.",
+      a.count,
+      count: a.count
+    )
+  end
+
+  def finding_message(%{code: :headings_empty, args: a}, _pinned?) do
+    ngettext(
+      "1 heading is empty — it adds a level to the outline without a topic.",
+      "%{count} headings are empty — they add levels to the outline without a topic.",
+      a.count,
+      count: a.count
+    )
+  end
+
   # ── Readability ───────────────────────────────────────────────────────────
 
   def finding_message(%{code: :long_sentences, args: a}, _pinned?),

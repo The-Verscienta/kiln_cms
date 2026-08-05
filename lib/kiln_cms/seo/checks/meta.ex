@@ -13,6 +13,11 @@ defmodule KilnCMS.Seo.Checks.Meta do
 
   alias Kiln.Advisory.Context
 
+  # Search-only: a title tag's length says nothing about whether the page is
+  # usable with a screen reader.
+  @impl Kiln.Advisory
+  def lenses, do: [:seo]
+
   @title_min 30
   @description_min 70
 
