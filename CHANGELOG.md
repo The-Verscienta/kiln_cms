@@ -29,6 +29,13 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **"Add to release" from the content editor.** The Settings tab now carries a
+  **Release** panel: queue the record you're editing into a content release,
+  see which release it's already in (with a link to it), and take it back out.
+  Releases previously could only be filled from the content list's bulk action,
+  which is the wrong shape for "this one piece belongs in Friday's launch"
+  (#836).
+
 - **Content releases are bounded.** A release is capped at 500 items by default,
   configurable via `config :kiln_cms, KilnCMS.CMS.Releases, max_items:` alongside
   `transaction_timeout_ms:`. The go-live transaction is what makes a release
