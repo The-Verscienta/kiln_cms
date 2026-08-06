@@ -467,13 +467,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_async(:content_intel, {:exit, reason}, socket) do
     Logger.warning("Content intelligence task exited: #{inspect(reason)}")
 
-    # `[]`, not nil: nil reads as "never run" and the panel would offer to run
-    # it again with the same button label, hiding that it failed.
+    # `[]`, not nil, so the button stops offering a first run it already made.
+    # But `[]` alone renders the panel's ordinary empty state — "Nothing similar
+    # found." — which is a *result*, and this is the absence of one. The flash
+    # is what carries that difference; without it a crashed analysis is
+    # indistinguishable from a clean bill of health, and an author would
+    # reasonably publish the duplicate we failed to look for.
+    #
+    # Only a *task-level* failure lands here (a lost DB connection, say). An
+    # embedder that raises does not: `KilnCMS.Cache.fetch/3` wraps it in
+    # `Cachex.fetch`, which catches fallback exceptions, so a broken model
+    # degrades to an empty suggestion list through the `{:ok, _}` clause above
+    # and still reads as "nothing found". Widening that is #851's neighbourhood,
+    # not this clause's.
     {:noreply,
      socket
      |> assign(:intel_loading?, false)
      |> assign(:intel_duplicates, [])
-     |> assign(:intel_tags, [])}
+     |> assign(:intel_tags, [])
+     |> put_flash(:error, gettext("Couldn't analyze this content. Please try again."))}
   end
 
   def handle_async(:seo_draft, {:exit, reason}, socket) do
