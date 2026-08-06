@@ -663,13 +663,17 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    an editor merely inserting a block above a featured one), and carrying the
    value forward silently writes something the client never sent.
 
+   Nested `columns` children (raw maps with no id) are covered too (#774): the
+   whole tree's multiset of role-restricted non-default nested values must be
+   identical before and after, so a non-admin can neither introduce one nor drop
+   one by omission, but may resubmit a column holding an admin-set value
+   unchanged — which the old per-child default rule refused outright.
+
    *Residual, all about **which block an id names** rather than what a field may
    hold:* an editor can still reuse the id of another block **of the same type**
    to move an admin-set field off the block that had it, and an empty
    `block_tree` deletes the block outright. Both predate this and need the write
-   path to verify a submitted id belongs to the block it claims. Nested
-   `columns` children have no identity at all and remain on the stricter
-   default-value rule.
+   path to verify a submitted id belongs to the block it claims.
 9. **Per-account throttling is per node, in memory, and keyed on
    attacker-chosen strings.** `AccountThrottle` (#478) holds its budgets in ETS,
    so a restart forgives every accumulated attempt and a second node would carry

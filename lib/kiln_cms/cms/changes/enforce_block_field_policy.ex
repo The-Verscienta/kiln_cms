@@ -36,14 +36,21 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   `blocks` attribute is not `public?` and such a client cannot have read the
   current values it would be claiming to preserve.
 
-  ## Known limits
+  ## Nested children: a whole-tree multiset (#774)
 
   `columns` nests its children as raw maps (`{:array, :map}`) rather than union
-  members, to avoid a recursive-type compile cycle. Nested children therefore
-  carry no stable identity to diff against, so they are held to the stricter
-  new-block rule: a restricted field on a nested block must equal its default.
-  This closes the "nest it in a column to bypass the check" hole at the cost of
-  refusing an edit to a column that already contains an admin-set value.
+  members, to avoid a recursive-type compile cycle, so nested children carry no
+  stable identity to diff one-for-one. Rather than the old per-child "must equal
+  its default" rule — which closed the smuggle hole but refused an editor even
+  resubmitting an admin's value, and (#774) still let them CLEAR one by omission
+  — the check compares the **whole tree's multiset** of role-restricted
+  non-default nested values before and after. A non-admin write must leave that
+  multiset identical: it can neither introduce a restricted value (smuggle/set)
+  nor drop one (omit/clear), but it may resubmit a column holding an admin-set
+  value unchanged, and it may edit the permitted fields around it. Because the
+  multiset spans the whole tree it needs no per-child id, and it only ever
+  refuses more than the value being preserved would — it never lets a non-admin
+  add or remove a restricted value.
 
   ## Omitted is not the same as default (#566)
 
@@ -84,9 +91,9 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   had it. And an empty `block_tree` deletes the block outright. Both are about
   which block an id names rather than what a field may hold, and both predate
   this; closing them needs the write path to verify that a submitted id belongs
-  to the block it claims. Nested `columns` children have no identity at all —
-  see the note above — so the omission rule cannot reach them either. Recorded
-  as residual risk in `docs/threat-model.md`.
+  to the block it claims. (Nested `columns` children are no longer a gap — the
+  whole-tree multiset above reaches them, #774.) Recorded as residual risk in
+  `docs/threat-model.md`.
   """
   use Ash.Resource.Change
 
@@ -116,13 +123,14 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
       # refuse an editor simply inserting a block above a featured one.
       identified? = Enum.any?(raw, &has_id?/1)
 
-      changeset
-      |> Ash.Changeset.get_attribute(:blocks)
-      |> List.wrap()
+      blocks = changeset |> Ash.Changeset.get_attribute(:blocks) |> List.wrap()
+
+      blocks
       |> Enum.with_index()
       |> Enum.reduce(changeset, fn {block, index}, acc ->
         check_block(acc, block, stored, role, Enum.at(raw, index), identified?)
       end)
+      |> check_nested_tree(blocks, role)
     else
       changeset
     end
@@ -181,7 +189,6 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
           acc
       end
     end)
-    |> check_nested(block, module, role)
   end
 
   defp check_block(changeset, _other, _stored, _role, _raw, _identified?), do: changeset
@@ -219,51 +226,82 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   defp permitted_value(field, nil), do: field.default
   defp permitted_value(field, previous), do: Map.get(previous, field.name)
 
-  # `columns` (and any future nesting) holds children as raw maps tagged with
-  # `_type`, so walk the block's own field values for anything that resolves to
-  # a known block module. Nested children have no id to diff, so they are held
-  # to the default-value rule.
-  defp check_nested(changeset, block, module, role) do
-    module
-    |> Kiln.Block.Info.fields()
-    |> Enum.reduce(changeset, fn field, acc ->
-      walk_nested(acc, Map.get(block, field.name), role)
+  # `columns` (and any future nesting) holds children as raw maps with no id, so
+  # they cannot be diffed one-for-one (#774). Instead the WHOLE tree's multiset
+  # of role-restricted non-default nested values is required to be identical
+  # before and after: a non-admin can neither introduce one (the #51 "smuggle"
+  # and #566 "set" cases) nor drop one (the #774 omission — nest a featured quote
+  # in a column, then resubmit the column with `featured` gone), but MAY resubmit
+  # a column that already holds an admin-set value unchanged — which the old
+  # per-child default rule refused outright. `columns` itself carries an id, but
+  # a whole-tree multiset needs no per-child identity and is strictly safe: it
+  # allows moving a preserved value between columns, never adding or removing one.
+  defp check_nested_tree(changeset, submitted, role) do
+    before = nested_restricted(stored_blocks(changeset.data), role)
+    now = nested_restricted(submitted, role)
+
+    (Map.keys(before) ++ Map.keys(now))
+    |> Enum.uniq()
+    |> Enum.reduce(changeset, fn {module, field_name} = key, acc ->
+      if Map.get(before, key, []) == Map.get(now, key, []),
+        do: acc,
+        else: add_nested_violation(acc, module, field_name)
     end)
   end
 
-  defp walk_nested(changeset, value, role) when is_list(value),
-    do: Enum.reduce(value, changeset, &walk_nested(&2, &1, role))
+  defp stored_blocks(%{blocks: blocks}) when is_list(blocks), do: blocks
+  defp stored_blocks(_data), do: []
 
-  defp walk_nested(changeset, %Ash.Union{}, _role), do: changeset
-
-  defp walk_nested(changeset, %{} = value, role) when not is_struct(value) do
-    changeset = check_nested_map(changeset, value, role)
-
-    Enum.reduce(Map.values(value), changeset, &walk_nested(&2, &1, role))
+  # `{module, field_name}` => the sorted multiset of non-default values held under
+  # role-restricted fields, across every nested typed child map in the tree, at
+  # any depth. Omitted and default-valued fields contribute nothing, so an
+  # ordinary page with nothing restricted set yields an empty map on both sides.
+  defp nested_restricted(blocks, role) do
+    blocks
+    |> Enum.flat_map(&nested_maps/1)
+    |> Enum.reduce(%{}, &collect_restricted(&1, role, &2))
+    |> Map.new(fn {key, values} -> {key, Enum.sort(values)} end)
   end
 
-  defp walk_nested(changeset, _value, _role), do: changeset
+  # Every nested typed child map inside a block, at any depth. A top-level block
+  # is a union member; only `columns` (and future nesting) carries raw child maps
+  # in its own field values.
+  defp nested_maps(%Ash.Union{value: value}), do: nested_maps(value)
 
-  defp check_nested_map(changeset, map, role) do
+  defp nested_maps(%module{} = block) do
+    module
+    |> Kiln.Block.Info.fields()
+    |> Enum.flat_map(&collect_maps(Map.get(block, &1.name)))
+  end
+
+  defp nested_maps(_other), do: []
+
+  defp collect_maps(list) when is_list(list), do: Enum.flat_map(list, &collect_maps/1)
+  defp collect_maps(%Ash.Union{}), do: []
+
+  defp collect_maps(%{} = map) when not is_struct(map) do
+    typed = if Map.has_key?(map, "_type") or Map.has_key?(map, :_type), do: [map], else: []
+    typed ++ Enum.flat_map(Map.values(map), &collect_maps/1)
+  end
+
+  defp collect_maps(_other), do: []
+
+  defp collect_restricted(map, role, acc) do
     with {:ok, type} <- fetch_type(map),
          {:ok, module} <- KilnCMS.Blocks.fetch(type) do
       module
       |> restricted_fields(role)
-      |> Enum.reduce(changeset, &check_nested_field(&2, map, module, &1))
+      |> Enum.reduce(acc, fn field, inner ->
+        case fetch_field(map, field.name) do
+          {:ok, value} when not is_nil(value) and value != field.default ->
+            Map.update(inner, {module, field.name}, [value], &[value | &1])
+
+          _ ->
+            inner
+        end
+      end)
     else
-      _ -> changeset
-    end
-  end
-
-  defp check_nested_field(changeset, map, module, field) do
-    case fetch_field(map, field.name) do
-      {:ok, value} when not is_nil(value) ->
-        if value == field.default,
-          do: changeset,
-          else: add_violation(changeset, module, field.name)
-
-      _ ->
-        changeset
+      _ -> acc
     end
   end
 
@@ -298,6 +336,20 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     Ash.Changeset.add_error(changeset,
       field: :blocks,
       message: "cannot change `#{field_name}` on a #{type} block: restricted to other roles"
+    )
+  end
+
+  # Nested children have no id, so the message can't point at one block. It names
+  # the field and the type and says what the rule is: the admin-set value has to
+  # come back unchanged — covering both introducing a value and dropping one.
+  defp add_nested_violation(changeset, module, field_name) do
+    type = Kiln.Block.Info.name(module)
+
+    Ash.Changeset.add_error(changeset,
+      field: :blocks,
+      message:
+        "cannot change `#{field_name}` on a nested #{type} block: it is restricted to other " <>
+          "roles, so an admin-set value must be resubmitted unchanged, not introduced or dropped"
     )
   end
 
