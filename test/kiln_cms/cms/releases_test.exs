@@ -132,6 +132,34 @@ defmodule KilnCMS.CMS.ReleasesTest do
       assert :ok = CMS.destroy_release(rel, actor: admin)
       assert {:error, _} = CMS.get_release_item(item.id, authorize?: false)
     end
+
+    test "a content_id that resolves to nothing is refused at add time, not go-live" do
+      # Without this, a stale/bogus id sits :pending until go-live, where
+      # `Releases.apply_all/4` rolls back the WHOLE release on the first
+      # `fetch_record` miss — taking every other admin-approved item down with
+      # it. Refusing here is the whole fix.
+      admin = user(:admin)
+      rel = release(admin)
+      good = page()
+
+      assert {:ok, _} = add(rel, good, admin)
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.add_release_item(
+                 %{
+                   release_id: rel.id,
+                   content_type: "page",
+                   content_id: Ash.UUID.generate(),
+                   action: :publish
+                 },
+                 actor: admin
+               )
+
+      assert Exception.message(error) =~ "does not resolve to an existing record"
+
+      # The good item's slot must not have been consumed by the failed add.
+      assert [_] = CMS.list_release_items_with_status!(rel.id, :pending, authorize?: false)
+    end
   end
 
   describe "authorization" do
