@@ -9,7 +9,7 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   owns saving then, so the two writers can't race the optimistic lock. Only
   drafts are written (mirroring client autosave), through the same `:autosave`
   action (coalesced PaperTrail versions). Rich-text blocks whose fragment has
-  content get their `legacy_html` replaced by `Materializer.fragment_html/2`;
+  content get their `body` replaced by `Materializer.fragment_body/2`;
   everything else round-trips untouched, and a no-change checkpoint skips the
   write entirely. A stale-record failure is *fine* — it means an editor's save
   already landed with the same converged content.
@@ -53,11 +53,20 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   defp materialize_block(%Ash.Union{type: :rich_text} = block, doc) do
     input = TypedBlocks.input_map(block)
 
-    case input["id"] && Materializer.fragment_html(doc, "block-#{input["id"]}") do
+    case input["id"] && Materializer.fragment_body(doc, "block-#{input["id"]}") do
       # No id or an empty/absent fragment (never collaboratively edited):
-      # keep the stored HTML.
-      nil -> input
-      html -> Map.put(input, "legacy_html", html)
+      # keep the stored prose.
+      nil ->
+        input
+
+      # `body`, not `legacy_html`. Portable Text is authoritative, so the cast
+      # nulls `legacy_html` whenever a body is present — a checkpoint writing
+      # HTML had it thrown away on the way in and the stale body kept, which
+      # made this whole path inert for any block the editor had ever saved.
+      # `legacy_html` is left alone here and the cast clears it, converting a
+      # never-migrated legacy block to PT on its first collaborative save.
+      body ->
+        Map.put(input, "body", body)
     end
   end
 

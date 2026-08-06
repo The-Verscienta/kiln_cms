@@ -60,12 +60,31 @@ defmodule KilnCMS.HTMLSanitizer do
   end
 
   @doc """
-  Returns a safe link `href` for block rendering, or `nil` when the URL uses a
-  disallowed scheme (`javascript:`, `data:`, `vbscript:`, …).
+  Returns a safe link `href`, trimmed, or `nil` when Kiln won't carry it.
 
-  Allowed: same-origin relative paths, `http(s)://`, and `mailto:`. Mirrors the
-  URL policy applied on the public HEEx delivery path so fired `:web` artifacts
-  consumed via `innerHTML` cannot carry scriptable links.
+  Allowed: same-origin relative paths, in-page `#fragment`s, `http(s)://` and
+  `mailto:`. Rejected: any other scheme (`javascript:`, `data:`, `vbscript:`,
+  `ftp:`, …), protocol-relative `//host` — which reads as same-origin and
+  isn't — and paths containing `..`.
+
+  **This is the one definition of a link href Kiln will store and serve.**
+  Everything that handles one defers here: `PortableText.sanitize_def/1` at
+  cast time, `PortableText.to_html/1` at render time,
+  `KilnCMS.HTMLSanitizer.RichText` for legacy stored HTML, and the editor's
+  `safeHref` in `assets/js/rich_text.js`, which mirrors these rules so an
+  author is told *why* a URL was refused instead of watching the link vanish
+  on the next reload.
+
+  Keeping them in step matters more than the individual verdicts: the two
+  policies drifted apart for a year and disagreed about four kinds of href,
+  each of which meant a link that survived one surface and died on another.
+
+  > #### `#fragment` targets {: .info}
+  >
+  > A fragment href is *carried*, not resolved: `to_html/1` emits headings
+  > without `id`s, so a bare `#section` has nothing to land on in Kiln-rendered
+  > prose. It stays allowed because in-page anchors are legitimate against page
+  > chrome, and stripping them would break stored content that works today.
   """
   def safe_href(nil), do: nil
   def safe_href(""), do: nil
@@ -74,6 +93,7 @@ defmodule KilnCMS.HTMLSanitizer do
     trimmed = String.trim(url)
 
     cond do
+      fragment?(trimmed) -> trimmed
       safe_relative_path?(trimmed) -> trimmed
       safe_absolute_url?(trimmed) -> trimmed
       mailto?(trimmed) -> trimmed
@@ -82,6 +102,10 @@ defmodule KilnCMS.HTMLSanitizer do
   end
 
   def safe_href(_), do: nil
+
+  # An in-page fragment. Nothing after the `#` can carry a scheme or leave the
+  # page, so the whole rest of the string is taken as-is.
+  defp fragment?(url), do: String.starts_with?(url, "#")
 
   defp mailto?(url) do
     case URI.parse(url) do
