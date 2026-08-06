@@ -119,13 +119,24 @@ defmodule KilnCMS.Accounts.SecondFactor do
   @spec verify(Accounts.User.t(), term()) :: {:ok, Accounts.User.t()} | :invalid
   defp verify(user, code) when is_binary(code) do
     if is_binary(user.totp_secret) and Totp.valid?(user.totp_secret, code) do
-      {:ok, user}
+      {:ok, mark(user, :totp)}
     else
-      recovery_code(user, code)
+      case recovery_code(user, code) do
+        {:ok, updated} -> {:ok, mark(updated, :recovery)}
+        other -> other
+      end
     end
   end
 
   defp verify(_user, _code), do: :invalid
+
+  # Which factor was actually accepted, carried on the returned record's Ash
+  # metadata (#786). A recovery-code sign-in is what lets a gate mark the session
+  # as recovery-established, so a later re-enrolment through `:confirm_totp` can
+  # promote a new secret over the live one without a current code — the owner who
+  # lost their authenticator has none to give. Metadata, not the return shape, so
+  # neither sign-in gate's `{:ok, user}` match changes.
+  defp mark(user, method), do: Ash.Resource.put_metadata(user, :second_factor_method, method)
 
   # An empty set is checked here rather than left to the action: with no hashes
   # stored there is nothing a code could match, and skipping the changeset keeps

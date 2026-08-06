@@ -97,4 +97,70 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       assert reloaded.totp_secret == enrolled.totp_secret
     end
   end
+
+  describe "replacing a confirmed secret needs proof of the outgoing one (#786)" do
+    # Enrol, then stage a fresh pending secret over the live one.
+    defp re_enrolling do
+      user = user()
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      {:ok, enrolled} = Accounts.confirm_totp(user, %{code: current_code(user)}, actor: user)
+      {:ok, restarted} = Accounts.setup_totp(enrolled, %{}, actor: enrolled)
+
+      %{
+        enrolled: enrolled,
+        restarted: restarted,
+        new_code: Totp.code_at(restarted.totp_pending_secret, System.system_time(:second)),
+        live_code: Totp.code_at(restarted.totp_secret, System.system_time(:second))
+      }
+    end
+
+    test "the new secret's own code alone cannot promote it over the live one" do
+      %{enrolled: enrolled, restarted: restarted, new_code: new_code} = re_enrolling()
+
+      # The #786 attack: a session runs setup_totp + confirm_totp with the pending
+      # secret's own code (trivially known) and would otherwise swap the factor.
+      assert {:error, _} = Accounts.confirm_totp(restarted, %{code: new_code}, actor: restarted)
+
+      reloaded = Accounts.get_user!(enrolled.id, authorize?: false)
+
+      assert reloaded.totp_secret == enrolled.totp_secret,
+             "the live secret must be untouched"
+    end
+
+    test "a code from the current authenticator promotes it" do
+      %{enrolled: enrolled, restarted: restarted, new_code: new_code, live_code: live_code} =
+        re_enrolling()
+
+      assert {:ok, swapped} =
+               Accounts.confirm_totp(restarted, %{code: new_code, current_code: live_code},
+                 actor: restarted
+               )
+
+      assert swapped.totp_secret == restarted.totp_pending_secret
+      refute swapped.totp_secret == enrolled.totp_secret
+    end
+
+    test "a wrong current code is refused" do
+      %{restarted: restarted, new_code: new_code} = re_enrolling()
+
+      assert {:error, _} =
+               Accounts.confirm_totp(restarted, %{code: new_code, current_code: "000000"},
+                 actor: restarted
+               )
+    end
+
+    test "a recovery-code session may promote it without a current code" do
+      %{enrolled: enrolled, restarted: restarted, new_code: new_code} = re_enrolling()
+
+      # `recovery_login?` stands in for the outgoing factor: the owner who lost
+      # their authenticator signed in with a recovery code and has no live code.
+      assert {:ok, swapped} =
+               Accounts.confirm_totp(restarted, %{code: new_code, recovery_login?: true},
+                 actor: restarted
+               )
+
+      assert swapped.totp_secret == restarted.totp_pending_secret
+      refute swapped.totp_secret == enrolled.totp_secret
+    end
+  end
 end

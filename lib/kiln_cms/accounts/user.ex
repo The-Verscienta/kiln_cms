@@ -549,6 +549,13 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      # Proof of the OUTGOING factor, required only when promoting *over* an
+      # already-confirmed secret and not from a recovery-code session (#786). A
+      # first enrolment leaves both unset. `recovery_login?` is set by the caller
+      # from server-side session provenance, never client input.
+      argument :current_code, :string, allow_nil?: true, sensitive?: true
+      argument :recovery_login?, :boolean, allow_nil?: false, default: false
+
       # Budgeted like the other two (#727). Not because a stolen-session
       # attacker can grind this into a bypass — they would have to have called
       # `:setup_totp` themselves first, in which case they already know the
@@ -557,9 +564,13 @@ defmodule KilnCMS.Accounts.User do
       # holds an unconfirmed pending secret waiting to be typed in, a second,
       # attacker-held session on the same account could otherwise grind the
       # 6-digit space for that same pending secret and confirm it out from
-      # under them.
+      # under them. It also budgets grinding of `current_code` below.
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret}
+      # Replacing a live factor needs the outgoing code (or a recovery-code
+      # session) — a bare setup_totp+confirm_totp can no longer swap the secret
+      # silently out from under the owner (#786).
+      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement
       change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
