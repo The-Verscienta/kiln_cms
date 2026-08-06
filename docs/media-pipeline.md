@@ -24,6 +24,118 @@ the original — **cropped variants are excluded** (a different aspect ratio in
 an `srcset` would let the browser pick the wrong framing); consumers ask for
 crops by label from the `variants` map (JSON:API/GraphQL expose it).
 
+## Modern formats (#473)
+
+Every variant is written **once per output format**: the source's own format,
+plus each configured alternate. WebP is on by default; AVIF is opt-in because
+encoding it costs roughly an order of magnitude more CPU per image, which is a
+real bill on a bulk regeneration.
+
+```elixir
+config :kiln_cms, :image_variants,
+  formats: [:webp],     # add :avif to opt in
+  webp_quality: 82,
+  avif_quality: 50,     # AVIF's scale isn't JPEG's — 50 ≈ WebP 80
+  jpg_quality: 82
+```
+
+Quality applies to the **lossy** formats only. There is no `png_quality`:
+libvips has no quality knob for PNG (it has `compression`) and `Image.write`
+discards `:quality` for it outright, so offering the setting would mean a
+config value that silently does nothing. A quality outside `1..100`, or a
+non-integer (`System.get_env/1` returns strings), falls back to the default
+rather than being passed through — a rejected write produces *no* variant, so
+the alternative to clamping is a config typo emptying the library.
+
+Keys in the `variants` map name exactly one file. The **bare label** is the
+source format — that is the `<img src>` fallback, and it is how every map
+written before #473 is keyed — and alternates take a `<label>.<format>` suffix:
+
+```
+thumb        image/jpeg   /uploads/…-thumb.jpg
+thumb.webp   image/webp   /uploads/…-thumb.webp
+card         image/jpeg   /uploads/…-card.jpg
+card.webp    image/webp   /uploads/…-card.webp
+full.webp    image/webp   /uploads/…-full.webp
+```
+
+`full` is a full-size re-encode written in the **alternate formats only** — the
+source-format equivalent is the original itself. It exists because a matching
+`<source>` *replaces* the `<img>`'s srcset rather than adding to it: without a
+candidate at the original's width, a WebP-capable browser could never reach
+anything wider than the largest downscale, and every content image would
+quietly render smaller than it did before.
+
+Each entry carries its own `content_type`, which is what a `<picture>`
+`<source type=…>` needs. A source format that is *also* a configured alternate
+(a WebP upload with WebP variants) is written **once**, under the bare label —
+two identical files under two keys would double storage and put the same bytes
+in a `<picture>` twice. Animated sources (GIF) get no alternates: variants are
+already flattened stills, so transcoding would spend encoder time producing a
+second still of an image whose animation is the point.
+
+An unknown format name in config is dropped rather than raising — a typo should
+cost the site its WebP variants, not its uploads. A format whose encoder is
+missing from the libvips build fails that one write and leaves the rest,
+including the source-format fallback.
+
+### Delivery renders `<picture>`
+
+`KilnCMS.Media.Presentation` exposes the two halves separately, and the split is
+the point:
+
+* `srcset/1` — the **source-format** downscales plus the original. A browser
+  picks from a `srcset` on width alone, so mixing encodings there would hand a
+  WebP-less client a WebP, and offer two entries at the same width to choose
+  between arbitrarily.
+* `sources/1` — one `srcset` per **alternate** encoding (a key with a format
+  suffix), each tagged with its `type`, **most efficient first** (AVIF, then
+  WebP). That ordering is the whole contract of `<picture>`: the browser takes
+  the first `type` it supports and stops looking. A WebP *upload* therefore gets
+  no `<source>` at all — its variants are already the `<img>` fallback, and
+  offering them again would only drop the original from consideration.
+
+Image and gallery blocks render a `<picture>` wrapping the existing `<img>`. An
+item with no alternates produces no `<source>` elements, so the markup degrades
+to exactly the `<img>` that was there before.
+
+### Bulk regeneration
+
+A configuration change only ever reaches images uploaded after it. To roll it
+out over the existing library:
+
+```bash
+mix kiln.media.regenerate_variants          # only what's missing (a format rollout)
+mix kiln.media.regenerate_variants --all    # everything (a quality/width change)
+```
+
+Admins can do the same from **`/media` → Regenerate variants**.
+
+Both enqueue `KilnCMS.Media.VariantWorker` on the throttled `:media` Oban queue
+rather than processing inline, and at the **lowest Oban priority** — `:media`
+is a concurrency-3 queue shared with upload processing and video probes, and
+jobs are otherwise fetched in id order, so an un-deprioritised bulk run would
+sit ahead of every subsequent upload for hours. The admin button runs the scan
+itself in a supervised task, because Oban's unique inserts are one transaction
+per row and a large library would otherwise block the LiveView past its
+heartbeat.
+
+Jobs are unique per item for an hour, keyed with a `"source" => "regenerate"`
+marker so they dedupe against *other regeneration runs* only: Oban's default
+unique states include `:completed`, so without it every image uploaded in the
+previous hour would collide with its own upload job and be silently skipped.
+
+Each run replaces the variant map wholesale and then **deletes the blobs the old
+map named** — every other deletion path in Kiln reads the *current* map, so
+without that a single run over a large library would orphan tens of thousands
+of files nothing could ever find again. **Originals are never rewritten** —
+published snapshots and fired artifacts point at them by key.
+
+"Missing only" means *nothing a run would add*, not *has every format*: an
+animated GIF (which gets no alternates by design) and an image narrower than
+every responsive target (which produces no variants at all) both count as
+current, or the rollout mode would re-decode them on every run for ever.
+
 ## Focal point
 
 Every image carries a focal point (`focal_x`/`focal_y`, fractions of the
