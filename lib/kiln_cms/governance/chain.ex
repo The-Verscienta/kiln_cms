@@ -356,28 +356,54 @@ defmodule KilnCMS.Governance.Chain do
   re-propagate (the digest binds the predecessor's signature). Every other field
   — `chain_hash`, `version_count`, `sequence`, boundary, `attribution_hash` — is
   unchanged, because the version rows kept their ids and timestamps, so the
-  result is byte-for-byte the chain the document would carry had it always been
-  the compiled type. `chain_hash` is NOT recomputed, so a chain that was already
-  `:tampered` stays `:tampered` — this re-keys an intact chain, it cannot launder
-  a doctored one.
+  result is byte-for-byte the chain an intact document would carry had it always
+  been the compiled type.
+
+  **A doctored chain is refused, not laundered.** Not recomputing `chain_hash`
+  is necessary but not sufficient: re-signing over stored columns would mint a
+  valid *current-key* signature over a `chain_hash` a DB-write attacker could
+  have doctored to match doctored version rows — the signature was the ONLY
+  thing catching that (`verify/4` read `:tampered`), and this would flip it to
+  `:verified`. So before signing anything, every anchor is required to reproduce
+  from the moved version rows (the same evidence `verdict/5` checks: hash, count,
+  and attribution). Any anchor that does not reproduce raises, and the caller's
+  transaction rolls the whole move back — promotion refuses to graduate a type
+  whose history is already tampered. `mint`-parity: re-attestation signs
+  *recomputed* evidence, never stored column values it did not re-derive.
+
+  Likewise an anchor minted UNSIGNED (a keyless era, or a transient signing
+  failure) stays unsigned — re-signing it with the current key would upgrade an
+  advisory anchor to attested, an upgrade a natively-compiled document would not
+  have. Only anchors that already carry a signature are re-signed.
 
   The anchor resource is append-only by design (no update/destroy action); this
   is the one authorized re-attestation, reached only from the dev-run promotion
   task with the signing key in hand, and it runs inside that task's transaction.
   A signed chain with no key available to re-sign it raises rather than silently
-  breaking its signatures — the caller's transaction then rolls the move back.
+  breaking its signatures — the transaction then rolls the move back.
+
+  One thing it does NOT carry over is the checkpoint witness (#666): the old
+  witnessed entries key on `"entry"`, so the promoted document is uncovered by
+  the witness until the next checkpoint runs under the new type — one interval,
+  the documented exposure window. Tracked for a follow-up.
   """
-  @spec repoint_after_promotion([Ash.UUID.t()], String.t(), String.t(), Ash.UUID.t() | nil) ::
+  @spec repoint_after_promotion(
+          module(),
+          [Ash.UUID.t()],
+          String.t(),
+          String.t(),
+          Ash.UUID.t() | nil
+        ) ::
           non_neg_integer()
-  def repoint_after_promotion(source_ids, old_type, new_type, org_id) do
+  def repoint_after_promotion(resource, source_ids, old_type, new_type, org_id) do
     signing? = match?({:ok, _}, Signer.key_id())
 
     Enum.reduce(source_ids, 0, fn source_id, total ->
-      total + reattest_document(source_id, old_type, new_type, org_id, signing?)
+      total + reattest_document(resource, source_id, old_type, new_type, org_id, signing?)
     end)
   end
 
-  defp reattest_document(source_id, old_type, new_type, org_id, signing?) do
+  defp reattest_document(resource, source_id, old_type, new_type, org_id, signing?) do
     # An ungated, ASCENDING read: the rows exist regardless of the runtime kill
     # switch, and the `prev_anchor_digest` links must re-propagate oldest-first.
     anchors =
@@ -387,13 +413,81 @@ defmodule KilnCMS.Governance.Chain do
         query: [sort: [sequence: :asc]]
       )
 
+    # The moved version rows, read once (ascending) so each anchor's stored hash
+    # can be re-derived and checked before it is re-signed — never trust the
+    # stored `chain_hash` we are about to bless with a fresh signature.
+    versions = versions(resource, source_id, :all, org_id)
+
     {count, _prev_digest} =
       Enum.reduce(anchors, {0, nil}, fn anchor, {n, prev_digest} ->
+        ensure_reproduces!(
+          anchor,
+          fold_loaded(versions, anchor.version_count),
+          old_type,
+          source_id
+        )
+
         updated = reattest_anchor(anchor, new_type, prev_digest, source_id, signing?)
         {n + 1, anchor_digest(updated)}
       end)
 
     count
+  end
+
+  # The whole tamper half of `verdict/5`, applied UNGATED before re-signing (the
+  # kill switch must not be a way to skip it). Two independent doctorings have to
+  # be refused, and it takes both a hash check and a signature check to catch
+  # them:
+  #
+  #   * a version row rewritten with the anchor's `chain_hash` left alone — the
+  #     fold no longer reproduces the recorded hash (`computed.chain_hash !=`);
+  #   * a version row rewritten AND `chain_hash` updated to match it — the fold
+  #     now reproduces, so only the anchor's EXISTING signature (over the
+  #     original hash, unforgeable without the key) still catches it.
+  #
+  # Either way the chain was already `:tampered`; re-signing it would mint a
+  # valid current-key signature over doctored history — exactly the laundering
+  # the module fights. So any anchor that does not reproduce raises, aborting the
+  # promotion (the caller's transaction rolls the move back). `:unverifiable`
+  # (signed under a key we do not hold) is NOT tampering — the hashes reproduce
+  # and the operator is re-attesting with the current key — so it is allowed.
+  defp ensure_reproduces!(anchor, computed, old_type, source_id) do
+    cond do
+      computed.version_count < anchor.version_count ->
+        raise reattest_tamper(anchor, source_id, "anchored versions are missing")
+
+      computed.chain_hash != anchor.chain_hash ->
+        raise reattest_tamper(
+                anchor,
+                source_id,
+                "anchored history does not reproduce its chain hash"
+              )
+
+      attribution_rewritten?(anchor, computed) ->
+        raise reattest_tamper(anchor, source_id, "recorded author attribution does not reproduce")
+
+      signature_broken?(anchor, old_type, source_id) ->
+        raise reattest_tamper(anchor, source_id, "its existing signature does not verify")
+
+      true ->
+        :ok
+    end
+  end
+
+  # An unsigned anchor has no signature to break (it is not re-signed anyway). A
+  # signed anchor whose signature does not verify under a key we HOLD is
+  # tampered; one we cannot check (`:unverifiable`, rotated/unregistered key) is
+  # not — its hashes reproduced above, and the re-sign is a legitimate operator
+  # re-attestation.
+  defp signature_broken?(%{signature: nil}, _old_type, _source_id), do: false
+
+  defp signature_broken?(anchor, old_type, source_id),
+    do: match?({:tampered, _}, signature_verdict(anchor, old_type, source_id))
+
+  defp reattest_tamper(anchor, source_id, reason) do
+    "refusing to promote: history anchor #{anchor.id} for document #{source_id} " <>
+      "cannot be re-attested because #{reason}. Its chain is already tampered — " <>
+      "re-signing it would launder that. Investigate before promoting this type."
   end
 
   defp reattest_anchor(anchor, new_type, prev_digest, source_id, signing?) do
@@ -408,16 +502,24 @@ defmodule KilnCMS.Governance.Chain do
 
     staged = %{anchor | resource_type: new_type, prev_anchor_digest: prev_digest}
 
-    # Sign the canonical candidate for this anchor's columns — the shape
-    # `payload_candidates/3` offers first and therefore the one `verify/4` will
-    # match. An unsigned chain keeps its nil signature (its digests are unchanged
-    # by a bare repoint, so the cascade is a no-op beyond `resource_type`).
+    # Re-sign iff the anchor was ALREADY signed — the decision keys on the
+    # anchor's own state, never on whether the deployment now holds a key. An
+    # anchor minted unsigned (a keyless era, or a transient signing failure that
+    # stored `{nil, nil}` loudly) stays unsigned: re-signing it with the current
+    # key would upgrade an advisory anchor to attested, which is NOT the chain a
+    # natively-compiled document would carry, and on a keyless-then-keyed
+    # deployment would bless a `chain_hash` an attacker could have recomputed —
+    # the exact laundering the module fights. It still gets its `resource_type`
+    # and (cascaded) `prev_anchor_digest` repointed; there is no signature to
+    # invalidate. A signed anchor is re-signed under the new type on the shape
+    # `payload_candidates/3` offers first — the one `verify/4` matches — and the
+    # guard above has already ensured a key is available to do it.
     {signature, key_id} =
-      if signing? do
+      if is_nil(anchor.signature) do
+        {nil, nil}
+      else
         [payload | _] = payload_candidates(staged, new_type, source_id)
         sign(payload)
-      else
-        {anchor.signature, anchor.key_id}
       end
 
     Repo.query!(

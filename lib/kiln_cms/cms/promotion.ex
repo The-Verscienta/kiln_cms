@@ -174,14 +174,17 @@ defmodule KilnCMS.CMS.Promotion do
       Repo.query!(
         """
         SELECT DISTINCT source_id FROM history_anchors
-        WHERE resource_type = 'entry' AND source_id IN (SELECT id FROM #{target_table})
+        WHERE resource_type = 'entry'
+          AND org_id = $1
+          AND source_id IN (SELECT id FROM #{target_table})
         """,
-        []
+        [Ecto.UUID.dump!(org_id)]
       )
 
     source_ids = Enum.map(rows, fn [id] -> Ecto.UUID.load!(id) end)
 
     KilnCMS.Governance.Chain.repoint_after_promotion(
+      target.resource,
       source_ids,
       "entry",
       to_string(target.type),

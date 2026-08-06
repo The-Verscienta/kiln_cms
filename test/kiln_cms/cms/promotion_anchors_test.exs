@@ -13,6 +13,7 @@ defmodule KilnCMS.CMS.PromotionAnchorsTest do
   alias KilnCMS.CMS.Page
   alias KilnCMS.CMS.Promotion
   alias KilnCMS.Governance.Chain
+  alias KilnCMS.Repo
 
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -105,6 +106,122 @@ defmodule KilnCMS.CMS.PromotionAnchorsTest do
     assert :unsigned = Chain.verify(Page, "page", entry.id, entry.org_id)
     assert Chain.anchors("entry", entry.id, entry.org_id) == []
     assert [_ | _] = Chain.anchors("page", entry.id, entry.org_id)
+  end
+
+  test "a mixed signed/unsigned chain keeps its :unsigned verdict — promotion never upgrades it" do
+    enable_signing!()
+    actor = admin()
+    definition = define_type!(actor)
+
+    entry = ContentTypes.create!(definition.name, %{title: "v0", slug: slug()}, actor: actor)
+    {:ok, entry} = CMS.update_entry(entry, %{title: "v1"}, actor: actor)
+    :ok = Chain.anchor(entry)
+
+    # One anchor minted while the key is unavailable → stored unsigned. Toggling
+    # only the config (not the env var) leaves the SAME key in place, so the
+    # anchors on either side stay verifiable — the middle one is simply unsigned.
+    # This is the anchor promotion must NOT silently re-sign into attestation.
+    keyed = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+    Application.put_env(:kiln_cms, KilnCMS.Provenance, Keyword.delete(keyed, :signing_key))
+    {:ok, entry} = CMS.update_entry(entry, %{title: "v2"}, actor: actor)
+    :ok = Chain.anchor(entry)
+    Application.put_env(:kiln_cms, KilnCMS.Provenance, keyed)
+
+    {:ok, entry} = CMS.update_entry(entry, %{title: "v3"}, actor: actor)
+    :ok = Chain.anchor(entry)
+
+    # A single unsigned anchor floors the whole chain to :unsigned.
+    assert :unsigned = Chain.verify(Entry, "entry", entry.id, entry.org_id)
+
+    assert {:ok, %{entries: 1}} = Promotion.promote!(definition.name, into: :page)
+
+    # Byte-for-byte the chain a native compiled document would carry: still
+    # :unsigned, NOT upgraded to :verified by re-keying the advisory anchor.
+    assert :unsigned = Chain.verify(Page, "page", entry.id, entry.org_id)
+  end
+
+  test "re-attests every promoted document in one run (entries: 2)" do
+    enable_signing!()
+    actor = admin()
+    definition = define_type!(actor)
+
+    one = anchored_entry(actor, definition, 2)
+    two = anchored_entry(actor, definition, 1)
+
+    assert :verified = Chain.verify(Entry, "entry", one.id, one.org_id)
+    assert :verified = Chain.verify(Entry, "entry", two.id, two.org_id)
+
+    assert {:ok, %{entries: 2}} = Promotion.promote!(definition.name, into: :page)
+
+    assert :verified = Chain.verify(Page, "page", one.id, one.org_id)
+    assert :verified = Chain.verify(Page, "page", two.id, two.org_id)
+    assert Chain.anchors("entry", one.id, one.org_id) == []
+    assert Chain.anchors("entry", two.id, two.org_id) == []
+  end
+
+  # Doctor the earliest version row's `changes`, which every anchor folds.
+  defp doctor_a_version!(entry) do
+    [version | _] =
+      CMS.list_entry_versions!(
+        authorize?: false,
+        query: [filter: [version_source_id: entry.id], sort: [version_inserted_at: :asc]]
+      )
+
+    Repo.query!(
+      "UPDATE entries_versions SET changes = changes || '{\"laundered\": true}'::jsonb WHERE id = $1",
+      [Ecto.UUID.dump!(version.id)]
+    )
+  end
+
+  test "promotion refuses a chain whose versions were doctored (hash no longer reproduces)" do
+    enable_signing!()
+    actor = admin()
+    definition = define_type!(actor)
+    entry = anchored_entry(actor, definition, 2)
+
+    doctor_a_version!(entry)
+    assert {:tampered, _} = Chain.verify(Entry, "entry", entry.id, entry.org_id)
+
+    assert_raise RuntimeError, ~r/cannot be re-attested/, fn ->
+      Promotion.promote!(definition.name, into: :page)
+    end
+
+    # Rolled back — still a live, "entry"-anchored dynamic document.
+    assert [_ | _] = ContentTypes.list!(definition.name, actor: actor)
+    assert [_ | _] = Chain.anchors("entry", entry.id, entry.org_id)
+  end
+
+  test "promotion refuses to launder a doctored chain even when its hash was updated to match" do
+    enable_signing!()
+    actor = admin()
+    definition = define_type!(actor)
+    entry = anchored_entry(actor, definition, 1)
+
+    # The attacker's move WITHOUT the signing key: rewrite a version AND update
+    # every anchor's chain_hash to the recomputed (doctored) fold, so the hash
+    # reproduces and only the original signature — which they cannot forge —
+    # still betrays the tamper. `verify` reads :tampered solely on the signature.
+    doctor_a_version!(entry)
+
+    for anchor <- Chain.anchors("entry", entry.id, entry.org_id) do
+      doctored = Chain.compute(Entry, entry.id, entry.org_id, anchor.version_count).chain_hash
+
+      Repo.query!("UPDATE history_anchors SET chain_hash = $1 WHERE id = $2", [
+        doctored,
+        Ecto.UUID.dump!(anchor.id)
+      ])
+    end
+
+    assert {:tampered, _} = Chain.verify(Entry, "entry", entry.id, entry.org_id)
+
+    # Re-signing over the doctored-but-reproducing hash would mint a valid
+    # current-key signature and flip it to :verified. The signature pre-check
+    # refuses instead.
+    assert_raise RuntimeError, ~r/existing signature does not verify/, fn ->
+      Promotion.promote!(definition.name, into: :page)
+    end
+
+    assert [_ | _] = ContentTypes.list!(definition.name, actor: actor)
   end
 
   test "a signed chain with no key available aborts the promotion rather than breaking signatures" do
