@@ -109,8 +109,16 @@ defmodule KilnCMSWeb.SignInLive do
     end
   end
 
+  # The one `handle_params/3` in the app that passes its `uri` on rather than
+  # discarding it, because upstream's signature takes it. Upstream discards it
+  # today — but "a dependency ignores this argument" is not a property we
+  # control across upgrades, and the argument is a URL the client chose (#687).
+  # `vouch_uri/2` keeps the path and re-roots it on the authority the server
+  # vouched for at mount, so a `live_patch` naming another org's host cannot
+  # hand AshAuthentication that host.
   @impl true
-  def handle_params(params, uri, socket), do: Upstream.handle_params(params, uri, socket)
+  def handle_params(params, uri, socket),
+    do: Upstream.handle_params(params, KilnCMSWeb.LiveUserAuth.vouch_uri(socket, uri), socket)
 
   @impl true
   def render(assigns), do: Upstream.render(assigns)
