@@ -29,7 +29,15 @@ defmodule KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement do
   @impl true
   def validate(changeset, _opts, _context) do
     data = changeset.data
-    replacing? = not is_nil(data.totp_confirmed_at) and is_binary(data.totp_secret)
+
+    # Keyed on `totp_confirmed_at` ALONE — the same predicate that enforces 2FA at
+    # sign-in (`Accounts.totp_enabled?/1`), and which `SecondFactor` still honours
+    # via recovery codes when `totp_secret` is nil. Gating on the secret too would
+    # leave a `confirmed_at`-set-but-`secret`-nil account (a partial write, a
+    # restore, a future rotate) enforcing 2FA yet skippable here. With a nil
+    # secret `valid_current?` can't pass, so only a recovery-code session may
+    # re-enrol — exactly right for an account reachable only by recovery code.
+    replacing? = not is_nil(data.totp_confirmed_at)
 
     cond do
       not replacing? ->
@@ -49,6 +57,8 @@ defmodule KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement do
     end
   end
 
-  defp valid_current?(secret, code) when is_binary(code), do: Totp.valid?(secret, code)
+  defp valid_current?(secret, code) when is_binary(secret) and is_binary(code),
+    do: Totp.valid?(secret, code)
+
   defp valid_current?(_secret, _code), do: false
 end

@@ -162,5 +162,31 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       assert swapped.totp_secret == restarted.totp_pending_secret
       refute swapped.totp_secret == enrolled.totp_secret
     end
+
+    test "an account confirmed but with a nil secret still can't be swapped without proof" do
+      # `totp_confirmed_at` set while `totp_secret` is nil — no shipped action
+      # produces it (a partial write / restore / future rotate would), but 2FA is
+      # still enforced there via recovery codes, so the replacement check must not
+      # be skippable. Keying on `totp_confirmed_at` alone covers it.
+      base = user()
+      {:ok, base} = Accounts.setup_totp(base, %{}, actor: base)
+      {:ok, enrolled} = Accounts.confirm_totp(base, %{code: current_code(base)}, actor: base)
+
+      # Force the pathological state (no shipped action does), then stage a fresh
+      # secret over it.
+      nil_secret = Ash.Seed.update!(enrolled, %{totp_secret: nil})
+      {:ok, restarted} = Accounts.setup_totp(nil_secret, %{}, actor: nil_secret)
+      new_code = Totp.code_at(restarted.totp_pending_secret, System.system_time(:second))
+
+      # No current code is even possible (the secret is nil); without a recovery
+      # session it must be refused rather than silently promoted.
+      assert {:error, _} = Accounts.confirm_totp(restarted, %{code: new_code}, actor: restarted)
+
+      # A recovery-code session is still the sanctioned way back in.
+      assert {:ok, _} =
+               Accounts.confirm_totp(restarted, %{code: new_code, recovery_login?: true},
+                 actor: restarted
+               )
+    end
   end
 end
