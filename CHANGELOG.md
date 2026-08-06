@@ -29,6 +29,41 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Duplicate content.** A **Duplicate** button on every content-list row and in
+  the content editor's header clones a record into a new draft of the same
+  locale and lands the editor in it — the "copy this page and tweak it" motion
+  Yoast Duplicate Post exists for (#471). The copy carries the authored payload
+  (blocks with fresh stable ids at every depth, excerpt, SEO title/description/
+  image, audience, custom fields, category, featured image, tags, related
+  content) and leaves behind everything that identifies or tracks the source:
+  the slug is regenerated through the type's slug pattern (so "Guide" duplicates
+  to `guide-copy`, then `guide-copy-2`), the workflow starts at `:draft` with no
+  schedules, and the copy gets its own paper-trail rather than inheriting the
+  source's.
+
+  Two things deliberately do **not** travel. The **focus keyphrase**
+  (`seo_keywords`) stays with the source: it is a per-URL SEO target, so two
+  records chasing one keyphrase cannibalize each other — and since the default
+  slug chain is keyphrase → title, carrying it would also mint the copy a slug
+  with no relation to its title. **Incoming** links stay with the source too —
+  other records linked to *it*, not to a draft copy of it.
+
+  Curated relations are cloned as `ContentLink` rows rather than through the
+  `related_<type>_ids` argument, so a link's `kind`, `position`, `label` and
+  `metadata` survive: that argument is a bare id set, and re-managing it would
+  flatten the payload data-carrying relations exist to hold and collapse two
+  links to one target under different kinds into one.
+
+  `KilnCMS.CMS.Duplication` runs the type's ordinary `:create` action as the
+  acting user, so create policies apply exactly as they would to a hand-authored
+  document — and because duplication is the one create that carries *another
+  record's* values, it also honours per-field write grants, which
+  `Changes.EnforceFieldGrants` otherwise skips on creates. `audience` is exempt
+  from that filter: dropping it would fall back to the attribute default
+  (`:public`), which is strictly *less* restrictive than the source. The payload
+  mechanics it shares with one-click translations now live in
+  `KilnCMS.CMS.ContentCopy`.
+
 - **Auto-complete-on-publish is now configurable.** Publishing a piece of
   content still completes its open editorial tasks — that was unconditional
   since #501 — but a site can change the default and an individual task can
