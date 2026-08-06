@@ -57,10 +57,41 @@ defmodule KilnCMSWeb.CalendarLive do
       (ContentTypes.all() ++ ContentTypes.dynamic_all(org.id))
       |> Enum.flat_map(&month_events(&1, actor, org, from, to))
 
-    (content_events ++ task_events(actor, org, month))
+    (content_events ++ task_events(actor, org, month) ++ release_events(actor, org, from, to))
     |> Enum.sort_by(& &1.at, DateTime)
     |> Enum.group_by(&DateTime.to_date(&1.at))
   end
+
+  # Content releases (#500): a bundle's go-live is the coordinated date an
+  # editorial team plans around, so it belongs on the same grid as the per-item
+  # schedules it replaces. Both axes are shown — the future go-live and the
+  # moment a release actually shipped — because "what went out that week" is
+  # the other question this calendar gets asked.
+  defp release_events(actor, org, from, to) do
+    CMS.list_releases_in_window!(from, to, actor: actor, tenant: org)
+    |> Enum.flat_map(fn release ->
+      for {kind, at} <- [
+            {:release_scheduled, scheduled(release)},
+            {:release_published, release.published_at}
+          ],
+          in_window?(at, from, to) do
+        %{
+          id: release.id,
+          type: :release,
+          label: gettext("Release"),
+          title: release.name,
+          kind: kind,
+          at: at
+        }
+      end
+    end)
+  end
+
+  # Only a release still waiting to fire has a meaningful go-live chip; once it
+  # has published, its `scheduled_at` is history that would double up with the
+  # published chip on the same day.
+  defp scheduled(%{state: :scheduled, scheduled_at: at}), do: at
+  defp scheduled(_release), do: nil
 
   # Task due dates (#501) — a different content axis from publish/unpublish:
   # every editor already has read access to every org task (same policy as
@@ -153,11 +184,20 @@ defmodule KilnCMSWeb.CalendarLive do
   defp kind_label(:unpublish), do: gettext("unpublishes")
   defp kind_label(:published), do: gettext("went live")
   defp kind_label(:task_due), do: gettext("task due")
+  defp kind_label(:release_scheduled), do: gettext("release goes live")
+  defp kind_label(:release_published), do: gettext("release shipped")
 
   defp kind_class(:publish), do: "border-warning/40 bg-warning/10"
   defp kind_class(:unpublish), do: "border-error/40 bg-error/10"
   defp kind_class(:published), do: "border-success/40 bg-success/10"
   defp kind_class(:task_due), do: "border-info/40 bg-info/10"
+  defp kind_class(:release_scheduled), do: "border-primary/50 bg-primary/10 font-medium"
+  defp kind_class(:release_published), do: "border-primary/30 bg-primary/5"
+
+  # A release chip goes to the release, not to a content editor — it isn't a
+  # content record and has no `{type, id}` editor route.
+  defp event_path(%{type: :release, id: id}), do: ~p"/editor/releases/#{id}"
+  defp event_path(%{type: type, id: id}), do: ~p"/editor/content/#{type}/#{id}"
 
   # --- render -----------------------------------------------------------------
 
@@ -213,6 +253,10 @@ defmodule KilnCMSWeb.CalendarLive do
             <span class={["inline-block size-3 rounded border", kind_class(:task_due)]} />
             {gettext("Task due")}
           </span>
+          <span class="flex items-center gap-1.5">
+            <span class={["inline-block size-3 rounded border", kind_class(:release_scheduled)]} />
+            {gettext("Release go-live")}
+          </span>
         </p>
 
         <div class="overflow-x-auto">
@@ -255,7 +299,7 @@ defmodule KilnCMSWeb.CalendarLive do
                   <ul class="space-y-1">
                     <li :for={ev <- Map.get(@events, day, [])}>
                       <.link
-                        navigate={~p"/editor/content/#{ev.type}/#{ev.id}"}
+                        navigate={event_path(ev)}
                         class={[
                           "block truncate rounded border px-1.5 py-0.5 text-xs hover:opacity-80",
                           kind_class(ev.kind)

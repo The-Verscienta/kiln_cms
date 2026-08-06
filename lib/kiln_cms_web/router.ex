@@ -301,6 +301,10 @@ defmodule KilnCMSWeb.Router do
       live "/editor/overview", OverviewLive, :index
       live "/editor/calendar", CalendarLive, :index
       live "/editor/tasks", TaskLive, :index
+      # Content releases (#500). Editor-gated like the rest; the actions that
+      # actually ship content are admin-gated by the resource policy, not here.
+      live "/editor/releases", ReleaseLive, :index
+      live "/editor/releases/:id", ReleaseLive, :show
       live "/editor/translations", TranslationsLive, :index
       live "/editor/search", SearchPaletteLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
@@ -579,6 +583,10 @@ defmodule KilnCMSWeb.Router do
     # reading the default org.
     live_session :token_preview,
       on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}] do
+      # The site as of a content release (#500 phase 2). Declared FIRST so its
+      # literal "release" segment is tried before the sibling's `:token`
+      # wildcard, which would otherwise swallow `/preview/release/live`.
+      live "/release/:token", ReleasePreviewLive, :show
       live "/:token/live", TokenPreviewLive, :show
     end
   end

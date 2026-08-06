@@ -29,6 +29,50 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Content releases: bundled, atomically published groups of changes.** A
+  release is a named bundle of publishes and unpublishes that ships as one
+  coordinated change — the Contentful Launch / Sanity Releases analogue. Kiln's
+  per-item `scheduled_at` could only line up N identical timestamps and hope;
+  a campaign touching a landing page, three posts and a fragment now goes live
+  as a unit at 09:00, or not at all (#500). See
+  [Content releases](docs/content-releases.md).
+
+  Three things are the substance of it:
+
+  - **The transaction is genuinely all-or-nothing.** Publishing N items through
+    the normal per-item actions means N state transitions, N artifact fires and
+    N webhook dispatches — which sounds uncoverable by a transaction. But every
+    side effect of Kiln's publish path is a *database write*: the webhook ledger
+    row and its Oban job, the artifact fire job, the automation dispatch job, the
+    audit-chain anchor rows. The POSTs and renders happen later, in workers, off
+    the same repo. So the whole bundle runs inside one `Repo.transaction`, and a
+    failure on item 7 rolls back items 1–6 **and** everything they queued. No
+    observer ever sees a half-live campaign; the release lands in `failed` naming
+    the item that broke, and the site is untouched.
+
+  - **Composing a release and shipping one are different privileges.** Editors
+    create releases and fill them; scheduling, publishing and rolling back are
+    admin-only, mirroring "editors submit for review, admins publish". A release
+    must not become a route around the publish approval step — and since the
+    worker necessarily publishes unauthorized, the admin who claimed it is
+    recorded and acts as the author of every item's version.
+
+  - **"Already true" is skipped, not failed.** If someone publishes one of the
+    pages by hand before the release fires, that item is marked `skipped` rather
+    than aborting the launch — and a later rollback leaves it alone, because the
+    release didn't put it there. A genuinely impossible transition (archived,
+    trashed, type retired) is still a hard failure.
+
+  Also: a **preview as of the release** at `/preview/release/:token`, shareable
+  with people who have no editor account, rendering each document exactly as
+  go-live will; **group rollback**, restoring each item's captured prior version
+  and workflow state in reverse; release chips on the editorial calendar; and
+  `release.published` / `release.rolled_back` webhook and automation events.
+
+  A record may appear in at most one unshipped release, enforced by a partial
+  unique index rather than an application check — two editors adding the same
+  page to two releases at once is exactly the race check-then-insert loses.
+
 - **Event content: schedules, recurrence, and calendar output.** Kiln has no
   `Event` resource, and that is the design — an event is a content type carrying
   a **`datetime_range`** field, composed at `/editor/types` like any other.

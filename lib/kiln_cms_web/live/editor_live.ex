@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.EditorLive do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
 
@@ -184,6 +185,54 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("cancel_bulk", _params, socket),
     do: {:noreply, assign(socket, :confirming_bulk, nil)}
 
+  # "Add to release" (#500) is a bulk verb with an argument — which release, and
+  # whether the release publishes or unpublishes the selection — so it opens its
+  # own panel instead of reusing the yes/no confirm bar.
+  def handle_event("open_release_panel", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:adding_to_release?, MapSet.size(socket.assigns.selected) > 0)
+     |> assign(:confirming_bulk, nil)}
+  end
+
+  def handle_event("cancel_release_panel", _params, socket),
+    do: {:noreply, assign(socket, :adding_to_release?, false)}
+
+  def handle_event(
+        "add_to_release",
+        %{"release_id" => release_id, "release_action" => action},
+        socket
+      )
+      when action in ~w(publish unpublish) do
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    {added, skipped} =
+      Enum.reduce(socket.assigns.selected, {0, 0}, fn key, {added, skipped} ->
+        [kind, id] = String.split(key, ":", parts: 2)
+
+        attrs = %{
+          release_id: release_id,
+          content_type: kind,
+          content_id: id,
+          action: String.to_existing_atom(action)
+        }
+
+        case CMS.add_release_item(attrs, opts) do
+          {:ok, _item} -> {added + 1, skipped}
+          {:error, _error} -> {added, skipped + 1}
+        end
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:selected, MapSet.new())
+     |> assign(:adding_to_release?, false)
+     |> put_flash(:info, release_flash(added, skipped))}
+  end
+
+  def handle_event("add_to_release", _params, socket),
+    do: {:noreply, put_flash(socket, :error, gettext("Pick a release first."))}
+
   def handle_event("confirm_bulk", _params, socket) do
     verb = socket.assigns.confirming_bulk
     actor = socket.assigns.actor
@@ -307,7 +356,22 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:status, status)
      |> assign(:type, type)
      |> assign(:query, params["q"] || "")
+     |> load_releases()
      |> load_items()}
+  end
+
+  # Releases still open for new content (#500), for the "Add to release" bulk
+  # action. Reloaded per navigation like the type registry, so a release created
+  # in another tab shows up on the next filter change rather than needing a
+  # reload of this page.
+  defp load_releases(socket) do
+    releases =
+      CMS.list_editable_releases!(
+        actor: socket.assigns.actor,
+        tenant: socket.assigns.current_org
+      )
+
+    socket |> assign(:releases, releases) |> assign(:adding_to_release?, false)
   end
 
   defp list_path(status, q, type) do
@@ -431,6 +495,19 @@ defmodule KilnCMSWeb.EditorLive do
           skipped: skipped
         ),
       else: gettext("%{action}: %{count} updated", action: bulk_verb_label(verb), count: ok)
+  end
+
+  # "Skipped" here has one dominant cause worth naming: a record already sitting
+  # in another open release, which the database refuses (#500's conflict rule).
+  defp release_flash(added, 0),
+    do: gettext("Added %{count} item(s) to the release", count: added)
+
+  defp release_flash(added, skipped) do
+    gettext(
+      "Added %{count} item(s); %{skipped} skipped — already in another open release, or not addable",
+      count: added,
+      skipped: skipped
+    )
   end
 
   @impl true
@@ -605,6 +682,18 @@ defmodule KilnCMSWeb.EditorLive do
             >
               {label}
             </button>
+            <%!-- Content releases (#500). Only offered once a release exists to
+                  add to — the button would otherwise be a dead end, and the
+                  release list is one click away in the sidebar. --%>
+            <button
+              :if={@releases != []}
+              type="button"
+              phx-click="open_release_panel"
+              disabled={@selected_count == 0}
+              class="btn btn-sm btn-default"
+            >
+              {gettext("Add to release")}
+            </button>
             <button
               :if={@tier == :admin}
               type="button"
@@ -617,6 +706,35 @@ defmodule KilnCMSWeb.EditorLive do
             </button>
           </div>
         </div>
+
+        <form
+          :if={@adding_to_release?}
+          id="add-to-release"
+          phx-submit="add_to_release"
+          class="flex flex-wrap items-end gap-3 rounded border border-primary/40 bg-primary/5 px-3 py-2 text-sm"
+        >
+          <div>
+            <label for="add-to-release-target" class="field-label">{gettext("Release")}</label>
+            <select id="add-to-release-target" name="release_id" class="field-select w-auto">
+              <option :for={release <- @releases} value={release.id}>{release.name}</option>
+            </select>
+          </div>
+          <div>
+            <label for="add-to-release-action" class="field-label">{gettext("On go-live")}</label>
+            <select id="add-to-release-action" name="release_action" class="field-select w-auto">
+              <option value="publish">{gettext("Publish")}</option>
+              <option value="unpublish">{gettext("Unpublish")}</option>
+            </select>
+          </div>
+          <div class="ml-auto flex gap-2">
+            <button type="submit" class="btn btn-sm btn-primary">
+              {gettext("Add %{count} item(s)", count: @selected_count)}
+            </button>
+            <button type="button" phx-click="cancel_release_panel" class="btn btn-sm btn-default">
+              {gettext("Cancel")}
+            </button>
+          </div>
+        </form>
 
         <div
           :if={@confirming_bulk}

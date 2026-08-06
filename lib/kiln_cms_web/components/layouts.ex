@@ -517,6 +517,15 @@ defmodule KilnCMSWeb.Layouts do
         path: ~p"/editor/calendar",
         icon: "hero-calendar-days"
       },
+      # Content releases (#500) — editorial planning, so it sits with the author
+      # group next to the calendar it plots onto, not with the admin tools. The
+      # admin-only half (schedule/publish/roll back) is gated on the page.
+      %{
+        key: :releases,
+        label: gettext("Releases"),
+        path: ~p"/editor/releases",
+        icon: "hero-rocket-launch"
+      },
       multi_locale? &&
         %{
           key: :translations,
