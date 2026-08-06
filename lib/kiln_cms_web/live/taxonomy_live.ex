@@ -181,13 +181,32 @@ defmodule KilnCMSWeb.TaxonomyLive do
   # Tags bucketed by group, in picker order, with "Ungrouped" last. Every group
   # is listed even when empty so editors can see a bucket they've yet to fill;
   # "Ungrouped" only appears when it has something in it.
-  defp group_tags(tags, groups) do
-    by_group = Enum.group_by(tags, & &1.tag_group_id)
+  #
+  # A tag whose `tag_group_id` names no LOADED group — a dangling or cross-tenant
+  # FK (`tags.tag_group_id` has no org component), or a group created after the
+  # page loaded — falls into "Ungrouped" rather than out of every section (#525).
+  # Dropping it hid its Edit/Delete controls, so it couldn't be fixed from the
+  # UI, and the "Tags (N)" heading (`length(@records)`) then over-counted the
+  # rows actually drawn. Mirrors the editor picker's `bucket_for/3` fallback so
+  # the two surfaces agree about the same data.
+  #
+  # Public only so the bucketing can be unit-tested with hand-built structs: the
+  # unknown-group path is unreachable through the DB in the fail-open test suite
+  # (both reads are `global?`, so every referenced group loads) and the `nilify`
+  # FK forbids a truly dangling `tag_group_id`, so it can't be seeded either.
+  @doc false
+  def group_tags(tags, groups) do
+    known = MapSet.new(groups, & &1.id)
+
+    {grouped, loose} =
+      Enum.split_with(tags, &(&1.tag_group_id && MapSet.member?(known, &1.tag_group_id)))
+
+    by_group = Enum.group_by(grouped, & &1.tag_group_id)
     named = Enum.map(groups, &{&1.id, &1.name, Map.get(by_group, &1.id, [])})
 
-    case Map.get(by_group, nil, []) do
+    case loose do
       [] -> named
-      loose -> named ++ [{nil, gettext("Ungrouped"), loose}]
+      _ -> named ++ [{nil, gettext("Ungrouped"), loose}]
     end
   end
 
