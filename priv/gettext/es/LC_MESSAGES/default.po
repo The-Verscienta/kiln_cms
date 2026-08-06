@@ -437,8 +437,8 @@ msgstr "Eliminar todo"
 msgid "Delete permanently"
 msgstr "Eliminar permanentemente"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:657
-#: lib/kiln_cms_web/live/taxonomy_live.ex:670
+#: lib/kiln_cms_web/live/taxonomy_live.ex:672
+#: lib/kiln_cms_web/live/taxonomy_live.ex:685
 #, elixir-autogen, elixir-format
 msgid "Delete “%{name}”?"
 msgstr "¿Eliminar «%{name}»?"
@@ -913,7 +913,7 @@ msgstr "tipo no compatible"
 msgid "· no alt"
 msgstr "· sin texto alternativo"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:673
+#: lib/kiln_cms_web/live/taxonomy_live.ex:688
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
 msgstr "«%{name}» se usa en %{count} elemento(s). ¿Eliminarlo de todos modos? Se quitarán los vínculos."
@@ -1735,7 +1735,7 @@ msgid "No results for “%{query}”."
 msgstr "No hay resultados para «%{query}»."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:3772
-#: lib/kiln_cms_web/live/taxonomy_live.ex:685
+#: lib/kiln_cms_web/live/taxonomy_live.ex:700
 #, elixir-autogen, elixir-format
 msgid "No tags yet."
 msgstr "Aún no hay etiquetas."
@@ -2274,7 +2274,7 @@ msgstr "%{count} elemento(s) movido(s) a la papelera, %{skipped} omitido(s)"
 msgid "New content type"
 msgstr "Nuevo tipo de contenido"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:683
+#: lib/kiln_cms_web/live/taxonomy_live.ex:698
 #, elixir-autogen, elixir-format
 msgid "No categories yet."
 msgstr "Aún no hay categorías."
@@ -2289,7 +2289,7 @@ msgstr "Aún no hay tipos de contenido personalizados."
 msgid "No media yet — upload some in the"
 msgstr "Aún no hay medios — suba algunos en la"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:686
+#: lib/kiln_cms_web/live/taxonomy_live.ex:701
 #, elixir-autogen, elixir-format
 msgid "Nothing here yet."
 msgstr "Aún no hay nada aquí."
@@ -2814,12 +2814,12 @@ msgstr "correcto"
 msgid "skipped"
 msgstr "omitido"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:690
+#: lib/kiln_cms_web/live/taxonomy_live.ex:705
 #, elixir-autogen, elixir-format
 msgid "category"
 msgstr "categoría"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:692
+#: lib/kiln_cms_web/live/taxonomy_live.ex:707
 #, elixir-autogen, elixir-format
 msgid "tag"
 msgstr "etiqueta"
@@ -5647,7 +5647,7 @@ msgstr "Deje todo sin marcar para ofrecer este grupo en todos los tipos de conte
 msgid "No blocks yet"
 msgstr "Aún no hay bloques"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:684
+#: lib/kiln_cms_web/live/taxonomy_live.ex:699
 #, elixir-autogen, elixir-format
 msgid "No tag groups yet."
 msgstr "Aún no hay grupos de etiquetas."
@@ -5662,7 +5662,7 @@ msgstr "Aún no hay etiquetas en este grupo."
 msgid "No tags match that filter."
 msgstr "Ninguna etiqueta coincide con ese filtro."
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:652
+#: lib/kiln_cms_web/live/taxonomy_live.ex:666
 #, elixir-autogen, elixir-format
 msgid "Only: %{types}"
 msgstr "Solo: %{types}"
@@ -5718,7 +5718,7 @@ msgstr "Sin grupo"
 msgid "Unpublishes"
 msgstr "Se despublica el"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:691
+#: lib/kiln_cms_web/live/taxonomy_live.ex:706
 #, elixir-autogen, elixir-format
 msgid "tag group"
 msgstr "grupo de etiquetas"
@@ -5728,7 +5728,7 @@ msgstr "grupo de etiquetas"
 msgid "— Ungrouped —"
 msgstr "— Sin grupo —"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:660
+#: lib/kiln_cms_web/live/taxonomy_live.ex:675
 #, elixir-autogen, elixir-format
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."
 msgstr "«%{name}» contiene %{count} etiqueta(s). ¿Eliminar el grupo de todos modos? Las etiquetas se conservan y quedan sin grupo."
@@ -9114,3 +9114,8 @@ msgstr[1] "No se encontraron problemas de alegaciones en %{count} verificaciones
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
 msgstr "Falta el aviso legal obligatorio. Añádalo literalmente: «%{disclaimer}»"
+
+#: lib/kiln_cms_web/live/taxonomy_live.ex:661
+#, elixir-autogen, elixir-format
+msgid "%{type} (unknown)"
+msgstr "%{type} (desconocido)"

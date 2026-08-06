@@ -437,8 +437,8 @@ msgstr ""
 msgid "Delete permanently"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:657
-#: lib/kiln_cms_web/live/taxonomy_live.ex:670
+#: lib/kiln_cms_web/live/taxonomy_live.ex:672
+#: lib/kiln_cms_web/live/taxonomy_live.ex:685
 #, elixir-autogen, elixir-format
 msgid "Delete “%{name}”?"
 msgstr ""
@@ -913,7 +913,7 @@ msgstr ""
 msgid "· no alt"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:673
+#: lib/kiln_cms_web/live/taxonomy_live.ex:688
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
 msgstr ""
@@ -1735,7 +1735,7 @@ msgid "No results for “%{query}”."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:3772
-#: lib/kiln_cms_web/live/taxonomy_live.ex:685
+#: lib/kiln_cms_web/live/taxonomy_live.ex:700
 #, elixir-autogen, elixir-format
 msgid "No tags yet."
 msgstr ""
@@ -2274,7 +2274,7 @@ msgstr ""
 msgid "New content type"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:683
+#: lib/kiln_cms_web/live/taxonomy_live.ex:698
 #, elixir-autogen, elixir-format
 msgid "No categories yet."
 msgstr ""
@@ -2289,7 +2289,7 @@ msgstr ""
 msgid "No media yet — upload some in the"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:686
+#: lib/kiln_cms_web/live/taxonomy_live.ex:701
 #, elixir-autogen, elixir-format
 msgid "Nothing here yet."
 msgstr ""
@@ -2814,12 +2814,12 @@ msgstr ""
 msgid "skipped"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:690
+#: lib/kiln_cms_web/live/taxonomy_live.ex:705
 #, elixir-autogen, elixir-format
 msgid "category"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:692
+#: lib/kiln_cms_web/live/taxonomy_live.ex:707
 #, elixir-autogen, elixir-format
 msgid "tag"
 msgstr ""
@@ -5647,7 +5647,7 @@ msgstr ""
 msgid "No blocks yet"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:684
+#: lib/kiln_cms_web/live/taxonomy_live.ex:699
 #, elixir-autogen, elixir-format
 msgid "No tag groups yet."
 msgstr ""
@@ -5662,7 +5662,7 @@ msgstr ""
 msgid "No tags match that filter."
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:652
+#: lib/kiln_cms_web/live/taxonomy_live.ex:666
 #, elixir-autogen, elixir-format
 msgid "Only: %{types}"
 msgstr ""
@@ -5718,7 +5718,7 @@ msgstr ""
 msgid "Unpublishes"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:691
+#: lib/kiln_cms_web/live/taxonomy_live.ex:706
 #, elixir-autogen, elixir-format
 msgid "tag group"
 msgstr ""
@@ -5728,7 +5728,7 @@ msgstr ""
 msgid "— Ungrouped —"
 msgstr ""
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:660
+#: lib/kiln_cms_web/live/taxonomy_live.ex:675
 #, elixir-autogen, elixir-format
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."
 msgstr ""
@@ -9113,4 +9113,9 @@ msgstr[1] ""
 #: lib/kiln_cms_web/components/compliance_components.ex:91
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
+msgstr ""
+
+#: lib/kiln_cms_web/live/taxonomy_live.ex:661
+#, elixir-autogen, elixir-format
+msgid "%{type} (unknown)"
 msgstr ""

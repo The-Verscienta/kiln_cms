@@ -169,6 +169,18 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
       assert html =~ "become ungrouped"
     end
 
+    test "a scope entry naming no live type renders as (unknown) (#526)", %{conn: conn} do
+      # Seeded to bypass the KnownContentTypes validation — models a pre-existing
+      # bad row or a TypeDefinition renamed out from under the group.
+      seed_tag_group(%{name: "Stale scope", content_types: ["ghosttype", "post"]})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      # The unresolvable entry is flagged; the real one shows its label, not "(unknown)".
+      assert html =~ "ghosttype (unknown)"
+      refute html =~ "post (unknown)"
+    end
+
     # A tag pointing at a group the page didn't load (a cross-tenant `tag_group_id`
     # — the FK carries no org component — or one raced in after load) must fall
     # into "Ungrouped", not vanish: dropping it hid its Edit/Delete controls and
