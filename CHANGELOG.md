@@ -1463,6 +1463,31 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A client-chosen payload shape no longer crashes an editor LiveView.** A
+  `handle_event/3` payload is arbitrary client JSON and `handle_params/3` has a
+  controller's shape freedom, so `%{"q" => q}` constrains the key and never the
+  value — `String.trim/1` and `Integer.parse/1` have no clause for a list or a
+  map and raise (#764). The authenticated sibling of #751.
+
+  Two mechanisms, which only work together: a `when is_binary(…)` guard on the
+  clause heads that would otherwise raise inside their bodies, and a catch-all
+  `handle_event/3` that `KilnCMSWeb.MalformedEvent` appends to every Kiln
+  LiveView so an unmatched event is a no-op. A guard without the catch-all just
+  moves the crash from the body to the head. It has to be `@before_compile`:
+  a catch-all injected at the top of a module shadows every real handler in it.
+
+  The three cases reachable by a **crafted link** rather than a pushed event —
+  `/editor?q[a]=1`, `/media?q[a]=1`, `/editor/analytics?range[]=7` — now read
+  through `KilnCMSWeb.Params`, so a wrong shape is absent rather than coerced.
+
+  `KilnCMSWeb.CollabChannel` is separate: `handle_in/3` had no catch-all and
+  `Base.decode64/2` was called on an unguarded `"update"` value, so one
+  malformed frame killed that client's channel process and dropped its editor
+  to a rejoin mid-edit. It now guards the payload and ignores unknown frames.
+  The document room itself survives either way — each client gets its own
+  channel process, and `Collab.DocServer` monitors its channels rather than
+  linking them.
+
 - **`KILN_STRICT_TEST=true` ran the test suite without strict tenancy, and said
   nothing.** The flag was matched as `== "1"` while
   `docs/environment-variables.md` teaches `true`/`1`/`yes`/`on` for every other

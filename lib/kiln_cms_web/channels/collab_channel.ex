@@ -149,7 +149,22 @@ defmodule KilnCMSWeb.CollabChannel do
   end
 
   @impl true
-  def handle_in("update", %{"update" => encoded}, socket) do
+  # `is_binary(encoded)` is load-bearing, not decoration (#764). The payload is
+  # client-chosen JSON, so `%{"update" => encoded}` constrains the key and never
+  # the value — and `Base.decode64/2` has no clause for a list or a map.
+  #
+  # The blast radius is the offending client only, not the room: Phoenix gives
+  # each client its own channel process per topic, and `Collab.DocServer` only
+  # MONITORS its attached channels rather than linking them, so a crash just
+  # drops that pid from `clients`. What the sender gets is its editor dropping
+  # to a rejoin mid-edit, which is bad enough for a frame it could have ignored.
+  #
+  # A non-binary falls through to the catch-all below, NOT to the `else` here —
+  # so an undecodable *binary* gets an error reply and a wrong-shaped payload
+  # gets no reply at all. That asymmetry is deliberate but harmless either way:
+  # `assets/js/collab.js` pushes updates without a `.receive`, so nothing is
+  # waiting on a reply.
+  def handle_in("update", %{"update" => encoded}, socket) when is_binary(encoded) do
     with {:ok, update} <- Base.decode64(encoded),
          :ok <- Crdt.apply_update(socket.assigns.doc_server, update) do
       broadcast_from!(socket, "update", %{"update" => encoded})
@@ -170,6 +185,23 @@ defmodule KilnCMSWeb.CollabChannel do
   # carets appear immediately instead of on the next periodic refresh).
   def handle_in("awareness_request", _payload, socket) do
     broadcast_from!(socket, "awareness_request", %{})
+    {:noreply, socket}
+  end
+
+  # Anything else is ignored rather than crashing the room (#764).
+  #
+  # `handle_in/3` had no catch-all, so an unknown event name — or a known one
+  # whose payload arrived in a shape its clause head does not match — was a
+  # `FunctionClauseError`, which terminates that client's channel process and
+  # drops it to a rejoin mid-edit. (Only that client's: see the `"update"`
+  # clause above on why the room survives.)
+  #
+  # Logged at debug rather than warn, and not replied to. A real client never
+  # gets here, so the only traffic is a stale build or someone poking the
+  # socket; neither is worth an error-tracker event, and an error reply would
+  # tell a prober which event names exist.
+  def handle_in(event, _payload, socket) do
+    Logger.debug("CollabChannel ignoring unhandled event #{inspect(event)}")
     {:noreply, socket}
   end
 end

@@ -67,6 +67,13 @@ defmodule KilnCMSWeb do
       # declared here survives that, and refuses the join.
       on_mount KilnCMSWeb.LiveRouteGuard
 
+      # Appends a catch-all `handle_event/3` after the module body, so a pushed
+      # event whose payload arrived in a shape no clause matches is ignored
+      # rather than crashing the view (#764). Must be `@before_compile`, not a
+      # clause injected here — a catch-all written at the top of a module
+      # shadows every real handler below it.
+      use KilnCMSWeb.MalformedEvent
+
       unquote(html_helpers())
     end
   end
