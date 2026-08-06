@@ -162,6 +162,65 @@ defmodule KilnCMS.CMS.ReleasesTest do
     end
   end
 
+  describe "size cap" do
+    setup do
+      previous = Application.get_env(:kiln_cms, Releases, [])
+      Application.put_env(:kiln_cms, Releases, Keyword.put(previous, :max_items, 2))
+      on_exit(fn -> Application.put_env(:kiln_cms, Releases, previous) end)
+      :ok
+    end
+
+    test "a full release refuses further items" do
+      admin = user(:admin)
+      rel = release(admin)
+
+      assert {:ok, _} = add(rel, page(), admin)
+      assert {:ok, _} = add(rel, page(), admin)
+
+      assert {:error, %Ash.Error.Invalid{} = error} = add(rel, page(), admin)
+      assert Exception.message(error) =~ "full"
+
+      assert 2 =
+               rel.id
+               |> CMS.list_release_items_with_status!(:pending, authorize?: false)
+               |> length()
+    end
+
+    test "removing an item frees a slot" do
+      admin = user(:admin)
+      rel = release(admin)
+
+      {:ok, item} = add(rel, page(), admin)
+      {:ok, _} = add(rel, page(), admin)
+      assert {:error, %Ash.Error.Invalid{}} = add(rel, page(), admin)
+
+      {:ok, _} = CMS.cancel_release_item(item, %{}, actor: admin)
+      assert {:ok, _} = add(rel, page(), admin)
+    end
+
+    test "the cap counts only pending items, so a shipped release doesn't block a new one" do
+      admin = user(:admin)
+      shipped = release(admin, %{name: "Shipped"})
+      {:ok, _} = add(shipped, page(), admin)
+      {:ok, _} = add(shipped, page(), admin)
+      {:ok, published} = go_live(shipped, admin)
+      assert published.state == :published
+
+      # Its items are :applied now, not :pending — a fresh release starts empty.
+      fresh = release(admin, %{name: "Fresh"})
+      assert {:ok, _} = add(fresh, page(), admin)
+      assert {:ok, _} = add(fresh, page(), admin)
+    end
+
+    test "the cap and the transaction timeout are configurable" do
+      assert Releases.max_items() == 2
+
+      Application.put_env(:kiln_cms, Releases, max_items: 7, transaction_timeout_ms: 1_000)
+      assert Releases.max_items() == 7
+      assert Releases.transaction_timeout_ms() == 1_000
+    end
+  end
+
   describe "authorization" do
     test "editors compose releases but may not ship them" do
       editor = user(:editor)

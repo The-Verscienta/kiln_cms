@@ -69,6 +69,30 @@ matters more here than elsewhere, because the preview link below renders every
 item's unpublished body to whoever holds it — so a release can only ever expose
 what the editor who filled it was already allowed to see.
 
+### How large a release can get
+
+A release is capped at **500 items** by default. The console shows how many
+slots are used, warns at 80%, and the add is refused once the cap is reached.
+
+The cap exists because the single go-live transaction — the thing that makes the
+whole feature's guarantee true — holds row locks on every item for its duration,
+and the console recomputes readiness across every item on each render. Both
+scale with item count. The default is deliberately generous (a site-wide
+migration release is a real use); it is there to stop unbounded *accidental*
+growth from a bulk "select all", not to impose an editorial style.
+
+Both bounds are configurable:
+
+```elixir
+config :kiln_cms, KilnCMS.CMS.Releases,
+  max_items: 500,
+  transaction_timeout_ms: 120_000
+```
+
+It is a guardrail rather than an invariant: the check is a count, so two
+simultaneous adds at the cap can overshoot by one. Nothing downstream depends on
+the exact number.
+
 ### One record, one open release
 
 A given piece of content can sit in **at most one** release that hasn't shipped.
@@ -106,7 +130,8 @@ never see a partial campaign; the site is untouched; the release lands in
 **Failed** with the offending item and the reason recorded on it.
 
 The honest cost: one long transaction holding row locks on every item for its
-duration (bounded at two minutes).
+duration — bounded by `transaction_timeout_ms` (two minutes by default) and, at
+the other end, by the item cap above.
 
 ### Skipped, not failed
 

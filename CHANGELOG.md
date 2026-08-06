@@ -29,6 +29,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Content releases are bounded.** A release is capped at 500 items by default,
+  configurable via `config :kiln_cms, KilnCMS.CMS.Releases, max_items:` alongside
+  `transaction_timeout_ms:`. The go-live transaction is what makes a release
+  atomic, and it holds row locks on every item for its duration — so an
+  unbounded release built by a bulk "select all" could hold those locks until
+  the timeout aborted it, *after* the wait. The console shows slots used and
+  warns at 80% rather than only refusing at the cap (#837).
+
 - **Content releases: bundled, atomically published groups of changes.** A
   release is a named bundle of publishes and unpublishes that ships as one
   coordinated change — the Contentful Launch / Sanity Releases analogue. Kiln's

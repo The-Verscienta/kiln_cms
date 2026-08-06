@@ -121,6 +121,8 @@ defmodule KilnCMSWeb.ReleaseLive do
     |> assign(:titles, resolve_titles(items, opts))
     |> assign(:readiness, readiness(release, opts))
     |> assign(:schedule_form, to_form(schedule_params(release), as: :schedule))
+    |> assign(:max_items, Releases.max_items())
+    |> assign(:pending_count, Enum.count(items, &(&1.status == :pending)))
     |> subscribe_to(release)
   end
 
@@ -539,7 +541,32 @@ defmodule KilnCMSWeb.ReleaseLive do
 
       <div class="mt-6 grid gap-6 lg:grid-cols-3">
         <div class="lg:col-span-2">
-          <h2 class="text-sm font-medium">{gettext("Contents")}</h2>
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 class="text-sm font-medium">{gettext("Contents")}</h2>
+            <span :if={@pending_count > 0} class="text-xs text-base-content/60">
+              {gettext("%{count} of %{cap} slots used", count: @pending_count, cap: @max_items)}
+            </span>
+          </div>
+          <%!-- Warn before the cap rather than only refusing at it: an editor
+                filling a launch by bulk selection should find out with room to
+                split the release, not on the add that fails (#837). --%>
+          <p
+            :if={@pending_count >= @max_items}
+            class="mt-2 rounded border border-warning/40 bg-warning/10 p-2 text-xs"
+          >
+            {gettext(
+              "This release is full. Ship it or move some items to another release before adding more."
+            )}
+          </p>
+          <p
+            :if={@pending_count < @max_items and @pending_count >= div(@max_items * 4, 5)}
+            class="mt-2 rounded border border-warning/30 bg-warning/5 p-2 text-xs"
+          >
+            {gettext("This release is nearly full (%{count} of %{cap}).",
+              count: @pending_count,
+              cap: @max_items
+            )}
+          </p>
 
           <.empty_state
             :if={@items == []}

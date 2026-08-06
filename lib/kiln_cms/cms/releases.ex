@@ -25,7 +25,13 @@ defmodule KilnCMS.CMS.Releases do
   the site is exactly as it was.
 
   The cost is honest and worth stating: one long-running transaction holding row
-  locks on every item for the duration. `@transaction_timeout_ms` bounds it.
+  locks on every item for the duration. Two things bound it — `max_items/0` caps
+  how large a release can get, and `transaction_timeout_ms/0` caps how long the
+  go-live may run. Both are configurable per install:
+
+      config :kiln_cms, KilnCMS.CMS.Releases,
+        max_items: 500,
+        transaction_timeout_ms: 120_000
 
   ## Already-true items are skipped, not failed
 
@@ -44,18 +50,26 @@ defmodule KilnCMS.CMS.Releases do
   record has since drifted, `prior_version_id` — in reverse order, in one
   transaction, with the same all-or-nothing guarantee. See `roll_back/1`.
 
-  ## A known, accepted gap in notifications
+  ## Notifications
 
   Ash drops a resource's notifications for any action running inside a
-  transaction it did not open, so every write here asks for them back and
-  replays them on commit (`notifying/1`). Four internal writes are still missed,
-  because they are made by the publish path's own hooks rather than by us:
-  `Page.set_published_version_id` (the published-version pointer),
-  `HistoryAnchor.create` (the audit chain), `PublishedArtifact.destroy`, and the
-  `WebhookDelivery` rows `Webhooks.dispatch/3` records. Threading notifications
-  out of those shared changes would touch the whole publish path for little gain
-  — the meaningful `:publish` / `:unpublish` notification is captured and
-  delivered, and the missed ones are bookkeeping writes no subscriber acts on.
+  transaction it did not open, so every write here asks for them back
+  (`notifying/1`) and replays them on commit. Four internal writes still don't,
+  because the publish path's own hooks make them rather than us:
+  `Page.set_published_version_id`, `HistoryAnchor.create`,
+  `PublishedArtifact.destroy`, and the `WebhookDelivery` rows
+  `Webhooks.dispatch/3` records — each logged as "Missed 1 notifications".
+
+  That reads like a gap and isn't one (#838). Only resources declaring
+  `graphql.subscriptions` get a notifier at all (`AshGraphql.Resource.Transformers.Subscription`),
+  and `HistoryAnchor`, `PublishedArtifact` and `WebhookDelivery` declare none —
+  their notifications have no consumer in this codebase, in or out of a
+  transaction. `set_published_version_id` is an `:update` on a subscribed
+  resource, so it would emit; but it is a redundant second event for a record
+  whose `:publish` notification IS delivered, and here the pointer is already
+  committed when that publish event fires. A subscriber re-reading on it sees
+  the final state — strictly better ordering than the normal path, where the
+  pointer lands in a second event *after* the first.
   """
   require Logger
 
@@ -68,7 +82,36 @@ defmodule KilnCMS.CMS.Releases do
   # (all of that is queued), but it does run N publish transactions' worth of
   # writes back to back. Two minutes is far above any realistic release and far
   # below "a stuck worker holds locks all afternoon".
-  @transaction_timeout_ms :timer.minutes(2)
+  @default_transaction_timeout_ms :timer.minutes(2)
+
+  # Generous on purpose: a site-wide migration release is a real use, and the
+  # cap exists to stop unbounded accidental growth (a "select all" over a large
+  # library), not to impose an editorial style. Comfortably inside the timeout
+  # above — each item is a handful of writes, everything expensive is queued.
+  @default_max_items 500
+
+  @doc """
+  The most items a release may hold. Configure with
+
+      config :kiln_cms, KilnCMS.CMS.Releases, max_items: 500
+
+  Enforced at add time by `KilnCMS.CMS.Validations.ReleaseWithinSizeLimit`.
+  """
+  @spec max_items() :: pos_integer()
+  def max_items, do: config(:max_items, @default_max_items)
+
+  @doc """
+  How long a go-live or rollback transaction may run before Postgres aborts it.
+  Configure with
+
+      config :kiln_cms, KilnCMS.CMS.Releases, transaction_timeout_ms: 120_000
+  """
+  @spec transaction_timeout_ms() :: pos_integer()
+  def transaction_timeout_ms,
+    do: config(:transaction_timeout_ms, @default_transaction_timeout_ms)
+
+  defp config(key, default),
+    do: :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(key, default)
 
   @typedoc "Why an item cannot be applied, or that it needs no work."
   @type classification ::
@@ -493,7 +536,7 @@ defmodule KilnCMS.CMS.Releases do
   end
 
   defp run_transaction(fun) do
-    Repo.transaction(fun, timeout: @transaction_timeout_ms)
+    Repo.transaction(fun, timeout: transaction_timeout_ms())
   end
 
   defp event_payload(release, items) do
