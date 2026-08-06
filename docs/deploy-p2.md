@@ -54,7 +54,8 @@ Key points:
 - [ ] **Migration ran** — startup logs show `bin/migrate` applying
       `add_automation_rules` (or "Already up"), and the app booted (not
       crash-looping on migrate).
-- [ ] **App healthy** — `GET /up` returns `200`.
+- [ ] **App serving** — `GET /live` returns `200` (the Docker healthcheck's probe; no DB check).
+- [ ] **App ready** — `GET /up` returns `200` (adds the `SELECT 1` DB check).
 - [ ] **#342 automation** — as an **admin**, `/editor/automation` loads and you
       can add a rule (non-admin/anonymous should be bounced). Optionally add a
       `broadcast`/`invalidate_cache` rule and publish an item to see it fire.

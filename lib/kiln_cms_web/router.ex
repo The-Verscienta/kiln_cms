@@ -653,7 +653,12 @@ defmodule KilnCMSWeb.Router do
     # branding lookup — so `:probe` is the right ceiling.
     get "/manifest.webmanifest", ManifestController, :show
 
-    # Liveness probe for load balancers / uptime monitors / Coolify.
+    # NB `GET /live` (DB-free liveness, #816) is answered by the endpoint plug
+    # `KilnCMSWeb.Plugs.Liveness` BEFORE the router — deliberately, so it never
+    # reaches SetTenant's host resolution (a DB read). It is not a route here.
+    #
+    # Readiness: 200 only when the database is also reachable, else 503 — for the
+    # load balancer / uptime monitor deciding whether to route traffic here.
     get "/up", HealthController, :show
     # Readiness probe with DB + Oban queue-depth payload for monitoring.
     get "/ready", HealthController, :ready
