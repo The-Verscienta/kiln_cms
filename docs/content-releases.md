@@ -22,9 +22,16 @@ groups: **Planned** (open, scheduled, publishing, failed), **Published**, and
 
 1. **Create a release** from the form at the top of the list — a name and
    optional notes.
-2. **Add content to it.** In the content list (`/editor`), tick the records you
-   want and use **Add to release**. Choose the release, and whether it should
-   **Publish** or **Unpublish** each of them when it goes live.
+2. **Add content to it**, from either end:
+   - In the content list (`/editor`), tick the records you want and use **Add to
+     release** — the bulk path, for assembling a campaign in one pass.
+   - In the content editor's **Settings** tab, the **Release** panel queues the
+     record you are editing, shows which release it is already in, and takes it
+     back out again — the path for "this one piece belongs in Friday's launch",
+     without leaving the editor.
+
+   Either way you choose the release and whether it should **Publish** or
+   **Unpublish** that record when the release goes live.
 3. **Review it.** The release page lists everything in the bundle with its title
    resolved, and badges any item that couldn't ship as it stands (e.g. *"cannot
    be published from archived"*) or that would be a no-op (*"already in that

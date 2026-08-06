@@ -320,6 +320,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:assignable_users, assignable_users())
          |> assign(:task_assign_open?, assign_deep_link?)
          |> assign(:task_draft, %{})
+         # Content releases (#500 / #836): the record's pending release, if any,
+         # plus the releases it could be added to.
+         |> assign_release_state(kind, record.id, actor, org)
          |> assign_record(record)
          |> open_settings_if_deep_linked(assign_deep_link?)}
     end
@@ -1542,6 +1545,68 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # No `<form>` for any of this — see `release_panel/1`. Each control carries its
+  # own `phx-change` into `@release_draft`; the button is a plain `phx-click`.
+  def handle_event("release_draft_change", %{"release_target" => v}, socket),
+    do: {:noreply, put_release_draft(socket, "release_id", v)}
+
+  def handle_event("release_draft_change", %{"release_action" => v}, socket),
+    do: {:noreply, put_release_draft(socket, "action", v)}
+
+  def handle_event("release_draft_change", _params, socket), do: {:noreply, socket}
+
+  def handle_event("release_add", _params, socket) do
+    draft = socket.assigns.release_draft
+    release_id = draft["release_id"] || default_release_id(socket)
+
+    attrs = %{
+      release_id: release_id,
+      content_type: to_string(socket.assigns.kind),
+      content_id: socket.assigns.record.id,
+      action: release_action(draft["action"])
+    }
+
+    case CMS.add_release_item(attrs,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, _item} ->
+        {:noreply,
+         socket
+         |> reload_release_state()
+         |> put_flash(:info, gettext("Added to the release."))}
+
+      # The reason matters here in a way it doesn't for most adds — "already in
+      # another open release", "outside your content-type scope" and "release is
+      # full" are all things the editor can act on.
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, release_error_message(error))}
+    end
+  end
+
+  def handle_event("release_remove", _params, socket) do
+    case socket.assigns.release_item do
+      nil ->
+        {:noreply, socket}
+
+      item ->
+        case CMS.cancel_release_item(item, %{},
+               actor: socket.assigns.actor,
+               tenant: socket.assigns.current_org
+             ) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> reload_release_state()
+             |> put_flash(:info, gettext("Removed from the release."))}
+
+          {:error, _} ->
+            {:noreply,
+             put_flash(socket, :error, gettext("Couldn't remove it from that release."))}
+        end
+    end
+  end
+
   def handle_event("task_complete", %{"id" => id}, socket) do
     case Enum.find(socket.assigns.tasks, &(&1.id == id)) do
       nil ->
@@ -2362,6 +2427,85 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp put_task_draft(socket, key, value),
     do: assign(socket, :task_draft, Map.put(socket.assigns.task_draft, key, value))
+
+  # ── Content releases (#500 / #836) ──────────────────────────────────────────
+
+  # A record sits in at most one unshipped release (the partial unique index on
+  # `release_items`), so this is a single row or nothing. The pickable list is
+  # the editable releases; adding is refused server-side for a type outside the
+  # editor's scope, which is what actually enforces it — the picker just doesn't
+  # need to know.
+  defp assign_release_state(socket, kind, record_id, actor, org) do
+    item =
+      to_string(kind)
+      |> CMS.list_pending_release_items_for_content!(record_id, actor: actor, tenant: org)
+      |> List.first()
+
+    socket
+    |> assign(:release_item, item)
+    |> assign(:release_of_item, release_of(item, actor, org))
+    |> assign(:releases, CMS.list_editable_releases!(actor: actor, tenant: org))
+    |> assign(:release_draft, %{})
+  end
+
+  defp reload_release_state(socket) do
+    assign_release_state(
+      socket,
+      socket.assigns.kind,
+      socket.assigns.record.id,
+      socket.assigns.actor,
+      socket.assigns.current_org
+    )
+  end
+
+  defp release_of(nil, _actor, _org), do: nil
+
+  defp release_of(item, actor, org) do
+    case CMS.get_release(item.release_id, actor: actor, tenant: org) do
+      {:ok, release} -> release
+      _ -> nil
+    end
+  end
+
+  defp put_release_draft(socket, key, value),
+    do: assign(socket, :release_draft, Map.put(socket.assigns.release_draft, key, value))
+
+  # The select renders the first release preselected, but a browser that never
+  # fires `change` (the editor accepts the default) leaves the draft empty — so
+  # the button falls back to what the select is actually showing.
+  defp default_release_id(socket) do
+    case socket.assigns.releases do
+      [%{id: id} | _] -> id
+      _ -> nil
+    end
+  end
+
+  defp release_action("unpublish"), do: :unpublish
+  defp release_action(_publish), do: :publish
+
+  # The reason is worth surfacing here — "already in another open release",
+  # "outside your content-type scope" and "release is full" are all things the
+  # editor can act on, and a generic failure would send them hunting.
+  #
+  # Read off the error STRUCTS rather than `Exception.message/1`: Ash renders a
+  # multi-line breakdown with breadcrumbs and a stacktrace, so splitting that on
+  # newlines puts `:gen_server.handle_msg/3` in the flash.
+  defp release_error_message(%{errors: errors}) when is_list(errors) do
+    errors
+    |> Enum.map(&leaf_message/1)
+    |> Enum.find(&(is_binary(&1) and &1 != ""))
+    |> case do
+      nil -> generic_release_error()
+      reason -> gettext("Couldn't add it to that release: %{reason}", reason: reason)
+    end
+  end
+
+  defp release_error_message(_error), do: generic_release_error()
+
+  defp leaf_message(%{message: message}) when is_binary(message), do: message
+  defp leaf_message(_error), do: nil
+
+  defp generic_release_error, do: gettext("Couldn't add it to that release.")
 
   # Org editors/admins — the roster a task can be assigned to (viewers can't
   # act on content, so they're excluded). `authorize?: false`: OrgMembership's
@@ -4397,6 +4541,86 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </button>
         </div>
       </div>
+    </div>
+    """
+  end
+
+  attr :item, :map, default: nil
+  attr :release, :map, default: nil
+  attr :releases, :list, required: true
+  attr :draft, :map, required: true
+
+  # Content releases (#500 / #836): which release this record is queued in, or a
+  # picker to put it in one — the editor-side half of "add to release", which
+  # until now existed only as a bulk action on the content list.
+  #
+  # No `<form>`, for the reason `task_list/1` and `comment_panel/1` spell out:
+  # this renders inside the page's own `id="page-editor"` form, HTML forbids
+  # nested forms, and the parser silently drops the tag (keeping its inputs), so
+  # `phx-submit` would never fire and the button would appear to do nothing.
+  defp release_panel(assigns) do
+    ~H"""
+    <div class="space-y-2">
+      <%= if @item do %>
+        <div class="rounded border border-base-content/15 p-2 text-xs">
+          <p class="font-medium">
+            <.link :if={@release} navigate={~p"/editor/releases/#{@release.id}"} class="link">
+              {@release.name}
+            </.link>
+            <span :if={!@release}>{gettext("In a release")}</span>
+          </p>
+          <p class="mt-1 text-base-content/70">
+            {if @item.action == :unpublish,
+              do: gettext("Will be unpublished when the release goes live."),
+              else: gettext("Will be published when the release goes live.")}
+          </p>
+          <button
+            type="button"
+            phx-click="release_remove"
+            class="mt-2 text-primary hover:underline"
+          >
+            {gettext("Remove from release")}
+          </button>
+        </div>
+      <% else %>
+        <p :if={@releases == []} class="text-xs text-base-content/60">
+          {gettext("No open releases.")}
+          <.link navigate={~p"/editor/releases"} class="link">{gettext("Create one")}</.link>
+        </p>
+
+        <div :if={@releases != []} class="space-y-2">
+          <select
+            name="release_target"
+            phx-change="release_draft_change"
+            aria-label={gettext("Release")}
+            class="select select-sm w-full"
+          >
+            <option
+              :for={release <- @releases}
+              value={release.id}
+              selected={@draft["release_id"] == release.id}
+            >
+              {release.name}
+            </option>
+          </select>
+          <select
+            name="release_action"
+            phx-change="release_draft_change"
+            aria-label={gettext("On go-live")}
+            class="select select-sm w-full"
+          >
+            <option value="publish" selected={@draft["action"] != "unpublish"}>
+              {gettext("Publish on go-live")}
+            </option>
+            <option value="unpublish" selected={@draft["action"] == "unpublish"}>
+              {gettext("Unpublish on go-live")}
+            </option>
+          </select>
+          <button type="button" phx-click="release_add" class="btn btn-sm btn-default w-full">
+            {gettext("Add to release")}
+          </button>
+        </div>
+      <% end %>
     </div>
     """
   end
@@ -6743,6 +6967,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   open?={@task_assign_open?}
                   draft={@task_draft}
                   assignable_users={@assignable_users}
+                />
+              </.inspector_section>
+
+              <.inspector_section title={gettext("Release")}>
+                <.release_panel
+                  item={@release_item}
+                  release={@release_of_item}
+                  releases={@releases}
+                  draft={@release_draft}
                 />
               </.inspector_section>
 
