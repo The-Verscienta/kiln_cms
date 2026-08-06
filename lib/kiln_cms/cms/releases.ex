@@ -48,14 +48,14 @@ defmodule KilnCMS.CMS.Releases do
 
   Ash drops a resource's notifications for any action running inside a
   transaction it did not open, so every write here asks for them back and
-  replays them on commit (`notifying/1`). Three internal writes are still missed,
-  because they are made by the publish path's own `after_transaction` hooks
-  rather than by us: `Page.set_published_version_id` (the published-version
-  pointer), `HistoryAnchor.create` (the audit chain) and
-  `PublishedArtifact.destroy`. Threading notifications out of those shared
-  changes would touch the whole publish path for little gain — the meaningful
-  `:publish` / `:unpublish` notification is captured and delivered, and the
-  missed ones are bookkeeping writes no subscriber acts on.
+  replays them on commit (`notifying/1`). Four internal writes are still missed,
+  because they are made by the publish path's own hooks rather than by us:
+  `Page.set_published_version_id` (the published-version pointer),
+  `HistoryAnchor.create` (the audit chain), `PublishedArtifact.destroy`, and the
+  `WebhookDelivery` rows `Webhooks.dispatch/3` records. Threading notifications
+  out of those shared changes would touch the whole publish path for little gain
+  — the meaningful `:publish` / `:unpublish` notification is captured and
+  delivered, and the missed ones are bookkeeping writes no subscriber acts on.
   """
   require Logger
 
@@ -75,6 +75,23 @@ defmodule KilnCMS.CMS.Releases do
           :apply | {:skip, :already_in_state} | {:error, String.t()}
 
   @doc """
+  PubSub topic a release's console page listens on for its worker's verdict.
+
+  Go-live runs off-request, so the page that started it has nothing to re-read
+  at the moment it starts — the claim commits microseconds before the worker
+  does any work. Without this the console renders "Publishing" and stays there.
+  """
+  @spec topic(Ash.UUID.t()) :: String.t()
+  def topic(release_id), do: "content_release:#{release_id}"
+
+  # Broadcast AFTER the transaction, so a subscriber that re-reads on the
+  # message can only ever see committed state.
+  defp announce(release) do
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(release.id), {:release_finished, release.id})
+    release
+  end
+
+  @doc """
   Publish every pending item in `release`, atomically.
 
   Returns `{:ok, release}` with the release marked `:published`, or
@@ -92,9 +109,10 @@ defmodule KilnCMS.CMS.Releases do
     case run_transaction(fn -> apply_all(release, items, actor, opts) end) do
       {:ok, {published, notifications}} ->
         Ash.Notifier.notify(notifications)
-        {:ok, published}
+        {:ok, announce(published)}
 
       {:error, reason} ->
+        announce(release)
         fail(release, items, reason, opts)
     end
   end
@@ -122,7 +140,7 @@ defmodule KilnCMS.CMS.Releases do
     case run_transaction(fn -> undo_all(release, items, actor, opts) end) do
       {:ok, {rolled_back, notifications}} ->
         Ash.Notifier.notify(notifications)
-        {:ok, rolled_back}
+        {:ok, announce(rolled_back)}
 
       {:error, reason} ->
         {item_id, message} = describe_failure(reason, items)
@@ -133,6 +151,7 @@ defmodule KilnCMS.CMS.Releases do
           opts
         )
 
+        announce(release)
         {:error, reason}
     end
   end
@@ -149,12 +168,51 @@ defmodule KilnCMS.CMS.Releases do
   """
   @spec readiness(struct(), keyword()) :: [{struct(), classification()}]
   def readiness(release, opts \\ []) do
-    opts = Keyword.merge(system_opts(release), opts)
+    opts = readiness_opts(release, opts)
+    items = pending_items(release, opts)
+    records = resolve_records(items, opts)
 
-    release
-    |> pending_items(opts)
-    |> Enum.map(fn item -> {item, classify(item, opts)} end)
+    Enum.map(items, fn item -> {item, classify_resolved(item, Map.get(records, item.id))} end)
   end
+
+  # A caller that supplies an actor gets AUTHORIZED reads. `Keyword.merge` alone
+  # got this wrong: the caller never passes `:authorize?`, so `authorize?: false`
+  # from `system_opts/1` always survived, and the console's readiness panel
+  # reported the workflow state of content the reader's own policies hide.
+  defp readiness_opts(release, opts) do
+    if Keyword.has_key?(opts, :actor),
+      do: Keyword.put_new(opts, :tenant, release.org_id),
+      else: Keyword.merge(system_opts(release), opts)
+  end
+
+  # One read per content TYPE, not per item. The console recomputes readiness on
+  # mount and after every click, so a fifty-post release was fifty queries a
+  # render. The go-live transaction still reads each record individually — there
+  # it needs the freshest possible row, one at a time, right before it writes.
+  defp resolve_records(items, opts) do
+    items
+    |> Enum.group_by(& &1.content_type)
+    |> Enum.flat_map(fn {type, rows} -> records_for_type(type, rows, opts) end)
+    |> Map.new()
+  end
+
+  defp records_for_type(type, rows, opts) do
+    ids = rows |> Enum.map(& &1.content_id) |> Enum.uniq()
+    query = [filter: [id: [in: ids]], select: [:id, :state]]
+
+    found =
+      type
+      |> ContentTypes.list!(Keyword.put(opts, :query, query))
+      |> Map.new(&{&1.id, &1})
+
+    Enum.map(rows, &{&1.id, found[&1.content_id]})
+  rescue
+    # The content type was retired since the item was added.
+    _error -> Enum.map(rows, &{&1.id, nil})
+  end
+
+  defp classify_resolved(_item, nil), do: {:error, "content no longer exists"}
+  defp classify_resolved(item, record), do: classify_record(item, record)
 
   # --- go-live ---------------------------------------------------------------
 
@@ -255,11 +313,31 @@ defmodule KilnCMS.CMS.Releases do
   # unpublish being undone, and the "put it back exactly as it was" contract is
   # written once.
   defp undo_item(item, actor, opts) do
-    with {:ok, record} <- fetch_record(item, opts),
-         {:ok, notes} <- restore_state(item, record, actor, opts),
+    with {:ok, notes} <- undo_content(item, actor, opts),
          {:ok, mark_notes} <-
            notified(CMS.mark_release_item_rolled_back(item, %{}, notifying(opts))) do
       {:ok, notes ++ mark_notes}
+    end
+  end
+
+  # Content that is gone has nothing to restore, so rollback records the item as
+  # undone and moves on. Failing here instead would wedge the group permanently:
+  # the release returns to `:published`, the item stays `:applied`, and every
+  # retry hits the same deleted record — so one purged page would strand every
+  # OTHER item of the release live, with no way to take the group down. Go-live
+  # has the same shape of escape for an item whose desired state already holds.
+  defp undo_content(item, actor, opts) do
+    case fetch_record(item, opts) do
+      {:ok, record} ->
+        restore_state(item, record, actor, opts)
+
+      {:error, _gone} ->
+        Logger.warning(
+          "Release item #{item.id} (#{item.content_type} #{item.content_id}) has no content " <>
+            "to roll back; recording it as undone"
+        )
+
+        {:ok, []}
     end
   end
 

@@ -89,6 +89,11 @@ defmodule KilnCMS.CMS.ReleaseItem do
       accept [:release_id, :content_type, :content_id, :action]
 
       validate KilnCMS.CMS.Validations.KnownContentType
+      # Granular RBAC (#332) reaches this resource through the `content_type`
+      # attribute, not through the resource being written — see the validation.
+      # Without it, "add to release" is a hole straight through the type scope,
+      # and the release preview link renders whatever went through it.
+      validate KilnCMS.CMS.Validations.EditableReleaseContent
       validate KilnCMS.CMS.Validations.ReleaseOpenForEdit
       change KilnCMS.CMS.Changes.StampReleaseItemAdder
     end
@@ -169,6 +174,13 @@ defmodule KilnCMS.CMS.ReleaseItem do
       prepare build(sort: [inserted_at: :asc])
     end
 
+    read :for_releases do
+      description "Items across several releases at once (the console's item counts)."
+      argument :release_ids, {:array, :uuid}, allow_nil?: false
+
+      filter expr(release_id in ^arg(:release_ids))
+    end
+
     read :pending_for_content do
       description "The open reservation on one content record, if any."
       argument :content_type, :string, allow_nil?: false
@@ -182,10 +194,11 @@ defmodule KilnCMS.CMS.ReleaseItem do
   end
 
   policies do
-    bypass KilnCMS.CMS.Checks.OrgAdmin do
-      authorize_if always()
-    end
-
+    # No blanket `OrgAdmin` bypass, for the reason spelled out on
+    # `KilnCMS.CMS.ContentRelease`: a bypass skips every policy below it, which
+    # would let a human call the `mark_*` writes and rewrite the `prior_state` /
+    # `prior_version_id` that rollback restores from. `OrgEditor` matches admins
+    # too, so nothing legitimate is lost.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end

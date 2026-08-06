@@ -95,7 +95,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex:427
 #: lib/kiln_cms_web/live/editor_live.ex:435
 #: lib/kiln_cms_web/live/editor_live.ex:442
-#: lib/kiln_cms_web/live/release_live.ex:665
+#: lib/kiln_cms_web/live/release_live.ex:754
 #, elixir-autogen, elixir-format
 msgid "Archive"
 msgstr ""
@@ -123,7 +123,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex:536
 #: lib/kiln_cms_web/live/editor_live.ex:581
 #: lib/kiln_cms_web/live/overview_live.ex:238
-#: lib/kiln_cms_web/live/release_live.ex:492
+#: lib/kiln_cms_web/live/release_live.ex:556
 #: lib/kiln_cms_web/live/translations_live.ex:162
 #, elixir-autogen, elixir-format
 msgid "Content"
@@ -133,7 +133,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex:444
 #: lib/kiln_cms_web/live/editor_live.ex:705
 #: lib/kiln_cms_web/live/media_live.ex:1160
-#: lib/kiln_cms_web/live/release_live.ex:676
+#: lib/kiln_cms_web/live/release_live.ex:763
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr ""
@@ -200,7 +200,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex:440
 #: lib/kiln_cms_web/live/editor_live.ex:725
 #: lib/kiln_cms_web/live/editor_live.ex:851
-#: lib/kiln_cms_web/live/release_live.ex:327
+#: lib/kiln_cms_web/live/release_live.ex:391
 #, elixir-autogen, elixir-format
 msgid "Publish"
 msgstr ""
@@ -266,7 +266,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex:441
 #: lib/kiln_cms_web/live/editor_live.ex:726
 #: lib/kiln_cms_web/live/editor_live.ex:871
-#: lib/kiln_cms_web/live/release_live.ex:328
+#: lib/kiln_cms_web/live/release_live.ex:392
 #, elixir-autogen, elixir-format
 msgid "Unpublish"
 msgstr ""
@@ -558,7 +558,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/funnel_builder_live.ex:230
 #: lib/kiln_cms_web/live/funnel_live.ex:117
 #: lib/kiln_cms_web/live/newsletter_live.ex:342
-#: lib/kiln_cms_web/live/release_live.ex:373
+#: lib/kiln_cms_web/live/release_live.ex:437
 #: lib/kiln_cms_web/live/taxonomy_live.ex:392
 #: lib/kiln_cms_web/live/taxonomy_live.ex:516
 #: lib/kiln_cms_web/live/team_live.ex:498
@@ -623,7 +623,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex:6310
 #: lib/kiln_cms_web/live/content_editor_live.ex:7448
 #: lib/kiln_cms_web/live/form_builder_live.ex:484
-#: lib/kiln_cms_web/live/release_live.ex:639
+#: lib/kiln_cms_web/live/release_live.ex:727
 #: lib/kiln_cms_web/live/token_preview_live.ex:55
 #: lib/kiln_cms_web/live/token_preview_live.ex:60
 #, elixir-autogen, elixir-format
@@ -1464,7 +1464,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex:234
 #: lib/kiln_cms_web/live/editor_live.ex:925
-#: lib/kiln_cms_web/live/release_live.ex:319
+#: lib/kiln_cms_web/live/release_live.ex:383
 #, elixir-autogen, elixir-format
 msgid "Archived"
 msgstr ""
@@ -1818,10 +1818,10 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex:233
 #: lib/kiln_cms_web/live/editor_live.ex:924
-#: lib/kiln_cms_web/live/release_live.ex:315
-#: lib/kiln_cms_web/live/release_live.ex:331
-#: lib/kiln_cms_web/live/release_live.ex:416
-#: lib/kiln_cms_web/live/release_live.ex:548
+#: lib/kiln_cms_web/live/release_live.ex:379
+#: lib/kiln_cms_web/live/release_live.ex:395
+#: lib/kiln_cms_web/live/release_live.ex:480
+#: lib/kiln_cms_web/live/release_live.ex:612
 #, elixir-autogen, elixir-format
 msgid "Published"
 msgstr ""
@@ -2348,7 +2348,7 @@ msgid "Showing the %{max} most recently deleted files — older trashed files ex
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:6993
-#: lib/kiln_cms_web/live/release_live.ex:583
+#: lib/kiln_cms_web/live/release_live.ex:651
 #, elixir-autogen, elixir-format
 msgid "Shown in your local timezone; stored as UTC."
 msgstr ""
@@ -2721,7 +2721,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex:528
 #: lib/kiln_cms_web/live/mail_settings_live.ex:383
 #: lib/kiln_cms_web/live/newsletter_live.ex:436
-#: lib/kiln_cms_web/live/release_live.ex:494
+#: lib/kiln_cms_web/live/release_live.ex:558
 #: lib/kiln_cms_web/live/webhook_live.ex:422
 #, elixir-autogen, elixir-format
 msgid "Status"
@@ -3749,7 +3749,7 @@ msgid "Export trail (JSON)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex:438
-#: lib/kiln_cms_web/live/release_live.ex:316
+#: lib/kiln_cms_web/live/release_live.ex:380
 #: lib/kiln_cms_web/live/webhook_live.ex:475
 #, elixir-autogen, elixir-format
 msgid "Failed"
@@ -4232,7 +4232,7 @@ msgid "Only published posts can be sent."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex:326
-#: lib/kiln_cms_web/live/release_live.ex:312
+#: lib/kiln_cms_web/live/release_live.ex:376
 #, elixir-autogen, elixir-format
 msgid "Open"
 msgstr ""
@@ -4869,7 +4869,7 @@ msgid "Sourced claim with citation metadata"
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex:344
-#: lib/kiln_cms_web/live/release_live.ex:413
+#: lib/kiln_cms_web/live/release_live.ex:477
 #: lib/kiln_cms_web/live/slug_regen_live.ex:229
 #, elixir-autogen, elixir-format
 msgid "State"
@@ -6680,7 +6680,7 @@ msgid "Payment overdue"
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex:238
-#: lib/kiln_cms_web/live/release_live.ex:321
+#: lib/kiln_cms_web/live/release_live.ex:385
 #, elixir-autogen, elixir-format
 msgid "Pending"
 msgstr ""
@@ -7150,7 +7150,7 @@ msgid "Published at"
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex:268
-#: lib/kiln_cms_web/live/release_live.ex:324
+#: lib/kiln_cms_web/live/release_live.ex:388
 #, elixir-autogen, elixir-format
 msgid "Removed"
 msgstr ""
@@ -8568,12 +8568,12 @@ msgstr[1] ""
 msgid "%{publishing} going live, %{removing} coming down."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:170
+#: lib/kiln_cms_web/live/release_live.ex:203
 #, elixir-autogen, elixir-format
 msgid "A release needs a name."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:641
+#: lib/kiln_cms_web/live/release_live.ex:729
 #, elixir-autogen, elixir-format
 msgid "A shareable link showing the site as this release would leave it."
 msgstr ""
@@ -8583,7 +8583,7 @@ msgstr ""
 msgid "Add %{count} item(s)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:382
+#: lib/kiln_cms_web/live/release_live.ex:446
 #, elixir-autogen, elixir-format
 msgid "Add content to it from the content list."
 msgstr ""
@@ -8603,32 +8603,32 @@ msgstr ""
 msgid "Added %{count} item(s); %{skipped} skipped — already in another open release, or not addable"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:322
+#: lib/kiln_cms_web/live/release_live.ex:386
 #, elixir-autogen, elixir-format
 msgid "Applied"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:661
+#: lib/kiln_cms_web/live/release_live.ex:364
 #, elixir-autogen, elixir-format
 msgid "Archive this release? Its pending items are freed for other releases."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:357
+#: lib/kiln_cms_web/live/release_live.ex:421
 #, elixir-autogen, elixir-format
 msgid "Bundle a campaign's publishes and unpublishes and ship them as one coordinated change. A release goes live all at once, or not at all."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:493
+#: lib/kiln_cms_web/live/release_live.ex:557
 #, elixir-autogen, elixir-format
 msgid "Change"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:655
+#: lib/kiln_cms_web/live/release_live.ex:743
 #, elixir-autogen, elixir-format
 msgid "Close out"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:332
+#: lib/kiln_cms_web/live/release_live.ex:396
 #, elixir-autogen, elixir-format
 msgid "Closed"
 msgstr ""
@@ -8638,37 +8638,37 @@ msgstr ""
 msgid "Coming off the site"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:510
+#: lib/kiln_cms_web/live/release_live.ex:574
 #, elixir-autogen, elixir-format
 msgid "Content no longer exists"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:478
+#: lib/kiln_cms_web/live/release_live.ex:542
 #, elixir-autogen, elixir-format
 msgid "Contents"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:239
+#: lib/kiln_cms_web/live/release_live.ex:278
 #, elixir-autogen, elixir-format
 msgid "Couldn't remove that item."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:405
+#: lib/kiln_cms_web/live/release_live.ex:469
 #, elixir-autogen, elixir-format
 msgid "Create one above, then add content to it from the content list."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:644
+#: lib/kiln_cms_web/live/release_live.ex:732
 #, elixir-autogen, elixir-format
 msgid "Create preview link"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:380
+#: lib/kiln_cms_web/live/release_live.ex:444
 #, elixir-autogen, elixir-format
 msgid "Create release"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:673
+#: lib/kiln_cms_web/live/release_live.ex:760
 #, elixir-autogen, elixir-format
 msgid "Delete this release? Its item list goes with it."
 msgstr ""
@@ -8678,48 +8678,48 @@ msgstr ""
 msgid "Documents in this release"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:182
+#: lib/kiln_cms_web/live/release_live.ex:215
 #, elixir-autogen, elixir-format
 msgid "Enter a valid go-live date and time."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:568
+#: lib/kiln_cms_web/live/release_live.ex:636
 #, elixir-autogen, elixir-format
 msgid "Go live at"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:415
-#: lib/kiln_cms_web/live/release_live.ex:540
+#: lib/kiln_cms_web/live/release_live.ex:479
+#: lib/kiln_cms_web/live/release_live.ex:604
 #, elixir-autogen, elixir-format
 msgid "Go-live"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:189
+#: lib/kiln_cms_web/live/release_live.ex:222
 #, elixir-autogen, elixir-format
 msgid "Go-live date removed; the release is manual again."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:414
+#: lib/kiln_cms_web/live/release_live.ex:478
 #, elixir-autogen, elixir-format
 msgid "Items"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:364
+#: lib/kiln_cms_web/live/release_live.ex:428
 #, elixir-autogen, elixir-format
 msgid "New release"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:403
+#: lib/kiln_cms_web/live/release_live.ex:467
 #, elixir-autogen, elixir-format
 msgid "No releases here"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:377
+#: lib/kiln_cms_web/live/release_live.ex:441
 #, elixir-autogen, elixir-format
 msgid "Notes (optional)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:483
+#: lib/kiln_cms_web/live/release_live.ex:547
 #, elixir-autogen, elixir-format
 msgid "Nothing in this release"
 msgstr ""
@@ -8734,7 +8734,7 @@ msgstr ""
 msgid "Pick a release first."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:330
+#: lib/kiln_cms_web/live/release_live.ex:394
 #, elixir-autogen, elixir-format
 msgid "Planned"
 msgstr ""
@@ -8744,39 +8744,39 @@ msgstr ""
 msgid "Preview of release “%{name}” — not the live site"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:610
+#: lib/kiln_cms_web/live/release_live.ex:678
 #, elixir-autogen, elixir-format
 msgid "Publish now"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:604
+#: lib/kiln_cms_web/live/release_live.ex:672
 #, elixir-autogen, elixir-format
 msgid "Publish this release now? Every item goes live together — or, if any one fails, none of them do."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:314
+#: lib/kiln_cms_web/live/release_live.ex:378
 #, elixir-autogen, elixir-format
 msgid "Publishing"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:195
+#: lib/kiln_cms_web/live/release_live.ex:228
 #, elixir-autogen, elixir-format
 msgid "Publishing the release…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex:81
 #: lib/kiln_cms_web/live/editor_live.ex:717
-#: lib/kiln_cms_web/live/release_live.ex:412
+#: lib/kiln_cms_web/live/release_live.ex:476
 #, elixir-autogen, elixir-format
 msgid "Release"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:213
+#: lib/kiln_cms_web/live/release_live.ex:252
 #, elixir-autogen, elixir-format
 msgid "Release archived."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:221
+#: lib/kiln_cms_web/live/release_live.ex:260
 #, elixir-autogen, elixir-format
 msgid "Release deleted."
 msgstr ""
@@ -8801,118 +8801,118 @@ msgstr ""
 msgid "Release preview: %{name}"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:207
+#: lib/kiln_cms_web/live/release_live.ex:246
 #, elixir-autogen, elixir-format
 msgid "Release reopened."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:179
+#: lib/kiln_cms_web/live/release_live.ex:212
 #, elixir-autogen, elixir-format
 msgid "Release scheduled."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:525
 #: lib/kiln_cms_web/live/release_live.ex:42
-#: lib/kiln_cms_web/live/release_live.ex:57
-#: lib/kiln_cms_web/live/release_live.ex:355
+#: lib/kiln_cms_web/live/release_live.ex:67
+#: lib/kiln_cms_web/live/release_live.ex:419
 #, elixir-autogen, elixir-format
 msgid "Releases"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:526
+#: lib/kiln_cms_web/live/release_live.ex:590
 #, elixir-autogen, elixir-format
 msgid "Remove from release"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:597
+#: lib/kiln_cms_web/live/release_live.ex:665
 #, elixir-autogen, elixir-format
 msgid "Remove schedule"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:237
+#: lib/kiln_cms_web/live/release_live.ex:276
 #, elixir-autogen, elixir-format
 msgid "Removed from the release."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:634
+#: lib/kiln_cms_web/live/release_live.ex:702
 #, elixir-autogen, elixir-format
 msgid "Reopen for editing"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:625
+#: lib/kiln_cms_web/live/release_live.ex:693
 #, elixir-autogen, elixir-format
 msgid "Roll back"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:619
+#: lib/kiln_cms_web/live/release_live.ex:687
 #, elixir-autogen, elixir-format
 msgid "Roll this release back? Every item it changed returns to the state it was in before."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:318
-#: lib/kiln_cms_web/live/release_live.ex:325
-#: lib/kiln_cms_web/live/release_live.ex:552
+#: lib/kiln_cms_web/live/release_live.ex:382
+#: lib/kiln_cms_web/live/release_live.ex:389
+#: lib/kiln_cms_web/live/release_live.ex:616
 #, elixir-autogen, elixir-format
 msgid "Rolled back"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:317
+#: lib/kiln_cms_web/live/release_live.ex:381
 #, elixir-autogen, elixir-format
 msgid "Rolling back"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:201
+#: lib/kiln_cms_web/live/release_live.ex:234
 #, elixir-autogen, elixir-format
 msgid "Rolling the release back…"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:587
+#: lib/kiln_cms_web/live/release_live.ex:655
 #, elixir-autogen, elixir-format
 msgid "Schedule"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:313
-#: lib/kiln_cms_web/live/release_live.ex:544
+#: lib/kiln_cms_web/live/release_live.ex:377
+#: lib/kiln_cms_web/live/release_live.ex:608
 #, elixir-autogen, elixir-format
 msgid "Scheduled"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:558
+#: lib/kiln_cms_web/live/release_live.ex:622
 #, elixir-autogen, elixir-format
 msgid "Scheduling and publishing a release need admin access."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:485
+#: lib/kiln_cms_web/live/release_live.ex:549
 #, elixir-autogen, elixir-format
 msgid "Select content in the content list and use “Add to release”."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:263
+#: lib/kiln_cms_web/live/release_live.ex:302
 #, elixir-autogen, elixir-format
 msgid "Shipping a release needs admin access."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:323
+#: lib/kiln_cms_web/live/release_live.ex:387
 #, elixir-autogen, elixir-format
 msgid "Skipped"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:374
+#: lib/kiln_cms_web/live/release_live.ex:438
 #, elixir-autogen, elixir-format
 msgid "Spring campaign"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:267
+#: lib/kiln_cms_web/live/release_live.ex:306
 #, elixir-autogen, elixir-format
 msgid "That didn't work — try again."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:225
+#: lib/kiln_cms_web/live/release_live.ex:264
 #, elixir-autogen, elixir-format
 msgid "That release can't be deleted."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:71
+#: lib/kiln_cms_web/live/release_live.ex:81
 #, elixir-autogen, elixir-format
 msgid "That release no longer exists."
 msgstr ""
@@ -8922,7 +8922,7 @@ msgstr ""
 msgid "This content no longer exists — the release will not publish as it stands."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:472
+#: lib/kiln_cms_web/live/release_live.ex:536
 #, elixir-autogen, elixir-format
 msgid "This release did not ship. Nothing went live."
 msgstr ""
@@ -8932,12 +8932,12 @@ msgstr ""
 msgid "This release is empty."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:650
+#: lib/kiln_cms_web/live/release_live.ex:738
 #, elixir-autogen, elixir-format
 msgid "Valid for one hour."
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:338
+#: lib/kiln_cms_web/live/release_live.ex:402
 #, elixir-autogen, elixir-format
 msgid "already in that state — will be skipped"
 msgstr ""
@@ -8962,7 +8962,32 @@ msgstr ""
 msgid "scheduled for %{at} UTC"
 msgstr ""
 
-#: lib/kiln_cms_web/live/release_live.ex:455
+#: lib/kiln_cms_web/live/release_live.ex:519
 #, elixir-autogen, elixir-format
 msgid "← All releases"
+msgstr ""
+
+#: lib/kiln_cms_web/live/release_live.ex:367
+#, elixir-autogen, elixir-format
+msgid "Archive this published release? It can no longer be rolled back as a group."
+msgstr ""
+
+#: lib/kiln_cms_web/live/release_live.ex:240
+#, elixir-autogen, elixir-format
+msgid "Claim released; the release can be retried."
+msgstr ""
+
+#: lib/kiln_cms_web/live/release_live.ex:705
+#, elixir-autogen, elixir-format
+msgid "Fix the item above, then reopen to schedule or publish again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/release_live.ex:716
+#, elixir-autogen, elixir-format
+msgid "Only do this if the release is stuck — no publish is still running. It releases the claim so the release can be retried."
+msgstr ""
+
+#: lib/kiln_cms_web/live/release_live.ex:722
+#, elixir-autogen, elixir-format
+msgid "Release a stuck claim"
 msgstr ""

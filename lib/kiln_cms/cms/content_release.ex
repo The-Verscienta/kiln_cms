@@ -99,10 +99,7 @@ defmodule KilnCMS.CMS.ContentRelease do
   end
 
   state_machine do
-    # `:scheduled` is an initial state as well as a reachable one: "new release
-    # for Friday 09:00" creates it already scheduled rather than making the
-    # console follow every create with a second write.
-    initial_states [:open, :scheduled]
+    initial_states [:open]
     default_initial_state :open
 
     transitions do
@@ -117,6 +114,9 @@ defmodule KilnCMS.CMS.ContentRelease do
       transition :mark_rolled_back, from: :rolling_back, to: :rolled_back
       # A rollback that aborts leaves the release exactly as it was: published.
       transition :mark_rollback_failed, from: :rolling_back, to: :published
+      # The way out of a claim whose worker never ran (see `:abandon`).
+      transition :abandon, from: :publishing, to: :failed
+      transition :abandon, from: :rolling_back, to: :published
 
       transition :archive,
         from: [:open, :scheduled, :failed, :published, :rolled_back],
@@ -157,17 +157,16 @@ defmodule KilnCMS.CMS.ContentRelease do
     create :create do
       description "Start a new release."
       primary? true
-      accept [:name, :description, :scheduled_at]
+      # `scheduled_at` is deliberately NOT accepted here. Setting it on create
+      # and starting the release in `:scheduled` would hand any editor the exact
+      # thing `:schedule` is admin-gated to prevent: the minute cron fires a
+      # `:scheduled` release under AshOban's bypass, and the worker publishes
+      # every item unauthorized — with `triggered_by_id` nil, so the publishes
+      # aren't even attributable. A release is always created open; scheduling it
+      # is a second, admin-only step.
+      accept [:name, :description]
 
       change KilnCMS.CMS.Changes.StampReleaseCreator
-
-      # A release created with a target datetime starts scheduled, so "new
-      # release for Friday 09:00" is one step rather than create-then-schedule.
-      change fn changeset, _context ->
-        if Ash.Changeset.get_attribute(changeset, :scheduled_at),
-          do: Ash.Changeset.force_change_attribute(changeset, :state, :scheduled),
-          else: changeset
-      end
     end
 
     update :update do
@@ -201,9 +200,14 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
-      # The claim is what makes the minute cron safe: `:publishing` no longer
-      # matches the trigger's `where`, so a go-live that outlives its minute
-      # can't be started a second time.
+      # The claim has to be a compare-and-SWAP, not a compare-and-hope. The
+      # state machine only validates the state of the struct it was handed, so a
+      # console page held open since 08:59 still says `:scheduled` at 09:00:05 —
+      # after the cron claimed the release — and "Publish now" would sail
+      # through and enqueue a second worker. This `filter` puts the guard in the
+      # UPDATE's own WHERE clause: the second writer matches no row and gets a
+      # `StaleRecord` error instead of a duplicate go-live.
+      change filter(expr(state in [:open, :scheduled]))
       change transition_state(:publishing)
       change KilnCMS.CMS.Changes.StampReleaseTrigger
       change {KilnCMS.CMS.Changes.EnqueueReleaseWorker, mode: :publish}
@@ -248,9 +252,43 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      # Compare-and-swap, for the same reason `:start` is — see there.
+      change filter(expr(state == :published))
       change transition_state(:rolling_back)
       change KilnCMS.CMS.Changes.StampReleaseTrigger
       change {KilnCMS.CMS.Changes.EnqueueReleaseWorker, mode: :rollback}
+    end
+
+    update :abandon do
+      description "Release a claim whose worker never ran, so the release can be retried."
+      accept []
+      require_atomic? false
+
+      # The way out of `:publishing` / `:rolling_back`. Those states mean "a
+      # worker owns this right now", and a worker that died — node restart, a
+      # job discarded at `max_attempts: 1` — leaves nobody to say otherwise.
+      # Without this the release is stuck forever AND its items keep reserving
+      # their content against every other release, with no UI to free them.
+      #
+      # A claim that IS still running would be interrupted mid-transaction by an
+      # abandon, which is why it's admin-only and confirmed in the console: it
+      # asserts "no worker is running", and only a human can know that.
+      change filter(expr(state in [:publishing, :rolling_back]))
+
+      # An abandoned go-live lands in `:failed` (nothing shipped, retry after
+      # reopening); an abandoned ROLLBACK goes back to `:published`, because
+      # that is still what is true of the site.
+      change fn changeset, _context ->
+        {target, reason} =
+          case changeset.data.state do
+            :rolling_back -> {:published, "Abandoned: the rollback worker never finished."}
+            _ -> {:failed, "Abandoned: the go-live worker never finished."}
+          end
+
+        changeset
+        |> AshStateMachine.transition_state(target)
+        |> Ash.Changeset.force_change_attribute(:failure_reason, reason)
+      end
     end
 
     update :mark_rolled_back do
@@ -326,26 +364,49 @@ defmodule KilnCMS.CMS.ContentRelease do
       authorize_if always()
     end
 
-    bypass KilnCMS.CMS.Checks.OrgAdmin do
-      authorize_if always()
-    end
+    # There is deliberately NO blanket `OrgAdmin` bypass here. A bypass that
+    # matches authorizes the whole request and skips every policy below it,
+    # which would make the system `mark_*` writes callable by any org admin —
+    # letting a human stamp a release `:published` that never published, or
+    # rewrite an item's captured `prior_version_id` and quietly corrupt what
+    # rollback restores. Admins reach everything they should through the
+    # explicit policies below; the worker reaches the `mark_*` actions the only
+    # way anything should, with `authorize?: false`.
 
     # Editor-facing only — a release is never part of a delivered document.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
-    # Editors compose releases: create one, rename it, reopen a failed one, close
-    # one out, delete one that never shipped. Every action that *ships* content
-    # (`:schedule`, `:start`, `:start_rollback`) and every system `mark_*` write
-    # is deliberately absent from this list: no policy applies to them for a
-    # non-admin, and Ash forbids an action no policy authorizes.
-    policy action([:create, :update, :reopen, :archive]) do
+    # Composing a release is editor work.
+    policy action([:create, :update, :reopen]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
+    # Shipping one is admin work — publishing content is an admin approval step,
+    # and a release must not be a way around it.
+    policy action([:schedule, :unschedule, :start, :start_rollback, :abandon]) do
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+    end
+
+    # Closing out is editor work UNTIL the release is somebody else's decision.
+    # Archiving is one-way and there is no transition out of `:archived`, so an
+    # editor archiving a published release would permanently destroy its group
+    # rollback; archiving a scheduled one would silently cancel an admin's
+    # coordinated launch. Both are admin calls.
+    policy action(:archive) do
+      forbid_unless KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if expr(is_nil(published_at) and state != :scheduled)
+    end
+
+    # Same shape for delete: `ReleaseDeletable` already refuses anything that
+    # shipped or is mid-flight, so the only extra case is a scheduled release,
+    # which is an admin's plan to cancel, not an editor's.
     policy action_type(:destroy) do
-      authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if expr(state != :scheduled)
     end
   end
 

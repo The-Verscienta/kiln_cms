@@ -44,9 +44,11 @@ Composing a release is editor work; shipping one is admin work.
 
 | Action | Editor | Admin |
 | --- | --- | --- |
-| Create, rename, delete an unshipped release | ✅ | ✅ |
+| Create and rename a release | ✅ | ✅ |
 | Add / remove content | ✅ | ✅ |
-| Reopen a failed release, archive one | ✅ | ✅ |
+| Reopen a failed release | ✅ | ✅ |
+| Archive or delete a release that never shipped | ✅ | ✅ |
+| Archive or delete a **scheduled** or **published** release | ❌ | ✅ |
 | Schedule, **Publish now**, **Roll back** | ❌ | ✅ |
 
 This mirrors Kiln's existing rule that publishing is an admin approval step: a
@@ -55,6 +57,17 @@ couldn't. The go-live worker necessarily runs unauthorized (it publishes across
 types on behalf of the bundle), so the gate is at the release, and the admin who
 scheduled or started it is recorded and used as the acting user for every item —
 version history and the audit chain name a person, not "system".
+
+Closing out follows the same logic. Archiving is one-way, so archiving a
+published release permanently ends its group rollback, and archiving or deleting
+a scheduled one silently cancels a launch somebody else planned. Both are admin
+calls; an editor can still close out a release nobody has committed to.
+
+Adding content to a release also respects the **granular-RBAC type scope**
+(#332): an editor restricted to `post` cannot put a `page` in a release. That
+matters more here than elsewhere, because the preview link below renders every
+item's unpublished body to whoever holds it — so a release can only ever expose
+what the editor who filled it was already allowed to see.
 
 ### One record, one open release
 
@@ -111,7 +124,22 @@ type that no longer exists — is a real failure and aborts the release.
 **Reopen for editing** returns a failed release to open with its items intact
 and still pending, so you can fix the offending record and publish again. The
 go-live job does not retry itself: a release that aborted needs an editorial
-decision, not another attempt against the same broken item.
+decision, not another attempt against the same broken item. Scheduling and
+**Publish now** are deliberately not offered on a failed release — reopening is
+the first step, and those transitions don't exist from `failed`.
+
+### A stuck claim
+
+`publishing` and `rolling_back` mean "a worker owns this release right now".
+If that worker dies — a node restart, a job discarded — nobody is left to say
+otherwise, and the release would sit there forever with its items still
+reserving their content against every other release.
+
+**Release a stuck claim** (admin only) is the way out: it returns a stuck
+go-live to `failed` and a stuck rollback to `published`, after which the normal
+reopen-and-retry path works. Only use it when you know no publish is actually
+running — that is the one thing the system can't determine for you, which is why
+it is a button and not automatic.
 
 ## Preview as of a release
 
@@ -146,8 +174,15 @@ item's transition ran — the only moment those are knowable.
   back the body that was actually live rather than whatever it drifted into. An
   untouched record is simply republished — no needless extra version.
 
-Rollback runs in one transaction with the same all-or-nothing guarantee: if any
-item can't be restored, the release stays **Published** and nothing moves.
+An item whose content has since been **deleted outright** is recorded as undone
+and skipped. Failing on it would wedge the group: the release would return to
+`published`, the item would stay applied, and every retry would hit the same
+missing record — so one purged page would strand every *other* item of the
+release live, with no way to take the group down.
+
+Otherwise rollback runs in one transaction with the same all-or-nothing
+guarantee: if any item can't be restored, the release stays **Published** and
+nothing moves.
 
 ## Calendar and events
 
@@ -177,9 +212,15 @@ transaction, so a release that aborts never emits one.
 | `KilnCMS.CMS.ReleasePreview` | the overlay and its signed share token |
 
 States: `open ⇄ scheduled → publishing → published | failed`, with
-`failed → open` (reopen), `published → rolling_back → rolled_back`, and
-`archived` as the close-out from anywhere that isn't mid-flight.
+`failed → open` (reopen), `published → rolling_back → rolled_back`,
+`publishing | rolling_back → failed | published` (abandon), and `archived` as
+the close-out from anywhere that isn't mid-flight.
 
 `publishing` and `rolling_back` are **claim** states rather than cosmetics: both
 the minute cron and the Publish-now button transition into them before any work
-starts, so a go-live that outlives its minute can't be picked up twice.
+starts. The claim is a compare-and-**swap**, not a compare-and-hope — the guard
+is in the `UPDATE`'s own `WHERE` clause, so a console page held open since 08:59
+(still showing `scheduled` after the 09:00 cron claimed the release) gets a stale
+-record error rather than shipping the bundle a second time. The worker's job is
+enqueued *inside* the claim's transaction, so a claim can never commit without
+one.

@@ -38,10 +38,15 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
            )}
         end
 
-      # A missing release is the `belongs_to`'s problem to report (or the row is
-      # simply gone) — don't invent a second, confusing error for it.
+      # Unreadable in this tenant. The `belongs_to` FK is on `content_releases`
+      # alone and carries no org column, so a release belonging to ANOTHER org
+      # satisfies it — and letting that through writes an item into this org
+      # that no release here can see, holding its content's reservation slot
+      # forever with no UI able to free it. Refuse instead of deferring to the
+      # foreign key.
       _ ->
-        :ok
+        {:error,
+         InvalidChanges.exception(fields: [:release_id], message: "release was not found")}
     end
   end
 

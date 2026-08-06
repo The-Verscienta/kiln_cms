@@ -41,8 +41,18 @@ defmodule KilnCMSWeb.ReleaseLive do
      |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
      |> assign(:page_title, gettext("Releases"))
      |> assign(:new, to_form(%{"name" => "", "description" => ""}, as: :release))
-     |> assign(:preview_url, nil)}
+     |> assign(:preview_url, nil)
+     |> assign(:subscribed_to, nil)}
   end
+
+  # The go-live / rollback worker finished — re-read so the page shows the
+  # outcome rather than the claim state it started in.
+  @impl true
+  def handle_info({:release_finished, id}, %{assigns: %{release: %{id: id}}} = socket) do
+    {:noreply, reload(socket)}
+  end
+
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl true
   def handle_params(params, _uri, socket) do
@@ -84,12 +94,21 @@ defmodule KilnCMSWeb.ReleaseLive do
       |> Enum.flat_map(&CMS.list_releases_by_state!(&1, opts))
       |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
 
-    counts =
-      Map.new(releases, fn release ->
-        {release.id, length(CMS.list_release_items_for!(release.id, opts))}
-      end)
+    socket |> assign(:releases, releases) |> assign(:counts, item_counts(releases, opts))
+  end
 
-    socket |> assign(:releases, releases) |> assign(:counts, counts)
+  # One read for every release on the page, not one per release.
+  defp item_counts([], _opts), do: %{}
+
+  defp item_counts(releases, opts) do
+    ids = Enum.map(releases, & &1.id)
+
+    counts =
+      ids
+      |> CMS.list_release_items_for_releases!(opts)
+      |> Enum.frequencies_by(& &1.release_id)
+
+    Map.new(ids, &{&1, Map.get(counts, &1, 0)})
   end
 
   defp load_release(socket, release) do
@@ -102,6 +121,20 @@ defmodule KilnCMSWeb.ReleaseLive do
     |> assign(:titles, resolve_titles(items, opts))
     |> assign(:readiness, readiness(release, opts))
     |> assign(:schedule_form, to_form(schedule_params(release), as: :schedule))
+    |> subscribe_to(release)
+  end
+
+  # A go-live runs off-request, so without this the page that started it renders
+  # "Publishing" and stays there — the re-read after the claim happens
+  # microseconds later, long before the worker has done anything. The worker
+  # broadcasts when it finishes and the page reloads itself.
+  defp subscribe_to(socket, release) do
+    if connected?(socket) and socket.assigns[:subscribed_to] != release.id do
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, KilnCMS.CMS.Releases.topic(release.id))
+      assign(socket, :subscribed_to, release.id)
+    else
+      socket
+    end
   end
 
   # Only pending items have a readiness verdict — everything else already
@@ -199,6 +232,12 @@ defmodule KilnCMSWeb.ReleaseLive do
     socket.assigns.release
     |> CMS.start_release_rollback(%{}, act(socket))
     |> respond(socket, gettext("Rolling the release back…"))
+  end
+
+  def handle_event("abandon", _params, socket) do
+    socket.assigns.release
+    |> CMS.abandon_release(%{}, act(socket))
+    |> respond(socket, gettext("Claim released; the release can be retried."))
   end
 
   def handle_event("reopen", _params, socket) do
@@ -301,6 +340,31 @@ defmodule KilnCMSWeb.ReleaseLive do
   defp stamp(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
 
   defp admin?(tier), do: tier == :admin
+
+  # Mid-flight is never archivable (a worker owns those rows), and once a
+  # release has shipped or been scheduled, closing it out is an admin decision —
+  # the resource policy enforces the same split. Mirrored here only so an editor
+  # isn't offered a button that always errors.
+  defp archivable?(%{state: state}, _tier) when state in [:archived, :publishing, :rolling_back],
+    do: false
+
+  defp archivable?(_release, :admin), do: true
+
+  defp archivable?(%{state: state, published_at: published_at}, _tier),
+    do: is_nil(published_at) and state != :scheduled
+
+  defp deletable?(%{state: state}, _tier) when state in [:publishing, :rolling_back], do: false
+  defp deletable?(%{published_at: published_at}, _tier) when not is_nil(published_at), do: false
+  defp deletable?(_release, :admin), do: true
+  defp deletable?(%{state: state}, _tier), do: state != :scheduled
+
+  # Archiving a *published* release is the end of its rollback, because there is
+  # no transition out of `:archived`. Say that, rather than the generic prompt.
+  defp archive_prompt(%{published_at: nil}),
+    do: gettext("Archive this release? Its pending items are freed for other releases.")
+
+  defp archive_prompt(_release),
+    do: gettext("Archive this published release? It can no longer be rolled back as a group.")
 
   defp state_variant(:published), do: "success"
   defp state_variant(:scheduled), do: "info"
@@ -558,8 +622,12 @@ defmodule KilnCMSWeb.ReleaseLive do
               {gettext("Scheduling and publishing a release need admin access.")}
             </p>
 
+            <%!-- `:schedule` and `:start` transition from :open/:scheduled ONLY. Drawing
+                  them on a :failed release offered two buttons that could only ever
+                  produce "that didn't work", instead of pointing at Reopen — which
+                  is the actual first step. --%>
             <div
-              :if={admin?(@tier) and @release.state in [:open, :scheduled, :failed]}
+              :if={admin?(@tier) and @release.state in [:open, :scheduled]}
               class="mt-3 space-y-3"
             >
               <.form for={@schedule_form} id="schedule-form" phx-submit="schedule">
@@ -629,9 +697,29 @@ defmodule KilnCMSWeb.ReleaseLive do
               :if={@release.state == :failed}
               type="button"
               phx-click="reopen"
-              class="btn btn-sm btn-default mt-3 w-full"
+              class="btn btn-sm btn-primary mt-3 w-full"
             >
               {gettext("Reopen for editing")}
+            </button>
+            <p :if={@release.state == :failed} class="mt-1 text-xs text-base-content/60">
+              {gettext("Fix the item above, then reopen to schedule or publish again.")}
+            </p>
+
+            <%!-- The way out of a claim whose worker died. Nothing else can move
+                  a release off :publishing / :rolling_back, and while it sits there
+                  its items keep reserving their content against every other release. --%>
+            <button
+              :if={admin?(@tier) and @release.state in [:publishing, :rolling_back]}
+              type="button"
+              phx-click="abandon"
+              data-confirm={
+                gettext(
+                  "Only do this if the release is stuck — no publish is still running. It releases the claim so the release can be retried."
+                )
+              }
+              class="btn btn-sm btn-default mt-3 w-full"
+            >
+              {gettext("Release a stuck claim")}
             </button>
           </div>
 
@@ -653,21 +741,20 @@ defmodule KilnCMSWeb.ReleaseLive do
 
           <div class="card card-pad">
             <h2 class="text-sm font-medium">{gettext("Close out")}</h2>
+            <%!-- Archiving is one-way — there is no transition out of :archived —
+                  so archiving a published release permanently ends its group
+                  rollback. That is an admin's call, and the confirm says so. --%>
             <button
-              :if={@release.state != :archived}
+              :if={archivable?(@release, @tier)}
               type="button"
               phx-click="archive"
-              data-confirm={
-                gettext("Archive this release? Its pending items are freed for other releases.")
-              }
+              data-confirm={archive_prompt(@release)}
               class="btn btn-sm btn-default mt-2 w-full"
             >
               {gettext("Archive")}
             </button>
             <button
-              :if={
-                is_nil(@release.published_at) and @release.state not in [:publishing, :rolling_back]
-              }
+              :if={deletable?(@release, @tier)}
               type="button"
               phx-click="delete"
               data-confirm={gettext("Delete this release? Its item list goes with it.")}

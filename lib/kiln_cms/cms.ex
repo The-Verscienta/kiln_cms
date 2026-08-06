@@ -378,6 +378,7 @@ defmodule KilnCMS.CMS do
       define :unschedule_release, action: :unschedule
       define :start_release, action: :start
       define :start_release_rollback, action: :start_rollback
+      define :abandon_release, action: :abandon
       define :reopen_release, action: :reopen
       define :archive_release, action: :archive
       define :destroy_release, action: :destroy
@@ -392,6 +393,7 @@ defmodule KilnCMS.CMS do
       define :cancel_release_item, action: :cancel
       define :get_release_item, action: :read, get_by: [:id]
       define :list_release_items_for, action: :for_release, args: [:release_id]
+      define :list_release_items_for_releases, action: :for_releases, args: [:release_ids]
 
       define :list_release_items_with_status,
         action: :for_release_with_status,

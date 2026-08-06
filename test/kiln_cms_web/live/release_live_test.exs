@@ -151,6 +151,80 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
     assert html =~ "expired"
   end
 
+  test "a preview token for another site is refused, not rendered under this one's branding" do
+    admin = authed_user(:admin)
+    rel = release(admin, "Other tenant")
+    page = CMS.create_page!(%{title: "Secret draft", slug: slug()}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    # A validly-signed token whose org is not the one serving the request.
+    token = KilnCMS.CMS.ReleasePreview.sign(%{id: rel.id, org_id: Ecto.UUID.generate()})
+
+    {:ok, _view, html} = live(build_conn(), ~p"/preview/release/#{token}")
+    assert html =~ "expired"
+    refute html =~ "Secret draft"
+  end
+
+  test "the console shows the outcome once the worker finishes, not the claim state",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Watch me")
+    page = CMS.create_page!(%{title: "Live soon", slug: slug()}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    {:ok, view, _html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+
+    # The claim commits microseconds before the worker does any work, so the
+    # page necessarily renders the claim state first.
+    assert render_click(view, "publish_now", %{}) =~ "Publishing"
+
+    # ...and must not still be saying that once the worker has committed.
+    KilnCMS.DataCase.drain_oban()
+
+    # Assert on controls, not on copy: the flash still reads "Publishing the
+    # release…", so a substring check would pass on a page stuck at the claim.
+    html = render(view)
+    assert html =~ "Roll back"
+    refute html =~ "Release a stuck claim"
+  end
+
+  test "a failed release offers Reopen, not controls whose transition doesn't exist",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Broken")
+    page = CMS.create_page!(%{title: "Archived", slug: slug()}, actor: admin)
+    {:ok, archived} = CMS.archive_page(page, %{}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: archived.id},
+        actor: admin
+      )
+
+    {:ok, view, _html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    render_click(view, "publish_now", %{})
+    KilnCMS.DataCase.drain_oban()
+
+    html = render(view)
+    assert CMS.get_release!(rel.id, authorize?: false).state == :failed
+    assert html =~ "did not ship"
+    assert html =~ "Reopen for editing"
+    # `:start` and `:schedule` transition from :open/:scheduled only — offering
+    # them here could produce nothing but "that didn't work".
+    refute html =~ "Publish now"
+    refute html =~ "Go live at"
+  end
+
   test "add to release from the content list", %{conn: conn} do
     admin = authed_user(:admin)
     rel = release(admin, "Bulk target")

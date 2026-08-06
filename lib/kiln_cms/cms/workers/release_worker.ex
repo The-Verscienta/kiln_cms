@@ -45,12 +45,40 @@ defmodule KilnCMS.CMS.Workers.ReleaseWorker do
   # A release whose state no longer matches the job is not an error: the most
   # likely cause is a duplicate job (an at-least-once queue), and the claim
   # states exist precisely so the second one is a no-op.
-  defp run(release, "publish"), do: report(Releases.publish(release), release, "go-live")
-  defp run(release, "rollback"), do: report(Releases.roll_back(release), release, "rollback")
+  defp run(release, "publish"),
+    do: report(guarded(release, &Releases.publish/1), release, "go-live")
+
+  defp run(release, "rollback"),
+    do: report(guarded(release, &Releases.roll_back/1), release, "rollback")
 
   defp run(release, mode) do
     Logger.error("Release #{release.id}: unknown worker mode #{inspect(mode)}")
     :ok
+  end
+
+  # An exception escaping here would leave the release in its claim state
+  # forever — `max_attempts: 1` discards the job, and `:publishing` means "a
+  # worker owns this", so nothing else will ever touch it while its items go on
+  # reserving their content. Not every step is inside the transaction's own
+  # error handling (the pre-transaction item read, the notification replay), so
+  # the crash has to be converted into the state an operator can act on.
+  # `:abandon` is the manual equivalent for a worker that died mid-flight.
+  defp guarded(release, fun) do
+    fun.(release)
+  rescue
+    error ->
+      Logger.error(
+        "Release #{release.id} crashed: #{Exception.format(:error, error, __STACKTRACE__)}"
+      )
+
+      abandon(release)
+      {:error, error}
+  end
+
+  defp abandon(release) do
+    KilnCMS.CMS.abandon_release(release, %{}, authorize?: false, tenant: release.org_id)
+  rescue
+    _error -> :ok
   end
 
   # The failure is already recorded on the release (state + reason + item), which

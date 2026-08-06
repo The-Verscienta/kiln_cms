@@ -9,21 +9,29 @@ defmodule KilnCMS.CMS.ReleasesTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Releases
 
-  defp user(role) do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "release-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+  defp user(role, extra \\ %{}) do
+    Ash.Seed.seed!(
+      KilnCMS.Accounts.User,
+      Map.merge(
+        %{
+          email: "release-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        extra
+      )
+    )
   end
 
   # Created through the real `:create` action, not seeded: a seeded row has no
   # create version, so folding its history back reconstructs nils — the version
   # machinery these tests lean on only behaves like production if the content
   # was authored like production content.
+  defp n, do: System.unique_integer([:positive])
+
   defp page(attrs \\ %{}) do
-    n = System.unique_integer([:positive])
+    n = n()
 
     {:ok, page} =
       CMS.create_page(%{title: "Release page #{n}", slug: "release-page-#{n}"},
@@ -140,6 +148,86 @@ defmodule KilnCMS.CMS.ReleasesTest do
 
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.schedule_release(rel, %{scheduled_at: DateTime.utc_now()}, actor: editor)
+    end
+
+    test "a type-scoped editor cannot smuggle out-of-scope content into a release" do
+      # Granular RBAC (#332). The preview link renders every pending item's full
+      # unpublished body to whoever holds it, so "add to release" has to enforce
+      # the same type scope every other content write does — otherwise it is a
+      # read of content this editor is explicitly denied.
+      admin = user(:admin)
+      scoped = user(:editor, %{editable_types: ["post"], readable_types: ["post"]})
+      rel = release(admin)
+      page = page()
+
+      assert {:error, %Ash.Error.Invalid{}} = add(rel, page, scoped)
+      assert [] = CMS.list_release_items_for!(rel.id, authorize?: false)
+
+      # ...and the same editor CAN add a type they hold.
+      {:ok, post} =
+        CMS.create_post(%{title: "In scope", slug: "in-scope-#{n()}"}, authorize?: false)
+
+      assert {:ok, _} =
+               CMS.add_release_item(
+                 %{release_id: rel.id, content_type: "post", content_id: post.id},
+                 actor: scoped
+               )
+    end
+
+    test "a release cannot be created already scheduled" do
+      # `:schedule` is admin-only precisely so an editor can't arrange for the
+      # cron to publish on their behalf. Accepting `scheduled_at` on `:create`
+      # would have handed that straight back.
+      editor = user(:editor)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.create_release(%{name: "Sneaky", scheduled_at: DateTime.utc_now()},
+                 actor: editor
+               )
+
+      {:ok, rel} = CMS.create_release(%{name: "Honest"}, actor: editor)
+      assert rel.state == :open
+      assert is_nil(rel.scheduled_at)
+    end
+
+    test "an editor may not archive or delete a release an admin committed" do
+      admin = user(:admin)
+      editor = user(:editor)
+
+      scheduled = release(admin, %{name: "Scheduled"})
+      {:ok, _} = add(scheduled, page(), admin)
+
+      {:ok, scheduled} =
+        CMS.schedule_release(scheduled, %{scheduled_at: DateTime.utc_now()}, actor: admin)
+
+      # Archiving would cancel the launch; deleting would remove it outright.
+      assert {:error, %Ash.Error.Forbidden{}} = CMS.archive_release(scheduled, %{}, actor: editor)
+      assert {:error, %Ash.Error.Forbidden{}} = CMS.destroy_release(scheduled, actor: editor)
+
+      shipped = release(admin, %{name: "Shipped"})
+      {:ok, _} = add(shipped, page(), admin)
+      {:ok, shipped} = go_live(shipped, admin)
+
+      # Archiving is one-way, so this would permanently destroy the rollback.
+      assert {:error, %Ash.Error.Forbidden{}} = CMS.archive_release(shipped, %{}, actor: editor)
+      assert {:ok, _} = CMS.archive_release(shipped, %{}, actor: admin)
+    end
+
+    test "the system mark_* writes are unreachable even for an admin" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      # Claim it, so the state machine would ALLOW the transition and the policy
+      # is what actually refuses.
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+
+      # No blanket admin bypass: a human stamping a release `:published` that
+      # never published would make the console lie about the site, and
+      # `mark_applied` would let one rewrite what rollback restores.
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.mark_release_published(claimed, %{}, actor: admin)
+
+      KilnCMS.DataCase.drain_oban()
     end
 
     test "viewers see nothing and can compose nothing" do
@@ -277,6 +365,106 @@ defmodule KilnCMS.CMS.ReleasesTest do
     end
   end
 
+  describe "claiming a release" do
+    test "a second claim from a stale struct is refused, not duplicated" do
+      # The console page an admin has had open since 08:59 still says
+      # `:scheduled` after the 09:00 cron claimed the release. Without a
+      # compare-and-swap on the UPDATE itself, "Publish now" at 09:00:05 would
+      # validate against that stale struct and ship the bundle a second time.
+      admin = user(:admin)
+
+      {:ok, _endpoint} =
+        CMS.create_webhook_endpoint(
+          %{
+            url: "https://example.com/once",
+            events: ["release.published"],
+            active: true
+          },
+          actor: admin
+        )
+
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+
+      assert {:ok, _claimed} = CMS.start_release(rel, %{}, actor: admin)
+      assert {:error, _stale} = CMS.start_release(rel, %{}, actor: admin)
+
+      KilnCMS.DataCase.drain_oban()
+
+      assert reload(rel).state == :published
+      # One go-live, so exactly one release.published, not two.
+      assert 1 =
+               CMS.recent_webhook_deliveries!(authorize?: false)
+               |> Enum.count(&(&1.event == "release.published"))
+    end
+
+    test "publishing an already-published release is a no-op, not a second run" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, published} = go_live(rel, admin)
+
+      assert {:error, {:unexpected_state, :published}} = Releases.publish(published)
+      assert reload(rel).published_at == published.published_at
+    end
+
+    test "a stuck claim can be released and the release retried" do
+      # `:publishing` means "a worker owns this". A worker that died leaves
+      # nobody to say otherwise: without `:abandon` the release is wedged
+      # forever AND its items keep reserving their content against every other
+      # release, with no UI able to free them.
+      admin = user(:admin)
+      rel = release(admin)
+      p = page()
+      {:ok, _} = add(rel, p, admin)
+
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+      assert claimed.state == :publishing
+
+      # Nothing else moves a release out of :publishing.
+      assert {:error, _} = CMS.archive_release(claimed, %{}, actor: admin)
+      assert {:error, _} = CMS.reopen_release(claimed, %{}, actor: admin)
+      assert {:error, _} = CMS.destroy_release(claimed, actor: admin)
+
+      {:ok, abandoned} = CMS.abandon_release(claimed, %{}, actor: admin)
+      assert abandoned.state == :failed
+      assert abandoned.failure_reason =~ "Abandoned"
+
+      # And the retry path works end to end.
+      {:ok, reopened} = CMS.reopen_release(abandoned, %{}, actor: admin)
+      {:ok, published} = go_live(reopened, admin)
+      assert published.state == :published
+      assert reload_page(p).state == :published
+    end
+
+    test "abandoning a rollback returns the release to published" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, published} = go_live(rel, admin)
+
+      {:ok, claimed} = CMS.start_release_rollback(published, %{}, actor: admin)
+      assert claimed.state == :rolling_back
+
+      {:ok, abandoned} = CMS.abandon_release(claimed, %{}, actor: admin)
+      # The site is still live, so `:published` is what remains true of it.
+      assert abandoned.state == :published
+
+      KilnCMS.DataCase.drain_oban()
+    end
+
+    test "only admins may release a stuck claim" do
+      admin = user(:admin)
+      editor = user(:editor)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+
+      assert {:error, %Ash.Error.Forbidden{}} = CMS.abandon_release(claimed, %{}, actor: editor)
+      KilnCMS.DataCase.drain_oban()
+    end
+  end
+
   describe "release.published event" do
     test "is selectable as a webhook subscription and dispatched on go-live" do
       admin = user(:admin)
@@ -370,6 +558,99 @@ defmodule KilnCMS.CMS.ReleasesTest do
 
       # The release didn't put it live, so rollback must not take it down.
       assert reload_page(already).state == :published
+    end
+
+    test "a deleted item doesn't strand the rest of the group live" do
+      # Without an escape for content that is simply gone, one purged page makes
+      # rollback fail identically on every retry — leaving every OTHER item of
+      # the release live with no way to take the group down.
+      admin = user(:admin)
+      rel = release(admin)
+      survivor = page()
+      doomed = page()
+      {:ok, _} = add(rel, survivor, admin)
+      {:ok, _} = add(rel, doomed, admin)
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+
+      :ok = CMS.purge_page(reload_page(doomed), authorize?: false)
+
+      {:ok, _} = CMS.start_release_rollback(published, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert reload(rel).state == :rolled_back
+      assert reload_page(survivor).state == :draft
+    end
+
+    test "an untouched record is republished without cutting a restore version" do
+      admin = user(:admin)
+      live = page()
+      {:ok, live} = CMS.publish_page(live, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      rel = release(admin)
+      {:ok, _} = add(rel, live, admin, :unpublish)
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+
+      before = CMS.list_page_versions!(authorize?: false) |> Enum.count()
+
+      {:ok, _} = CMS.start_release_rollback(published, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert reload_page(live).state == :published
+
+      # The republish cuts one version. A needless restore would cut two —
+      # and, for content whose history predates version tracking, could fail
+      # outright and abort a rollback with nothing to reconstruct.
+      assert CMS.list_page_versions!(authorize?: false) |> Enum.count() == before + 1
+    end
+
+    test "a rollback that cannot complete leaves the release published" do
+      admin = user(:admin)
+
+      img =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "r-#{n()}.png",
+          url: "/uploads/r-#{n()}.png",
+          content_type: "image/png"
+        })
+
+      # Live, with an image that has no alt text.
+      {:ok, live} =
+        CMS.create_page(
+          %{
+            title: "Alt-less",
+            slug: "alt-less-#{n()}",
+            blocks: [%{"_type" => "image", "url" => img.url, "media_id" => img.id, "alt" => nil}]
+          },
+          authorize?: false
+        )
+
+      {:ok, live} = CMS.publish_page(live, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      rel = release(admin)
+      {:ok, _} = add(rel, live, admin, :unpublish)
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+
+      # Rolling back has to REPUBLISH it — and now the accessibility gate is on,
+      # so that publish is refused. This also exercises the Ash-rollback branch
+      # of `describe_failure/2`: the failure comes from inside an Ash action, not
+      # from our own classification.
+      Application.put_env(:kiln_cms, :media, require_alt_text: true)
+      on_exit(fn -> Application.put_env(:kiln_cms, :media, []) end)
+
+      {:ok, _} = CMS.start_release_rollback(published, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      after_attempt = reload(rel)
+      assert after_attempt.state == :published
+      assert after_attempt.failure_reason =~ "alt"
+      # Nothing moved, so a retry after fixing the image still works.
+      assert reload_page(live).state == :draft
+      assert [_] = CMS.list_release_items_with_status!(rel.id, :applied, authorize?: false)
     end
 
     test "only admins may roll a release back" do
