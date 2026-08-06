@@ -146,11 +146,15 @@ defmodule KilnCMSWeb.LiveHostUriTest do
     # reviewer to ask where that host came from.
     @live_dir "lib/kiln_cms_web/live"
 
-    # `sign_in_live.ex` is the single reviewed exception: upstream's signature
-    # takes a `uri`, so it cannot discard it, and it launders the value through
-    # `LiveUserAuth.vouch_uri/2` before passing it on. Listed by name so that
-    # adding a second one is a deliberate act.
-    @vouched ["sign_in_live.ex"]
+    # Two reviewed exceptions, both the same shape: an AshAuthentication view
+    # whose signature takes a `uri`, wrapped by a Kiln module that cannot
+    # discard it and so launders it through `LiveUserAuth.vouch_uri/2` before
+    # passing it on. `auth_live.ex` is the `__using__` macro behind
+    # `ResetLive`/`ConfirmLive`/`MagicSignInLive`/`SignOutLive` (#701), so the
+    # generated clause is written once and covered here once.
+    #
+    # Listed by name so that adding a third is a deliberate act.
+    @vouched ["sign_in_live.ex", "auth_live.ex"]
 
     test "every handle_params/3 either discards its uri or vouches it" do
       offenders =
