@@ -258,6 +258,239 @@ defmodule KilnCMS.Governance.WitnessTest do
     end
   end
 
+  # #732. Each row signs its predecessor's id AND a digest of its contents, but
+  # nothing walked the run: `Chain.verify/4` attests only the checkpoint an entry
+  # names, and the audit's contiguity check reads sequence numbers, not links.
+  # So a checkpoint rewritten in place was caught only by its own signature
+  # failing — which on an unsigned deployment it does not.
+  describe "predecessor links across the run (#732)" do
+    # Hand-built rows rather than minted ones: the point is to express runs a
+    # correct mint can never produce, which is exactly what an attacker writes.
+    defp link(sequence, attrs) do
+      base = %{
+        id: Ecto.UUID.generate(),
+        sequence: sequence,
+        root: "root-#{sequence}",
+        document_count: sequence,
+        signature: nil,
+        prev_checkpoint_id: nil,
+        prev_checkpoint_digest: nil
+      }
+
+      Map.merge(base, attrs)
+    end
+
+    # A well-formed run of `n` checkpoints, newest first — the shape
+    # `Checkpoint.recent/1` returns.
+    defp run(n) do
+      Enum.reduce(1..n, [], fn sequence, acc ->
+        prev = List.first(acc)
+
+        [
+          link(sequence, %{
+            prev_checkpoint_id: prev && prev.id,
+            prev_checkpoint_digest: Checkpoint.digest(prev)
+          })
+          | acc
+        ]
+      end)
+    end
+
+    test "a well-formed run has no broken links" do
+      assert Checkpoint.link_failures(run(4)) == []
+    end
+
+    test "a single genesis checkpoint is a clean run" do
+      assert Checkpoint.link_failures(run(1)) == []
+      assert Checkpoint.link_failures([]) == []
+    end
+
+    test "a predecessor rewritten in place is caught, with no signature involved" do
+      # THE case the issue is about. Sequence 2's contents change; its number and
+      # every link id stay put, so contiguity is satisfied and nothing is signed.
+      [four, three, two, one] = run(4)
+      rewritten = %{two | document_count: 999}
+
+      failures = Checkpoint.link_failures([four, three, rewritten, one])
+
+      assert [message] = failures
+      assert message =~ "checkpoint 3 does not match the contents of predecessor 2"
+      assert message =~ "rewritten"
+    end
+
+    test "an excised middle checkpoint leaves its successor's link dangling" do
+      [four, three, _two, one] = run(4)
+
+      assert [message] = Checkpoint.link_failures([four, three, one])
+      assert message =~ "checkpoint 3 names predecessor"
+      assert message =~ "no longer exists"
+    end
+
+    test "detaching a row by nulling its link is caught, not skipped" do
+      # The cheapest single-column edit, and the one a walk that rejects null
+      # links before comparing digests would step straight over.
+      [four, three, two, one] = run(4)
+      detached = %{three | prev_checkpoint_id: nil, prev_checkpoint_digest: nil}
+
+      [first | _rest] = Checkpoint.link_failures([four, detached, two, one])
+      assert first =~ "checkpoint 3 names no predecessor"
+    end
+
+    test "an edit cascades to the successor, because the link columns are inside the digest" do
+      # `digest/1` covers `prev_checkpoint_id`/`prev_checkpoint_digest`, so any
+      # edit to a row's link also changes what its successor should have
+      # recorded. Two reports for one edit is correct and worth knowing about:
+      # an operator reading the audit sees the detached row AND the row that
+      # noticed, not a single ambiguous line.
+      [four, three, two, one] = run(4)
+      detached = %{three | prev_checkpoint_id: nil, prev_checkpoint_digest: nil}
+
+      assert [detach, cascade] = Checkpoint.link_failures([four, detached, two, one])
+      assert detach =~ "checkpoint 3 names no predecessor"
+      assert cascade =~ "checkpoint 4 does not match the contents of predecessor 3"
+    end
+
+    test "a link that jumps back over a surviving checkpoint is caught" do
+      # Contiguity cannot see this — 1..4 are all present. Only the links show
+      # that 3 has been threaded out of the run.
+      [four, three, two, one] = run(4)
+
+      rethreaded = %{
+        four
+        | prev_checkpoint_id: two.id,
+          prev_checkpoint_digest: Checkpoint.digest(two)
+      }
+
+      assert [message] = Checkpoint.link_failures([rethreaded, three, two, one])
+      assert message =~ "checkpoint 4 links back to 2"
+      assert message =~ "skipping 3"
+    end
+
+    test "a genesis checkpoint that names a predecessor is caught" do
+      [two, one] = run(2)
+      rerooted = %{one | prev_checkpoint_id: Ecto.UUID.generate()}
+
+      [first | _cascade] = Checkpoint.link_failures([two, rerooted])
+      assert first =~ "checkpoint 1 is the first in the run but names predecessor"
+    end
+
+    test "failures are reported oldest first, so the earliest edit reads first" do
+      [four, three, two, one] = run(4)
+      detached_two = %{two | prev_checkpoint_id: nil, prev_checkpoint_digest: nil}
+      detached_four = %{four | prev_checkpoint_id: nil, prev_checkpoint_digest: nil}
+
+      failures = Checkpoint.link_failures([detached_four, three, detached_two, one])
+
+      # `recent/1` hands them over newest first; an audit reads better in the
+      # order the edits happened.
+      reported =
+        Enum.map(failures, fn message ->
+          [_, sequence] = Regex.run(~r/checkpoint (\d+)/, message)
+          String.to_integer(sequence)
+        end)
+
+      assert reported == Enum.sort(reported)
+      assert List.first(reported) == 2
+    end
+
+    # The honest limit, asserted so nobody reads the walk as covering more than
+    # it does — this is what the witness and the sink enumeration are for.
+    test "a clean truncation of the newest checkpoints has intact links throughout" do
+      [_five, _four, three, two, one] = run(5)
+
+      assert Checkpoint.link_failures([three, two, one]) == []
+    end
+
+    test "a genesis checkpoint with a stray predecessor digest is caught" do
+      [two, one] = run(2)
+      stray = %{one | prev_checkpoint_digest: "not-nil"}
+
+      [first | _cascade] = Checkpoint.link_failures([two, stray])
+      assert first =~ "checkpoint 1 is the first in the run but records a predecessor digest"
+    end
+
+    test "a forward link says so, rather than claiming something was skipped" do
+      # `prev_n >= n` skips nothing. The "skipping N" wording would send an
+      # operator hunting a deletion that never happened.
+      [three, two, one] = run(3)
+
+      forward = %{
+        two
+        | prev_checkpoint_id: three.id,
+          prev_checkpoint_digest: Checkpoint.digest(three)
+      }
+
+      [message | _] = Checkpoint.link_failures([three, forward, one])
+      assert message =~ "which is not earlier than it"
+      refute message =~ "skipping"
+    end
+
+    # The limits, asserted so neither the moduledoc nor this suite can be read as
+    # promising more than the walk delivers.
+    test "a rewrite of the HEAD checkpoint is invisible — nothing records its digest" do
+      [four, three, two, one] = run(4)
+      doctored_head = %{four | root: "rewritten", document_count: 9_999}
+
+      assert Checkpoint.link_failures([doctored_head, three, two, one]) == []
+    end
+
+    test "an attacker who cascades the digests forward walks clean" do
+      # `digest/1` is an unkeyed hash over public columns, so rewriting a row and
+      # recomputing every link after it costs one UPDATE per downstream row. What
+      # this buys is not detection but amplification: `prev_checkpoint_digest` is
+      # inside `document/2`, so the cascade forces a rewrite of every PUBLISHED
+      # object too, turning one witness mismatch into many.
+      [_four, _three, _two, one] = run(4)
+      doctored = %{one | root: "rewritten"}
+
+      cascaded =
+        Enum.reduce(2..4, [doctored], fn sequence, acc ->
+          prev = List.first(acc)
+
+          [
+            link(sequence, %{
+              prev_checkpoint_id: prev.id,
+              prev_checkpoint_digest: Checkpoint.digest(prev)
+            })
+            | acc
+          ]
+        end)
+
+      assert Checkpoint.link_failures(cascaded) == []
+    end
+
+    test "covered_at and key_id are outside the digest, so edits to them are invisible" do
+      # Both are carried by `document/2` and `covered_at` is signed, but neither
+      # is hashed by `digest/1` — so the witness comparison catches them and this
+      # walk cannot. Pinned so the moduledoc's claim stays honest if `digest/1`
+      # is ever widened.
+      [two, one] = run(2)
+
+      assert Checkpoint.digest(%{one | signature: "forged"}) != Checkpoint.digest(one)
+
+      assert Checkpoint.link_failures([two, Map.put(one, :covered_at, ~U[2030-01-01 00:00:00Z])]) ==
+               []
+
+      assert Checkpoint.link_failures([two, Map.put(one, :key_id, "bogus")]) == []
+    end
+
+    test "a real minted run walks clean" do
+      # Guards `mint/1` against writing the links in a shape the walk rejects,
+      # and `recent/1` against returning one it can't read. It does NOT guard the
+      # fixtures against a digest-shape drift — both sides call the same
+      # `digest/1`, so a shape change moves them together.
+      page = published_page()
+      {:ok, _first} = Checkpoint.mint(page.org_id)
+
+      _page2 = published_page()
+      {:ok, _second} = Checkpoint.mint(page.org_id)
+
+      rows = Checkpoint.recent(page.org_id)
+      assert length(rows) == 2
+      assert Checkpoint.link_failures(rows) == []
+    end
+  end
+
   describe "the none adapter" do
     test "mints without publishing and says so" do
       Application.put_env(:kiln_cms, Witness, adapter: Witness.None)
