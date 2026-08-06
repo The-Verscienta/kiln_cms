@@ -227,6 +227,74 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
     end
   end
 
+  describe "nested multiset — boundaries of the whole-tree rule (#774)" do
+    defp columns_children(children),
+      do: %{"_type" => "columns", "columns" => [%{"blocks" => children}]}
+
+    test "an admin value nested two columns deep is still caught on omission" do
+      admin = user(:admin)
+
+      inner = columns_children([quote_block(%{"featured" => true})])
+      {:ok, page} = create_page(admin, [columns_children([inner])])
+
+      inner_omit = columns_children([quote_block(%{})])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [columns_children([inner_omit])]},
+                 actor: user(:editor)
+               )
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "dropping one of two admin-featured children is refused (multiset shrinks)" do
+      admin = user(:admin)
+
+      two =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "A"}),
+          quote_block(%{"featured" => true, "text" => "B"})
+        ])
+
+      {:ok, page} = create_page(admin, [two])
+
+      one =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "A"}),
+          quote_block(%{"featured" => false, "text" => "B"})
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [one]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "re-targeting an admin value between same-type children is allowed (accepted residual)" do
+      # The count is preserved, only which child holds `featured` moves. Closing
+      # this needs per-child identity (tracked); this pins the current behavior so
+      # a future identity fix has to change it deliberately.
+      admin = user(:admin)
+
+      before =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "A"}),
+          quote_block(%{"featured" => false, "text" => "B"})
+        ])
+
+      {:ok, page} = create_page(admin, [before])
+
+      swapped =
+        columns_children([
+          quote_block(%{"featured" => false, "text" => "A"}),
+          quote_block(%{"featured" => true, "text" => "B"})
+        ])
+
+      assert {:ok, _updated} =
+               CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+    end
+  end
+
   describe "clear by omission (#566)" do
     setup do
       admin = user(:admin)

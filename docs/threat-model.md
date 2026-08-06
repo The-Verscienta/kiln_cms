@@ -667,7 +667,12 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    whole tree's multiset of role-restricted non-default nested values must be
    identical before and after, so a non-admin can neither introduce one nor drop
    one by omission, but may resubmit a column holding an admin-set value
-   unchanged — which the old per-child default rule refused outright.
+   unchanged — which the old per-child default rule refused outright. The
+   multiset preserves the *count* of admin-set values, not their *binding*: with
+   no per-child id, a non-admin can **re-target** one — clear it on one child and
+   set it on another of the same type in one write — though never raise or lower
+   the count. Closing that needs nested-child identity (the same primitive the
+   id-reuse residual above needs); tracked as a follow-up.
 
    *Residual, all about **which block an id names** rather than what a field may
    hold:* an editor can still reuse the id of another block **of the same type**

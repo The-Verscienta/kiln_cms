@@ -47,10 +47,19 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   non-default nested values before and after. A non-admin write must leave that
   multiset identical: it can neither introduce a restricted value (smuggle/set)
   nor drop one (omit/clear), but it may resubmit a column holding an admin-set
-  value unchanged, and it may edit the permitted fields around it. Because the
-  multiset spans the whole tree it needs no per-child id, and it only ever
-  refuses more than the value being preserved would — it never lets a non-admin
-  add or remove a restricted value.
+  value unchanged, and it may edit the permitted fields around it.
+
+  It preserves the *count* of admin-set values, not their *binding* to specific
+  content — the residual the missing per-child identity leaves. Because nested
+  children have no id, a non-admin can **re-target** a restricted value: clear it
+  on one child and set it on another of the same type in the same write, keeping
+  the multiset equal. They still cannot raise the count (feature a quote from
+  none) or lower it (un-feature one), only move which same-type child holds it.
+  Closing that needs the same nested-child identity the top-level rule diffs on;
+  tracked as a follow-up, and recorded in `docs/threat-model.md` residual risk 8.
+  A structural delete that removes a child holding an admin-set value shrinks the
+  multiset and is therefore refused — stricter than the top-level layer, which
+  errs safe.
 
   ## Omitted is not the same as default (#566)
 
