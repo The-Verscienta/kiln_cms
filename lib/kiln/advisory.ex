@@ -72,9 +72,18 @@ defmodule Kiln.Advisory do
   @typedoc """
   A panel a check's findings belong in.
 
-  `:seo` is #476's search-and-readability panel; `:accessibility` is #495's.
+  `:seo` is #476's search-and-readability panel; `:accessibility` is #495's;
+  `:compliance` is #377's claim-checking panel.
+
+  `:compliance` is deliberately **not** in the default returned by
+  `c:lenses/0`. The other two overlap almost entirely — a skipped heading is
+  both a search and an accessibility problem — which is why defaulting to both
+  is right for them. A claim check is a different question with a different
+  audience and, where the publish gate is switched on, different consequences;
+  a generic plugin check landing in it by default would dilute exactly the
+  panel that must not cry wolf. Compliance checks opt in explicitly.
   """
-  @type lens :: :seo | :accessibility
+  @type lens :: :seo | :accessibility | :compliance
 
   @doc """
   Which panels this check's findings belong in. Defaults to **both**.
