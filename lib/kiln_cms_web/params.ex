@@ -39,6 +39,18 @@ defmodule KilnCMSWeb.Params do
   instead, so a non-binary takes the same branch a garbage string does. Reading
   it as absent there would silently serve the live document to a compliance
   reader asking for a historical one, which is worse than the crash.
+
+  ## The authenticated half
+
+  #764 applied the same reading to the editor LiveViews, where `handle_params/3`
+  has exactly the shape freedom a controller does — `/editor?q[a]=1` and
+  `/editor/analytics?range[]=7` are links someone can be sent. Those read
+  through this module.
+
+  A LiveView's *pushed* events are the other half and this module is not the
+  answer there: the payload is arbitrary client JSON rather than a decoded query
+  string, so the fix is a `when is_binary(…)` guard on the clause head plus the
+  catch-all `KilnCMSWeb.MalformedEvent` appends to every Kiln LiveView.
   """
 
   @doc """
