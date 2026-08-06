@@ -76,7 +76,18 @@ function safeHref(url) {
   if (trimmed.toLowerCase().includes("javascript:")) return null
 
   const scheme = parsed.protocol.replace(/:$/, "")
-  if ((scheme === "http" || scheme === "https") && parsed.host) return trimmed
+
+  // `parsed.host` is not enough to decide an http(s) URL names a host (#833).
+  // WHATWG parsing is lenient where `URI.parse/1` is literal, and it invents
+  // an authority out of the path: `new URL("http:///path").host` is `"path"`,
+  // and `http:example.com` becomes `http://example.com/` — both of which the
+  // server refuses, so accepting them here puts the author back in the
+  // vanishing-link bug this mirror exists to prevent. Require the authority to
+  // be written out, with something other than a slash immediately after `//`.
+  if (scheme === "http" || scheme === "https") {
+    return /^https?:\/\/[^/\s]/i.test(trimmed) && parsed.host ? trimmed : null
+  }
+
   if (scheme === "mailto") return trimmed
   return null
 }
