@@ -128,6 +128,10 @@ defmodule KilnCMSWeb.Endpoint do
       cookie_key: "request_logger"
   end
 
+  # DB-free liveness (#816): answer GET /live before SetTenant resolves the host
+  # (a DB read), so a restart-triggering healthcheck survives a database outage.
+  plug KilnCMSWeb.Plugs.Liveness
+
   # Resolve the real client IP from X-Forwarded-For when behind a trusted proxy,
   # before anything (rate limiting, logging) reads conn.remote_ip.
   plug KilnCMSWeb.Plugs.ClientIp

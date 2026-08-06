@@ -2,12 +2,19 @@ defmodule KilnCMSWeb.HealthController do
   @moduledoc """
   Health probes for load balancers, uptime monitors, and Coolify.
 
-    * `GET /up` — **liveness**: a cheap text probe that returns 200 only when the
-      database is reachable, else 503. Used by the platform healthcheck.
-    * `GET /ready` — **readiness**: a JSON probe reporting database connectivity
+    `GET /live` — **liveness** — is not here: it is answered by the endpoint plug
+    `KilnCMSWeb.Plugs.Liveness`, ahead of `SetTenant`, so the DB-free liveness
+    signal a restart-triggering healthcheck needs never reaches host resolution
+    (a DB read). See that plug and #816.
+
+    * `GET /up` — **readiness**: a cheap text probe that returns 200 only when
+      the database is also reachable, else 503. For a load balancer / uptime
+      monitor deciding whether to route traffic here — not for triggering a
+      restart. (Kept as `/up` for the platforms and monitors already dialing it.)
+    * `GET /ready` — **readiness+**: a JSON probe reporting database connectivity
       and Oban background-queue depth, for monitoring/alerting sinks. Returns
-      200 when the database is reachable, else 503 (so it can double as a
-      readiness gate), with the queue-depth payload either way.
+      200 when the database is reachable, else 503, with the queue-depth payload
+      either way.
 
   See `docs/observability.md` for the alert rules that consume `/ready`.
   """

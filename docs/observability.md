@@ -108,12 +108,21 @@ reporter needs no change to the event-emitting code.
 
 ## Health & readiness probes (issue #56)
 
-Two HTTP probes back the platform healthcheck and external monitoring:
+Three HTTP probes back the container healthcheck and external monitoring:
 
 | Probe | Purpose | Body | Status |
 |-------|---------|------|--------|
-| `GET /up` | Liveness — used by the Coolify/LB healthcheck | `OK` | 200 if the DB answers `SELECT 1`, else 503 |
-| `GET /ready` | Readiness — for monitoring/alert sinks | JSON | 200 when the DB is reachable, else 503 |
+| `GET /live` | **Liveness** — the Docker `HEALTHCHECK` (restart trigger) probes this | `OK` | 200 iff the endpoint is serving; **no** DB check |
+| `GET /up` | **Readiness** — for a load balancer / uptime monitor routing traffic | `OK` | 200 if the DB answers `SELECT 1`, else 503 |
+| `GET /ready` | Readiness+ — for monitoring/alert sinks | JSON | 200 when the DB is reachable, else 503 |
+
+**Use `/live`, not `/up`, for anything that RESTARTS the app.** `/up` returns
+503 on a database outage, and restarting the app cannot fix an unreachable
+database — it only restart-storms the replicas exactly when the platform is
+already degraded (#816). `/live` returns 200 while the process is serving,
+regardless of the database, so a restart-triggering healthcheck only fires when
+the process itself is wedged. `/up` and `/ready` stay DB-coupled on purpose:
+that is the signal a load balancer wants when deciding whether to *route* here.
 
 `/ready` returns a machine-readable snapshot:
 
