@@ -235,4 +235,104 @@ defmodule KilnCMS.Firing.FormatVersionMigrationTest do
       refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => page.id})
     end
   end
+
+  # #615 made a stale row re-fire on the read path, which converges — unless the
+  # document can no longer be fired. Then the row stayed stale and every cache
+  # miss enqueued again: roughly one wasted job per cache expiry, forever, with
+  # no failed job and nothing marking the row as hopeless.
+  #
+  # These rows are a real state, not a hypothetical: `DeleteArtifacts` purges on
+  # unpublish inside a best-effort `try/rescue`, so a failed purge leaves an
+  # artifact for a now-draft document.
+  describe "a stale artifact whose document can no longer be fired (#664)" do
+    defp orphaned_artifact do
+      page = published_page()
+      age_artifact(org(), page, :json)
+
+      # Unpublish WITHOUT the housekeeping that normally purges — exactly the
+      # state a failed `DeleteArtifacts` leaves behind.
+      Ash.Seed.update!(page, %{state: :draft, published_at: nil})
+      Cache.evict(org(), :page, page.id)
+
+      page
+    end
+
+    test "the worker purges the orphaned row instead of leaving it stale" do
+      page = orphaned_artifact()
+
+      Engine.read(org(), :page, page.id, :json)
+      assert_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => page.id})
+      drain_oban()
+
+      # Gone, not merely re-stamped: the row should not exist at all, which is
+      # what unpublish intended.
+      refute match?(
+               {:ok, _},
+               Firing.get_artifact(:page, page.id, :json, authorize?: false, tenant: org())
+             )
+    end
+
+    test "a second read does not enqueue again — the drip converges" do
+      # The issue's acceptance criterion. Before this, read → job → row still
+      # stale → read → job → … bounded only by how long the deployment lives.
+      page = orphaned_artifact()
+
+      Engine.read(org(), :page, page.id, :json)
+      drain_oban()
+
+      # A fresh read after the purge. There is no row to be stale, so the read
+      # is a plain miss served by a live render, and nothing is queued.
+      Cache.evict(org(), :page, page.id)
+      Engine.read(org(), :page, page.id, :json)
+
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => page.id})
+    end
+
+    test "the job is cancelled, not recorded as a success" do
+      # `:ok` said "fired successfully" about a job that fired nothing, so the
+      # only trace of an unfireable document was its absence from the artifact
+      # table. A cancellation carries the reason.
+      page = orphaned_artifact()
+
+      assert {:cancel, reason} =
+               perform_job(KilnCMS.Firing.FireWorker, %{
+                 "org_id" => org(),
+                 "type" => "page",
+                 "id" => page.id
+               })
+
+      assert reason =~ "purged its orphaned artifacts"
+    end
+
+    test "a type no resource answers to is cancelled, not retried forever" do
+      assert {:cancel, reason} =
+               perform_job(KilnCMS.Firing.FireWorker, %{
+                 "org_id" => org(),
+                 "type" => "type_that_no_longer_exists",
+                 "id" => Ash.UUID.generate()
+               })
+
+      assert reason =~ "no content type answers to"
+    end
+
+    test "a published document is still fired — purging is only for settled absence" do
+      # The guard on the whole change: `:absent` must mean the document is
+      # genuinely not there. If it ever widens back to "the read failed", this
+      # test is what fails.
+      page = published_page()
+      age_artifact(org(), page, :json)
+
+      assert :ok =
+               perform_job(KilnCMS.Firing.FireWorker, %{
+                 "org_id" => org(),
+                 "type" => "page",
+                 "id" => page.id
+               })
+
+      assert {:ok, artifact} =
+               Firing.get_artifact(:page, page.id, :json, authorize?: false, tenant: org())
+
+      assert artifact.format_version == Engine.format_version()
+    end
+  end
 end

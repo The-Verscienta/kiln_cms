@@ -109,6 +109,7 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
       |> apply_custom_field_registry(restorable)
       |> revalidate(context)
       |> revalidate_alt_text(context)
+      |> revalidate_claims(context)
       |> validate_references(restorable, org_id)
     else
       :error ->
@@ -190,6 +191,26 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
       # image already live undescribed is not this write's doing, but one that
       # brings back an undescribed image the current page had fixed is refused.
       case Validations.MediaAltText.validate(changeset, [only_new: true], context) do
+        :ok -> changeset
+        {:error, error} -> Ash.Changeset.add_error(changeset, error)
+      end
+    else
+      changeset
+    end
+  end
+
+  # Exactly the same hole for claim checking (#377): this action force-changes
+  # `blocks`, `title`, `seo_title` and `seo_description` in a `before_action`,
+  # so the plain `validate` on `:update` has already run, and `:restore_version`
+  # fires artifacts of its own when the record is published. Restoring a live
+  # page to a version that said "FDA approved" would put the claim back on the
+  # public site having passed no gate at all.
+  #
+  # `only_new: true` for the same reason as above: restoring a claim that is
+  # already live is not this write's doing.
+  defp revalidate_claims(changeset, context) do
+    if changeset.data.state == :published do
+      case Validations.ComplianceClaims.validate(changeset, [only_new: true], context) do
         :ok -> changeset
         {:error, error} -> Ash.Changeset.add_error(changeset, error)
       end
