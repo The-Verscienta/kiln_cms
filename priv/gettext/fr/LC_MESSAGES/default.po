@@ -1910,7 +1910,7 @@ msgstr "Les recherches sont journalisées anonymement — sans identifiant utili
 msgid "Select %{title}"
 msgstr "Sélectionner %{title}"
 
-#: lib/kiln_cms_web/components/layouts/root.html.heex:156
+#: lib/kiln_cms_web/components/layouts/root.html.heex:167
 #, elixir-autogen, elixir-format
 msgid "Skip to main content"
 msgstr "Aller au contenu principal"
@@ -9067,3 +9067,23 @@ msgstr "Sera publié lors de la mise en ligne du lancement."
 #, elixir-autogen, elixir-format
 msgid "Will be unpublished when the release goes live."
 msgstr "Sera retiré lors de la mise en ligne du lancement."
+
+#: lib/kiln_cms_web/controllers/manifest_controller.ex:122
+#, elixir-autogen, elixir-format
+msgid "%{site} Editor"
+msgstr "Éditeur %{site}"
+
+#: lib/kiln_cms_web/controllers/manifest_controller.ex:168
+#, elixir-autogen, elixir-format
+msgid "Drafts"
+msgstr "Brouillons"
+
+#: lib/kiln_cms_web/controllers/manifest_controller.ex:163
+#, elixir-autogen, elixir-format
+msgid "Review queue"
+msgstr "File d'attente de révision"
+
+#: lib/kiln_cms_web/controllers/manifest_controller.ex:124
+#, elixir-autogen, elixir-format
+msgid "Review, approve and publish %{site} content."
+msgstr "Relisez, approuvez et publiez le contenu de %{site}."

@@ -208,14 +208,17 @@ it is the more likely shape of any future native work.
 
 Delivered with this document, because it reaches the goal the issue names:
 
-- **`KilnCMSWeb.ManifestController`** serves `/manifest.webmanifest` **per org**
+- **`KilnCMSWeb.ManifestController`** serves `/manifest.webmanifest?locale=…`
+  **per org and per locale** (#630)
   — `name`, `short_name` and `theme_color` come from `KilnCMS.Branding.for_org/1`,
   so a white-labelled site installs under its own name and colour (#48). A
   static file could not do this.
 - **`start_url` is `/editor?status=in_review`** — the review queue, not a
   generic dashboard. `scope` stays `/` so a sign-in redirect stays inside the
   installed window. A stable `id` (`/editor`) keeps existing installs valid if
-  the landing filter ever changes.
+  the landing filter ever changes — and it stays stable across locales too, since
+  a mismatched id makes a browser discard the whole manifest update rather than
+  rename the app.
 - **App icons** at 192/512 plus a separate maskable 512 and an iOS
   `apple-touch-icon`, all derived from the ember mark.
 - **`priv/static/sw.js`** — a deliberately minimal service worker. It exists
@@ -245,9 +248,12 @@ Honest limits. Each is filed, so closing #65 doesn't bury them:
   white-labelled one: the manifest cannot honestly declare `sizes` for a logo of
   unknown dimensions, and the offline page is a static file with no org context
   — [#629](https://github.com/The-Verscienta/kiln_cms/issues/629).
-- **The manifest is not localized** — deliberately, since a manifest is fetched
-  once from a locale-less URL and the label then sticks on the home screen —
-  [#630](https://github.com/The-Verscienta/kiln_cms/issues/630).
+- ~~**The manifest is not localized**~~ **Done** —
+  [#630](https://github.com/The-Verscienta/kiln_cms/issues/630). The link now
+  carries `?locale=`, so `name`, `description` and the shortcut labels are
+  translated. `short_name` is not (a brand name is a proper noun), and Android
+  labels the home-screen icon from `short_name` — so what this reaches is the
+  install dialog, app list, splash screen and shortcut menu, not the icon label.
 - **iOS gives no install prompt.** Safari requires the user to pick "Add to Home
   Screen" manually; there is no `beforeinstallprompt` equivalent.
 - **The iOS status bar stays opaque.** `apple-mobile-web-app-status-bar-style:
