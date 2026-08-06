@@ -414,6 +414,54 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # covers an identical trashed id inside `custom_fields` too.
       assert_refuses(page, create_version, :custom_fields, admin)
     end
+
+    test "a :reference value pointing at a since-trashed record fails the restore" do
+      admin = admin()
+      target = CMS.create_page!(%{title: "Target", slug: slug()}, actor: admin)
+
+      define_field!(admin, %{
+        name: "related",
+        label: "Related",
+        field_type: :reference,
+        target_type: "page"
+      })
+
+      page =
+        CMS.create_page!(
+          %{title: "P", slug: slug(), custom_fields: %{"related" => target.id}},
+          actor: admin
+        )
+
+      [create_version | _] = versions(page, admin)
+
+      CMS.update_page!(page, %{title: "P2"}, actor: admin)
+      CMS.destroy_page!(target, actor: admin)
+
+      assert_refuses(page, create_version, :custom_fields, admin)
+    end
+
+    test "computed fields refresh from the restored document, not the stored value" do
+      admin = admin()
+      # Created BEFORE the computed field exists, so the create version's folded
+      # map carries no key for it.
+      page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      [create_version | _] = versions(page, admin)
+
+      define_field!(admin, %{
+        name: "echo",
+        label: "Echo",
+        field_type: :computed,
+        compute: "{{ title }}"
+      })
+
+      CMS.update_page!(page, %{title: "Beta"}, actor: admin)
+
+      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+
+      # Recomputed from the restored title — not left absent (old behavior, the
+      # folded map predates the field) and not the current "Beta".
+      assert restored.custom_fields["echo"] == "Alpha"
+    end
   end
 
   describe "re-validation (#691)" do
