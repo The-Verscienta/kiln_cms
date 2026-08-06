@@ -20,15 +20,21 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, grants \\ %{}) do
     email = "seo-suggest-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        grants
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -110,6 +116,49 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       [value] -> value
       # Textareas carry their value as content, not an attribute.
       nil -> html |> String.replace(~r/<[^>]*>/, "") |> String.trim()
+    end
+  end
+
+  describe "authorization (#550)" do
+    # An editor scoped to author only "post" can READ pages (empty readable
+    # scope = unrestricted) but cannot autosave one — the "read-only on this
+    # type" role the issue is about.
+    defp read_only_editor,
+      do: authed_user(:editor, %{editable_types: ["post"], readable_types: []})
+
+    test "the Suggest control is hidden from an editor who cannot write the record", %{conn: conn} do
+      enable_stub()
+      page = page(authed_user(:admin))
+
+      {_lv, html} = open_editor(conn, read_only_editor(), page)
+
+      refute html =~ "Suggest with AI"
+    end
+
+    test "a forged seo_suggest event is refused server-side and starts no billed run",
+         %{conn: conn} do
+      enable_stub()
+      page = page(authed_user(:admin))
+
+      {lv, _html} = open_editor(conn, read_only_editor(), page)
+
+      # The disabled/hidden button is not the control — push the event directly,
+      # as a replay or a hand-rolled client would.
+      render_click(lv, "seo_suggest", %{})
+
+      # No async generation was ever started, so no suggestions land.
+      refute render_async(lv, 2_000) =~ "Suggestions"
+    end
+
+    test "an editor who may write the record still gets the control", %{conn: conn} do
+      enable_stub()
+      editor = authed_user(:editor)
+
+      {lv, html} = open_editor(conn, editor, page(editor))
+      assert html =~ "Suggest with AI"
+
+      render_click(lv, "seo_suggest", %{})
+      assert render_async(lv, 2_000) =~ "Suggestions"
     end
   end
 
