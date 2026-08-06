@@ -33,6 +33,14 @@ defmodule KilnCMSWeb.ManifestControllerTest do
       assert ["application/manifest+json" <> _] = get_resp_header(conn, "content-type")
     end
 
+    test "is marked private/no-cache — it varies by org host and locale param", %{conn: conn} do
+      conn = get(conn, ~p"/manifest.webmanifest")
+
+      # A shared/CDN cache must never hand one org's (or one locale's) manifest
+      # to another; the body carries no shared-cacheable value (#48, #630).
+      assert ["private, no-cache"] = get_resp_header(conn, "cache-control")
+    end
+
     test "needs no authentication — the browser fetches it as a page subresource",
          %{conn: conn} do
       # No session at all: still 200, because a signed-out editor hitting

@@ -59,6 +59,13 @@ defmodule KilnCMSWeb.ManifestController do
 
     conn
     |> put_resp_content_type("application/manifest+json")
+    # The body varies by BOTH the host (per-org branding, #48) and the `locale`
+    # query param (#630). `private` keeps it out of shared/CDN caches, which is
+    # what makes those two dimensions safe: a CDN that cached one org's or one
+    # locale's manifest — some are configured to serve `.webmanifest` with the
+    # query string stripped — would otherwise hand it to another. Per-install
+    # and cheap to regenerate, so there's nothing to gain from shared caching.
+    |> put_resp_header("cache-control", "private, no-cache")
     |> json(manifest(brand, locale))
   end
 
