@@ -137,17 +137,22 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
 
     test "a forged seo_suggest event is refused server-side and starts no billed run",
          %{conn: conn} do
-      enable_stub()
-      page = page(authed_user(:admin))
+      # The counting stub proves the guard independently of rendering: the button
+      # is hidden, but that alone wouldn't prove the *handler* refused — only that
+      # the card didn't render. Asserting the generator was never called does.
+      put_seo(generator: KilnCMS.StubSeoGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubSeoGenerator.Counting.start_link()
+      KilnCMS.StubSeoGenerator.Counting.reset()
 
+      page = page(authed_user(:admin))
       {lv, _html} = open_editor(conn, read_only_editor(), page)
 
       # The disabled/hidden button is not the control — push the event directly,
       # as a replay or a hand-rolled client would.
       render_click(lv, "seo_suggest", %{})
+      render_async(lv, 2_000)
 
-      # No async generation was ever started, so no suggestions land.
-      refute render_async(lv, 2_000) =~ "Suggestions"
+      assert KilnCMS.StubSeoGenerator.Counting.count() == 0
     end
 
     test "an editor who may write the record still gets the control", %{conn: conn} do
