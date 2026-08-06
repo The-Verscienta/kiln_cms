@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.TaskLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.TaskSettings
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,8 +22,18 @@ defmodule KilnCMSWeb.TaskLive do
      socket
      |> assign(:page_title, gettext("Tasks"))
      |> assign(:view, :mine)
+     |> assign(:is_admin, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
+     |> load_site_default()
      |> load_tasks()}
   end
+
+  defp load_site_default(socket),
+    do:
+      assign(
+        socket,
+        :auto_complete_default,
+        TaskSettings.site_default(socket.assigns.current_org)
+      )
 
   @impl true
   def handle_params(params, _uri, socket) do
@@ -30,7 +41,33 @@ defmodule KilnCMSWeb.TaskLive do
     {:noreply, socket |> assign(:view, view) |> load_tasks()}
   end
 
+  # The site default (#818). Editor-visible because the rows below say what
+  # publishing will do to them, and that sentence is wrong if you cannot see the
+  # setting — but only an admin can change it, enforced by the resource policy
+  # rather than by this page. `/editor/links` draws the same line.
   @impl true
+  def handle_event("set_auto_complete", %{"enabled" => enabled}, socket)
+      when is_binary(enabled) do
+    attrs = %{auto_complete_tasks_on_publish: enabled == "true"}
+
+    case CMS.save_site_editorial_settings(attrs,
+           actor: socket.assigns.current_user,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, _settings} ->
+        {:noreply, socket |> load_site_default() |> load_tasks()}
+
+      {:error, _error} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't change that setting."))}
+    end
+  end
+
+  # A pushed payload is client-chosen, so the guard above must have somewhere to
+  # fall (#764). `TaskLive` predates `KilnCMSWeb.MalformedEvent`'s catch-all and
+  # has none of its own, so without this a `%{"enabled" => true}` push is a
+  # FunctionClauseError that kills the view.
+  def handle_event("set_auto_complete", _params, socket), do: {:noreply, socket}
+
   def handle_event("complete", %{"id" => id}, socket) do
     case Enum.find(all_tasks(socket), &(&1.id == id)) do
       nil ->
@@ -96,6 +133,16 @@ defmodule KilnCMSWeb.TaskLive do
 
   defp overdue?(%{due_on: due_on}), do: due_on != nil and Date.before?(due_on, Date.utc_today())
 
+  # Asked through `TaskSettings.describe/2` rather than by reading the field, so
+  # the precedence rule lives in exactly one module (#818).
+  defp overrides_site?(task, site_default) do
+    case TaskSettings.describe(task, site_default) do
+      {^site_default, _source} -> false
+      {_effective, :task} -> true
+      {_effective, :site} -> false
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -125,11 +172,46 @@ defmodule KilnCMSWeb.TaskLive do
           </div>
         </div>
 
+        <%!-- The site default (#818). Stated for every editor, changeable by an
+              admin — a task row's "stays open after publish" only makes sense
+              next to what the default is. --%>
+        <div class="card card-pad flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-sm font-medium">
+              {gettext("Publishing completes open tasks")}
+            </p>
+            <p class="text-xs text-base-content/60">
+              {if @auto_complete_default,
+                do:
+                  gettext(
+                    "Open tasks on a piece of content are marked done when it publishes. Individual tasks can opt out."
+                  ),
+                else:
+                  gettext(
+                    "Open tasks stay open when their content publishes. Individual tasks can opt in."
+                  )}
+            </p>
+          </div>
+          <button
+            :if={@is_admin}
+            type="button"
+            phx-click="set_auto_complete"
+            phx-value-enabled={to_string(!@auto_complete_default)}
+            class="btn btn-sm btn-default"
+          >
+            {if @auto_complete_default, do: gettext("Turn off"), else: gettext("Turn on")}
+          </button>
+        </div>
+
         <div :if={@view == :mine} class="card divide-y divide-base-content/10">
           <p :if={@my_tasks == []} class="p-4 text-sm text-base-content/60">
             {gettext("No open tasks assigned to you.")}
           </p>
-          <.task_row :for={task <- @my_tasks} task={task} />
+          <.task_row
+            :for={task <- @my_tasks}
+            task={task}
+            auto_complete_default={@auto_complete_default}
+          />
         </div>
 
         <div :if={@view == :team} class="space-y-4">
@@ -141,7 +223,11 @@ defmodule KilnCMSWeb.TaskLive do
               {assignee} <span class="text-base-content/50">({length(tasks)})</span>
             </div>
             <div class="divide-y divide-base-content/10">
-              <.task_row :for={task <- tasks} task={task} />
+              <.task_row
+                :for={task <- tasks}
+                task={task}
+                auto_complete_default={@auto_complete_default}
+              />
             </div>
           </div>
         </div>
@@ -151,6 +237,7 @@ defmodule KilnCMSWeb.TaskLive do
   end
 
   attr :task, :map, required: true
+  attr :auto_complete_default, :boolean, required: true
 
   defp task_row(assigns) do
     ~H"""
@@ -163,6 +250,15 @@ defmodule KilnCMSWeb.TaskLive do
           {@task.content_title}
         </.link>
         <p :if={@task.note} class="truncate text-xs text-base-content/60">{@task.note}</p>
+        <%!-- Only when this task DISAGREES with the site (#818). The banner
+              above states the site rule; repeating it on every row would be
+              noise, but leaving a task that contradicts it unlabelled would
+              make the banner wrong for the row directly beneath it. --%>
+        <p :if={overrides_site?(@task, @auto_complete_default)} class="text-xs text-base-content/60">
+          {if @task.auto_complete_on_publish,
+            do: gettext("Completes when its content publishes"),
+            else: gettext("Stays open when its content publishes")}
+        </p>
       </div>
       <span :if={@task.due_on} class={["text-xs", overdue?(@task) && "font-semibold text-error"]}>
         {if overdue?(@task), do: gettext("Overdue"), else: gettext("Due")} {Date.to_iso8601(

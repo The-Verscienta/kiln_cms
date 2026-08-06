@@ -44,7 +44,7 @@ defmodule KilnCMS.CMS.Task do
     create :assign do
       description "Assign an editorial task on a piece of content."
       primary? true
-      accept [:content_type, :content_id, :assignee_id, :due_on, :note]
+      accept [:content_type, :content_id, :assignee_id, :due_on, :note, :auto_complete_on_publish]
 
       validate KilnCMS.CMS.Validations.AssigneeIsEditor
 
@@ -61,7 +61,7 @@ defmodule KilnCMS.CMS.Task do
     update :update do
       description "Reassign a task, or change its due date / note."
       primary? true
-      accept [:assignee_id, :due_on, :note]
+      accept [:assignee_id, :due_on, :note, :auto_complete_on_publish]
       require_atomic? false
 
       validate KilnCMS.CMS.Validations.AssigneeIsEditor
@@ -214,6 +214,23 @@ defmodule KilnCMS.CMS.Task do
 
     attribute :due_on, :date, public?: true
     attribute :note, :string, public?: true
+
+    # Whether publishing this task's content completes it (#818).
+    #
+    # **`nil` is a third value, not a missing one**: it means "whatever the site
+    # is set to" (`SiteEditorialSettings.auto_complete_tasks_on_publish`).
+    # `true`/`false` override that for this task alone, which is the case the
+    # site setting cannot serve — a follow-up task deliberately outliving the
+    # publish it hangs off.
+    #
+    # So `allow_nil? true` and no default. A default of `true` here would be a
+    # different feature: every task would carry an explicit opt-in written at
+    # assign time, and changing the site setting afterwards would move none of
+    # them. Resolve the pair with `KilnCMS.CMS.TaskSettings.auto_complete?/2`.
+    attribute :auto_complete_on_publish, :boolean do
+      allow_nil? true
+      public? true
+    end
 
     attribute :status, :atom do
       constraints one_of: [:open, :done]

@@ -130,4 +130,41 @@ defmodule KilnCMSWeb.TaskLiveTest do
 
     assert html =~ "Overdue"
   end
+
+  # The site default for auto-complete-on-publish (#818). Read by every editor
+  # because the task rows explain what publishing will do to them; changed only
+  # by an admin, enforced by the resource policy rather than by this route —
+  # `/editor/links` draws the same line.
+  describe "the auto-complete-on-publish default" do
+    test "is stated on the page, and reads as on before anyone saves", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/tasks")
+
+      assert html =~ "Publishing completes open tasks"
+      assert html =~ "marked done when it publishes"
+    end
+
+    test "an editor sees it but is offered no control", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/tasks")
+
+      # The admin test below renders the same button, so this refute is a real
+      # difference rather than an assertion about a string nobody emits.
+      assert html =~ "Publishing completes open tasks"
+      refute html =~ "set_auto_complete"
+    end
+
+    test "an admin can turn it off, and the page then says so", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/tasks")
+
+      html = lv |> element("button[phx-click='set_auto_complete']") |> render_click()
+
+      assert html =~ "stay open when their content publishes"
+      assert html =~ "Turn on"
+    end
+  end
 end
