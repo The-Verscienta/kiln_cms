@@ -127,8 +127,11 @@ defmodule KilnCMS.CMS.Releases do
   @spec topic(Ash.UUID.t()) :: String.t()
   def topic(release_id), do: "content_release:#{release_id}"
 
-  # Broadcast AFTER the transaction, so a subscriber that re-reads on the
-  # message can only ever see committed state.
+  # Broadcast AFTER the outcome is written, never before. A subscriber's only
+  # reaction is to re-read the release, so announcing while the row still says
+  # `:publishing` tells the console to fetch the state it already has — and it
+  # then sits on "Publishing" forever, which is the exact failure this PubSub
+  # hop exists to prevent.
   defp announce(release) do
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(release.id), {:release_finished, release.id})
     release
@@ -155,8 +158,9 @@ defmodule KilnCMS.CMS.Releases do
         {:ok, announce(published)}
 
       {:error, reason} ->
+        result = fail(release, items, reason, opts)
         announce(release)
-        fail(release, items, reason, opts)
+        result
     end
   end
 
