@@ -21,6 +21,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   import Ash.Expr, only: [expr: 1]
   import KilnCMSWeb.AccessibilityComponents, only: [a11y_findings: 1, a11y_grade_badge: 1]
+
+  import KilnCMSWeb.ComplianceComponents,
+    only: [compliance_findings: 1, compliance_grade_badge: 1]
+
   import KilnCMSWeb.SeoComponents, only: [seo_findings: 1, seo_grade_badge: 1]
   import KilnCMSWeb.VersionDiffComponents, only: [version_compare: 1]
 
@@ -721,16 +725,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp refresh_body_stats(socket, typed) do
-    digest = :erlang.phash2(typed)
+    # The claim rules are part of the digest, not just the blocks: the body
+    # scan is memoized here, so switching claim checking on (or editing the
+    # rules) while an editor session is open would otherwise leave that session
+    # showing the previous scan — or no panel at all — until the author
+    # happened to touch the body.
+    digest = :erlang.phash2({typed, claim_signature()})
 
     if digest == socket.assigns[:seo_body_digest] do
       socket
     else
+      body = Kiln.Advisory.Body.from_typed(typed)
+
       socket
       |> assign(:seo_body_digest, digest)
-      |> assign(:seo_body_stats, Kiln.Advisory.Body.from_typed(typed))
+      |> assign(:seo_body_stats, body)
+      # Scanning the whole document for every configured claim phrase is body
+      # work, so it is memoized here with the rest of it (#377). The short
+      # scalar fields are scanned per keystroke in `refresh_seo_report/1` and
+      # merged in — see `KilnCMS.Compliance.merge/2`.
+      |> assign(:claim_body_matches, scan_claims(body.text))
       |> refresh_link_targets()
     end
+  end
+
+  # `%{}` rather than `nil` when nothing matched, so the check can tell "scanned
+  # and clean" from "nobody scanned" — which it reports as `:n_a`, because a
+  # document nobody checked is not a document that is clean.
+  defp scan_claims(text) do
+    if KilnCMS.Compliance.enabled?(), do: KilnCMS.Compliance.scan(text), else: nil
+  end
+
+  defp claim_signature do
+    if KilnCMS.Compliance.enabled?(), do: KilnCMS.Compliance.rules(), else: nil
   end
 
   # Resolving an internal link is a query per distinct path (#474), so it is
@@ -794,13 +821,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
       locale: form[:locale].value
     }
 
-    # One registry run, two views (#495). The panels overlap heavily — headings,
-    # alt text and readability report into both — so running the checks once
-    # and splitting the outcomes by lens is the difference between paying for
-    # the shared ones once per keystroke and paying twice.
+    # One registry run, three views (#495, #377). SEO and accessibility overlap
+    # heavily — headings, alt text and readability report into both — so
+    # running the checks once and splitting the outcomes by lens is the
+    # difference between paying for the shared ones once per keystroke and
+    # paying twice. Compliance shares no checks with either, but rides the same
+    # run rather than opening a second one.
     outcomes =
       KilnCMS.Seo.Analyzer.run(fields, socket.assigns.seo_body_stats,
-        facts: %{link_targets: socket.assigns[:link_targets] || %{}}
+        facts: %{
+          link_targets: socket.assigns[:link_targets] || %{},
+          claim_matches: claim_matches(socket, fields)
+        }
       )
 
     body = socket.assigns.seo_body_stats
@@ -811,6 +843,41 @@ defmodule KilnCMSWeb.ContentEditorLive do
       :a11y_report,
       outcomes |> Registry.by_lens(:accessibility) |> Report.from_outcomes(body)
     )
+    |> assign(
+      :compliance_report,
+      outcomes |> Registry.by_lens(:compliance) |> Report.from_outcomes(body)
+    )
+  end
+
+  # The scalar fields that get published as text (#377). Scanned here rather
+  # than with the body because they change on every keystroke — but they are a
+  # title and two meta fields, so one regex pass over a few hundred bytes, not
+  # over the document.
+  #
+  # Gating them out would leave the panel and the publish gate disagreeing: the
+  # gate scans the SEO description, and a claim there is the one that ships to
+  # a search results page.
+  @claim_scanned_fields [:title, :seo_title, :seo_description]
+
+  defp claim_matches(socket, fields) do
+    case socket.assigns[:claim_body_matches] do
+      nil ->
+        nil
+
+      body_matches ->
+        # Each field scanned separately, never joined. Concatenating them
+        # invents phrases across the seam — a title ending "…at your own risk"
+        # beside an SEO title starting "Free…" would report "risk free", which
+        # appears nowhere in the document.
+        @claim_scanned_fields
+        |> Enum.reduce(body_matches, fn field, acc ->
+          fields
+          |> Map.get(field)
+          |> to_string()
+          |> KilnCMS.Compliance.scan()
+          |> then(&KilnCMS.Compliance.merge(acc, &1))
+        end)
+    end
   end
 
   defp load_versions(socket) do
@@ -7073,6 +7140,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     "No accessibility issues found in %{count} applicable checks.",
                     @a11y_report.total,
                     count: @a11y_report.total
+                  )}
+                </p>
+              </.inspector_section>
+
+              <%!-- Compliance (#377). Rendered only when there is something to
+                    say: with claim checking off both checks report `:n_a`, so
+                    `total` is 0 and the section never appears — an install
+                    that never asked for a claims panel doesn't grow one. --%>
+              <.inspector_section
+                :if={@compliance_report.total > 0}
+                id="inspector-compliance"
+                title={gettext("Compliance")}
+              >
+                <:aside>
+                  <.compliance_grade_badge report={@compliance_report} />
+                </:aside>
+                <%!-- Advisory only. The hard gate is
+                      `Validations.ComplianceClaims`, which is separate and
+                      opt-in on top of this — see `KilnCMS.Compliance`. --%>
+                <.compliance_findings
+                  :if={@compliance_report.findings != []}
+                  report={@compliance_report}
+                  class="rounded border border-base-content/10 bg-base-200/40 p-2"
+                />
+                <p :if={@compliance_report.findings == []} class="text-xs text-base-content/60">
+                  {ngettext(
+                    "No claim issues found in %{count} applicable check.",
+                    "No claim issues found in %{count} applicable checks.",
+                    @compliance_report.total,
+                    count: @compliance_report.total
                   )}
                 </p>
               </.inspector_section>

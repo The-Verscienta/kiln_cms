@@ -17,9 +17,10 @@ defmodule KilnCMS.Seo.Analyzer do
 
   ## This is the SEO *view*, not the whole registry
 
-  Since #495 there are two panels over one set of checks, so this filters
-  outcomes to the `:seo` lens (see `c:Kiln.Advisory.lenses/0`). A caller that
-  wants both views should run the registry once and split it —
+  Since #495 — and a third panel since #377 — there are several views over one
+  set of checks, so this filters outcomes to the `:seo` lens (see
+  `c:Kiln.Advisory.lenses/0`). A caller that wants more than one view should
+  run the registry once and split it —
   `KilnCMSWeb.ContentEditorLive` does — rather than call this and its
   accessibility counterpart, which would walk every shared check twice on
   every keystroke.

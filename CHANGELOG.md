@@ -29,6 +29,58 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Editorial claim checking.** A **Compliance** panel in the content editor
+  flags the phrases a regulator or a house style guide would want a second look
+  at — "FDA approved", "no side effects", "guaranteed results" — plus an
+  optional check that a configured disclaimer is present. Built on the existing
+  advisory framework as a third lens rather than a private panel, so it shares
+  the body walk, the severity vocabulary and the rendering (#377). See
+  [Editorial claim checking](docs/compliance.md).
+
+  **Off by default, behind two switches.** `enabled` turns the panel on;
+  `require_at_publish` then turns an `:error`-severity match into a refused
+  publish (`KilnCMS.CMS.Validations.ComplianceClaims`). It is read *through*
+  `enabled`, so setting it alone is inert. Most publications want the panel
+  long before they want a gate.
+
+  The gate covers every path that can put text on the public site: `:publish`,
+  `:publish_scheduled`, an `:update` to an already-live record, and a version
+  restore (which force-changes fields in a `before_action`, so a plain
+  validation never sees them). All are scoped to the claims *that write
+  introduces*, so switching the gate on doesn't make existing pages
+  un-editable. Note it costs a block-tree walk and a scan on every write to a
+  published record — unlike the alt-text gate it also reads the SEO fields, and
+  Ash's `where:` has no "any of these changed".
+
+  Three judgement calls worth knowing, all argued in the doc. The check is an
+  editor advisory rather than the background agent #377 sketched, because a
+  claim is a judgement about meaning and every honest implementation ends up
+  asking a human — who is already in the editor. The shipped rule pack omits
+  bare curative vocabulary ("cures", "heals"), which is the vocabulary a health
+  CMS most obviously wants and also the vocabulary with the most legitimate uses
+  — where that line falls is the operator's call, and a shipped guess means
+  every install starts by switching the panel off. And negation is deliberately
+  not handled: "does not cure cancer" is reported, because a negation window
+  would suppress "not only clinically proven, but…" just as readily.
+
+  Phrases match on whole-word boundaries — as a substring, `cures` matches
+  *manicures*, *procures* and *secures*.
+
+- **Beta testing program.** [Beta user testing](docs/beta-testing.md) documents
+  the Phase 9 editor-UX beta: the surface under test, seven guided scenarios, a
+  session notes form, and a feedback → issue → fix triage loop. A **Beta
+  feedback** issue form files one finding per issue, labelled `beta`, capturing
+  severity, area, build and tester so a fix can be confirmed with the person who
+  found it (#59).
+
+  The thing that shapes the whole program is that access is gated on **two**
+  axes, not one. The router decides which pages open (nineteen are admin-only),
+  and Ash policy separately decides which actions run — and `publish` is
+  admin-only, so **an editor cannot publish**. A beta round therefore can't be
+  one person alone at a keyboard: the draft → in_review → published loop needs
+  two seats, which is the workflow under test anyway. Scenarios are split
+  accordingly.
+
 - **"Add to release" from the content editor.** The Settings tab now carries a
   **Release** panel: queue the record you're editing into a content release,
   see which release it's already in (with a link to it), and take it back out.

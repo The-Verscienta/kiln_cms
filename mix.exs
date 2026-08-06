@@ -111,6 +111,7 @@ defmodule KilnCMS.MixProject do
       # Authoring & editorial
       "docs/editor-shortcuts.md": [],
       "docs/advisories.md": [],
+      "docs/compliance.md": [],
       "docs/link-checking.md": [],
       "docs/comments.md": [],
       "docs/content-releases.md": [],
@@ -153,6 +154,7 @@ defmodule KilnCMS.MixProject do
       "docs/observability.md": [],
       "docs/performance.md": [],
       "docs/releasing.md": [],
+      "docs/beta-testing.md": [],
       "docs/staging-environments.md": [],
       "docs/media-pipeline.md": [],
       "docs/direct-email-delivery.md": [],
@@ -212,6 +214,7 @@ defmodule KilnCMS.MixProject do
       "Authoring & editorial": [
         "docs/editor-shortcuts.md",
         "docs/advisories.md",
+        "docs/compliance.md",
         "docs/link-checking.md",
         "docs/comments.md",
         "docs/content-releases.md",
@@ -257,6 +260,7 @@ defmodule KilnCMS.MixProject do
         "docs/observability.md",
         "docs/performance.md",
         "docs/releasing.md",
+        "docs/beta-testing.md",
         "docs/staging-environments.md",
         "docs/media-pipeline.md",
         "docs/direct-email-delivery.md",
