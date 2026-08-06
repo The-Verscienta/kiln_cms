@@ -26,10 +26,7 @@ defmodule KilnCMS.CMS.Validations.TagGroupInTenant do
         :ok
 
       group_id ->
-        org_id =
-          Ash.Changeset.get_attribute(changeset, :org_id) || KilnCMS.Accounts.default_org_id()
-
-        case KilnCMS.CMS.get_tag_group(group_id, authorize?: false, tenant: org_id) do
+        case KilnCMS.CMS.get_tag_group(group_id, authorize?: false, tenant: org_id(changeset)) do
           {:ok, _group} ->
             :ok
 
@@ -43,4 +40,18 @@ defmodule KilnCMS.CMS.Validations.TagGroupInTenant do
         end
     end
   end
+
+  # The writer's org. `to_tenant` (an id via `Ash.ToTenant`, matched as a struct
+  # too) is populated at changeset-build time, so it is the value validations can
+  # trust — the `org_id` ATTRIBUTE isn't stamped from the tenant until the action
+  # runs, so on `:create` it is still nil here. Reading it instead resolved every
+  # scoped create under the DEFAULT org, which INVERTED this control: a foreign
+  # group filed under a non-default tenant resolved as the default org's and was
+  # wrongly accepted, while a legitimate same-org group was rejected. Falls back
+  # like `Scoping`.
+  defp org_id(%{to_tenant: org_id}) when is_binary(org_id), do: org_id
+  defp org_id(%{to_tenant: %{id: org_id}}) when is_binary(org_id), do: org_id
+
+  defp org_id(changeset),
+    do: Ash.Changeset.get_attribute(changeset, :org_id) || KilnCMS.Accounts.default_org_id()
 end

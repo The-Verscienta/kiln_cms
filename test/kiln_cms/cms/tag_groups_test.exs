@@ -172,6 +172,34 @@ defmodule KilnCMS.CMS.TagGroupsTest do
 
       assert tag.tag_group_id == home.id
     end
+
+    test "on create, resolves the group under the WRITE's tenant, not the default org" do
+      actor = admin()
+      org_b = other_org()
+      home_b = group(%{org_id: org_b.id})
+      default_group = group()
+
+      # Same-org group written under org_b: accepted. On the buggy version the
+      # validation read the not-yet-stamped `org_id` attribute (nil on create)
+      # and fell back to the default org, so this legitimate group was REJECTED.
+      assert {:ok, _} =
+               CMS.create_tag(
+                 %{name: "Ok", slug: "ok-#{uniq()}", tag_group_id: home_b.id},
+                 actor: actor,
+                 tenant: org_b
+               )
+
+      # The DEFAULT org's group is cross-tenant for an org_b tag: rejected. On the
+      # buggy version this resolved under the default org, found the group, and
+      # WRONGLY ACCEPTED it — the security control inverted for any non-default
+      # tenant.
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.create_tag(
+                 %{name: "Bad", slug: "bad-#{uniq()}", tag_group_id: default_group.id},
+                 actor: actor,
+                 tenant: org_b
+               )
+    end
   end
 
   describe "listing" do

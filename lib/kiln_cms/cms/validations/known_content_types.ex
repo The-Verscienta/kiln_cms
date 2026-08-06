@@ -21,10 +21,9 @@ defmodule KilnCMS.CMS.Validations.KnownContentTypes do
 
   @impl true
   def validate(changeset, _opts, _context) do
-    org_id =
-      Ash.Changeset.get_attribute(changeset, :org_id) || KilnCMS.Accounts.default_org_id()
-
-    case changeset |> Ash.Changeset.get_attribute(:content_types) |> unknown_types(org_id) do
+    case changeset
+         |> Ash.Changeset.get_attribute(:content_types)
+         |> unknown_types(org_id(changeset)) do
       [] ->
         :ok
 
@@ -41,4 +40,16 @@ defmodule KilnCMS.CMS.Validations.KnownContentTypes do
 
   defp unknown_types(nil, _org_id), do: []
   defp unknown_types(types, org_id), do: Enum.reject(types, &ContentTypes.get(&1, org_id))
+
+  # The writer's org. `to_tenant` (an id via `Ash.ToTenant`, matched as a struct
+  # too) is populated at changeset-build time, so it is the value validations can
+  # trust — the `org_id` ATTRIBUTE is not stamped from the tenant until the action
+  # runs, and its function default is lazy, so on `:create` it is still nil here.
+  # Reading it instead resolved every scoped create under the DEFAULT org, which
+  # rejected a non-default org's own dynamic types. Falls back like `Scoping`.
+  defp org_id(%{to_tenant: org_id}) when is_binary(org_id), do: org_id
+  defp org_id(%{to_tenant: %{id: org_id}}) when is_binary(org_id), do: org_id
+
+  defp org_id(changeset),
+    do: Ash.Changeset.get_attribute(changeset, :org_id) || KilnCMS.Accounts.default_org_id()
 end
