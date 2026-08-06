@@ -168,6 +168,54 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
 
       assert html =~ "become ungrouped"
     end
+
+    # A tag pointing at a group the page didn't load (a cross-tenant `tag_group_id`
+    # — the FK carries no org component — or one raced in after load) must fall
+    # into "Ungrouped", not vanish: dropping it hid its Edit/Delete controls and
+    # skewed the "Tags (N)" count (#525). This can't be reproduced through the DB
+    # here — the fail-open suite loads every group `global?` and the `nilify` FK
+    # forbids a dangling id — so exercise the pure bucketing directly.
+    test "a tag in an unloaded group buckets as ungrouped rather than disappearing" do
+      # Two loaded groups so we can also assert picker order is preserved and the
+      # Ungrouped bucket lands last.
+      first = %TagGroup{id: Ecto.UUID.generate(), name: "First"}
+      second = %TagGroup{id: Ecto.UUID.generate(), name: "Second"}
+      absent_id = Ecto.UUID.generate()
+
+      in_first = %Tag{id: Ecto.UUID.generate(), name: "Filed", tag_group_id: first.id}
+      orphan = %Tag{id: Ecto.UUID.generate(), name: "Orphan", tag_group_id: absent_id}
+      loose = %Tag{id: Ecto.UUID.generate(), name: "Loose", tag_group_id: nil}
+
+      buckets =
+        KilnCMSWeb.TaxonomyLive.group_tags([in_first, orphan, loose], [first, second])
+
+      # Every tag survives — none is silently dropped.
+      bucketed = for {_id, _name, tags} <- buckets, t <- tags, do: t.name
+      assert Enum.sort(bucketed) == ["Filed", "Loose", "Orphan"]
+
+      # Loaded groups keep picker order; the empty one still shows; Ungrouped last.
+      assert [
+               {first_id, "First", [in_first]},
+               {second_id, "Second", []},
+               {nil, ungrouped_label, ungrouped}
+             ] =
+               buckets
+
+      assert first_id == first.id
+      assert second_id == second.id
+      assert ungrouped_label =~ "Ungrouped"
+      # Both the null-group tag and the unknown-group tag land under "Ungrouped".
+      assert Enum.map(ungrouped, & &1.name) |> Enum.sort() == ["Loose", "Orphan"]
+    end
+
+    test "no ungrouped bucket appears when every tag is filed under a loaded group" do
+      loaded = %TagGroup{id: Ecto.UUID.generate(), name: "Loaded"}
+      filed = %Tag{id: Ecto.UUID.generate(), name: "Filed", tag_group_id: loaded.id}
+
+      buckets = KilnCMSWeb.TaxonomyLive.group_tags([filed], [loaded])
+
+      assert buckets == [{loaded.id, "Loaded", [filed]}]
+    end
   end
 
   describe "editing taxonomy" do
