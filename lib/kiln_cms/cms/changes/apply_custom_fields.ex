@@ -44,7 +44,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   def change(changeset, _opts, _context) do
     if changeset.action_type == :create or
          Ash.Changeset.changing_attribute?(changeset, :custom_fields) do
-      apply_definitions(changeset)
+      apply_definitions(changeset, merge_base(changeset))
     else
       # An update that never mentions `custom_fields` still has to refresh
       # computed fields: their inputs are the *document* — a retitled page
@@ -53,7 +53,36 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
-  defp apply_definitions(changeset) do
+  @doc """
+  Run the registry pass over a `custom_fields` map a restore just force-changed
+  onto the changeset (#710).
+
+  A version restore folds the stored map in raw, in a `before_action`, so it
+  never passes through `change/3` — leaving `:select` values outside a
+  since-narrowed option list unchecked, `:media`/`:reference` ids unresolved
+  (a trashed id sails past `featured_image_id`'s dangling-reference check),
+  computed fields showing the pre-restore document's value, and keys for
+  deleted definitions publicly readable again.
+
+  It runs against an EMPTY base, not the record's current map: a restore is a
+  wholesale replacement (the compare view reports a key added since the target
+  as *added*), so a key absent from the restored map falls to its default and an
+  undefined key is dropped — the record lands in a shape an ordinary save could
+  also produce. Errors it raises (a now-dangling media id) fail the restore, the
+  same stance `featured_image_id` already takes.
+  """
+  @spec apply_restored(Ash.Changeset.t()) :: Ash.Changeset.t()
+  def apply_restored(changeset), do: apply_definitions(changeset, %{})
+
+  # The base to merge the payload over. On create there is no record yet, so
+  # absent fields fall to their defaults (empty base). On update we carry the
+  # stored values forward, so a field the caller didn't mention is preserved
+  # rather than dropped by the full-map rewrite. A restore passes `%{}` directly
+  # (see `apply_restored/1`).
+  defp merge_base(%{action_type: :create}), do: %{}
+  defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
+
+  defp apply_definitions(changeset, existing) do
     defs = definitions_for(changeset)
 
     # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
@@ -63,16 +92,6 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     tenant = changeset.to_tenant
 
     supplied = stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
-
-    # The base to merge the payload over. On create there is no record yet, so
-    # absent fields fall to their defaults (empty base). On update we carry the
-    # stored values forward, so a field the caller didn't mention is preserved
-    # rather than dropped by the full-map rewrite below.
-    existing =
-      case changeset.action_type do
-        :create -> %{}
-        _ -> stringify_keys(changeset.data.custom_fields || %{})
-      end
 
     # Computed fields (#429) are resolved in a second pass, after the editable
     # ones: their formulas reference sibling values, so they must see the
