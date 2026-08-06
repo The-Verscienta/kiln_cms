@@ -5,17 +5,40 @@ defmodule KilnCMS.HTMLSanitizer.RichText do
   scripts, iframes, and event-handler attributes — is stripped.
 
   Shared by both public HTML delivery (`BlockComponents`) and the fired headless
-  `:web` artifacts (`RichText.render(:web)`), so the link allowlist here is the
-  single source of truth for what survives to readers (#148).
+  `:web` artifacts (`RichText.render(:web)`), so what this admits is what
+  survives to readers (#148).
+
+  Its scope is *legacy* rich text — the TipTap HTML stored in `legacy_html`
+  before Portable Text became authoritative. Prose the editor writes today is
+  PT, rendered by `KilnCMS.Blocks.PortableText.to_html/1` and sanitized at cast
+  time instead. Link hrefs on both paths now go through the same
+  `KilnCMS.HTMLSanitizer.safe_href/1`.
   """
 
   use HtmlSanitizeEx, extend: :strip_tags
 
-  # Safe hyperlinks (#148): `<a href>` for `https:` / `mailto:` and relative URLs
-  # (schemeless hrefs like `/blog/x` or `#anchor` are kept). `javascript:`,
-  # `data:`, and bare `http:` schemes are rejected by the scheme allowlist;
-  # `target`/`rel`/event-handler attributes are scrubbed off.
-  allow_tag_with_uri_attributes("a", ["href"], ["https", "mailto"])
+  # Safe hyperlinks (#148), gated by `KilnCMS.HTMLSanitizer.safe_href/1` — the
+  # one definition of an href Kiln will store and serve. `target`/`rel`/
+  # event-handler attributes are still scrubbed off, and an `<a>` whose href is
+  # refused keeps its text and loses the anchor.
+  #
+  # This used to be `allow_tag_with_uri_attributes("a", ["href"], ["https",
+  # "mailto"])`, a *scheme* allowlist, which disagreed with `safe_href/1` about
+  # four kinds of href — in both directions. The scheme list rejected bare
+  # `http:` that the Portable Text path serves happily, and, because
+  # HtmlSanitizeEx passes any href with no protocol separator straight through,
+  # it accepted protocol-relative `//evil.example.com` (same-origin to read,
+  # off-site in fact) and `/a/../../etc/passwd`, both of which `safe_href/1`
+  # has always refused.
+  #
+  # Delegating also fails *closed* on the entity-encoded schemes the upstream
+  # scrubber has a regex for (`java&#58;script:`): `safe_href/1` is an
+  # allowlist of URL shapes, so anything it can't parse into one is rejected
+  # rather than pattern-matched against a list of known-bad spellings.
+  allow_tag_with_these_attributes "a", [] do
+    {"href", value} ->
+      if href = KilnCMS.HTMLSanitizer.safe_href(value), do: {"href", href}
+  end
 
   allow_tag_with_these_attributes("p", [])
   allow_tag_with_these_attributes("br", [])

@@ -54,10 +54,16 @@ become a link.
 
 Accepted URLs mirror
 [`KilnCMS.HTMLSanitizer.safe_href/1`](../lib/kiln_cms/html_sanitizer.ex):
-`http(s)://`, `mailto:`, and same-origin paths starting with `/`. Anything else
-— `javascript:`, `data:`, `ftp:`, `#anchor` — is refused in the popover with a
-message, because the server would blank it on save and the link would silently
-disappear on the next reload.
+`http(s)://`, `mailto:`, same-origin paths starting with `/`, and in-page
+`#fragment`s. Anything else — `javascript:`, `data:`, `ftp:`, protocol-relative
+`//host`, paths containing `..` — is refused in the popover with a message,
+because the server would blank it on save and the link would silently disappear
+on the next reload.
+
+That one function is the whole policy: the editor, the block cast, the Portable
+Text renderer and the legacy-HTML sanitizer all defer to it. A `#fragment` is
+*carried* rather than resolved, though — Kiln renders headings without `id`s, so
+a bare `#section` has nothing to land on in prose it generated.
 
 Links are stored as Portable Text `markDefs`, which is what
 [`Kiln.Advisory.Checks.LinkText`](../lib/kiln/advisory/checks/link_text.ex) and

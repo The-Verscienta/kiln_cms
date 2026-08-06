@@ -42,8 +42,9 @@ const TABLE_EXTENSIONS = [
 
 // Mirror of `KilnCMS.HTMLSanitizer.safe_href/1`: returns the trimmed URL when
 // the CMS will store it, `null` when it won't. Allowed are same-origin relative
-// paths, `http(s)://` and `mailto:` — everything else (`javascript:`, `data:`,
-// `ftp:`, protocol-relative `//host`, `#anchor`) is rejected.
+// paths, in-page `#fragment`s, `http(s)://` and `mailto:` — everything else
+// (`javascript:`, `data:`, `ftp:`, protocol-relative `//host`, paths
+// containing `..`) is rejected.
 //
 // This has to agree with the server (#823). `PortableText.sanitize_def/1`
 // blanks the href of any link mark it doesn't like, and a blanked href renders
@@ -55,8 +56,10 @@ function safeHref(url) {
   const trimmed = url.trim()
   if (!trimmed) return null
 
-  // Relative first, exactly as the server orders it: `/blog/x` never reaches
-  // the URL parser.
+  // Fragment and relative first, exactly as the server orders it: `#section`
+  // and `/blog/x` never reach the URL parser.
+  if (trimmed.startsWith("#")) return trimmed
+
   if (trimmed.startsWith("/") && !trimmed.startsWith("//") && !trimmed.includes("..")) {
     return trimmed
   }
@@ -395,7 +398,7 @@ class LinkPrompt {
 
     if (!href) {
       this.error.textContent =
-        "Use an http(s):// URL, a mailto: address, or a path starting with /."
+        "Use an http(s):// URL, a mailto: address, a path starting with /, or a #section."
       this.error.hidden = false
       return
     }

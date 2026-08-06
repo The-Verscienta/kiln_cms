@@ -1,15 +1,23 @@
 defmodule KilnCMS.Collab.CrdtMaterializationTest do
   @moduledoc """
   Server-side checkpoint materialization (spike doc §8): when the last editor
-  detaches (or the server shuts down mid-session), the DocServer renders the
-  converged Yjs text to sanitized HTML on the BEAM and writes it into the
+  detaches (or the server shuts down mid-session), the DocServer converts the
+  converged Yjs text to Portable Text on the BEAM and writes it into the
   draft's blocks through the autosave action — the persistence net for
   "everyone crashed before their autosave fired".
+
+  These tests seeded rich-text blocks holding **only `legacy_html`**, which was
+  the one shape whose checkpoint still worked: Portable Text is authoritative,
+  so the cast nulls `legacy_html` whenever `body` is present, and a checkpoint
+  materializing to HTML had its write discarded for every block the editor had
+  ever saved. The fixture now carries a `body`, so the assertions run against
+  the shape real content is in.
   """
   # async: false — flips global config; sync tests run the sandbox in shared
   # mode so the DocServer process can read/write records.
   use KilnCMS.DataCase, async: false
 
+  alias KilnCMS.Blocks.PortableText
   alias KilnCMS.CMS
   alias KilnCMS.Collab.Crdt
   alias KilnCMS.Collab.Crdt.Materializer
@@ -40,12 +48,27 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
         slug: "mat-#{System.unique_integer([:positive])}",
         blocks: [
           %{"_type" => "heading", "text" => "Keep me"},
-          %{"_type" => "rich_text", "legacy_html" => "<p>stored</p>"}
+          %{"_type" => "rich_text", "body" => pt("stored")}
         ]
       },
       actor: actor
     )
   end
+
+  # Prose in the shape the editor actually stores it.
+  defp pt(text) do
+    [
+      %{
+        "_type" => "block",
+        "_key" => "b0",
+        "style" => "normal",
+        "children" => [%{"_type" => "span", "text" => text, "marks" => []}],
+        "markDefs" => []
+      }
+    ]
+  end
+
+  defp prose(block), do: PortableText.to_plain_text(block.body)
 
   # An update writing ProseMirror-shaped content (a paragraph with a bold run)
   # into the block's fragment, exactly as y-prosemirror would.
@@ -117,17 +140,17 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     leave.()
 
     # The test process is still a client, so materialization hasn't run yet.
-    assert rich_block(CMS.get_page!(page.id, actor: actor)).legacy_html == "<p>stored</p>"
+    assert prose(rich_block(CMS.get_page!(page.id, actor: actor))) == "stored"
 
     # Server shutdown (deploy path) flushes regardless of attached clients.
     :ok = GenServer.stop(server)
 
     await(fn ->
-      rich_block(CMS.get_page!(page.id, actor: actor)).legacy_html =~ "typed"
+      prose(rich_block(CMS.get_page!(page.id, actor: actor))) =~ "typed"
     end)
 
     page = CMS.get_page!(page.id, actor: actor)
-    assert rich_block(page).legacy_html == "<p>typed <strong>together</strong></p>"
+    assert prose(rich_block(page)) == "typed together"
     # Untouched blocks round-trip identically; block identity is preserved.
     assert Enum.find(page.blocks, &(&1.type == :heading)).value.text == "Keep me"
     assert rich_block(page).id == block_id
@@ -149,11 +172,11 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     leave.()
 
     await(fn ->
-      rich_block(CMS.get_page!(page.id, actor: actor)).legacy_html =~ "typed"
+      prose(rich_block(CMS.get_page!(page.id, actor: actor))) =~ "typed"
     end)
   end
 
-  test "blocks without fragment content keep their stored HTML" do
+  test "blocks without fragment content keep their stored prose" do
     actor = admin()
     page = draft_page!(actor)
 
@@ -163,7 +186,7 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     leave.()
     :ok = GenServer.stop(server)
 
-    assert rich_block(CMS.get_page!(page.id, actor: actor)).legacy_html == "<p>stored</p>"
+    assert prose(rich_block(CMS.get_page!(page.id, actor: actor))) == "stored"
   end
 
   test "the write-back lands on a document outside the default org (#655)" do
@@ -183,6 +206,9 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
 
     block_id = rich_block(page).id
 
+    # Seeded with legacy HTML and no body — the never-migrated shape. Its first
+    # collaborative checkpoint converts it to Portable Text, which is the
+    # direction the cast enforces anyway.
     # The checkpoint used to resolve `default_org_id/0` unconditionally, so on
     # any site but the default one it looked the document up in the wrong tenant
     # and silently wrote nothing — the converged text was simply lost.
@@ -195,7 +221,7 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     :ok = GenServer.stop(server)
 
     reloaded = CMS.get_page!(page.id, actor: actor, tenant: other.id)
-    assert rich_block(reloaded).legacy_html =~ "typed"
+    assert prose(rich_block(reloaded)) =~ "typed"
   end
 
   test "published content is never written by the server" do
@@ -212,7 +238,7 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
     leave.()
     :ok = GenServer.stop(server)
 
-    assert rich_block(CMS.get_page!(page.id, actor: actor)).legacy_html == "<p>stored</p>"
+    assert prose(rich_block(CMS.get_page!(page.id, actor: actor))) == "stored"
   end
 
   test "the materializer renders the StarterKit node set totally" do
@@ -242,16 +268,47 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
       Yex.XmlElementPrelim.new("galaxyBrain", [Yex.XmlTextPrelim.from("degraded")])
     )
 
-    html = Materializer.fragment_html(doc, "f")
+    body = Materializer.fragment_body(doc, "f")
+    html = PortableText.to_html(body)
 
     assert html =~ "<h3>Title</h3>"
-    assert html =~ "<ul><li><p>item &amp; &lt;escaped&gt;</p></li></ul>"
+    assert html =~ "<ul><li>item &amp; &lt;escaped&gt;</li></ul>"
     assert html =~ "<hr"
     assert html =~ "degraded"
     refute html =~ "galaxyBrain"
 
-    # Empty/absent fragments are nil — callers must not clobber stored HTML.
-    assert Materializer.fragment_html(doc, "never-touched") == nil
+    # Empty/absent fragments are nil — callers must not clobber stored prose.
+    assert Materializer.fragment_body(doc, "never-touched") == nil
+  end
+
+  test "a link authored collaboratively survives the checkpoint (#823)" do
+    doc = Yex.Doc.new()
+    frag = Yex.Doc.get_xml_fragment(doc, "f")
+
+    Yex.XmlFragment.push(
+      frag,
+      Yex.XmlElementPrelim.new("paragraph", [Yex.XmlTextPrelim.from("See the refund policy")])
+    )
+
+    text = frag |> Yex.XmlFragment.fetch!(0) |> Yex.XmlElement.fetch!(0)
+    Yex.XmlText.format(text, 0, 3, %{"bold" => %{}})
+    Yex.XmlText.format(text, 4, 17, %{"link" => %{"href" => "/refunds"}})
+
+    # The HTML materializer knew four marks — bold, italic, strike, code — so a
+    # collaborative link was rendered as its bare text and the checkpoint wrote
+    # the loss back. Going through `from_tiptap/1` means one list of marks.
+    [block] = Materializer.fragment_body(doc, "f")
+
+    assert [%{"_type" => "link", "_key" => key, "href" => "/refunds"}] = block["markDefs"]
+    assert %{"text" => "the refund policy", "marks" => [^key]} = List.last(block["children"])
+    assert PortableText.to_html([block]) =~ ~s(<a href="/refunds">the refund policy</a>)
+
+    # An href the policy refuses is blanked by `sanitize_def/1`, exactly as it
+    # would be coming from the editor or the API — no second URL rule here.
+    Yex.XmlText.format(text, 0, 3, %{"link" => %{"href" => "javascript:alert(1)"}})
+    [block] = Materializer.fragment_body(doc, "f")
+    assert Enum.any?(block["markDefs"], &(&1["href"] == ""))
+    refute PortableText.to_html([block]) =~ "javascript:"
   end
 
   test "the materializer keeps table structure and the code-block language tag" do
@@ -287,10 +344,14 @@ defmodule KilnCMS.Collab.CrdtMaterializationTest do
 
     Yex.XmlFragment.fetch!(frag, 1) |> Yex.XmlElement.insert_attribute("language", "elixir")
 
-    html = Materializer.fragment_html(doc, "f")
+    body = Materializer.fragment_body(doc, "f")
 
-    assert html =~ "<table><tr><th><p>Name</p></th>"
-    assert html =~ ~s(<td colspan="2"><p>Ginger</p></td>)
-    assert html =~ ~s|<pre><code class="language-elixir">IO.puts(1)</code></pre>|
+    assert [%{"_type" => "table", "rows" => [%{"cells" => [header, spanning]}]}, code] = body
+    assert %{"header" => true, "children" => [%{"text" => "Name"}]} = header
+    # Y attributes are strings; `from_tiptap/1` only stores an INTEGER span, so
+    # a checkpoint that passed "2" straight through would silently drop it.
+    assert %{"header" => false, "colspan" => 2, "children" => [%{"text" => "Ginger"}]} = spanning
+    assert %{"style" => "code", "language" => "elixir"} = code
+    assert PortableText.to_html(body) =~ ~s|<code class="language-elixir">|
   end
 end
