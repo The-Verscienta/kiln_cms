@@ -252,6 +252,11 @@ defmodule KilnCMSWeb.WriteApiTest do
                      bearer: ctx.admin_key
                    )
 
+          # Default config (compliance/consent/alt-text gates off), so the only
+          # error is the transition one. The 409 and the log line below are the
+          # two halves of the SAME branch in AshJsonApi — impl present → this
+          # structured error; impl absent → warn + something_went_wrong/400 — so
+          # asserting the 409+code already proves the fallback wasn't taken.
           assert [error] = body["errors"]
           assert error["code"] == "invalid_state_transition"
           refute error["code"] == "something_went_wrong"
@@ -261,8 +266,10 @@ defmodule KilnCMSWeb.WriteApiTest do
           assert error["detail"] =~ "published"
         end)
 
-      # The unimplemented-protocol warning (and its per-request stacktrace) is gone.
-      refute log =~ "AshJsonApi.Error not implemented"
+      # The per-request stacktrace warning is gone. Scoped to this error type
+      # rather than the generic "not implemented" text so a concurrent async
+      # test hitting some *other* unimplemented error can't bleed into the refute
+      # — with the fix in place nothing logs a NoMatchingTransition at all.
       refute log =~ "NoMatchingTransition"
     end
 
