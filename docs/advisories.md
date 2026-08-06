@@ -97,13 +97,20 @@ for rather than restating two dozen clauses that would then drift.
 ## Two panels, one set of checks (#495)
 
 The editor shows an **SEO & scheduling** panel and an **Accessibility** panel.
-They are two views over the same registry, not two registries.
+They are two views over the same registry, not two registries. (Since #377
+there is a third — Compliance — over that same registry; the reasoning below
+is about these two, which are the pair that overlap.)
+
+> Since #377 there is a third lens, `:compliance`, behind the **Compliance**
+> panel — see [Editorial claim checking](compliance.md). It is the exception to
+> the rule below: it is **not** in the default `lenses/0`, and checks opt into
+> it explicitly. The reasoning is in the next section.
 
 That matters because the overlap is large and load-bearing. A skipped heading
 level breaks the outline a screen-reader user navigates by *and* the one a
 search engine reads; an image with no alt text is a failure in both. Splitting
 the panels without splitting the checks is the whole point — an author fixing a
-heading should not have to find it twice, and the two panels can never disagree
+heading should not have to find it twice, and those two panels can never disagree
 about what a heading problem is.
 
 Each check says where it belongs:
@@ -118,6 +125,18 @@ def lenses, do: [:accessibility] # a11y-only
 **The default is both.** A plugin author who never considered the distinction
 gets a panel rather than silence, which is the failure that would be hard to
 notice.
+
+**`:compliance` is not in that default**, and a check that wants it says so:
+
+```elixir
+def lenses, do: [:compliance]
+```
+
+SEO and accessibility overlap almost entirely, which is what makes "default to
+both" right for them. Compliance is a different question with a different
+audience and — where the publish gate is switched on — different consequences.
+A generic plugin check landing there by default would dilute the one panel
+whose value depends on it not crying wolf.
 
 ### When one check's findings don't all belong together
 
@@ -266,8 +285,9 @@ The hard enforcement of alt text at publish time is separate and opt-in —
 | `Kiln.Advisory.Context` | fields + body facts, feature-neutral |
 | `Kiln.Advisory.Body` | the block-tree walk (headings, images, sentences, link text) |
 | `Kiln.Advisory.Registry` | discovery, execution, containment, tally, `by_lens/2` |
-| `Kiln.Advisory.Report` | findings + tally + grade, shared by both panels |
+| `Kiln.Advisory.Report` | findings + tally + grade, shared by every panel |
 | `Kiln.Advisory.Checks.*` | feature-neutral checks (headings, image alt, internal links, link text, all caps) |
+| `KilnCMS.Compliance.Checks.*` | claim and disclaimer checks ([compliance.md](compliance.md)) |
 | `KilnCMS.Links.Internal` | resolves a same-origin path the way delivery would |
 | `KilnCMS.Seo.Checks.*` | search-specific checks (meta, keyphrase, readability) |
 | `KilnCMS.Seo.Analyzer` | builds the context and runs the registry |

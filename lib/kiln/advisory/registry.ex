@@ -45,9 +45,10 @@ defmodule Kiln.Advisory.Registry do
   Keep only the outcomes whose check belongs to `lens` (#495).
 
   Applied to already-run outcomes rather than by running a filtered check list,
-  because the two panels overlap heavily — most checks are in both — and
-  running the registry twice would pay for the shared ones twice on every
-  keystroke. One run, two views.
+  because the SEO and accessibility panels overlap heavily — most checks are
+  in both — and running the registry twice would pay for the shared ones twice
+  on every keystroke. One run, three views (`:compliance` joined them in #377,
+  and unlike those two it shares no checks with either).
 
   A check that predates `lenses/0`, or a plugin's that doesn't define it, is
   treated as belonging to every lens: `Kiln.Advisory`'s `__using__` supplies

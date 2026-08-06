@@ -5,7 +5,7 @@ defmodule Kiln.Advisory.Report do
   Extracted from `KilnCMS.Seo.Analyzer` when #495's accessibility panel became
   the second consumer. The grading rule in particular is worth having in one
   place — "an `:info` is a nudge, so a page whose only findings are nudges
-  still reads green" is a judgement call, and two panels quietly disagreeing
+  still reads green" is a judgement call, and panels quietly disagreeing
   about what green means would be worse than either answer.
   """
 
