@@ -43,9 +43,11 @@ defmodule KilnCMS.Config.Env do
   stdout — visible in `docker logs`, but the config provider can't reach Sentry
   or a log sink. So each unrecognized read is also accumulated (see
   `warnings/0`), and `KilnCMS.Application` calls `replay_warnings/0` once the
-  system is up to re-emit them through `Logger` — where they do reach Sentry
-  (#634). The stderr line stays regardless: it is the only thing left if the app
-  never finishes starting.
+  system is up to re-emit them — through `Logger` for the console and any OTel/log
+  sink, and through `Sentry.capture_message/2` for Sentry, because the Sentry
+  logger handler runs with its defaults and forwards crashes rather than plain
+  warnings (#634). The stderr line stays regardless: it is the only thing left if
+  the app never finishes starting.
 
   > #### Not for secrets {: .warning}
   >
@@ -241,11 +243,13 @@ defmodule KilnCMS.Config.Env do
   end
 
   @doc """
-  Replay every accumulated warning through `Logger.warning/1` — so it reaches
-  Sentry and any log sink, which the boot-time `IO.warn` cannot — then clear
-  them. Called once by `KilnCMS.Application` after Logger is up. Returns the
-  count replayed. The `IO.warn` is deliberately kept: it is the only thing left
-  if the app never finishes starting.
+  Replay every accumulated warning where the boot-time `IO.warn` cannot reach —
+  through `Logger.warning/1` for the console and any OTel/log sink, and through
+  `Sentry.capture_message/2` for Sentry (whose logger handler forwards crashes,
+  not plain warnings) — then clear them. Called once by `KilnCMS.Application`
+  after the system is up. Returns the count replayed. The `IO.warn` is
+  deliberately kept: it is the only thing left if the app never finishes
+  starting.
   """
   @spec replay_warnings() :: non_neg_integer()
   def replay_warnings do
@@ -254,10 +258,19 @@ defmodule KilnCMS.Config.Env do
     accumulated = warnings()
 
     for {var, raw} <- accumulated do
-      Logger.warning(
+      message =
         "#{var} was set to an unrecognized value (#{inspect(raw)}) at boot; the configured " <>
           "default was kept. See docs/environment-variables.md."
-      )
+
+      # Logger reaches the console backend and any OTel/log sink. Sentry's
+      # LoggerHandler is attached with its defaults (`capture_log_messages:
+      # false`), so it forwards crashes but NOT plain `Logger.warning/1`, which
+      # would leave the operator-facing point of #634 unmet — an operator watching
+      # Sentry would still miss the misconfiguration. So the message is also sent
+      # to Sentry explicitly; with no `SENTRY_DSN` this is a no-op, exactly like
+      # every other capture in dev/test.
+      Logger.warning(message)
+      Sentry.capture_message(message, level: :warning)
     end
 
     clear_warnings()
