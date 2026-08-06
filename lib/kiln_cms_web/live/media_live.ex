@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.MediaLive do
   alias KilnCMS.MediaKind
   alias KilnCMS.Storage
   alias KilnCMS.Unsplash
+  alias KilnCMSWeb.Params
 
   @accept ~w(.jpg .jpeg .png .webp .gif .pdf .mp4 .m4a .webm .mp3 .vtt)
   @max_entries 10
@@ -85,7 +86,10 @@ defmodule KilnCMSWeb.MediaLive do
   # database (audit U-M2), so it finds items beyond the loaded pages.
   @impl true
   def handle_params(params, _uri, socket) do
-    q = params["q"] || ""
+    # `?q[a]=1` decodes to a MAP, which flowed into `search_filter/1`'s
+    # `String.replace/3` and raised (#764). Bookmarkable URL, so absent is the
+    # right answer — same as the omitted parameter.
+    q = Params.string(params, "q", "")
 
     socket =
       if q == socket.assigns.query,
@@ -98,7 +102,7 @@ defmodule KilnCMSWeb.MediaLive do
   @impl true
   def handle_event("validate", _params, socket), do: {:noreply, socket}
 
-  def handle_event("search", %{"q" => q}, socket) do
+  def handle_event("search", %{"q" => q}, socket) when is_binary(q) do
     {:noreply, push_patch(socket, to: media_path(q, nil), replace: true)}
   end
 
@@ -181,7 +185,7 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  def handle_event("unsplash_search", %{"q" => q}, socket) do
+  def handle_event("unsplash_search", %{"q" => q}, socket) when is_binary(q) do
     case String.trim(q) do
       "" ->
         {:noreply,

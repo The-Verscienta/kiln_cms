@@ -90,7 +90,13 @@ defmodule KilnCMS.CMS.TagGroup do
     default_accept [:name, :slug, :description, :position, :content_types]
 
     create :create, primary?: true
-    update :update, primary?: true
+
+    # `require_atomic? false`: `KnownContentTypes` resolves each entry against the
+    # (per-org, DB-backed) type registry, which can't run inside an atomic UPDATE.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
 
     # Picker order: the editor-chosen `position` first, name as the tiebreaker,
     # so an unordered set of groups still reads alphabetically.
@@ -143,6 +149,15 @@ defmodule KilnCMS.CMS.TagGroup do
     policy action_type(:destroy) do
       forbid_if always()
     end
+  end
+
+  validations do
+    # `content_types` is in `default_accept`, so without this every non-LiveView
+    # write path (AshAdmin, seeds, code interfaces) could file a group under a
+    # content type that doesn't exist — a UI checkbox is not a data-level guard
+    # (#526). Only on writes; a stale entry on an existing row is not re-checked
+    # on read.
+    validate {KilnCMS.CMS.Validations.KnownContentTypes, []}, on: [:create, :update]
   end
 
   # Multi-tenancy (epic #336): taxonomy is per-site, partitioned by `org_id`
