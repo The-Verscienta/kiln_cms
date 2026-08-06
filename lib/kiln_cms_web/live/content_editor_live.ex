@@ -481,6 +481,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:page_title, record.title)
     |> assign(:slug_customized?, slug_customized?(socket))
+    # Render hint for the "Suggest with AI" control (#550) — recomputed here
+    # rather than once at mount so a workflow transition (which can move the
+    # record out of an actor's write reach) is reflected. The event handler
+    # re-checks; this only decides whether the button is drawn.
+    |> assign(:seo_may_suggest?, may_update_record?(socket))
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> seed_block_children(record)
     |> refresh_preview()
@@ -871,6 +876,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> to_form()
   end
 
+  # Whether this actor may WRITE the open record — the permission an AI
+  # suggestion is spent on behalf of (#550), as distinct from the read access
+  # that got them into the editor. `:update` and the record's own org are the
+  # action and tenant `build_form/2` submits under, so this asks about the same
+  # save an accepted suggestion would be submitted through. It is the *record*
+  # axis only: per-field grants are enforced by a change rather than a policy
+  # (`Changes.EnforceFieldGrants`), so they are invisible here — an editor
+  # granted only `title` still passes this and still can't save an accepted
+  # SEO field. Tracked separately.
+  #
+  # `Ash.can/3`, not `Ash.can?/3`: the bang form raises on an error, and this
+  # runs from `assign_record/2` — i.e. on the reload after a *successful*
+  # autosave. A pool timeout there would take the LiveView down and the
+  # socket-only editor state (block children, rich-text bodies) with it. Only an
+  # explicit `{:ok, true}` authorizes, so an error and an unresolvable `:maybe`
+  # both fail closed, which is what a billed, irreversible spend wants.
+  defp may_update_record?(%{assigns: %{record: record, actor: actor}}) do
+    case Ash.can({record, :update}, actor, tenant: record.org_id) do
+      {:ok, true} ->
+        true
+
+      {:ok, _refused} ->
+        false
+
+      {:error, error} ->
+        Logger.warning("SEO suggest permission check failed, refusing: #{inspect(error)}")
+        false
+    end
+  end
+
   # Backfill a stable id onto any block that reached the editor without one
   # (legacy content predating the uuid_primary_key), so every block can be
   # addressed by identity (picker/move/remove/duplicate carry `bid`).
@@ -1256,32 +1291,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Ignore a re-click while a run is in flight: the disabled attribute is
     # client-side only, so a fast double-click (or a replayed event) would
     # otherwise start a second generation and bill for it.
-    if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? do
-      {:noreply, socket}
-    else
-      document = seo_document(socket)
-      # The rate-limit bucket keys interpolate this, so it must be the id —
-      # `current_org` is the Organization struct (Ash takes it as a tenant, but
-      # a struct in a bucket key would blow up on String.Chars).
-      org_id = org_id(socket.assigns.current_org)
-      actor_id = socket.assigns.actor.id
-      # Stamped so a result that lands after a conflict reload or a version
-      # restore (both bump `editor_version`) can be recognized as stale.
-      version = socket.assigns.editor_version
+    cond do
+      socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? ->
+        {:noreply, socket}
 
-      {:noreply,
-       socket
-       |> assign(:seo_drafting?, true)
-       # Clear the previous proposal, not just the dismissed set: emptying
-       # `seo_dismissed` alone would re-render the *old* cards for the length of
-       # the call (and permanently if it fails), letting "Use all" clobber
-       # fields the author has since accepted and hand-edited.
-       |> clear_seo_suggestions()
-       |> start_async(:seo_draft, fn ->
-         # Captures plain data only — never the socket or the form struct,
-         # both of which are stale the moment an autosave rebuilds the form.
-         {version, KilnCMS.Seo.draft(document, org_id: org_id, user_id: actor_id)}
-       end)}
+      # Authorization (#550). Read access is what gets an actor into this editor,
+      # and read access must not be enough to spend the org's LLM budget: a
+      # reviewer, or an editor whose `editable_types` scope excludes this type,
+      # can open the record but can never accept a suggestion for it.
+      #
+      # Checked HERE and not only via `@seo_may_suggest?` — the assign is a
+      # render hint refreshed when the record reloads, this is the boundary. Same
+      # reasoning the accept path re-checks `field_locked?/2` server-side instead
+      # of trusting the client-side `disabled` attribute.
+      not may_update_record?(socket) ->
+        {:noreply,
+         put_flash(socket, :error, gettext("You don't have permission to edit this content."))}
+
+      true ->
+        start_seo_draft(socket)
     end
   end
 
@@ -2331,6 +2359,32 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> clear_seo_suggestions()
     |> close_assist()
     |> assign(:seo_links, nil)
+  end
+
+  defp start_seo_draft(socket) do
+    document = seo_document(socket)
+    # The rate-limit bucket keys interpolate this, so it must be the id —
+    # `current_org` is the Organization struct (Ash takes it as a tenant, but
+    # a struct in a bucket key would blow up on String.Chars).
+    org_id = org_id(socket.assigns.current_org)
+    actor_id = socket.assigns.actor.id
+    # Stamped so a result that lands after a conflict reload or a version
+    # restore (both bump `editor_version`) can be recognized as stale.
+    version = socket.assigns.editor_version
+
+    {:noreply,
+     socket
+     |> assign(:seo_drafting?, true)
+     # Clear the previous proposal, not just the dismissed set: emptying
+     # `seo_dismissed` alone would re-render the *old* cards for the length of
+     # the call (and permanently if it fails), letting "Use all" clobber
+     # fields the author has since accepted and hand-edited.
+     |> clear_seo_suggestions()
+     |> start_async(:seo_draft, fn ->
+       # Captures plain data only — never the socket or the form struct,
+       # both of which are stale the moment an autosave rebuilds the form.
+       {version, KilnCMS.Seo.draft(document, org_id: org_id, user_id: actor_id)}
+     end)}
   end
 
   defp clear_seo_suggestions(socket) do
@@ -7066,7 +7120,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   slug_customized?={@slug_customized?}
                   class="rounded border border-base-content/10 bg-base-200/40 p-2"
                 />
-                <div :if={@seo_enabled?}>
+                <%!-- `@seo_may_suggest?` hides the control from an actor who can
+                      read this record but not write it (#550) — the handler is
+                      the actual gate, this just stops offering a button whose
+                      output they could never accept. --%>
+                <div :if={@seo_enabled? and @seo_may_suggest?}>
                   <%!-- `type="button"` is mandatory: this sits inside the main
                         <.form>, so the default type would submit it. --%>
                   <button

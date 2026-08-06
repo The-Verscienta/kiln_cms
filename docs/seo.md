@@ -120,7 +120,9 @@ config :kiln_cms, KilnCMS.Seo,
 ```
 
 Both rate-limit buckets must pass. The per-user bucket stops a stuck button or
-a replayed event; the per-org bucket is the actual spend ceiling.
+a replayed event; the per-org bucket is the spend ceiling. Neither is an access
+control — who may spend at all is decided before the buckets are consulted, by
+the update check below.
 
 There is deliberately **no draft cache**: a draft is per-document,
 per-revision and per-org, and a cache key loose enough to ever hit would be a
@@ -139,6 +141,13 @@ cross-tenant leak.
 - **The model gets no tools.** The generator callback takes strings and returns
   strings. It cannot call Ash actions, read other records, or reach the network
   beyond its own provider.
+- **Only someone who could save the record can spend on it.** Drafting asserts
+  the actor may `:update` this record — the same permission accepting a
+  suggestion ultimately needs — before the generator is called, and the control
+  isn't rendered otherwise. Reaching the editor takes read access, and read
+  access is not enough to consume the org's budget: a reviewer, or an editor
+  whose `editable_types` scope excludes this type, gets neither the button nor
+  a generation from a pushed event.
 - **Drafts are generated in the record's locale**, not the admin UI's.
 
 The body is also fenced and labelled as untrusted data in the prompt. That

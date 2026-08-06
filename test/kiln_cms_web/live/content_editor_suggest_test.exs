@@ -20,15 +20,21 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, attrs \\ %{}) do
     email = "seo-suggest-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        attrs
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -125,6 +131,85 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       enable_stub()
       editor = authed_user(:editor)
       {_lv, html} = open_editor(conn, editor, page(editor))
+
+      assert html =~ "Suggest with AI"
+    end
+  end
+
+  # #550: reaching the editor takes READ access; spending the org's LLM budget
+  # takes the write permission an accepted suggestion would need. A restricted
+  # editor (`editable_types: ["post"]` opening a page) is the cheapest actor
+  # that can read a record it can never save.
+  describe "per-record authorization" do
+    setup do
+      enable_stub(KilnCMS.StubSeoGenerator.Counting)
+      # The Agent is `name:`-registered and dies with the test process it is
+      # linked to, which is asynchronous with the runner starting the next test.
+      # Four tests in a row would otherwise race the name and raise MatchError,
+      # so tolerate an Agent the previous test hasn't finished releasing.
+      case KilnCMS.StubSeoGenerator.Counting.start_link() do
+        {:ok, _pid} -> :ok
+        {:error, {:already_started, _pid}} -> :ok
+      end
+
+      KilnCMS.StubSeoGenerator.Counting.reset()
+      :ok
+    end
+
+    test "a reader who cannot update the record is not offered the control", %{conn: conn} do
+      author = authed_user(:editor)
+      page = page(author)
+      restricted = authed_user(:editor, %{editable_types: ["post"]})
+
+      {_lv, html} = open_editor(conn, restricted, page)
+
+      # Pinned so this can't quietly become vacuous: the point is an actor who
+      # READS the record and is still refused. If a fixture change ever stopped
+      # them reaching the editor at all, the refute below would pass for nothing.
+      assert html =~ "Understanding kiln firing"
+      refute html =~ "Suggest with AI"
+    end
+
+    test "a directly-pushed event from that reader bills nothing", %{conn: conn} do
+      # The absent button is not the control — this pushes the event anyway, the
+      # way a crafted client or a stale tab would.
+      author = authed_user(:editor)
+      page = page(author)
+      restricted = authed_user(:editor, %{editable_types: ["post"]})
+
+      {lv, _html} = open_editor(conn, restricted, page)
+
+      render_click(lv, "seo_suggest", %{})
+      # Settle first, then assert: a generation started by a broken guard runs
+      # in a Task, so a pre-settle snapshot could not observe it either way.
+      html = render_async(lv, 2_000)
+
+      assert KilnCMS.StubSeoGenerator.Counting.count() == 0
+      assert html =~ "don&#39;t have permission"
+      refute html =~ "Draft 1 for"
+    end
+
+    test "an editor who may update the record is unaffected", %{conn: conn} do
+      editor = authed_user(:editor)
+      {lv, html} = open_editor(conn, editor, page(editor))
+
+      assert html =~ "Suggest with AI"
+
+      render_click(lv, "seo_suggest", %{})
+      render_async(lv, 5_000)
+
+      assert KilnCMS.StubSeoGenerator.Counting.count() == 1
+    end
+
+    test "an admin outside the editable_types scope is unaffected", %{conn: conn} do
+      # The content policies bypass on admin, so a (meaningless) scope on an
+      # admin must not hide the control — proves the check reads the policy
+      # rather than re-implementing the scope comparison.
+      author = authed_user(:editor)
+      page = page(author)
+      admin = authed_user(:admin, %{editable_types: ["post"]})
+
+      {_lv, html} = open_editor(conn, admin, page)
 
       assert html =~ "Suggest with AI"
     end
