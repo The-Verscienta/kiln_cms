@@ -88,6 +88,12 @@ curl -s -X POST http://localhost:4000/api/auth/sign_in \
 }
 ```
 
+`user.role` is the caller's **effective tier on the organization this request
+resolved to** — the same per-org authorization boundary the server enforces
+(#419), not a single global role. It therefore **changes with the host you dial**
+(`acme.example.com` vs `beta.example.com`), and is `"none"` on an org where the
+account has no tier. Shape UI on it only for the org you signed in against.
+
 > The account must already exist with an `:editor` or `:admin` role — signup
 > always creates a `:viewer`. See [**Creating an admin user**](../README.md#creating-an-admin-user)
 > in the README for seeding the first admin and promoting other users.
