@@ -226,6 +226,80 @@ defmodule KilnCMSWeb.WriteApiTest do
     end
   end
 
+  # #880: a workflow transition on a record in the wrong state (double-tapping
+  # "Return", approving what a colleague just approved) raises
+  # `AshStateMachine.Errors.NoMatchingTransition`. Without a `ToJsonApiError`
+  # impl it fell through to an opaque `something_went_wrong` 400 plus a
+  # per-request stacktrace in the logs. It is now a clean 409 the client can act
+  # on, and the log line is silenced (the warning fired *because* the protocol
+  # was unimplemented).
+  describe "JSON:API — wrong-state workflow transitions (#880)" do
+    setup do
+      admin = user(:admin)
+      %{admin: admin, admin_key: mint(admin, :read_write)}
+    end
+
+    test "publishing already-published content is a 409, not an opaque fault", ctx do
+      published =
+        CMS.create_post!(%{title: "WS", slug: slug()}, actor: ctx.admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: ctx.admin))
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {409, body} =
+                   patch_json("/api/json/posts/#{published.id}/publish", published.id, %{},
+                     type: "post",
+                     bearer: ctx.admin_key
+                   )
+
+          assert [error] = body["errors"]
+          assert error["code"] == "invalid_state_transition"
+          refute error["code"] == "something_went_wrong"
+          # The client can tell "already published" from a server fault, and can
+          # reconcile off the machine-readable state without parsing the prose.
+          assert error["meta"]["current_state"] == "published"
+          assert error["detail"] =~ "published"
+        end)
+
+      # The unimplemented-protocol warning (and its per-request stacktrace) is gone.
+      refute log =~ "AshJsonApi.Error not implemented"
+      refute log =~ "NoMatchingTransition"
+    end
+
+    test "submit-for-review from in_review is a 409", ctx do
+      in_review =
+        CMS.create_post!(%{title: "WS2", slug: slug()}, actor: ctx.admin)
+        |> then(&CMS.submit_post_for_review!(&1, %{}, actor: ctx.admin))
+
+      assert {409, body} =
+               patch_json("/api/json/posts/#{in_review.id}/submit-for-review", in_review.id, %{},
+                 type: "post",
+                 bearer: ctx.admin_key
+               )
+
+      assert [
+               %{
+                 "code" => "invalid_state_transition",
+                 "meta" => %{"current_state" => "in_review"}
+               }
+             ] =
+               body["errors"]
+    end
+
+    test "unpublishing a draft is a 409", ctx do
+      draft = CMS.create_post!(%{title: "WS3", slug: slug()}, actor: ctx.admin)
+
+      assert {409, body} =
+               patch_json("/api/json/posts/#{draft.id}/unpublish", draft.id, %{},
+                 type: "post",
+                 bearer: ctx.admin_key
+               )
+
+      assert [%{"code" => "invalid_state_transition", "meta" => %{"current_state" => "draft"}}] =
+               body["errors"]
+    end
+  end
+
   describe "JSON:API — block-body writes & re-fire" do
     test "block_tree writes the body through the sanitizing union cast" do
       owner = user(:editor)
@@ -534,6 +608,28 @@ defmodule KilnCMSWeb.WriteApiTest do
         worker: KilnCMS.Firing.FireWorker,
         args: %{"type" => "post", "id" => post.id}
       )
+    end
+
+    test "a wrong-state mutation surfaces invalid_state_transition, not a masked error (#880)" do
+      admin = user(:admin)
+      admin_key = mint(admin, :read_write)
+
+      published =
+        CMS.create_post!(%{title: "GQL WS", slug: slug()}, actor: admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+
+      query = """
+      mutation ($id: ID!) {
+        publishPost(id: $id) { result { id } errors { message code } }
+      }
+      """
+
+      body = gql(query, %{id: published.id}, bearer: admin_key)
+
+      assert is_nil(get_in(body, ["data", "publishPost", "result"]))
+      assert [error] = body["data"]["publishPost"]["errors"]
+      assert error["code"] == "invalid_state_transition"
+      assert error["message"] =~ "published"
     end
   end
 end
