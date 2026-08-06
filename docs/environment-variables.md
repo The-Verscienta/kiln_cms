@@ -38,14 +38,36 @@ for all of them (`PHX_SERVER` is a partial exception — see its row):
   `" true "` all work.
 * **Unset or blank** (`FOO=`, a common `.env` and `--env-file` artifact) means
   the variable was not set — the default in the table applies.
-* **Anything else keeps the default and warns on stderr.** A misspelling is
-  never *interpreted* — it cannot flip a flag in either direction. For the
-  switches that default to on (`DATABASE_SSL`, `SMTP_TLS`, `SMTP_TLS_VERIFY`)
-  that means a typo can no longer turn TLS off, which is the whole point of
-  #606. For a switch that defaults to **off**, the flip side holds: a typo
-  leaves it off, so if you set `KILN_AUDIT_ANCHOR_EVERY_WRITE` to turn signing
-  *on*, check stderr on boot — the warning is the only signal that it didn't
-  take.
+* **Anything else keeps the default and warns.** A misspelling is never
+  *interpreted* — it cannot flip a flag in either direction. For the switches
+  that default to on (`DATABASE_SSL`, `SMTP_TLS`, `SMTP_TLS_VERIFY`) that means
+  a typo can no longer turn TLS off, which is the whole point of #606. For a
+  switch that defaults to **off**, the flip side holds: a typo leaves it off, so
+  if you set `KILN_AUDIT_ANCHOR_EVERY_WRITE` to turn signing *on*, the warning
+  is the only signal that it didn't take.
+
+### Where that warning goes
+
+Two places, because one of them is not enough (#634):
+
+* **stderr, at boot.** Config providers run before `Logger` exists, so this is
+  all that is available at the moment the value is read. In a release it lands
+  in container stdout — `docker logs` — and is forwarded nowhere. If it scrolls
+  past during a deploy it is gone.
+* **`Logger`, once the application is up**, at `warning` level. Every
+  unrecognized read is carried out of `config/runtime.exs` in
+  `:kiln_cms, :config_warnings` and replayed as soon as observability is
+  attached, so it goes through the normal logging pipeline — formatted,
+  timestamped, and picked up by whatever collects the application's output.
+* **Sentry**, as a `warning`-level message, when `SENTRY_DSN` is set. This is
+  reported explicitly rather than left to the log line: Sentry's logger handler
+  runs at `level: :error` with `capture_log_messages: false`, so a
+  `Logger.warning` never reaches it. Issues are grouped per variable, so a flag
+  that stays misspelled is one issue rather than a new one on every restart.
+
+Only variables that hold a **flag** go through this. Nothing here echoes a
+credential; a variable carrying a secret is read elsewhere and its value is
+never logged.
 
 Until #607 each variable had its own parser, and two of them matched the raw
 string: `DATABASE_SSL=True` silently gave you a **plaintext** Postgres
