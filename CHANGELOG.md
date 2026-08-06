@@ -29,6 +29,21 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Beta testing program.** [Beta user testing](docs/beta-testing.md) documents
+  the Phase 9 editor-UX beta: the surface under test, seven guided scenarios, a
+  session notes form, and a feedback → issue → fix triage loop. A **Beta
+  feedback** issue form files one finding per issue, labelled `beta`, capturing
+  severity, area, build and tester so a fix can be confirmed with the person who
+  found it (#59).
+
+  The thing that shapes the whole program is that access is gated on **two**
+  axes, not one. The router decides which pages open (nineteen are admin-only),
+  and Ash policy separately decides which actions run — and `publish` is
+  admin-only, so **an editor cannot publish**. A beta round therefore can't be
+  one person alone at a keyboard: the draft → in_review → published loop needs
+  two seats, which is the workflow under test anyway. Scenarios are split
+  accordingly.
+
 - **"Add to release" from the content editor.** The Settings tab now carries a
   **Release** panel: queue the record you're editing into a content release,
   see which release it's already in (with a link to it), and take it back out.

@@ -425,7 +425,7 @@ Use this as living checklist. Mark as you progress. Grouped by phase/category. P
 - [~] Monitoring setup — Sentry (errors) + OpenTelemetry (tracing) wired, env-gated no-ops by default (`docs/observability.md`); LiveDashboard available. **Still open:** a `/ready` readiness probe (DB + Oban depth) + alert rules (#56 reopened; only `/up` exists).
 - [ ] Backup strategy (Postgres + media) — **still open** (#57 reopened; its runbook was lost in the #106 premature merge). The most consequential gap for the live prod instance.
 - [x] Domain + SSL via Coolify — prod is live behind Coolify on the VPS.
-- [ ] Beta user testing (internal or friendly clinics/agencies) — **still open** (#59 reopened).
+- [~] Beta user testing (internal or friendly clinics/agencies) — the **apparatus** is in place and ready to run: `docs/beta-testing.md` (round shapes, seven scenarios, session form, triage rubric) plus a **Beta feedback** issue form that files one finding per issue, labelled `beta`. Rebuilt after the #106 premature merge lost it. **Still open:** no round has actually run, so there are no triaged beta findings yet — #59 stays open and tracks the rounds.
 
 ### Stretch / Post-v1.0
 - [ ] AI content generation assistant (block-level prompts via LLM) — **still open** (#60 reopened; `KilnCMS.AI` was lost in #106). Adjacent AI surface that *did* ship: MCP server (`docs/mcp.md`), RAG guide (`docs/rag.md`), llms.txt/GEO delivery.

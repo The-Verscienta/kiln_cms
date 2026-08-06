@@ -1,0 +1,144 @@
+name: Beta feedback
+description: A single finding from a beta testing session (see docs/beta-testing.md)
+labels: ["beta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For findings from a **beta testing session**. One finding per issue —
+        if a session turned up five problems, that's five issues, so they can be
+        triaged, deduplicated and closed independently. See
+        [docs/beta-testing.md](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/beta-testing.md).
+
+        Not from a beta session? Use **Bug report** or **Feature request** instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What the tester tried, what they got, and what they expected instead.
+      placeholder: |
+        Tried to: publish a post from the content list.
+        Got: the row stayed on "draft" with no message; publishing only worked
+        from inside the editor.
+        Expected: the inline publish action to work, or to say why it didn't.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: >
+        The scale from the session form. This drives the priority label at
+        triage — see the rubric in docs/beta-testing.md.
+      options:
+        - S1 — blocker (couldn't complete the task)
+        - S2 — major (works, but painful or risks losing data)
+        - S3 — minor (annoyance)
+        - S4 — cosmetic / nit
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the editor? Pick the closest match.
+      options:
+        - Content list (/editor)
+        - Block editor (/editor/content/:type/:id)
+        - Media library (/media)
+        - Review workflow (draft → in_review → published)
+        - Taxonomy (/editor/taxonomy)
+        - Releases (/editor/releases)
+        - Calendar (/editor/calendar)
+        - Editorial tasks (/editor/tasks)
+        - Search palette (/editor/search)
+        - Analytics (/editor/analytics)
+        - Broken links (/editor/links)
+        - Settings (/editor/settings)
+        - Team & roles (/editor/team) — admin
+        - Webhooks (/editor/webhooks) — admin
+        - Forms (/editor/forms) — admin
+        - Content types & fields — admin
+        - Automation (/editor/automation) — admin
+        - Governance (/editor/governance) — admin
+        - Trash (/editor/trash) — admin
+        - Navigation / general orientation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Is this broken, or just missing?
+      options:
+        - Something behaved incorrectly (bug)
+        - Something was confusing or slow to figure out (usability)
+        - Something the tester reached for wasn't there (missing feature)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Tester's tier
+      description: >
+        The role the tester was provisioned with. This matters — most admin-only
+        surfaces are hidden from the `editor` tier entirely, so an `editor`
+        reporting a missing admin page is a provisioning artifact, not a finding.
+      options:
+        - editor
+        - admin
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: build
+    attributes:
+      label: Build tested
+      description: The frozen commit for this round — `git rev-parse --short HEAD`.
+      placeholder: "918ff58d"
+    validations:
+      required: true
+
+  - type: input
+    id: session
+    attributes:
+      label: Tester and session date
+      description: >
+        Handle (or an anonymized tester ID) and the session date, so the fix can
+        be confirmed with the person who found it.
+      placeholder: "tester-03, 2026-08-06"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Only for bugs — leave blank for pure usability or missing-feature
+        findings. Numbered steps from a fresh session, plus the tester's device
+        and browser if it looks environment-specific.
+      placeholder: |
+        1. Sign in as an editor, go to /editor
+        2. Create a post, leave it as a draft
+        3. Use the inline "Publish" action on the list row
+        4. Row still reads "draft"; Safari 18.5 / macOS
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Facilitator notes
+      description: >
+        Where the tester hesitated or backtracked, whether they needed a hint,
+        and any quote worth keeping. Attach a screenshot or clip if you recorded
+        one (with consent). Redact anything identifying.
+    validations:
+      required: false
