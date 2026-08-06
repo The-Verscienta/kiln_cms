@@ -95,6 +95,10 @@ defmodule KilnCMS.CMS.ReleaseItem do
       # and the release preview link renders whatever went through it.
       validate KilnCMS.CMS.Validations.EditableReleaseContent
       validate KilnCMS.CMS.Validations.ReleaseOpenForEdit
+      # A stale/bogus content_id would otherwise sit :pending until go-live,
+      # where a single unresolvable item aborts the whole atomic release
+      # (`Releases.apply_all/4` rolls back on the first `fetch_record` miss).
+      validate KilnCMS.CMS.Validations.ReleaseContentExists
       change KilnCMS.CMS.Changes.StampReleaseItemAdder
     end
 
