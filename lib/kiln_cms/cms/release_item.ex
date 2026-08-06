@@ -99,6 +99,9 @@ defmodule KilnCMS.CMS.ReleaseItem do
       # where a single unresolvable item aborts the whole atomic release
       # (`Releases.apply_all/4` rolls back on the first `fetch_record` miss).
       validate KilnCMS.CMS.Validations.ReleaseContentExists
+      # Last, because it is the only one that costs a count query — no point
+      # paying for it on an add the cheaper checks already refused (#837).
+      validate KilnCMS.CMS.Validations.ReleaseWithinSizeLimit
       change KilnCMS.CMS.Changes.StampReleaseItemAdder
     end
 
