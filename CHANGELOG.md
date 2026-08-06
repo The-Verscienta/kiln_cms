@@ -29,6 +29,36 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **"Similar content" panel in the content editor.** Surfaces the
+  near-duplicate detection and tag suggestions that #339 phase 2 shipped as
+  domain functions but never put in front of an author —
+  `KilnCMS.Search.Related.near_duplicates/2` and `suggest_tags/2`, both built
+  on the block embeddings that already exist, so no new model and no egress
+  (#339). See [Ask your content (RAG)](docs/rag.md).
+
+  Click-to-load rather than on mount, since it costs two pgvector queries plus
+  a read per neighbour. An empty result names its cause — semantic search off,
+  or a draft that was never indexed — instead of rendering a blank panel that
+  reads as broken. It also states outright that it describes the **last
+  published version**: the answers come from stored block embeddings, which are
+  written on publish, so unsaved edits are invisible to it and an author would
+  otherwise have no way to know.
+
+  `near_duplicates/2` gained an `:actor` option and the editor passes one.
+  It is the one function in `Related` that reports documents in any state —
+  catching a draft duplicating live content is the point — so unauthorized it
+  would have shown an editor restricted by `readable_types` (#332), or one
+  outside a document's audience, the titles and slugs of records the read
+  policy exists to hide. Callers with no viewer (the public related endpoint,
+  the automation reactions) are unchanged.
+
+  Read-only on purpose. A near-duplicate says two documents overlap but not
+  which one is real, so there is no safe action to offer; tag suggestions are
+  shown beside the Tags picker rather than applied from the panel, so the
+  author ticks what they're agreeing to. Unattended application already has a
+  home — the `:flag_duplicates` and `:suggest_tags` automation reactions run
+  the same functions.
+
 - **Beta testing program.** [Beta user testing](docs/beta-testing.md) documents
   the Phase 9 editor-UX beta: the surface under test, seven guided scenarios, a
   session notes form, and a feedback → issue → fix triage loop. A **Beta

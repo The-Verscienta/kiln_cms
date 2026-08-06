@@ -52,6 +52,21 @@ defmodule KilnCMS.Search.Related do
   @doc """
   Documents whose closest block sits within `:threshold` cosine distance of
   this document (default 0.1) — near-duplicates, any workflow state.
+
+  ## Pass an `:actor` for anything user-facing
+
+  Unlike `related_documents/2` this deliberately does **not** filter to
+  published-and-public — catching a draft that duplicates live content is the
+  point. That makes it the one function here that can surface a record the
+  caller is not allowed to read, so a surface with a user behind it must say
+  who:
+
+      near_duplicates(record, actor: actor)
+
+  With an actor the neighbour reads are authorized and anything out of scope
+  simply doesn't come back. Without one they run `authorize?: false`, which is
+  right for the background automation reaction (no actor exists) and wrong for
+  anything rendered to a person.
   """
   @spec near_duplicates(struct(), keyword()) :: [neighbour()]
   def near_duplicates(record, opts \\ []) do
@@ -60,7 +75,7 @@ defmodule KilnCMS.Search.Related do
     record
     |> neighbours(Keyword.get(opts, :limit, 20))
     |> Enum.filter(&(&1.distance <= threshold))
-    |> resolve(record.org_id, published_only?: false)
+    |> resolve(record.org_id, published_only?: false, actor: Keyword.get(opts, :actor))
   end
 
   @doc """
@@ -156,9 +171,33 @@ defmodule KilnCMS.Search.Related do
     end
   end
 
-  defp resolve(neighbours, org_id, published_only?: published_only?) do
+  # `actor` is what decides whether the read is authorized at all.
+  #
+  # `nil` keeps the historical behaviour — `authorize?: false` — which is
+  # correct for the two callers that have no actor to speak for: the public
+  # related-content endpoint, which then filters to published-and-public in
+  # `neighbour_entry/3`, and the background automation reactions.
+  #
+  # An actor turns authorization ON, and that matters specifically for
+  # `near_duplicates/2`, which does NOT filter by state or audience — it is
+  # meant to catch a draft duplicating live content. Without an actor it
+  # would hand an editor restricted by `readable_types` (#332), or one outside
+  # a document's audience, the titles and slugs of records the read policy
+  # exists to hide. A forbidden neighbour comes back as an error and is
+  # dropped by the existing clause, which is the behaviour we want: absent
+  # rather than redacted.
+  defp resolve(neighbours, org_id, opts) do
+    published_only? = Keyword.fetch!(opts, :published_only?)
+    actor = Keyword.get(opts, :actor)
+
+    read_opts =
+      case actor do
+        nil -> [authorize?: false, tenant: org_id]
+        actor -> [actor: actor, tenant: org_id]
+      end
+
     Enum.flat_map(neighbours, fn %{type: storage, id: id, distance: distance} ->
-      case ContentTypes.get_record(to_string(storage), id, authorize?: false, tenant: org_id) do
+      case ContentTypes.get_record(to_string(storage), id, read_opts) do
         {:ok, doc} -> neighbour_entry(doc, distance, published_only?)
         _ -> []
       end

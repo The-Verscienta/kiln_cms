@@ -79,9 +79,47 @@ when semantic search is off:
 The vector primitive behind them is `BlockEmbedding`'s `:nearest_to_vector`
 read (nearest neighbours of an already-computed vector, self-excluded).
 
+### In the editor
+
+The content editor's inspector carries a **Similar content** panel over
+`near_duplicates/2` and `suggest_tags/2`.
+
+It loads on an explicit click, never on mount — two pgvector queries plus a
+read per neighbour is not a cost every editor open should pay. An empty result
+says *why* it is empty (semantic search off, or an unindexed draft) rather than
+rendering a blank panel that reads as broken.
+
+**It describes the last published version, and the panel says so.** Both
+answers come from stored `BlockEmbedding` rows, which the firing worker writes
+on publish — so unsaved edits, and indeed saved draft edits, are invisible to
+it. That is worth stating outright rather than leaving an author to infer it
+from a stale-looking percentage.
+
+`near_duplicates/2` is the one function here that reports documents in **any**
+state — catching a draft that duplicates live content is the point — which
+makes it the one that can surface a record the caller may not read. It takes an
+`:actor`, and the editor passes one, so a neighbour outside the viewer's
+`readable_types` (#332) or audience simply doesn't come back. Callers with no
+actor (the public related endpoint, the automation reactions) keep the previous
+unauthorized read, which is safe for them: the public endpoint filters to
+published-and-public, and the reaction has no viewer.
+
+**Read-only**, deliberately, and for two different reasons. A near-duplicate
+tells you two documents overlap; it cannot tell you which is the real one, so
+there is no safe action to offer. Tag suggestions are shown next to the Tags
+picker rather than applied from the panel, so the author ticks what they are
+agreeing to — the same call `KilnCMS.Seo.Links` made about link suggestions
+(#541), where auto-insertion was ruled out for the same reason plus a harder
+one about the block tree.
+
+For unattended use the seam is the automation reaction, not this panel:
+`:flag_duplicates` and `:suggest_tags` already exist as `KilnCMS.Automation`
+actions (see [Automation](automation.md)) and run the same functions.
+
 ## Later
 
 - A reference **no-egress generator** wired to a local model (the
   `KilnCMS.Ask.Generator` seam stands).
-- Editor-UI surfacing of near-duplicates and tag suggestions (the domain
-  functions are the seam; #377's agentic tasks are the natural consumer).
+- Content gaps (`content_gaps/2`) have no UI at all — the natural home is the
+  analytics dashboard rather than the content editor, since the question is
+  about the site, not about a document.

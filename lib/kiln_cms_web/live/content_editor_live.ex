@@ -191,6 +191,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # record read per neighbour, which no page-load should pay.
          |> assign(:seo_links, nil)
          |> assign(:seo_links_loading?, false)
+         # Near-duplicates and tag suggestions (#339 phase 2). Same deal, same
+         # reason: two more pgvector queries, deferred to an explicit click.
+         |> assign(:content_intel, nil)
+         |> assign(:content_intel_loading?, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -429,6 +433,33 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # An empty list rather than nil: nil means "not loaded yet" and would make
     # the panel try again on every open.
     {:noreply, socket |> assign(:seo_links_loading?, false) |> assign(:seo_links, [])}
+  end
+
+  # Stamped with the `editor_version` the task started under, like `:seo_draft`
+  # and `:assist`. Without it a reload-conflict or a version restore clears the
+  # panel and the in-flight task then repopulates it a moment later with the
+  # answer for the document the author just walked away from — which is the
+  # stale-but-authoritative failure the panel is supposed to avoid.
+  def handle_async(:content_intel, {:ok, {version, intel}}, socket) do
+    if version == socket.assigns.editor_version do
+      {:noreply,
+       socket
+       |> assign(:content_intel_loading?, false)
+       |> assign(:content_intel, intel)}
+    else
+      {:noreply, assign(socket, :content_intel_loading?, false)}
+    end
+  end
+
+  def handle_async(:content_intel, {:exit, reason}, socket) do
+    Logger.warning("Content intelligence task exited: #{inspect(reason)}")
+
+    # An empty result rather than nil, for the same reason as `:seo_links`:
+    # nil means "never asked" and the panel would offer to try again forever.
+    {:noreply,
+     socket
+     |> assign(:content_intel_loading?, false)
+     |> assign(:content_intel, %{duplicates: [], tags: []})}
   end
 
   def handle_async(:seo_draft, {:exit, reason}, socket) do
@@ -1291,6 +1322,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     if socket.assigns.seo_links_loading?,
       do: {:noreply, socket},
       else: {:noreply, load_link_suggestions(socket)}
+  end
+
+  # Near-duplicates + tag suggestions (#339 phase 2), on the same
+  # explicit-click contract as the link suggestions above.
+  def handle_event("content_intel_refresh", _params, socket) do
+    if socket.assigns.content_intel_loading?,
+      do: {:noreply, socket},
+      else: {:noreply, load_content_intel(socket)}
   end
 
   # The `Clipboard` JS hook pushes this after a successful copy. Without a
@@ -2331,6 +2370,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> clear_seo_suggestions()
     |> close_assist()
     |> assign(:seo_links, nil)
+    # This path is a conflict reload or a version restore — the record itself
+    # changed underneath the author, so a previous answer is about a different
+    # document. (Ordinary editing does NOT clear it, and does not need to: the
+    # answer is derived from stored embeddings, i.e. from the last published
+    # version, which typing does not move. The panel says so.)
+    |> assign(:content_intel, nil)
   end
 
   defp clear_seo_suggestions(socket) do
@@ -3262,6 +3307,63 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> start_async(:seo_links, fn ->
       KilnCMS.Seo.Links.suggest(record, actor: actor, exclude_paths: linked)
     end)
+  end
+
+  # Both halves in one task: they are two queries against the same embeddings,
+  # and running them as two `start_async`es would mean two spinners, two
+  # failure paths and two re-renders for what the author asked for once.
+  defp load_content_intel(socket) do
+    record = socket.assigns.record
+    actor = socket.assigns.actor
+    version = socket.assigns.editor_version
+
+    socket
+    |> assign(:content_intel_loading?, true)
+    |> start_async(:content_intel, fn ->
+      # `actor:` is load-bearing, not hygiene. `near_duplicates/2` reports
+      # documents in ANY state — that is what catches a draft duplicating live
+      # content — so without an actor it would show an editor restricted by
+      # `readable_types` (#332), or one outside a document's audience, the
+      # titles of records the read policy exists to hide.
+      {version,
+       %{
+         duplicates: KilnCMS.Search.Related.near_duplicates(record, actor: actor),
+         tags: KilnCMS.Search.Related.suggest_tags(record)
+       }}
+    end)
+  end
+
+  defp empty_intel?(%{duplicates: [], tags: []}), do: true
+  defp empty_intel?(_intel), do: false
+
+  # A cosine distance read as a similarity percentage, because "0.06" means
+  # nothing to an editor deciding whether two pages are the same page.
+  # Clamped: distance is bounded to [0, 2] in principle but a degenerate
+  # vector can round outside it, and a "-3% similar" badge reads as a bug.
+  defp similarity_percent(distance) when is_number(distance) do
+    ((1 - distance) * 100)
+    |> max(0)
+    |> min(100)
+    |> round()
+  end
+
+  defp similarity_percent(_distance), do: 0
+
+  # Same reasoning as `link_empty_reason/1`: an empty panel with no
+  # explanation reads as broken, and here the overwhelmingly common cause is
+  # that semantic search is off — in which case `KilnCMS.Search.Related`
+  # returns empty by design and no amount of editing will change it.
+  defp intel_empty_reason(record) do
+    cond do
+      not KilnCMS.Search.semantic?() ->
+        gettext("Turn on semantic search to check for duplicates and suggest tags.")
+
+      record.state != :published and is_nil(record.published_at) ->
+        gettext("Publish this page to index it — these come from indexed content.")
+
+      true ->
+        gettext("Nothing similar found.")
+    end
   end
 
   # Why the suggestion list came back empty — an unexplained empty panel reads
@@ -7306,6 +7408,85 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     else: gettext("Refresh")}
                   <.icon
                     :if={@seo_links_loading?}
+                    name="hero-arrow-path"
+                    class="ml-1 size-3 motion-safe:animate-spin"
+                  />
+                </button>
+              </.inspector_section>
+
+              <%!-- Content intelligence (#339 phase 2). The domain functions
+                    shipped with that phase; this is the editor surface
+                    `docs/rag.md` records as still owed. Click-to-load, for the
+                    same cost reason as internal links above.
+
+                    Read-only, like the link suggestions: near-duplicates need a
+                    human to decide which document is the real one, and tags are
+                    ticked in the picker rather than applied from here, so the
+                    author sees what they are agreeing to. --%>
+              <.inspector_section id="inspector-content-intel" title={gettext("Similar content")}>
+                <p class="text-xs text-base-content/60">
+                  {gettext("Content that reads like this one, and tags it resembles.")}
+                </p>
+                <%!-- Said plainly, because it is not guessable from the panel:
+                      both answers come from stored block embeddings, which are
+                      written by the firing worker on PUBLISH. So this describes
+                      the last published version of this document, not the text
+                      currently in the editor. --%>
+                <p class="text-xs text-base-content/60">
+                  {gettext("Based on the last published version, not unsaved edits.")}
+                </p>
+
+                <p
+                  :if={@content_intel && empty_intel?(@content_intel)}
+                  class="text-xs text-base-content/60"
+                >
+                  {intel_empty_reason(@record)}
+                </p>
+
+                <div :if={@content_intel && @content_intel.duplicates != []} class="space-y-1">
+                  <p class="text-xs font-medium">{gettext("Possible duplicates")}</p>
+                  <ul class="space-y-1.5">
+                    <li
+                      :for={dupe <- @content_intel.duplicates}
+                      class="rounded border border-warning/40 bg-warning/10 p-2"
+                    >
+                      <p class="text-xs font-medium">{dupe.title || dupe.slug}</p>
+                      <p class="mt-0.5 text-xs text-base-content/60">
+                        <%!-- One `%`, not `%%`: Elixir Gettext is not printf —
+                              it only interpolates `%{…}` and would render a
+                              doubled sign literally. --%>
+                        {gettext("%{percent}% similar", percent: similarity_percent(dupe.distance))}
+                      </p>
+                    </li>
+                  </ul>
+                </div>
+
+                <div :if={@content_intel && @content_intel.tags != []} class="space-y-1">
+                  <p class="text-xs font-medium">{gettext("Suggested tags")}</p>
+                  <p class="text-xs text-base-content/60">
+                    {gettext("Tick them in the Tags picker if they fit.")}
+                  </p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span
+                      :for={suggestion <- @content_intel.tags}
+                      class="rounded border border-base-content/20 px-2 py-0.5 text-xs"
+                    >
+                      {suggestion.tag.name}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  phx-click="content_intel_refresh"
+                  disabled={@content_intel_loading?}
+                  class="btn btn-sm btn-default"
+                >
+                  {if @content_intel == nil,
+                    do: gettext("Check for duplicates"),
+                    else: gettext("Refresh")}
+                  <.icon
+                    :if={@content_intel_loading?}
                     name="hero-arrow-path"
                     class="ml-1 size-3 motion-safe:animate-spin"
                   />
