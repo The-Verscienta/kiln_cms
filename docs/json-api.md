@@ -343,6 +343,7 @@ Use the JSON:API media type on both `Accept` and `Content-Type`:
 | `POST /api/json/posts` | `:create` | `:read_write` key, editor+ | Creates a **draft**, attributed to the key's owner |
 | `PATCH /api/json/posts/:id` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if already published |
 | `PATCH /api/json/posts/:id/submit-for-review` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
+| `PATCH /api/json/posts/:id/return-to-draft` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft (reject; notifies the author) |
 | `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
 | `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
 | `DELETE /api/json/posts/:id` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
@@ -436,8 +437,9 @@ edits do not fire.
 
 ### Workflow routes take an empty resource object
 
-The workflow `PATCH` routes (`/publish`, `/unpublish`, `/submit-for-review`)
-carry no attributes — send the JSON:API resource identifier only:
+The workflow `PATCH` routes (`/publish`, `/unpublish`, `/submit-for-review`,
+`/return-to-draft`) carry no attributes — send the JSON:API resource identifier
+only:
 
 ```bash
 curl -s -X PATCH http://localhost:4000/api/json/posts/<uuid>/publish \

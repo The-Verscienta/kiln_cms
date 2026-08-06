@@ -297,6 +297,7 @@ defmodule KilnCMS.CMS.Content do
               create :create_entry, :create, hide_inputs: [:blocks]
               update :update_entry, :update, hide_inputs: [:blocks]
               update :submit_entry_for_review, :submit_for_review, hide_inputs: [:blocks]
+              update :return_entry_to_draft, :return_to_draft, hide_inputs: [:blocks]
               update :publish_entry, :publish, hide_inputs: [:blocks]
               update :unpublish_entry, :unpublish, hide_inputs: [:blocks]
               destroy :delete_entry, :destroy, hide_inputs: [:blocks]
@@ -341,6 +342,7 @@ defmodule KilnCMS.CMS.Content do
               post :create
               patch :update
               patch :submit_for_review, route: "/:id/submit-for-review"
+              patch :return_to_draft, route: "/:id/return-to-draft"
               patch :publish, route: "/:id/publish"
               patch :unpublish, route: "/:id/unpublish"
               delete :destroy
@@ -410,8 +412,9 @@ defmodule KilnCMS.CMS.Content do
             # Write surface (#330 — reverses D7). GraphQL mutations mirror the
             # JSON:API write routes and share the identical policy stack: a
             # read-only API key is forbidden every write; a `:read_write` key
-            # acts as its owning user (create/update/submit as editor, publish as
-            # admin). `hide_inputs: [:blocks]` keeps the non-public `blocks` union
+            # acts as its owning user (create/update/submit as editor; publish and
+            # return-to-draft as admin — the two halves of the approve/reject pair,
+            # #626). `hide_inputs: [:blocks]` keeps the non-public `blocks` union
             # out of every mutation input (AshGraphql can't build an input type
             # for it); body content goes through the public `block_tree` argument.
             mutations do
@@ -420,6 +423,8 @@ defmodule KilnCMS.CMS.Content do
 
               update unquote(:"submit_#{type}_for_review"), :submit_for_review,
                 hide_inputs: [:blocks]
+
+              update unquote(:"return_#{type}_to_draft"), :return_to_draft, hide_inputs: [:blocks]
 
               update unquote(:"publish_#{type}"), :publish, hide_inputs: [:blocks]
               update unquote(:"unpublish_#{type}"), :unpublish, hide_inputs: [:blocks]
@@ -477,13 +482,15 @@ defmodule KilnCMS.CMS.Content do
               # Write surface (#330 — reverses D7 for authenticated writers).
               # Same policy stack as `/mcp`: a read-only API key is forbidden
               # every write by the resource policies; a `:read_write` key acts as
-              # its owning user (create/update/submit as an editor; publish as an
-              # admin). Anonymous/JWT writers are governed by role alone. Body
+              # its owning user (create/update/submit as an editor; publish and
+              # return-to-draft as an admin, #626). Anonymous/JWT writers are
+              # governed by role alone. Body
               # content is written via the public `block_tree` argument (the raw
               # `blocks` union isn't exposed). See docs/json-api.md → "Writing".
               post :create
               patch :update
               patch :submit_for_review, route: "/:id/submit-for-review"
+              patch :return_to_draft, route: "/:id/return-to-draft"
               patch :publish, route: "/:id/publish"
               patch :unpublish, route: "/:id/unpublish"
               # DELETE is a reversible soft-delete (AshArchival); hard `:purge`

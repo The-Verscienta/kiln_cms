@@ -184,6 +184,36 @@ defmodule KilnCMSWeb.WriteApiTest do
       assert CMS.get_post!(post.id, actor: user(:admin)).state == :in_review
     end
 
+    test "return-to-draft is forbidden to an editor key but allowed to an admin key (#626)",
+         %{owner: owner, post: post} do
+      # An editor submits for review; sending it back is the admin half of the
+      # approve/reject pair, so it must be gated exactly like publish.
+      in_review = CMS.submit_post_for_review!(post, %{}, actor: owner)
+      assert in_review.state == :in_review
+
+      # The editor who authored it still cannot return it — OrgAdmin only.
+      editor_key = mint(user(:editor), :read_write)
+
+      assert {403, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: editor_key
+               )
+
+      assert CMS.get_post!(post.id, actor: user(:admin)).state == :in_review
+
+      # An admin :read_write key can.
+      admin_key = mint(user(:admin), :read_write)
+
+      assert {200, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: admin_key
+               )
+
+      assert CMS.get_post!(post.id, actor: user(:admin)).state == :draft
+    end
+
     test "publish is forbidden to an editor key but allowed to an admin key", %{post: post} do
       # Editor may not publish (admin approval step).
       editor_key = mint(user(:editor), :read_write)

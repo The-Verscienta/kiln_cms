@@ -231,6 +231,10 @@ defmodule KilnCMSWeb.DeliveryGraphqlTest do
             :create_page,
             :update_page,
             :submit_page_for_review,
+            # The admin half of the approve/reject pair, on all three tiers (#626).
+            :return_page_to_draft,
+            :return_post_to_draft,
+            :return_entry_to_draft,
             :publish_page,
             :unpublish_page,
             :delete_page,
