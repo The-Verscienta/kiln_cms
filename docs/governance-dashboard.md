@@ -62,6 +62,19 @@ Phase 1 was a read model over what the cluster already produces. Phase 2
   (#597). Note that on an unsigned deployment the links and the sequence are
   ordinary columns and the verdict is `unsigned` regardless: configure a signing
   key before treating any of this as evidence.
+
+  A forged head is held to the newest anchor that still verifies (#708), but
+  only within *that* anchor's prefix. An attacker with DELETE as well as INSERT
+  moves the doctoring past it — delete the verified head, doctor only the
+  versions it covered, re-insert an unsigned anchor refolded over the doctored
+  rows — and the result reads `unsigned`, not `TAMPERED` (#811). Nothing inside
+  `history_anchors` can distinguish that from a deployment whose signing key
+  went away between publishes; the two produce identical tables.
+
+  `mix kiln.audit.verify` therefore reports how far the attestation actually
+  reaches rather than calling such a chain "intact", and fails the run when a
+  signing key **is** configured — a deployment that could have signed and did
+  not is an anomaly to explain. The checkpoint witness below is what settles it.
 - **Checkpoints** (#666) — a clean truncation of the *newest* anchors is the one
   thing no column inside the document can catch: a shorter chain is
   indistinguishable from a younger one. So a scheduled job mints a signed,
