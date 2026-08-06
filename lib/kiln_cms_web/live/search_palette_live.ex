@@ -24,7 +24,8 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   defp empty, do: %{pages: [], posts: [], entries: [], media: [], categories: [], tags: []}
 
   @impl true
-  def handle_event("search", %{"q" => raw}, socket) do
+  # `String.trim/1` raises on a list or a map (#764).
+  def handle_event("search", %{"q" => raw}, socket) when is_binary(raw) do
     query = String.trim(raw)
 
     socket =

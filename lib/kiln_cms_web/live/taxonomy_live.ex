@@ -486,7 +486,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
   attr :content_type_options, :list, required: true
 
   defp taxonomy_row(assigns) do
-    assigns = assign(assigns, :scope, scope_line(assigns.record))
+    assigns = assign(assigns, :scope, scope_line(assigns.record, assigns.content_type_options))
 
     ~H"""
     <li class="p-3">
@@ -646,12 +646,27 @@ defmodule KilnCMSWeb.TaxonomyLive do
   end
 
   # Only tag groups carry a content-type scope; nil hides the line entirely.
-  defp scope_line(%TagGroup{content_types: []}), do: gettext("All content types")
+  defp scope_line(%TagGroup{content_types: []}, _options), do: gettext("All content types")
 
-  defp scope_line(%TagGroup{content_types: types}),
-    do: gettext("Only: %{types}", types: Enum.join(types, ", "))
+  # Render from resolved labels, not the raw stored strings: an entry that names
+  # no live type (a renamed/archived `TypeDefinition`, or a bad write predating
+  # the `KnownContentTypes` validation) shows as "recipe (unknown)" rather than
+  # "Only: recipe", which is indistinguishable from a type that exists (#526).
+  defp scope_line(%TagGroup{content_types: types}, options) do
+    labels = Map.new(options, fn {label, type} -> {type, label} end)
 
-  defp scope_line(_record), do: nil
+    rendered =
+      Enum.map_join(types, ", ", fn type ->
+        case Map.get(labels, type) do
+          nil -> gettext("%{type} (unknown)", type: type)
+          label -> label
+        end
+      end)
+
+    gettext("Only: %{types}", types: rendered)
+  end
+
+  defp scope_line(_record, _options), do: nil
 
   defp delete_confirm(%TagGroup{tag_count: 0} = group),
     do: gettext("Delete “%{name}”?", name: group.name)
