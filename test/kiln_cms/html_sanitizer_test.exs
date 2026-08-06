@@ -156,6 +156,9 @@ defmodule KilnCMS.HTMLSanitizerTest do
         {http, true},
         # was: scrubber ACCEPTED — reads same-origin, resolves off-site
         {"//evil.example.com", false},
+        # its backslash twin: browsers read `\\` as `/` for http(s), so this
+        # resolves to https://evil.example.com/ while reading as a path
+        {"/\\evil.example.com", false},
         # was: scrubber ACCEPTED
         {"/a/../../etc/passwd", false},
         # was: scrubber REJECTED — a colon in the QUERY is not a scheme, and
@@ -237,6 +240,10 @@ defmodule KilnCMS.HTMLSanitizerTest do
             42,
             # reads same-origin, resolves off-site
             "//evil.example.com",
+            # the same escape with a backslash — WHATWG treats `\\` as `/` for
+            # special schemes, so every browser resolves this off-site
+            "/\\evil.example.com",
+            "/ /evil.example.com\\x",
             "/a/../../etc/passwd",
             "javascript" <> @colon <> "alert(1)",
             "data" <> @colon <> "text/html,x",

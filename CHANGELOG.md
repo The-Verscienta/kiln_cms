@@ -29,6 +29,41 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Editor-managed navigation menus.** `/editor/menus` builds ordered trees of
+  links — "Main navigation", "Footer" — and `GET /api/menus/:key` serves them to
+  a front end (#466). Kiln had no navigation resource at all: categories are
+  flat, so every headless consumer had to hard-code its nav. This was the
+  biggest functional hole in the Drupal-core comparison.
+
+  Items link to content **by reference**, and the URL is computed at read time
+  from the target's current published path — so renaming a slug moves the
+  navigation with it and never leaves a dead link. Items can also carry an
+  external URL (sanitized through the same `safe_href/1` policy rich-text links
+  use, so a `javascript:` trap can't be stored) or be a plain heading.
+
+  A menu is **per locale**, sharing a `key` across variants, like content
+  itself: labels, ordering and *which items exist* all differ between locales,
+  which a per-item translations map can't express. A missing locale variant is a
+  miss, not a fallback to English.
+
+  Delivery drops what a reader can't see: an item pointing at unpublished or
+  audience-gated content — or one an editor switched off — is omitted along with
+  its children, so a dropped section takes its links with it rather than
+  promoting them. That is why the stored rows are deliberately absent from the
+  auto JSON:API and GraphQL surfaces: serving them raw would publish the label
+  and target id of an unannounced page. `GET /api/menus/:key` and the `menu`
+  GraphQL query both resolve. Depth (counting the subtree a move carries),
+  cycles and cross-menu parenting are refused at write time. See
+  [Navigation menus](docs/navigation-menus.md).
+
+### Fixed
+
+- **`safe_href/1` accepted `/\evil.com`.** A backslash is a slash for `http(s)`
+  under the WHATWG URL spec, so a link that read as a same-origin path resolved
+  off-site in every browser — the `//host` escape the policy already blocked,
+  wearing a different hat. Now rejected wherever a link href is stored: rich
+  text, portable text, legacy HTML, and the new menu items.
+
 - **Auto-complete-on-publish is now configurable.** Publishing a piece of
   content still completes its open editorial tasks — that was unconditional
   since #501 — but a site can change the default and an individual task can
