@@ -40,8 +40,12 @@ defmodule KilnCMS.Config.Env do
 
   The warning goes to `:standard_error` rather than `Logger`, because config
   providers run before `Logger` is available. In a release that means container
-  stdout — visible in `docker logs`, but never forwarded to Sentry. It is a
-  boot-time line an operator has to look for, not an alert.
+  stdout — visible in `docker logs`, but the config provider can't reach Sentry
+  or a log sink. So each unrecognized read is also accumulated (see
+  `warnings/0`), and `KilnCMS.Application` calls `replay_warnings/0` once the
+  system is up to re-emit them through `Logger` — where they do reach Sentry
+  (#634). The stderr line stays regardless: it is the only thing left if the app
+  never finishes starting.
 
   > #### Not for secrets {: .warning}
   >
@@ -197,7 +201,66 @@ defmodule KilnCMS.Config.Env do
           []
         )
 
+        record_warning(var, raw)
         :unrecognized
     end
+  end
+
+  # ── Boot-warning replay (#634) ─────────────────────────────────────────────
+
+  # The `IO.warn` above is the only signal an operator gets that a flag didn't
+  # take effect, and in a release it reaches container stdout only — never Sentry
+  # or a log sink, because config providers run before `Logger` exists. So each
+  # unrecognized read is also accumulated here for `KilnCMS.Application` to replay
+  # through `Logger` once the system is up.
+  #
+  # `:persistent_term`, not application env: it is plain VM state, available both
+  # in the config-provider context (where a provider's own config would not yet
+  # be applied) and at application start, so it sidesteps every question about
+  # whether a `put_env` from inside a provider survives the provider's own
+  # `put_all_env`. Flag-only by contract (see the "Not for secrets" note), so the
+  # accumulated raw values are safe to echo.
+  @warnings_key {__MODULE__, :boot_warnings}
+
+  defp record_warning(var, raw) do
+    :persistent_term.put(@warnings_key, :persistent_term.get(@warnings_key, []) ++ [{var, raw}])
+  end
+
+  @doc """
+  The unrecognized-value warnings accumulated by `fetch/1` (and thus `flag/2`)
+  during config evaluation — `{var, raw_value}` in read order (#634).
+  """
+  @spec warnings() :: [{String.t(), String.t()}]
+  def warnings, do: :persistent_term.get(@warnings_key, [])
+
+  @doc "Drop the accumulated warnings (after replay, or between tests)."
+  @spec clear_warnings() :: :ok
+  def clear_warnings do
+    _ = :persistent_term.erase(@warnings_key)
+    :ok
+  end
+
+  @doc """
+  Replay every accumulated warning through `Logger.warning/1` — so it reaches
+  Sentry and any log sink, which the boot-time `IO.warn` cannot — then clear
+  them. Called once by `KilnCMS.Application` after Logger is up. Returns the
+  count replayed. The `IO.warn` is deliberately kept: it is the only thing left
+  if the app never finishes starting.
+  """
+  @spec replay_warnings() :: non_neg_integer()
+  def replay_warnings do
+    require Logger
+
+    accumulated = warnings()
+
+    for {var, raw} <- accumulated do
+      Logger.warning(
+        "#{var} was set to an unrecognized value (#{inspect(raw)}) at boot; the configured " <>
+          "default was kept. See docs/environment-variables.md."
+      )
+    end
+
+    clear_warnings()
+    length(accumulated)
   end
 end

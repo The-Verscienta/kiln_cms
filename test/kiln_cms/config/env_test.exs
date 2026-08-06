@@ -99,6 +99,43 @@ defmodule KilnCMS.Config.EnvTest do
     end
   end
 
+  describe "boot-warning replay (#634)" do
+    setup do
+      Env.clear_warnings()
+      on_exit(&Env.clear_warnings/0)
+      :ok
+    end
+
+    test "an unrecognized value is recorded for later replay, not only written to stderr" do
+      put("enabledd")
+      quietly(fn -> assert Env.fetch(@var) == :unrecognized end)
+
+      assert {@var, "enabledd"} in Env.warnings()
+    end
+
+    test "a recognized or unset value records nothing" do
+      put("true")
+      assert Env.fetch(@var) == {:ok, true}
+      put(nil)
+      assert Env.fetch(@var) == :unset
+
+      assert Env.warnings() == []
+    end
+
+    test "replay re-emits each through Logger — where the config provider's stderr can't reach — and clears" do
+      put(" Enabled ")
+      quietly(fn -> Env.fetch(@var) end)
+      # The RAW value is kept, spaces and all, so an operator can grep for it.
+      assert [{@var, " Enabled "}] = Env.warnings()
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert Env.replay_warnings() == 1 end)
+
+      assert log =~ @var
+      assert log =~ "unrecognized value"
+      assert Env.warnings() == [], "replay clears the buffer so a restart doesn't double-report"
+    end
+  end
+
   describe "truthy?/1" do
     test "an explicit off-spelling disables, whatever the case or padding" do
       # The only thing this changes from a bare presence check — and the one

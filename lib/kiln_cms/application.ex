@@ -15,6 +15,9 @@ defmodule KilnCMS.Application do
     # visible by querying `oban_jobs`. Attaching here makes those failures
     # show up in the logs, as the mailer config comment in runtime.exs assumes.
     _ = Oban.Telemetry.attach_default_logger(level: :info)
+    # Replay any unparseable-env-flag warnings the config providers could only
+    # write to stderr (#634), now that Logger and the Sentry handler are up.
+    _ = KilnCMS.Config.Env.replay_warnings()
     warn_if_no_mailer_in_prod()
     warn_if_seo_drafting_egresses()
     warn_if_assist_egresses()
