@@ -85,7 +85,11 @@ defmodule KilnCMS.CMS.ContentRelease do
 
   admin do
     resource_group :content
-    table_columns [:name, :state, :scheduled_at, :published_at, :inserted_at]
+    # `:state` is deliberately absent: AshStateMachine adds that attribute in a
+    # transformer that AshAdmin's table-column validator does not see, so naming
+    # it here fails a CLEAN compile while passing an incremental one. The content
+    # resources' own `table_columns` leave it out for the same reason.
+    table_columns [:name, :scheduled_at, :published_at, :inserted_at]
   end
 
   postgres do
