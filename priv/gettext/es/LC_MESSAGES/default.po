@@ -1048,7 +1048,7 @@ msgstr "Actualizado."
 msgid "You are now signed out"
 msgstr "Ha cerrado la sesión"
 
-#: lib/kiln_cms_web/live_user_auth.ex:110
+#: lib/kiln_cms_web/live_user_auth.ex:115
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr "Necesita acceso de editor para ver esa página."
@@ -1400,7 +1400,7 @@ msgstr "Ya ha iniciado sesión de otra manera, pero no ha confirmado su cuenta. 
 #: lib/kiln_cms_web/live/team_live.ex:42
 #: lib/kiln_cms_web/live/trash_live.ex:38
 #: lib/kiln_cms_web/live/webhook_live.ex:34
-#: lib/kiln_cms_web/live_user_auth.ex:133
+#: lib/kiln_cms_web/live_user_auth.ex:138
 #, elixir-autogen, elixir-format
 msgid "You need admin access to view that page."
 msgstr "Necesita acceso de administrador para ver esa página."
