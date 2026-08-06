@@ -26,11 +26,21 @@ defmodule KilnCMSWeb.AskController do
         # Scope RAG retrieval to the request's org (#336).
         tenant: KilnCMSWeb.Tenant.current_org_id(conn),
         locale: Params.string(params, "locale"),
-        limit: parse_limit(Params.string(params, "limit"))
+        limit: parse_limit(Params.string(params, "limit")),
+        # What the generation budget keys on for an anonymous caller. This
+        # endpoint is public, so most callers have no actor, and without an
+        # identity the per-caller bucket would be skipped outright — leaving
+        # only the pipeline's 120/min per-IP limiter in front of an LLM call.
+        client_id: client_id(conn)
       )
 
     json(conn, result)
   end
+
+  # Spelled with `KilnCMSWeb.RateLimit.client_key/1` rather than formatting the
+  # address here, so this bucket and the pipeline's per-IP bucket name the same
+  # client the same way.
+  defp client_id(conn), do: "ip:" <> KilnCMSWeb.RateLimit.client_key(conn.remote_ip)
 
   # Left unclamped on purpose: `Ask.answer/2` clamps it against its own ceiling,
   # so bounding it a second time here would be two numbers to keep in step. The
