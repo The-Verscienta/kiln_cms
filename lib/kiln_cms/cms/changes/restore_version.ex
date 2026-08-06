@@ -34,10 +34,14 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   The stored map replaces the current one, so a key added after the target
   version is gone afterwards. That is what the compare view promises — it
   reports such a key as *added* between the two versions — and a key-wise merge
-  would make that report a lie. The map is written as it was stored, bypassing
-  `Changes.ApplyCustomFields`, so a definition retired since leaves a key the
-  editor form no longer renders; routing a restored map back through the
-  registry is tracked separately (#708).
+  would make that report a lie. The fold writes the map as it was stored, then
+  `apply_custom_field_registry/2` runs it back through
+  `Changes.ApplyCustomFields.apply_restored/1` (#710): against an EMPTY base, so
+  the wholesale semantics hold, but with every registry pass an ordinary save
+  gets — coercion, `:select` membership, media/reference resolution under the
+  tenant, computed-field refresh from the restored document, and dropping keys
+  for retired definitions. A restore therefore lands in a shape an ordinary save
+  could also produce.
 
   ## References
 
@@ -102,6 +106,7 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
            ) do
       changeset
       |> restore_fields(state, restorable)
+      |> apply_custom_field_registry(restorable)
       |> revalidate(context)
       |> revalidate_alt_text(context)
       |> validate_references(restorable, org_id)
@@ -121,6 +126,24 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
     |> case do
       {:ok, %{} = version} -> {:ok, version}
       _ -> :error
+    end
+  end
+
+  # `custom_fields` restores as the raw stored map (`restore_fields/3`, wholesale
+  # by design), which never passes through `Changes.ApplyCustomFields` on its own
+  # (#710). Run the registry pass by hand once the fold has landed — the same
+  # shape the `@revalidate` set uses for the "validates a stored value but runs
+  # too early" problem — so a `:select` outside a since-narrowed list is caught,
+  # computed fields refresh from the just-restored document, `:media`/`:reference`
+  # ids resolve under the tenant (a trashed one fails the restore, like
+  # `featured_image_id`), and a key whose definition was retired is dropped
+  # rather than made publicly readable again. Only when `custom_fields` is
+  # actually restorable for this resource.
+  defp apply_custom_field_registry(changeset, restorable) do
+    if :custom_fields in restorable do
+      KilnCMS.CMS.Changes.ApplyCustomFields.apply_restored(changeset)
+    else
+      changeset
     end
   end
 

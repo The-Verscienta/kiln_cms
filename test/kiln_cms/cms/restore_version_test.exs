@@ -343,6 +343,79 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     end
   end
 
+  describe "restored custom_fields run the FieldDefinition registry (#710)" do
+    test "a key whose definition was deleted since is dropped, not resurrected" do
+      admin = admin()
+      definition = define_price!(admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "P", slug: slug(), custom_fields: %{"price" => "9"}},
+          actor: admin
+        )
+
+      [create_version | _] = versions(page, admin)
+
+      # Retire the definition, then restore the version that still carried its key.
+      CMS.update_page!(page, %{title: "P2"}, actor: admin)
+      CMS.destroy_field_definition!(definition, actor: admin)
+
+      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+
+      # `custom_fields` is `public? true`; resurrecting the key would republish a
+      # value an admin removed the definition for. The registry pass drops it.
+      refute Map.has_key?(restored.custom_fields, "price")
+    end
+
+    test "a :select value outside a since-narrowed option list fails the restore" do
+      admin = admin()
+
+      size =
+        define_field!(admin, %{
+          name: "size",
+          label: "Size",
+          field_type: :select,
+          options: ["s", "m", "l"]
+        })
+
+      page =
+        CMS.create_page!(
+          %{title: "P", slug: slug(), custom_fields: %{"size" => "l"}},
+          actor: admin
+        )
+
+      [create_version | _] = versions(page, admin)
+
+      CMS.update_page!(page, %{custom_fields: %{"size" => "m"}}, actor: admin)
+      CMS.update_field_definition!(size, %{options: ["s", "m"]}, actor: admin)
+
+      # Without the registry pass the stale "l" was written back unchecked and the
+      # record could no longer be saved at all; now the restore refuses up front.
+      assert_refuses(page, create_version, :custom_fields, admin)
+    end
+
+    test "a :media value pointing at since-trashed media fails the restore" do
+      admin = admin()
+      define_field!(admin, %{name: "hero", label: "Hero", field_type: :media})
+      item = media!()
+
+      page =
+        CMS.create_page!(
+          %{title: "P", slug: slug(), custom_fields: %{"hero" => item.id}},
+          actor: admin
+        )
+
+      [create_version | _] = versions(page, admin)
+
+      CMS.update_page!(page, %{title: "P2"}, actor: admin)
+      CMS.destroy_media_item!(item, actor: admin)
+
+      # The dangling-reference check PR #709 added for `featured_image_id` now
+      # covers an identical trashed id inside `custom_fields` too.
+      assert_refuses(page, create_version, :custom_fields, admin)
+    end
+  end
+
   describe "re-validation (#691)" do
     test "refuses a path_alias another record has claimed since" do
       admin = admin()
