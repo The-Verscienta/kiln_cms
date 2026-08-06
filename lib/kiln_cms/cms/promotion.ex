@@ -11,11 +11,14 @@ defmodule KilnCMS.CMS.Promotion do
        preserved**, so taggings and content links — both polymorphic by UUID —
        keep working with no changes);
     2. moves their PaperTrail versions into the compiled type's versions table;
-    3. deletes their fired `:entry` artifacts and stale reference edges (the
+    3. re-attests their tamper-evident history anchors under the compiled type,
+       so `Chain.verify/4` still resolves the chain instead of orphaning it
+       (#704 — anchors key on the document's type);
+    4. deletes their fired `:entry` artifacts and stale reference edges (the
        artifact API backfills on demand under the new storage type);
-    4. re-scopes the type's `FieldDefinition` rows to the compiled type, so
+    5. re-scopes the type's `FieldDefinition` rows to the compiled type, so
        every custom field keeps rendering and validating exactly as before;
-    5. archives the `TypeDefinition` (restorable, but its name now belongs to
+    6. archives the `TypeDefinition` (restorable, but its name now belongs to
        the compiled type).
 
   Fields deliberately stay **data-driven** after promotion: the editor renders
@@ -74,6 +77,7 @@ defmodule KilnCMS.CMS.Promotion do
       Repo.transaction(fn ->
         entry_count = move_rows("entries", target_table, definition.id)
         version_count = move_versions(target_table)
+        reattest_anchors(target_table, target, definition.org_id)
         purge_artifacts_and_edges()
         rescope_field_definitions(definition, target)
         notifications = archive_definition(definition)
@@ -150,6 +154,44 @@ defmodule KilnCMS.CMS.Promotion do
       )
 
     copied
+  end
+
+  # History anchors (#356) key on the document's public type — `"entry"` for a
+  # dynamic doc, the compiled atom now — so the move orphans them unless they are
+  # re-attested under the new type. Left orphaned, `Chain.verify/4` reads nothing
+  # under the new type and the next publish silently re-anchors from genesis
+  # (#704). Scope to docs that BOTH moved into the target AND still carry `entry`
+  # anchors, so a re-promotion into a shared target skips docs already re-keyed —
+  # same "no longer in entries / now in target" shape as `purge_artifacts_and_edges`.
+  #
+  # Same identifier-interpolation rationale as `move_rows`: `target_table` comes
+  # from the compiled resource's config, the literals are constant, nothing is
+  # request-derived. `Chain.repoint_after_promotion/4` re-signs each anchor under
+  # the new type (see its docs for why a bare UPDATE can't).
+  # sobelow_skip ["SQL.Query"]
+  defp reattest_anchors(target_table, target, org_id) do
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT DISTINCT source_id FROM history_anchors
+        WHERE resource_type = 'entry'
+          AND org_id = $1
+          AND source_id IN (SELECT id FROM #{target_table})
+        """,
+        [Ecto.UUID.dump!(org_id)]
+      )
+
+    source_ids = Enum.map(rows, fn [id] -> Ecto.UUID.load!(id) end)
+
+    KilnCMS.Governance.Chain.repoint_after_promotion(
+      target.resource,
+      source_ids,
+      "entry",
+      to_string(target.type),
+      org_id
+    )
+
+    :ok
   end
 
   # Fired :entry artifacts and reference edges point at the old storage type —
