@@ -20,14 +20,18 @@ defmodule KilnCMSWeb.ManifestController do
   content stays inside the installed window instead of kicking out to a browser
   tab.
 
-  ## Why the strings here aren't `gettext`'d
+  ## Localized per fetched URL, not per request locale (#630)
 
-  Every other admin string is translated, but a manifest is fetched once per
-  install from a single URL that carries no locale, and the OS then keeps the
-  chosen name on the home screen indefinitely. Translating it would mean the
-  installed app is labelled in whatever locale happened to trigger the first
-  fetch — worse than one consistent label. Per-locale manifests are a real
-  feature, but they need a locale-scoped URL to hang off; see #630.
+  A manifest is fetched once per install and the OS keeps the chosen name on the
+  home screen indefinitely, so translating against the request's Gettext locale
+  would label the installed app in whatever locale happened to trigger the first
+  fetch. Instead the locale is an explicit query param the linking page embeds
+  (`root.html.heex` links `?locale=<request locale>`): `?locale=fr` is a
+  distinct, cacheable URL from `?locale=en`, and each carries a distinct manifest
+  `id`, so a `fr` install and an `en` install are separate apps — switching the
+  console language does not rename an already-installed one; a reinstall from the
+  new language does. The default locale keeps the historical `/editor` id, so
+  existing installs survive this change.
   """
   use KilnCMSWeb, :controller
 
@@ -41,24 +45,36 @@ defmodule KilnCMSWeb.ManifestController do
   # `--color-primary` in `assets/css/app.css`.
   @default_theme_color "#ff6200"
 
-  @doc "The per-org web app manifest (`application/manifest+json`)."
-  def show(conn, _params) do
+  @doc "The per-org, per-locale web app manifest (`application/manifest+json`)."
+  def show(conn, params) do
+    # The locale rides in as a query param (`?locale=fr`) that the linking page
+    # embeds, NOT off the request path — the manifest URL carries no locale
+    # segment (#630). Unsupported or absent falls back to the default. Set the
+    # process locale so every `gettext/1` below resolves against it, overriding
+    # whatever `Plugs.SetLocale` derived from this (locale-less) request path.
+    locale = KilnCMS.I18n.normalize(params["locale"])
+    Gettext.put_locale(KilnCMSWeb.Gettext, locale)
+
     brand = Branding.for_org(conn.assigns[:current_org])
 
     conn
     |> put_resp_content_type("application/manifest+json")
-    |> json(manifest(brand))
+    |> json(manifest(brand, locale))
   end
 
-  defp manifest(brand) do
+  defp manifest(brand, locale) do
     %{
       # A stable identity across redeploys and brand renames — without it the
       # browser keys the installed app on `start_url`, and a later change there
-      # would orphan the install.
-      id: "/editor",
-      name: "#{brand.site_name} Editor",
+      # would orphan the install. Per-locale (#630) so an install made in one UI
+      # language keeps its localized home-screen name when the operator later
+      # switches the console language — a `fr` install and an `en` install are
+      # distinct apps. The default locale keeps the historical `/editor` id so
+      # existing installs are not orphaned by this change.
+      id: manifest_id(locale),
+      name: gettext("%{site} Editor", site: brand.site_name),
       short_name: brand.site_name,
-      description: "Review, approve and publish #{brand.site_name} content.",
+      description: gettext("Review, approve and publish %{site} content.", site: brand.site_name),
       start_url: "/editor?status=in_review",
       scope: "/",
       display: "standalone",
@@ -68,6 +84,10 @@ defmodule KilnCMSWeb.ManifestController do
       icons: icons(),
       shortcuts: shortcuts()
     }
+  end
+
+  defp manifest_id(locale) do
+    if locale == KilnCMS.I18n.default_locale(), do: "/editor", else: "/editor?lang=#{locale}"
   end
 
   # `any` and `maskable` are separate images, not one image with both purposes:
@@ -90,12 +110,12 @@ defmodule KilnCMSWeb.ManifestController do
   defp shortcuts do
     [
       %{
-        name: "Review queue",
+        name: gettext("Review queue"),
         url: "/editor?status=in_review",
         icons: [%{src: "/images/app-icon-192.png", sizes: "192x192", type: "image/png"}]
       },
       %{
-        name: "Drafts",
+        name: gettext("Drafts"),
         url: "/editor?status=draft",
         icons: [%{src: "/images/app-icon-192.png", sizes: "192x192", type: "image/png"}]
       }

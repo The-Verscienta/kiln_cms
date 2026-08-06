@@ -103,6 +103,34 @@ defmodule KilnCMSWeb.ManifestControllerTest do
     end
   end
 
+  describe "localization (#630)" do
+    test "a non-default locale localizes the labels and gets its own install id", %{conn: conn} do
+      body = json_response(get(conn, ~p"/manifest.webmanifest?locale=fr"), 200)
+
+      assert body["name"] == "Éditeur KilnCMS"
+      assert body["description"] == "Relisez, approuvez et publiez le contenu de KilnCMS."
+      assert Enum.map(body["shortcuts"], & &1["name"]) == ["File de révision", "Brouillons"]
+
+      # A distinct id so a fr install and an en install are separate apps —
+      # switching the console language doesn't rename an already-installed one.
+      assert body["id"] == "/editor?lang=fr"
+    end
+
+    test "the default locale keeps English strings and the historical id", %{conn: conn} do
+      body = json_response(get(conn, ~p"/manifest.webmanifest?locale=en"), 200)
+
+      assert body["name"] == "KilnCMS Editor"
+      assert body["id"] == "/editor", "existing installs must not be orphaned"
+    end
+
+    test "an unsupported locale falls back to the default", %{conn: conn} do
+      body = json_response(get(conn, ~p"/manifest.webmanifest?locale=zz"), 200)
+
+      assert body["name"] == "KilnCMS Editor"
+      assert body["id"] == "/editor"
+    end
+  end
+
   describe "per-org branding (#48)" do
     setup do
       org =
