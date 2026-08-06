@@ -67,6 +67,30 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
     |> post("/api/auth/sign_in", body)
   end
 
+  defp seed_org do
+    Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+      name: "Org #{unique()}",
+      slug: "org-#{unique()}"
+    })
+  end
+
+  defp membership(user, org, tier) do
+    Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+      user_id: user.id,
+      organization_id: org.id,
+      role: tier
+    })
+  end
+
+  # Sign in over `org`'s own host, so `SetTenant` resolves that org and the
+  # response's per-org tier is the one for it.
+  defp sign_in_on(org, user) do
+    host = "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"
+
+    %{build_conn() | host: host}
+    |> post_sign_in(%{email: to_string(user.email), password: @password})
+  end
+
   defp post_verify(conn, body) do
     conn
     |> put_req_header("content-type", "application/json")
@@ -97,6 +121,33 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
       # The token authenticates as the signed-in user.
       assert {:ok, authed} = BearerAuth.user_from_token(token)
       assert authed.id == user.id
+    end
+
+    # `role` is the EFFECTIVE tier on the request's org (#627), not the global
+    # one — so the same account, same credentials, is described differently
+    # depending on the host it signs in against.
+    test "role is the per-org effective tier, keyed on the request host", %{conn: _conn} do
+      user = seed_user(:viewer)
+      org_a = seed_org()
+      org_b = seed_org()
+      membership(user, org_a, :admin)
+      membership(user, org_b, :editor)
+
+      # Against org A's host, an admin…
+      resp_a = sign_in_on(org_a, user) |> json_response(201)
+      assert resp_a["user"]["role"] == "admin"
+
+      # …against org B's host, an editor — not the admin they are on A.
+      resp_b = sign_in_on(org_b, user) |> json_response(201)
+      assert resp_b["user"]["role"] == "editor"
+    end
+
+    test "role is `none` on a host where the account has no tier", %{conn: _conn} do
+      user = seed_user(:viewer)
+      other_org = seed_org()
+
+      assert sign_in_on(other_org, user) |> json_response(201) |> get_in(["user", "role"]) ==
+               "none"
     end
 
     test "wrong password is a generic 401", %{conn: conn} do
@@ -177,6 +228,24 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
         |> json_response(201)
 
       assert draft.id in draft_ids(jwt)
+    end
+
+    # The verify leg shares `issue_token/2`, so it must carry the same per-org
+    # tier (#627) — and its host, not the sign-in host, is what decides it.
+    test "the completed 2FA exchange returns the per-org effective tier" do
+      {user, secret} = seed_totp_user(:viewer)
+      org_b = seed_org()
+      membership(user, org_b, :editor)
+
+      host = "#{org_b.slug}.#{KilnCMSWeb.Tenant.base_host()}"
+      pending = begin_two_factor(%{build_conn() | host: host}, user)
+
+      resp =
+        %{build_conn() | host: host}
+        |> post_verify(%{pending_token: pending, code: current_code(secret)})
+        |> json_response(201)
+
+      assert resp["user"]["role"] == "editor"
     end
 
     test "the pending token is encrypted, so the first-factor JWT is not readable from it",

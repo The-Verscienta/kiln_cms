@@ -80,6 +80,7 @@ defmodule KilnCMSWeb.ApiAuthController do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.PendingSignIn
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.SecondFactor
   alias KilnCMS.Accounts.User
   alias KilnCMSWeb.ApiError
@@ -90,7 +91,10 @@ defmodule KilnCMSWeb.ApiAuthController do
   Body (`application/json`): `{"email": "...", "password": "..."}`.
 
   Success → `201 Created {"token": "<jwt>", "user": {"id", "email", "role"}}`,
-  or, for an account with two-factor enabled,
+  where `role` is the caller's **effective tier on the org this request resolved
+  to** (per-org since #419, so it changes with the host dialed), not the global
+  `User.role` (#627).
+  Or, for an account with two-factor enabled,
   `200 OK {"two_factor_required": true, "pending_token": "...", "expires_in": 300}`
   — finish at `verify/2`.
   """
@@ -202,9 +206,20 @@ defmodule KilnCMSWeb.ApiAuthController do
     |> put_status(:created)
     |> json(%{
       token: user.__metadata__.token,
-      # One shape for both steps, so the contract cannot drift between them —
-      # and one place to fix what `role` means (#627).
-      user: %{id: user.id, email: to_string(user.email), role: user.role}
+      # One shape for both steps, so the contract cannot drift between them.
+      #
+      # `role` is the caller's EFFECTIVE TIER on the org the request resolved to,
+      # not `User.role` (the global one) — since #419 the authorization boundary
+      # on org-scoped resources is the per-org tier, so a client pre-shaping its
+      # UI (show/hide Approve) on the global role would offer actions the server
+      # then refuses on any org where the membership tier is lower (#627). The
+      # value therefore changes with the host the client dials; `SetTenant` has
+      # already put that org on the conn. `:none` when the user has no tier there.
+      user: %{
+        id: user.id,
+        email: to_string(user.email),
+        role: Scoping.effective_tier(user, conn.assigns.current_org.id)
+      }
     })
   end
 
