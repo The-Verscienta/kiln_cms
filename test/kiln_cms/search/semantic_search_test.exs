@@ -92,4 +92,106 @@ defmodule KilnCMS.Search.SemanticSearchTest do
     refute draft.id in anon_ids
     assert published.id in anon_ids
   end
+
+  describe "semantic_distances/3" do
+    test "reports each neighbour's raw cosine distance, nearest first" do
+      admin = admin()
+      CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      CMS.create_page!(%{title: "Beta", slug: slug()}, actor: admin)
+      embed_all()
+
+      assert {:ok, [{"Alpha", nearest} | rest]} =
+               KilnCMS.Search.semantic_distances(:page, "Alpha", actor: admin)
+
+      # "Alpha" embeds to exactly the Alpha page's vector.
+      assert_in_delta nearest, 0.0, 1.0e-6
+      assert Enum.all?(rest, fn {_title, d} -> d > nearest end)
+    end
+
+    test "ignores a configured floor, so a cutoff can be measured against it" do
+      admin = admin()
+      CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      CMS.create_page!(%{title: "Beta", slug: slug()}, actor: admin)
+      embed_all()
+
+      put_search_env(semantic_max_distance: 0.0)
+
+      assert {:ok, measured} = KilnCMS.Search.semantic_distances(:page, "Alpha", actor: admin)
+      assert length(measured) == 2
+    end
+  end
+
+  describe "the relevance floor" do
+    # Distances come from the stub embedder, so rather than hardcode a cutoff
+    # the tests measure the corpus and place the floor between two known
+    # neighbours — the same procedure the docs prescribe for a real model.
+    defp distances(admin) do
+      {:ok, measured} = KilnCMS.Search.semantic_distances(:page, "Alpha", actor: admin)
+      measured
+    end
+
+    defp two_pages(admin) do
+      alpha = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      beta = CMS.create_page!(%{title: "Beta", slug: slug()}, actor: admin)
+      embed_all()
+      {alpha, beta}
+    end
+
+    test "unset (the default), every neighbour is returned however distant" do
+      admin = admin()
+      {alpha, beta} = two_pages(admin)
+
+      ids = "Alpha" |> CMS.semantic_search_pages!(actor: admin) |> Enum.map(& &1.id)
+
+      assert alpha.id in ids
+      assert beta.id in ids
+    end
+
+    test "drops neighbours beyond the cutoff" do
+      admin = admin()
+      {alpha, beta} = two_pages(admin)
+
+      [{_, nearest}, {_, furthest}] = distances(admin)
+      put_search_env(semantic_max_distance: (nearest + furthest) / 2)
+
+      ids = "Alpha" |> CMS.semantic_search_pages!(actor: admin) |> Enum.map(& &1.id)
+
+      assert ids == [alpha.id]
+      refute beta.id in ids
+    end
+
+    test "a query unlike anything indexed returns nothing at all" do
+      # The point of the whole change: nearest-neighbour search always has a
+      # nearest, so without a floor "no results" is unreachable.
+      admin = admin()
+      two_pages(admin)
+
+      put_search_env(semantic_max_distance: 0.0)
+
+      assert CMS.semantic_search_pages!("nothing like this exists", actor: admin) == []
+    end
+
+    test "keeps an exact match at a cutoff of zero" do
+      # Boundary: the comparison is inclusive, so distance 0 survives a 0 floor.
+      admin = admin()
+      {alpha, _beta} = two_pages(admin)
+
+      put_search_env(semantic_max_distance: 0.0)
+
+      ids = "Alpha" |> CMS.semantic_search_pages!(actor: admin) |> Enum.map(& &1.id)
+      assert ids == [alpha.id]
+    end
+
+    test "the floor reaches the hybrid search's semantic leg" do
+      # hybrid/3 fuses keyword + semantic; with the floor on, a query matching
+      # no keyword and nothing semantically near must come back empty rather
+      # than fused-from-noise.
+      admin = admin()
+      two_pages(admin)
+
+      put_search_env(semantic_max_distance: 0.0)
+
+      assert KilnCMS.Search.hybrid(:page, "nothing like this exists", actor: admin) == []
+    end
+  end
 end
