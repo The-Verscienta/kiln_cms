@@ -437,8 +437,8 @@ msgstr "Tout supprimer"
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:657
-#: lib/kiln_cms_web/live/taxonomy_live.ex:670
+#: lib/kiln_cms_web/live/taxonomy_live.ex:672
+#: lib/kiln_cms_web/live/taxonomy_live.ex:685
 #, elixir-autogen, elixir-format
 msgid "Delete “%{name}”?"
 msgstr "Supprimer « %{name} » ?"
@@ -913,7 +913,7 @@ msgstr "type non pris en charge"
 msgid "· no alt"
 msgstr "· sans alt"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:673
+#: lib/kiln_cms_web/live/taxonomy_live.ex:688
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
 msgstr "« %{name} » est utilisé par %{count} élément(s). Le supprimer quand même ? Les liens seront retirés."
@@ -1735,7 +1735,7 @@ msgid "No results for “%{query}”."
 msgstr "Aucun résultat pour « %{query} »."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:3705
-#: lib/kiln_cms_web/live/taxonomy_live.ex:685
+#: lib/kiln_cms_web/live/taxonomy_live.ex:700
 #, elixir-autogen, elixir-format
 msgid "No tags yet."
 msgstr "Aucune étiquette pour le moment."
@@ -2274,7 +2274,7 @@ msgstr "%{count} élément(s) déplacé(s) vers la corbeille, %{skipped} ignoré
 msgid "New content type"
 msgstr "Nouveau type de contenu"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:683
+#: lib/kiln_cms_web/live/taxonomy_live.ex:698
 #, elixir-autogen, elixir-format
 msgid "No categories yet."
 msgstr "Aucune catégorie pour le moment."
@@ -2289,7 +2289,7 @@ msgstr "Aucun type de contenu personnalisé pour le moment."
 msgid "No media yet — upload some in the"
 msgstr "Aucun média pour le moment — téléversez-en dans la"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:686
+#: lib/kiln_cms_web/live/taxonomy_live.ex:701
 #, elixir-autogen, elixir-format
 msgid "Nothing here yet."
 msgstr "Rien ici pour le moment."
@@ -2814,12 +2814,12 @@ msgstr "ok"
 msgid "skipped"
 msgstr "ignoré"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:690
+#: lib/kiln_cms_web/live/taxonomy_live.ex:705
 #, elixir-autogen, elixir-format
 msgid "category"
 msgstr "catégorie"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:692
+#: lib/kiln_cms_web/live/taxonomy_live.ex:707
 #, elixir-autogen, elixir-format
 msgid "tag"
 msgstr "étiquette"
@@ -5647,7 +5647,7 @@ msgstr "Laissez tout décoché pour proposer ce groupe sur tous les types de con
 msgid "No blocks yet"
 msgstr "Aucun bloc pour le moment"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:684
+#: lib/kiln_cms_web/live/taxonomy_live.ex:699
 #, elixir-autogen, elixir-format
 msgid "No tag groups yet."
 msgstr "Aucun groupe d'étiquettes pour le moment."
@@ -5662,7 +5662,7 @@ msgstr "Aucune étiquette dans ce groupe pour le moment."
 msgid "No tags match that filter."
 msgstr "Aucune étiquette ne correspond à ce filtre."
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:652
+#: lib/kiln_cms_web/live/taxonomy_live.ex:666
 #, elixir-autogen, elixir-format
 msgid "Only: %{types}"
 msgstr "Uniquement : %{types}"
@@ -5718,7 +5718,7 @@ msgstr "Sans groupe"
 msgid "Unpublishes"
 msgstr "Dépublication le"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:691
+#: lib/kiln_cms_web/live/taxonomy_live.ex:706
 #, elixir-autogen, elixir-format
 msgid "tag group"
 msgstr "groupe d'étiquettes"
@@ -5728,7 +5728,7 @@ msgstr "groupe d'étiquettes"
 msgid "— Ungrouped —"
 msgstr "— Sans groupe —"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:660
+#: lib/kiln_cms_web/live/taxonomy_live.ex:675
 #, elixir-autogen, elixir-format
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."
 msgstr "« %{name} » contient %{count} étiquette(s). Supprimer le groupe quand même ? Les étiquettes sont conservées et se retrouvent sans groupe."
@@ -9067,3 +9067,8 @@ msgstr "Sera publié lors de la mise en ligne du lancement."
 #, elixir-autogen, elixir-format
 msgid "Will be unpublished when the release goes live."
 msgstr "Sera retiré lors de la mise en ligne du lancement."
+
+#: lib/kiln_cms_web/live/taxonomy_live.ex:661
+#, elixir-autogen, elixir-format
+msgid "%{type} (unknown)"
+msgstr "%{type} (inconnu)"

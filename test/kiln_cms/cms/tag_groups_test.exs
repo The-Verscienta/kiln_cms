@@ -108,6 +108,72 @@ defmodule KilnCMS.CMS.TagGroupsTest do
     end
   end
 
+  describe "content-type scope validation (#526)" do
+    test "rejects an entry that names no content type" do
+      actor = admin()
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.create_tag_group(
+                 %{name: "Typo", slug: "typo-#{uniq()}", content_types: ["posts"]},
+                 actor: actor
+               )
+
+      assert Enum.any?(error.errors, &(&1.field == :content_types))
+    end
+
+    test "accepts known compiled type names, and re-checks on update" do
+      actor = admin()
+
+      assert {:ok, g} =
+               CMS.create_tag_group(
+                 %{name: "Good", slug: "good-#{uniq()}", content_types: ["post", "page"]},
+                 actor: actor
+               )
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.update_tag_group(g, %{content_types: ["post", "ghost"]}, actor: actor)
+
+      assert {:ok, _} = CMS.update_tag_group(g, %{content_types: ["page"]}, actor: actor)
+    end
+  end
+
+  describe "cross-tenant tag_group_id (#526)" do
+    defp other_org do
+      Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+        name: "Other",
+        slug: "other-#{uniq()}",
+        status: :active
+      })
+    end
+
+    test "rejects a group that belongs to another organization" do
+      actor = admin()
+      # Seeded straight into a second org, bypassing the write path under test.
+      foreign = group(%{org_id: other_org().id})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.create_tag(
+                 %{name: "X", slug: "x-#{uniq()}", tag_group_id: foreign.id},
+                 actor: actor
+               )
+
+      assert Enum.any?(error.errors, &(&1.field == :tag_group_id))
+    end
+
+    test "accepts a group in the writer's own organization" do
+      actor = admin()
+      home = group()
+
+      assert {:ok, tag} =
+               CMS.create_tag(
+                 %{name: "Y", slug: "y-#{uniq()}", tag_group_id: home.id},
+                 actor: actor
+               )
+
+      assert tag.tag_group_id == home.id
+    end
+  end
+
   describe "listing" do
     test "groups come back ordered by position then name" do
       actor = admin()
