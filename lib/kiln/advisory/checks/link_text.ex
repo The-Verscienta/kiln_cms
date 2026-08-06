@@ -25,19 +25,6 @@ defmodule Kiln.Advisory.Checks.LinkText do
   context is genuinely fine), and an advisory that cries wolf on a defensible
   choice is one authors learn to dismiss.
 
-  ## Reachability, honestly (#823)
-
-  This reads `Kiln.Advisory.Body`'s `links`, which come from Portable Text
-  `markDefs`. Today those survive the API, MCP and import write paths but
-  **not** the content editor: TipTap is built without a Link extension, so
-  opening a page parses its anchors away and the autosave persists the loss.
-  Until #823 lands, this check sees links on content that hasn't been opened
-  in the editor and nothing on content that has.
-
-  That is a bug in the editor, not a reason to hold this back — the check is
-  correct, and it starts reporting the day links can exist. But it is worth
-  knowing before concluding from a quiet panel that a page has no bad links.
-
   ## Why the phrase list is short
 
   Only phrases that are uninformative *whatever* the surrounding text says.

@@ -1,7 +1,7 @@
 # Rich-text editor: keyboard shortcuts & slash commands
 
 The content editor's `rich_text` blocks use [TipTap](https://tiptap.dev)
-(ProseMirror) with the StarterKit extensions, wired up in
+(ProseMirror) with the StarterKit extensions, plus links and tables, wired up in
 [`assets/js/rich_text.js`](../assets/js/rich_text.js). This is the reference for
 the formatting shortcuts and the slash-command menu.
 
@@ -28,12 +28,40 @@ the toolbar, shortcuts, and slash commands all emit only tags on that allowlist.
 | Numbered list | `⌘⇧7` | `Ctrl ⇧ 7` |
 | Blockquote | `⌘⇧B` | `Ctrl ⇧ B` |
 | Code block | `⌘⌥C` | `Ctrl Alt C` |
+| Link | `⌘K` | `Ctrl K` |
 | Hard line break | `⇧↵` | `⇧ ↵` |
 | Undo | `⌘Z` | `Ctrl Z` |
 | Redo | `⌘⇧Z` | `Ctrl ⇧ Z` |
 
-These are the StarterKit defaults; the toolbar above each editor exposes the
-same commands as buttons and highlights the ones active at the cursor.
+These are the StarterKit defaults (plus `⌘K`, which is ours); the toolbar above
+each editor exposes the same commands as buttons and highlights the ones active
+at the cursor. `⌘K` opens the editor search palette everywhere *except* inside a
+rich-text block, where it makes a link instead.
+
+## Links
+
+`⌘K` — or the toolbar's **Link** button — opens a small popover at the cursor:
+
+- with text selected, it links that text;
+- with the caret inside an existing link, it prefills that link's URL, edits the
+  whole link (not the fragment under the caret), and offers **Remove**;
+- with nothing selected, it inserts the URL as its own link text.
+
+`↵` applies, `Esc` dismisses. Pasting a URL over selected text links the
+selection, keeping the text as the label — that works for internal paths
+(`/pricing`) as well as full URLs. Typing a bare URL does **not** silently
+become a link.
+
+Accepted URLs mirror
+[`KilnCMS.HTMLSanitizer.safe_href/1`](../lib/kiln_cms/html_sanitizer.ex):
+`http(s)://`, `mailto:`, and same-origin paths starting with `/`. Anything else
+— `javascript:`, `data:`, `ftp:`, `#anchor` — is refused in the popover with a
+message, because the server would blank it on save and the link would silently
+disappear on the next reload.
+
+Links are stored as Portable Text `markDefs`, which is what
+[`Kiln.Advisory.Checks.LinkText`](../lib/kiln/advisory/checks/link_text.ex) and
+the [broken-link checks](link-checking.md) read.
 
 ## Slash commands
 

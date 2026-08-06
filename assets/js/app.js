@@ -265,6 +265,7 @@ const Hooks = {
     destroyed() {
       this._destroyed = true
       this.slash && this.slash.destroy()
+      this.linkPrompt && this.linkPrompt.destroy()
       this.editor && this.editor.destroy()
       // Rich-text hosts remount on every conflict reload / version restore, so
       // a handler left registered would accumulate one dead listener per
@@ -319,6 +320,7 @@ const Hooks = {
     destroyed() {
       this._destroyed = true
       this.slash && this.slash.destroy()
+      this.linkPrompt && this.linkPrompt.destroy()
       this.toolbar && this.toolbar.remove()
       this.editor && this.editor.destroy()
     },

@@ -111,6 +111,67 @@ test.describe("editor journey", () => {
     await expect(editor.locator("blockquote")).toContainText("Pearl of wisdom");
   });
 
+  // #823. A rich-text link only exists if it survives being *parsed back* into
+  // TipTap: the stored Portable Text is rendered to HTML to seed the editor, and
+  // an extension list without a Link mark drops the anchor there and then
+  // autosaves prose that no longer has it. That is invisible to the Elixir
+  // round-trip tests — `to_html/1` and `from_tiptap/1` were both correct
+  // throughout the bug — so the regression has to be caught in a real browser.
+  test("a link authored in a rich-text block survives the editor round-trip", async ({ page }) => {
+    const slug = `e2e-link-${Date.now()}`;
+    const linkText = "the refund policy";
+    await newDraftPage(page);
+    await page.fill('input[name$="[title]"]', "E2E Link");
+    await page.fill('input[name$="[slug]"]', slug);
+
+    await addBlock(page, "rich_text");
+    const editor = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.type(linkText);
+
+    // Select the prose, then link it. `Mod-a` is ProseMirror's own selectAll
+    // keybinding, so it lands as an editor command rather than depending on the
+    // browser's native caret movement — which arrow keys in an automated
+    // contenteditable can't be relied on for.
+    await page.keyboard.press("ControlOrMeta+a");
+    // ⌘K / Ctrl-K is bound on the editor itself and pre-empts the global
+    // search palette (which skips contenteditable targets anyway).
+    await page.keyboard.press("ControlOrMeta+k");
+    const url = page.locator(".rt-link-prompt input");
+    await expect(url).toBeFocused();
+
+    // A scheme the server would blank is refused here, with a reason, and the
+    // document is left alone — the popover stays open to be corrected.
+    await url.fill("javascript:alert(1)");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".rt-link-error")).toBeVisible();
+    await expect(editor.locator("a")).toHaveCount(0);
+
+    await url.fill("/refunds");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".rt-link-prompt")).toBeHidden();
+    await expect(editor.locator('a[href="/refunds"]')).toHaveText(linkText);
+
+    // Let the 300ms rich_text_body push flush, then save.
+    await page.waitForTimeout(700);
+    await page.getByRole("button", { name: /^save$/i }).click();
+
+    // The regression: reloading re-seeds the editor from the *stored* Portable
+    // Text, so the anchor here proves markDefs survived both directions.
+    await page.reload();
+    const reloaded = page.locator('[phx-hook="RichText"] [data-editor] .ProseMirror').first();
+    await expect(reloaded.locator('a[href="/refunds"]')).toHaveText(linkText);
+
+    // And it reaches readers: publish, then check the delivered page.
+    await page.click('button[phx-click="workflow"][phx-value-action="publish"]');
+    await expect(
+      page.locator('button[phx-click="workflow"][phx-value-action="unpublish"]'),
+    ).toBeVisible();
+    await page.goto(`/${slug}`);
+    await expect(page.locator('article a[href="/refunds"]')).toHaveText(linkText);
+  });
+
   test("reorder blocks via drag-and-drop (SortableJS)", async ({ page }) => {
     await newDraftPage(page);
     await page.fill('input[name$="[title]"]', "E2E Reorder");

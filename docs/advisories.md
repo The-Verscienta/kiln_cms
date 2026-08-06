@@ -243,11 +243,6 @@ supplies the context is genuinely fine — and an advisory that cries wolf on a
 defensible choice is one authors learn to dismiss, at which point it isn't
 catching the real ones either.
 
-> **`LinkText` is currently blind to editor-authored content** (#823). It reads
-> Portable Text `markDefs`, and the editor's TipTap build has no Link
-> extension, so opening a page strips its anchors and the autosave persists
-> that. Links written through the API, MCP or an import are checked normally.
-
 Two design notes worth knowing before changing them:
 
 * **`LinkText` matches whole text, never substrings.** "learn more" is a bad
