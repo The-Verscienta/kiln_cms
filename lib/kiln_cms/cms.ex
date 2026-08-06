@@ -362,6 +362,51 @@ defmodule KilnCMS.CMS do
       define :list_newly_overdue_tasks, action: :newly_overdue
     end
 
+    # Content releases: bundled, atomically published groups of changes (#500).
+    # The go-live/rollback machinery is `KilnCMS.CMS.Releases`; the `mark_*`
+    # interfaces below are its system writes, reachable only with
+    # `authorize?: false` (no policy authorizes them for any actor).
+    resource KilnCMS.CMS.ContentRelease do
+      define :create_release, action: :create
+      define :update_release, action: :update
+      define :get_release, action: :read, get_by: [:id]
+      define :list_releases, action: :read
+      define :list_editable_releases, action: :editable
+      define :list_releases_by_state, action: :by_state, args: [:state]
+      define :list_releases_in_window, action: :in_window, args: [:from, :to]
+      define :schedule_release, action: :schedule
+      define :unschedule_release, action: :unschedule
+      define :start_release, action: :start
+      define :start_release_rollback, action: :start_rollback
+      define :reopen_release, action: :reopen
+      define :archive_release, action: :archive
+      define :destroy_release, action: :destroy
+      define :mark_release_published, action: :mark_published
+      define :mark_release_failed, action: :mark_failed
+      define :mark_release_rolled_back, action: :mark_rolled_back
+      define :mark_release_rollback_failed, action: :mark_rollback_failed
+    end
+
+    resource KilnCMS.CMS.ReleaseItem do
+      define :add_release_item, action: :add
+      define :cancel_release_item, action: :cancel
+      define :get_release_item, action: :read, get_by: [:id]
+      define :list_release_items_for, action: :for_release, args: [:release_id]
+
+      define :list_release_items_with_status,
+        action: :for_release_with_status,
+        args: [:release_id, :status]
+
+      define :list_pending_release_items_for_content,
+        action: :pending_for_content,
+        args: [:content_type, :content_id]
+
+      define :mark_release_item_applied, action: :mark_applied
+      define :mark_release_item_skipped, action: :mark_skipped
+      define :mark_release_item_rolled_back, action: :mark_rolled_back
+      define :mark_release_item_cancelled, action: :mark_cancelled
+    end
+
     # Signed, append-only anchors over a document's version history (#356,
     # tamper-evident half). Minted on publish; see KilnCMS.Governance.Chain.
     resource KilnCMS.CMS.HistoryAnchor do

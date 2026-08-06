@@ -21,6 +21,13 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   # POSTed draft/embargoed content it didn't ask for.
   @default_verbs ~w(published unpublished updated)
 
+  # Domain events that are NOT a content type crossed with a verb. Editorial
+  # tasks (#501) and content releases (#500) dispatch through the same
+  # `KilnCMS.Webhooks.dispatch/3` funnel with a literal type segment, so they are
+  # selectable here exactly like `page.published`.
+  @task_events ~w(task.assigned task.overdue)
+  @release_events ~w(release.published release.rolled_back)
+
   @doc "The lifecycle verbs every content type can emit."
   def verbs, do: @verbs
 
@@ -28,8 +35,9 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   Every selectable event name: each registered content type — compiled and
   admin-defined dynamic (D17) — crossed with each lifecycle verb (e.g.
   `"page.published"`, `"recipe.updated"`), plus `form.submitted` for
-  admin-defined public forms and `task.assigned`/`task.overdue` for editorial
-  tasks (#501). Derived at runtime so generated and admin-defined types get
+  admin-defined public forms, `task.assigned`/`task.overdue` for editorial
+  tasks (#501), and `release.published`/`release.rolled_back` for content
+  releases (#500). Derived at runtime so generated and admin-defined types get
   events for free.
 
   Dynamic types are per-org (epic #336), so the console passes the request's
@@ -38,7 +46,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   def events(org_id \\ KilnCMS.Accounts.default_org_id()) do
     types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all(org_id)
     content = for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
-    content ++ ["form.submitted", "task.assigned", "task.overdue"]
+    content ++ ["form.submitted"] ++ @task_events ++ @release_events
   end
 
   @doc """
