@@ -141,12 +141,19 @@ test.describe("editor journey", () => {
     const url = page.locator(".rt-link-prompt input");
     await expect(url).toBeFocused();
 
-    // A scheme the server would blank is refused here, with a reason, and the
+    // An href the server would blank is refused here, with a reason, and the
     // document is left alone — the popover stays open to be corrected.
-    await url.fill("javascript:alert(1)");
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".rt-link-error")).toBeVisible();
-    await expect(editor.locator("a")).toHaveCount(0);
+    //
+    // `http:///path` is the one that drifted (#833): WHATWG parsing invents an
+    // authority out of the path, so `new URL(...).host` is truthy and a naive
+    // client check accepts what `URI.parse/1` refuses. The whole point of the
+    // mirror is that the two agree, so it earns a case of its own.
+    for (const bad of ["javascript:alert(1)", "http:///path", "//evil.example.com"]) {
+      await url.fill(bad);
+      await page.keyboard.press("Enter");
+      await expect(page.locator(".rt-link-error")).toBeVisible();
+      await expect(editor.locator("a")).toHaveCount(0);
+    }
 
     await url.fill("/refunds");
     await page.keyboard.press("Enter");
