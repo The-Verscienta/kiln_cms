@@ -680,6 +680,17 @@ defmodule KilnCMSWeb.MediaLive do
   defp upload_failure_reason(:too_large), do: gettext("file is too large for its type")
   defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
   defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")
+
+  # #807. Both of these mean "we could not remove this PDF's metadata", and the
+  # upload is refused rather than stored unstripped — so the message has to name
+  # the server as the problem, not the file. An editor told "unsupported format"
+  # about a PDF that opens fine everywhere would keep retrying it.
+  defp upload_failure_reason(:unavailable),
+    do: gettext("can't be processed — PDF metadata stripping isn't available on this server")
+
+  defp upload_failure_reason(:strip_failed),
+    do: gettext("couldn't have its metadata removed, so it wasn't stored")
+
   defp upload_failure_reason(_invalid), do: gettext("not a supported file")
 
   defp humanize_bytes(nil), do: "—"

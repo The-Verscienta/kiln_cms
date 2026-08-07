@@ -273,11 +273,41 @@ defmodule KilnCMS.CMS do
 
     # 301 redirects from retired public paths (pathauto companion) — written
     # automatically on published slug renames, resolved by delivery.
+    # Editor-managed navigation (#466). Delivery should go through
+    # `KilnCMS.CMS.Menus`, which resolves each item to a live URL and drops the
+    # ones a caller may not see; these interfaces are the structure itself.
+    resource KilnCMS.CMS.Menu do
+      define :list_menus, action: :read
+      define :get_menu, action: :read, get_by: [:id]
+      define :get_menu_by_key, action: :by_key, args: [:key, :locale]
+      define :create_menu, action: :create
+      define :update_menu, action: :update
+      define :destroy_menu, action: :destroy
+    end
+
+    resource KilnCMS.CMS.MenuItem do
+      define :list_menu_items, action: :read
+      define :get_menu_item, action: :read, get_by: [:id]
+      define :create_menu_item, action: :create
+      define :update_menu_item, action: :update
+      define :destroy_menu_item, action: :destroy
+    end
+
     resource KilnCMS.CMS.Redirect do
       define :create_redirect, action: :create
       define :list_redirects, action: :read
       define :get_redirect, action: :read, get_by: [:id]
       define :destroy_redirect, action: :destroy
+    end
+
+    # Aggregated delivery 404s (#472) — the other half of the redirect story.
+    # Written by `KilnCMSWeb.MissedPathTracking` off the request path; read by
+    # `/editor/redirects`' 404s tab.
+    resource KilnCMS.CMS.MissedPath do
+      define :record_missed_path, action: :record
+      define :list_missed_paths, action: :top
+      define :get_missed_path, action: :read, get_by: [:id]
+      define :destroy_missed_path, action: :destroy
     end
 
     # Per-site white-label branding (#48). Reads should go through

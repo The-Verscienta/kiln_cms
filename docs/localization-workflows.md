@@ -41,3 +41,8 @@ custom fields, category, and tags. Workflow state, schedules, and published
 artifacts start fresh; `canonical_url` is locale-specific and intentionally
 not carried over. Creating a variant that already exists fails on the
 `[slug, locale]` identity.
+
+The payload mechanics live in `KilnCMS.CMS.ContentCopy`, shared with the
+**Duplicate** action (`KilnCMS.CMS.Duplication`, #471) — the same clone the
+other way round: a duplicate keeps the locale and regenerates the slug, where
+a translation keeps the slug and changes the locale.

@@ -96,6 +96,104 @@ migration, a rewritten column, a dropped config key).
   `Content-Length` is a claim the remote server makes, and a size check that
   runs after the download has already lost.
 
+- **Editor-managed navigation menus.** `/editor/menus` builds ordered trees of
+  links — "Main navigation", "Footer" — and `GET /api/menus/:key` serves them to
+  a front end (#466). Kiln had no navigation resource at all: categories are
+  flat, so every headless consumer had to hard-code its nav. This was the
+  biggest functional hole in the Drupal-core comparison.
+
+  Items link to content **by reference**, and the URL is computed at read time
+  from the target's current published path — so renaming a slug moves the
+  navigation with it and never leaves a dead link. Items can also carry an
+  external URL (sanitized through the same `safe_href/1` policy rich-text links
+  use, so a `javascript:` trap can't be stored) or be a plain heading.
+
+  A menu is **per locale**, sharing a `key` across variants, like content
+  itself: labels, ordering and *which items exist* all differ between locales,
+  which a per-item translations map can't express. A missing locale variant is a
+  miss, not a fallback to English.
+
+  Delivery drops what a reader can't see: an item pointing at unpublished or
+  audience-gated content — or one an editor switched off — is omitted along with
+  its children, so a dropped section takes its links with it rather than
+  promoting them. That is why the stored rows are deliberately absent from the
+  auto JSON:API and GraphQL surfaces: serving them raw would publish the label
+  and target id of an unannounced page. `GET /api/menus/:key` and the `menu`
+  GraphQL query both resolve. Depth (counting the subtree a move carries),
+  cycles and cross-menu parenting are refused at write time. See
+  [Navigation menus](docs/navigation-menus.md).
+
+### Fixed
+
+- **`safe_href/1` accepted `/\evil.com`.** A backslash is a slash for `http(s)`
+  under the WHATWG URL spec, so a link that read as a same-origin path resolved
+  off-site in every browser — the `//host` escape the policy already blocked,
+  wearing a different hat. Now rejected wherever a link href is stored: rich
+  text, portable text, legacy HTML, and the new menu items.
+
+- **Duplicate content.** A **Duplicate** button on every content-list row and in
+  the content editor's header clones a record into a new draft of the same
+  locale and lands the editor in it — the "copy this page and tweak it" motion
+  Yoast Duplicate Post exists for (#471). The copy carries the authored payload
+  (blocks with fresh stable ids at every depth, excerpt, SEO title/description/
+  image, audience, custom fields, category, featured image, tags, related
+  content) and leaves behind everything that identifies or tracks the source:
+  the slug is regenerated through the type's slug pattern (so "Guide" duplicates
+  to `guide-copy`, then `guide-copy-2`), the workflow starts at `:draft` with no
+  schedules, and the copy gets its own paper-trail rather than inheriting the
+  source's.
+
+  Two things deliberately do **not** travel. The **focus keyphrase**
+  (`seo_keywords`) stays with the source: it is a per-URL SEO target, so two
+  records chasing one keyphrase cannibalize each other — and since the default
+  slug chain is keyphrase → title, carrying it would also mint the copy a slug
+  with no relation to its title. **Incoming** links stay with the source too —
+  other records linked to *it*, not to a draft copy of it.
+
+  Curated relations are cloned as `ContentLink` rows rather than through the
+  `related_<type>_ids` argument, so a link's `kind`, `position`, `label` and
+  `metadata` survive: that argument is a bare id set, and re-managing it would
+  flatten the payload data-carrying relations exist to hold and collapse two
+  links to one target under different kinds into one.
+
+  `KilnCMS.CMS.Duplication` runs the type's ordinary `:create` action as the
+  acting user, so create policies apply exactly as they would to a hand-authored
+  document — and because duplication is the one create that carries *another
+  record's* values, it also honours per-field write grants, which
+  `Changes.EnforceFieldGrants` otherwise skips on creates. `audience` is exempt
+  from that filter: dropping it would fall back to the attribute default
+  (`:public`), which is strictly *less* restrictive than the source. The payload
+  mechanics it shares with one-click translations now live in
+  `KilnCMS.CMS.ContentCopy`.
+
+- **404 capture, paired with redirects.** `/editor/redirects` grows a **404s**
+  tab listing the paths delivery couldn't serve, most-requested first, each with
+  a one-click "Create redirect →" that drops the path into the form above (#472).
+  That pairing is the whole point: Kiln's redirect table was manual-entry only,
+  so after a migration off WordPress you had to guess what broke. Creating the
+  redirect clears the counter, so the list reads as a work queue rather than an
+  archive.
+
+  `KilnCMS.CMS.MissedPath` is a **counter** table, not a request log — one row
+  per `(path, locale)`, upserted atomically, so a crawler hammering one dead URL
+  adds one row rather than ten thousand. That keeps delivery's deliberate
+  "resolve misses quietly, no log noise" stance intact.
+
+  The path recorded is the one delivery resolved against — routed and
+  percent-decoded, empty segments collapsed — not the raw request target, so the
+  one-click redirect writes a rule that actually fires and `/café-gone` doesn't
+  become several rows.
+
+  It stores paths and nothing else: no IP, user agent, referrer or actor. Since
+  anonymous traffic writes it, three bounds apply — probe-shaped requests
+  (`/wp-login.php`, `/.env`, asset extensions) are never recorded; a per-site cap
+  where a new path **evicts the least-requested row** rather than being refused,
+  so one cheap flood can't pin the table full of junk and deny the feature; and a
+  nightly AshOban trigger that purges rows 30 days after their last hit. Writes
+  run off the request path in a supervised task. Turn the whole thing off with
+  `config :kiln_cms, :missed_paths, enabled: false`. The staging scrub purges the
+  table; see [Data flows](docs/data-flows.md).
+
 - **The editor PWA's web app manifest is localized.** `name`, `description` and
   both shortcut labels are translated, so the install dialog, app list, splash
   screen and long-press shortcut menu appear in the editor's language. The root

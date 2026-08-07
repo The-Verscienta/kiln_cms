@@ -205,10 +205,34 @@ defmodule KilnCMS.Media.Ingest do
     end
   end
 
-  # No metadata-stripping step for A/V or documents: an MP4's metadata atoms
-  # need container-specific tooling this codebase doesn't have, and PDFs are
-  # handled separately (#807). Same as what the image path does when stripping
-  # fails — store what arrived.
+  # PDFs carry author/producer in `/Info` and an XMP packet (#807), so strip
+  # before persisting and store the stripped copy — what gets recorded must be
+  # what a reader downloads, the same line the image path draws.
+  #
+  # Unlike the image path this does NOT fall back to the original on failure.
+  # A document that cannot be stripped is refused, because the metadata a PDF
+  # carries is the identifying kind and storing it unstripped is the outcome
+  # #807 exists to prevent.
+  #
+  # `stripped` is `DocumentProcessor`'s own server-built temp file, never
+  # caller input — the traversal warning is a false positive.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp persist(path, %{kind: :document, ext: ext, content_type: content_type}, filename, opts) do
+    case DocumentProcessor.strip_metadata(path) do
+      {:ok, stripped} ->
+        try do
+          store_and_create(stripped, ext, content_type, filename, opts)
+        after
+          File.rm(stripped)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # No metadata-stripping step for A/V: an MP4's metadata atoms need
+  # container-specific tooling this codebase doesn't have (tracked separately).
   defp persist(path, %{ext: ext, content_type: content_type}, filename, opts),
     do: store_and_create(path, ext, content_type, filename, opts)
 

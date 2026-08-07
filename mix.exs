@@ -123,6 +123,7 @@ defmodule KilnCMS.MixProject do
       "docs/editorial-consent.md": [],
       "docs/governance-dashboard.md": [],
       "docs/localization-workflows.md": [],
+      "docs/navigation-menus.md": [],
       "docs/automation.md": [],
       "docs/newsletter.md": [title: "Newsletter"],
       "docs/memberships.md": [title: "Paid memberships"],
@@ -228,6 +229,7 @@ defmodule KilnCMS.MixProject do
         "docs/governance-dashboard.md",
         "docs/code-injection.md",
         "docs/localization-workflows.md",
+        "docs/navigation-menus.md",
         "docs/automation.md",
         "docs/newsletter.md",
         "docs/memberships.md",
@@ -326,7 +328,7 @@ defmodule KilnCMS.MixProject do
       "Email & notifications":
         ~r/^(Elixir\.)?KilnCMS\.(Mail|Mailer|Newsletter|Notifications)(\.|$)/,
       "Editorial operations":
-        ~r/^(Elixir\.)?KilnCMS\.(Governance|History|Provenance|Automation|Webhooks|Staging|Collab)(\.|$)/,
+        ~r/^(Elixir\.)?KilnCMS\.(Governance|History|Provenance|Automation|Webhooks|Staging|Collab|Beta)(\.|$)/,
       "Rendering & delivery":
         ~r/^(Elixir\.)?KilnCMS\.(Firing|HTMLSanitizer|Highlight|VisualEditing|Seo|Assist|LLM|Branding|I18n)(\.|$)/,
       Analytics: ~r/^(Elixir\.)?KilnCMS\.Analytics(\.|$)/,
