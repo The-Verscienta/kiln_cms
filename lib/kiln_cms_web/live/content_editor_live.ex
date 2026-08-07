@@ -324,6 +324,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:assignable_users, assignable_users())
          |> assign(:task_assign_open?, assign_deep_link?)
          |> assign(:task_draft, %{})
+         # What the site does with an open task on publish (#818) — the assign
+         # form's blank option names it, so the author sees what "site default"
+         # means rather than having to go and look.
+         |> assign(:auto_complete_default, KilnCMS.CMS.TaskSettings.site_default(org))
          # Content releases (#500 / #836): the record's pending release, if any,
          # plus the releases it could be added to.
          |> assign_release_state(kind, record.id, actor, org)
@@ -1604,6 +1608,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("task_draft_change", %{"task_note" => v}, socket),
     do: {:noreply, put_task_draft(socket, "note", v)}
 
+  def handle_event("task_draft_change", %{"task_auto_complete" => v}, socket),
+    do: {:noreply, put_task_draft(socket, "auto_complete", v)}
+
   def handle_event("task_draft_change", _params, socket), do: {:noreply, socket}
 
   def handle_event("task_assign_submit", _params, socket) do
@@ -1614,7 +1621,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       content_id: socket.assigns.record.id,
       assignee_id: draft["assignee_id"],
       due_on: blank_to_nil(draft["due_on"]),
-      note: blank_to_nil(draft["note"])
+      note: blank_to_nil(draft["note"]),
+      # `nil` means "inherit the site default" (#818) — a real third value, not
+      # an omission, so the blank option has to survive as nil rather than
+      # being dropped from the map.
+      auto_complete_on_publish: tri_state(draft["auto_complete"])
     }
 
     case CMS.assign_task(attrs, actor: socket.assigns.actor, tenant: socket.assigns.current_org) do
@@ -4547,6 +4558,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :open?, :boolean, required: true
   attr :draft, :map, required: true
   attr :assignable_users, :list, required: true
+  attr :auto_complete_default, :boolean, required: true
 
   # Editorial tasks (#501): the whole record's open tasks (usually zero or
   # one — v1 doesn't cap it), plus an inline "+ Assign" form. Document-level,
@@ -4582,6 +4594,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
           </div>
           <p :if={task.due_on} class="text-base-content/60">
             {gettext("Due %{date}", date: Date.to_iso8601(task.due_on))}
+          </p>
+          <%!-- Shown only when this task DISAGREES with the site default
+                (#818). An earlier version keyed on the raw field, which was
+                silent in the case that most needs saying — a site set to
+                "leave open" and a task inheriting it — while labelling a
+                `false` task that merely agreed with the site. Asked through
+                `TaskSettings` so the precedence rule lives in one module. --%>
+          <p
+            :if={task_overrides_site?(task, @auto_complete_default)}
+            class="text-base-content/60"
+          >
+            {if task.auto_complete_on_publish,
+              do: gettext("Completes when this publishes"),
+              else: gettext("Stays open when this publishes")}
           </p>
           <p :if={task.note} class="mt-1 text-base-content/70">{task.note}</p>
         </li>
@@ -4621,6 +4647,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
           placeholder={gettext("Note (optional)")}
           class="textarea textarea-sm w-full"
         >{@draft["note"]}</textarea>
+        <%!-- Three values, not a checkbox (#818): the blank option means "use
+              whatever the site is set to", which is different from an explicit
+              yes and from an explicit no. A checkbox could only say two of
+              those, and would have to pick one to mean "inherit". --%>
+        <select
+          name="task_auto_complete"
+          phx-change="task_draft_change"
+          class="select select-sm w-full"
+        >
+          <option value="" selected={@draft["auto_complete"] in [nil, ""]}>
+            {if @auto_complete_default,
+              do: gettext("On publish: complete it (site default)"),
+              else: gettext("On publish: leave it open (site default)")}
+          </option>
+          <option value="true" selected={@draft["auto_complete"] == "true"}>
+            {gettext("On publish: always complete it")}
+          </option>
+          <option value="false" selected={@draft["auto_complete"] == "false"}>
+            {gettext("On publish: always leave it open")}
+          </option>
+        </select>
         <div class="flex justify-end gap-2">
           <button type="button" phx-click="task_assign_close" class="btn btn-sm btn-default">
             {gettext("Cancel")}
@@ -4900,6 +4947,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </div>
     """
   end
+
+  defp task_overrides_site?(task, site_default) do
+    case KilnCMS.CMS.TaskSettings.describe(task, site_default) do
+      {^site_default, _source} -> false
+      {_effective, :task} -> true
+      {_effective, :site} -> false
+    end
+  end
+
+  # A three-valued select: "" is `nil` ("use the site default"), and it is a
+  # value in its own right rather than a missing one (#818). Anything else
+  # unrecognised also reads as `nil`, so a hand-pushed payload lands on the
+  # inheriting default rather than silently pinning the task.
+  defp tri_state("true"), do: true
+  defp tri_state("false"), do: false
+  defp tri_state(_other), do: nil
 
   defp blank_to_nil(value) do
     case String.trim(to_string(value || "")) do
@@ -7056,6 +7119,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   open?={@task_assign_open?}
                   draft={@task_draft}
                   assignable_users={@assignable_users}
+                  auto_complete_default={@auto_complete_default}
                 />
               </.inspector_section>
 

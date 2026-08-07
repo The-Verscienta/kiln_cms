@@ -149,7 +149,7 @@ defmodule KilnCMS.CMS.Releases do
   @spec publish(struct()) :: {:ok, struct()} | {:error, term()}
   def publish(%{state: :publishing} = release) do
     actor = triggering_actor(release)
-    opts = system_opts(release)
+    opts = release |> system_opts() |> with_task_settings(release)
     items = pending_items(release, opts)
 
     case run_transaction(fn -> apply_all(release, items, actor, opts) end) do
@@ -528,6 +528,20 @@ defmodule KilnCMS.CMS.Releases do
   # admin-only), and the worker publishes types the claiming admin may not hold
   # individually. `triggering_actor/1` is what keeps the writes attributable.
   defp system_opts(release), do: [authorize?: false, tenant: release.org_id]
+
+  # Resolve "does publishing complete open tasks" ONCE for the whole release
+  # (#818), here rather than in `Changes.AutoCompleteTasks`, for the same reason
+  # `resolve_records/2` reads readiness once per content type rather than once
+  # per item: a 500-item release would otherwise issue 500 identical settings
+  # lookups for one org.
+  #
+  # Before `run_transaction/1` on purpose. Inside it, a failed read would abort
+  # the whole release rather than degrading — see `Changes.AutoCompleteTasks`.
+  defp with_task_settings(opts, release) do
+    Keyword.put(opts, :context, %{
+      auto_complete_default: KilnCMS.CMS.TaskSettings.site_default(release.org_id)
+    })
+  end
 
   defp triggering_actor(%{triggered_by_id: nil}), do: nil
 
