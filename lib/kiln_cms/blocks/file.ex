@@ -76,6 +76,23 @@ defmodule KilnCMS.Blocks.File do
   # a search engine should index as a discrete entity.
   def render(_block, :json_ld), do: nil
 
+  # The delivery payload adds a resolved `download_url` the DSL has no field
+  # for, and every other key is conditional (`put_if`), so nothing beyond
+  # `_type` is required — including `media_id`, which a placeholder block that
+  # was never filled in does not carry.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "download_url" => %{
+          "type" => "string",
+          "format" => "uri-reference",
+          "description" => "Delivery href for the attachment, resolved from `media_id`."
+        }
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     [display_title(block), block.description]

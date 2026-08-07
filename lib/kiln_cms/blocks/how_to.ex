@@ -77,6 +77,17 @@ defmodule KilnCMS.Blocks.HowTo do
     end
   end
 
+  # `steps/1` normalizes every entry, so the delivered array is never null and
+  # both keys are always present strings.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "steps" => Kiln.Block.JsonSchema.object_array(~w(name text))
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     steps =

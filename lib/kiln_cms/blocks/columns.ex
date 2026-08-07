@@ -117,6 +117,30 @@ defmodule KilnCMS.Blocks.Columns do
     |> Enum.reject(&is_nil/1)
   end
 
+  # The one place the exported schema can say what the Ash type system cannot
+  # (see the moduledoc): a column's children are the block union itself. JSON
+  # Schema recurses through `$ref` happily, so a typed client gets the tree the
+  # storage union has to keep flat. Depth is bounded at cast time
+  # (`KilnCMS.CMS.TypedBlocks` `@max_nesting`), not expressible here.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "columns" => %{
+          "type" => "array",
+          "items" => %{
+            "type" => "object",
+            "properties" => %{
+              "blocks" => %{"type" => "array", "items" => Kiln.Block.JsonSchema.block_ref()}
+            },
+            "required" => ["blocks"],
+            "additionalProperties" => false
+          }
+        }
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     block

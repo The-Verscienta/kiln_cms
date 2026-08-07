@@ -128,6 +128,22 @@ defmodule KilnCMS.Blocks.Video do
     end
   end
 
+  # Same projection as `audio`, one level deeper: the poster and captions each
+  # collapse a `*_media_id`/`*_url` pair into one resolved href.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "x-kiln-drop" => ["url", "poster_media_id", "poster_url", "captions_media_id"],
+      "properties" => %{
+        "src" => Kiln.Block.JsonSchema.resolved_src(),
+        "poster" => %{"type" => "string", "format" => "uri-reference"},
+        "captions_url" => %{"type" => "string", "format" => "uri-reference"},
+        "autoplay" => %{"type" => "boolean", "default" => false},
+        "loop" => %{"type" => "boolean", "default" => false}
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     [block.title, block.caption] |> Enum.reject(&blank?/1) |> Enum.join(" ")

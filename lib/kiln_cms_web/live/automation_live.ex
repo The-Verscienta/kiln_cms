@@ -399,6 +399,11 @@ defmodule KilnCMSWeb.AutomationLive do
           "send_email: to, subject, body. broadcast: topic. Templates support {{title}}, {{slug}}, {{type}}, {{event}}."
         )}
       </p>
+      <p class="mt-1 text-xs text-base-content/60">
+        {gettext(
+          "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
+        )}
+      </p>
     </div>
     """
   end

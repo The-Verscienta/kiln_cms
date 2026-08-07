@@ -24,4 +24,35 @@ defmodule Kiln.Block.Renderer do
 
   @doc "Plain text projection used for search/embeddings (decision D16)."
   @callback search_text(block :: struct()) :: String.t()
+
+  @doc """
+  A **patch** onto the block's derived `:json` JSON Schema (#430).
+
+  `Kiln.Block.JsonSchema` derives a block's delivery schema from its `field`
+  declarations, which is exact for most blocks. It is *not* exact for the ones
+  whose `render/2` `:json` clause projects rather than mirrors — an `image`
+  drops `media_id`, a `video` resolves `media_id`/`url` into one `src`, a
+  `file` adds a computed `download_url`. Those blocks implement this callback
+  so the exported schema describes what delivery actually serves.
+
+  It is also where a block with a `{:array, :map}` field says what those maps
+  hold: the derived schema can only say "array of object", while `gallery`,
+  `faq` and friends know their item shape exactly.
+
+  Three keys, all optional:
+
+    * `"properties"` — merged **into** the derived properties (adds or replaces
+      one at a time; untouched fields keep their derived schema);
+    * `"drop"` — property names to remove, for fields the `:json` render does
+      not project;
+    * `"required"` — replaces the derived required list wholesale.
+
+  Any other key is merged onto the block's schema object as-is. `"drop"` is a
+  Kiln directive consumed by the exporter and never appears in the output.
+
+  Optional: a block whose `:json` render mirrors its fields needs nothing here.
+  """
+  @callback json_schema() :: map()
+
+  @optional_callbacks json_schema: 0
 end

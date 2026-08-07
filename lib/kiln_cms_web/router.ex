@@ -528,6 +528,12 @@ defmodule KilnCMSWeb.Router do
     # hreflang set without hard-coding the site's configured languages.
     get "/locales", LocalesController, :index
 
+    # JSON Schema for this site's delivery payloads (#430): the block union and
+    # one document schema per content type, so a typed client generates against
+    # the live schema instead of a vendored copy. Per-org, because dynamic types
+    # and custom fields are.
+    get "/schema", SchemaController, :show
+
     # Editor-managed navigation (#466): the menu list, and one resolved menu
     # tree with live URLs and unpublished targets omitted. Static segment first
     # so `/menus` can't be swallowed by the `/:key` fetch.

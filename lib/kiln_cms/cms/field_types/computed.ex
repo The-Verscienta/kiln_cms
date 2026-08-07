@@ -55,4 +55,20 @@ defmodule KilnCMS.CMS.FieldTypes.Computed do
   # (docs/design-language.md, "Accessible by construction").
   @impl Kiln.FieldType
   def input_attrs(_definition), do: %{readonly: true}
+
+  # A computed value is whatever its expression evaluated to — a single
+  # `{{ … }}` template returns the native value, so `{{ word_count(body) }}`
+  # delivers an integer while `"{{ … }} min read"` delivers a string. The
+  # widget is a text input, so inference would claim `string` for both.
+  # Unconstrained is the honest answer: the type is a property of the formula,
+  # which the schema has no way to evaluate.
+  @impl Kiln.FieldType
+  def json_schema(_definition) do
+    %{
+      "description" =>
+        "A computed field. Its JSON type follows the expression: a single " <>
+          "`{{ … }}` template delivers the native value (number, boolean, " <>
+          "string), an interpolated one always delivers a string."
+    }
+  end
 end

@@ -175,10 +175,23 @@ defmodule KilnCMS.Cache do
     if enabled?() do
       Cachex.del(@cache, type_registry_key(org_id))
       Cachex.del(@cache, calendar_types_key(org_id))
+      Cachex.del(@cache, delivery_schema_key(org_id))
     end
 
     :ok
   end
+
+  @doc """
+  Cache key for a site's exported delivery JSON Schema (#430).
+
+  Busted from `bust_type_registry/1` rather than on its own, because the schema
+  is derived from exactly what that function already invalidates: the dynamic
+  type registry and the custom-field definitions. `Changes.BustTypeRegistry`
+  fires on every `TypeDefinition` **and** `FieldDefinition` write, so the
+  invalidation is exact and costs nothing extra.
+  """
+  @spec delivery_schema_key(Ash.UUID.t()) :: String.t()
+  def delivery_schema_key(org_id), do: "delivery_schema:#{org_id}"
 
   @doc """
   Cache key for which of a site's content types are event-shaped (#480).

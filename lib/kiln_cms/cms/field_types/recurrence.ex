@@ -75,6 +75,24 @@ defmodule KilnCMS.CMS.FieldTypes.Recurrence do
     ]
   end
 
+  # The widget renders `exdates` as one comma-separated text input, but `cast/2`
+  # stores the parsed **list** — so the shape inferred from `input_parts/1`
+  # would be wrong for every recurrence value, an empty one included (`[]`).
+  @impl Kiln.FieldType
+  def json_schema(_definition) do
+    %{
+      "type" => ["object", "null"],
+      "properties" => %{
+        "rrule" => %{"type" => "string", "description" => "An RFC 5545 RRULE."},
+        "exdates" => %{
+          "type" => "array",
+          "items" => %{"type" => "string", "format" => "date"},
+          "description" => "Excluded dates, ISO-8601."
+        }
+      }
+    }
+  end
+
   @doc """
   The parsed rule for a stored value, or `nil`.
 
