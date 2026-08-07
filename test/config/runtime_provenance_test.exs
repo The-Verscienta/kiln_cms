@@ -27,7 +27,8 @@ defmodule KilnCMS.Config.RuntimeProvenanceTest do
 
   @runtime Path.expand("../../config/runtime.exs", __DIR__)
 
-  @vars ~w(KILN_PROVENANCE_ENABLED KILN_PROVENANCE_KEY_FILE KILN_PROVENANCE_RETIRED_KEY_FILES)
+  @vars ~w(KILN_PROVENANCE_ENABLED KILN_PROVENANCE_KEY_FILE KILN_PROVENANCE_RETIRED_KEY_FILES
+           KILN_PROVENANCE_SIGNER KILN_PROVENANCE_ORIGIN KILN_PROVENANCE_AI_DISCLOSURE)
 
   # runtime.exs's :prod branch reads these and raises without them.
   @prod_env %{
@@ -241,6 +242,48 @@ defmodule KilnCMS.Config.RuntimeProvenanceTest do
                {:env, %{"var" => "KILN_PROVENANCE_PRIVATE_KEY"}}
 
       assert Keyword.fetch!(provenance, :retired_keys) == []
+    end
+  end
+
+  describe "KILN_PROVENANCE_SIGNER / KILN_PROVENANCE_ORIGIN (#644)" do
+    test "the signer identity is written when set, nothing when unset or blank" do
+      assert {"Acme Editorial", _} =
+               read(:signer, %{"KILN_PROVENANCE_SIGNER" => "Acme Editorial"})
+
+      # Unset and blank both keep the compiled default (which falls back to the
+      # site name), so the `nil`-means-fall-back semantics survive.
+      assert {:not_written, _} = read(:signer, %{})
+      assert {:not_written, _} = read(:signer, %{"KILN_PROVENANCE_SIGNER" => "   "})
+    end
+
+    test "the origin URL is written when set, nothing when unset" do
+      assert {"https://acme.com", _} =
+               read(:origin, %{"KILN_PROVENANCE_ORIGIN" => "https://acme.com"})
+
+      assert {:not_written, _} = read(:origin, %{})
+    end
+  end
+
+  describe "KILN_PROVENANCE_AI_DISCLOSURE (#644)" do
+    test "a valid disclosure is written, case- and whitespace-insensitively" do
+      for value <- ["human", "AI_ASSISTED", " ai_generated "] do
+        {written, _} = read(:ai_disclosure, %{"KILN_PROVENANCE_AI_DISCLOSURE" => value})
+
+        assert written == value |> String.trim() |> String.downcase(),
+               "#{inspect(value)} should be normalized and written"
+      end
+    end
+
+    test "unset writes nothing, keeping the compiled default" do
+      assert {:not_written, _} = read(:ai_disclosure, %{})
+    end
+
+    test "an unrecognized value warns and writes nothing, rather than coercing into a signed claim" do
+      {written, stderr} =
+        read(:ai_disclosure, %{"KILN_PROVENANCE_AI_DISCLOSURE" => "sometimes"})
+
+      assert written == :not_written
+      assert stderr =~ "KILN_PROVENANCE_AI_DISCLOSURE is set to an unrecognized value"
     end
   end
 end

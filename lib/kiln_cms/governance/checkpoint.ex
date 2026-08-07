@@ -716,6 +716,145 @@ defmodule KilnCMS.Governance.Checkpoint do
     end
   end
 
+  @doc """
+  Every broken predecessor link across an org's whole checkpoint run (#732).
+
+  Each row signs its predecessor's id **and** a digest of that predecessor's
+  contents, but until this nothing walked the run: `Chain.verify/4` attests only
+  the single checkpoint an entry names, and the audit's contiguity check reads
+  the sequence numbers, not the links. So a checkpoint whose *contents* were
+  rewritten while its number was left alone was caught only by its own signature
+  failing — which on an unsigned deployment it does not.
+
+  Walking the links catches that, because a rewritten row's recomputed digest no
+  longer matches what its successor recorded. It is the same walk
+  `KilnCMS.Governance.Chain.chain_intact/1` does over anchors, for the same
+  reason and with the same limits.
+
+  Four ways a link is wrong, and each is a distinct edit an attacker has to make:
+
+    * a checkpoint names a predecessor that is **gone** — the row was excised;
+    * the named predecessor's **digest no longer matches** — its contents were
+      rewritten in place, keeping its sequence;
+    * a checkpoint past the first names **no predecessor at all** — the cheapest
+      way to detach a row from the run, and invisible to a walk that simply
+      skips null links;
+    * the named predecessor is **not the immediately preceding sequence** — a
+      link that jumps backwards over a surviving checkpoint, which contiguity
+      alone cannot see because every number is still present.
+
+  Returns messages, oldest checkpoint first; an empty list is a clean run.
+
+  ## What this cannot do
+
+  Three limits, and the first two are about the newest checkpoint specifically.
+
+  **A clean truncation of the newest checkpoints.** A run of `[3, 2, 1]` after
+  deleting 5 and 4 has intact links throughout. That is the argument that made
+  checkpoints necessary in the first place, one level up.
+
+  **A rewrite of the head.** Nothing records the newest checkpoint's digest —
+  it has no successor — so its `root`, `document_count`, `covered_at` or
+  `signature` can be changed in place and every link still resolves. The head
+  carries the most recent commitments, so it is the more valuable target of the
+  two.
+
+  **A careful attacker.** `digest/1` is an unkeyed hash over public columns, so
+  whoever rewrote checkpoint *k* can recompute `digest(k)`, write it into
+  *k+1*'s `prev_checkpoint_digest`, and cascade to the head — where it
+  terminates for free, by the limit above. On a deployment that signs nothing
+  that is the whole cost.
+
+  What it is, then: a check on a *careless* edit, and a multiplier against a
+  careful one — because `prev_checkpoint_digest` is inside `document/2`,
+  cascading forces the attacker to rewrite every published object after the
+  doctored row, turning one witness mismatch into many. All three limits are
+  answered by the same thing: the external witness, and the audit's enumeration
+  of keys the database no longer accounts for.
+
+  Deliberately not called from `verify/4`: loading an org's whole run once per
+  audit is affordable, and doing it per document on the governance dashboard is
+  not. Same reasoning that put the inclusion proofs on the entries.
+  """
+  @spec link_failures([struct()]) :: [String.t()]
+  def link_failures(checkpoints) do
+    by_id = Map.new(checkpoints, &{&1.id, &1})
+
+    checkpoints
+    |> Enum.sort_by(& &1.sequence)
+    |> Enum.flat_map(&link_failure(&1, by_id))
+  end
+
+  # Sequence 1 is the genesis checkpoint and correctly names nothing — BOTH
+  # columns, as `Chain.links_intact/2` requires of a genesis anchor. A stray
+  # digest beside a null id is caught by the successor's link too (it changes
+  # `digest/1`), but saying it here names the doctored row rather than the one
+  # that noticed.
+  defp link_failure(%{sequence: 1, prev_checkpoint_id: nil, prev_checkpoint_digest: nil}, _by_id),
+    do: []
+
+  defp link_failure(%{sequence: 1, prev_checkpoint_id: nil}, _by_id),
+    do: ["checkpoint 1 is the first in the run but records a predecessor digest"]
+
+  defp link_failure(%{sequence: 1} = checkpoint, _by_id) do
+    [
+      "checkpoint 1 is the first in the run but names predecessor " <>
+        "#{checkpoint.prev_checkpoint_id}"
+    ]
+  end
+
+  defp link_failure(%{prev_checkpoint_id: nil} = checkpoint, _by_id) do
+    # Nulling one column detaches a row from the run. A walk that only rejects
+    # null links before comparing digests would skip straight past it.
+    [
+      "checkpoint #{checkpoint.sequence} names no predecessor, but the run does " <>
+        "not start until 1"
+    ]
+  end
+
+  defp link_failure(checkpoint, by_id) do
+    case Map.fetch(by_id, checkpoint.prev_checkpoint_id) do
+      :error ->
+        [
+          "checkpoint #{checkpoint.sequence} names predecessor " <>
+            "#{checkpoint.prev_checkpoint_id}, which no longer exists"
+        ]
+
+      {:ok, prev} ->
+        digest_failure(checkpoint, prev) ++ position_failure(checkpoint, prev)
+    end
+  end
+
+  defp digest_failure(checkpoint, prev) do
+    if digest(prev) == checkpoint.prev_checkpoint_digest do
+      []
+    else
+      [
+        "checkpoint #{checkpoint.sequence} does not match the contents of " <>
+          "predecessor #{prev.sequence} it names — that row was rewritten"
+      ]
+    end
+  end
+
+  # Three shapes, not two. A link pointing FORWARD (or at itself) skips nothing,
+  # and saying "skipping N" would send an operator hunting a deletion that never
+  # happened.
+  defp position_failure(%{sequence: n}, %{sequence: prev_n}) when prev_n == n - 1, do: []
+
+  defp position_failure(%{sequence: n}, %{sequence: prev_n} = prev) when prev_n >= n do
+    [
+      "checkpoint #{n} names #{prev_n} (#{prev.id}) as its predecessor, which is not " <>
+        "earlier than it — the run is not ordered"
+    ]
+  end
+
+  defp position_failure(%{sequence: n}, %{sequence: prev_n} = prev) do
+    [
+      "checkpoint #{n} links back to #{prev_n} (#{prev.id}), skipping " <>
+        "#{n - 1} — the run is threaded around a surviving checkpoint"
+    ]
+  end
+
   # ── internals ─────────────────────────────────────────────────────────────
 
   defp next_sequence(nil), do: 1
@@ -724,9 +863,22 @@ defmodule KilnCMS.Governance.Checkpoint do
   @doc """
   A digest over a checkpoint's identity and contents, recorded by its successor.
 
-  Same shape and same reason as `KilnCMS.Governance.Chain.anchor_digest/1`: the
-  id alone would let a deleted predecessor be replaced by a forged row reusing
-  it.
+  Same *reason* as `KilnCMS.Governance.Chain.anchor_digest/1`: the id alone would
+  let a deleted predecessor be replaced by a forged row reusing it.
+
+  Not the same coverage, though, and the difference matters to anything reading
+  this as "the contents". It hashes `id`, `sequence`, `root`, `document_count`,
+  `signature` and the two link columns — but **not** `covered_at`, `key_id` or
+  `org_id`, all three of which `document/2` does carry and two of which
+  `checkpoint_payload/1` signs. So a row whose `covered_at` is moved forward, or
+  whose `key_id` is pointed at a key nobody holds, produces an identical digest
+  and is invisible to `link_failures/1`. `key_id` is the same one-column hole
+  `Chain` catalogues for anchors; nulling `signature`, by contrast, *is* caught.
+
+  Widening this is not a one-line edit: the output is already recorded in every
+  existing `prev_checkpoint_digest`, so changing the input set retro-breaks every
+  run. It needs a versioned digest with fallback shapes, the way `anchor_payload`
+  is versioned. Tracked separately.
   """
   @spec digest(struct() | nil) :: String.t() | nil
   def digest(nil), do: nil
