@@ -35,6 +35,12 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   # as importantly, so the suite that runs after them does too. The file this
   # replaced set @prod_env and never restored it.
   #
+  # The last five are listed for a reason specific to the `:config_warnings`
+  # cases (#634): those assert the collected list is EXACTLY empty, and every
+  # variable runtime.exs reads through `Env` under `:prod` can add an entry. A
+  # developer with `OEMBED_ENABLED=enabled` exported would otherwise get a red
+  # suite with an assertion message naming DATABASE_SSL.
+  #
   # KILN_UPDATE_REPO/RELEASES_URL/PIN_PATH are listed although no case sets
   # them: they write into the *same* `Kiln.Updates` keyword the update-check
   # cases assert on, and `Config` deep-merges — so a fork maintainer, whom
@@ -47,6 +53,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_AUDIT_ANCHORS_ENABLED KILN_AUDIT_ANCHOR_EVERY_WRITE
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
+            KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
+            BACKUP_ENABLED OEMBED_ENABLED
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -469,6 +477,62 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       # The var is advertised in .env.example; a developer exporting it must not
       # change how the governance tests behave.
       assert {:not_written, _} = anchor_every_write("true", :test)
+    end
+  end
+
+  # #634. The stderr line above is the only signal an operator gets that a flag
+  # did not take effect, and in a release it reaches container stdout and nothing
+  # else. These pin the handoff that lets `KilnCMS.Application` replay it through
+  # `Logger` — the end-to-end half of `KilnCMS.Config.EnvTest`'s unit coverage,
+  # through the real `Config.Reader` path a release actually takes.
+  describe ":config_warnings handoff (#634)" do
+    defp config_warnings(vars, env \\ :prod),
+      do: vars |> eval(env) |> get_in([:kiln_cms, :config_warnings])
+
+    test "an unrecognized value is carried out of runtime.exs, not just warned about" do
+      warnings = config_warnings(%{"DATABASE_SSL" => "enabled"})
+
+      assert {"DATABASE_SSL", "enabled"} in warnings
+    end
+
+    test "the raw value survives, not the normalized form" do
+      # Same reason the stderr line quotes it: the trimming and downcasing are
+      # what caused the mismatch, so the normalized string is the one the
+      # operator cannot find in their compose file.
+      assert {"DATABASE_SSL", " Enabled "} in config_warnings(%{"DATABASE_SSL" => " Enabled "})
+    end
+
+    test "several bad values are all carried, not just the first" do
+      warnings =
+        config_warnings(%{"DATABASE_SSL" => "enabled", "VISUAL_EDITING_ENABLED" => "ture"})
+
+      assert {"DATABASE_SSL", "enabled"} in warnings
+      assert {"VISUAL_EDITING_ENABLED", "ture"} in warnings
+    end
+
+    test "a clean boot writes an empty list, not nil" do
+      # `KilnCMS.Application` defaults to `[]`, but writing the key
+      # unconditionally is what stops `Config`'s deep merge leaving a previous
+      # evaluation's list in place on the config-provider path.
+      assert config_warnings(%{"DATABASE_SSL" => "true"}) == []
+    end
+
+    test "a second evaluation in the same process does not inherit the first's warnings" do
+      # `Config.Reader.read!/2` runs in the calling process, so the collector
+      # would otherwise accumulate across evaluations and report a variable the
+      # operator never set on this pass. `take_collected/0` drains for this.
+      assert {"DATABASE_SSL", "enabled"} in config_warnings(%{"DATABASE_SSL" => "enabled"})
+      assert config_warnings(%{"DATABASE_SSL" => "true"}) == []
+    end
+
+    test "it is written in :test too, so a dev boot reports the same way" do
+      # `VISUAL_EDITING_ENABLED`, not `DATABASE_SSL`: the latter is only read
+      # inside runtime.exs's `:prod` branch, so under `:test` there is nothing to
+      # warn about and the assertion would pass for the wrong reason.
+      assert {"VISUAL_EDITING_ENABLED", "ture"} in config_warnings(
+               %{"VISUAL_EDITING_ENABLED" => "ture"},
+               :test
+             )
     end
   end
 end

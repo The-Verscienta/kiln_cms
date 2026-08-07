@@ -40,8 +40,17 @@ defmodule KilnCMS.Config.Env do
 
   The warning goes to `:standard_error` rather than `Logger`, because config
   providers run before `Logger` is available. In a release that means container
-  stdout — visible in `docker logs`, but never forwarded to Sentry. It is a
-  boot-time line an operator has to look for, not an alert.
+  stdout — visible in `docker logs`, but never forwarded to Sentry.
+
+  So each unrecognized read is *also* recorded (see `collected/0`), and
+  `config/runtime.exs` hands the accumulated list to `:kiln_cms,
+  :config_warnings` on its way out. `KilnCMS.Application` replays it through
+  `Logger.warning/1` once observability is attached, so the one signal an
+  operator gets that a flag did not take effect reaches Sentry and every log
+  sink rather than scrolling past in a deploy (#634).
+
+  The stderr write stays regardless — it is the only thing available if the
+  application never starts at all.
 
   > #### Not for secrets {: .warning}
   >
@@ -86,8 +95,25 @@ defmodule KilnCMS.Config.Env do
   than trusted to stay in sync by hand.
   """
 
+  require Logger
+
   @true_values ~w(true 1 yes on)
   @false_values ~w(false 0 no off)
+
+  # Unrecognized reads accumulate here rather than in application env, because a
+  # release's config provider computes runtime config in a boot VM and then
+  # restarts the system — anything `Application.put_env/3` wrote during that pass
+  # is gone by the time the real VM starts. What survives is the config the
+  # provider *returns*, which is why the handoff is a `config` call at the end of
+  # `runtime.exs` rather than a write from in here.
+  #
+  # The process dictionary is the right scope for that: `runtime.exs` is
+  # evaluated in a single process, so one pass sees exactly its own reads. The
+  # handful of callers that reach `flag/2` at request time instead
+  # (`KilnCMS.Staging`) accumulate into their own short-lived process and are
+  # never collected, which is the behaviour we want — those are already inside a
+  # running system where `Logger` works.
+  @collected_key {__MODULE__, :collected}
 
   @doc """
   The recognized "on" spellings, for `config/strict_test_flag.exs`'s sync test
@@ -197,7 +223,107 @@ defmodule KilnCMS.Config.Env do
           []
         )
 
+        record_unrecognized(var, raw)
         :unrecognized
     end
   end
+
+  @doc """
+  The unrecognized reads this process has made, in the order they happened.
+
+  Values are safe to log: this module is flag-only by contract (see the
+  "Not for secrets" note above). Do not generalize the replay to arbitrary
+  variables without revisiting that.
+  """
+  @spec collected() :: [{String.t(), String.t()}]
+  def collected, do: @collected_key |> Process.get([]) |> Enum.reverse()
+
+  @doc """
+  `collected/0`, and forgets it.
+
+  This is the form `config/runtime.exs` uses, **last**, to hand the list to
+  `:kiln_cms, :config_warnings` for `KilnCMS.Application` to replay through
+  `Logger` once observability is up (#634). Ordering matters — a read below the
+  handoff is warned about on stderr and nowhere else — so
+  `test/kiln_cms/config/env_test.exs` pins that nothing calls this module there.
+
+  Draining rather than merely reading, because a process can evaluate
+  `runtime.exs` more than once: a release does it once, but `Config.Reader.read!/2`
+  in the test harness runs in the calling process, so a second evaluation would
+  otherwise inherit the first's warnings and report variables the operator never
+  set on that pass.
+  """
+  @spec take_collected() :: [{String.t(), String.t()}]
+  def take_collected do
+    collected = collected()
+    Process.delete(@collected_key)
+    collected
+  end
+
+  @doc """
+  Re-emits what `runtime.exs` collected, once the system is up, so a
+  misconfigured flag reaches the places an operator actually watches (#634).
+
+  Called once from KilnCMS.Application's `start/2`, after `setup_observability/0`.
+  The stderr line `fetch/1` already wrote stays: it is the only thing available
+  if the application never starts at all, so this is a second copy of the same
+  fact, not a replacement.
+
+  ## Two emissions, because `Logger` alone does not reach Sentry
+
+  `Logger.warning/1` is what puts the line in front of a log collector — it is
+  formatted, timestamped, and carried by whatever ships the application's output.
+
+  It does **not** reach Sentry. The handler is attached with the library's
+  defaults (`Sentry.LoggerHandler`: `level: :error`, `capture_log_messages:
+  false`), so a `:warning` is dropped at the first filter in the handler's
+  `handle_event/3`, and a bare string log with no `:crash_reason` metadata is
+  ignored even above that level. Raising the handler's level globally would send
+  Sentry every warning the application emits — a much larger change than this
+  issue asked for — so the Sentry event is reported explicitly instead.
+
+  `Sentry.capture_message/2` no-ops when no DSN is configured
+  (Sentry's `send_event` guards on a configured DSN), so this
+  costs a deployment without Sentry nothing.
+
+  Lives here rather than in `KilnCMS.Application` so the boot-time and
+  after-boot wordings cannot drift, and so it is directly testable — an
+  unexercised replay is the kind of thing that ships inert.
+  """
+  @spec replay_collected() :: :ok
+  def replay_collected do
+    for {var, raw} <- Application.get_env(:kiln_cms, :config_warnings, []) do
+      Logger.warning(message_for(var, raw))
+      report_to_sentry(var, raw)
+    end
+
+    :ok
+  end
+
+  defp message_for(var, raw) do
+    "#{var} is set to an unrecognized value (#{inspect(raw)}); the configured default " <>
+      "was kept, so this variable had no effect. Use one of: " <>
+      "#{Enum.join(@true_values, "/")}, #{Enum.join(@false_values, "/")}."
+  end
+
+  # A stable message with the variable in `fingerprint`, so Sentry groups one
+  # issue per variable rather than one per deployment — an operator wants "this
+  # flag is still wrong", not a new issue each restart. The offending value goes
+  # in `extra` for the same reason it is quoted on stderr: it is the only thing
+  # they can act on. Safe to send — this module is flag-only by contract.
+  defp report_to_sentry(var, raw) do
+    _ =
+      Sentry.capture_message(message_for(var, raw),
+        level: :warning,
+        fingerprint: ["kiln-config-warning", var],
+        extra: %{variable: var, value: raw}
+      )
+
+    :ok
+  end
+
+  # Prepend + reverse in `collected/0`, so a boot reading dozens of flags does
+  # not walk the list once per warning.
+  defp record_unrecognized(var, raw),
+    do: Process.put(@collected_key, [{var, raw} | Process.get(@collected_key, [])])
 end

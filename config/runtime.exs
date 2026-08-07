@@ -1143,3 +1143,22 @@ if config_env() != :test do
       """)
   end
 end
+
+# ── Boot-time config warnings ────────────────────────────────────────────────
+#
+# MUST STAY LAST. `KilnCMS.Config.Env` warns on stderr for a variable it cannot
+# parse, and in a release that line reaches container stdout and nothing else —
+# no Sentry, no OTel, no log sink — because config providers run before `Logger`
+# exists (#634). `Env.take_collected/0` returns what this evaluation warned
+# about, so `KilnCMS.Application` can replay it once observability is attached.
+# It DRAINS (unlike the plain `collected/0` reader), so a process that evaluates
+# this file twice — the test harness does — reports only that pass's reads.
+#
+# Anything calling `Env` *below* this line is warned about on stderr only, which
+# is the failure mode #634 exists to close. `test/kiln_cms/config/env_test.exs`
+# fails if that happens.
+#
+# Written unconditionally rather than `if warnings != []`: `Config` deep-merges,
+# so skipping the empty case would leave a previous evaluation's list in place
+# on the config-provider path.
+config :kiln_cms, :config_warnings, Env.take_collected()
