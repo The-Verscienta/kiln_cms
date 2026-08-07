@@ -78,4 +78,29 @@ defmodule KilnCMS.CMS.ApprovalWorkflowTest do
     published = CMS.publish_post!(post, %{}, actor: admin)
     assert published.state == :published
   end
+
+  # #879: each transition's UPDATE is now a compare-and-swap on the current
+  # state, so a caller holding a stale struct can't clobber a row another writer
+  # has already moved. The state machine only checks the in-memory struct, and
+  # the UPDATE previously carried no state predicate — the repo's own "guards the
+  # struct, not the row" hazard, widened by every headless request being a
+  # separate get-then-update.
+  test "a transition is a compare-and-swap and won't clobber a moved row (#879)" do
+    admin = user(:admin)
+
+    # A draft, captured as a now-stale in-memory struct.
+    draft = CMS.create_post!(%{title: "CAS", slug: slug()}, actor: admin)
+
+    # The row moves on underneath it: submitted for review, then published.
+    in_review = CMS.submit_post_for_review!(draft, %{}, actor: admin)
+    published = CMS.publish_post!(in_review, %{}, actor: admin)
+    assert published.state == :published
+
+    # Submitting the STALE :draft struct must NOT drag the published row back to
+    # :in_review. Its in-memory state still satisfies the state machine's struct
+    # check, but the CAS filter sees the row is no longer :draft, so the UPDATE
+    # matches nothing and the write is refused rather than clobbering.
+    assert {:error, _} = CMS.submit_post_for_review(draft, %{}, actor: admin)
+    assert CMS.get_post!(published.id, actor: admin).state == :published
+  end
 end

@@ -1543,6 +1543,12 @@ defmodule KilnCMS.CMS.Content do
 
         update :submit_for_review do
           require_atomic? false
+          # A workflow transition takes no content input, and its UPDATE is a
+          # compare-and-swap on the current state — see `:return_to_draft` for the
+          # full rationale (#873); this closes the same two gaps on the other three
+          # routed transitions (#879).
+          accept []
+          change filter(expr(^ref(:state) == :draft))
           change transition_state(:in_review)
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "in_review"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :submitted_for_review}
@@ -1574,6 +1580,11 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # No content input, and a compare-and-swap on state (#879) — see
+          # `:return_to_draft`. Without the filter a publish landing after a
+          # concurrent transition would stamp `published_at` + artifacts onto a
+          # row another writer had already moved out of a publishable state.
+          accept []
           # Compliance gate (#356): block publish when a required editorial consent
           # is missing (config-gated, no-op by default — see the validation).
           validate KilnCMS.CMS.Validations.RequiredConsent
@@ -1587,6 +1598,7 @@ defmodule KilnCMS.CMS.Content do
           # advises on, so the gate can never disagree with the panel the
           # author has been reading.
           validate KilnCMS.CMS.Validations.ComplianceClaims
+          change filter(expr(^ref(:state) == :draft or ^ref(:state) == :in_review))
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -1643,6 +1655,10 @@ defmodule KilnCMS.CMS.Content do
 
         update :unpublish do
           require_atomic? false
+          # No content input, and a compare-and-swap on state (#879) — see
+          # `:return_to_draft`.
+          accept []
+          change filter(expr(^ref(:state) == :published))
           change transition_state(:draft)
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
@@ -1663,7 +1679,19 @@ defmodule KilnCMS.CMS.Content do
 
         update :archive do
           require_atomic? false
+          # Same no-input + compare-and-swap treatment as the other transitions
+          # (#879). `from: [:draft, :in_review, :published]`, so the CAS predicate
+          # is "not already archived".
+          accept []
+          change filter(expr(^ref(:state) != :archived))
           change transition_state(:archived)
+          # Archiving a *published* record must tear down its published version and
+          # artifacts exactly as `:unpublish` does — otherwise they orphan (no race
+          # needed, #879 pt 3). Both are harmless when archiving a draft/in_review
+          # record: there are no artifacts to purge, and `ClearPublishedVersion`
+          # writes a nil `published_version_id` that was already nil.
+          change KilnCMS.CMS.Changes.ClearPublishedVersion
+          change KilnCMS.CMS.Changes.DeleteArtifacts
         end
 
         # Sends archived content back to draft (the state-machine inverse of
