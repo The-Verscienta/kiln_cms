@@ -233,6 +233,10 @@ defmodule KilnCMS.Media.Ingest do
     end
   end
 
+  # `stripped` is `DocumentProcessor.strip_metadata/1`'s server-generated temp
+  # file, never caller input.
+  # sobelow_skip ["Traversal.FileModule"]
+  #
   # Documents are stripped too (#807), and the STRIPPED copy is what gets
   # stored — the image path draws the same line, for the same reason: what is
   # recorded must be what a reader will actually download. A strip that fails
