@@ -300,17 +300,22 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
          {:ok, module} <- KilnCMS.Blocks.fetch(type) do
       module
       |> restricted_fields(role)
-      |> Enum.reduce(acc, fn field, inner ->
-        case fetch_field(map, field.name) do
-          {:ok, value} when not is_nil(value) and value != field.default ->
-            Map.update(inner, {module, field.name}, [value], &[value | &1])
-
-          _ ->
-            inner
-        end
-      end)
+      |> Enum.reduce(acc, &collect_field_value(map, module, &1, &2))
     else
       _ -> acc
+    end
+  end
+
+  # Split out of `collect_restricted/3` rather than written inline: `with` ->
+  # `reduce` -> `case` nests one level past the limit `mix credo --strict`
+  # enforces.
+  defp collect_field_value(map, module, field, acc) do
+    case fetch_field(map, field.name) do
+      {:ok, value} when not is_nil(value) and value != field.default ->
+        Map.update(acc, {module, field.name}, [value], &[value | &1])
+
+      _ ->
+        acc
     end
   end
 
