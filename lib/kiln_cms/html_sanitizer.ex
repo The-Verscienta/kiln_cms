@@ -54,8 +54,15 @@ defmodule KilnCMS.HTMLSanitizer do
   end
 
   defp safe_relative_path?(url) do
+    # A backslash is a slash for special schemes under the WHATWG URL spec, so
+    # `/\evil.com` reads as a same-origin path here and resolves to
+    # `https://evil.com/` in every browser — the `//host` escape wearing a
+    # different hat. Nothing legitimate puts a raw `\` in a URL path (it
+    # encodes as `%5C`), so reject it outright rather than trying to spot the
+    # positions that matter.
     String.starts_with?(url, "/") and
       not String.starts_with?(url, "//") and
+      not String.contains?(url, "\\") and
       not String.contains?(url, "..")
   end
 
@@ -65,7 +72,8 @@ defmodule KilnCMS.HTMLSanitizer do
   Allowed: same-origin relative paths, in-page `#fragment`s, `http(s)://` and
   `mailto:`. Rejected: any other scheme (`javascript:`, `data:`, `vbscript:`,
   `ftp:`, …), protocol-relative `//host` — which reads as same-origin and
-  isn't — and paths containing `..`.
+  isn't — its backslash twin `/\\host` (browsers treat `\\` as `/`), and paths
+  containing `..`.
 
   **This is the one definition of a link href Kiln will store and serve.**
   Everything that handles one defers here: `PortableText.sanitize_def/1` at
