@@ -308,6 +308,10 @@ defmodule KilnCMSWeb.Router do
       live "/editor/translations", TranslationsLive, :index
       live "/editor/search", SearchPaletteLive, :index
       live "/editor/taxonomy", TaxonomyLive, :index
+      # Editor-managed navigation menus (#466). Editorial, like taxonomy — the
+      # menu list, and one menu's item tree.
+      live "/editor/menus", MenuLive, :index
+      live "/editor/menus/:id", MenuLive, :show
       live "/editor/analytics", AnalyticsLive, :index
       # Site-wide broken outbound links (#474). Editorial, so it lives here
       # rather than under the admin session; the opt-in switch on the page is
@@ -529,6 +533,12 @@ defmodule KilnCMSWeb.Router do
     # the live schema instead of a vendored copy. Per-org, because dynamic types
     # and custom fields are.
     get "/schema", SchemaController, :show
+
+    # Editor-managed navigation (#466): the menu list, and one resolved menu
+    # tree with live URLs and unpublished targets omitted. Static segment first
+    # so `/menus` can't be swallowed by the `/:key` fetch.
+    get "/menus", MenuController, :index
+    get "/menus/:key", MenuController, :show
 
     # Path resolution for headless routing: what lives at this URL — published
     # content ("ok"), a pathauto redirect ("moved", 301 it yourself), or 404.

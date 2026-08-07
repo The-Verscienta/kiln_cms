@@ -564,6 +564,31 @@ const Hooks = {
     },
   },
 
+  // Drag-to-reorder for one level of the navigation menu tree (#466). Unlike
+  // `Sortable`, each list reports which parent it belongs to — a menu renders
+  // one list per level, so a bare "reorder" would be ambiguous. Depth changes
+  // are the indent/outdent buttons, not the drag: dropping *into* a sibling is
+  // hard to hit and impossible with a keyboard, and this tree is the site's
+  // navigation.
+  MenuSortable: {
+    mounted() {
+      this.sorter = Sortable.create(this.el, {
+        animation: 150,
+        handle: "[data-drag-handle]",
+        ghostClass: "opacity-40",
+        onEnd: () => {
+          const order = Array.from(this.el.children)
+            .map(c => c.dataset.sortId)
+            .filter(id => id !== undefined)
+          this.pushEvent("reorder_items", {parent_id: this.el.dataset.parentId || "", order})
+        },
+      })
+    },
+    destroyed() {
+      this.sorter && this.sorter.destroy()
+    },
+  },
+
   // Nested drag-and-drop for a `columns` block's children (#335): one Sortable
   // per column list, all sharing a group so a child can be dragged within a
   // column or across into a sibling column of the same block. On any drop it
