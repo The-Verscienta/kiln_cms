@@ -762,8 +762,10 @@ defmodule KilnCMS.Portability.Import do
     |> String.trim("-")
   end
 
-  defp describe(%{__exception__: true} = error), do: Exception.message(error)
-  defp describe(other), do: inspect(other)
+  # The one caller passes the `reason` from an Ash `{:error, reason}`, which is
+  # always an exception struct — dialyzer proves a non-exception clause here
+  # unreachable, so there is no second clause to fall through to.
+  defp describe(error), do: Exception.message(error)
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, _key, ""), do: map
