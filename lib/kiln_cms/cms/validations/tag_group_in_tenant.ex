@@ -14,6 +14,23 @@ defmodule KilnCMS.CMS.Validations.TagGroupInTenant do
   Resolves the group under the tag's resolved `org_id`, so the group is required
   to be same-org whether or not the deployment runs strict tenancy (a provided
   tenant scopes the read even under `global?: true`).
+
+  ## Only what the write supplies
+
+  `Ash.Changeset.get_attribute/2` falls back to `get_data/2`, so validating
+  unconditionally re-judged the row's **stored** `tag_group_id` on every update.
+  That made the pre-existing cross-org rows this control exists to stop — the
+  ones #513 deliberately kept *survivable and editable* — impossible to save:
+  renaming such a tag was rejected on a field the write never mentioned, and the
+  editor's `<select>` only offers same-org groups, so the sole write that could
+  succeed was one that silently ungrouped the tag. The repair path the feature
+  documents was unreachable.
+
+  It also cost a `SELECT` per keystroke: declared in the global `validations`
+  block, this runs at changeset-build time, and `AshPhoenix.Form.validate` fires
+  on every `phx-change`. Skipping an unchanged attribute removes that too.
+
+  So this validates only when the write is actually changing `tag_group_id`.
   """
   use Ash.Resource.Validation
 
@@ -21,6 +38,14 @@ defmodule KilnCMS.CMS.Validations.TagGroupInTenant do
 
   @impl true
   def validate(changeset, _opts, _context) do
+    if Ash.Changeset.changing_attribute?(changeset, :tag_group_id) do
+      validate_supplied(changeset)
+    else
+      :ok
+    end
+  end
+
+  defp validate_supplied(changeset) do
     case Ash.Changeset.get_attribute(changeset, :tag_group_id) do
       nil ->
         :ok
