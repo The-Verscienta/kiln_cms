@@ -28,7 +28,7 @@ defmodule KilnCMS.Analytics.Titles do
     rows
     |> Enum.group_by(& &1.content_type)
     |> Enum.flat_map(fn {type, type_rows} ->
-      case ContentTypes.get(type, org_id(org)) do
+      case ContentTypes.get(type, org) do
         nil -> []
         ct -> batch_lookup(ct, type_rows |> Enum.map(& &1.content_id) |> Enum.uniq(), org, actor)
       end
@@ -45,7 +45,7 @@ defmodule KilnCMS.Analytics.Titles do
   """
   @spec title_for(map(), map(), term()) :: String.t()
   def title_for(row, titles, org) do
-    case ContentTypes.get(row.content_type, org_id(org)) do
+    case ContentTypes.get(row.content_type, org) do
       nil -> "(unknown type: #{row.content_type})"
       _ct -> titles |> Map.get(row.content_id, {"(deleted)", nil}) |> elem(0)
     end
@@ -63,7 +63,4 @@ defmodule KilnCMS.Analytics.Titles do
     )
     |> Enum.map(&{&1.id, {&1.title, &1.slug}})
   end
-
-  defp org_id(%{id: id}), do: id
-  defp org_id(id), do: id
 end

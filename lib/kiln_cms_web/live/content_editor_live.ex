@@ -104,7 +104,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         org = socket.assigns.current_org
         record = fetch!(kind, id, actor, org)
         field_definitions = field_definitions(kind, actor, org)
-        content_type = ContentTypes.get!(kind, org_id(org))
+        content_type = ContentTypes.get!(kind, org)
 
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
@@ -361,7 +361,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp content_kind(%{"type" => type}, socket) do
     # Resolve the type within the current site (epic #336) — a dynamic type name
     # only names a type on the org that defined it.
-    case ContentTypes.get(type, org_id(socket.assigns.current_org)) do
+    case ContentTypes.get(type, socket.assigns.current_org) do
       nil -> nil
       ct -> ct.type
     end
@@ -842,7 +842,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         KilnCMS.Links.Internal.resolve_all(
           paths,
           link_locale(socket),
-          org_id(socket.assigns.current_org)
+          Accounts.org_id(socket.assigns.current_org)
         )
       )
     end
@@ -1108,7 +1108,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # kind's by its type atom (see FieldDefinition's two scopes). Resolved and read
   # under the current org (epic #336).
   defp field_definitions(kind, actor, org) do
-    case ContentTypes.get!(kind, org_id(org)) do
+    case ContentTypes.get!(kind, org) do
       %{source: :dynamic, definition: definition} ->
         CMS.field_definitions_for_definition!(definition.id, actor: actor, tenant: org)
 
@@ -1116,10 +1116,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
         CMS.field_definitions_for!(ct.type, actor: actor, tenant: org)
     end
   end
-
-  # `ContentTypes.get!/2` keys the dynamic-type registry by a raw org_id.
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
 
   # Pick-lists for `:reference` custom fields: per definition, the target
   # type's records as `{title, id}` options — narrow select and the same window
@@ -1129,7 +1125,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Enum.filter(&(&1.field_type == :reference))
     |> Map.new(fn definition ->
       options =
-        case ContentTypes.get(definition.target_type, org_id(org)) do
+        case ContentTypes.get(definition.target_type, org) do
           nil ->
             []
 
@@ -1407,7 +1403,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # The rate-limit bucket keys interpolate this, so it must be the id —
       # `current_org` is the Organization struct (Ash takes it as a tenant, but
       # a struct in a bucket key would blow up on String.Chars).
-      org_id = org_id(socket.assigns.current_org)
+      org_id = Accounts.org_id(socket.assigns.current_org)
       actor_id = socket.assigns.actor.id
       # Stamped so a result that lands after a conflict reload or a version
       # restore (both bump `editor_version`) can be recognized as stale.
@@ -1564,7 +1560,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # without this check a crafted push buys a billed generation for nothing.
     if assist_runnable?(socket, block_id) do
       request = assist_request(socket, block_id)
-      org_id = org_id(socket.assigns.current_org)
+      org_id = Accounts.org_id(socket.assigns.current_org)
       actor_id = socket.assigns.actor.id
       version = socket.assigns.editor_version
 
@@ -3972,28 +3968,62 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
       |> Enum.map(&to_string/1)
 
+    sections = tag_sections(pickable, assigns.tag_groups, assigns.kind, selected, attached)
+
     assigns =
       assigns
       |> assign(:selected, selected)
-      |> assign(:no_tags?, pickable == [])
+      |> assign(:sections, sections)
+      # Why an empty picker is empty, which is not one question but two, and the
+      # difference is what the editor should do next (#524). `pickable` and
+      # `sections` are narrowed independently — every tag in the org can sit in
+      # groups scoped to *other* content types, with none of them on this record,
+      # and then there are tags but nothing to show. The old guard keyed the
+      # whole body on `pickable`, so that case rendered a legend, a filter box
+      # and nothing else — no explanation, and no way to tell it from a bug.
       |> assign(
-        :sections,
-        tag_sections(pickable, assigns.tag_groups, assigns.kind, selected, attached)
+        :empty_reason,
+        cond do
+          pickable == [] -> :no_tags
+          sections == [] -> :none_apply
+          true -> nil
+        end
       )
       |> assign(:name, assigns.form[:tag_ids].name <> "[]")
 
     ~H"""
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
       <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
-      <p :if={@no_tags?} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
+      <p :if={@empty_reason == :no_tags} class="text-xs text-base-content/70">
+        {gettext("No tags yet.")}
+      </p>
+      <%!-- Says only what is observable. `tag_sections/5` drops an *applicable*
+            group that happens to be empty exactly as it drops a non-applicable
+            one, so "every group is scoped to other types" would be wrong about
+            as often as it was right — and would send the editor hunting for a
+            scope to widen when the fix is a tag to create. The link goes where
+            both fixes live; same shape as the media picker's empty state. --%>
+      <p :if={@empty_reason == :none_apply} class="text-xs text-base-content/70">
+        {gettext("No tags are available on this content type — set them up under")} <.link
+          navigate={~p"/editor/taxonomy"}
+          class="underline"
+        >{gettext("taxonomy")}</.link>.
+      </p>
 
       <%!-- Browsers omit an all-unchecked checkbox group from the payload
             entirely, which `selected_ids/3` can only read as "untouched" — so
             the last tag could never be removed. This sentinel keeps the key
-            present; `normalize_tag_ids/1` drops it before the changeset. --%>
-      <input :if={not @no_tags?} type="hidden" name={@name} value="" />
+            present; `normalize_tag_ids/1` drops it before the changeset.
 
-      <div :if={not @no_tags?} class="space-y-2">
+            Gated on the sections, not on `pickable`: with nothing rendered to
+            tick, submitting the key at all would post an empty `tag_ids` that
+            `append_and_remove` reads as "detach everything". (Unreachable
+            today — every attached tag lands in some section, so no sections
+            means no attached tags — but the sentinel's whole job is to make an
+            empty submission meaningful, and it must not do that here.) --%>
+      <input :if={@sections != []} type="hidden" name={@name} value="" />
+
+      <div :if={@sections != []} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
               phx-update="ignore" so a re-render can't clobber what's typed.
               Unnamed does NOT stop the enclosing form's phx-change from firing,

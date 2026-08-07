@@ -31,9 +31,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Custom fields"))
        |> assign(:content_types, ContentTypes.all())
-       |> assign(:dynamic_types, ContentTypes.dynamic_all(org_id(org)))
+       |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
        |> assign(:field_types, FieldDefinition.field_types())
-       |> assign(:target_types, target_types(org_id(org)))
+       |> assign(:target_types, ContentTypes.options(org))
        |> assign(:edit, nil)
        |> assign(:form, create_form(actor, org))
        |> load_definitions()}
@@ -164,10 +164,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> to_form()
   end
 
-  # The dynamic-type registry (`ContentTypes.*`) keys by a raw org_id.
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
-
   # Options are entered one-per-line (or comma-separated) in a textarea and
   # stored as a string array. Split, trim and drop blanks before they reach the
   # attribute. Only meaningful for `:select`, harmless otherwise. The scope
@@ -182,15 +178,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.reject(&(&1 == ""))
 
     params |> Map.put("options", options) |> unpack_scope()
-  end
-
-  # What a `:reference` field may point at: every type, compiled or dynamic,
-  # as `{label, name string}` select options.
-  defp target_types(org_id) do
-    Enum.map(
-      ContentTypes.all() ++ ContentTypes.dynamic_all(org_id),
-      &{&1.label, to_string(&1.type)}
-    )
   end
 
   # Whether the reference-target select applies to the form's current type.

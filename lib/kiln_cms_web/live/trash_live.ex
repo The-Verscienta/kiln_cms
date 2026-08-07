@@ -89,7 +89,7 @@ defmodule KilnCMSWeb.TrashLive do
       [select: @list_fields, sort: [archived_at: :desc], limit: @page_size]
   end
 
-  defp editable_types(org_id), do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id)
+  defp editable_types(org_id), do: ContentTypes.all_for_org(org_id)
 
   @impl true
   def handle_event("restore", %{"kind" => kind, "id" => id}, socket) do

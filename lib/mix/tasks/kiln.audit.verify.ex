@@ -83,7 +83,7 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
     # dynamic-type registry both require a tenant.
     results =
       for org_id <- KilnCMS.Accounts.list_org_ids(),
-          ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(org_id),
+          ct <- ContentTypes.all_for_org(org_id),
           # Minimal select — the verifier needs identity, not block trees. The
           # dynamic tier shares the :entry storage resource, which is also what
           # the publish hook keys anchors on.

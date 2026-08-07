@@ -94,7 +94,7 @@ defmodule KilnCMS.Firing.StaticExport do
     mkdir_p!(out_dir)
 
     {entries, skipped} =
-      (ContentTypes.all() ++ ContentTypes.dynamic_all(org_id))
+      ContentTypes.all_for_org(org_id)
       |> Enum.flat_map(&published_records(&1, org_id))
       |> Enum.reduce({[], 0}, fn {ct, record}, {acc, skipped} ->
         case export_document(out_dir, ct, record, surfaces) do

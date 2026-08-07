@@ -671,22 +671,50 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    an editor merely inserting a block above a featured one), and carrying the
    value forward silently writes something the client never sent.
 
-   Nested `columns` children (raw maps with no id) are covered too (#774): the
-   whole tree's multiset of role-restricted non-default nested values must be
-   identical before and after, so a non-admin can neither introduce one nor drop
-   one by omission, but may resubmit a column holding an admin-set value
-   unchanged — which the old per-child default rule refused outright. The
-   multiset preserves the *count* of admin-set values, not their *binding*: with
-   no per-child id, a non-admin can **re-target** one — clear it on one child and
-   set it on another of the same type in one write — though never raise or lower
-   the count. Closing that needs nested-child identity (the same primitive the
-   id-reuse residual above needs); tracked as a follow-up.
+   Nested `columns` children are covered too (#774): the whole tree's multiset
+   of role-restricted non-default nested values must be identical before and
+   after, so a non-admin can neither introduce one nor drop one by omission, but
+   may resubmit a column holding an admin-set value unchanged — which the old
+   per-child default rule refused outright.
+
+   A multiset preserves the *count* of admin-set values, not their *binding*, so
+   on its own it allowed a **re-target** — clearing the value on one child and
+   setting it on another of the same type in one write. That is **narrowed, not
+   closed** (#865).
+
+   The content editor stamps each nested child an `"id"` for its own
+   bookkeeping, and the key survives into storage. Where those ids exist the
+   check binds each admin-set value to the child holding it: a child returning
+   under a known id must return with that id's value, and a child that *held* a
+   restricted non-default value must return under the same id still holding it.
+   Separately and unconditionally, an id that names **two** children in one
+   submission is refused — without that the two collapse when indexed, the last
+   wins, and a decoy sharing the real child's id satisfies the binding while the
+   rendered content quietly loses the value.
+
+   The binding applies only when the client demonstrably round-trips ids, and
+   that gate is forced rather than chosen: **nested child ids cannot be read
+   back.** `blocks` is not `public?`, GraphQL carries `hide_inputs: [:blocks]`,
+   and the fired artifact exposes `_id` rather than `id`. A headless
+   `block_tree` client has no way to learn a child's id, and `restore_version`
+   accepts nothing but a `version_id`, so versions captured before the editor
+   stamped children restore id-less by construction. Demanding an id back from
+   those callers would refuse them permanently while naming a remedy neither
+   could perform.
+
+   *Residual:* a caller willing to drop **every** nested id is still governed by
+   the count alone, so the re-target survives there. Closing it needs nested
+   child ids a client can read — the same missing primitive as the id-reuse
+   residual below, one level down.
 
    *Residual, all about **which block an id names** rather than what a field may
    hold:* an editor can still reuse the id of another block **of the same type**
    to move an admin-set field off the block that had it, and an empty
    `block_tree` deletes the block outright. Both predate this and need the write
-   path to verify a submitted id belongs to the block it claims.
+   path to verify a submitted id belongs to the block it claims. The same is
+   true of nested children: ids there are client-supplied, so relabelling which
+   child an id names is believed, and only the two-children-one-id case is
+   decidable without an ownership check.
 9. **Per-account throttling is per node, in memory, and keyed on
    attacker-chosen strings.** `AccountThrottle` (#478) holds its budgets in ETS,
    so a restart forgives every accumulated attempt and a second node would carry

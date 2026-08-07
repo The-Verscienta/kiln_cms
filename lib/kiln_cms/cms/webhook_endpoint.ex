@@ -44,7 +44,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   org — `org_id` defaults to the sole org for tenant-less callers.
   """
   def events(org_id \\ KilnCMS.Accounts.default_org_id()) do
-    types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all(org_id)
+    types = KilnCMS.CMS.ContentTypes.all_for_org(org_id)
     content = for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
     content ++ ["form.submitted"] ++ @task_events ++ @release_events
   end
@@ -62,7 +62,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   only applies to tenant-less programmatic creates.
   """
   def default_events do
-    types = KilnCMS.CMS.ContentTypes.all() ++ KilnCMS.CMS.ContentTypes.dynamic_all()
+    types = KilnCMS.CMS.ContentTypes.all_for_org(nil)
     content = for ct <- types, verb <- @default_verbs, do: "#{ct.type}.#{verb}"
     content ++ ["form.submitted"]
   end
