@@ -38,6 +38,30 @@ defmodule KilnCMS.DocumentProcessor do
   and page content survive. The `qpdf --empty --pages in.pdf 1-z -- out.pdf`
   idiom also strips metadata, but by rebuilding the file from its pages, which
   silently discards bookmarks — measured, not assumed.
+
+  ## Those two flags are not enough on their own (#918)
+
+  They clear the trailer `/Info` and the Catalog's `/Metadata`. They do **not**
+  touch per-page `/Metadata` XMP packets or `/PieceInfo` private data — and
+  `/PieceInfo` is where Illustrator, InDesign and Acrobat park the author name
+  and the authoring filesystem path (`C:\\Users\\jane\\...`). Verified against
+  qpdf 12.3.2: after the two flags, a page-level `dc:creator` and a
+  `/PieceInfo /Private` string both still grep out of the stored file.
+
+  qpdf has no flag for this, so the strip runs in two passes: dump the object
+  dictionaries with `--json-output`, prune `/Metadata` and `/PieceInfo` from
+  every object that carries one, and feed the result back through
+  `--update-from-json` alongside the two document-level flags.
+  `--json-stream-data=none` keeps the intermediate JSON to the dictionaries —
+  stream payloads are the bulk of a PDF and nothing here needs them.
+
+  ## Encrypted PDFs are refused, and say so
+
+  qpdf cannot open a user-password-encrypted PDF without the password, so it
+  cannot strip one. Such a file is refused with `{:error, :encrypted}` rather
+  than the generic `:strip_failed`, because the two mean different things to
+  whoever uploaded it: one is "this file is broken", the other is "unlock it
+  first". Storing it unstripped is not on the table — see the posture above.
   """
 
   require Logger
@@ -46,12 +70,20 @@ defmodule KilnCMS.DocumentProcessor do
   # file can describe a very large amount of work, the same class of problem
   # `ImageProcessor`'s pixel cap and `AVProcessor`'s scan limits address.
   #
-  # Unlike ffmpeg, qpdf has no self-imposed CPU limit to hand it, and closing an
-  # Erlang port shuts the pipes without signalling the child — so this timeout
-  # bounds *our* wait, and a runaway qpdf is reaped by the container rather than
-  # by us. Acceptable because the process is per-upload and short-lived; the
-  # alternative is holding a LiveView upload open indefinitely.
+  # Unlike ffmpeg, qpdf has no self-imposed CPU limit to hand it. Closing an
+  # Erlang port shuts the pipes *without* signalling the child, so the timeout
+  # additionally kills the OS process by pid (#918): a `Task.shutdown/2` left an
+  # orphan qpdf burning CPU and then writing an unreferenced file into the temp
+  # dir minutes after the upload had already been refused, with nothing reaping
+  # it. `--decode-level=none` removes the amplification that made that reachable
+  # — a 25 MB PDF can hold a FlateDecode stream that inflates to ~25 GB, and
+  # qpdf's default `generalized` decode level would expand it.
   @timeout_ms 30_000
+
+  # Keys pruned from EVERY object, not just pages: `/PieceInfo` is legal on any
+  # dictionary, and a `/Metadata` stream attached to a Form XObject leaks the
+  # same way one attached to a Page does.
+  @pruned_keys ["/Metadata", "/PieceInfo"]
 
   # Canonical {extension, content_type} per magic-byte signature this module
   # recognizes. Deny-by-default: anything else is rejected, same posture as
@@ -160,23 +192,28 @@ defmodule KilnCMS.DocumentProcessor do
   # sobelow_skip ["Traversal.FileModule"]
   defp run_qpdf(path) do
     out = Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-stripped.pdf")
+    strip_to(path, out)
+  end
 
-    case qpdf(["--remove-info", "--remove-metadata", path, out]) do
-      # qpdf exits 3 for warnings it recovered from ("operation succeeded with
-      # warnings"), which a slightly malformed but readable PDF routinely
-      # triggers. The output is written and correct, so treating it as failure
-      # would reject documents every other reader opens fine.
-      {_output, code} when code in [0, 3] ->
-        {:ok, out}
+  # sobelow_skip ["Traversal.FileModule"]
+  defp strip_to(path, out) do
+    {update_args, update_path} = object_prune_args(path)
 
-      {output, code} ->
-        File.rm(out)
+    try do
+      case qpdf(base_args() ++ update_args ++ [path, out]) do
+        # qpdf exits 3 for warnings it recovered from ("operation succeeded with
+        # warnings"), which a slightly malformed but readable PDF routinely
+        # triggers. The output is written and correct, so treating it as failure
+        # would reject documents every other reader opens fine.
+        {_output, code} when code in [0, 3] ->
+          {:ok, out}
 
-        Logger.warning(
-          "qpdf strip failed (exit #{code}) for #{path}: #{String.slice(output, 0, 500)}"
-        )
-
-        {:error, :strip_failed}
+        {output, code} ->
+          File.rm(out)
+          classify_failure(path, output, code)
+      end
+    after
+      if update_path, do: File.rm(update_path)
     end
   rescue
     error ->
@@ -184,21 +221,217 @@ defmodule KilnCMS.DocumentProcessor do
       {:error, :strip_failed}
   end
 
-  # `System.cmd/3` execs directly rather than through a shell, so neither the
-  # program nor the argument list can be injected into. `args` is fixed flags
-  # plus two paths this server generated; even a hostile *filename* would
-  # arrive as one exec argv entry, not as shell syntax. Same as
-  # `AVProcessor.cmd/2`, which is the other place a user file meets a binary.
+  # Encryption is classified from the FAILURE, not probed up front. `qpdf
+  # --is-encrypted` also exits 0 for an **owner-password-only** file — the
+  # "restrict printing/editing" export that every reader opens with no password
+  # at all — and qpdf strips those perfectly well. Pre-checking therefore
+  # refused a large class of ordinary documents and told the uploader to remove
+  # a password that does not exist. Only a file qpdf could not *open* is
+  # `:encrypted`.
+  defp classify_failure(path, output, code) do
+    if output =~ ~r/invalid password/i do
+      Logger.info("Refusing encrypted PDF #{path}: qpdf cannot strip what it cannot open")
+      {:error, :encrypted}
+    else
+      Logger.warning(
+        "qpdf strip failed (exit #{code}) for #{path}: #{String.slice(output, 0, 500)}"
+      )
+
+      {:error, :strip_failed}
+    end
+  end
+
+  # The document-level half. `--decode-level=none` keeps qpdf from inflating
+  # every stream it copies, which is both the timeout amplification vector and
+  # unnecessary work — nothing here inspects stream contents.
+  defp base_args,
+    do: ["--remove-info", "--remove-metadata", "--decode-level=none"]
+
+  # The per-object half (#918). Returns `{args, temp_path_to_clean_up}`, and
+  # `{[], nil}` whenever there is nothing to prune — in which case the
+  # document-level strip still runs, which is strictly better than refusing an
+  # upload because a metadata *extra* could not be read.
+  #
+  # The dump goes to a FILE, not stdout. `qpdf/1` merges stderr into stdout so a
+  # failure message is never lost, and qpdf emits `WARNING:` lines for any file
+  # whose xref it reconstructs — exactly the "damaged but readable" class the
+  # `code in [0, 3]` tolerance exists for. Read from stdout, those lines land in
+  # front of the JSON, `Jason.decode/1` fails, and the prune is skipped on
+  # precisely the files most likely to have been produced by a tool that also
+  # left `/PieceInfo` behind.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp object_prune_args(path) do
+    json_path = Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-objects.json")
+
+    try do
+      with {_out, code} when code in [0, 3] <-
+             qpdf(["--json-output=2", "--json-stream-data=none", path, json_path]),
+           {:ok, raw} <- File.read(json_path),
+           {:ok, decoded} <- Jason.decode(raw),
+           {:ok, pruned} when pruned != %{} <- prune_objects(decoded),
+           update <- %{"qpdf" => [header(decoded), pruned]},
+           update_path <-
+             Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-prune.json"),
+           :ok <- File.write(update_path, Jason.encode!(update)) do
+        {["--update-from-json=" <> update_path], update_path}
+      else
+        # Distinguished from "nothing to prune" so a silent skip is visible.
+        {:ok, empty} when empty == %{} ->
+          {[], nil}
+
+        other ->
+          Logger.warning(
+            "PDF object prune unavailable for #{path} (#{inspect(other)}); " <>
+              "document-level strip still applied"
+          )
+
+          {[], nil}
+      end
+    after
+      File.rm(json_path)
+    end
+  end
+
+  defp header(%{"qpdf" => [header | _rest]}), do: header
+
+  # Every `obj:N 0 R` entry carrying a pruned key at any depth, rewritten
+  # without it.
+  defp prune_objects(%{"qpdf" => [_header, objects]}) when is_map(objects) do
+    pruned =
+      objects
+      |> Enum.flat_map(fn {key, entry} -> prune_entry(key, entry) end)
+      |> Map.new()
+
+    {:ok, pruned}
+  end
+
+  defp prune_objects(_other), do: :error
+
+  # qpdf JSON v2 has TWO object shapes, and the second one is the one that
+  # matters most in practice: a plain object is `%{"value" => dict}`, but a
+  # STREAM object is `%{"stream" => %{"dict" => dict}}` — and image and Form
+  # XObjects are streams. Those carry the original photo's XMP (photographer,
+  # GPS) and Photoshop's/Illustrator's `/PieceInfo`, so matching only `"value"`
+  # missed the most common real-world carrier while the moduledoc claimed
+  # otherwise.
+  defp prune_entry("obj:" <> _rest = key, %{"value" => dict}) when is_map(dict) do
+    case prune_dict(dict) do
+      ^dict -> []
+      cleaned -> [{key, %{"value" => cleaned}}]
+    end
+  end
+
+  defp prune_entry("obj:" <> _rest = key, %{"stream" => %{"dict" => dict} = stream})
+       when is_map(dict) do
+    case prune_dict(dict) do
+      ^dict -> []
+      cleaned -> [{key, %{"stream" => Map.put(stream, "dict", cleaned)}}]
+    end
+  end
+
+  defp prune_entry(_key, _entry), do: []
+
+  # Recursive: `/Metadata` and `/PieceInfo` are legal on any dictionary, and a
+  # direct (inline) annotation or resource dictionary nests one a level down
+  # where a top-level `Map.drop/2` never reaches it.
+  defp prune_dict(dict) when is_map(dict) do
+    dict
+    |> Map.drop(@pruned_keys)
+    |> Map.new(fn {k, v} -> {k, prune_dict(v)} end)
+  end
+
+  defp prune_dict(list) when is_list(list), do: Enum.map(list, &prune_dict/1)
+  defp prune_dict(other), do: other
+
+  # `Port.open/2` with `:spawn_executable` execs directly rather than through a
+  # shell, so neither the program nor the argument list can be injected into.
+  # `args` is fixed flags plus paths this server generated; even a hostile
+  # *filename* would arrive as one exec argv entry, not as shell syntax.
+  #
+  # A port rather than `System.cmd/3` because the timeout has to be able to KILL
+  # the child, and only a port hands back its OS pid. Closing the port alone
+  # leaves qpdf running (#918).
   # sobelow_skip ["CI.System"]
   defp qpdf(args) do
-    task =
-      Task.async(fn ->
-        System.cmd(System.find_executable("qpdf"), args, stderr_to_stdout: true)
-      end)
+    case System.find_executable("qpdf") do
+      nil ->
+        {"qpdf not found", :enoent}
 
-    case Task.yield(task, @timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} -> result
-      _timed_out -> {"qpdf timed out after #{@timeout_ms}ms", :timeout}
+      exe ->
+        port =
+          Port.open({:spawn_executable, exe}, [
+            :binary,
+            :exit_status,
+            :stderr_to_stdout,
+            {:args, args}
+          ])
+
+        os_pid =
+          case Port.info(port, :os_pid) do
+            {:os_pid, pid} -> pid
+            _closed -> nil
+          end
+
+        collect(port, os_pid, [], System.monotonic_time(:millisecond) + @timeout_ms)
     end
+  end
+
+  # `acc` is an iodata LIST, not a binary being appended to. `acc <> chunk` in a
+  # receive loop is quadratic — it reallocates the whole accumulated output per
+  # chunk — which on a large `--json-output` dump was the difference between
+  # tens of megabytes and most of a gigabyte of resident memory, in the
+  # LiveView process handling the upload.
+  #
+  # The deadline is absolute rather than a per-message `after`: qpdf streams its
+  # output, so a per-message timeout resets on every chunk and a slow but chatty
+  # run could outlive the budget indefinitely.
+  defp collect(port, os_pid, acc, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^port, {:data, chunk}} -> collect(port, os_pid, [acc | chunk], deadline)
+      {^port, {:exit_status, code}} -> {IO.iodata_to_binary(acc), code}
+    after
+      remaining ->
+        kill(os_pid)
+        close(port)
+        drain(port)
+        {"qpdf timed out after #{@timeout_ms}ms", :timeout}
+    end
+  end
+
+  # `Port.close/1` stops delivery but does not purge what the port already sent,
+  # and this runs in the LiveView process handling the upload — `MediaLive` has
+  # no catch-all `handle_info/2`, so one stray `{port, {:data, _}}` left in the
+  # mailbox crashes the editor's media page instead of showing them the
+  # refusal. Under the previous `Task`-based design the strays died with the
+  # task; a port makes them the caller's problem.
+  defp drain(port) do
+    receive do
+      {^port, _anything} -> drain(port)
+    after
+      0 -> :ok
+    end
+  end
+
+  # SIGKILL, because the point is that the process stops now: it is holding CPU
+  # on an upload the caller has already given up on, and qpdf has no cleanup
+  # worth waiting for. Closing the port does not signal the child.
+  # sobelow_skip ["CI.System"]
+  defp kill(nil), do: :ok
+
+  defp kill(os_pid) do
+    System.cmd("kill", ["-9", to_string(os_pid)], stderr_to_stdout: true)
+    :ok
+  rescue
+    _error -> :ok
+  end
+
+  defp close(port) do
+    Port.close(port)
+    :ok
+  rescue
+    # Already closed because the child exited in the race with the timeout.
+    ArgumentError -> :ok
   end
 end
