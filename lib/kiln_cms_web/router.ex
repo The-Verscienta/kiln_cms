@@ -247,6 +247,15 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :billing_webhook
   end
 
+  # The ActivityPub inbox (#491). Same situation as a payment webhook and the
+  # same shape: no CSRF, no session, the caller is a remote server, and
+  # authorization is an HTTP Signature over the raw body (preserved by
+  # `KilnCMSWeb.Plugs.RawBodyReader`). No `:accepts` — a fediverse server sends
+  # `application/activity+json`, which Phoenix does not negotiate.
+  pipeline :activitypub_inbox do
+    plug KilnCMSWeb.Plugs.RateLimit, :api
+  end
+
   # The iframe page for an embeddable form. A page load, not a submission, so it
   # gets the generous `:delivery` ceiling rather than the tight `:form` bucket.
   # The controller replaces the CSP with `KilnCMSWeb.Embed.content_security_policy/0`,
@@ -677,6 +686,24 @@ defmodule KilnCMSWeb.Router do
     # branding lookup — so `:probe` is the right ceiling.
     get "/manifest.webmanifest", ManifestController, :show
 
+    # ActivityPub discovery (#491). Unauthenticated machine fetches of per-org
+    # documents — the same shape as the manifest above, so the same ceiling.
+    # All four 404 unless federation is on for both the deployment and the site.
+    #
+    # A single fixed `/actor` rather than Mastodon's `/users/:name`: a Kiln site
+    # is one publication, not a user directory, and a fixed path cannot be
+    # shadowed by a content type whose plural happens to collide. Declared here,
+    # ahead of the `[:browser, :delivery]` content scopes, so it wins outright.
+    get "/.well-known/webfinger", FederationController, :webfinger
+    get "/actor", FederationController, :actor
+    get "/actor/outbox", FederationController, :outbox
+    get "/actor/followers", FederationController, :followers
+
+    # Every activity this site delivers carries an object id under this path.
+    # An id that does not dereference is a broken post on the receiving side —
+    # Mastodon re-resolves objects on refresh and to confirm a Delete.
+    get "/ap/object/:id", FederationController, :object
+
     # NB `GET /live` (DB-free liveness, #816) is answered by the endpoint plug
     # `KilnCMSWeb.Plugs.Liveness` BEFORE the router — deliberately, so it never
     # reaches SetTenant's host resolution (a DB read). It is not a route here.
@@ -686,6 +713,14 @@ defmodule KilnCMSWeb.Router do
     get "/up", HealthController, :show
     # Readiness probe with DB + Oban queue-depth payload for monitoring.
     get "/ready", HealthController, :ready
+  end
+
+  # The ActivityPub inbox. Its own scope so it can skip `:accepts` and CSRF —
+  # see the `:activitypub_inbox` pipeline.
+  scope "/", KilnCMSWeb do
+    pipe_through :activitypub_inbox
+
+    post "/actor/inbox", FederationController, :inbox
   end
 
   scope "/", KilnCMSWeb do

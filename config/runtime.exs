@@ -362,6 +362,18 @@ if config_env() != :test do
     config :kiln_cms, KilnCMS.Provenance, enabled: provenance?
   end
 
+  # ActivityPub federation (#491). The deployment-wide half of a two-part gate:
+  # off here means every federation route 404s regardless of what any tenant
+  # admin has enabled. Federation makes this server sign and POST to hosts
+  # chosen by strangers who followed the site, so an operator whose egress
+  # policy forbids that must be able to say so once, centrally.
+  #
+  # `Env.fetch/1` for the same reason as above (#607): unset and unrecognized
+  # both leave the compiled default (off) alone.
+  with {:ok, federation?} <- Env.fetch("KILN_FEDERATION_ENABLED") do
+    config :kiln_cms, KilnCMS.Federation, enabled: federation?
+  end
+
   # Mount the signing key as a file instead of exporting it. The key is a
   # multi-line PKCS#1 PEM and most .env parsers (docker-compose included) do not
   # carry embedded newlines, so a file is the route .env.example already
