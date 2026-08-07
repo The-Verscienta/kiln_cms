@@ -157,6 +157,7 @@ defmodule KilnCMS.MixProject do
       "docs/beta-testing.md": [],
       "docs/staging-environments.md": [],
       "docs/media-pipeline.md": [],
+      "docs/content-portability.md": [],
       "docs/direct-email-delivery.md": [],
       "docs/data-flows.md": [],
       # Security & access
@@ -263,6 +264,7 @@ defmodule KilnCMS.MixProject do
         "docs/beta-testing.md",
         "docs/staging-environments.md",
         "docs/media-pipeline.md",
+        "docs/content-portability.md",
         "docs/direct-email-delivery.md",
         "docs/data-flows.md"
       ],
@@ -417,6 +419,11 @@ defmodule KilnCMS.MixProject do
       {:phoenix_html, "~> 4.1"},
       {:corsica, "~> 2.1"},
       {:html_sanitize_ex, "~> 1.4"},
+      # Reads legacy HTML back into structured prose for the importers (#487):
+      # a WordPress body is a blob of HTML, and Portable Text is the only shape
+      # this CMS stores. Backed by mochiweb (already here through
+      # html_sanitize_ex) rather than a NIF, so it adds no build weight.
+      {:floki, "~> 0.38"},
       # Fire-time syntax highlighting for rich-text code blocks (#503). Each
       # lexer is its own OTP app that registers language names with
       # Makeup.Registry on boot — see KilnCMS.Highlight.

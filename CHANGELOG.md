@@ -29,6 +29,73 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Bulk content import/export, and a WordPress (WXR) importer.** Kiln had no
+  "get my content in or out" path — the mix-task inventory could scaffold code
+  and move rows between internal types, but structured export existed only for
+  GDPR and governance trails. Three tasks close that (#487):
+
+  ```
+  mix kiln.import.wordpress export.xml --dry-run
+  mix kiln.export.content --type post --out posts.json
+  mix kiln.import.content posts.json
+  ```
+
+  The WordPress importer maps posts and pages to content types, converts the
+  body HTML to typed blocks, resolves both taxonomies, sideloads referenced
+  images into the media library, and — the part that makes a migration survive
+  contact with search engines — **turns every old permalink into a redirect**.
+  With #472's 404 capture, that completes the "switch from WordPress" path.
+
+  Everything is written through the types' ordinary Ash create actions and the
+  workflow state machine, never raw inserts: slug generation, custom fields,
+  sanitization, tenancy and policy all apply, and an imported live post fires
+  and versions exactly like a hand-authored one. An import can therefore never
+  produce content its operator was not allowed to create.
+
+  `--dry-run` runs the whole plan with no writes, through the same code path as
+  a real run, so it cannot describe something the run would not do. Re-running
+  is safe: an existing `(slug, locale)` is skipped, which also makes resuming
+  after a partial run cheap. There is deliberately **no overwrite mode** —
+  silently replacing edits an author made after the first import is not
+  recoverable through any UI.
+
+  Two failure modes are reported rather than left to the database. A slug held
+  by a **trashed** record is named as such (`destroy` is a soft delete, so the
+  row and its unique index survive while the ordinary read hides it) instead of
+  surfacing a bare "slug has already been taken". And an image that cannot be
+  fetched costs you the image, not the post — the block keeps the source URL
+  and the failure is listed.
+
+- **`KilnCMS.Blocks.Html`** reads legacy HTML back into Portable Text and typed
+  blocks — the direction `Blocks.PortableText` did not go. It routes through
+  TipTap JSON rather than building PT directly, so marks, nested lists, tables
+  and link `markDefs` come from the one implementation delivery, search and the
+  editor already agree on. It handles the two habits any HTML of WordPress
+  vintage has: `wpautop` (classic bodies have no `<p>` tags at all — parsing
+  them literally yields one enormous paragraph) and Gutenberg's `<!-- wp: -->`
+  comment delimiters. `[caption]` becomes an image caption, `[embed]` becomes
+  an embed block, and other shortcodes are removed rather than left as literal
+  `[gallery ids="1,2"]` text in the middle of a sentence.
+
+### Changed
+
+- **The media ingest pipeline is one module.** Sniff → size-cap → strip →
+  store → `MediaItem` → enqueue derivation lived twice inside
+  `KilnCMSWeb.MediaLive` (direct upload, Unsplash import); the importers are
+  the third caller, and it is a sequence where a divergence is silent rather
+  than loud — a path that forgets `strip_metadata/2` still produces a working
+  image, it just ships the photographer's GPS coordinates with it.
+  `KilnCMS.Media.Ingest` now owns it, and `MediaLive` keeps only the
+  LiveView-shaped edges. No behaviour change to uploads.
+
+  Its new `store_url/2` is the only part that touches the network, and it is
+  hardened for its callers: importers hand it URLs from a file a user uploaded,
+  so it runs every URL through the SSRF checks (loopback, private ranges, cloud
+  metadata endpoints), refuses redirects rather than following them somewhere
+  that was never validated, and streams to disk through a byte counter — a
+  `Content-Length` is a claim the remote server makes, and a size check that
+  runs after the download has already lost.
+
 - **The editor PWA's web app manifest is localized.** `name`, `description` and
   both shortcut labels are translated, so the install dialog, app list, splash
   screen and long-press shortcut menu appear in the editor's language. The root
