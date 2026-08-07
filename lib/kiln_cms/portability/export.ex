@@ -48,9 +48,12 @@ defmodule KilnCMS.Portability.Export do
 
   @version 1
 
-  # Read in pages rather than one unbounded query: an export is the one
-  # operation guaranteed to touch every row, and a site with 50k records would
-  # otherwise materialize all of them (with block trees) in one list.
+  # Read in pages rather than one unbounded query, so no single SQL round trip
+  # has to return every row. Note this bounds the QUERY, not the result: the
+  # envelope is assembled in memory and encoded as one binary, so a very large
+  # site is still a very large allocation. `--type` and `--limit` are the tools
+  # for that; a genuinely streaming export would have to give up the single
+  # JSON document.
   @page_size 200
 
   @typedoc "The JSON-serializable envelope."
@@ -80,7 +83,7 @@ defmodule KilnCMS.Portability.Export do
          "types" => Enum.map(resolved, &to_string(&1.type))
        },
        "records" => records,
-       "media" => media_manifest(records)
+       "media" => media_manifest(records, opts)
      }}
   end
 
@@ -238,7 +241,7 @@ defmodule KilnCMS.Portability.Export do
   # and image/gallery blocks. Exporting the whole library instead would make
   # the manifest mostly noise, and the importer only ever fetches what a block
   # points at.
-  defp media_manifest(records) do
+  defp media_manifest(records, opts) do
     ids =
       records
       |> Enum.flat_map(&referenced_media_ids/1)
@@ -247,7 +250,7 @@ defmodule KilnCMS.Portability.Export do
 
     ids
     |> Enum.chunk_every(100)
-    |> Enum.flat_map(&fetch_media/1)
+    |> Enum.flat_map(&fetch_media(&1, opts))
   end
 
   defp referenced_media_ids(record) do
@@ -273,11 +276,19 @@ defmodule KilnCMS.Portability.Export do
 
   defp block_media_ids(_other), do: []
 
-  defp fetch_media(ids) do
-    KilnCMS.CMS.list_media_items!(
-      authorize?: false,
-      query: [filter: [id: [in: ids]]]
-    )
+  # Under the caller's own actor and tenant, like every other read here.
+  #
+  # This was `authorize?: false` with no tenant, which failed in two directions
+  # at once. With `strict_tenancy` on (the production default) `MediaItem` is
+  # `global?: false`, so a tenant-less read RAISES and the rescue below turned
+  # every production export's manifest into `[]` — silently losing every
+  # featured image on every round trip. And in a fail-open build the same read
+  # spanned every organization *and* bypassed the read policy that gates
+  # non-public items, handing a viewer the storage URLs of media they cannot
+  # see. The moduledoc's promise that there is no `authorize?: false` here is
+  # now true.
+  defp fetch_media(ids, opts) do
+    KilnCMS.CMS.list_media_items!(scope(opts) ++ [query: [filter: [id: [in: ids]]]])
     |> Enum.map(
       &%{
         "id" => &1.id,

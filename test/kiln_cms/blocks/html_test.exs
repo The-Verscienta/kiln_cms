@@ -261,6 +261,69 @@ defmodule KilnCMS.Blocks.HtmlTest do
     end
   end
 
+  describe "regressions" do
+    # `collect_descendants/1` is fully recursive, so the inner table's rows were
+    # hoisted into the OUTER table and rendered again inside the cell.
+    test "a table nested in a cell does not duplicate its rows" do
+      html = "<table><tr><td><table><tr><td>inner</td></tr></table></td></tr></table>"
+      [outer] = Html.to_portable_text(html)
+
+      assert length(outer["rows"]) == 1
+      assert html |> text() |> String.split("inner") |> length() == 2
+    end
+
+    test "tbody/thead wrappers still contribute their rows" do
+      [table] =
+        Html.to_portable_text(
+          "<table><thead><tr><th>H</th></tr></thead><tbody><tr><td>B</td></tr></tbody></table>"
+        )
+
+      assert length(table["rows"]) == 2
+    end
+
+    # Gutenberg emits a gallery as a figure of figures; `Enum.find` kept the
+    # first image and dropped the rest with no entry in any failure report.
+    test "a Gutenberg gallery keeps every image" do
+      html = """
+      <figure class="wp-block-gallery">
+        <figure class="wp-block-image"><img src="https://x/a.jpg"><figcaption>A</figcaption></figure>
+        <figure class="wp-block-image"><img src="https://x/b.jpg"><figcaption>B</figcaption></figure>
+      </figure>
+      """
+
+      images = blocks(html) |> Enum.filter(&(&1["type"] == "image"))
+
+      assert Enum.map(images, & &1["value"]["url"]) == ["https://x/a.jpg", "https://x/b.jpg"]
+      assert Enum.map(images, & &1["value"]["caption"]) == ["A", "B"]
+    end
+
+    # Restoring token 0 reintroduced token 1's literal text, and token 1's
+    # global replace then hit it too — replacing a code block with a duplicate
+    # of another one.
+    test "a <pre> containing a placeholder token is not corrupted" do
+      html = "<pre>A &lt;!--kiln-pre-1--&gt; B</pre>\n\n<pre>SECOND</pre>"
+      out = text(html)
+
+      assert out =~ "SECOND"
+      assert out |> String.split("SECOND") |> length() == 2
+    end
+
+    # An unmatched `[opener]` made the backreferenced regex rescan to
+    # end-of-input for every occurrence — quadratic, and hours on a real body.
+    test "many unmatched shortcode openers stay fast" do
+      html = String.duplicate(~s([gallery ids="1,2,3"] some text ), 4_000)
+
+      {micros, result} = :timer.tc(fn -> Html.to_portable_text(html) end)
+
+      assert is_list(result)
+      assert micros < 5_000_000, "took #{div(micros, 1000)}ms"
+    end
+
+    test "a bounded paired shortcode still unwraps its content" do
+      assert text("[su_note]kept[/su_note]") =~ "kept"
+    end
+  end
+
   describe "empty and nil input" do
     test "nil and empty produce nothing" do
       assert Html.to_portable_text(nil) == []

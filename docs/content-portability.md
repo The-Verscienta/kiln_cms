@@ -21,11 +21,13 @@ mix kiln.import.wordpress export.xml --dry-run
 
 A dry run performs every read — resolving slugs, matching taxonomy, deciding
 what each record becomes — and no writes, then prints the same report a real
-run prints. The plan and the run come from one code path, so a dry run cannot
-describe something the real run would not do.
+run prints. It shares the collision check with the real run, so the two cannot
+disagree about what already exists.
 
-The one number a dry run *under*-reports is media: it deliberately fetches
-nothing, so it reports what it `would_import` rather than what is reachable.
+It is a plan, **not a validation**. No changeset is built, so a record the
+create action would ultimately reject is still counted as importable — a dry
+run can over-report. Media is the reverse: it fetches nothing, so it reports
+what it `would_import` rather than what is reachable.
 
 ## Migrating from WordPress
 
@@ -55,6 +57,7 @@ mix kiln.import.wordpress wordpress.xml
 | `<link>` (the old permalink) | a Redirect at that path |
 | `wp:status` `publish` | published, through the state machine |
 | `wp:status` anything else | draft |
+| `wp:post_date_gmt` | `published_at`, restored after the publish transition |
 
 ### Deliberate decisions worth knowing
 
@@ -78,6 +81,19 @@ The first is kept.
 **Redirects are built from the permalink's path**, not the whole URL — the old
 host is by definition not this one. An old home page (`/`) is skipped: pointing
 the new site's root at one imported post would break it.
+
+**Publication dates are restored.** `published_at` is not an authored field —
+the `:publish` transition stamps `utc_now` — so the importer puts the source
+date back afterwards. Without that, a decade of archives all land in one
+arbitrary-ordered second and feeds and sitemaps inherit it. The restore mints
+one extra version per record, which is an honest record that the import set it.
+
+**Media variants are generated asynchronously, by a running app node.** The
+importer enqueues `VariantWorker` jobs; it does not wait for them. If you run
+the import in a one-off container with nothing else consuming the `media`
+queue, the jobs sit `available` and imported images render full-size until a
+node picks them up. Run the import where the app is running, or drain the queue
+afterwards.
 
 ### What is not imported
 
@@ -133,6 +149,20 @@ unusable at any real site's scale, and the importer sideloads from the
 manifest — which does mean **the source must still be reachable** when you
 import, or `--skip-media` will keep the blocks pointing at it.
 
+### Scale
+
+The WXR parser reads the whole file into memory and hands it to `xmerl`, which
+expands it to a charlist first — roughly **16 bytes per source byte** before the
+document tree is built on top. That puts the practical ceiling somewhere around
+50 MB of XML on a normal box; past that you will hit an OOM kill with no partial
+progress. WordPress's exporter can split a large site into several files, and
+that is the supported way to import one — the importer is safe to run once per
+file, because re-running skips what already landed.
+
+Media sideloading is serial and runs before any record is written, so a site
+with thousands of images spends a long time apparently doing nothing. `--limit`
+is the way to try a slice first.
+
 ### Uses
 
 - Moving a site between Kiln instances
@@ -170,9 +200,12 @@ authorization — an export endpoint that bypassed policy would be the most
 efficient exfiltration primitive in the system.
 
 Media sideloading fetches URLs that came from a file someone uploaded, so it
-runs them through the same SSRF checks as outbound webhooks (loopback, private
-ranges, cloud metadata endpoints), refuses redirects rather than following them
-somewhere never validated, and caps the download as it streams.
+goes through `KilnCMS.SafeFetch` — the same path as oEmbed resolution. That
+resolves the host once, checks the answer, and connects to that *literal
+address* with SNI pointed back at the real name, which is what stops a name
+being re-resolved to `169.254.169.254` between the check and the connection.
+Redirects are refused rather than followed (a followed redirect is a fresh
+resolution the pin never sees), and the body is capped.
 
 ## Extending to another source
 

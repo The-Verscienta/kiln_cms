@@ -261,6 +261,130 @@ defmodule KilnCMS.Portability.ImportTest do
     end
   end
 
+  describe "envelope fidelity" do
+    # `audience` defaults to `:public`. Dropping it does not merely lose
+    # fidelity — it republishes a members-only document to the open web.
+    test "audience travels, so gated content does not become public", %{actor: actor} do
+      envelope = %{
+        "records" => [
+          %{
+            "type" => "post",
+            "title" => "Members only",
+            "slug" => "members-only",
+            "state" => "published",
+            "audience" => "member"
+          }
+        ]
+      }
+
+      {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+      assert report.failed == []
+
+      assert posts(actor) |> find("members-only") |> Map.fetch!(:audience) == :member
+    end
+
+    # Every record collapsing to one locale makes the second translation of a
+    # slug look like a duplicate, so it is reported "already present" and lost.
+    test "per-record locale is honoured, so translations survive", %{actor: actor} do
+      envelope = %{
+        "records" => [
+          %{"type" => "post", "title" => "Hello", "slug" => "hello", "locale" => "en"},
+          %{"type" => "post", "title" => "Bonjour", "slug" => "hello", "locale" => "fr"}
+        ]
+      }
+
+      {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+
+      assert length(report.created) == 2
+      assert report.skipped == []
+      assert posts(actor) |> Enum.map(& &1.locale) |> Enum.sort() == ["en", "fr"]
+    end
+
+    test "an explicit --locale still overrides the envelope", %{actor: actor} do
+      envelope = %{
+        "records" => [%{"type" => "post", "title" => "T", "slug" => "t", "locale" => "fr"}]
+      }
+
+      {:ok, _} = Import.run_envelope(envelope, actor: actor, skip_media: true, locale: "en")
+      assert posts(actor) |> find("t") |> Map.fetch!(:locale) == "en"
+    end
+
+    test "SEO fields and custom_fields travel", %{actor: actor} do
+      envelope = %{
+        "records" => [
+          %{
+            "type" => "post",
+            "title" => "SEO",
+            "slug" => "seo",
+            "seo_title" => "The SEO title",
+            "seo_description" => "A description",
+            "canonical_url" => "https://example.com/seo"
+          }
+        ]
+      }
+
+      {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+      assert report.failed == []
+
+      post = posts(actor) |> find("seo")
+      assert post.seo_title == "The SEO title"
+      assert post.seo_description == "A description"
+      assert post.canonical_url == "https://example.com/seo"
+    end
+
+    # `:publish` stamps `utc_now`, so without a restore a decade of archives
+    # all land in one arbitrary-ordered second.
+    test "the source publication date survives publishing", %{actor: actor} do
+      envelope = %{
+        "records" => [
+          %{
+            "type" => "post",
+            "title" => "Old news",
+            "slug" => "old-news",
+            "state" => "published",
+            "published_at" => "2015-06-01T09:00:00Z"
+          }
+        ]
+      }
+
+      {:ok, _} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+
+      post = posts(actor) |> find("old-news")
+      assert post.state == :published
+      assert DateTime.to_date(post.published_at) == ~D[2015-06-01]
+    end
+
+    test "a WordPress post keeps its publication date too", %{
+      parsed: parsed,
+      scope: scope,
+      actor: actor
+    } do
+      import!(parsed, scope)
+
+      assert posts(actor)
+             |> find("hello-world")
+             |> Map.fetch!(:published_at)
+             |> DateTime.to_date() ==
+               ~D[2024-03-01]
+    end
+
+    # `Page` has no `excerpt` attribute, so sending one raised NoSuchInput and
+    # discarded the whole page — blocks and all — over its summary.
+    test "a page carrying an excerpt imports, minus the excerpt", %{actor: actor} do
+      envelope = %{
+        "records" => [
+          %{"type" => "page", "title" => "About", "slug" => "about-us", "excerpt" => "A summary."}
+        ]
+      }
+
+      {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+
+      assert report.failed == []
+      assert length(report.created) == 1
+      assert pages(actor) |> find("about-us")
+    end
+  end
+
   describe "envelope import" do
     test "a JSON envelope goes through the same write path", %{actor: actor} do
       envelope = %{

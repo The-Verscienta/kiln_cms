@@ -166,12 +166,32 @@ defmodule KilnCMS.Blocks.Html do
   defp strip_gutenberg_comments(html),
     do: String.replace(html, ~r{<!--\s*/?wp:.*?-->}s, "")
 
+  # A shortcode body longer than this is not a shortcode body — it is an
+  # unmatched opener with the rest of the post behind it. Compiled here rather
+  # than written as a `~r{}` sigil because the `{0,n}` quantifier collides with
+  # the sigil's own brace delimiters.
+  @caption_re Regex.compile!(
+                "\\[caption[^\\]]*\\](.{0,20000}?)\\[/caption\\]",
+                "s"
+              )
+  @paired_shortcode_re Regex.compile!(
+                         "\\[(\\w[\\w-]*)[^\\]]*\\](.{0,20000}?)\\[/\\1\\]",
+                         "s"
+                       )
+
   # `[caption id="…" width="…"]<img …/>Some caption[/caption]` — the caption is
   # bare text after the image, which would otherwise be parsed as a sibling
   # text node and land in the following paragraph. Rewrite to the `<figure>`
   # the same markup means today.
   defp expand_captions(html) do
-    Regex.replace(~r{\[caption[^\]]*\](.*?)\[/caption\]}s, html, fn _full, inner ->
+    if String.contains?(html, "[/caption]"),
+      do: do_expand_captions(html),
+      else: html
+  end
+
+  # Bounded for the same reason as `strip_paired_shortcodes/1`.
+  defp do_expand_captions(html) do
+    Regex.replace(@caption_re, html, fn _full, inner ->
       case Regex.run(~r{(<img[^>]*>|<a[^>]*>.*?</a>)(.*)}s, inner) do
         [_, media, caption] ->
           "<figure>#{media}<figcaption>#{String.trim(caption)}</figcaption></figure>"
@@ -200,11 +220,28 @@ defmodule KilnCMS.Blocks.Html do
   # Everything else. Left in place these render as literal `[gallery ids="1,2"]`
   # text mid-paragraph, which is worse than absent: it looks like content.
   # Paired shortcodes keep their inner content, self-closing ones just go.
+  #
+  # The paired pass is BOUNDED (`{0,@shortcode_span}?`) and skipped entirely
+  # when the document has no closing tag. A backreference defeats any literal
+  # prefilter, so an unbounded lazy `(.*?)` rescans to end-of-input for every
+  # opener that never closes — and `[gallery ids="1,2"]` (the normal
+  # self-closing form) and `[1]`-style footnote markers are exactly that.
+  # Measured before the bound: 256 KB of such markers took 68 seconds, and a
+  # 5 MB body — well within one WordPress post — extrapolated to hours, spent
+  # before a single record was written.
   defp strip_shortcodes(html) do
     html
-    |> String.replace(~r{\[(\w[\w-]*)[^\]]*\](.*?)\[/\1\]}s, "\\2")
+    |> strip_paired_shortcodes()
     |> String.replace(~r{\[/?\w[\w-]*[^\]]*\]}, "")
   end
+
+  defp strip_paired_shortcodes(html) do
+    if String.contains?(html, "[/"),
+      do: String.replace(html, paired_shortcode_regex(), "\\2"),
+      else: html
+  end
+
+  defp paired_shortcode_regex, do: @paired_shortcode_re
 
   defp maybe_autop(html, false), do: html
   defp maybe_autop(html, _true), do: autop(html)
@@ -235,17 +272,33 @@ defmodule KilnCMS.Blocks.Html do
     |> restore_pre(pres)
   end
 
+  # A marker string the document does not already contain. Without this, a code
+  # block whose SOURCE holds the literal text of a later placeholder is replaced
+  # by a duplicate of that block when the tokens are restored — restoring token 0
+  # reintroduces token 1's text, and token 1's global replace then hits it too.
+  # Trivially reachable from an uploaded file, and it corrupts the document
+  # rather than merely losing formatting.
+  defp unused_marker(html, suffix \\ "") do
+    candidate = "kiln-pre#{suffix}"
+
+    if String.contains?(html, candidate),
+      do: unused_marker(html, suffix <> "x"),
+      else: candidate
+  end
+
   # `<pre>` is the one element where newlines are content. Swap each occurrence
   # out for a positional placeholder before the newline rewriting and put it
   # back after. The token is indexed rather than content-hashed so two
   # identical code blocks in one document stay two blocks.
   defp protect_pre(html) do
+    marker = unused_marker(html)
+
     {parts, replaced} =
       ~r{<pre\b.*?</pre>}s
       |> Regex.scan(html)
       |> Enum.with_index()
       |> Enum.reduce({[], html}, fn {[match], idx}, {parts, acc} ->
-        token = "<!--kiln-pre-#{idx}-->"
+        token = "<!--#{marker}-#{idx}-->"
         # `replace/4` with `global: false` so only THIS occurrence is consumed;
         # the next identical match then finds the following one.
         {[{token, match} | parts], String.replace(acc, match, "\n\n#{token}\n\n", global: false)}
@@ -290,10 +343,14 @@ defmodule KilnCMS.Blocks.Html do
   defp split_top_level({tag, _attrs, children}) when tag in @transparent,
     do: Enum.flat_map(children, &split_top_level/1)
 
+  # A figure whose children are themselves figures is a Gutenberg **gallery**,
+  # not one image. Recursing rather than picking the first match is the whole
+  # difference between importing a ten-image gallery and importing its first
+  # image with the others silently gone.
   defp split_top_level({"figure", _attrs, children} = node) do
-    case figure_parts(children) do
-      {nil, _caption} -> [{:prose, node}]
-      {media, caption} -> [{:media, media, caption}]
+    case Enum.filter(children, &match?({"figure", _, _}, &1)) do
+      [] -> single_figure(node, children)
+      nested -> Enum.flat_map(nested, &split_top_level/1)
     end
   end
 
@@ -318,6 +375,13 @@ defmodule KilnCMS.Blocks.Html do
   end
 
   defp split_top_level(node), do: [{:prose, node}]
+
+  defp single_figure(node, children) do
+    case figure_parts(children) do
+      {nil, _caption} -> [{:prose, node}]
+      {media, caption} -> [{:media, media, caption}]
+    end
+  end
 
   defp link_only_paragraph({"a", attrs, children} = link, node) do
     href = attr(attrs, "href")
@@ -483,8 +547,7 @@ defmodule KilnCMS.Blocks.Html do
   defp block_node({"table", _attrs, children}) do
     rows =
       children
-      |> collect_descendants()
-      |> Enum.filter(&match?({"tr", _, _}, &1))
+      |> own_rows()
       |> Enum.map(&table_row/1)
 
     if rows == [], do: [], else: [%{"type" => "table", "content" => rows}]
@@ -524,6 +587,19 @@ defmodule KilnCMS.Blocks.Html do
   end
 
   defp block_node(_other), do: []
+
+  # This table's OWN rows: direct children, plus those of a `tbody`/`thead`/
+  # `tfoot` wrapper. Deliberately not `collect_descendants/1`, which is fully
+  # recursive — a table nested inside a cell had its rows hoisted into the
+  # outer table AND rendered again inside the cell, so every inner row appeared
+  # twice. Legacy WordPress layout markup nests tables routinely.
+  defp own_rows(children) do
+    Enum.flat_map(children, fn
+      {"tr", _, _} = row -> [row]
+      {section, _, kids} when section in ["tbody", "thead", "tfoot"] -> own_rows(kids)
+      _other -> []
+    end)
+  end
 
   defp list_node(type, children) do
     items =

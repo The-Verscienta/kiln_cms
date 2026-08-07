@@ -88,13 +88,14 @@ migration, a rewritten column, a dropped config key).
   `KilnCMS.Media.Ingest` now owns it, and `MediaLive` keeps only the
   LiveView-shaped edges. No behaviour change to uploads.
 
-  Its new `store_url/2` is the only part that touches the network, and it is
-  hardened for its callers: importers hand it URLs from a file a user uploaded,
-  so it runs every URL through the SSRF checks (loopback, private ranges, cloud
-  metadata endpoints), refuses redirects rather than following them somewhere
-  that was never validated, and streams to disk through a byte counter — a
-  `Content-Length` is a claim the remote server makes, and a size check that
-  runs after the download has already lost.
+  Its new `store_url/2` is the only part that touches the network, and it goes
+  through `KilnCMS.SafeFetch` — importers hand it URLs from a file a user
+  uploaded, which makes it the most content-chosen fetch in the system.
+  `SafeFetch` resolves the host once, checks the answer, and connects to that
+  *literal address* with SNI pointed back at the real name, so the name cannot
+  be re-resolved to `169.254.169.254` between the check and the connection;
+  redirects are refused rather than followed, and the body is capped. Uploads
+  are otherwise unchanged, including the localized per-file failure messages.
 
 - **The editor PWA's web app manifest is localized.** `name`, `description` and
   both shortcut labels are translated, so the install dialog, app list, splash

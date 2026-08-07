@@ -28,16 +28,20 @@ defmodule KilnCMS.Media.Ingest do
   `store_url/2` exists for the importers, which are handed URLs by a file the
   user uploaded — i.e. attacker-influenced input pointed at this server's own
   network position. It therefore runs every URL through
-  `KilnCMS.Webhooks.SafeUrl` (loopback, private ranges, cloud metadata
-  endpoints) and pins the response size, and it is the *only* place in the
-  ingest path that touches the network.
+  `KilnCMS.SafeFetch` — which resolves the host once, checks the answer, and
+  connects to that *literal address*, so the name cannot be re-resolved to
+  `169.254.169.254` between the check and the connection. It is the only place
+  in the ingest path that touches the network.
   """
+
+  require Logger
 
   alias KilnCMS.AVProcessor
   alias KilnCMS.CMS
   alias KilnCMS.DocumentProcessor
   alias KilnCMS.ImageProcessor
   alias KilnCMS.MediaKind
+  alias KilnCMS.SafeFetch
   alias KilnCMS.Storage
   alias KilnCMS.Webhooks.SafeUrl
 
@@ -49,9 +53,12 @@ defmodule KilnCMS.Media.Ingest do
   @max_audio_size 100_000_000
   @max_captions_size 2_000_000
 
-  # A remote fetch is bounded by the largest thing this pipeline would accept
-  # anyway; past that the connection is dropped rather than buffered.
-  @max_download_size @max_video_size
+  # Deliberately the DOCUMENT cap, not the upload ceiling. A sideloaded body is
+  # buffered in memory (`SafeFetch` returns a binary), and what an importer
+  # pulls is page imagery — accepting a 500 MB video over HTTP from a site being
+  # migrated away from would be a memory hazard in exchange for a case nobody
+  # has. Anything larger is reported as a skipped asset, which is visible.
+  @max_download_size @max_document_size
   @download_timeout 30_000
 
   @type opts :: [
@@ -116,18 +123,39 @@ defmodule KilnCMS.Media.Ingest do
     # (epic #336) — future-proof for the strict `global?: false` flip.
     args = %{media_item_id: item.id, org_id: item.org_id}
 
+    # `insert/1`, not `insert!/1`. A bulk import calls this thousands of times
+    # from a mix task; one Oban/DB hiccup raising here would abort the run
+    # before its report is printed, losing the record of everything already
+    # created. A missing derivation job costs variants, which are re-derivable.
     cond do
       MediaKind.playable?(item.content_type) ->
-        args |> KilnCMS.Media.AVWorker.new() |> Oban.insert!()
-        :ok
+        insert_job(KilnCMS.Media.AVWorker.new(args), item)
 
       MediaKind.of(item.content_type) == :image ->
-        args |> KilnCMS.Media.VariantWorker.new() |> Oban.insert!()
-        :ok
+        insert_job(KilnCMS.Media.VariantWorker.new(args), item)
 
       true ->
         :ok
     end
+  end
+
+  defp insert_job(changeset, item) do
+    case Oban.insert(changeset) do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Media #{item.id} stored but derivation was not queued: #{inspect(reason)}. " <>
+            "Re-queue with mix kiln.media.reprocess."
+        )
+
+        :ok
+    end
+  rescue
+    error ->
+      Logger.warning("Media #{item.id} stored but derivation was not queued: #{inspect(error)}")
+      :ok
   end
 
   @doc "The per-kind byte ceiling, exposed so callers can advertise the same numbers."
@@ -252,7 +280,13 @@ defmodule KilnCMS.Media.Ingest do
         # Reclaim the blob: the row is what makes it reachable, so without this
         # a refused create leaves bytes nothing will ever reference or delete.
         Storage.delete(key)
-        {:error, reason}
+
+        # `:create_failed`, not the raw Ash error. `MediaLive` maps this atom to
+        # a localized "couldn't be saved" — handing it the struct instead sent
+        # it to the catch-all, which tells an editor their file was "not a
+        # supported file" when it was refused by policy or a validation.
+        Logger.warning("Media item create refused: #{inspect(reason)}")
+        {:error, :create_failed}
     end
   end
 
@@ -284,23 +318,24 @@ defmodule KilnCMS.Media.Ingest do
     end
   end
 
-  # Streamed to disk through a collector that counts as it goes, rather than
-  # buffered: `Content-Length` is a claim the remote server makes, and the
-  # importer is pointed at URLs from a file someone uploaded. A server that
-  # streams forever would otherwise fill the disk before any size check ran —
-  # `check_size/2` only sees a file that finished downloading.
+  # `SafeFetch`, not a bare `Req.get`. Validating a hostname and then handing
+  # that *hostname* to an HTTP client re-resolves it at connect time, which is a
+  # DNS-rebinding hole: an attacker controlling the name answers with a public
+  # address during validation and `169.254.169.254` a millisecond later. This is
+  # the most content-chosen fetch in the system — the URLs come out of a WXR
+  # file someone uploaded — so it uses the module that resolves once, checks,
+  # and connects to the literal address with SNI pointed back at the real name.
+  # `SafeFetch` also refuses redirects by default (a followed redirect is a
+  # fresh resolution the pin never sees) and enforces `:max_bytes` itself.
   #
   # sobelow_skip ["Traversal.FileModule"]
   defp download(url) do
-    path = Path.join(System.tmp_dir!(), "kiln-ingest-#{Ecto.UUID.generate()}")
+    case SafeFetch.get(url, max_bytes: @max_download_size, receive_timeout: @download_timeout) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        write_temp(body)
 
-    case File.open(path, [:write, :binary]) do
-      {:ok, file} ->
-        try do
-          fetch_into(url, file, path)
-        after
-          File.close(file)
-        end
+      {:ok, %{status: status}} ->
+        {:error, {:http_status, status}}
 
       {:error, reason} ->
         {:error, reason}
@@ -308,47 +343,12 @@ defmodule KilnCMS.Media.Ingest do
   end
 
   # sobelow_skip ["Traversal.FileModule"]
-  defp fetch_into(url, file, path) do
-    result =
-      Req.get(url,
-        into: capped_collector(file),
-        receive_timeout: @download_timeout,
-        retry: false,
-        # A redirect is re-resolved by the client, which would step around the
-        # SafeUrl check performed on the URL we were given. Refuse rather than
-        # follow: the importer records a visible skip, where a followed
-        # redirect to 169.254.169.254 would not be.
-        redirect: false
-      )
+  defp write_temp(body) do
+    path = Path.join(System.tmp_dir!(), "kiln-ingest-#{Ecto.UUID.generate()}")
 
-    case result do
-      {:ok, %Req.Response{private: %{kiln_ingest_too_large: true}}} ->
-        File.rm(path)
-        {:error, :too_large}
-
-      {:ok, %Req.Response{status: status}} when status in 200..299 ->
-        {:ok, path}
-
-      {:ok, %Req.Response{status: status}} ->
-        File.rm(path)
-        {:error, {:http_status, status}}
-
-      {:error, reason} ->
-        File.rm(path)
-        {:error, reason}
-    end
-  end
-
-  defp capped_collector(file) do
-    fn {:data, data}, {req, resp} ->
-      written = Map.get(resp.private, :kiln_ingest_written, 0) + byte_size(data)
-
-      if written > @max_download_size do
-        {:halt, {req, Req.Response.put_private(resp, :kiln_ingest_too_large, true)}}
-      else
-        IO.binwrite(file, data)
-        {:cont, {req, Req.Response.put_private(resp, :kiln_ingest_written, written)}}
-      end
+    case File.write(path, body) do
+      :ok -> {:ok, path}
+      {:error, reason} -> {:error, reason}
     end
   end
 

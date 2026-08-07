@@ -210,6 +210,80 @@ defmodule KilnCMS.Portability.ExportTest do
     end
   end
 
+  describe "media manifest" do
+    setup %{actor: actor} do
+      {:ok, item} =
+        CMS.create_media_item(
+          %{
+            filename: "pic.jpg",
+            content_type: "image/jpeg",
+            storage_key: "k/pic.jpg",
+            url: "https://cdn.example.com/pic.jpg",
+            alt: "A picture"
+          },
+          actor: actor
+        )
+
+      {:ok, post} =
+        CMS.create_post(
+          %{
+            title: "With media",
+            slug: "with-media",
+            featured_image_id: item.id,
+            block_tree: [%{"_type" => "image", "url" => item.url, "media_id" => item.id}]
+          },
+          actor: actor
+        )
+
+      %{item: item, post: post}
+    end
+
+    # This read used to be `authorize?: false` with NO tenant. Under strict
+    # tenancy (the production default) that raises and a rescue turned the
+    # manifest into [] — silently losing every featured image on every round
+    # trip — while a fail-open build leaked media across orgs and past policy.
+    test "carries the media a record references", %{actor: actor, item: item} do
+      {:ok, envelope} = Export.run(:all, actor: actor)
+
+      assert [entry] = envelope["media"]
+      assert entry["id"] == item.id
+      assert entry["url"] == "https://cdn.example.com/pic.jpg"
+      assert entry["alt"] == "A picture"
+    end
+
+    test "a nested media_id is remapped on import, not left dangling", %{actor: actor, item: item} do
+      {:ok, envelope} = Export.run(:all, actor: actor)
+
+      # A gallery carries its media_ids inside a list of maps — deeper than the
+      # top-level image block the remapper used to handle.
+      envelope =
+        put_in(envelope, ["records"], [
+          %{
+            "type" => "page",
+            "title" => "Gallery page",
+            "slug" => "gallery-page",
+            "blocks" => [
+              %{
+                "type" => "gallery",
+                "value" => %{"images" => [%{"media_id" => item.id, "url" => "https://old/x.jpg"}]}
+              }
+            ]
+          }
+        ])
+
+      {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+      assert report.failed == []
+
+      page = CMS.list_pages!(actor: actor) |> Enum.find(&(&1.slug == "gallery-page"))
+      [gallery] = page.blocks
+
+      # The source uuid must be gone — it names a row the target has no copy of.
+      assert [image] = gallery.value.images
+      refute image["media_id"] == item.id
+      assert image["url"] == "https://cdn.example.com/pic.jpg"
+    end
+  end
+
   describe "authorization" do
     test "an export reads under the actor's own policies", %{actor: admin} do
       viewer = user(:viewer)
