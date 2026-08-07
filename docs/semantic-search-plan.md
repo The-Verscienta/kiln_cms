@@ -79,6 +79,36 @@ local default; an `Http` adapter (Voyage/OpenAI) stays opt-in.
   `ts_rank` sort. Reuses the read policy (published-only for anon).
 - Interfaces in `cms.ex`: `semantic_search_pages` / `semantic_search_posts`.
 
+### Relevance floor
+
+Nearest-neighbour search always returns neighbours. Sorting by distance orders
+results but never rejects any, so left alone the semantic leg answers *every*
+query with a full candidate set — and since `hybrid/3` fuses that leg in,
+"no results" becomes unreachable for the whole search. Gibberish comes back
+looking exactly as confident as a real query.
+
+`semantic_max_distance` is the ceiling that makes an empty result possible:
+
+```elixir
+config :kiln_cms, KilnCMS.Search, semantic_max_distance: 0.55
+```
+
+Default `nil` (no floor). There is no safe default to ship — pgvector's `<=>`
+runs `0` (identical) to `2` (opposed), but where *related* stops is a property
+of the model and the corpus, and instruction-tuned embedders like bge cluster
+in a narrow high-similarity band. A value tuned for one setup can silently
+empty another.
+
+To pick one, measure both directions:
+
+```elixir
+KilnCMS.Search.semantic_distances(:page, "a query that should match")
+KilnCMS.Search.semantic_distances(:page, "asdfghjkl")
+```
+
+Set the cutoff between the two. If the ranges overlap, distance alone can't
+separate your corpus — reach for `rerank: true` instead.
+
 ## Phase 3 — Hybrid fusion (+ optional rerank)
 - `KilnCMS.Search.hybrid(type, query, opts)` runs both legs (top-N each), fuses
   by **Reciprocal Rank Fusion** in Elixir, returns merged records; falls back to

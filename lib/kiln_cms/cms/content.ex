@@ -43,6 +43,10 @@ defmodule KilnCMS.CMS.Content do
   Per-type extras (custom attributes, extra actions) are declared in the using
   module as usual — Spark merges them with what this macro injects.
   """
+  # For `semantic_floor/2` below — `Ash.Query.filter/2` is a macro. Scoped to
+  # this module; the injected resource `quote` brings its own imports.
+  require Ash.Query
+
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
@@ -68,10 +72,33 @@ defmodule KilnCMS.CMS.Content do
          {:ok, vector} <- query_vector(query) do
       query
       |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+      |> semantic_floor(vector)
       |> cap_unbounded()
     else
       # Disabled, or the query couldn't be embedded — no semantic results.
       _ -> Ash.Query.limit(query, 0)
+    end
+  end
+
+  # Drop neighbours that are merely the *nearest* rather than actually related
+  # (see `KilnCMS.Search.semantic_max_distance/0`). Off unless configured, so
+  # this is inert for anyone who hasn't measured a cutoff for their model.
+  #
+  # `WHERE distance <= t ORDER BY distance LIMIT n` is pgvector's documented
+  # thresholding shape: the ORDER BY still drives the HNSW index scan and the
+  # bound is applied to the rows it walks, so this does not fall back to the
+  # exact-scan behaviour `cap_unbounded/2` exists to prevent. It can return
+  # fewer than `limit` rows — that is the entire point.
+  defp semantic_floor(query, vector) do
+    case KilnCMS.Search.semantic_max_distance() do
+      nil ->
+        query
+
+      max_distance ->
+        Ash.Query.filter(
+          query,
+          semantic_distance(query_vector: ^vector) <= ^max_distance
+        )
     end
   end
 
