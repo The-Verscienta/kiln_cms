@@ -96,4 +96,78 @@ defmodule KilnCMSWeb.ContentEditorTaskAssignmentTest do
     assert html =~ "Assign to…"
     assert html =~ "phx-click=\"task_assign_submit\""
   end
+
+  # The per-task override (#818). Three values, not two: the blank option is
+  # "whatever the site is set to", which has to survive as `nil` rather than
+  # being dropped from the attrs or coerced to a boolean.
+  describe "auto-complete-on-publish override" do
+    test "defaults to inheriting the site, and the option names what that means",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      assignee = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+      html = render_click(lv, "task_assign_open")
+      assert html =~ "On publish: complete it (site default)"
+
+      render_change(lv, "task_draft_change", %{"task_assignee_id" => assignee.id})
+      render_click(lv, "task_assign_submit")
+
+      assert [task] = CMS.list_tasks_for!("page", page.id, actor: editor)
+      assert is_nil(task.auto_complete_on_publish)
+    end
+
+    test "an explicit opt-out is stored and shown on the row", %{conn: conn} do
+      editor = authed_user(:editor)
+      assignee = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+      render_click(lv, "task_assign_open")
+      render_change(lv, "task_draft_change", %{"task_assignee_id" => assignee.id})
+      render_change(lv, "task_draft_change", %{"task_auto_complete" => "false"})
+      html = render_click(lv, "task_assign_submit")
+
+      assert [task] = CMS.list_tasks_for!("page", page.id, actor: editor)
+      assert task.auto_complete_on_publish == false
+      assert html =~ "Stays open when this publishes"
+    end
+
+    test "an explicit opt-in is stored", %{conn: conn} do
+      editor = authed_user(:editor)
+      assignee = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+      render_click(lv, "task_assign_open")
+      render_change(lv, "task_draft_change", %{"task_assignee_id" => assignee.id})
+      render_change(lv, "task_draft_change", %{"task_auto_complete" => "true"})
+      render_click(lv, "task_assign_submit")
+
+      assert [task] = CMS.list_tasks_for!("page", page.id, actor: editor)
+      assert task.auto_complete_on_publish == true
+    end
+
+    # A pushed payload is client-chosen (#764), and an unrecognised value must
+    # land on "inherit" rather than silently pinning the task either way.
+    test "an unrecognised value reads as inherit", %{conn: conn} do
+      editor = authed_user(:editor)
+      assignee = authed_user(:editor)
+      page = page!(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+      render_click(lv, "task_assign_open")
+      render_change(lv, "task_draft_change", %{"task_assignee_id" => assignee.id})
+      render_change(lv, "task_draft_change", %{"task_auto_complete" => "banana"})
+      render_click(lv, "task_assign_submit")
+
+      assert [task] = CMS.list_tasks_for!("page", page.id, actor: editor)
+      assert is_nil(task.auto_complete_on_publish)
+    end
+  end
 end

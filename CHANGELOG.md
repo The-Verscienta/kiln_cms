@@ -29,6 +29,28 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Auto-complete-on-publish is now configurable.** Publishing a piece of
+  content still completes its open editorial tasks — that was unconditional
+  since #501 — but a site can change the default and an individual task can
+  override it (#818).
+
+  The per-task half is the one neither setting serves alone: a follow-up task
+  deliberately outliving the publish it hangs off. `Task.auto_complete_on_publish`
+  is a **three-valued** field, where `nil` means "whatever the site is set to"
+  rather than "no". So flipping the site setting moves every task that hasn't
+  been pinned, instead of only affecting ones created afterwards.
+
+  The site default lives on `/editor/tasks`, stated for every editor (the task
+  rows explain what publishing will do to them) and changeable only by an admin
+  — the resource policy draws that line, not the route, the same way
+  `/editor/links` does. The per-task override is a select in the content
+  editor's Assignment panel.
+
+  **No behaviour change on upgrade.** The migration adds a nullable column with
+  no default, so every existing task inherits, and a site with no settings row
+  resolves to the shipped `true`. Read the pair through
+  `KilnCMS.CMS.TaskSettings` rather than either half directly — it owns the
+  precedence and resolves an absent row without writing one.
 - **`mix kiln.audit.checkpoint --audit` walks the checkpoint run's predecessor
   links, and its structural half now runs without a witness.** Each
   `chain_checkpoints` row signs its predecessor's id and a digest of its

@@ -312,6 +312,15 @@ defmodule KilnCMS.CMS do
       define :save_site_link_check, action: :save
     end
 
+    # Per-site editorial workflow settings (#818) — currently just whether
+    # publishing completes a record's open tasks. Same absent-row-is-the-default
+    # shape as `SiteLinkCheck`, read through `KilnCMS.CMS.TaskSettings`, which
+    # also applies each task's own override.
+    resource KilnCMS.CMS.SiteEditorialSettings do
+      define :list_site_editorial_settings, action: :read
+      define :save_site_editorial_settings, action: :save
+    end
+
     # One outbound URL in one document, and its last verdict (#474). Written by
     # the sweep and the check worker, both system-side; read by the report.
     resource KilnCMS.CMS.ExternalLink do
