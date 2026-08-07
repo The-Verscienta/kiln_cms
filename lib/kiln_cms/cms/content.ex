@@ -1660,8 +1660,9 @@ defmodule KilnCMS.CMS.Content do
           change transition_state(:archived)
           # Archiving a *published* record must tear down its published version and
           # artifacts exactly as `:unpublish` does — otherwise they orphan (no race
-          # needed, #879 pt 3). Both no-op when archiving a draft/in_review record
-          # (nothing published to clear).
+          # needed, #879 pt 3). Both are harmless when archiving a draft/in_review
+          # record: there are no artifacts to purge, and `ClearPublishedVersion`
+          # writes a nil `published_version_id` that was already nil.
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
         end

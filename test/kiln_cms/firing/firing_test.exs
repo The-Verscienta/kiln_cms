@@ -297,6 +297,42 @@ defmodule KilnCMS.Firing.FiringTest do
     end
   end
 
+  describe "archive (#879)" do
+    test "archiving a published record clears its version and purges artifacts" do
+      actor = admin()
+      org = KilnCMS.Accounts.default_org_id()
+      page = published_page(actor)
+
+      # A published record has a recorded published version and live artifacts.
+      assert {:ok, _} = Engine.read(org, :page, page.id, :web)
+      refute is_nil(CMS.get_page!(page.id, actor: actor).published_version_id)
+
+      archived = CMS.archive_page!(page, actor: actor)
+      assert archived.state == :archived
+
+      # Same teardown as unpublish — otherwise the artifacts (and the published
+      # version pointer) would orphan.
+      reloaded = CMS.get_page!(page.id, actor: actor)
+      assert is_nil(reloaded.published_version_id)
+      assert {:ok, []} = Firing.artifacts_for(:page, page.id, authorize?: false)
+      assert :error = Engine.read(org, :page, page.id, :web)
+    end
+
+    test "archiving a draft is clean — nothing to clear" do
+      actor = admin()
+
+      draft =
+        CMS.create_page!(
+          %{title: "Draft", slug: slug(), blocks: [%{type: :heading, content: "Hi", order: 0}]},
+          actor: actor
+        )
+
+      archived = CMS.archive_page!(draft, actor: actor)
+      assert archived.state == :archived
+      assert is_nil(archived.published_version_id)
+    end
+  end
+
   describe "preview mode" do
     test "compiles to memory without persisting artifacts" do
       actor = admin()
