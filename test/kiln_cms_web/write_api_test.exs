@@ -318,6 +318,64 @@ defmodule KilnCMSWeb.WriteApiTest do
 
       assert CMS.get_post!(published.id, actor: admin).state == :draft
     end
+
+    # #879: the other three routed transitions inherited `default_accept` (17
+    # content attributes) just as `:return_to_draft` did before #873 — a
+    # populated `attributes` object would write content while skipping the
+    # optimistic lock, slug/SEO validations, redirect record, search text and
+    # embeddings. Each now carries `accept []`. Same shape as the return-to-draft
+    # case above: refused outright, or transitions with the attributes ignored —
+    # never "200 and the title changed".
+    test "submit-for-review writes no content attributes (#879)", %{key: key, post: post} do
+      {status, _} =
+        patch_json(
+          "/api/json/posts/#{post.id}/submit-for-review",
+          post.id,
+          %{title: "Smuggled", slug: "smuggled-#{System.unique_integer([:positive])}"},
+          type: "post",
+          bearer: key
+        )
+
+      reloaded = CMS.get_post!(post.id, actor: user(:admin))
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
+
+    test "publish writes no content attributes (#879)", %{post: post} do
+      {status, _} =
+        patch_json(
+          "/api/json/posts/#{post.id}/publish",
+          post.id,
+          %{title: "Smuggled", slug: "smuggled-#{System.unique_integer([:positive])}"},
+          type: "post",
+          bearer: mint(user(:admin), :read_write)
+        )
+
+      reloaded = CMS.get_post!(post.id, actor: user(:admin))
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
+
+    test "unpublish writes no content attributes (#879)", %{post: post} do
+      admin = user(:admin)
+      published = CMS.publish_post!(post, %{}, actor: admin)
+
+      {status, _} =
+        patch_json(
+          "/api/json/posts/#{published.id}/unpublish",
+          published.id,
+          %{title: "Smuggled", slug: "smuggled-#{System.unique_integer([:positive])}"},
+          type: "post",
+          bearer: mint(admin, :read_write)
+        )
+
+      reloaded = CMS.get_post!(published.id, actor: admin)
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
   end
 
   # #880: a workflow transition on a record in the wrong state (double-tapping

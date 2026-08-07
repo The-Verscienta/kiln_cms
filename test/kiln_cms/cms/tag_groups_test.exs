@@ -135,6 +135,37 @@ defmodule KilnCMS.CMS.TagGroupsTest do
 
       assert {:ok, _} = CMS.update_tag_group(g, %{content_types: ["page"]}, actor: actor)
     end
+
+    test "a write that never touches content_types is not judged on the stored list" do
+      # `get_attribute/2` falls back to `get_data/2`, so validating unconditionally
+      # re-judged the STORED list on every update — and an entry goes stale
+      # without anyone touching the group (archiving a dynamic type drops it from
+      # the registry). That froze the row: renaming it was rejected on a field the
+      # write never mentioned, with no way back except editing the column by hand.
+      actor = admin()
+
+      # Seeded past the write path, standing in for a list that has since gone
+      # stale under a row nobody edited.
+      stale = group(%{content_types: ["recipe"]})
+
+      assert {:ok, renamed} =
+               CMS.update_tag_group(stale, %{name: "Renamed"}, actor: actor)
+
+      assert renamed.name == "Renamed"
+      # Untouched, not silently repaired — the UI renders it as "(unknown)" so an
+      # admin can see and fix it.
+      assert renamed.content_types == ["recipe"]
+    end
+
+    test "but a write that DOES supply content_types is still checked" do
+      actor = admin()
+      stale = group(%{content_types: ["recipe"]})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.update_tag_group(stale, %{content_types: ["also-not-real"]}, actor: actor)
+
+      assert Enum.any?(error.errors, &(&1.field == :content_types))
+    end
   end
 
   describe "cross-tenant tag_group_id (#526)" do
@@ -171,6 +202,36 @@ defmodule KilnCMS.CMS.TagGroupsTest do
                )
 
       assert tag.tag_group_id == home.id
+    end
+
+    test "a write that never touches tag_group_id can still save a legacy cross-org tag" do
+      # #513 deliberately made such a tag survivable and EDITABLE so it can be
+      # repaired. Re-judging the stored FK on every update made that impossible:
+      # renaming was rejected on a field the write never mentioned, and the
+      # editor's <select> only offers same-org groups, so the only write that
+      # could succeed was one that silently ungrouped the tag.
+      actor = admin()
+      foreign = group(%{org_id: other_org().id})
+
+      # Seeded past the write path, standing in for a row that predates the check.
+      legacy = tag(%{name: "Legacy", slug: "legacy-#{uniq()}", tag_group_id: foreign.id})
+
+      assert {:ok, renamed} = CMS.update_tag(legacy, %{name: "Renamed"}, actor: actor)
+
+      assert renamed.name == "Renamed"
+      assert renamed.tag_group_id == foreign.id
+    end
+
+    test "but a write that DOES supply a foreign tag_group_id is still rejected" do
+      actor = admin()
+      foreign = group(%{org_id: other_org().id})
+      home = group()
+      t = tag(%{name: "Z", slug: "z-#{uniq()}", tag_group_id: home.id})
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.update_tag(t, %{tag_group_id: foreign.id}, actor: actor)
+
+      assert Enum.any?(error.errors, &(&1.field == :tag_group_id))
     end
 
     test "on create, resolves the group under the WRITE's tenant, not the default org" do
