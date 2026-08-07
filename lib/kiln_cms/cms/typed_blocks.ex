@@ -557,6 +557,16 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}
 
+  # Total fallback. Every preview surface (`preview_live`, `token_preview_live`,
+  # `release_preview_live`, the in-context editor, the editor's own pop-out
+  # preview) funnels through here, so a block type with no clause above is a
+  # crash on those pages rather than a missing block — and the set without one
+  # grows every time a block is added (`video`, `audio`, `file` and now
+  # `fragment` all lacked one). A content-free legacy block renders as nothing,
+  # which is what these surfaces should show for a block they can't project.
+  defp one_to_legacy(%_{} = block),
+    do: %{type: :custom, content: nil, data: %{}, id: Map.get(block, :id)}
+
   defp rich_text_content(%RichText{legacy_html: html}) when is_binary(html) and html != "",
     do: KilnCMS.HTMLSanitizer.sanitize_rich_text(html)
 

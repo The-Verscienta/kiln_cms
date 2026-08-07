@@ -14,6 +14,7 @@ defmodule KilnCMS.Firing.Engine do
   require Logger
 
   alias KilnCMS.Blocks
+  alias KilnCMS.CMS.Fragments
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Cache
@@ -41,6 +42,35 @@ defmodule KilnCMS.Firing.Engine do
 
     typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
 
+    # Reusable fragments are inlined here, once, before any surface renders
+    # (#479 — decision A3 taken literally). Every surface, plus `body_text/1`
+    # below and everything derived from it, then sees one flat tree and needs no
+    # knowledge of fragments.
+    #
+    # `typed` — the RAW tree — is what `References.rebuild/4` gets at the bottom
+    # of this function, deliberately: expansion removes the fragment block and
+    # with it the `:reference` the edge is extracted from, so rebuilding on the
+    # expanded tree would drop the edge that makes publishing a fragment re-fire
+    # its referrers.
+    #
+    # Expanded with the **host document's own** audience, and nothing wider.
+    # An artifact is keyed to the host, and every artifact consumer —
+    # `ArtifactController`, the feeds, static export, the newsletter — resolves
+    # that host through a `:public`-only filter and then serves the body
+    # verbatim. Firing with every audience would therefore put a `:member`
+    # fragment's text into a `:public` page's artifact and hand it to anonymous
+    # callers, which is exactly the leak this feature must not have. Keeping the
+    # host's own audience makes the artifact no more permissive than the
+    # document carrying it — the rule delivery already enforces.
+    expanded =
+      Fragments.expand(typed, org_id,
+        audiences: host_audiences(document),
+        # Seeded with the document itself, so a page embedding *itself* doesn't
+        # inline its own body once before the cycle guard catches it a level
+        # down.
+        ancestry: [{public_type(document), document.id}]
+      )
+
     # Custom fields are resolved once and shared by every surface: the read is
     # one query, and computed fields (#429) are recomputed exactly once per
     # fire rather than once per surface.
@@ -50,12 +80,14 @@ defmodule KilnCMS.Firing.Engine do
     # from today's formulas and today's field registry would report values that
     # were never live at the requested instant.
     custom =
-      KilnCMS.Firing.CustomFields.resolve(document, body_text(typed),
+      KilnCMS.Firing.CustomFields.resolve(document, body_text(expanded),
         recompute?: Keyword.get(opts, :custom_fields, :recompute) == :recompute
       )
 
     artifacts =
-      Map.new(@surfaces, fn surface -> {surface, compose(document, typed, custom, surface)} end)
+      Map.new(@surfaces, fn surface ->
+        {surface, compose(document, expanded, custom, surface)}
+      end)
 
     if mode == :persist do
       persist(document, type, org_id, artifacts)
@@ -74,6 +106,16 @@ defmodule KilnCMS.Firing.Engine do
     )
 
     {:ok, artifacts}
+  end
+
+  # The gated tiers a document's own artifact may carry: its own, when gated.
+  # A `:public` document carries public fragments only.
+  defp host_audiences(document) do
+    case Map.get(document, :audience) do
+      nil -> []
+      :public -> []
+      audience -> [audience]
+    end
   end
 
   @doc "Read a fired artifact body for a surface: cache, then the artifact table."

@@ -4,6 +4,14 @@ defmodule KilnCMS.Firing.RefireWorker do
 
   Cycle-safe: each node is fired at most once per wave via the accumulating
   `visited` set. Only published documents re-fire; everything else is a no-op.
+
+  The wave also busts the referrer's **delivery** cache, not just its artifact.
+  Since #479 an HTML payload can embed another document's body (a reusable
+  fragment), and that payload is memoized under the *referrer's* own
+  `{type, slug}` — a key nothing else touches when the target changes. Without
+  this, unpublishing a fragment leaves its body on every page carrying it for
+  the cache TTL, which is precisely the fail-closed leak fragments must not
+  have. Same reasoning `Changes.BustMediaCache` already applies to media.
   """
   # Bound refire storms for hub documents: dedupe pending refire jobs by node
   # (type+id), ignoring the per-path `visited` set so a fan-in doesn't enqueue
@@ -19,6 +27,7 @@ defmodule KilnCMS.Firing.RefireWorker do
       states: [:scheduled, :available, :executing, :retryable, :suspended]
     ]
 
+  alias KilnCMS.Cache
   alias KilnCMS.Firing.{Engine, References}
 
   @impl Oban.Worker
@@ -47,6 +56,7 @@ defmodule KilnCMS.Firing.RefireWorker do
     case References.load_published(org_id, type, id) do
       {:ok, document} ->
         Engine.fire(document)
+        bust_delivery_cache(org_id, document)
         References.invalidate(org_id, type, id, visited)
 
       # Settled-gone, or a type no compiled resource answers to. A wave reaches
@@ -63,5 +73,12 @@ defmodule KilnCMS.Firing.RefireWorker do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # The public type name is what the delivery cache keys on (`ContentController`
+  # passes `to_string(ct.type)`), which for a dynamic entry is its definition's
+  # name rather than `"entry"`.
+  defp bust_delivery_cache(org_id, document) do
+    Cache.bust(org_id, Engine.public_type(document), document.slug)
   end
 end

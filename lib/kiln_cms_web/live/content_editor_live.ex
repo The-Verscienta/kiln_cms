@@ -495,6 +495,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> refresh_preview()
     |> load_versions()
     |> load_translations()
+    |> load_fragment_options()
   end
 
   # Whether the actor may WRITE this record — the authorization both AI-assist
@@ -674,6 +675,62 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Per-locale coverage for the Translations panel (only rendered when the
   # install has more than one locale).
+  # Candidates for the fragment picker (#479): published documents of every
+  # content type, most recent first, bounded.
+  #
+  # Published-only because a fragment pointing at a draft expands to nothing —
+  # offering one would be a picker whose choices silently do not render. Loaded
+  # once per editor mount rather than per keystroke: it feeds a `<select>`, and
+  # the cap is what keeps that select usable as much as what keeps the query
+  # cheap.
+  @fragment_option_limit 200
+
+  defp load_fragment_options(socket) do
+    org = socket.assigns.current_org
+
+    options =
+      for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org)),
+          record <-
+            ContentTypes.list!(ct,
+              actor: socket.assigns.actor,
+              tenant: org,
+              query: [
+                filter: [state: :published],
+                select: [:id, :title, :updated_at],
+                sort: [updated_at: :desc],
+                limit: @fragment_option_limit
+              ]
+            ) do
+        {"#{record.title} (#{ct.label})", "#{ct.type}:#{record.id}"}
+      end
+
+    assign(socket, :fragment_options, options)
+  end
+
+  # The option list, with the block's own current reference guaranteed present.
+  #
+  # `@fragment_options` is published-only and capped, so a target that was
+  # unpublished (or has simply aged out of the cap) would match no option — the
+  # browser would fall back to the prompt, and the next `phx-change` would post
+  # a blank, clearing a reference on a block nobody touched. The stored value is
+  # prepended instead, labelled so the editor can see what happened.
+  defp fragment_options_for(options, bf) do
+    bf[:ref].value |> fragment_ref_value() |> ensure_option(options)
+  end
+
+  defp ensure_option("", options), do: options
+
+  defp ensure_option(current, options) do
+    if Enum.any?(options, fn {_label, value} -> value == current end),
+      do: options,
+      else: [{gettext("Current target (unpublished or not listed)"), current} | options]
+  end
+
+  # The stored `%{"type" =>, "id" =>}` as the picker's `"type:id"` option value.
+  defp fragment_ref_value(%{"type" => type, "id" => id}) when is_binary(id), do: "#{type}:#{id}"
+  defp fragment_ref_value(%{type: type, id: id}) when is_binary(id), do: "#{type}:#{id}"
+  defp fragment_ref_value(_ref), do: ""
+
   defp load_translations(socket) do
     assign(
       socket,
@@ -3072,15 +3129,35 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # is not edited by `item_rows_editor/1` — but it is still an indexed map on
     # the wire, so it needs the same flattening or a gallery loses every image
     # on save.
-    Enum.reduce(@row_fields ++ ["images"], block, fn key, block ->
+    @row_fields
+    |> Kernel.++(["images"])
+    |> Enum.reduce(block, fn key, block ->
       case block do
         %{^key => %{} = indexed} -> Map.put(block, key, indexed_items_to_list(indexed))
         _ -> block
       end
     end)
+    |> normalize_fragment_ref()
   end
 
   defp normalize_block_items(other), do: other
+
+  # The fragment picker (#479) is a single `<select>`, because a reference is
+  # one choice — so it posts one `"type:id"` string, which becomes the
+  # `%{"type" => …, "id" => …}` map the `:reference` field stores and
+  # `Firing.References` extracts its edge from. An empty selection clears the
+  # reference rather than storing a half-shape the resolver would silently drop.
+  defp normalize_fragment_ref(%{"ref" => ref} = block) when is_binary(ref) do
+    case String.split(ref, ":", parts: 2) do
+      [type, id] when type != "" and id != "" ->
+        Map.put(block, "ref", %{"type" => type, "id" => id})
+
+      _blank ->
+        Map.put(block, "ref", nil)
+    end
+  end
+
+  defp normalize_fragment_ref(block), do: block
 
   defp indexed_items_to_list(indexed) do
     indexed
@@ -7021,6 +7098,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       />
                       <.input field={bf[:description]} label={gettext("Description")} />
                     </div>
+                    <div :if={block_type_string(bf) == "fragment"} class="space-y-2">
+                      <%!-- One `<select>`, because a reference is one choice.
+                            It posts `"type:id"`, which `normalize_fragment_ref/1`
+                            turns into the stored reference map (#479). --%>
+                      <.input
+                        type="select"
+                        name={bf[:ref].name}
+                        value={fragment_ref_value(bf[:ref].value)}
+                        label={gettext("Fragment")}
+                        prompt={gettext("Choose published content…")}
+                        options={fragment_options_for(@fragment_options, bf)}
+                      />
+                      <.input field={bf[:label]} label={gettext("Label (editor only)")} />
+                      <p class="text-xs text-base-content/60">
+                        {gettext(
+                          "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
+                        )}
+                      </p>
+                    </div>
                     <.video_editor :if={block_type_string(bf) == "video"} bf={bf} />
                     <.audio_editor :if={block_type_string(bf) == "audio"} bf={bf} />
                     <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
@@ -7038,7 +7134,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         "video",
                         "audio",
                         "columns",
-                        "gallery"
+                        "gallery",
+                        "fragment"
                       ]
                     }>
                       <.dsl_block_fields

@@ -338,11 +338,19 @@ defmodule KilnCMS.Firing.References do
   def type_atom(type) when is_binary(type) do
     case Map.get(@types, type) do
       nil ->
-        # Any other compiled content type registered on a content domain —
+        # Any other content type registered on a content domain.
         # `ContentTypes.get/1` resolves strings via safe_existing_atom, so no
         # dynamic atoms are created.
+        #
+        # A **dynamic** type (D17) resolves to `:entry`, the storage tier its
+        # records actually live in — which is also the type `Engine.fire/2`
+        # stamps on the edge and the type `invalidate/4` looks edges up by. It
+        # used to return `nil` here, so a reference *to* a dynamic entry (which
+        # #479's fragment picker offers) recorded no edge at all and its
+        # referrers never re-fired.
         case CMS.ContentTypes.get(type) do
           %{source: :compiled, type: atom} -> atom
+          %{source: :dynamic} -> :entry
           _ -> nil
         end
 

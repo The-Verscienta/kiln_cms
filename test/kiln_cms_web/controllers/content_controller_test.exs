@@ -49,6 +49,54 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "Hello Heading"
     end
 
+    # #479: HTML delivery renders live from the block tree, not from the fired
+    # artifact, so fragment expansion has to happen on this path too.
+    test "a fragment block inlines its target's body", %{conn: conn} do
+      shared =
+        page(%{
+          title: "Shared CTA",
+          blocks: [%{"_type" => "heading", "text" => "Subscribe now"}]
+        })
+
+      host =
+        page(%{
+          title: "Host",
+          blocks: [
+            %{"_type" => "heading", "text" => "Intro"},
+            %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}
+          ]
+        })
+
+      html = conn |> get(~p"/#{host.slug}") |> html_response(200)
+
+      assert html =~ "Intro"
+      assert html =~ "Subscribe now"
+    end
+
+    # A pointer to something the reader may not see has no safe rendering — a
+    # placeholder would leak its existence.
+    test "a fragment pointing at a draft renders nothing", %{conn: conn} do
+      draft =
+        Ash.Seed.seed!(Page, %{
+          title: "Unannounced",
+          slug: "fr-#{uniq()}",
+          state: :draft,
+          blocks: [%{"_type" => "heading", "text" => "Unannounced launch"}]
+        })
+
+      host =
+        page(%{
+          title: "Host",
+          blocks: [
+            %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => draft.id}}
+          ]
+        })
+
+      html = conn |> get(~p"/#{host.slug}") |> html_response(200)
+
+      refute html =~ "Unannounced launch"
+    end
+
     test "image blocks render a responsive srcset + alt from the media library", %{conn: conn} do
       media =
         Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{

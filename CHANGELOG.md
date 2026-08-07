@@ -29,6 +29,44 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Reusable content fragments.** A `fragment` block embeds another document's
+  body inline — define once, embed everywhere, edit the fragment and every page
+  carrying it updates (#479). This is the Regular Labs / WP reusable-block /
+  Contentful-reference idea, and it finishes the `:reference` field type the
+  block DSL declared but stubbed.
+
+  It is **inlined, not rendered**: `KilnCMS.CMS.Fragments.expand/3` replaces the
+  block with the target's tree before any surface renderer runs (decision A3
+  taken literally), so all four fired surfaces plus search text, reading time
+  and the a11y report see one flat tree and need no knowledge of fragments.
+
+  The re-fire wave needed no new machinery — `ref` is a DSL `:reference`, which
+  `Firing.References` already extracts into a `ReferenceEdge`, so publishing a
+  fragment re-fires everything embedding it. That is the feature's one ordering
+  constraint: expansion runs *after* the edge rebuild, which reads the raw tree.
+  Expand first and the edge disappears, quietly turning this into a one-shot
+  copy.
+
+  Delivery **fails closed**: a target that is missing, unpublished, archived, in
+  another org, or gated to an audience the reader doesn't hold expands to
+  nothing — a placeholder would leak its existence. A fired artifact is expanded
+  with its **host's own** audience and nothing wider, because every artifact
+  consumer (the headless endpoint, feeds, static export, the newsletter)
+  resolves the host through a `:public`-only filter and then serves the body
+  verbatim. And the re-fire wave now busts each referrer's *delivery* cache too
+  — that cache is keyed on the referrer's own slug, which nothing else touches
+  when the target changes.
+
+  Cycles and runaway nesting are bounded at expansion time — an ancestry list
+  seeded with the host, a depth cap, per-expansion memoization and a fetch
+  budget — because a cycle needs two documents pointing at each other, either
+  write is individually fine, and depth alone bounds depth rather than breadth.
+
+  Write-time derivations (`search_text`, `word_count`, `reading_time_minutes`)
+  and the editor's preview/SEO/a11y panels still run over the raw tree, so
+  fragment text is not yet in the host's search index — tracked separately. See
+  [Extending the content model](docs/extending-content.md).
+
 - **The editor PWA's web app manifest is localized.** `name`, `description` and
   both shortcut labels are translated, so the install dialog, app list, splash
   screen and long-press shortcut menu appear in the editor's language. The root
