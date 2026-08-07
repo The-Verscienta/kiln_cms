@@ -363,7 +363,8 @@ defmodule KilnCMS.Search do
   @doc """
   Global **hybrid** search across content types, media, and taxonomy,
   returning sectioned results:
-  `%{pages: [...], posts: [...], entries: [...], media: [...], categories: [...], tags: [...]}`.
+  `%{pages: [...], posts: [...], entries: [...], media: [...], categories: [...],
+  tags: [...], tag_groups: [...]}`.
 
   Every content section fuses the keyword and semantic legs (RRF via
   `hybrid/3`), so meaning-based matches surface everywhere search is offered —
@@ -385,12 +386,20 @@ defmodule KilnCMS.Search do
   the content sections (rendered escape-safely via
   `KilnCMS.Search.Highlight.to_safe_html/1`). `:filters` (see `hybrid/3`)
   narrows the content sections — media and taxonomy don't carry facets.
+
+  The taxonomy sections come from `KilnCMS.CMS.Taxonomy.searchable/0` — one per
+  taxonomy resource, so adding one joins global search with no edit here. They
+  were a literal two-element list, which is how `tag_groups` came to be absent
+  from every search surface without anything failing (#530); `searchable/0` is
+  the contract, and callers that enumerate sections should read it rather than
+  restate the keys.
   """
   @spec global(String.t(), keyword()) :: %{
           required(:entries) => [struct()],
           required(:media) => [struct()],
           required(:categories) => [struct()],
           required(:tags) => [struct()],
+          required(:tag_groups) => [struct()],
           optional(atom()) => [struct()]
         }
   def global(query, opts \\ []) when is_binary(query) do
@@ -427,25 +436,29 @@ defmodule KilnCMS.Search do
         {ct.section, fn -> hybrid(ct.resource, query, [load: content_load] ++ hybrid_opts) end}
       end)
 
-    fixed = [
-      # One section across every dynamic type. `type_name` (an expression
-      # calc, so it doesn't run TypeDefinition's editor-only read policy for
-      # anonymous callers) labels each hit with its dynamic type.
-      {:entries,
-       fn ->
-         hybrid(KilnCMS.CMS.Entry, query, [load: [:type_name | content_load]] ++ hybrid_opts)
-       end},
-      # NOTE (#336): MediaItem/Category/Tag are NOT org-scoped yet, so these three
-      # sections stay cross-org (they ignore the `:tenant` in `read_opts`). Content
-      # + entries above ARE scoped. Closes when those resources gain `org_id`.
-      {:media,
-       fn -> section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []) end},
-      # Taxonomy (name/description, typo-tolerant) — matched categories and
-      # tags so editors and headless frontends can jump to filtered listings.
-      {:categories,
-       fn -> section(KilnCMS.CMS.Category, :search, %{query: query}, read_opts, limit, []) end},
-      {:tags, fn -> section(KilnCMS.CMS.Tag, :search, %{query: query}, read_opts, limit, []) end}
-    ]
+    fixed =
+      [
+        # One section across every dynamic type. `type_name` (an expression
+        # calc, so it doesn't run TypeDefinition's editor-only read policy for
+        # anonymous callers) labels each hit with its dynamic type.
+        {:entries,
+         fn ->
+           hybrid(KilnCMS.CMS.Entry, query, [load: [:type_name | content_load]] ++ hybrid_opts)
+         end},
+        # Media and taxonomy are org-scoped like content (epic #336), so the
+        # `:tenant` in `read_opts` narrows these sections too.
+        {:media,
+         fn -> section(KilnCMS.CMS.MediaItem, :search, %{query: query}, read_opts, limit, []) end},
+        # Taxonomy (name/description, typo-tolerant) — matched categories, tags and
+        # tag groups, so editors and headless frontends can jump to filtered
+        # listings. Driven off `Taxonomy.searchable/0` rather than a literal list:
+        # this was two entries hard-coded here, which is how `TagGroup` came to be
+        # unfindable in search without anything failing (#530).
+        Enum.map(KilnCMS.CMS.Taxonomy.searchable(), fn {key, resource} ->
+          {key, fn -> section(resource, :search, %{query: query}, read_opts, limit, []) end}
+        end)
+      ]
+      |> List.flatten()
 
     run_sections(compiled ++ fixed)
   end

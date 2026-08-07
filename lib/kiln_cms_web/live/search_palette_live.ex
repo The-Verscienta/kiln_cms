@@ -21,7 +21,16 @@ defmodule KilnCMSWeb.SearchPaletteLive do
      |> assign(:results, empty())}
   end
 
-  defp empty, do: %{pages: [], posts: [], entries: [], media: [], categories: [], tags: []}
+  defp empty,
+    do: %{
+      pages: [],
+      posts: [],
+      entries: [],
+      media: [],
+      categories: [],
+      tags: [],
+      tag_groups: []
+    }
 
   @impl true
   # `String.trim/1` raises on a list or a map (#764).
@@ -79,8 +88,16 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     _ -> :ok
   end
 
-  defp result_count(%{pages: p, posts: o, entries: e, media: m, categories: c, tags: t}),
-    do: length(p) + length(o) + length(e) + length(m) + length(c) + length(t)
+  defp result_count(%{
+         pages: p,
+         posts: o,
+         entries: e,
+         media: m,
+         categories: c,
+         tags: t,
+         tag_groups: g
+       }),
+       do: length(p) + length(o) + length(e) + length(m) + length(c) + length(t) + length(g)
 
   @impl true
   def render(assigns) do
@@ -160,7 +177,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
             </.link>
           </.section>
           <.section
-            :if={@results.categories != [] or @results.tags != []}
+            :if={@results.categories != [] or @results.tags != [] or @results.tag_groups != []}
             title={gettext("Taxonomy")}
           >
             <.link
@@ -181,6 +198,16 @@ defmodule KilnCMSWeb.SearchPaletteLive do
               <span class="font-medium">{t.name}</span>
               <span class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
                 {gettext("Tag")}
+              </span>
+            </.link>
+            <.link
+              :for={g <- @results.tag_groups}
+              navigate={~p"/editor/taxonomy"}
+              class="block rounded px-3 py-2 hover:bg-base-200"
+            >
+              <span class="font-medium">{g.name}</span>
+              <span class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
+                {gettext("Tag group")}
               </span>
             </.link>
           </.section>
