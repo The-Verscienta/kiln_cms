@@ -319,4 +319,95 @@ test.describe("editor journey", () => {
     await expect(settingsTab).toHaveAttribute("aria-selected", "true");
     await expect(seoTitle).toHaveValue("E2E SEO title more");
   });
+
+  // #523. Whether a tag-picker section is expanded is client state with three
+  // would-be owners: the editor's own click, the server's rendered `open`, and
+  // the TagFilter hook's force-open while narrowing. The bug was the last two
+  // fighting — the server re-derived `open` from the live tick count, so
+  // unticking folded the section shut under the cursor, and the hook kept its
+  // own shadow copy of the server's choice on a data attribute. Every symptom
+  // is a DOM-state race across a LiveView patch, so none of it is visible to
+  // the Elixir round-trip tests: it has to be driven in a real browser.
+  test("the tag picker's sections stay where the editor put them", async ({ page }) => {
+    const stamp = Date.now();
+    const group = `E2E Group ${stamp}`;
+    const [alpha, beta] = [`e2e-alpha-${stamp}`, `e2e-beta-${stamp}`];
+
+    // A group with two tags, so there is a section to collapse and a sibling
+    // inside it that a fold-away would hide.
+    await page.goto("/editor/taxonomy");
+    await page.fill('#new-tag_group-form input[name$="[name]"]', group);
+    await page.locator("#new-tag_group-form button[type=submit]").click();
+    await expect(page.locator("#new-tag-form select").getByText(group)).toBeAttached();
+
+    for (const name of [alpha, beta]) {
+      await page.fill('#new-tag-form input[name$="[name]"]', name);
+      await page.selectOption('#new-tag-form select[name$="[tag_group_id]"]', { label: group });
+      await page.locator("#new-tag-form button[type=submit]").click();
+      // The row renders the name and the auto-derived slug, which are the same
+      // string here — assert on the first match rather than fighting that.
+      await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+    }
+
+    await newDraftPage(page);
+    await page.getByRole("tab", { name: /settings/i }).click();
+
+    const picker = page.locator("#tag-picker");
+    const section = picker.locator("details[data-tag-section]").filter({ hasText: group });
+    const filter = picker.locator("[data-tag-filter-input]");
+    const title = page.locator('input[name$="[title]"]');
+
+    // Nothing is tagged on a fresh draft, so the section mounts collapsed.
+    await expect(section).toHaveJSProperty("open", false);
+
+    // Opened by hand, it survives the per-keystroke validate patch — the
+    // app-wide <details> preservation in app.js's `onBeforeElUpdated`.
+    await section.locator("summary").click();
+    await expect(section).toHaveJSProperty("open", true);
+    await title.fill("E2E Tag Picker");
+    await page.waitForTimeout(700);
+    await expect(section).toHaveJSProperty("open", true);
+
+    // Closed by hand, it stays closed across the next patch too. This is the
+    // direction the old code broke: the server re-rendered `open` from the tick
+    // count, and any change to that value overrode the editor's toggle.
+    await section.locator("summary").click();
+    await expect(section).toHaveJSProperty("open", false);
+    await title.fill("E2E Tag Picker 2");
+    await page.waitForTimeout(700);
+    await expect(section).toHaveJSProperty("open", false);
+
+    // Narrowing force-opens the section holding the hit, and clearing the box
+    // undoes exactly that — the hook closes only what the hook opened.
+    await filter.fill("alpha");
+    await expect(section).toHaveJSProperty("open", true);
+    await filter.fill("");
+    await expect(section).toHaveJSProperty("open", false);
+
+    // But once the editor has ticked something in a force-opened section,
+    // clearing the box must not fold it away under them: the box they just
+    // ticked and the sibling they were reaching for both have to stay put.
+    await filter.fill("alpha");
+    await section.getByRole("checkbox", { name: alpha }).check();
+    await page.waitForTimeout(700);
+    await filter.fill("");
+    await expect(section).toHaveJSProperty("open", true);
+    await expect(section.getByRole("checkbox", { name: alpha })).toBeChecked();
+    await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
+
+    // And the original report: unticking the section's last tag must not fold
+    // it shut. This is the crossing that the old server-rendered `open` got
+    // wrong — the value moved true→false, which is precisely the patch on which
+    // `onBeforeElUpdated` stops preserving the editor's own toggle, so the
+    // section vanished under the cursor with `beta` still unticked inside it.
+    await section.getByRole("checkbox", { name: alpha }).uncheck();
+    await page.waitForTimeout(700);
+    await expect(section).toHaveJSProperty("open", true);
+    await expect(section.getByRole("checkbox", { name: beta })).toBeVisible();
+
+    // Let the debounced autosave land: persisting the (now empty) tag set
+    // reloads the record, and that reload must not re-judge the section either.
+    await page.waitForTimeout(2500);
+    await expect(section).toHaveJSProperty("open", true);
+  });
 });
