@@ -21,6 +21,7 @@ defmodule KilnCMS.Application do
     warn_if_no_mailer_in_prod()
     warn_if_seo_drafting_egresses()
     warn_if_assist_egresses()
+    warn_if_ask_egresses()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -364,6 +365,24 @@ defmodule KilnCMS.Application do
           "(#{KilnCMS.Assist.model()}). Block text, page context and the editor's typed " <>
           "instruction are sent to that provider on each request. Add it to your DPA's " <>
           "subprocessor list, or point ASSIST_MODEL at a local endpoint " <>
+          "(e.g. ollama:llama3.1) to keep content in the deployment."
+      )
+    end
+  end
+
+  # The third of the trio (#339). Distinct from both above in *who* triggers
+  # the egress: nobody on staff does. `/api/ask` is public and anonymous, so an
+  # operator enabling this against a hosted provider is agreeing that a stranger
+  # on the internet can cause published passages to be sent there.
+  defp warn_if_ask_egresses do
+    if KilnCMS.Ask.enabled?() and KilnCMS.Ask.egress?() do
+      require Logger
+
+      Logger.warning(
+        "Ask (/api/ask) generation is enabled against #{KilnCMS.Ask.provider()} " <>
+          "(#{KilnCMS.Ask.model()}). Published passages retrieved for a question are sent to " <>
+          "that provider, on an endpoint any anonymous caller can reach. Add it to your DPA's " <>
+          "subprocessor list, or point ASK_MODEL at a local endpoint " <>
           "(e.g. ollama:llama3.1) to keep content in the deployment."
       )
     end
