@@ -81,6 +81,10 @@ defmodule KilnCMSWeb.Layouts do
   # assigns *before* the body sees them — which would make the absent case below
   # unreachable, and this layout would go on rendering the default org's
   # identity for a join that resolved no org at all (#701).
+  # Always present when this runs as a live layout; the default only guards a
+  # direct render in a test. Safe to default (unlike `:current_org` above),
+  # since there is no absent-vs-nil distinction to preserve here.
+  attr :flash, :map, default: %{}
   slot :inner_content
 
   def auth(assigns) do
@@ -101,6 +105,15 @@ defmodule KilnCMSWeb.Layouts do
         </span>
       </a>
     </div>
+    <%!-- The library's own live layout renders `Components.Flash`; replacing it
+          with this layout (for the white-label banner above) dropped it, so a
+          flash set on an auth page was held in the socket and never drawn (#884).
+          `Password.ResetForm` / `MagicLink` report success *only* by flashing —
+          without this the /reset and magic-link forms gave no feedback at all.
+          Kiln's own `flash_group` (as `Layouts.app/1` uses) rather than the
+          library's `Components.Flash`, so auth toasts match the rest of the
+          console; that is why the `Components.Flash` override is now gone. --%>
+    <.flash_group flash={@flash} />
     {@inner_content}
     """
   end

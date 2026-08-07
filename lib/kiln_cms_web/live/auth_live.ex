@@ -46,9 +46,10 @@ defmodule KilnCMSWeb.AuthLive do
     release that starts flashing from one of these pages does not quietly lose
     the message.
 
-    Worth knowing if you ever rely on it: `KilnCMSWeb.Layouts.auth/1` renders no
-    flash group, so a flash set on any Kiln auth page is currently held in the
-    socket and never drawn.
+    Since #884 `KilnCMSWeb.Layouts.auth/1` *does* render a flash group, so a
+    flash set on any Kiln auth page is now drawn — which is exactly why keeping
+    this hook matters: it is what lands the message in `@flash` for that group to
+    render. Before #884 the message was held in the socket and never shown.
   * **`mount/3` is delegated whole, not matched on.** These wrappers add
     nothing to the socket, so there is no reason to destructure the reply;
     passing the return value straight through keeps working if a release starts

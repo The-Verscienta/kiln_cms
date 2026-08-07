@@ -29,6 +29,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **The editor PWA's web app manifest is localized.** `name`, `description` and
+  both shortcut labels are translated, so the install dialog, app list, splash
+  screen and long-press shortcut menu appear in the editor's language. The root
+  layout links `/manifest.webmanifest?locale=<locale>` and the controller reads
+  the locale from the URL — a manifest is fetched once per install, so
+  translating against the *request's* locale from one URL would have named the
+  installed app after whichever locale happened to fetch first (#630).
+
+  `short_name` stays untranslated: it is the operator's brand name, a proper
+  noun. Note that Android labels the home-screen icon from `short_name`, and iOS
+  ignores the manifest entirely, so the icon caption itself is unchanged.
+
+  The install `id` deliberately does **not** vary by locale, despite the issue
+  suggesting it. A manifest whose id doesn't match an installed app's is not
+  treated as a rename — the whole update is discarded — so a per-locale id would
+  have permanently frozen icons, `theme_color`, `scope` and every future
+  branding change for anyone who had already installed under a non-default
+  locale. It would also have been unstable under `default_locale`, an
+  operator-facing setting.
+
 - **Auto-complete-on-publish is now configurable.** Publishing a piece of
   content still completes its open editorial tasks — that was unconditional
   since #501 — but a site can change the default and an individual task can
