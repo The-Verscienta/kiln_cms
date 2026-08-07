@@ -15,18 +15,24 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
   hides the rest with a CSS class — so which page a caller is on does not bound
   which form they can submit, and each needs its own charge.
 
-  The `:auth` limit is left at its real value and each test spends its own
-  address's bucket by hand. Tightening the limit app-wide would be the obvious
-  way to write this and is wrong: the limit is global while the counters are
-  per-address, so a tightened limit refuses every *other* suite's requests from
-  `127.0.0.1` for as long as this file runs.
+  The `:auth` limit is left at its real value and every test works on an
+  address of its own — the action tests build one into the context by hand, the
+  page tests hand one to the page with `client_conn/1`. Tightening the limit
+  app-wide would be the obvious way to write this and is wrong: the limit is
+  global while the counters are per-address, so a tightened limit refuses every
+  *other* suite's requests from `127.0.0.1` for as long as this file runs.
 
-  Not `async: true`: `KilnCMSWeb.RateLimit`'s table is node-wide. Every address
-  used here is unique, so the buckets themselves cannot collide with another
-  file's.
+  Measuring on a per-test address rather than on the loopback bucket is also
+  what keeps the delta assertions below stable — see
+  `KilnCMS.RateLimitHelpers` for the cleaner race that made them flaky (#877).
+
+  Not `async: true`: `Application.put_env` is global and this file sets
+  `AccountThrottle`'s budget for one test. The rate-limit table is node-wide
+  too, but that alone would no longer force it — no address here is shared.
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.RateLimitHelpers
   import Phoenix.LiveViewTest
   import Swoosh.TestAssertions
 
@@ -45,33 +51,13 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
 
   defp email, do: "signin-ip-#{System.unique_integer([:positive])}@example.com"
 
-  # A fresh address per call, so a spent bucket is never one another test (or
-  # another file) is also spending — which is the whole reason these tests can
-  # leave the real limit alone. Private range, spread across a /8 so the counter
-  # would have to run 16M calls before it repeated.
-  defp client_ip do
-    n = System.unique_integer([:positive])
-    "10.#{n |> div(65_536) |> rem(256)}.#{n |> div(256) |> rem(256)}.#{rem(n, 256)}"
-  end
-
   defp context(ip), do: [context: ThrottleSignIn.client_ip_context(ip)]
 
   # Spend `n` of the address's budget without going near the action — no bcrypt,
   # no account budget, nothing but the counter this is about.
   defp spend(ip, n), do: Enum.each(1..n//1, fn _ -> RateLimit.check(:auth, ip) end)
 
-  # How much of the address's budget has been charged. Reads Hammer's own table,
-  # whose rows are `{{key, window}, count, expiry}`, because nothing else can
-  # distinguish "charged once" from "charged eleven times" below the limit.
   defp spent(ip), do: spent("auth", ip)
-
-  defp spent(bucket, ip) do
-    KilnCMSWeb.RateLimit
-    |> :ets.tab2list()
-    |> Enum.filter(fn {{key, _window}, _count, _expiry} -> key == "#{bucket}:" <> ip end)
-    |> Enum.map(fn {_key, count, _expiry} -> count end)
-    |> Enum.sum()
-  end
 
   defp user!(address) do
     Ash.Seed.seed!(User, %{
@@ -231,15 +217,17 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
 
   describe "KilnCMSWeb.SignInLive" do
     test "attaches the socket's client address to the sign-in form context", %{conn: conn} do
+      {conn, ip} = client_conn(conn)
       {:ok, view, _html} = live(conn, ~p"/sign-in")
 
       form_context = :sys.get_state(view.pid).socket.assigns.context
 
-      # `ConnTest`'s socket peers from the loopback address. What matters is
-      # that *an* address is threaded through under the key the preparation
-      # reads — the two ends agreeing is the thing that can silently break.
-      assert ThrottleSignIn.client_ip_context("127.0.0.1") ==
-               Map.take(form_context, [:kiln_client_ip])
+      # The address the socket peered from, threaded through under the key the
+      # preparation reads — the two ends agreeing is the thing that can silently
+      # break. Asserted against the address this test handed the handshake and
+      # not against loopback, so a view that stopped resolving one (or answered
+      # a constant) fails rather than passing on `ConnTest`'s default peer.
+      assert ThrottleSignIn.client_ip_context(ip) == Map.take(form_context, [:kiln_client_ip])
     end
 
     test "a real submit through the page charges the bucket exactly once", %{conn: conn} do
@@ -253,20 +241,29 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       # preparation. Every other test in this file hand-builds the context and
       # so would stay green if any link in that chain were renamed or dropped —
       # which would silently turn the control off.
+      {conn, ip} = client_conn(conn)
       {:ok, view, _html} = live(conn, ~p"/sign-in")
-      before = spent("127.0.0.1")
+      before = spent(ip)
+
+      # The `remote_ip` half of `client_conn/1` is otherwise unpinned: `before`
+      # is read *after* the page load, so dropping it would only move the
+      # baseline from 1 to 0 and every delta below would still hold — silently
+      # putting every auth page load in this file back on `auth:127.0.0.1`.
+      # It is also the one assertion in the suite that the plug door and the
+      # socket door spell the same client the same way (`RateLimit.client_key/1`).
+      assert before == 1, "the disconnected render did not charge :auth on this test's address"
 
       view
       |> form("#user-password-sign-in-with-password", user: %{email: address, password: "wrong"})
       |> render_change()
 
-      assert spent("127.0.0.1") == before, "a phx-change must not spend the budget"
+      assert spent(ip) == before, "a phx-change must not spend the budget"
 
       view
       |> form("#user-password-sign-in-with-password", user: %{email: address, password: "wrong"})
       |> render_submit()
 
-      assert spent("127.0.0.1") == before + 1
+      assert spent(ip) == before + 1
     end
 
     test "a real registration through the page charges :register exactly once", %{conn: conn} do
@@ -274,8 +271,9 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       # form is reachable from every auth page. Walks view context ->
       # Components.SignIn -> Components.Password -> RegisterForm ->
       # AshPhoenix.Form -> the changeset context -> the change.
+      {conn, ip} = client_conn(conn)
       {:ok, view, _html} = live(conn, ~p"/register")
-      before = spent("register", "127.0.0.1")
+      before = spent("register", ip)
       address = email()
 
       params = %{email: address, password: @password, password_confirmation: @password}
@@ -284,7 +282,7 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       |> form("#user-password-register-with-password-wrapper form", user: params)
       |> render_change()
 
-      assert spent("register", "127.0.0.1") == before,
+      assert spent("register", ip) == before,
              "a phx-change must not spend the budget — the form is phx-change, so a " <>
                "charge at build time costs one unit per keystroke"
 
@@ -292,23 +290,25 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       |> form("#user-password-register-with-password-wrapper form", user: params)
       |> render_submit()
 
-      assert spent("register", "127.0.0.1") == before + 1
+      assert spent("register", ip) == before + 1
     end
 
     test "a real reset request through the page charges :auth once", %{conn: conn} do
+      {conn, ip} = client_conn(conn)
       {:ok, view, _html} = live(conn, ~p"/reset")
-      before = spent("auth", "127.0.0.1")
+      before = spent("auth", ip)
 
       view
       |> form("#user-password-request-password-reset-token-wrapper form", user: %{email: email()})
       |> render_submit()
 
-      assert spent("auth", "127.0.0.1") == before + 1
+      assert spent("auth", ip) == before + 1
     end
 
     test "a real magic-link request through the page charges :auth once", %{conn: conn} do
+      {conn, ip} = client_conn(conn)
       {:ok, view, _html} = live(conn, ~p"/sign-in")
-      before = spent("auth", "127.0.0.1")
+      before = spent("auth", ip)
 
       view
       # Selected by its action rather than an id: unlike the other three, the
@@ -316,7 +316,7 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       |> form(~s(form[action="/auth/user/magic_link/request"]), user: %{email: email()})
       |> render_submit()
 
-      assert spent("auth", "127.0.0.1") == before + 1
+      assert spent("auth", ip) == before + 1
     end
 
     test "every credential form is reachable from every auth page", %{conn: conn} do
@@ -331,7 +331,10 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
       ]
 
       for path <- [~p"/sign-in", ~p"/register", ~p"/reset"] do
-        {:ok, _view, html} = live(conn, path)
+        # Its own address too, though it measures nothing — so this file leaves
+        # `auth:127.0.0.1` alone entirely rather than only where it asserts.
+        {page_conn, _ip} = client_conn(conn)
+        {:ok, _view, html} = live(page_conn, path)
 
         for wrapper <- wrappers do
           assert html =~ wrapper, "#{wrapper} is not rendered on #{path}"
