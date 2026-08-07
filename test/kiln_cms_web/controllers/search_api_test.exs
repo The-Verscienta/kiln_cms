@@ -86,14 +86,18 @@ defmodule KilnCMSWeb.SearchApiTest do
   test "a blank query returns the empty shape", %{conn: conn} do
     body = conn |> get("/api/search?q=") |> json_response(200)
 
-    # One empty section per *registered* content type, not a hardcoded core
-    # list: since #311 the controller sweeps the ContentTypes registry, so a
-    # downstream tree running this suite with a project domain registered
-    # (e.g. an overlay CI) gets that project's sections here too.
+    # One empty section per *registered* content type and per taxonomy
+    # resource, not a hardcoded list: since #311 the controller sweeps the
+    # ContentTypes registry (so a downstream tree running this suite with a
+    # project domain registered gets that project's sections too), and since
+    # #530 the taxonomy sections come from `Taxonomy.searchable/0`.
+    taxonomy = Map.new(KilnCMS.CMS.Taxonomy.searchable(), &{to_string(elem(&1, 0)), []})
+
     expected =
       KilnCMS.CMS.ContentTypes.all()
       |> Map.new(fn ct -> {to_string(ct.section), []} end)
-      |> Map.merge(%{"entries" => [], "categories" => [], "tags" => []})
+      |> Map.merge(taxonomy)
+      |> Map.put("entries", [])
 
     assert body["results"] == expected
 
@@ -147,6 +151,18 @@ defmodule KilnCMSWeb.SearchApiTest do
     assert cid == category.id
     assert [%{"id" => tid, "type" => "tag"}] = body["results"]["tags"]
     assert tid == tag.id
+
+    # Tag groups are searchable too (#530) — they were the one taxonomy
+    # resource this surface never returned, with nothing failing to say so.
+    group =
+      KilnCMS.CMS.create_tag_group!(%{name: "#{word} themes", slug: slug()}, actor: actor)
+
+    body = conn |> get("/api/search?q=#{word}") |> json_response(200)
+
+    assert [%{"id" => gid, "type" => "tag_group", "name" => _, "slug" => _}] =
+             body["results"]["tag_groups"]
+
+    assert gid == group.id
 
     # Taxonomy-only matches don't suppress the content "did you mean" — but
     # here there's nothing trigram-close either, so no suggestion.

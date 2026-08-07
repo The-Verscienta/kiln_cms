@@ -9,8 +9,8 @@ defmodule KilnCMSWeb.SearchApiController do
   token widens visibility like every other headless surface. Sections mirror
   `global/2` — one per compiled content type, keyed by its plural
   (`pages`/`posts`/… for the core, plus any project-registered types), and
-  `entries`/`categories`/`tags` (media is an authoring concern, not a
-  content-search result). Content hits carry their
+  `entries` plus one per taxonomy resource — `categories`/`tags`/`tag_groups`
+  (media is an authoring concern, not a content-search result). Content hits carry their
   public `path` and an escape-safe `highlight` snippet (only `<mark>`
   survives); taxonomy hits carry `name`/`slug` (KilnCMS has no public
   taxonomy browse pages — headless frontends build their own listing URLs). A
@@ -73,18 +73,26 @@ defmodule KilnCMSWeb.SearchApiController do
          Enum.map(Map.get(sections, ct.section, []), &item(&1, to_string(ct.type), ct, locale))}
       end)
 
+    # One section per taxonomy resource, from the same registry `global/2`
+    # swept — the hard-coded pair here is how tag groups came to be missing from
+    # this surface while `global/2` was already returning them (#530).
+    taxonomy =
+      Map.new(KilnCMS.CMS.Taxonomy.searchable(), fn {section, resource} ->
+        type = resource |> Module.split() |> List.last() |> Macro.underscore()
+        {section, Enum.map(Map.get(sections, section, []), &taxonomy_item(&1, type))}
+      end)
+
     results =
-      Map.merge(compiled, %{
-        entries: Enum.flat_map(sections.entries, &entry_item(&1, locale)),
-        categories: Enum.map(sections.categories, &taxonomy_item(&1, "category")),
-        tags: Enum.map(sections.tags, &taxonomy_item(&1, "tag"))
-      })
+      compiled
+      |> Map.merge(taxonomy)
+      |> Map.put(:entries, Enum.flat_map(sections.entries, &entry_item(&1, locale)))
 
     # Content hits only — a taxonomy name match isn't a found document, so it
-    # neither counts for analytics nor suppresses the "did you mean".
+    # neither counts for analytics nor suppresses the "did you mean". Keyed off
+    # the registry for the same reason the sections are.
     total =
       results
-      |> Map.drop([:categories, :tags])
+      |> Map.drop(Map.keys(taxonomy))
       |> Map.values()
       |> Enum.map(&length/1)
       |> Enum.sum()
@@ -161,9 +169,12 @@ defmodule KilnCMSWeb.SearchApiController do
   end
 
   defp empty_sections do
+    taxonomy = Map.new(KilnCMS.CMS.Taxonomy.searchable(), &{elem(&1, 0), []})
+
     ContentTypes.all()
     |> Map.new(&{&1.section, []})
-    |> Map.merge(%{entries: [], categories: [], tags: []})
+    |> Map.merge(taxonomy)
+    |> Map.put(:entries, [])
   end
 
   defp validated_locale(locale) do

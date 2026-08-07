@@ -235,7 +235,8 @@ defmodule KilnClient do
   `:facets` (boolean), `:req` (worth a bound + `retry: false` here too — the
   semantic leg stalls when the embedding backend degrades, see the module
   doc). Returns the raw response map — sections under
-  `"results"` (`"pages"`, `"posts"`, `"entries"`, `"categories"`, `"tags"`),
+  `"results"` (`"pages"`, `"posts"`, `"entries"`, `"categories"`, `"tags"`,
+  `"tag_groups"`),
   plus `"facets"` when requested, and a `"suggestion"` ("did you mean") on
   sparse results.
 

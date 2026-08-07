@@ -59,7 +59,7 @@ defmodule KilnCMS.Search.CoverageTest do
     assert media.id in Enum.map(results.media, & &1.id)
   end
 
-  test "global/2 covers taxonomy: categories and tags match by name" do
+  test "global/2 covers taxonomy: categories, tags and tag groups match by name" do
     admin = admin()
     term = "orchard#{uniq()}"
 
@@ -71,10 +71,16 @@ defmodule KilnCMS.Search.CoverageTest do
 
     tag = CMS.create_tag!(%{name: "#{term}-tag", slug: slug()}, actor: admin)
 
+    # TagGroup was the one taxonomy resource without a `:search` action, so it
+    # was unfindable everywhere search is offered — and the leg was a literal
+    # list, so nothing failed to say so (#530).
+    group = CMS.create_tag_group!(%{name: "#{term} themes", slug: slug()}, actor: admin)
+
     results = Search.global(term, actor: admin)
 
     assert category.id in Enum.map(results.categories, & &1.id)
     assert tag.id in Enum.map(results.tags, & &1.id)
+    assert group.id in Enum.map(results.tag_groups, & &1.id)
   end
 
   test "category search matches descriptions and tolerates typos in names" do

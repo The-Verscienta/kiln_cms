@@ -49,9 +49,13 @@ defmodule KilnCMS.Search.GlobalSectionsTest do
     CMS.create_post!(%{title: "alpha notes", slug: "gs-post"}, actor: admin)
     KilnCMS.DataCase.drain_oban()
 
+    # Taxonomy keys come from the registry rather than a literal list (#530) —
+    # the literal is how `tag_groups` came to be missing from search in the
+    # first place, and restating it here would let it happen again.
     expected_keys =
       (Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.section) ++
-         [:entries, :media, :categories, :tags])
+         [:entries, :media] ++
+         Enum.map(KilnCMS.CMS.Taxonomy.searchable(), &elem(&1, 0)))
       |> Enum.sort()
 
     ids = fn sections ->

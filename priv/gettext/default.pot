@@ -234,7 +234,7 @@ msgid "Sign out"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:529
-#: lib/kiln_cms_web/live/search_palette_live.ex:164
+#: lib/kiln_cms_web/live/search_palette_live.ex:181
 #: lib/kiln_cms_web/live/taxonomy_live.ex:30
 #: lib/kiln_cms_web/live/taxonomy_live.ex:305
 #, elixir-autogen, elixir-format
@@ -349,7 +349,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex:344
 #: lib/kiln_cms_web/live/content_editor_live.ex:7425
-#: lib/kiln_cms_web/live/search_palette_live.ex:173
+#: lib/kiln_cms_web/live/search_palette_live.ex:190
 #, elixir-autogen, elixir-format
 msgid "Category"
 msgstr ""
@@ -1438,7 +1438,7 @@ msgstr ""
 msgid "← Newer posts"
 msgstr ""
 
-#: lib/kiln_cms_web/live/search_palette_live.ex:133
+#: lib/kiln_cms_web/live/search_palette_live.ex:150
 #, elixir-autogen, elixir-format
 msgid "%{count} results for “%{query}”."
 msgstr ""
@@ -1640,7 +1640,7 @@ msgstr ""
 msgid "Filter by status"
 msgstr ""
 
-#: lib/kiln_cms_web/live/search_palette_live.ex:100
+#: lib/kiln_cms_web/live/search_palette_live.ex:117
 #, elixir-autogen, elixir-format
 msgid "Find pages, posts, and media — press ⌘K / Ctrl-K from anywhere to jump here."
 msgstr ""
@@ -1712,7 +1712,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex:528
 #: lib/kiln_cms_web/live/backup_live.ex:237
 #: lib/kiln_cms_web/live/overview_live.ex:432
-#: lib/kiln_cms_web/live/search_palette_live.ex:152
+#: lib/kiln_cms_web/live/search_palette_live.ex:169
 #, elixir-autogen, elixir-format
 msgid "Media"
 msgstr ""
@@ -1746,8 +1746,8 @@ msgid "No custom fields yet."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:24
-#: lib/kiln_cms_web/live/search_palette_live.ex:131
-#: lib/kiln_cms_web/live/search_palette_live.ex:139
+#: lib/kiln_cms_web/live/search_palette_live.ex:148
+#: lib/kiln_cms_web/live/search_palette_live.ex:156
 #, elixir-autogen, elixir-format
 msgid "No results for “%{query}”."
 msgstr ""
@@ -1780,7 +1780,7 @@ msgid "Page not found"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:90
-#: lib/kiln_cms_web/live/search_palette_live.ex:143
+#: lib/kiln_cms_web/live/search_palette_live.ex:160
 #, elixir-autogen, elixir-format
 msgid "Pages"
 msgstr ""
@@ -1819,7 +1819,7 @@ msgid "Position"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:73
-#: lib/kiln_cms_web/live/search_palette_live.ex:146
+#: lib/kiln_cms_web/live/search_palette_live.ex:163
 #, elixir-autogen, elixir-format
 msgid "Posts"
 msgstr ""
@@ -1893,18 +1893,18 @@ msgstr ""
 #: lib/kiln_cms_web/live/analytics_live.ex:510
 #: lib/kiln_cms_web/live/media_live.ex:1075
 #: lib/kiln_cms_web/live/search_palette_live.ex:17
-#: lib/kiln_cms_web/live/search_palette_live.ex:98
+#: lib/kiln_cms_web/live/search_palette_live.ex:115
 #, elixir-autogen, elixir-format
 msgid "Search"
 msgstr ""
 
-#: lib/kiln_cms_web/live/search_palette_live.ex:111
-#: lib/kiln_cms_web/live/search_palette_live.ex:118
+#: lib/kiln_cms_web/live/search_palette_live.ex:128
+#: lib/kiln_cms_web/live/search_palette_live.ex:135
 #, elixir-autogen, elixir-format
 msgid "Search content"
 msgstr ""
 
-#: lib/kiln_cms_web/live/search_palette_live.ex:117
+#: lib/kiln_cms_web/live/search_palette_live.ex:134
 #, elixir-autogen, elixir-format
 msgid "Search content…"
 msgstr ""
@@ -1919,7 +1919,7 @@ msgstr ""
 msgid "Search published content…"
 msgstr ""
 
-#: lib/kiln_cms_web/live/search_palette_live.ex:103
+#: lib/kiln_cms_web/live/search_palette_live.ex:120
 #, elixir-autogen, elixir-format
 msgid "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days."
 msgstr ""
@@ -2151,7 +2151,7 @@ msgstr ""
 msgid "Custom"
 msgstr ""
 
-#: lib/kiln_cms_web/live/search_palette_live.ex:149
+#: lib/kiln_cms_web/live/search_palette_live.ex:166
 #, elixir-autogen, elixir-format
 msgid "Custom content"
 msgstr ""
@@ -2751,7 +2751,7 @@ msgstr ""
 msgid "Synced live — co-editor saves"
 msgstr ""
 
-#: lib/kiln_cms_web/live/search_palette_live.ex:183
+#: lib/kiln_cms_web/live/search_palette_live.ex:200
 #, elixir-autogen, elixir-format
 msgid "Tag"
 msgstr ""
@@ -9647,4 +9647,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex:4010
 #, elixir-autogen, elixir-format
 msgid "taxonomy"
+msgstr ""
+
+#: lib/kiln_cms_web/live/search_palette_live.ex:210
+#, elixir-autogen, elixir-format
+msgid "Tag group"
 msgstr ""
