@@ -15,7 +15,9 @@ defmodule KilnCMS.Ask do
   drafts and gated content can never leak into an answer or its citations.
 
   With no generator configured (the default), it returns retrieval-only:
-  `answer: nil`, `generated: false`, `sources: [...]`.
+  `answer: nil`, `generated: false`, `generation: :disabled`, `sources: [...]`.
+  `generation` is what separates that permanent state from a transient one —
+  see `t:generation/0`.
 
   ## Enabling generation
 
@@ -40,9 +42,39 @@ defmodule KilnCMS.Ask do
   client address when there is no user to key on — see `answer/2`'s
   `:client_id`. Exhausting a bucket degrades to retrieval-only; it never fails
   the request, because the sources are still a useful answer.
+
+  ## Telling an anonymous caller they were throttled (#853)
+
+  `generation: :rate_limited` is reported to anonymous callers too, and that is
+  a decision rather than an oversight — a bucket's state is information about
+  traffic, and one of the two buckets is shared.
+
+  The per-caller bucket is keyed on the caller's address, which is *mostly*
+  their own traffic reflected back — but not reliably. Everyone behind one NAT
+  or proxy egress shares a key, and `KilnCMSWeb.RateLimit.client_key/1`
+  collapses an unresolvable address to a single shared `"unknown"` bucket, so
+  even the per-caller bucket can tell one stranger about another. The per-org
+  bucket is shared by construction.
+
+  And `retry_after` says which bucket it was, whether or not it means to. The
+  two windows differ by default — a minute per caller, an hour per org — so any
+  value above the per-caller window can only have come from the shared one, and
+  it also says how far into that hour the org currently is.
+  `KilnCMS.LLM.Budget.check/4` does not label the bucket, but the number gives
+  it away, so treat this as disclosed rather than assuming it is not.
+
+  Reported anyway, on two grounds: the pipeline's own per-IP limiter already
+  answers 429 to the same anonymous caller and discloses more than an aggregate
+  window position; and withholding it would preserve exactly the ambiguity #853
+  exists to remove, in the case an operator most needs to diagnose — generation
+  silently off for everyone because the shared bucket is spent. Clamping the
+  reported value to the per-caller window was the alternative, and it is worse:
+  it would tell a client to retry in a minute when the real wait is most of an
+  hour, turning a disclosure into a lie the client acts on.
   """
   require Logger
 
+  alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
   alias KilnCMS.LLM
@@ -59,10 +91,40 @@ defmodule KilnCMS.Ask do
           url: String.t(),
           excerpt: String.t() | nil
         }
+  @typedoc """
+  Why there is no generated answer, or `nil` when there is one (#853).
+
+  `generated: false` on its own cannot be acted on: a client cannot tell "this
+  deployment does not do generated answers, stop showing the spinner" from "you
+  asked too fast, try again in a moment", and only the second has a recovery.
+
+    * `:disabled` — no generator configured. The default install; permanent
+      until an operator changes it.
+    * `:rate_limited` — a `KilnCMS.LLM.Budget` bucket is exhausted. Transient;
+      `retry_after` says for how long.
+    * `:failed` — the generator errored, timed out, or returned nothing usable.
+      Transient, but the caller cannot know when it clears.
+    * `:no_question` — `q` was blank, so nothing was retrieved or generated.
+      Not in #853's list, but the alternative was reporting `nil` (which means
+      success) for a request that produced no answer at all.
+
+  This is deliberately **coarser** than the `{:error, reason}` vocabulary
+  `KilnCMS.Assist` and `KilnCMS.Seo` use internally, which separates `:crashed`
+  from `:empty` from `:too_short`. Those two are reached by an authenticated
+  editor who can act on the distinction; this one is public and anonymous, and
+  the difference between "the model raised" and "the model returned whitespace"
+  is not the caller's to act on — both mean *try again, we don't know when*.
+  So they collapse into `:failed`, and only `:disabled` and `:rate_limited`,
+  which carry genuinely different recoveries, stay apart.
+  """
+  @type generation :: :disabled | :rate_limited | :failed | :no_question | nil
+
   @type result :: %{
           question: String.t(),
           answer: String.t() | nil,
           generated: boolean(),
+          generation: generation(),
+          retry_after: pos_integer() | nil,
           sources: [source()]
         }
 
@@ -143,14 +205,15 @@ defmodule KilnCMS.Ask do
 
   Retrieval always runs. Generation is skipped — leaving `answer: nil,
   generated: false` — when no generator is configured, when a budget bucket is
-  exhausted, or when the generator errors.
+  exhausted, or when the generator errors. `generation` says which of those it
+  was, and `retry_after` (seconds) is set for the one case that has a deadline.
   """
   @spec answer(String.t(), keyword()) :: result()
   def answer(question, opts \\ []) do
     question = question |> to_string() |> String.trim()
 
     if question == "" do
-      %{question: question, answer: nil, generated: false, sources: []}
+      result(question, nil, [], :no_question, nil)
     else
       locale = validate_locale(opts[:locale])
 
@@ -168,13 +231,39 @@ defmodule KilnCMS.Ask do
 
       case generate(generator, question, sources, locale, opts) do
         {:ok, answer} ->
-          %{question: question, answer: answer, generated: true, sources: sources}
+          result(question, answer, sources, nil, nil)
 
-        _none_or_error ->
-          %{question: question, answer: nil, generated: false, sources: sources}
+        :disabled ->
+          result(question, nil, sources, :disabled, nil)
+
+        # The only outcome with a deadline the caller can act on. Rounded
+        # through `AccountThrottle.retry_after_seconds/1` rather than here:
+        # it is exported precisely so the surfaces that answer "come back in N
+        # seconds" round the same way, and it already never answers 0 — which
+        # would invite an immediate retry straight into another refusal.
+        {:error, {:budget, retry_after_ms}} ->
+          result(question, nil, sources, :rate_limited, retry_after_seconds(retry_after_ms))
+
+        _error ->
+          result(question, nil, sources, :failed, nil)
       end
     end
   end
+
+  # `generated` is kept, and kept as the plain boolean it always was: it is the
+  # field existing clients read, and #853 is additive by construction.
+  defp result(question, answer, sources, generation, retry_after) do
+    %{
+      question: question,
+      answer: answer,
+      generated: not is_nil(answer),
+      generation: generation,
+      retry_after: retry_after,
+      sources: sources
+    }
+  end
+
+  defp retry_after_seconds(ms), do: AccountThrottle.retry_after_seconds(ms)
 
   # --- retrieval -------------------------------------------------------------
 
@@ -288,9 +377,14 @@ defmodule KilnCMS.Ask do
       :ok ->
         :ok
 
-      {:error, {:rate_limited, _retry_after_ms}} = denied ->
+      # Re-tagged, not passed through. `normalize/1` hands a generator's own
+      # `{:error, reason}` back untouched, so an adapter forwarding a provider
+      # 429 as `{:error, {:rate_limited, ms}}` would otherwise land in the same
+      # clause and be reported as one of OUR buckets — sending an operator to
+      # inspect `per_user_limit` for a limit that lives at the provider.
+      {:error, {:rate_limited, retry_after_ms}} ->
         Logger.info("Ask generation rate-limited; degrading to retrieval-only")
-        denied
+        {:error, {:budget, retry_after_ms}}
     end
   end
 
