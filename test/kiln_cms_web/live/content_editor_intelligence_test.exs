@@ -175,24 +175,46 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     assert html =~ "Semantic search is off"
   end
 
-  test "a never-published draft is told why it has no neighbours", %{conn: conn} do
+  test "a never-published draft finds its duplicate (#852)", %{conn: conn} do
+    # This test used to assert the opposite — "Publish this page to index it" —
+    # because embeddings were only written by firing, and firing runs on
+    # publish. That inverted the feature: near-duplicate detection is a
+    # PRE-publication check, and it only became available once the second copy
+    # had already been published.
     actor = authed_user(:admin)
+
+    twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
 
     draft =
       CMS.create_page!(
         %{
-          title: "Draft",
+          title: "Same",
           slug: slug(),
           blocks: [%{type: :rich_text, content: "<p>brewing herbal tea slowly</p>", order: 0}]
         },
         actor: actor
       )
 
-    # Embeddings are written by firing, and firing runs on publish — so this
-    # document genuinely has no vectors to compare, and saying "nothing similar"
-    # would blame the content for a state the author can fix by publishing.
     html = conn |> open(actor, draft) |> analyze()
 
-    assert html =~ "Publish this page to index it"
+    # The twin's editor LINK, not its title: both documents are titled "Same"
+    # (they have to be — the hierarchical embedding folds the title in), so
+    # asserting on the title would be satisfied by the editor's own title input
+    # and would pass with the fix removed.
+    assert html =~ "/editor/content/page/#{twin.id}"
+  end
+
+  test "a draft with nothing written in it says so", %{conn: conn} do
+    # The remaining honest empty state, and a different instruction: there is
+    # no block text to embed, so there is nothing to compare *from* — fixed by
+    # writing something, not by publishing or by changing a setting.
+    actor = authed_user(:admin)
+    _twin = indexed_page(actor, "brewing herbal tea slowly", title: "Same")
+
+    blank = CMS.create_page!(%{title: "Blank", slug: slug(), blocks: []}, actor: actor)
+
+    html = conn |> open(actor, blank) |> analyze()
+
+    assert html =~ "Add some content"
   end
 end

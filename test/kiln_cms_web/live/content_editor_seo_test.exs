@@ -450,9 +450,13 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       render_click(lv, "seo_links_refresh", %{})
       html = render_async(lv, 2_000)
 
-      # This draft was never published, so it was never indexed — say so
-      # instead of leaving the author staring at nothing.
-      assert html =~ "Publish this page to index it"
+      # It used to say "Publish this page to index it", which stopped being the
+      # reason when an unpublished anchor started getting a centroid computed in
+      # memory (#852) — and publishing would not have helped an empty page
+      # anyway. Semantic search is off in this suite, and the keyword fallback
+      # builds its query from the title rather than the blocks, so the honest
+      # answer here is the setting and not the empty body.
+      assert html =~ "Enabling semantic search"
     end
 
     test "the Clipboard hook's copied event is handled", %{conn: conn} do

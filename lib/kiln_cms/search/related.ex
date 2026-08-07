@@ -18,6 +18,7 @@ defmodule KilnCMS.Search.Related do
   """
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Search
+  alias KilnCMS.Search.BlockIndexer
 
   @typedoc """
   A scored neighbouring document. `path` is the canonical *public page* path
@@ -169,21 +170,70 @@ defmodule KilnCMS.Search.Related do
 
   # The document's embedding centroid: the element-wise mean of its block
   # vectors (hierarchical embeddings already fold in ancestor context).
+  #
+  # Falls back to computing them in memory when the index has none (#852).
+  # Vectors are written by firing and firing runs on publish, so a document that
+  # has never been published had no centroid — which meant `near_duplicates/2`,
+  # a **pre**-publication check, only became available once the thing it exists
+  # to prevent had already happened.
   defp centroid(record) do
+    case stored_vectors(record) do
+      [] -> unindexed_centroid(record)
+      vectors -> mean(vectors)
+    end
+  end
+
+  # Computing costs one model inference PER BLOCK, so it is confined to the one
+  # case that needs it: a document that has not been published.
+  #
+  # Not merely an optimisation. `/api/related` is public and anonymous, and its
+  # anchor always resolves through `Delivery.published/4` — so a published
+  # anchor is the only kind a stranger can name. Without this guard, an operator
+  # who turns on semantic search without re-firing puts every published page in
+  # the empty-`stored_vectors` state, and a crawler walking the site would then
+  # drive N sequential inferences per request through one `Nx.Serving`. Gating
+  # on state means the reader-facing surface keeps exactly the cheap behaviour
+  # it had, whatever the index looks like.
+  defp unindexed_centroid(%{state: :published}), do: nil
+  defp unindexed_centroid(record), do: computed_centroid(record)
+
+  defp stored_vectors(record) do
     storage = KilnCMS.Firing.Engine.document_type(record)
 
-    vectors =
-      KilnCMS.SearchIndex.block_embeddings_for!(storage, record.id,
-        authorize?: false,
-        tenant: record.org_id
-      )
-      |> Enum.map(&to_list(&1.embedding))
-      |> Enum.reject(&is_nil/1)
+    KilnCMS.SearchIndex.block_embeddings_for!(storage, record.id,
+      authorize?: false,
+      tenant: record.org_id
+    )
+    |> Enum.map(&to_list(&1.embedding))
+    |> Enum.reject(&is_nil/1)
+  end
 
-    case vectors do
-      [] -> nil
-      _ -> mean(vectors)
-    end
+  # Memoized on what would actually be embedded, not on the record's timestamp:
+  # the editor's panel is re-openable and `:flag_duplicates` can fire more than
+  # once for a document, and this is N model inferences for an N-block document.
+  #
+  # The TTL is deliberately short. The anchor is by definition being edited, so
+  # a long-lived entry would answer for content the author has already changed —
+  # and every save mints a fresh key, leaving the old one resident. These share
+  # `KilnCMS.Cache` with the `published:record:*` entries that keep delivery
+  # serving through a database outage, and evicting those to hold stale draft
+  # centroids would trade a real guarantee for a saved inference.
+  #
+  # Nothing is persisted — see `KilnCMS.Search.BlockIndexer.block_vectors/1` for
+  # why a draft's vectors must not enter `block_embeddings`.
+  defp computed_centroid(record) do
+    inputs = BlockIndexer.embedding_inputs(record)
+
+    key =
+      {:draft_centroid, Search.model(), KilnCMS.Firing.Engine.document_type(record), record.id,
+       :erlang.phash2(inputs)}
+
+    KilnCMS.Cache.fetch(key, :timer.seconds(60), fn ->
+      case BlockIndexer.block_vectors(record) do
+        [] -> nil
+        vectors -> mean(vectors)
+      end
+    end)
   end
 
   # A forbidden read comes back as an error tuple, which drops the neighbour —

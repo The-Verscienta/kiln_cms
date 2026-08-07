@@ -90,6 +90,138 @@ defmodule KilnCMS.Search.RelatedTest do
     refute Enum.any?(dups, &(&1.title == "Far"))
   end
 
+  # A never-indexed draft: created, never published, and never handed to
+  # `BlockIndexer.reindex/1` — so it has no rows in `block_embeddings`, which is
+  # the state every real never-published document is in.
+  defp unindexed_draft(actor, text, opts \\ []) do
+    CMS.create_post!(
+      %{
+        title: Keyword.get(opts, :title, "Doc"),
+        slug: slug(),
+        blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+      },
+      actor: actor
+    )
+  end
+
+  describe "a never-published anchor (#852)" do
+    test "near_duplicates works before the document has ever been indexed" do
+      # The inversion #852 is about: near-duplicate detection is a PRE-publication
+      # check — "someone already wrote this, do not publish a second copy" — and
+      # it used to become available only once the thing it exists to prevent had
+      # happened.
+      actor = admin()
+
+      published_twin =
+        indexed_post(actor, "unique passage about kiln firing", title: "Same")
+
+      _distant = indexed_post(actor, "entirely unrelated botany notes", title: "Far")
+
+      draft = unindexed_draft(actor, "unique passage about kiln firing", title: "Same")
+
+      # Precondition: the anchor genuinely has nothing in the index.
+      assert [] =
+               KilnCMS.SearchIndex.block_embeddings_for!(:post, draft.id,
+                 authorize?: false,
+                 tenant: draft.org_id
+               )
+
+      dups = Related.near_duplicates(draft)
+
+      assert Enum.any?(dups, &(&1.id == published_twin.id)),
+             "a never-published draft could not see its published duplicate"
+
+      refute Enum.any?(dups, &(&1.title == "Far"))
+    end
+
+    test "computing the anchor's centroid writes nothing to the index" do
+      # The reason this is computed rather than indexed: `block_embeddings` rows
+      # carry block text with no state or audience column to filter on, so a
+      # draft's rows would be visible to every other consumer of that table with
+      # nothing to exclude them by.
+      actor = admin()
+      _twin = indexed_post(actor, "unique passage about kiln firing", title: "Same")
+      draft = unindexed_draft(actor, "unique passage about kiln firing", title: "Same")
+
+      assert Related.near_duplicates(draft) != []
+
+      assert [] =
+               KilnCMS.SearchIndex.block_embeddings_for!(:post, draft.id,
+                 authorize?: false,
+                 tenant: draft.org_id
+               ),
+             "the draft's vectors were persisted; they must stay in memory"
+    end
+
+    test "a draft anchor still only sees published neighbours on the public surface" do
+      # `related_documents/2` is the reader-facing one. Giving the anchor a
+      # centroid must not change which NEIGHBOURS are allowed through.
+      actor = admin()
+
+      published_twin =
+        indexed_post(actor, "unique passage about kiln firing", title: "Same")
+
+      draft_twin =
+        indexed_post(actor, "unique passage about kiln firing",
+          title: "Same",
+          publish?: false
+        )
+
+      draft = unindexed_draft(actor, "unique passage about kiln firing", title: "Same")
+
+      related = Related.related_documents(draft)
+
+      assert Enum.any?(related, &(&1.id == published_twin.id))
+      refute Enum.any?(related, &(&1.id == draft_twin.id))
+    end
+
+    test "a PUBLISHED anchor with no stored vectors is not computed on demand" do
+      # The guard that keeps the public surface cheap. `/api/related` resolves
+      # its anchor through `Delivery.published/4`, so a published document is
+      # the only anchor a stranger can name — and an operator who turns on
+      # semantic search without re-firing puts EVERY published page in the
+      # no-stored-vectors state. Without this gate an anonymous crawler would
+      # drive one model inference per block, per request, through one serving.
+      actor = admin()
+      _twin = indexed_post(actor, "unique passage about kiln firing", title: "Same")
+
+      # Published, and deliberately never handed to `BlockIndexer.reindex/1`.
+      unindexed =
+        CMS.create_post!(
+          %{
+            title: "Same",
+            slug: slug(),
+            blocks: [
+              %{type: :rich_text, content: "<p>unique passage about kiln firing</p>", order: 0}
+            ]
+          },
+          actor: actor
+        )
+        |> CMS.publish_post!(%{}, actor: actor)
+
+      assert [] =
+               KilnCMS.SearchIndex.block_embeddings_for!(:post, unindexed.id,
+                 authorize?: false,
+                 tenant: unindexed.org_id
+               )
+
+      assert Related.near_duplicates(unindexed) == [],
+             "a published anchor must not fall back to computing its centroid"
+    end
+
+    test "an anchor with no block text still resolves to no neighbours" do
+      # An empty document has nothing to embed, so there is no centroid to
+      # compute — the fallback must answer "nothing", not crash or compare
+      # against a zero vector.
+      actor = admin()
+      _twin = indexed_post(actor, "unique passage about kiln firing", title: "Same")
+
+      empty = CMS.create_post!(%{title: "Empty", slug: slug(), blocks: []}, actor: actor)
+
+      assert Related.near_duplicates(empty) == []
+    end
+  end
+
   test "suggest_tags returns scored suggestions and skips applied tags" do
     actor = admin()
     uniq = System.unique_integer([:positive])
