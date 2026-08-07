@@ -10,9 +10,33 @@ defmodule KilnCMS.Ask do
   assembles them into cited `sources`, and — if a generator is configured (see
   `KilnCMS.Ask.Generator`) — synthesizes an answer grounded in those sources.
 
-  Retrieval is **policy-scoped**: an anonymous caller only ever sees published,
-  world-readable content (the same read policies as every headless surface), so
-  drafts and gated content can never leak into an answer or its citations.
+  Retrieval is **anonymous, always** — it runs the read policies with no actor,
+  so only published, `:public` content is ever retrieved, for every caller. That
+  is what makes the promise in `docs/rag.md` and `config/runtime.exs` true:
+  no draft or member-gated record can reach the model or the citations,
+  whatever credential the request carried.
+
+  ## Why this endpoint doesn't widen for a bearer token (#916)
+
+  Every other headless read surface widens with the caller's role, and this one
+  used to as well — it forwarded `conn.assigns[:current_user]` as the `:actor`.
+  That was a leak with two independent causes, either of which was sufficient:
+  `Content`'s read policy authorizes `ReadableContentType` *before* the
+  published+public clause, and an `OrgAdmin` **bypass** sits above the whole
+  block. So an editor's or admin's token pulled drafts and gated records into
+  the prompt, and `/api/ask` shipped their excerpts to the configured provider.
+
+  Flooring generation alone would have been the narrower fix, but it breaks the
+  thing that makes a citation API usable: the model is told to cite by index,
+  and the client renders `sources` by index, so the array in the prompt and the
+  array in the response must be the same array. Retrieving anonymously keeps
+  them identical **and** reuses the authorization path that was already correct,
+  rather than adding a second filter that has to stay in step with the first.
+
+  It also costs nothing real. `/api/ask` is the public site's Q&A endpoint;
+  searching drafts is what `/editor/search` and the editor palette are for.
+  Consequently `answer/2` takes no `:actor` — see #869 for why an ignored
+  `:actor` option is worse than no option at all.
 
   With no generator configured (the default), it returns retrieval-only:
   `answer: nil`, `generated: false`, `generation: :disabled`, `sources: [...]`.
@@ -40,7 +64,7 @@ defmodule KilnCMS.Ask do
   search query and an absurd one for model inference. So generation carries its
   own `KilnCMS.LLM.Budget` buckets, and the caller-side bucket falls back to the
   client address when there is no user to key on — see `answer/2`'s
-  `:client_id`. Exhausting a bucket degrades to retrieval-only; it never fails
+  `:caller_id`. Exhausting a bucket degrades to retrieval-only; it never fails
   the request, because the sources are still a useful answer.
 
   ## Telling an anonymous caller they were throttled (#853)
@@ -190,18 +214,20 @@ defmodule KilnCMS.Ask do
   @doc """
   Answer `question` from published content.
 
+  Retrieval is anonymous whatever the caller — see the moduledoc. There is
+  deliberately no `:actor` or `:authorize?` option (#916).
+
   Options:
 
-    * `:actor` — the requesting user (widens visibility beyond published for
-      editors/admins, exactly like other read paths); omit for anonymous.
-    * `:authorize?` — defaults to `true` (published-only for anonymous).
+    * `:tenant` — the organization to retrieve within (#336).
     * `:locale` — content locale (defaults to the configured default).
     * `:limit` — max sources to retrieve (clamped to #{@max_limit}).
     * `:generator` — override the configured generator module (mainly for tests).
-    * `:client_id` — what to key the caller's generation budget on when there is
-      no actor (the controller passes the client address). Ignored when an
-      actor is present, and skipping the bucket entirely when neither is given,
-      the same way `KilnCMS.LLM.Budget` treats a `nil` id everywhere else.
+    * `:caller_id` — an opaque identity for the caller's generation budget.
+      The controller passes the signed-in user's id when there is one and the
+      client address otherwise. Rate limiting, **not** authorization — it never
+      widens what is retrieved. Omitted, the caller bucket is skipped, the way
+      `KilnCMS.LLM.Budget` treats a `nil` id everywhere else.
 
   Retrieval always runs. Generation is skipped — leaving `answer: nil,
   generated: false` — when no generator is configured, when a budget bucket is
@@ -217,9 +243,14 @@ defmodule KilnCMS.Ask do
     else
       locale = validate_locale(opts[:locale])
 
+      # `actor: nil, authorize?: true` — pinned, not defaulted, and not taken
+      # from `opts`. This is the endpoint's published-only floor (#916): it runs
+      # the same read policies an anonymous HTTP caller runs, so `sources` is
+      # world-readable content by construction rather than by a filter that
+      # could drift. A caller cannot widen it.
       read_opts = [
-        actor: opts[:actor],
-        authorize?: Keyword.get(opts, :authorize?, true),
+        actor: nil,
+        authorize?: true,
         # Tenant (#336): retrieval via `Search.global` scopes to this org.
         tenant: opts[:tenant],
         locale: locale,
@@ -363,17 +394,13 @@ defmodule KilnCMS.Ask do
   defp normalize({:error, reason}), do: {:error, reason}
   defp normalize(other), do: {:error, {:unexpected, other}}
 
-  # Anonymous callers key the caller bucket on the client address; without that
-  # fallback the only real ceiling on a public endpoint would be the org bucket,
-  # which one client could exhaust for everybody.
+  # The caller bucket falls back to the client address for anonymous callers;
+  # without that the only real ceiling on a public endpoint would be the org
+  # bucket, which one client could exhaust for everybody. The controller
+  # resolves the identity, because it is the only layer that still knows who
+  # signed in — retrieval here is deliberately actorless (#916).
   defp check_budget(opts) do
-    caller_id =
-      case opts[:actor] do
-        %{id: id} -> id
-        _anonymous -> opts[:client_id]
-      end
-
-    case Budget.check("ask", opts[:tenant], caller_id, budget_limits()) do
+    case Budget.check("ask", opts[:tenant], opts[:caller_id], budget_limits()) do
       :ok ->
         :ok
 

@@ -1484,8 +1484,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Load internal-link suggestions the first time the panel is opened. Repeat
   # opens reuse what's already there — the author can refresh explicitly.
+  #
+  # `may_write?` for the same reason the two intelligence handlers below carry
+  # it (#550/#916): a pgvector query plus a record read per neighbour, on an
+  # explicit click, re-triggerable indefinitely and with no budget bucket. It is
+  # cheaper than the intelligence refresh — no embedding is generated — but it
+  # is the same shape, and gating one of the two would have been arbitrary.
   def handle_event("seo_links_refresh", _params, socket) do
-    if socket.assigns.seo_links_loading?,
+    if socket.assigns.seo_links_loading? or not socket.assigns.may_write?,
       do: {:noreply, socket},
       else: {:noreply, load_link_suggestions(socket)}
   end
@@ -1495,8 +1501,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Near-duplicates + tag suggestions, on an explicit click. Same "never on
   # mount" rule as the link suggestions: this is a pgvector query, a record read
   # per neighbour, and one embedding per unapplied tag name.
+  #
+  # `may_write?` gates it for the reason `seo_suggest` above states (#550): read
+  # access is enough to REACH this handler, but this one is unbounded work on a
+  # cold cache — a `list_tags!` plus an embedding per unapplied tag — and it is
+  # re-triggerable on every click, with no budget bucket in front of it. The
+  # hidden control is not the boundary; a replayed event arrives regardless.
   def handle_event("content_intel_refresh", _params, socket) do
-    if socket.assigns.intel_loading?,
+    if socket.assigns.intel_loading? or not socket.assigns.may_write?,
       do: {:noreply, socket},
       else: {:noreply, load_content_intel(socket)}
   end
@@ -1505,7 +1517,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # it lands in the same save as everything else the author is editing and is
   # undoable by unticking the checkbox the picker already renders for it.
   def handle_event("intel_add_tag", %{"id" => id}, socket) when is_binary(id) do
-    {:noreply, add_suggested_tag(socket, id)}
+    if socket.assigns.may_write?,
+      do: {:noreply, add_suggested_tag(socket, id)},
+      else: {:noreply, socket}
   end
 
   def handle_event("intel_add_tag", _params, socket), do: {:noreply, socket}
@@ -7849,8 +7863,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <%!-- Internal links (#377). Loaded on an explicit click, never on
                     mount: it costs a vector query plus a read per neighbour, and
                     inspector sections are always expanded, so there is no "first
-                    open" to hang lazy loading off. --%>
-              <.inspector_section title={gettext("Internal links")}>
+                    open" to hang lazy loading off.
+
+                    `:if={@may_write?}` matches the SEO panel above and the
+                    Similar content section below — every control in the rail
+                    that spends work on a click is offered only to someone who
+                    could act on the result. --%>
+              <.inspector_section :if={@may_write?} title={gettext("Internal links")}>
                 <p class="text-xs text-base-content/60">
                   {gettext("Related pages worth linking to from this one.")}
                 </p>
@@ -7908,8 +7927,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     just paid for one query is the one most likely to want the
                     others. No `<form>` here — the Settings rail is already
                     inside `id="page-editor"`'s form, and a nested one is
-                    dropped by the HTML parser. --%>
-              <.inspector_section title={gettext("Similar content")}>
+                    dropped by the HTML parser.
+
+                    `:if={@may_write?}` for the reason the SEO panel above
+                    carries it (#550): everything in here either bills an
+                    embedding or ticks a tag, and neither is something a
+                    read-only reviewer should be offered. The handlers refuse
+                    server-side too — this only stops showing a control that
+                    would be declined. --%>
+              <.inspector_section :if={@may_write?} title={gettext("Similar content")}>
                 <p class="text-xs text-base-content/60">
                   {gettext("Near-duplicates of this page, and tags its content suggests.")}
                 </p>
