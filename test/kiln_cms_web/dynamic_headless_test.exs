@@ -102,6 +102,78 @@ defmodule KilnCMSWeb.DynamicHeadlessTest do
     end
   end
 
+  # #626: the entry tier mirrors the compiled types' write surface, and
+  # `return_to_draft` was missing from both. `test/kiln_cms_web/write_api_test.exs`
+  # covers the compiled-type side; this is the generic-tier twin, which has its
+  # own `routes do` block and so its own way to be forgotten.
+  describe "JSON:API /api/json/entries — return-to-draft (#626)" do
+    # Bearer API key, the same surface `write_api_test.exs` drives the compiled
+    # types through — this is the headless path the issue is about, not a session.
+    defp mint(owner, access) do
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          owner.id,
+          "dyn-write-api",
+          DateTime.add(DateTime.utc_now(), 30, :day),
+          %{access: access},
+          actor: admin()
+        )
+
+      Ash.Resource.get_metadata(key, :plaintext_api_key)
+    end
+
+    defp api_patch(path, id, owner) do
+      body = %{data: %{type: "entry", id: id, attributes: %{}}}
+
+      conn =
+        build_conn()
+        |> put_req_header("accept", @accept)
+        |> put_req_header("content-type", @accept)
+        |> put_req_header("authorization", "Bearer #{mint(owner, :read_write)}")
+        |> dispatch(@endpoint, :patch, path, Jason.encode!(body))
+
+      {conn.status, conn.resp_body}
+    end
+
+    test "an admin can send an in-review entry back to its author" do
+      actor = admin()
+      definition = define_type!(actor)
+      entry = entry!(definition, %{title: "Draft entry"}, actor)
+
+      {:ok, in_review} =
+        ContentTypes.transition(definition.name, "submit", entry, actor: actor)
+
+      assert in_review.state == :in_review
+
+      assert {200, _} =
+               api_patch("/api/json/entries/#{entry.id}/return-to-draft", entry.id, actor)
+
+      assert ContentTypes.get_record!(definition.name, entry.id, actor: actor).state == :draft
+    end
+
+    test "an editor is refused — the OrgAdmin gate survives the new route" do
+      actor = admin()
+      definition = define_type!(actor)
+      entry = entry!(definition, %{title: "Draft entry"}, actor)
+
+      {:ok, _in_review} =
+        ContentTypes.transition(definition.name, "submit", entry, actor: actor)
+
+      editor =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "dynhl-ed-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :editor
+        })
+
+      assert {403, _} =
+               api_patch("/api/json/entries/#{entry.id}/return-to-draft", entry.id, editor)
+
+      assert ContentTypes.get_record!(definition.name, entry.id, actor: actor).state == :in_review
+    end
+  end
+
   describe "GraphQL entry queries" do
     test "entryBySlug resolves a published entry with its typeName" do
       actor = admin()

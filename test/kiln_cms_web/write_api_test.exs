@@ -211,6 +211,100 @@ defmodule KilnCMSWeb.WriteApiTest do
       )
     end
 
+    # #626: only half the approve/return pair was routed, so a headless reviewer
+    # could approve content but had to switch to the web editor to send anything
+    # back. The action, its state-machine transition and its `OrgAdmin` policy
+    # all already existed — it was simply never routed.
+    test "return-to-draft sends in-review content back to its author", %{post: post} do
+      admin = user(:admin)
+      in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+      assert in_review.state == :in_review
+
+      assert {200, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: mint(admin, :read_write)
+               )
+
+      assert CMS.get_post!(post.id, actor: admin).state == :draft
+    end
+
+    test "return-to-draft is forbidden to an editor key", %{post: post} do
+      # The gate is `policy action(:return_to_draft)` → `Checks.OrgAdmin`, the
+      # same one `publish` has. Routing the action must not re-derive it: an
+      # editor may submit for review, not decide the outcome.
+      admin = user(:admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      assert {403, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: mint(user(:editor), :read_write)
+               )
+
+      assert CMS.get_post!(post.id, actor: admin).state == :in_review
+    end
+
+    test "return-to-draft is forbidden to a read-only key, admin or not", %{post: post} do
+      # A `:read` key can never mutate content, whatever its owner's role —
+      # `Checks.ApiKeyWithoutWriteAccess` runs before the admin bypass.
+      admin = user(:admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      assert {403, _} =
+               patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+                 type: "post",
+                 bearer: mint(admin, :read)
+               )
+
+      assert CMS.get_post!(post.id, actor: admin).state == :in_review
+    end
+
+    test "return-to-draft writes no content attributes", %{post: post} do
+      # `docs/json-api.md` has always said the workflow routes "carry no
+      # attributes". Without `accept []` the action inherits `default_accept`, so
+      # a populated `attributes` object would write content here while skipping
+      # everything `:update` attaches — the optimistic lock, the slug/alias/SEO
+      # validations, the redirect record, search text and embeddings.
+      admin = user(:admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      {status, _body} =
+        patch_json(
+          "/api/json/posts/#{post.id}/return-to-draft",
+          post.id,
+          %{
+            title: "Rewritten by the transition",
+            slug: "smuggled-#{System.unique_integer([:positive])}"
+          },
+          type: "post",
+          bearer: mint(admin, :read_write)
+        )
+
+      reloaded = CMS.get_post!(post.id, actor: admin)
+
+      # Either the write is refused outright or the transition happens and the
+      # attributes are ignored — never "200 and the title changed".
+      assert status in [200, 400]
+      assert reloaded.title == "WF"
+      refute reloaded.slug =~ "smuggled"
+    end
+
+    test "return-to-draft from the wrong state is a clean 4xx, not a 500", %{post: post} do
+      # The case a review client hits constantly: double-tap Return, or return
+      # something already returned. The record is still `:draft` here.
+      admin = user(:admin)
+
+      {status, _body} =
+        patch_json("/api/json/posts/#{post.id}/return-to-draft", post.id, %{},
+          type: "post",
+          bearer: mint(admin, :read_write)
+        )
+
+      assert status in 400..499
+      assert CMS.get_post!(post.id, actor: admin).state == :draft
+    end
+
     test "unpublish takes published content back down", %{post: post} do
       admin = user(:admin)
       published = CMS.publish_post!(post, %{}, actor: admin)
@@ -594,6 +688,38 @@ defmodule KilnCMSWeb.WriteApiTest do
       # than a result.
       assert is_nil(get_in(body, ["data", "createPost", "result"]))
       assert [] = CMS.list_posts!(actor: user(:admin), query: [filter: [slug: s]])
+    end
+
+    test "returnPostToDraft is routed and admin-gated (#626)" do
+      admin = user(:admin)
+      post = CMS.create_post!(%{title: "GQL return", slug: slug()}, actor: admin)
+      _in_review = CMS.submit_post_for_review!(post, %{}, actor: admin)
+
+      query = """
+      mutation ($id: ID!) {
+        returnPostToDraft(id: $id) { result { id state } errors { message } }
+      }
+      """
+
+      # An editor key cannot: the `OrgAdmin` gate is the whole point of the
+      # action, and it must survive being exposed here.
+      #
+      # Asserted on the error, not on `result` being nil: a mutation that did not
+      # exist would return `%{"errors" => …}` with no `"data"` key at all, so
+      # `get_in(…, ["data", …])` is nil either way and proves nothing.
+      refused = gql(query, %{id: post.id}, bearer: mint(user(:editor), :read_write))
+
+      assert %{"returnPostToDraft" => %{"result" => nil, "errors" => [_ | _] = errors}} =
+               refused["data"]
+
+      assert Enum.any?(errors, &(&1["message"] =~ "forbidden" or &1["message"] =~ "authorized")),
+             "expected an authorization error, got #{inspect(errors)}"
+
+      assert CMS.get_post!(post.id, actor: admin).state == :in_review
+
+      body = gql(query, %{id: post.id}, bearer: mint(admin, :read_write))
+      assert body["data"]["returnPostToDraft"]["result"]["state"] == "draft"
+      assert CMS.get_post!(post.id, actor: admin).state == :draft
     end
 
     test "publishPost is admin-gated and re-fires on success" do

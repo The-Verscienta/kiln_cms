@@ -297,6 +297,10 @@ defmodule KilnCMS.CMS.Content do
               create :create_entry, :create, hide_inputs: [:blocks]
               update :update_entry, :update, hide_inputs: [:blocks]
               update :submit_entry_for_review, :submit_for_review, hide_inputs: [:blocks]
+              # The return half of the approve/return pair (#626). Admin-only via
+              # `policy action(:return_to_draft)`, exactly like `publish_entry` —
+              # routing it grants nobody anything the web editor didn't already.
+              update :return_entry_to_draft, :return_to_draft, hide_inputs: [:blocks]
               update :publish_entry, :publish, hide_inputs: [:blocks]
               update :unpublish_entry, :unpublish, hide_inputs: [:blocks]
               destroy :delete_entry, :destroy, hide_inputs: [:blocks]
@@ -341,6 +345,10 @@ defmodule KilnCMS.CMS.Content do
               post :create
               patch :update
               patch :submit_for_review, route: "/:id/submit-for-review"
+              # The return half of the approve/return pair (#626): without it a
+              # headless reviewer can approve but has to switch to the web editor
+              # to send anything back. Admin-only, like `publish` below.
+              patch :return_to_draft, route: "/:id/return-to-draft"
               patch :publish, route: "/:id/publish"
               patch :unpublish, route: "/:id/unpublish"
               delete :destroy
@@ -421,6 +429,11 @@ defmodule KilnCMS.CMS.Content do
               update unquote(:"submit_#{type}_for_review"), :submit_for_review,
                 hide_inputs: [:blocks]
 
+              # The return half of the approve/return pair (#626), so a review
+              # client can reject as well as approve. Admin-only via
+              # `policy action(:return_to_draft)`, like `publish_#{type}`.
+              update unquote(:"return_#{type}_to_draft"), :return_to_draft, hide_inputs: [:blocks]
+
               update unquote(:"publish_#{type}"), :publish, hide_inputs: [:blocks]
               update unquote(:"unpublish_#{type}"), :unpublish, hide_inputs: [:blocks]
               # Reversible soft-delete; hard `:purge` is never exposed.
@@ -484,6 +497,10 @@ defmodule KilnCMS.CMS.Content do
               post :create
               patch :update
               patch :submit_for_review, route: "/:id/submit-for-review"
+              # The return half of the approve/return pair (#626): without it a
+              # headless reviewer can approve but has to switch to the web editor
+              # to send anything back. Admin-only, like `publish` below.
+              patch :return_to_draft, route: "/:id/return-to-draft"
               patch :publish, route: "/:id/publish"
               patch :unpublish, route: "/:id/unpublish"
               # DELETE is a reversible soft-delete (AshArchival); hard `:purge`
@@ -1506,6 +1523,23 @@ defmodule KilnCMS.CMS.Content do
 
         update :return_to_draft do
           require_atomic? false
+          # A workflow transition takes no content input. Without this the action
+          # inherits `default_accept` (17 attributes), so `PATCH
+          # /:id/return-to-draft` with a populated `attributes` object would write
+          # content while skipping everything `:update` attaches — the optimistic
+          # lock, `SlugAvailable`/`PathAliasValid`/`SeoUrls`, `RecordSlugRedirect`,
+          # `SetSearchText`, `EnqueueEmbedding`. `docs/json-api.md` has always said
+          # these routes "carry no attributes"; now that is true of this one (#626).
+          accept []
+
+          # The state machine checks `changeset.data.state` — the in-memory struct
+          # — and the resulting UPDATE carries no state predicate, so two admins
+          # acting on an `:in_review` record concurrently can both win. A publish
+          # committing first and this landing second would leave `state: :draft`
+          # with `published_at`, a published version and live artifacts, which
+          # `unpublish` can then never clear because it requires `:published`.
+          # Filtering makes the write a real compare-and-swap.
+          change filter(expr(^ref(:state) == :in_review))
           change transition_state(:draft)
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "returned_to_draft"}
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :returned_to_draft}

@@ -158,6 +158,7 @@ identical; the dynamic tier shares one generic `*_entry` set):
 | `createPost(input:)` | `:create` | `:read_write` key, editor+ | Creates a **draft**, attributed to the key's owner |
 | `updatePost(id:, input:)` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if the record is already published |
 | `submitPostForReview(id:)` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
+| `returnPostToDraft(id:)` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
 | `publishPost(id:)` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
 | `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
 | `deletePost(id:)` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
@@ -165,8 +166,9 @@ identical; the dynamic tier shares one generic `*_entry` set):
 Authorization mirrors `/mcp` exactly: a **read-only key** can run none of these;
 a **`:read_write` key on a `:viewer`** account can run none (the role has no
 authoring rights); a **`:read_write` key on an `:editor`** account can
-create/update/submit; **publish, unpublish and delete require an `:admin`**
-account. The hard delete (`:purge`) is **never** exposed as a mutation and is
+create/update/submit; **return-to-draft, publish, unpublish and delete require an
+`:admin`** account — an editor submits for review, and deciding the outcome
+(approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
 
 ### Writing tags — replace vs merge
