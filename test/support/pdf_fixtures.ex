@@ -19,11 +19,20 @@ defmodule KilnCMS.PdfFixtures do
   @doc """
   A one-page PDF.
 
-  With `metadata: true` it also carries an `/Info` dictionary, an XMP packet
-  and an outline, so a test can tell "stripped the metadata" apart from
-  "rebuilt the file and lost the bookmarks". The strings it embeds are
-  returned by `metadata_markers/0` and `content_markers/0` so assertions never
-  restate them.
+  With `metadata: true` it also carries an `/Info` dictionary, a **document**
+  XMP packet, a **page-level** XMP packet, a `/PieceInfo` private dictionary
+  and an outline — so a test can tell "stripped the metadata" apart from
+  "rebuilt the file and lost the bookmarks", and apart from "cleared the two
+  document-level fields and left everything Illustrator writes".
+
+  The page-level pair matters more than it looks: this fixture used to attach
+  `/Metadata` to the Catalog only, so `metadata_markers/0` passed while
+  `qpdf --remove-info --remove-metadata` was leaving per-page XMP and
+  `/PieceInfo` in the stored file (#918). A fixture that only carries what the
+  implementation already handles cannot fail.
+
+  The strings it embeds are returned by `metadata_markers/0` and
+  `content_markers/0` so assertions never restate them.
   """
   @spec pdf(keyword()) :: binary()
   def pdf(opts \\ []) do
@@ -32,7 +41,26 @@ defmodule KilnCMS.PdfFixtures do
 
   @doc "Strings a stripped PDF must NOT contain."
   @spec metadata_markers() :: [String.t()]
-  def metadata_markers, do: ["Jane Author", "Quarterly Secrets", "SecretApp", "InternalTool"]
+  def metadata_markers,
+    do: [
+      "Jane Author",
+      "Quarterly Secrets",
+      "SecretApp",
+      "InternalTool",
+      # Page-level XMP and /PieceInfo (#918) — the two the document-level flags
+      # do not reach.
+      "Page Level Author",
+      "PieceInfoSecretPath",
+      # A STREAM object's dictionary (#918). qpdf's JSON gives streams a
+      # different shape from plain objects, and image/Form XObjects — which are
+      # streams — are where a placed asset's original XMP and Photoshop's
+      # `/PieceInfo` actually live. Matching only the plain shape missed the
+      # most common real-world carrier.
+      "XObject Level Author",
+      "XObjectPieceInfoPath",
+      # A DIRECT (inline) sub-dictionary, one level down from the object.
+      "NestedAnnotSecret"
+    ]
 
   @doc "Strings a stripped PDF MUST still contain — the document itself."
   @spec content_markers() :: [String.t()]
@@ -52,31 +80,51 @@ defmodule KilnCMS.PdfFixtures do
     [
       "<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R /Metadata 8 0 R >>",
       "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-      page_object(),
+      page_object(page_metadata()),
       stream("BT /F1 12 Tf 20 100 Td (Kiln page body) Tj ET", ""),
       "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
       "<< /Type /Outlines /First 7 0 R /Last 7 0 R /Count 1 >>",
       "<< /Title (Chapter One) /Parent 6 0 R /Dest [3 0 R /Fit] >>",
-      stream(xmp(), "/Type /Metadata /Subtype /XML "),
+      stream(xmp("Jane Author"), "/Type /Metadata /Subtype /XML "),
       "<< /Title (Quarterly Secrets) /Author (Jane Author) " <>
-        "/Creator (SecretApp 4.2) /Producer (InternalTool) >>"
+        "/Creator (SecretApp 4.2) /Producer (InternalTool) >>",
+      stream(xmp("Page Level Author"), "/Type /Metadata /Subtype /XML "),
+      # A Form XObject: a STREAM whose dictionary carries both markers.
+      stream(
+        "0 0 10 10 re f",
+        "/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Metadata 12 0 R " <>
+          "/PieceInfo << /Photoshop << /Private (XObjectPieceInfoPath) >> >> "
+      ),
+      stream(xmp("XObject Level Author"), "/Type /Metadata /Subtype /XML ")
     ]
   end
 
-  defp page_object do
+  defp page_object(extra \\ "") do
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R " <>
-      "/Resources << /Font << /F1 5 0 R >> >> >>"
+      "/Resources << /Font << /F1 5 0 R >> >>#{extra} >>"
+  end
+
+  # What a real authoring tool leaves on the page itself: an XMP packet and a
+  # private blob carrying the authoring machine's filesystem path.
+  defp page_metadata do
+    # A direct annotation dictionary — `/Metadata` nested one level down,
+    # where a top-level key drop never reaches it.
+    " /Metadata 10 0 R /PieceInfo << /Illustrator << /LastModified " <>
+      "(D:20250101000000Z) /Private (C:\\\\Users\\\\jane\\\\PieceInfoSecretPath) >> >>" <>
+      " /XObject << /X1 11 0 R >>" <>
+      " /Annots [<< /Type /Annot /Subtype /Square /Rect [0 0 10 10] " <>
+      "/PieceInfo << /App << /Private (NestedAnnotSecret) >> >> >>]"
   end
 
   defp stream(data, extra),
     do: "<< #{extra}/Length #{byte_size(data)} >>\nstream\n#{data}\nendstream"
 
-  defp xmp do
+  defp xmp(creator) do
     ~s(<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>) <>
       ~s(<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF ) <>
       ~s(xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">) <>
       ~s(<rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>) <>
-      ~s(<rdf:Seq><rdf:li>Jane Author</rdf:li></rdf:Seq></dc:creator>) <>
+      ~s(<rdf:Seq><rdf:li>#{creator}</rdf:li></rdf:Seq></dc:creator>) <>
       ~s(</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>)
   end
 
