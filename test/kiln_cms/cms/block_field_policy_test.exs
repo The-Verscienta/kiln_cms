@@ -270,6 +270,55 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       assert Exception.message(error) =~ "featured"
     end
 
+    test "a decoy _type in an unrendered slot cannot rebalance the multiset" do
+      # The bypass this whole comparison exists to stop, dressed as a rebalance:
+      # the editor removes a real admin-set `featured`, then re-adds the same
+      # value as a SIBLING KEY on the column wrapper. Nothing renders that slot —
+      # `Columns.raw_blocks/1` reads only `col["blocks"]` — but a traversal that
+      # collected any map carrying a `_type` counted it, so the two multisets
+      # compared equal and the removal went through silently.
+      admin = user(:admin)
+
+      {:ok, page} = create_page(admin, [columns_children([quote_block(%{"featured" => true})])])
+
+      decoy = %{
+        "_type" => "columns",
+        "columns" => [
+          Map.merge(
+            %{"blocks" => [quote_block(%{})]},
+            %{"_type" => "quote", "featured" => true}
+          )
+        ]
+      }
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [decoy]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "an admin may still write a value in an unrendered slot without it counting" do
+      # The mirror of the test above, so the fix can't be "reject anything with a
+      # stray key": an admin write carrying the same decoy is accepted, and the
+      # decoy simply contributes nothing to either side of the comparison.
+      admin = user(:admin)
+
+      {:ok, page} = create_page(admin, [columns_children([quote_block(%{"featured" => true})])])
+
+      same_tree_plus_junk = %{
+        "_type" => "columns",
+        "columns" => [
+          Map.merge(
+            %{"blocks" => [quote_block(%{"featured" => true})]},
+            %{"_type" => "quote", "featured" => true}
+          )
+        ]
+      }
+
+      assert {:ok, _updated} =
+               CMS.update_page(page, %{block_tree: [same_tree_plus_junk]}, actor: user(:editor))
+    end
+
     test "re-targeting an admin value between same-type children is allowed (accepted residual)" do
       # The count is preserved, only which child holds `featured` moves. Closing
       # this needs per-child identity (tracked); this pins the current behavior so

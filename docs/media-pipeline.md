@@ -119,11 +119,38 @@ byte-validated by `KilnCMS.DocumentProcessor` the same way images are by
 filename/MIME — deny-by-default). A document has no `width`/`height`
 (that's the library's own image/document discriminator: `content_type
 LIKE 'image/%'`, with a `NULL` content_type defaulting to "image" for
-backward compatibility with rows written before #481), no responsive
-variants, and — deliberately, disclosed as a known gap rather than an
-oversight — **no metadata stripping**: PDF metadata (XMP, the `/Info` dict,
-embedded author/producer strings) needs PDF-specific tooling this codebase
-doesn't have yet.
+backward compatibility with rows written before #481) and no responsive
+variants.
+
+### PDF metadata stripping (#807)
+
+An uploaded PDF is rewritten without its **`/Info` dictionary** (title, author,
+creator, producer) and its **XMP metadata stream** before the blob is stored —
+the document-library counterpart to the EXIF stripping images get. Outlines,
+form fields, attachments and page content are untouched.
+
+**qpdf is required, and a PDF that cannot be stripped is refused.** This is a
+deliberate departure from how ffmpeg is treated (see below): a missing ffmpeg
+costs you *enrichment* — no duration, no poster — while a missing stripper
+costs you a *privacy guarantee*, and a control that silently does not apply is
+worse than no control, because the operator believes it did. The editor sees
+"PDF metadata stripping isn't available on this server" rather than a
+misleading "unsupported format".
+
+Two operational notes:
+
+- **qpdf ≥ 11.10** is required — `--remove-info`/`--remove-metadata` arrived in
+  that release. `KilnCMS.DocumentProcessor.available?/0` checks the
+  *capability*, not just that a `qpdf` binary exists, because Debian bookworm's
+  11.3.0 would pass the latter and fail every strip. The release image runs
+  **Debian trixie** (qpdf 12.2.0) for exactly this reason.
+- **Not exiftool.** `exiftool -all=` on a PDF writes an incremental update that
+  marks the metadata deleted while leaving the original bytes in the file,
+  recoverable by anything that reads it with a parser rather than a viewer. It
+  looks like it worked. qpdf rewrites the document.
+
+Existing PDFs uploaded before this are **not** retroactively stripped; re-upload
+one to strip it.
 
 A document is placed on content with the **`file` block** (title,
 description, and a download link) — separate from the `image` block, which
