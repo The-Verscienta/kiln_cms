@@ -50,9 +50,18 @@ defmodule KilnCMS.Seo.Links do
   @doc """
   Pages worth linking to from `record`.
 
-  Options: `:limit` (default #{@default_limit}), `:actor`, `:tenant`, and
-  `:exclude_paths` — paths the body already links to, so the panel doesn't
-  suggest a link that is already there.
+  Scoped to `record`'s own organization — every read underneath threads
+  `record.org_id` as the tenant, on both the semantic pgvector leg
+  (`Search.Related`) and the keyword leg (`Search.global`) — and to published,
+  `:public` content, mirroring the delivery boundary in
+  `Slugs.find_published_by_alias/3`. That published/public filter, NOT actor
+  authorization, is the boundary: the panel surfaces nothing an anonymous
+  visitor couldn't already reach, so suggestions are identical for every actor.
+  Hence no `:actor` or `:tenant` option — the tenant is the record's own org,
+  and there is no per-actor scoping to apply (#869).
+
+  Options: `:limit` (default #{@default_limit}) and `:exclude_paths` — paths the
+  body already links to, so the panel doesn't suggest one that is already there.
   """
   @spec suggest(struct(), keyword()) :: [suggestion()]
   def suggest(record, opts \\ []) do
