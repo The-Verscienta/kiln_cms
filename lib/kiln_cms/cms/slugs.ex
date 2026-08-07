@@ -397,7 +397,7 @@ defmodule KilnCMS.CMS.Slugs do
 
   @doc """
   Whether `slug` is still auto-derived relative to `derived` (the current
-  `derive_base/2` output): the `untitled-<n>` scaffold, an exact match, or a
+  `derive_base/2` output): an `untitled-…` scaffold, an exact match, or a
   dedupe variant. `ensure_unique/2` never mints `-1`, so a `-1` suffix (or any
   non-matching base) means the author chose the slug; `base-N` with N >= 2
   stays ambiguous by construction and we side with "still derived".
@@ -406,9 +406,19 @@ defmodule KilnCMS.CMS.Slugs do
   def underived?(slug, derived) do
     slug = slug || ""
 
-    Regex.match?(~r/\Auntitled-\d+\z/, slug) or (derived != "" and slug == derived) or
+    scaffold?(slug) or (derived != "" and slug == derived) or
       dedupe_variant?(slug, derived)
   end
+
+  # Both scaffold shapes, because both exist in the wild. `untitled-<digits>` is
+  # what every draft created before #834 carries and those rows do not migrate;
+  # `untitled-<random_suffix>` is what new ones get. Recognising only the new
+  # one would strand every existing draft with a slug a title edit can no longer
+  # replace — the same bug as recognising only the old one, aimed backwards.
+  defp scaffold?("untitled-" <> rest),
+    do: Regex.match?(~r/\A\d+\z/, rest) or KilnCMS.Slug.random_suffix?(rest)
+
+  defp scaffold?(_slug), do: false
 
   defp dedupe_variant?(_slug, ""), do: false
 
@@ -473,7 +483,12 @@ defmodule KilnCMS.CMS.Slugs do
     [base]
     |> Stream.concat(Stream.map(2..1_000, &"#{base}-#{&1}"))
     |> Enum.find(&(not MapSet.member?(taken, &1)))
-    |> Kernel.||("#{base}-#{System.unique_integer([:positive])}")
+    # Past a thousand variants, give up on a tidy number and take a random one.
+    # `System.unique_integer/1` was wrong here for the reason #834 documents —
+    # it resets on VM restart while the rows do not — and wrong in the worst
+    # place: this branch is reached only when the low numbers are already taken,
+    # which is exactly the range a restarted counter hands back out.
+    |> Kernel.||("#{base}-#{KilnCMS.Slug.random_suffix()}")
   end
 
   # Every existing slug that could collide with `base` or its numbered

@@ -1401,6 +1401,24 @@ defmodule KilnCMS.CMS.Content do
           # assertion the page is done).
           validate {KilnCMS.CMS.Validations.MediaAltText, only_new: true},
             where: [changing(:blocks), attribute_equals(:state, :published)]
+
+          # Same reasoning for the claim gate (#377): `:update` re-fires
+          # artifacts for a live record, so editing a published page to add a
+          # flagged claim would ship it without ever passing `:publish`.
+          # `only_new: true` scopes it to claims this edit introduces, so
+          # switching the gate on doesn't make every page that already carried
+          # one un-editable.
+          #
+          # No `changing(...)` guard, unlike the alt-text gate above. That one
+          # can key on `:blocks` because blocks are the only thing it reads;
+          # this also reads the title and SEO fields, since a claim in the meta
+          # description ships to a search results page. `where:` is an AND, so
+          # there is no "any of these four changed" to express — and it would
+          # buy nothing: an update that touched none of them diffs to zero new
+          # offenders and passes anyway. The gate is opt-in, so the scan it
+          # costs is one an operator asked for.
+          validate {KilnCMS.CMS.Validations.ComplianceClaims, only_new: true},
+            where: [attribute_equals(:state, :published)]
         end
 
         # Debounced draft autosave from the editor. Writes the same content as
@@ -1536,6 +1554,12 @@ defmodule KilnCMS.CMS.Content do
           # is refused when the document shows an image with neither alt text nor
           # a `decorative` mark.
           validate KilnCMS.CMS.Validations.MediaAltText
+          # Claim gate (#377), config-gated and off by default: a publish is
+          # refused when the document carries a phrase an `:error`-severity
+          # compliance rule matches. Same rules the editor's compliance panel
+          # advises on, so the gate can never disagree with the panel the
+          # author has been reading.
+          validate KilnCMS.CMS.Validations.ComplianceClaims
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -1555,6 +1579,10 @@ defmodule KilnCMS.CMS.Content do
           # is refused when the document shows an image with neither alt text nor
           # a `decorative` mark.
           validate KilnCMS.CMS.Validations.MediaAltText
+          # Same claim gate as `:publish` (#377) — a scheduled publish is still
+          # a publish, and a claim that must not go live at 09:00 by hand must
+          # not go live at 09:00 by scheduler either.
+          validate KilnCMS.CMS.Validations.ComplianceClaims
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)

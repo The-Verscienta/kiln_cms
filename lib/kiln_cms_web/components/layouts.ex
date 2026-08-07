@@ -123,14 +123,17 @@ defmodule KilnCMSWeb.Layouts do
 
   ## What this does and does not close
 
-  Defence in depth, not a fix for the #701 scenario. A url-less join matches no
-  route, and Phoenix.LiveView.Channel's `load_layout/2` takes the router's
-  `layout:` from the matched route's `live_session` — so such a join falls back
-  to `view.__live__()[:layout]`, which for the AshAuthentication views still
-  outside `KilnCMSWeb.LiveRouteGuard` is *their* layout, not this one. This
-  function therefore does not run on that path. #701 stays open for it.
+  Defence in depth, and never the whole answer for #701. A url-less join matches
+  no route, and the LiveView channel takes the layout from the matched route's
+  `live_session` too — so such a join falls back to `view.__live__()[:layout]`.
+  For the AshAuthentication views that was *their* layout, not this one, so this
+  function never ran on that path and could not have saved it.
 
-  What it does hold for is every path that *does* reach these layouts with no
+  What closed #701 was putting those views behind `KilnCMSWeb.LiveRouteGuard`
+  instead (`KilnCMSWeb.AuthLive`), so the join is refused before any layout is
+  chosen.
+
+  What this holds for is every path that *does* reach these layouts with no
   resolved org — which is none today (`Plugs.SetTenant` always assigns, and every
   `live_session` carries `:assign_current_org`), and that is the point: the next
   one should render stock rather than another tenant.

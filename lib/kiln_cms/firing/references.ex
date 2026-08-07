@@ -351,8 +351,30 @@ defmodule KilnCMS.Firing.References do
     end
   end
 
-  @doc "Load a document by type+id only if it is currently published."
-  @spec load_published(Ash.UUID.t(), atom(), term()) :: {:ok, struct()} | :error
+  @doc """
+  The published document to fire, or why there isn't one.
+
+  The four outcomes are deliberately distinct, because callers must act on them
+  differently (#664):
+
+    * `{:ok, doc}` — fire it.
+    * `:absent` — the row is gone, or exists and is not published. **Settled
+      fact**: its artifacts are garbage and a caller may delete them.
+    * `:unknown_type` — no compiled resource answers to this type, so the
+      document cannot be addressed at all. Nothing to retry and nothing safe to
+      delete.
+    * `{:error, reason}` — the read itself failed. Says nothing about whether
+      the document exists.
+
+  Until #664 all three failures collapsed to a bare `:error`, and both callers
+  read that as "nothing to fire, we're done". Two bugs lived in the gap: a
+  transient read failure made a just-published document silently never fire
+  (with `max_attempts: 3` never engaging, because the job had *succeeded*), and
+  an orphan artifact could not be cleaned up because no caller could tell
+  "definitely not published" from "we could not find out".
+  """
+  @spec load_published(Ash.UUID.t(), atom(), term()) ::
+          {:ok, struct()} | :absent | :unknown_type | {:error, term()}
   def load_published(org_id, :page, id),
     do: published(CMS.get_page(id, authorize?: false, tenant: org_id))
 
@@ -369,12 +391,28 @@ defmodule KilnCMS.Firing.References do
         published(Ash.get(resource, id, authorize?: false, tenant: org_id))
 
       _ ->
-        :error
+        :unknown_type
     end
   end
 
   defp published({:ok, %{state: :published} = doc}), do: {:ok, doc}
-  defp published(_), do: :error
+
+  # It exists and is not published — settled, and the case unpublish intended to
+  # purge artifacts for.
+  defp published({:ok, %{}}), do: :absent
+
+  defp published({:error, error}), do: if(not_found?(error), do: :absent, else: {:error, error})
+
+  # Anything else is a shape we did not anticipate, which is not the same as
+  # "no document" — treat it as a failed read rather than a licence to delete.
+  defp published(other), do: {:error, other}
+
+  # Ash wraps the not-found in an `Invalid`/`Query` envelope whose `errors` list
+  # carries the real class, so the check has to recurse rather than match the
+  # top-level struct.
+  defp not_found?(%Ash.Error.Query.NotFound{}), do: true
+  defp not_found?(%{errors: errors}) when is_list(errors), do: Enum.any?(errors, &not_found?/1)
+  defp not_found?(_other), do: false
 
   # A `columns` container has no refs of its own, but its nested children may —
   # recurse so a reference inside a column is tracked like a top-level one.
