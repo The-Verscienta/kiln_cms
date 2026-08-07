@@ -26,6 +26,23 @@ defmodule KilnCMSWeb.PwaHeadTest do
       assert html =~ ~s(name="mobile-web-app-capable")
     end
 
+    test "the manifest link carries the request's locale (#630)", %{conn: conn} do
+      # The link is what decides which locale a browser installs under — the
+      # controller must never read it from the session, or the installed app is
+      # named after whichever locale happened to trigger the first fetch.
+      # No app-env mutation here: `config/test.exs` already configures "fr", and
+      # this module is `async: true` — narrowing `:i18n` globally would drop "es"
+      # out from under every concurrently-running test that asserts on it.
+      html =
+        conn
+        |> log_in(authed_user(:editor))
+        |> Plug.Test.init_test_session(locale: "fr")
+        |> get(~p"/editor")
+        |> html_response(200)
+
+      assert html =~ "/manifest.webmanifest?locale=fr"
+    end
+
     test "an admin-only page links it too", %{conn: conn} do
       html = conn |> log_in(authed_user(:admin)) |> get(~p"/editor/trash") |> html_response(200)
 

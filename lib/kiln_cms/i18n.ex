@@ -17,8 +17,15 @@ defmodule KilnCMS.I18n do
   @spec supported?(String.t()) :: boolean()
   def supported?(locale), do: locale in locales()
 
-  @doc "The locale to actually use for `requested`, falling back to the default."
-  @spec normalize(String.t() | nil) :: String.t()
+  @doc """
+  The locale to actually use for `requested`, falling back to the default.
+
+  Takes `term()` rather than `String.t() | nil` because callers pass raw client
+  input straight in — `KilnCMSWeb.ManifestController` hands it `params["locale"]`,
+  which Plug decodes as a list for `?locale[]=fr`. The catch-all clause exists
+  for exactly that, so the spec has to admit it.
+  """
+  @spec normalize(term()) :: String.t()
   def normalize(requested) when is_binary(requested) do
     if supported?(requested), do: requested, else: default_locale()
   end
