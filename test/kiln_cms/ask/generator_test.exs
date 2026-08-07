@@ -186,11 +186,11 @@ defmodule KilnCMS.Ask.GeneratorTest do
       client = "ip:198.51.100.#{System.unique_integer([:positive])}"
       put_ask(generator: LegacyGenerator, per_user_limit: {2, :timer.minutes(1)})
 
-      assert %{generated: true} = ask("q", client_id: client)
-      assert %{generated: true} = ask("q", client_id: client)
+      assert %{generated: true} = ask("q", caller_id: client)
+      assert %{generated: true} = ask("q", caller_id: client)
 
       # Third call in the window: no answer, but still a well-formed result.
-      assert %{answer: nil, generated: false, sources: []} = ask("q", client_id: client)
+      assert %{answer: nil, generated: false, sources: []} = ask("q", caller_id: client)
     end
 
     test "an exhausted bucket reports :rate_limited and a deadline in seconds (#853)" do
@@ -203,10 +203,10 @@ defmodule KilnCMS.Ask.GeneratorTest do
       # narrowed, not eliminated.
       put_ask(generator: LegacyGenerator, per_user_limit: {1, :timer.hours(1)})
 
-      assert %{generation: nil, retry_after: nil} = ask("q", client_id: client)
+      assert %{generation: nil, retry_after: nil} = ask("q", caller_id: client)
 
       assert %{generation: :rate_limited, generated: false, answer: nil, retry_after: retry} =
-               ask("q", client_id: client)
+               ask("q", caller_id: client)
 
       # Rounded up and never 0, via the same helper the auth surfaces use — a
       # `retry_after` of 0 invites an immediate retry into another refusal.
@@ -219,9 +219,9 @@ defmodule KilnCMS.Ask.GeneratorTest do
       two = "ip:198.51.100.#{System.unique_integer([:positive])}"
       put_ask(generator: LegacyGenerator, per_user_limit: {1, :timer.minutes(1)})
 
-      assert %{generated: true} = ask("q", client_id: one)
-      assert %{generated: false} = ask("q", client_id: one)
-      assert %{generated: true} = ask("q", client_id: two)
+      assert %{generated: true} = ask("q", caller_id: one)
+      assert %{generated: false} = ask("q", caller_id: one)
+      assert %{generated: true} = ask("q", caller_id: two)
     end
 
     test "with neither an actor nor a client id the caller bucket is skipped" do

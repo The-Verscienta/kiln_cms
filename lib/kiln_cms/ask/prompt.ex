@@ -20,7 +20,21 @@ defmodule KilnCMS.Ask.Prompt do
   security boundary — the real ones are that the generator gets no tools and
   that `KilnCMS.Ask` caps and normalizes whatever comes back. What makes this
   path narrower than block assist is that the fenced content is *published*
-  content only: an anonymous ask can never pull a draft into the prompt.
+  content only: no ask, from any caller, can pull a draft into the prompt
+  (#916).
+
+  **Nothing interpolated can close the fence.** The question is anonymous and
+  attacker-chosen, so a raw `q` containing a `-----` line ended the data
+  region early and reopened it as attacker-authored "excerpts" — the model then
+  answered from them, and `/api/ask` returned it as the site's own grounded
+  answer *alongside the real `sources`*, which is what made the forgery look
+  verified. The same escape fired from stored content: a published body with a
+  `-----` horizontal rule was enough.
+
+  So every interpolated value — the question, each title, each excerpt — passes
+  through `defence/1`, which neutralizes fence-like runs, and the question is
+  length-capped. This does not make the fence a security boundary; it makes it
+  a boundary the *input* can't simply walk through.
 
   The language is the **content** locale, not the caller's — a question typed
   in English against a French site should be answered from, and in, what the
@@ -30,6 +44,28 @@ defmodule KilnCMS.Ask.Prompt do
   alias KilnCMS.I18n
 
   @fence "-----"
+
+  # A run of 3+ dashes on its own line is what closes the region — matching that
+  # shape rather than the exact fence string, because "----" and "------" read
+  # to a model as the same horizontal rule and would land just as convincingly.
+  # Markdown's own thematic-break spellings (`***`, `___`) are included for the
+  # same reason.
+  #
+  # `[^\S\n]` — every whitespace character EXCEPT newline — not `[ \t]`. A
+  # first cut used `[ \t]`, which a NBSP, form feed or vertical tab walked
+  # straight past while still rendering as the same rule.
+  @fence_like ~r/^[^\S\n]*([-*_])(?:[^\S\n]*\1){2,}[^\S\n]*$/mu
+
+  # What a neutralized rule becomes. NOT another rule: replacing the dashes
+  # with em-dashes left `—————`, which is the same thematic break in a
+  # different glyph. This cannot be mistaken for a delimiter, and it keeps the
+  # line's meaning for a model reading the passage.
+  @neutralized "(horizontal rule)"
+
+  # Uncapped, `q` is an arbitrary-length attacker-controlled prefix to the
+  # prompt. The cap is generous for a real question and small enough that a
+  # pasted "document" can't dominate the context.
+  @max_question_chars 500
 
   @doc """
   The `{system_prompt, user_message}` pair for `question` over `sources`.
@@ -70,7 +106,7 @@ defmodule KilnCMS.Ask.Prompt do
 
   defp user(question, sources) do
     """
-    Question: #{question}
+    Question: #{question |> String.slice(0, @max_question_chars) |> defence()}
 
     Excerpts from the site:
 
@@ -92,7 +128,7 @@ defmodule KilnCMS.Ask.Prompt do
     |> Enum.with_index(1)
     |> Enum.map_join("\n\n", fn {source, index} ->
       [
-        "[#{index}] #{source[:title] || source["title"]}",
+        "[#{index}] #{defence(source[:title] || source["title"])}",
         excerpt(source)
       ]
       |> Enum.reject(&is_nil/1)
@@ -106,8 +142,28 @@ defmodule KilnCMS.Ask.Prompt do
   # rules just told it to keep link-free.
   defp excerpt(source) do
     case source[:excerpt] || source["excerpt"] do
-      text when is_binary(text) and text != "" -> text
+      text when is_binary(text) and text != "" -> defence(text)
       _none -> nil
     end
+  end
+
+  # Neutralize anything that could pass for a fence, keeping the character so a
+  # legitimate rule in a body still reads as a rule. Applied to EVERY
+  # interpolated value — question, title and excerpt alike — because the
+  # question is attacker-chosen and a published body is only as trustworthy as
+  # whoever may publish.
+  defp defence(nil), do: nil
+
+  defp defence(value) do
+    value
+    |> to_string()
+    # Line endings FIRST. Erlang's `:re` uses the LF-only newline convention,
+    # so in multiline mode `$` matches before `\n` — and on a CRLF line the
+    # character before it is `\r`, which no horizontal-whitespace class
+    # contains. The pattern therefore never matched a CRLF fence, and
+    # `?q=hi%0D%0A-----%0D%0A…` walked through the defence untouched. Every
+    # value here is prompt text, so normalizing newlines costs nothing.
+    |> String.replace(~r/\r\n?/u, "\n")
+    |> String.replace(@fence_like, @neutralized)
   end
 end

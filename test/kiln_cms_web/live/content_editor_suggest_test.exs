@@ -165,6 +165,82 @@ defmodule KilnCMSWeb.ContentEditorSuggestTest do
       render_click(lv, "seo_suggest", %{})
       assert render_async(lv, 2_000) =~ "Suggestions"
     end
+
+    # The content-intelligence section is the same shape as Suggest and was
+    # missing the same guard (#916): "Analyze content" is an unbounded
+    # `list_tags!` plus an embedding per unapplied tag on a cold 6h cache, and
+    # unlike the SEO path it has no budget bucket in front of it.
+    test "the Similar content section is hidden from a read-only editor", %{conn: conn} do
+      page = page(authed_user(:admin))
+
+      {_lv, html} = open_editor(conn, read_only_editor(), page)
+
+      refute html =~ "Similar content"
+    end
+
+    test "a forged content_intel_refresh is refused server-side", %{conn: conn} do
+      page = page(authed_user(:admin))
+      {lv, _html} = open_editor(conn, read_only_editor(), page)
+
+      # Asserted on the socket assigns, not the render: the section is hidden by
+      # `:if={@may_write?}` either way, so a DOM assertion here passes with the
+      # handler's guard deleted. `intel_duplicates` starts `nil` and only ever
+      # becomes a list once the async load has run, so it says plainly whether
+      # the handler did anything.
+      render_click(lv, "content_intel_refresh", %{})
+      render_async(lv, 2_000)
+
+      assert intel(lv, :intel_duplicates) == nil
+      assert intel(lv, :intel_tags) == nil
+    end
+
+    test "the same event from a writable editor DOES load", %{conn: conn} do
+      # The positive control. Without it, `intel_duplicates` staying nil proves
+      # nothing — it would stay nil if the event name were simply wrong.
+      editor = authed_user(:editor)
+      {lv, _html} = open_editor(conn, editor, page(editor))
+
+      render_click(lv, "content_intel_refresh", %{})
+      render_async(lv, 2_000)
+
+      assert is_list(intel(lv, :intel_duplicates))
+      assert is_list(intel(lv, :intel_tags))
+    end
+
+    test "a forged intel_add_tag ticks nothing", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      tag =
+        CMS.create_tag!(
+          %{name: "gated tag", slug: "gated-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      {lv, _html} = open_editor(conn, read_only_editor(), page(admin))
+
+      # `intel_tags` is empty for this editor by construction — the only thing
+      # that fills it is the refresh gated above — so `add_suggested_tag/2`
+      # would no-op even without the guard. So this asserts the guard's effect
+      # (the form is untouched) rather than pretending to prove the guard; the
+      # guard itself is defence in depth, for the day something else fills that
+      # list.
+      before_params = intel(lv, :form).params
+      render_click(lv, "intel_add_tag", %{"id" => tag.id})
+
+      assert intel(lv, :form).params == before_params
+    end
+
+    # Socket assigns, for the assertions that must not depend on markup a
+    # `:if={@may_write?}` has already removed.
+    defp intel(lv, key), do: :sys.get_state(lv.pid).socket.assigns[key]
+
+    test "an editor who may write the record still gets Similar content", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      {_lv, html} = open_editor(conn, editor, page(editor))
+
+      assert html =~ "Similar content"
+    end
   end
 
   describe "gating" do

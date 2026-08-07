@@ -949,8 +949,8 @@ if config_env() == :prod do
   #     ASK_MODEL=ollama:llama3.1           # on-prem, no egress
   #     ASK_MODEL=anthropic:claude-sonnet-5 # hosted; also needs ANTHROPIC_API_KEY
   #
-  # Only *published, world-readable* content is ever retrieved, so no draft can
-  # reach the model whatever the setting. Generation carries its own rate-limit
+  # Only *published, world-readable* content is ever retrieved — for EVERY
+  # caller, bearer token or not (#916). Generation carries its own rate-limit
   # buckets on top of the pipeline's per-IP limiter, keyed on the client address
   # for anonymous callers; an exhausted bucket degrades to retrieval-only rather
   # than refusing the request. Provider API keys are read by `req_llm` from its

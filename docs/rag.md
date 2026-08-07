@@ -139,11 +139,20 @@ that:
 - **Only published, world-readable content is ever retrieved**, so no draft can
   reach the model whatever the setting — the policy scoping above is upstream of
   the generator, not a check the generator performs.
+
+  This holds for **every** caller. Unlike the other headless read surfaces,
+  `/api/ask` does not widen for a bearer token: retrieval runs with no actor at
+  all, so an editor's or admin's credential retrieves exactly what a stranger
+  retrieves. It used to forward the caller as the `:actor`, and because
+  `Content`'s read policy sits behind an `OrgAdmin` bypass, that shipped drafts
+  and member-gated records to the provider (#916). Searching drafts is what
+  `/editor/search` and the editor palette are for.
 - **Generation carries its own budget** (`KilnCMS.LLM.Budget`) on top of the
   pipeline's per-IP limiter, which allows 120 requests a minute — a fine ceiling
   for a search query and an absurd one for model inference. The per-caller
-  bucket keys on the actor when there is one and on the client address
-  otherwise. Exhausting a bucket **degrades to retrieval-only**; it never fails
+  bucket keys on the signed-in user when there is one and on the client address
+  otherwise — a rate-limiting identity only, which never widens what is
+  retrieved. Exhausting a bucket **degrades to retrieval-only**; it never fails
   the request, because the cited sources are still a useful answer.
 
 Every other failure degrades the same way: an unset model, an unreachable
