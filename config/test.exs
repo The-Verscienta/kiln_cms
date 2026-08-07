@@ -30,6 +30,16 @@ config :kiln_cms, KilnCMS.OEmbed,
 # Webhook URL validation: skip DNS resolution for Req.Test stub hosts.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: false, resolve_dns: false
 
+# ActivityPub federation (#491). **Off**, like production — the federation
+# tests turn it on for themselves via `KilnCMS.FederationFixtures`. Leaving it
+# on globally would make every publish in the whole suite enqueue an
+# announcement job, which is a side effect on tests that have nothing to do
+# with federation (and did visibly perturb the hybrid-search suite).
+# Outbound requests (actor fetches, inbox deliveries) go through a Req.Test stub.
+config :kiln_cms, KilnCMS.Federation,
+  enabled: false,
+  req_options: [plug: {Req.Test, KilnCMS.Federation}]
+
 # Outbound link checking (#474). Every request goes to a Req.Test stub; nothing
 # in the suite may reach the real web. The per-host throttle is widened to
 # effectively off, because pacing is tested directly (`Links.Throttle`) and

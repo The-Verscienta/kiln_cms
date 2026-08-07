@@ -139,6 +139,10 @@ defmodule KilnCMSWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # `Plug.Parsers.JSON` already matches any `application/*+json` subtype, which
+  # covers the `application/activity+json` a fediverse server POSTs to the
+  # ActivityPub inbox (#491) — so that route reaches the body reader below with
+  # no parser change.
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json, AshJsonApi.Plug.Parser, Absinthe.Plug.Parser],
     pass: ["*/*"],
@@ -146,9 +150,9 @@ defmodule KilnCMSWeb.Endpoint do
     # single request can force us to buffer; raise per-endpoint if large uploads
     # are ever needed.
     length: 8_000_000,
-    # Preserves the raw bytes for the inbound payment-webhook path only, so its
-    # HMAC signature can be verified over exactly what was sent. Every other
-    # request reads exactly as before — see the module.
+    # Preserves the raw bytes for the inbound payment-webhook and ActivityPub
+    # inbox paths only, so their signatures can be verified over exactly what
+    # was sent. Every other request reads exactly as before — see the module.
     body_reader: {KilnCMSWeb.Plugs.RawBodyReader, :read_body, []},
     json_decoder: Phoenix.json_library()
 

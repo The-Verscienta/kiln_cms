@@ -128,6 +128,7 @@ defmodule KilnCMS.MixProject do
       "docs/newsletter.md": [title: "Newsletter"],
       "docs/memberships.md": [title: "Paid memberships"],
       "docs/provenance.md": [],
+      "docs/federation.md": [],
       "docs/point-in-time.md": [],
       # Modeling & extending
       "docs/extending-content.md": [],
@@ -234,6 +235,7 @@ defmodule KilnCMS.MixProject do
         "docs/newsletter.md",
         "docs/memberships.md",
         "docs/provenance.md",
+        "docs/federation.md",
         "docs/point-in-time.md"
       ],
       "Modeling & extending": [

@@ -44,6 +44,9 @@ config :kiln_cms, Oban,
     # KilnCMS.Links.Throttle, and a wide queue would just produce more jobs
     # snoozing on the same buckets.
     link_check: 3,
+    # Like `link_check`, deliberately narrow: every job is a signed request to
+    # somebody else's server, and a fediverse fan-out is many of them at once.
+    federation: 3,
     # In-app backups (#484). Concurrency ONE: two simultaneous `pg_dump`s of
     # the same database is never what anyone wanted, and the panel's whole
     # premise is that there is a most-recent backup. Its own queue so a dump
@@ -80,7 +83,8 @@ config :kiln_cms,
     KilnCMS.Mail,
     KilnCMS.Newsletter,
     KilnCMS.Automation,
-    KilnCMS.Billing
+    KilnCMS.Billing,
+    KilnCMS.Federation
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the

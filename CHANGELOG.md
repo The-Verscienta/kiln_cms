@@ -29,6 +29,41 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **ActivityPub federation: a Kiln site as a fediverse actor** (#491, phase 1).
+  A site can be followed from Mastodon, and its published content arrives in
+  followers' timelines: WebFinger, an actor document, an outbox, HTTP
+  Signatures both directions, and `Create`/`Update`/`Delete` delivered to
+  followers on publish/edit/unpublish. `mix kiln.federation enable` turns it on
+  and prints the handle; see [docs/federation.md](docs/federation.md).
+
+  **Off unless said twice.** `KILN_FEDERATION_ENABLED` for the deployment (off
+  ⇒ every route 404s, the `KilnCMS.Provenance` posture) *and* a per-site row.
+  Federation is an egress decision, not an editorial one — it makes the server
+  sign and POST to hosts chosen by strangers who followed the site — so an
+  operator whose policy forbids it can say so once, centrally.
+
+  Only published, `:public`-audience, default-locale content of types that
+  already syndicate a feed federates. An audience-gated record is published
+  *and paywalled*; three locales are three rows and would notify every follower
+  three times for one article; and a type an operator kept out of the site's
+  feed was not volunteered to the fediverse either.
+
+  The actor's origin is **pinned at enable time**, not derived per request:
+  an actor id is its permanent name in the fediverse, and deriving it from the
+  site's current base URL would silently rename the actor the day a
+  `custom_domain` was added, orphaning every follower with no way for them to
+  learn the new one. Disabling keeps the identity so re-enabling restores the
+  same handle and key.
+
+  Inbound is `Follow` and `Undo{Follow}` only, each authenticated by an HTTP
+  Signature checked against a key fetched from the actor named in the activity
+  — a signature over one's own key claiming someone else's `keyId` is refused,
+  which is what stops anyone subscribing any account's server to the firehose.
+  Unsupported activities get a 202 and are dropped rather than a 4xx that would
+  make the sender retry for days. Delivery is a ledger with 12 retries backing
+  off to six hours, and a follower whose instance stays dead is dropped rather
+  than disabled — there is nobody on the other side to notice a disabled row.
+
 - **Reusable content fragments.** A `fragment` block embeds another document's
   body inline — define once, embed everywhere, edit the fragment and every page
   carrying it updates (#479). This is the Regular Labs / WP reusable-block /
