@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.EditorLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
+  alias KilnCMS.Slug
   alias KilnCMSWeb.Params
 
   @statuses ~w(all draft in_review published archived)
@@ -128,7 +129,12 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("new", %{"kind" => kind}, socket) do
     attrs = %{
       title: "Untitled #{kind}",
-      slug: "untitled-#{System.unique_integer([:positive])}"
+      # NOT `System.unique_integer/1` (#834): that counter resets on every VM
+      # start, while the `untitled-N` rows it must miss live in Postgres and
+      # outlive any restart — so a fresh node re-issues low numbers and the
+      # create fails with "slug has already been taken", leaving the button
+      # doing nothing.
+      slug: "untitled-#{Slug.random_suffix()}"
     }
 
     record = create!(kind, attrs, socket.assigns.actor, socket.assigns.current_org)
