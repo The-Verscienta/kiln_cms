@@ -414,6 +414,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert processed.height == 1
     end
 
+    @tag :qpdf
     test "uploading a PDF stores it as a document, not an image (#481)", %{
       conn: conn,
       root: root
@@ -421,7 +422,11 @@ defmodule KilnCMSWeb.MediaLiveTest do
       editor = authed_user(:editor)
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
 
-      pdf = "%PDF-1.7\n%\xE2\xE3\xCF\xD3\nsome pdf content"
+      # A REAL PDF, not just the magic bytes: since #807 an upload is rewritten
+      # by qpdf before storage, so a file no parser can read is refused rather
+      # than stored. That refusal is the feature; this test is about the
+      # document/image discriminator, so it needs a document that survives it.
+      pdf = KilnCMS.PdfFixtures.pdf()
 
       input =
         file_input(lv, "#upload-form", :media, [
@@ -460,6 +465,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       refute Enum.any?(CMS.list_media_items!(actor: editor))
     end
 
+    @tag :qpdf
     test "a document under the document cap but over the (smaller) image cap still uploads", %{
       conn: conn
     } do
@@ -469,7 +475,11 @@ defmodule KilnCMSWeb.MediaLiveTest do
       # 11MB: over the 10MB image cap, under the 25MB document cap — proves
       # the per-type size cap is real, not the tighter image cap applied to
       # everything (#481).
-      big_pdf = "%PDF-1.7\n" <> :binary.copy(<<0>>, 11_000_000)
+      # Padded with a PDF COMMENT rather than NUL bytes: qpdf now parses this
+      # on the way in (#807), and 11 MB of nulls after the header is not a
+      # document. `%` runs to end-of-line, so this is bulk qpdf must accept.
+      big_pdf =
+        KilnCMS.PdfFixtures.pdf() <> "%" <> :binary.copy("p", 11_000_000) <> "\n"
 
       input =
         file_input(lv, "#upload-form", :media, [

@@ -30,6 +30,7 @@ defmodule KilnCMS.Staging.Scrub do
           webhooks_deactivated: non_neg_integer(),
           mail_settings_purged: non_neg_integer(),
           search_queries_purged: non_neg_integer(),
+          missed_paths_purged: non_neg_integer(),
           billing_settings_purged: non_neg_integer(),
           billing_events_purged: non_neg_integer(),
           memberships_scrubbed: non_neg_integer(),
@@ -70,6 +71,10 @@ defmodule KilnCMS.Staging.Scrub do
     {tokens_purged, _} = Repo.delete_all(KilnCMS.Accounts.Token)
     {mail_settings_purged, _} = Repo.delete_all(KilnCMS.Mail.Settings)
     {search_queries_purged, _} = Repo.delete_all(KilnCMS.Analytics.SearchQuery)
+    # Recorded 404 paths (#472) are traffic data about the *production* site —
+    # a staging clone has no business carrying them, and a path can be
+    # incidentally identifying.
+    {missed_paths_purged, _} = Repo.delete_all(KilnCMS.CMS.MissedPath)
 
     {webhooks_deactivated, _} =
       Repo.update_all(
@@ -121,6 +126,7 @@ defmodule KilnCMS.Staging.Scrub do
       webhooks_deactivated: webhooks_deactivated,
       mail_settings_purged: mail_settings_purged,
       search_queries_purged: search_queries_purged,
+      missed_paths_purged: missed_paths_purged,
       billing_settings_purged: billing_settings_purged,
       billing_events_purged: billing_events_purged,
       memberships_scrubbed: memberships_scrubbed,

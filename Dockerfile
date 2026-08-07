@@ -20,8 +20,23 @@ ARG ELIXIR_VERSION=1.19.5
 ARG OTP_VERSION=27.3.4.15
 ARG DEBIAN_VERSION=bookworm-20260713-slim
 
+# The runner tracks a NEWER Debian than the builder, deliberately (#807).
+#
+# PDF metadata stripping shells out to `qpdf --remove-info --remove-metadata`,
+# and those options landed in qpdf 11.10. Bookworm ships 11.3.0 and qpdf is not
+# in bookworm-backports, so on bookworm the option is "no stripping" — and
+# `KilnCMS.DocumentProcessor` refuses a PDF it cannot strip, which would mean
+# the released image could not accept PDFs at all. Trixie ships 12.2.0.
+#
+# Building on the older suite and running on the newer is the safe direction:
+# glibc is backward compatible, so a bookworm-built release runs on trixie, and
+# the reverse would not. The one thing ERTS needs from the runner is
+# `libtinfo.so.6` (verified with `ldd` on the builder's `beam.smp`), which
+# trixie's `libncurses6` provides.
+ARG RUNNER_DEBIAN_VERSION=trixie-20260713-slim
+
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+ARG RUNNER_IMAGE="debian:${RUNNER_DEBIAN_VERSION}"
 
 # ---- Build stage ----
 FROM ${BUILDER_IMAGE} AS builder
@@ -157,9 +172,17 @@ FROM ${RUNNER_IMAGE}
 # below needs all three, and a `-slim` Debian ships none of them. (An earlier
 # revision fetched the signing key with curl three lines before installing
 # curl; CI doesn't build this image, so nothing would have caught it.)
+# `qpdf` strips `/Info` and XMP from uploaded PDFs (#807). It is NOT optional
+# the way ffmpeg is: `KilnCMS.DocumentProcessor` refuses a PDF it cannot strip,
+# because a privacy control that silently doesn't apply is worse than none.
+#
+# Three package names differ from bookworm's and every one of them is a build
+# break, not a warning: `libncurses5` does not exist in trixie (ERTS wants
+# `libtinfo.so.6`, which `libncurses6` provides), and the 64-bit `time_t`
+# transition renamed `libvips42` to `libvips42t64`.
 RUN apt-get update -y \
   && apt-get install -y --no-install-recommends \
-     libstdc++6 openssl libncurses5 locales ca-certificates libvips42 curl gnupg \
+     libstdc++6 openssl libncurses6 locales ca-certificates libvips42t64 curl gnupg qpdf \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # `set -o pipefail` so a truncated download can't produce an empty keyring
@@ -169,7 +192,7 @@ RUN apt-get update -y \
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
      | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
-  && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+  && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
      > /etc/apt/sources.list.d/pgdg.list \
   && apt-get update -y \
   && apt-get install -y --no-install-recommends postgresql-client-17 \
