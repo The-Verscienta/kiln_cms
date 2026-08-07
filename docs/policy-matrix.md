@@ -458,13 +458,30 @@ to send each block's id — a tree carrying ids is judged block by block as
 before, so inserting a new block beside a restricted one is unaffected.
 
 Nested children of a `columns` block are raw maps rather than union members, so
-they carry no identity to diff one-for-one. They are covered by requiring the
-whole tree's multiset of role-restricted non-default nested values to be
+they get no `uuid_primary_key` of their own. They are covered first by requiring
+the whole tree's multiset of role-restricted non-default nested values to be
 identical before and after a non-admin write (#774): such a value can be neither
 introduced nor dropped, but a column already holding an admin-set value may be
-resubmitted unchanged. See residual risk 8 in
-[`threat-model.md`](threat-model.md) for what this does and does not guarantee —
-in particular that reusing another block's id is a separate, still-open hole.
+resubmitted unchanged.
+
+A count alone cannot say *which* child holds a value. The content editor stamps
+each nested child an `"id"`, and where those ids exist the check binds each
+admin-set value to the child holding it (#865): a child returning under a known
+id must return with that id's value, and a child that held a restricted
+non-default value must return under the same id still holding it. Independently,
+an id naming **two** children in one submission is always refused — that
+collision would otherwise let a decoy satisfy the binding while the rendered
+child lost the value.
+
+The binding applies only to clients that round-trip ids, because nested child
+ids **cannot be read back** — `blocks` is not `public?` and the fired artifact
+carries `_id`, not `id`. A headless `block_tree` client cannot learn one, and
+`restore_version` takes only a `version_id`, so requiring ids would lock both
+out with no remedy. Those callers stay on the count-only rule.
+
+See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
+and does not guarantee — in particular that a caller dropping every nested id
+keeps the re-target, and that reusing another block's id remains open.
 
 ## Coverage
 
