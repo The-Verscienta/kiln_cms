@@ -9652,24 +9652,24 @@ msgstr "taxonomía"
 #: lib/kiln_cms_web/live/content_editor_live.ex:7400
 #, elixir-autogen, elixir-format
 msgid "Choose published content…"
-msgstr ""
+msgstr "Elegir contenido publicado…"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:781
 #, elixir-autogen, elixir-format
 msgid "Current target (unpublished or not listed)"
-msgstr ""
+msgstr "Destino actual (no publicado o fuera de la lista)"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:7399
 #, elixir-autogen, elixir-format
 msgid "Fragment"
-msgstr ""
+msgstr "Fragmento"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:7403
 #, elixir-autogen, elixir-format
 msgid "Label (editor only)"
-msgstr ""
+msgstr "Etiqueta (solo editor)"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:7405
 #, elixir-autogen, elixir-format
 msgid "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
-msgstr ""
+msgstr "Los bloques del destino se insertan donde está este bloque. Editar el destino actualiza todas las páginas que lo incrustan; un destino no publicado o restringido no muestra nada."
