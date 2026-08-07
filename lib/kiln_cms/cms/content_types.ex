@@ -86,12 +86,21 @@ defmodule KilnCMS.CMS.ContentTypes do
   every TypeDefinition write, TTL as the backstop.
   """
   # Multi-tenancy (epic #336): the dynamic-type registry is per-org — a
-  # `TypeDefinition` belongs to one site. `org_id` defaults to the sole org so
+  # `TypeDefinition` belongs to one site. `org` defaults to the sole org so
   # every tenant-less caller keeps working under the single-org rollout; the
   # delivery/editor hot paths thread the request's real org. Cached per-org (the
-  # key carries `org_id`), so one site's types never leak into another's.
-  @spec dynamic_all(Ash.UUID.t()) :: [t()]
-  def dynamic_all(org_id \\ KilnCMS.Accounts.default_org_id()) do
+  # key carries the id), so one site's types never leak into another's.
+  #
+  # Takes a whole `Organization` as readily as an id (#527). Every caller holds
+  # one or the other, and requiring the id here is what grew ten private
+  # `org_id/1` copies at the call sites — one of which then had to be right
+  # about `nil`, and they weren't. Normalizing here means a caller cannot get
+  # it wrong, and `KilnCMS.Accounts.org_id/1` raises on anything that isn't an
+  # org rather than reading someone else's id as a tenant.
+  @spec dynamic_all(KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil) :: [t()]
+  def dynamic_all(org \\ nil) do
+    org_id = KilnCMS.Accounts.org_id(org)
+
     if cache_registry?() do
       KilnCMS.Cache.fetch(
         KilnCMS.Cache.type_registry_key(org_id),
@@ -116,12 +125,56 @@ defmodule KilnCMS.CMS.ContentTypes do
   end
 
   @doc """
-  Look up a dynamic content type by its name string, within `org_id` (defaults to
-  the sole org — epic #336). Returns nil if unknown.
+  Every content type available to an organization: the compiled ones, then its
+  admin-defined ones (#527).
+
+  `all() ++ dynamic_all(...)` appeared at ~20 call sites, each re-deriving the
+  org id from whatever it was holding. `org` may be an `Organization`, a bare
+  id, or `nil` — see `KilnCMS.Accounts.org_id/1` for why `nil` resolves to the
+  default org rather than raising.
+
+  Order is compiled-then-dynamic, each half sorted by label — the order every
+  one of those call sites already produced, and the order the grouped
+  "Built-in"/"Custom" pickers render in.
   """
-  @spec get_dynamic(String.t(), Ash.UUID.t()) :: t() | nil
-  def get_dynamic(name, org_id \\ KilnCMS.Accounts.default_org_id()) when is_binary(name),
-    do: Enum.find(dynamic_all(org_id), &(&1.type == name))
+  @spec all_for_org(KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil) :: [t()]
+  def all_for_org(org), do: all() ++ dynamic_all(KilnCMS.Accounts.org_id(org))
+
+  @doc """
+  Every content type available to `org` as `{label, name string}` select options
+  (#527).
+
+  Seven admin pick-lists built this by hand, and they had already diverged: six
+  rendered `all_for_org/1`'s compiled-then-dynamic order while `taxonomy_live`
+  re-sorted across the seam, so the same list appeared in two different orders in
+  the same console — and, in the field-definition form, in two different orders
+  on the same page, next to a picker grouped "Built-in" then "Custom". This
+  settles all of them on `all_for_org/1`'s order.
+
+  `:prompt` prepends a `{label, value}` pair for the callers that lead with an
+  "any"/"all" entry. Note that it shifts every index by one — don't read a
+  default out of this list by position.
+  """
+  @spec options(KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil, keyword()) ::
+          [{String.t(), String.t()}]
+  def options(org, opts \\ []) do
+    types = org |> all_for_org() |> Enum.map(&{&1.label, to_string(&1.type)})
+
+    case Keyword.get(opts, :prompt) do
+      nil -> types
+      prompt -> [prompt | types]
+    end
+  end
+
+  @doc """
+  Look up a dynamic content type by its name string, within `org` — an
+  `Organization`, an id, or `nil` for the sole org (epic #336). Returns nil if
+  unknown.
+  """
+  @spec get_dynamic(String.t(), KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil) ::
+          t() | nil
+  def get_dynamic(name, org \\ nil) when is_binary(name),
+    do: Enum.find(dynamic_all(org), &(&1.type == name))
 
   @doc "Router-owned first URL segments a dynamic type may not use."
   @spec reserved_path_segments() :: [String.t()]
@@ -265,10 +318,11 @@ defmodule KilnCMS.CMS.ContentTypes do
   Find a content type by its public URL segment, e.g. "blog" or "products" —
   compiled first, then dynamic (`TypeDefinition.path_segment`).
   """
-  @spec get_by_path(String.t(), Ash.UUID.t()) :: t() | nil
-  def get_by_path(segment, org_id \\ KilnCMS.Accounts.default_org_id()) do
+  @spec get_by_path(String.t(), KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil) ::
+          t() | nil
+  def get_by_path(segment, org \\ nil) do
     Enum.find(all(), &(&1.path_segment == segment)) ||
-      Enum.find(dynamic_all(org_id), &(&1.path_segment == segment))
+      Enum.find(dynamic_all(org), &(&1.path_segment == segment))
   end
 
   @doc "The atom types of all content types."
@@ -283,30 +337,34 @@ defmodule KilnCMS.CMS.ContentTypes do
   compiled always wins a name collision (which `TypeDefinition` validation
   prevents anyway). Atoms only ever name compiled types.
   """
-  @spec get(atom() | String.t() | t() | nil, Ash.UUID.t()) :: t() | nil
-  def get(type, org_id \\ KilnCMS.Accounts.default_org_id())
+  @spec get(
+          atom() | String.t() | t() | nil,
+          KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil
+        ) :: t() | nil
+  def get(type, org \\ nil)
 
-  def get(nil, _org_id), do: nil
+  def get(nil, _org), do: nil
 
   # An already-resolved descriptor passes through — iteration call sites hand
   # the descriptor straight to the dispatch helpers, so a type archived between
   # listing and dispatch can't turn into a lookup miss mid-request.
-  def get(%{type: _} = descriptor, _org_id), do: descriptor
+  def get(%{type: _} = descriptor, _org), do: descriptor
 
   # Atoms only ever name compiled types (org-independent).
-  def get(type, _org_id) when is_atom(type), do: Enum.find(all(), &(&1.type == type))
+  def get(type, _org) when is_atom(type), do: Enum.find(all(), &(&1.type == type))
 
-  def get(type, org_id) when is_binary(type) do
+  def get(type, org) when is_binary(type) do
     case safe_existing_atom(type) do
-      nil -> get_dynamic(type, org_id)
-      atom -> get(atom) || get_dynamic(type, org_id)
+      nil -> get_dynamic(type, org)
+      atom -> get(atom) || get_dynamic(type, org)
     end
   end
 
   @doc "Like `get/2` but raises for an unknown type (descriptors pass through)."
-  @spec get!(atom() | String.t() | t(), Ash.UUID.t()) :: t()
-  def get!(type, org_id \\ KilnCMS.Accounts.default_org_id()) do
-    get(type, org_id) || raise ArgumentError, "unknown content type: #{inspect(type)}"
+  @spec get!(atom() | String.t() | t(), KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil) ::
+          t()
+  def get!(type, org \\ nil) do
+    get(type, org) || raise ArgumentError, "unknown content type: #{inspect(type)}"
   end
 
   @doc "Whether `type` is a known content type."

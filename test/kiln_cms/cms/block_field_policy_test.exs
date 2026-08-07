@@ -34,6 +34,22 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
     block
   end
 
+  # Every nested child map in a stored page, flattened, at any depth (#865), so
+  # a test can assert on what a write actually stored.
+  defp stored_children(page) do
+    page.blocks
+    |> Enum.flat_map(fn %Ash.Union{value: block} -> Map.get(block, :columns, []) end)
+    |> Enum.flat_map(&child_maps/1)
+  end
+
+  defp child_maps(%{"blocks" => blocks}) when is_list(blocks),
+    do: Enum.flat_map(blocks, &[&1 | nested_of(&1)])
+
+  defp child_maps(_other), do: []
+
+  defp nested_of(%{"columns" => cols}) when is_list(cols), do: Enum.flat_map(cols, &child_maps/1)
+  defp nested_of(_other), do: []
+
   describe "create" do
     test "an editor cannot create a block with an admin-only field set" do
       assert {:error, error} =
@@ -183,6 +199,11 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       # Acceptance #2: the old per-child default rule refused this outright (any
       # non-default nested restricted value was a violation). The multiset rule
       # allows it — the admin value is preserved, only the permitted `text` moved.
+      #
+      # No child id, deliberately. This is the headless shape: `blocks` is not
+      # readable, so a `block_tree` client cannot learn one. The #865 binding
+      # must not refuse this, or the write API loses the ability to edit any
+      # page holding a nested admin-set value (see `round_trips_ids?/2`).
       assert {:ok, updated} =
                CMS.update_page(
                  page,
@@ -319,10 +340,95 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
                CMS.update_page(page, %{block_tree: [same_tree_plus_junk]}, actor: user(:editor))
     end
 
-    test "re-targeting an admin value between same-type children is allowed (accepted residual)" do
-      # The count is preserved, only which child holds `featured` moves. Closing
-      # this needs per-child identity (tracked); this pins the current behavior so
-      # a future identity fix has to change it deliberately.
+    test "re-targeting an admin value between same-type children is refused (#865)" do
+      # The accepted residual of #774: the count is preserved and only which
+      # child holds `featured` moves, so the multiset compared equal. Where the
+      # children have ids — editor-authored content does — the value is bound to
+      # the child that held it and moving it is a change to both.
+      admin = user(:admin)
+      {a, b} = {Ash.UUID.generate(), Ash.UUID.generate()}
+
+      before =
+        columns_children([
+          quote_block(%{"id" => a, "featured" => true, "text" => "A"}),
+          quote_block(%{"id" => b, "featured" => false, "text" => "B"})
+        ])
+
+      {:ok, page} = create_page(admin, [before])
+
+      swapped =
+        columns_children([
+          quote_block(%{"id" => a, "featured" => false, "text" => "A"}),
+          quote_block(%{"id" => b, "featured" => true, "text" => "B"})
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+
+      # Pinned to the rule that catches it, not merely to the field name — every
+      # violation message in this module mentions `featured`, so `=~ "featured"`
+      # would still pass if the multiset started firing instead.
+      assert Exception.message(error) =~ "cannot move or clear"
+    end
+
+    test "clearing an identified child by omitting the field is refused (#865)" do
+      # The #774 omission, this time named at the child rather than the tree:
+      # the child comes back under its own id with `featured` simply gone, which
+      # the cast reads as the default.
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([quote_block(%{"id" => a, "featured" => true, "text" => "A"})])
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(
+                 page,
+                 %{block_tree: [columns_children([quote_block(%{"id" => a, "text" => "A"})])]},
+                 actor: user(:editor)
+               )
+
+      assert Exception.message(error) =~ "cannot move or clear"
+    end
+
+    test "two children submitted under one id are refused (#865)" do
+      # The collision that made the binding refuse LESS: indexed by id, the last
+      # one wins, so submitting the real child cleared plus a decoy of the same
+      # id carrying the value satisfied the binding — it read the decoy — while
+      # the content that actually renders quietly lost `featured`.
+      #
+      # Unlike the two rules above this one is not gated on round-tripping: an
+      # id naming two children is incoherent whoever sent it.
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([quote_block(%{"id" => a, "featured" => true, "text" => "A"})])
+        ])
+
+      collided =
+        columns_children([
+          quote_block(%{"id" => a, "text" => "A", "featured" => false}),
+          quote_block(%{"id" => a, "text" => "", "featured" => true})
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [collided]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "same id"
+    end
+
+    test "a wholly id-less re-target is still allowed (accepted residual, #865)" do
+      # Pinned so the limit is deliberate rather than discovered. Nested child
+      # ids cannot be READ back — `blocks` is not `public?` and the fired
+      # artifact carries `_id`, not `id` — so a rule that demanded one would
+      # lock out every headless client and every `restore_version` of a version
+      # captured before the editor stamped its children. The binding therefore
+      # applies only where the client round-trips ids, and a caller willing to
+      # drop all of them keeps #774's count-only guarantee.
       admin = user(:admin)
 
       before =
@@ -341,6 +447,166 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
 
       assert {:ok, _updated} =
                CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+    end
+
+    test "a child may still move between columns, carrying its id and value (#865)" do
+      # The binding binds a value to a CHILD, not to a position — otherwise it
+      # would refuse the editor's drag-and-drop, which is the ordinary way to
+      # move a column's contents and has nothing to do with the field.
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      {:ok, page} =
+        create_page(admin, [
+          %{
+            "_type" => "columns",
+            "columns" => [
+              %{"blocks" => [quote_block(%{"id" => a, "featured" => true, "text" => "A"})]},
+              %{"blocks" => []}
+            ]
+          }
+        ])
+
+      moved = %{
+        "_type" => "columns",
+        "columns" => [
+          %{"blocks" => []},
+          %{"blocks" => [quote_block(%{"id" => a, "featured" => true, "text" => "A"})]}
+        ]
+      }
+
+      assert {:ok, _updated} =
+               CMS.update_page(page, %{block_tree: [moved]}, actor: user(:editor))
+    end
+
+    test "an editor may add a plain sibling beside a featured child (#865)" do
+      # A new child has an id nothing stored knows, so the binding says nothing
+      # about it and the multiset governs — it may be added, just not
+      # pre-`featured`.
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([quote_block(%{"id" => a, "featured" => true, "text" => "A"})])
+        ])
+
+      with_sibling =
+        columns_children([
+          quote_block(%{"id" => a, "featured" => true, "text" => "A"}),
+          quote_block(%{"id" => Ash.UUID.generate(), "text" => "new"})
+        ])
+
+      assert {:ok, _updated} =
+               CMS.update_page(page, %{block_tree: [with_sibling]}, actor: user(:editor))
+    end
+
+    test "an id-less headless client can still edit the page repeatedly (#865)" do
+      # The lockout this design exists to avoid. An earlier draft required the
+      # child that held an admin value to come back under the same id; a
+      # `block_tree` client cannot learn that id (`blocks` is not `public?`, and
+      # the fired artifact carries `_id`), so it would have been refused on
+      # every edit to this page, forever, told to send something it cannot know.
+      # The page is authored the way the EDITOR authors one — children carrying
+      # ids — because that is what makes the lockout reachable: stored children
+      # have ids, and the id-less client cannot produce them.
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([quote_block(%{"id" => a, "featured" => true, "text" => "A"})])
+        ])
+
+      assert [%{"id" => ^a}] = stored_children(page)
+
+      editor = user(:editor)
+
+      page =
+        Enum.reduce(1..3, page, fn n, page ->
+          assert {:ok, updated} =
+                   CMS.update_page(
+                     page,
+                     %{
+                       block_tree: [
+                         columns_children([
+                           quote_block(%{"featured" => true, "text" => "edit #{n}"})
+                         ])
+                       ]
+                     },
+                     actor: editor
+                   ),
+                 "headless edit #{n} was refused"
+
+          updated
+        end)
+
+      assert [child] = stored_children(page)
+      assert child["featured"] == true
+      assert child["text"] == "edit 3"
+    end
+
+    test "a non-admin can restore a version whose children carry no ids (#865)" do
+      # `restore_version` accepts nothing but a `version_id`, so it can never
+      # supply child ids — and every version captured before children had them
+      # restores id-less by construction. A binding that demanded ids back would
+      # make those versions unrestorable by an editor, with no remedy.
+      #
+      # v1's children are id-less; the CURRENT row's carry ids. Restoring v1
+      # therefore submits an id-less tree against an identified stored one,
+      # which is the shape that would be refused.
+      admin = user(:admin)
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([quote_block(%{"featured" => true, "text" => "v1"})])
+        ])
+
+      {:ok, page} =
+        CMS.update_page(
+          page,
+          %{
+            block_tree: [
+              columns_children([
+                quote_block(%{"id" => Ash.UUID.generate(), "featured" => true, "text" => "v2"})
+              ])
+            ]
+          },
+          actor: admin
+        )
+
+      assert [%{"id" => _}] = stored_children(page)
+
+      [create_version | _] =
+        CMS.list_page_versions!(actor: admin)
+        |> Enum.filter(&(&1.version_source_id == page.id))
+        |> Enum.sort_by(& &1.version_inserted_at, DateTime)
+
+      assert {:ok, _restored} =
+               CMS.restore_page_version(page, %{version_id: create_version.id},
+                 actor: user(:editor)
+               )
+    end
+
+    test "the binding holds two columns deep (#865)" do
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      inner = columns_children([quote_block(%{"id" => a, "featured" => true, "text" => "deep"})])
+      {:ok, page} = create_page(admin, [columns_children([inner])])
+
+      swapped_inner =
+        columns_children([
+          columns_children([
+            quote_block(%{"id" => a, "featured" => false, "text" => "deep"}),
+            quote_block(%{"id" => Ash.UUID.generate(), "featured" => true, "text" => "other"})
+          ])
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [swapped_inner]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "featured"
     end
   end
 

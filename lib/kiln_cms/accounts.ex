@@ -113,6 +113,27 @@ defmodule KilnCMS.Accounts do
   def default_org_id, do: KilnCMS.Accounts.Organization.default_id()
 
   @doc """
+  The org id behind an `Organization` struct, a bare id, or `nil` (#527).
+
+  Ash's `tenant:` accepts all three, so a request's org is passed around as any
+  of them; the functions that take an id and not a tenant need it narrowed. Ten
+  private copies of this had grown across the console and the core, and they
+  disagreed on `nil` — some raised, some fell back to the sole org, one had no
+  `is_binary` guard at all.
+
+  `nil` resolves to `default_org_id/0`, the same fallback every tenant-less write
+  already takes under the non-strict rollout, so a missing org reads as "no
+  tenant" does everywhere else. Anything else raises: matching `%{id: id}`
+  loosely — as several of the copies did — quietly accepts a `User`, a `Page`, or
+  a socket and hands its id downstream as a tenant, where it surfaces not as an
+  error but as an empty registry. Only these three shapes are an org.
+  """
+  @spec org_id(KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil) :: Ash.UUID.t()
+  def org_id(%KilnCMS.Accounts.Organization{id: id}) when is_binary(id), do: id
+  def org_id(id) when is_binary(id), do: id
+  def org_id(nil), do: default_org_id()
+
+  @doc """
   Every organization id (#419 strict-tenancy prep) — the tenant list for
   cross-org iteration: AshOban scheduler scans (`KilnCMS.Accounts.ListOrgIds`)
   and deliberate all-orgs sweeps (GDPR actor erasure). System-level read.

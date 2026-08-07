@@ -104,7 +104,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         org = socket.assigns.current_org
         record = fetch!(kind, id, actor, org)
         field_definitions = field_definitions(kind, actor, org)
-        content_type = ContentTypes.get!(kind, org_id(org))
+        content_type = ContentTypes.get!(kind, org)
 
         if connected?(socket) do
           topic = Presence.track_editor(self(), kind, id, actor)
@@ -361,7 +361,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp content_kind(%{"type" => type}, socket) do
     # Resolve the type within the current site (epic #336) — a dynamic type name
     # only names a type on the org that defined it.
-    case ContentTypes.get(type, org_id(socket.assigns.current_org)) do
+    case ContentTypes.get(type, socket.assigns.current_org) do
       nil -> nil
       ct -> ct.type
     end
@@ -744,7 +744,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     org = socket.assigns.current_org
 
     options =
-      for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org)),
+      for ct <- ContentTypes.all() ++ ContentTypes.dynamic_all(org),
           record <-
             ContentTypes.list!(ct,
               actor: socket.assigns.actor,
@@ -899,7 +899,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         KilnCMS.Links.Internal.resolve_all(
           paths,
           link_locale(socket),
-          org_id(socket.assigns.current_org)
+          Accounts.org_id(socket.assigns.current_org)
         )
       )
     end
@@ -1165,7 +1165,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # kind's by its type atom (see FieldDefinition's two scopes). Resolved and read
   # under the current org (epic #336).
   defp field_definitions(kind, actor, org) do
-    case ContentTypes.get!(kind, org_id(org)) do
+    case ContentTypes.get!(kind, org) do
       %{source: :dynamic, definition: definition} ->
         CMS.field_definitions_for_definition!(definition.id, actor: actor, tenant: org)
 
@@ -1173,10 +1173,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
         CMS.field_definitions_for!(ct.type, actor: actor, tenant: org)
     end
   end
-
-  # `ContentTypes.get!/2` keys the dynamic-type registry by a raw org_id.
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
 
   # Pick-lists for `:reference` custom fields: per definition, the target
   # type's records as `{title, id}` options — narrow select and the same window
@@ -1186,7 +1182,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Enum.filter(&(&1.field_type == :reference))
     |> Map.new(fn definition ->
       options =
-        case ContentTypes.get(definition.target_type, org_id(org)) do
+        case ContentTypes.get(definition.target_type, org) do
           nil ->
             []
 
@@ -1464,7 +1460,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # The rate-limit bucket keys interpolate this, so it must be the id —
       # `current_org` is the Organization struct (Ash takes it as a tenant, but
       # a struct in a bucket key would blow up on String.Chars).
-      org_id = org_id(socket.assigns.current_org)
+      org_id = Accounts.org_id(socket.assigns.current_org)
       actor_id = socket.assigns.actor.id
       # Stamped so a result that lands after a conflict reload or a version
       # restore (both bump `editor_version`) can be recognized as stale.
@@ -1621,7 +1617,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # without this check a crafted push buys a billed generation for nothing.
     if assist_runnable?(socket, block_id) do
       request = assist_request(socket, block_id)
-      org_id = org_id(socket.assigns.current_org)
+      org_id = Accounts.org_id(socket.assigns.current_org)
       actor_id = socket.assigns.actor.id
       version = socket.assigns.editor_version
 

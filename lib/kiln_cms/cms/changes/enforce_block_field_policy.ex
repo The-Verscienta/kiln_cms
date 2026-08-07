@@ -49,17 +49,46 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   nor drop one (omit/clear), but it may resubmit a column holding an admin-set
   value unchanged, and it may edit the permitted fields around it.
 
-  It preserves the *count* of admin-set values, not their *binding* to specific
-  content — the residual the missing per-child identity leaves. Because nested
-  children have no id, a non-admin can **re-target** a restricted value: clear it
-  on one child and set it on another of the same type in the same write, keeping
-  the multiset equal. They still cannot raise the count (feature a quote from
-  none) or lower it (un-feature one), only move which same-type child holds it.
-  Closing that needs the same nested-child identity the top-level rule diffs on;
-  tracked as a follow-up, and recorded in `docs/threat-model.md` residual risk 8.
-  A structural delete that removes a child holding an admin-set value shrinks the
-  multiset and is therefore refused — stricter than the top-level layer, which
-  errs safe.
+  A multiset preserves the *count* of admin-set values, not their *binding* to
+  specific content, so on its own it let a non-admin **re-target** one: clear it
+  on one child and set it on another of the same type in the same write, leaving
+  the count equal. A structural delete that removes a child holding an admin-set
+  value shrinks the multiset and is refused — stricter than the top-level layer,
+  which errs safe.
+
+  ## Nested children: bound to the child that holds them (#865)
+
+  `KilnCMSWeb.ContentEditorLive` stamps every nested child an `"id"` for its own
+  bookkeeping, and that key survives into storage. Where those ids exist the
+  multiset can be sharpened from *how many* admin-set values there are to
+  *which child* holds each one. Three rules are layered on it:
+
+    * **an id names one child.** Two children submitted under the same id are
+      refused. This one always applies: without it the two collapse when indexed
+      and the last wins, which is a collision that makes the check refuse
+      *less* — send the real child cleared and a decoy of the same id carrying
+      the value, decoy last, and the stored content quietly loses it.
+    * **a child that comes back under an id we know** must come back with the
+      value that id had. This is what sees a re-target: moving a value changes
+      both children while leaving the count alone.
+    * **a child that held a restricted non-default value** must come back, under
+      the same id, still holding it — otherwise the rule above is sidestepped by
+      presenting the same content under a fresh id.
+
+  The last two apply only when the client has shown it round-trips nested ids
+  (`round_trips_ids?/2`), and that gate is not politeness. Nested child ids are
+  **not readable**: `blocks` is not `public?`, GraphQL hides it, and the fired
+  artifact exposes `_id` rather than `id`. A headless `block_tree` client cannot
+  learn a child's id, and `restore_version` takes nothing but a `version_id`, so
+  a version captured before the editor stamped its children restores id-less by
+  construction. Requiring an id back from those callers would refuse them
+  permanently while naming a remedy neither can perform.
+
+  **So this does not close the residual for a caller that drops every id.** Such
+  a submission is still only counted, and #774's re-target survives there. What
+  it closes is the case where identity exists — editor-authored content, and any
+  client that round-trips what it was given. Closing the rest needs nested child
+  ids a client can *read*; recorded in `docs/threat-model.md`.
 
   ## Omitted is not the same as default (#566)
 
@@ -100,9 +129,17 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   had it. And an empty `block_tree` deletes the block outright. Both are about
   which block an id names rather than what a field may hold, and both predate
   this; closing them needs the write path to verify that a submitted id belongs
-  to the block it claims. (Nested `columns` children are no longer a gap — the
-  whole-tree multiset above reaches them, #774.) Recorded as residual risk in
-  `docs/threat-model.md`.
+  to the block it claims.
+
+  The same is true one level down, and for the same missing primitive: a client
+  that supplies its own nested child ids can relabel which child an id names, so
+  the binding above believes the labels it is handed. It is checked for the one
+  case that is decidable without ownership — an id naming two children at once —
+  and otherwise holds only as well as the ids do. Nested children additionally
+  keep the wholly-id-less residual described above, because their ids cannot be
+  read back.
+
+  Recorded as residual risk in `docs/threat-model.md`.
   """
   use Ash.Resource.Change
 
@@ -235,19 +272,35 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   defp permitted_value(field, nil), do: field.default
   defp permitted_value(field, previous), do: Map.get(previous, field.name)
 
-  # `columns` (and any future nesting) holds children as raw maps with no id, so
-  # they cannot be diffed one-for-one (#774). Instead the WHOLE tree's multiset
-  # of role-restricted non-default nested values is required to be identical
-  # before and after: a non-admin can neither introduce one (the #51 "smuggle"
-  # and #566 "set" cases) nor drop one (the #774 omission — nest a featured quote
-  # in a column, then resubmit the column with `featured` gone), but MAY resubmit
-  # a column that already holds an admin-set value unchanged — which the old
-  # per-child default rule refused outright. `columns` itself carries an id, but
-  # a whole-tree multiset needs no per-child identity and is strictly safe: it
-  # allows moving a preserved value between columns, never adding or removing one.
+  # Two checks over the nested tree, run against one walk of each side rather
+  # than one walk per check — `collect_maps/1` descends every map value, so on a
+  # page with a long `rich_text` body it walks the whole Portable Text document.
   defp check_nested_tree(changeset, submitted, role) do
-    before = nested_restricted(stored_blocks(changeset.data), role)
-    now = nested_restricted(submitted, role)
+    stored = changeset.data |> stored_blocks() |> nested_child_maps()
+    now = nested_child_maps(submitted)
+
+    changeset
+    |> check_nested_multiset(stored, now, role)
+    |> check_nested_identity(stored, now, role)
+  end
+
+  defp nested_child_maps(blocks), do: Enum.flat_map(blocks, &nested_maps/1)
+
+  # The WHOLE tree's multiset of role-restricted non-default nested values must
+  # be identical before and after (#774): a non-admin can neither introduce one
+  # (the #51 "smuggle" and #566 "set" cases) nor drop one (the #774 omission —
+  # nest a featured quote in a column, then resubmit the column with `featured`
+  # gone). It compares counts, not bindings, so it allows a *child* to move
+  # between columns as long as it keeps its value.
+  #
+  # Retained alongside the per-child binding below, and not redundant with it:
+  # this is the SOLE enforcement for a child the stored tree has never seen.
+  # `moved_values/2` says nothing about an unknown id and `dropped_values/2` only
+  # demands stored non-defaults back, so a brand-new nested child arriving
+  # pre-`featured` is invisible to both — the count going up is what catches it.
+  defp check_nested_multiset(changeset, stored_maps, now_maps, role) do
+    before = nested_restricted(stored_maps, role)
+    now = nested_restricted(now_maps, role)
 
     (Map.keys(before) ++ Map.keys(now))
     |> Enum.uniq()
@@ -258,6 +311,143 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
     end)
   end
 
+  # Which child holds each admin-set value, not just how many do (#865).
+  #
+  # The multiset compares sorted VALUES keyed by `{module, field}`, so a
+  # non-admin could clear `featured` on one nested quote and set it on another
+  # in the same write: the count is unchanged, so it saw nothing. Now that
+  # `TypedBlocks` stamps every nested child an id on the way in, the value can
+  # be bound to the child that held it.
+  #
+  # Layered on rather than replacing the multiset, and purely additive — it can
+  # only refuse writes that used to pass, never permit one that used to fail
+  # (#566's constraint). That also makes it safe for rows written before the
+  # stamping existed: their stored children carry no id, match nothing here, and
+  # are governed by the multiset exactly as before.
+  defp check_nested_identity(changeset, stored_maps, now_maps, role) do
+    stored_entries = nested_entries(stored_maps, role)
+    now_entries = nested_entries(now_maps, role)
+
+    stored = Map.new(stored_entries)
+    now = Map.new(now_entries)
+
+    bound =
+      if round_trips_ids?(stored, now),
+        do: moved_values(now, stored) ++ dropped_values(stored, now),
+        else: []
+
+    (duplicate_ids(now_entries) ++ bound)
+    |> Enum.uniq()
+    |> Enum.reduce(changeset, fn
+      {:duplicate, module, field_name}, acc ->
+        add_duplicate_id_violation(acc, module, field_name)
+
+      {:binding, module, field_name}, acc ->
+        add_nested_identity_violation(acc, module, field_name)
+    end)
+  end
+
+  # Has this client shown it can name a nested child? At least one submitted
+  # child has come back under an id the stored tree knows.
+  #
+  # The same shape as the top-level `identified?` test, and load-bearing for a
+  # sharper reason: nested child ids are **not readable**. `blocks` is not
+  # `public?`, every GraphQL action carries `hide_inputs: [:blocks]`, and the
+  # fired artifact exposes `_id`, not `id`. A headless `block_tree` client
+  # therefore has no way to learn a child's id, and `restore_version` accepts
+  # nothing but a `version_id` — versions captured before the editor stamped
+  # children restore id-less by construction. Demanding an id back
+  # unconditionally refuses both of them permanently, naming a remedy neither
+  # can perform.
+  #
+  # So the binding applies to clients that demonstrably round-trip ids — the
+  # content editor stamps one per child and resubmits it — and everyone else is
+  # governed by the multiset, exactly as before. The cost is the residual this
+  # cannot close: a wholly id-less nested submission is only counted, so a
+  # caller willing to drop every id keeps #774's re-target. Closing that needs
+  # child ids a client can *read*; recorded in `docs/threat-model.md`.
+  defp round_trips_ids?(stored, now),
+    do: Enum.any?(Map.keys(now), &Map.has_key?(stored, &1))
+
+  # An id names one child. A tree where it names two collapses in `Map.new/1`
+  # above and the LAST one wins, which is a collision that makes the check
+  # refuse *less*: submit the real child cleared and a decoy of the same id
+  # carrying the value, decoy last, and `moved_values/2` reads the decoy's value
+  # while the stored content quietly loses it. Verified reachable before this
+  # existed, so it is checked rather than reasoned away.
+  defp duplicate_ids(entries) do
+    entries
+    |> Enum.frequencies_by(fn {key, _value} -> key end)
+    |> Enum.flat_map(fn
+      {{_id, module, field_name}, count} when count > 1 -> [{:duplicate, module, field_name}]
+      _unique -> []
+    end)
+  end
+
+  # A child that came back under an id we know must come back with the value
+  # that id had. An id we do not know is a new child, and the multiset already
+  # refuses it arriving pre-set.
+  defp moved_values(now, stored) do
+    Enum.flat_map(now, fn {{_id, module, field_name} = key, {_field, value}} ->
+      case Map.fetch(stored, key) do
+        {:ok, {_field, ^value}} -> []
+        {:ok, _different} -> [{:binding, module, field_name}]
+        :error -> []
+      end
+    end)
+  end
+
+  # ...and a child that held one must still be there holding it. Without this
+  # the rule above is evaded by simply dropping the ids: the stamp then mints
+  # fresh ones, which match nothing stored, and the multiset only counts. It is
+  # also what refuses the #774 clear-by-omission on an identified child, this
+  # time naming the child rather than the tree.
+  #
+  # Only non-default stored values are required back, so an ordinary page —
+  # where nothing restricted is set — is untouched, and a child may still be
+  # deleted outright unless it is holding an admin-set value.
+  defp dropped_values(stored, now) do
+    Enum.flat_map(stored, fn {{_id, module, field_name} = key, {field, value}} ->
+      if value != field.default and not Map.has_key?(now, key),
+        do: [{:binding, module, field_name}],
+        else: []
+    end)
+  end
+
+  # `{{child_id, module, field_name}, {field, value}}` for every role-restricted
+  # field of every nested child that carries an id, at any depth. A LIST rather
+  # than a map, so `duplicate_ids/1` can still see a key that appears twice.
+  #
+  # Unlike `nested_restricted/2` this keeps default values too: clearing a field
+  # is a write of its default, and that is exactly what has to be caught.
+  #
+  # A field the child omits reads as the default here, and that is right
+  # *because* there is an id. The top-level rule cannot read an omission as a
+  # default write (#566) precisely because with no id it cannot tell which
+  # block is which; with one, "you sent this child back without the field it
+  # had" is an unambiguous clear.
+  defp nested_entries(child_maps, role),
+    do: Enum.flat_map(child_maps, &identified_entries(&1, role))
+
+  defp identified_entries(map, role) do
+    with {:ok, id} when is_binary(id) <- fetch_field(map, :id),
+         {:ok, type} <- fetch_type(map),
+         {:ok, module} <- KilnCMS.Blocks.fetch(type) do
+      module
+      |> restricted_fields(role)
+      |> Enum.map(&{{id, module, &1.name}, {&1, field_value(map, &1)}})
+    else
+      _ -> []
+    end
+  end
+
+  defp field_value(map, field) do
+    case fetch_field(map, field.name) do
+      {:ok, value} -> value
+      :error -> field.default
+    end
+  end
+
   defp stored_blocks(%{blocks: blocks}) when is_list(blocks), do: blocks
   defp stored_blocks(_data), do: []
 
@@ -265,9 +455,8 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
   # role-restricted fields, across every nested typed child map in the tree, at
   # any depth. Omitted and default-valued fields contribute nothing, so an
   # ordinary page with nothing restricted set yields an empty map on both sides.
-  defp nested_restricted(blocks, role) do
-    blocks
-    |> Enum.flat_map(&nested_maps/1)
+  defp nested_restricted(child_maps, role) do
+    child_maps
     |> Enum.reduce(%{}, &collect_restricted(&1, role, &2))
     |> Map.new(fn {key, values} -> {key, Enum.sort(values)} end)
   end
@@ -392,6 +581,34 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
       message:
         "cannot change `#{field_name}` on a nested #{type} block: it is restricted to other " <>
           "roles, so an admin-set value must be resubmitted unchanged, not introduced or dropped"
+    )
+  end
+
+  # An id that names two children is refused outright rather than resolved: any
+  # rule that picks one of them is picking which claim to believe, and the whole
+  # point of the id is that there is nothing to pick between.
+  defp add_duplicate_id_violation(changeset, module, field_name) do
+    type = Kiln.Block.Info.name(module)
+
+    Ash.Changeset.add_error(changeset,
+      field: :blocks,
+      message:
+        "two nested #{type} blocks were submitted under the same id, and `#{field_name}` on " <>
+          "them is restricted to other roles: an id must name one child"
+    )
+  end
+
+  # Nested children now DO have an id, so this one can say which value moved and
+  # what the remedy is — resubmit the child that held it, holding it.
+  defp add_nested_identity_violation(changeset, module, field_name) do
+    type = Kiln.Block.Info.name(module)
+
+    Ash.Changeset.add_error(changeset,
+      field: :blocks,
+      message:
+        "cannot move or clear `#{field_name}` on a nested #{type} block: it is restricted to " <>
+          "other roles, so the child that holds it must come back under the same id still " <>
+          "holding it"
     )
   end
 

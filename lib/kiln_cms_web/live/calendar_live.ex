@@ -54,7 +54,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
     # Scope the whole calendar to the editor's current site (epic #336).
     content_events =
-      (ContentTypes.all() ++ ContentTypes.dynamic_all(org.id))
+      ContentTypes.all_for_org(org.id)
       |> Enum.flat_map(&month_events(&1, actor, org, from, to))
 
     (content_events ++ task_events(actor, org, month) ++ release_events(actor, org, from, to))
