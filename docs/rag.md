@@ -13,6 +13,8 @@ grounded in those sources.
   "question": "world",
   "answer": null,
   "generated": false,
+  "generation": "disabled",
+  "retry_after": null,
   "sources": [
     { "type": "page", "title": "Welcome to KilnCMS", "url": "/welcome",
       "excerpt": "Welcome to KilnCMS … A world-class, Elixir-native headless CMS. …" },
@@ -24,6 +26,52 @@ grounded in those sources.
 
 Parameters: `q` (the question), optional `locale` and `limit` (max sources,
 clamped to 12).
+
+### Why there is no generated answer
+
+The endpoint **always answers 200**: when generation does not run you still get
+the cited sources, which are a useful answer on their own, and a 429 for a
+partial result would be worse. `generated: false` therefore covers several
+situations that a client should treat differently, so `generation` names which
+one it was:
+
+| `generation` | Meaning | Recovery |
+| --- | --- | --- |
+| `null` | An answer was generated. | — |
+| `"disabled"` | No generator configured — the default install. | None. Stop offering generated answers. |
+| `"rate_limited"` | A generation budget is exhausted. | Retry after `retry_after` seconds. |
+| `"failed"` | The generator errored, timed out, or returned nothing usable. | Retry, but no deadline is known. |
+| `"no_question"` | `q` was blank, so nothing ran. | Send a question. |
+
+`retry_after` is a whole number of **seconds**, rounded up (never 0), and is set
+only for `"rate_limited"`. It is a body field rather than a `Retry-After` header
+because a header describes the **whole response**, and this response succeeded —
+only the generation part of it was throttled. Telling a client to retry the
+request would throw away the sources it just got. Kiln reserves `Retry-After`
+for genuine refusals (see [`api.md`](api.md)), where retrying *is* the
+instruction.
+
+These fields are **additive**. `question`, `answer`, `generated` and `sources`
+are unchanged, so a client reading only those needs no update. `generated` stays
+for compatibility and is exactly `generation == null`; new clients should branch
+on `generation`, which says *why*, rather than on `generated`, which only says
+whether.
+
+Anonymous callers are told about `"rate_limited"` too, and that is a decision
+rather than an oversight. The per-caller budget keys on the caller's address —
+mostly their own traffic reflected back, though everyone behind one NAT or proxy
+egress shares a key. The per-org budget is shared by construction, and
+`retry_after` gives away which of the two it was: the windows differ (a minute
+per caller, an hour per org by default), so a value above the per-caller window
+can only have come from the shared one.
+
+Reported anyway, because the pipeline's own per-IP limiter already answers 429
+to the same anonymous caller and discloses more, and because withholding it
+would leave an operator unable to tell "off by configuration" from "off because
+the shared bucket is spent" — the case they most need to diagnose. Clamping
+`retry_after` to the per-caller window would hide the distinction at the cost of
+telling a client to retry in a minute when the real wait is most of an hour,
+which is worse than the disclosure.
 
 ## How it works
 
@@ -37,8 +85,8 @@ clamped to 12).
   **drafts and gated content can never leak** into an answer or a citation. A
   bearer token widens visibility like other headless endpoints.
 - **Generation is off by default.** With no model configured `/api/ask` returns
-  retrieval-only (`answer: null`, `generated: false`) and nothing leaves the
-  deployment.
+  retrieval-only (`answer: null`, `generated: false`, `generation: "disabled"`)
+  and nothing leaves the deployment.
 
 ## Turning on generated answers
 
@@ -99,8 +147,12 @@ that:
   the request, because the cited sources are still a useful answer.
 
 Every other failure degrades the same way: an unset model, an unreachable
-endpoint, a generator that raises or exits, an empty or unparsable response. A
-misconfigured model makes `/api/ask` behave exactly as a default install does.
+endpoint, a generator that raises or exits, an empty or unparsable response. The
+*shape* of the response is identical to a default install's — same 200, same
+`answer: null`, same sources — but it is no longer indistinguishable: a
+configured-but-broken generator reports `generation: "failed"` where a default
+install reports `"disabled"`. That difference is the point of the field, and it
+is what tells an operator a transient outage from a switch they never flipped.
 
 ## Writing your own generator
 

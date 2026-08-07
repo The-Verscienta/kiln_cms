@@ -7,9 +7,15 @@ defmodule KilnCMSWeb.AskController do
 
   Anonymous requests see published, world-readable content only (the read
   policies); a bearer token widens visibility like every other headless surface.
-  Ships retrieval-only by default (`answer: null`), so it works with no model
-  configured; wiring an on-prem generator turns on generation without touching
-  this controller.
+  Ships retrieval-only by default (`answer: null`, `generation: "disabled"`), so
+  it works with no model configured; wiring an on-prem generator turns on
+  generation without touching this controller.
+
+  Always answers **200**, including when generation does not run — the cited
+  sources are a useful result on their own, and a status code for a partial
+  result would be worse. The reason therefore travels in the body:
+  `generation` names it and `retry_after` gives the one case with a deadline
+  (#853). See `t:KilnCMS.Ask.generation/0`.
   """
   use KilnCMSWeb, :controller
 
@@ -34,7 +40,16 @@ defmodule KilnCMSWeb.AskController do
         client_id: client_id(conn)
       )
 
-    json(conn, result)
+    conn
+    # `no-store`, like `VisualEditingController`, and for the same reason: the
+    # body is per-caller. `sources` already depended on the actor's visibility,
+    # and #853 added throttle state that is not merely per-caller but decays —
+    # a shared cache holding one client's `generation: "rate_limited"` would
+    # hand a second client a deadline it was never subject to, and suppress
+    # generated answers it was entitled to. A 200 with no directive is
+    # heuristically cacheable, so the absence of a header is not neutral here.
+    |> put_resp_header("cache-control", "private, no-store")
+    |> json(result)
   end
 
   # Spelled with `KilnCMSWeb.RateLimit.client_key/1` rather than formatting the

@@ -14,9 +14,10 @@ defmodule KilnCMS.Ask.Generator.ReqLLM do
   object to coerce and nothing for a provider without tool-calling to fail at.
 
   Every failure — an unset model, a refused request, an unparsable response —
-  comes back as `{:error, _}`, which `KilnCMS.Ask` degrades to retrieval-only.
-  A misconfigured or unreachable model makes `/api/ask` behave exactly as it
-  does on a default install; it never 500s the ask.
+  comes back as `{:error, _}`, which `KilnCMS.Ask` degrades to retrieval-only;
+  it never 500s the ask. The response takes the same shape a default install's
+  does, but says so: `generation: :failed` rather than `:disabled` (#853), so a
+  broken endpoint is not mistaken for a feature nobody turned on.
   """
 
   @behaviour KilnCMS.Ask.Generator

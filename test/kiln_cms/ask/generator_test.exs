@@ -193,6 +193,27 @@ defmodule KilnCMS.Ask.GeneratorTest do
       assert %{answer: nil, generated: false, sources: []} = ask("q", client_id: client)
     end
 
+    test "an exhausted bucket reports :rate_limited and a deadline in seconds (#853)" do
+      # `generated: false` alone cannot be acted on — it is the same value a
+      # deployment with no generator returns, and only this one has a recovery.
+      client = "ip:198.51.100.#{System.unique_integer([:positive])}"
+      # Widened, not tightened. Hammer's windows are clock-aligned
+      # (`div(now, scale)`), so a rollover between the two calls is possible at
+      # any scale and a wider one only makes it rarer — this is #697's shape,
+      # narrowed, not eliminated.
+      put_ask(generator: LegacyGenerator, per_user_limit: {1, :timer.hours(1)})
+
+      assert %{generation: nil, retry_after: nil} = ask("q", client_id: client)
+
+      assert %{generation: :rate_limited, generated: false, answer: nil, retry_after: retry} =
+               ask("q", client_id: client)
+
+      # Rounded up and never 0, via the same helper the auth surfaces use — a
+      # `retry_after` of 0 invites an immediate retry into another refusal.
+      assert is_integer(retry) and retry > 0
+      assert retry <= 3600
+    end
+
     test "a different client is not affected by an exhausted neighbour" do
       one = "ip:198.51.100.#{System.unique_integer([:positive])}"
       two = "ip:198.51.100.#{System.unique_integer([:positive])}"

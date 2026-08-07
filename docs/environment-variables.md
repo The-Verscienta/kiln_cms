@@ -364,14 +364,17 @@ boot warning for a hosted provider. See [`docs/ai-assist.md`](ai-assist.md).
 The third AI switch, and the one to think hardest about, because it is the only
 one a **stranger** can trigger: `/api/ask` is a public, anonymous endpoint.
 Unset, it stays what it is by default — retrieval-only, returning cited
-published passages and `"answer": null` — and nothing leaves the deployment.
+published passages, `"answer": null` and `"generation": "disabled"` — and
+nothing leaves the deployment.
 
 Only *published, world-readable* content is ever retrieved, so no draft can
 reach the model whatever the setting. Generation carries its own rate-limit
 buckets on top of the pipeline's per-IP limiter, keyed on the client address for
 anonymous callers; an exhausted bucket degrades to retrieval-only rather than
-refusing the request. Same on-prem preference and same boot warning for a hosted
-provider. See [`docs/rag.md`](rag.md).
+refusing the request, and says so — `"generation": "rate_limited"` with a
+`retry_after`, so a client can tell a throttle from a switch. Same on-prem
+preference and same boot warning for a hosted provider. See
+[`docs/rag.md`](rag.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
