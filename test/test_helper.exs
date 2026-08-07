@@ -30,10 +30,29 @@ pg_tools_exclusion =
     [:pg_tools]
   end
 
+# PDF metadata stripping (#807) really shells out to qpdf, for the same reason
+# the backup tests really shell out to pg_dump: the claim under test is that
+# an uploaded PDF comes back with no `/Info` and no XMP, and only qpdf's actual
+# output can show that. Excluded rather than conditionally skipped, on the
+# reasoning above — and note `available?/0` checks the *capability*, so a host
+# carrying qpdf older than 11.10 excludes these too rather than failing them.
+qpdf_exclusion =
+  if KilnCMS.DocumentProcessor.available?() do
+    []
+  else
+    IO.puts(
+      :stderr,
+      "note: excluding :qpdf tests — no qpdf with --remove-info/--remove-metadata " <>
+        "(needs qpdf >= 11.10; PDF uploads are refused without it)"
+    )
+
+    [:qpdf]
+  end
+
 if KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST")) do
   ExUnit.start(include: [strict_tenancy: true], exclude: [:test])
 else
-  ExUnit.start(exclude: [strict_tenancy: true] ++ pg_tools_exclusion)
+  ExUnit.start(exclude: [strict_tenancy: true] ++ pg_tools_exclusion ++ qpdf_exclusion)
 end
 
 Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
