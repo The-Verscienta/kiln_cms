@@ -3441,14 +3441,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp load_link_suggestions(socket) do
     record = socket.assigns.record
-    actor = socket.assigns.actor
     # Paths the body already links to, so we don't suggest a link that's there.
     linked = socket.assigns.seo_body_stats.internal_link_paths
 
     socket
     |> assign(:seo_links_loading?, true)
     |> start_async(:seo_links, fn ->
-      KilnCMS.Seo.Links.suggest(record, actor: actor, exclude_paths: linked)
+      # No actor/tenant: `suggest/2` scopes to `record`'s own org and the
+      # published/`:public` delivery boundary, so it is identical for every actor
+      # (#869).
+      KilnCMS.Seo.Links.suggest(record, exclude_paths: linked)
     end)
   end
 
