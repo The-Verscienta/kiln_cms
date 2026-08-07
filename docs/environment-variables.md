@@ -306,16 +306,16 @@ outbound port 25.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:1002`](../config/runtime.exs#L1002) |
-| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:1008`](../config/runtime.exs#L1008) |
-| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:1088`](../config/runtime.exs#L1088) |
-| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:1002`](../config/runtime.exs#L1002) |
-| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:1048`](../config/runtime.exs#L1048) |
-| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:1049`](../config/runtime.exs#L1049) |
-| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:1050`](../config/runtime.exs#L1050) |
-| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:1004`](../config/runtime.exs#L1004) |
-| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:1031`](../config/runtime.exs#L1031) |
-| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:1064`](../config/runtime.exs#L1064) |
+| `MAIL_MODE` | unset | `smtp` = relay through an SMTP server; `direct` = deliver straight to each recipient domain's MX hosts (built-in MTA, no relay). Anything else raises at boot. | [`config/runtime.exs:1030`](../config/runtime.exs#L1030) |
+| `MAIL_FROM_EMAIL` | unset | From address for all outbound mail. **Required when `MAIL_MODE=direct`** (raises otherwise) — its domain is the sending/DKIM domain. | [`config/runtime.exs:1036`](../config/runtime.exs#L1036) |
+| `MAIL_FROM_NAME` | `KilnCMS` | Display name for the From address. | [`config/runtime.exs:1116`](../config/runtime.exs#L1116) |
+| `SMTP_HOST` | unset | Relay host. **Required when `MAIL_MODE=smtp`**; setting it without `MAIL_MODE` also selects smtp mode. | [`config/runtime.exs:1030`](../config/runtime.exs#L1030) |
+| `SMTP_PORT` | `587` | Relay port. 587 (STARTTLS) is the right default, and 25 belongs to `MAIL_MODE=direct`. **465 will not work**: that port expects implicit TLS from the first byte, and the adapter is configured for STARTTLS only (`tls:`, never gen_smtp's `ssl:`) with no environment variable to change it — a relay that offers both ports should be pointed at 587. | [`config/runtime.exs:1076`](../config/runtime.exs#L1076) |
+| `SMTP_USERNAME` | unset | Relay username (`auth: :always`). **From the relay provider's dashboard** — providers name the pair differently: Postmark issues one Server API Token used as *both* username and password; SES issues dedicated SMTP credentials, which are **not** your AWS access keys; Gmail requires an App Password rather than the account password. | [`config/runtime.exs:1077`](../config/runtime.exs#L1077) |
+| `SMTP_PASSWORD` | unset | Relay password; see `SMTP_USERNAME` for where it comes from. | [`config/runtime.exs:1078`](../config/runtime.exs#L1078) |
+| `SMTP_TLS` | `true` | STARTTLS to the relay. Set to an off-spelling only for a local dev/test relay. | [`config/runtime.exs:1032`](../config/runtime.exs#L1032) |
+| `SMTP_TLS_VERIFY` | `true` | Verify the relay's certificate against [CAStore](https://hex.pm/packages/castore)'s bundle, with SNI. Set to an off-spelling for a relay with a self-signed or mismatched certificate: the connection stays encrypted but the peer is not verified (`verify_none`). | [`config/runtime.exs:1059`](../config/runtime.exs#L1059) |
+| `MAIL_HELO_HOST` | `PHX_HOST` | Direct mode only: HELO/EHLO hostname. Deliverability requires the sending IP's PTR record to resolve to this name. | [`config/runtime.exs:1092`](../config/runtime.exs#L1092) |
 | `DKIM_PRIVATE_KEY` | unset | Direct mode's DKIM signing key (PKCS#1 RSA PEM, same shape as the provenance key). **Most deployments should not set this**: `/editor/mail` generates the keypair, picks a selector, prints the TXT record to publish and then verifies it against DNS alongside SPF, DMARC, PTR and outbound port 25. This variable exists for a deployment whose policy forbids a private key in the database — select the env provider on that page (it falls back to this variable name when none is given, [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex#L4)) and supply the PEM yourself, because that provider is read-only and the Generate button can no longer help. A blank value counts as unset. Being a multi-line PEM, it takes the same forms as `KILN_PROVENANCE_PRIVATE_KEY` — an escaped one-line double-quoted value (literal `\n`, unescaped on read, #609), a true multi-line double-quoted value, or the file provider. Generate with `openssl genrsa -traditional -out kiln-dkim.pem 2048`, and stay at 2048 bits — a 4096-bit public half overflows the 255-byte TXT string limit. See [direct-email-delivery.md](direct-email-delivery.md). | [`KilnCMS.Keys.Providers.Env`](../lib/kiln_cms/keys/providers/env.ex) |
 
 ## Optional — search (Meilisearch)
@@ -359,6 +359,25 @@ boot warning for a hosted provider. See [`docs/ai-assist.md`](ai-assist.md).
 | `ASSIST_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables block assist when set. | [`config/runtime.exs:913`](../config/runtime.exs#L913) |
 | `ASSIST_GENERATOR` | `KilnCMS.Assist.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Assist.Generator`. | [`config/runtime.exs:917`](../config/runtime.exs#L917) |
 
+## Optional — generated answers for `/api/ask`
+
+The third AI switch, and the one to think hardest about, because it is the only
+one a **stranger** can trigger: `/api/ask` is a public, anonymous endpoint.
+Unset, it stays what it is by default — retrieval-only, returning cited
+published passages and `"answer": null` — and nothing leaves the deployment.
+
+Only *published, world-readable* content is ever retrieved, so no draft can
+reach the model whatever the setting. Generation carries its own rate-limit
+buckets on top of the pipeline's per-IP limiter, keyed on the client address for
+anonymous callers; an exhausted bucket degrades to retrieval-only rather than
+refusing the request. Same on-prem preference and same boot warning for a hosted
+provider. See [`docs/rag.md`](rag.md).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `ASK_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1`. Enables generated answers when set. | [`config/runtime.exs:947`](../config/runtime.exs#L947) |
+| `ASK_GENERATOR` | `KilnCMS.Ask.Generator.ReqLLM` | Override the adapter module with your own `KilnCMS.Ask.Generator`. | [`config/runtime.exs:949`](../config/runtime.exs#L949) |
+
 ## Optional — rich embed cards (oEmbed, #489)
 
 Off by default, and **enabling it is egress**: the server makes an outbound
@@ -375,8 +394,8 @@ thumbnail are stored, and the thumbnail must be on that provider's own CDN.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `OEMBED_ENABLED` | `false` | Resolve oEmbed metadata so embeds render as cards. | [`config/runtime.exs:931`](../config/runtime.exs#L931) |
-| `OEMBED_PROVIDERS` | unset (all) | Comma-separated provider names to **narrow** the built-in list. Cannot add one — a new provider is a host this server dials, so it is a code change. | [`config/runtime.exs:943`](../config/runtime.exs#L943) |
+| `OEMBED_ENABLED` | `false` | Resolve oEmbed metadata so embeds render as cards. | [`config/runtime.exs:959`](../config/runtime.exs#L959) |
+| `OEMBED_PROVIDERS` | unset (all) | Comma-separated provider names to **narrow** the built-in list. Cannot add one — a new provider is a host this server dials, so it is a code change. | [`config/runtime.exs:971`](../config/runtime.exs#L971) |
 
 ## Optional — outbound link checking (#474)
 
@@ -443,9 +462,9 @@ configured. See [editorial-consent.md](editorial-consent.md) and
 | `KILN_PROVENANCE_KEY_FILE` | unset | Path to the same PEM, mounted as a file (Docker/K8s secret). Sets `signing_key: {:file, …}` at runtime — before #608 this shape existed only in `config/config.exs`, i.e. only with a rebuild. It replaces `signing_key` **wholesale**, so it wins over `KILN_PROVENANCE_PRIVATE_KEY` (mount the file first, unset the var after) but equally over a source-configured `:dkim` or `{:file, …}` — setting it switches the signing key, and every new anchor gets a new `key_id`. | [`config/runtime.exs:373`](../config/runtime.exs#L373) |
 | `KILN_PROVENANCE_RETIRED_KEY_FILES` | unset | Comma-separated **paths** to the public halves of keys that no longer sign but must still verify. Sets `:retired_key_files`, which `KeyRegistry.retired/0` **unions** with any `:retired_keys` configured in source — so the env route can only add verification keys, never drop one. (That holds because this var is the sole writer of `:retired_key_files`; put source config in `:retired_keys`.) Blank entries are ignored, so a trailing comma is harmless, and a value with no paths at all warns and changes nothing rather than clearing the list. An unreadable path is logged and skipped rather than blinding the keys that do resolve. Paths only — a public key is multi-line too — and since `,` separates and each entry is trimmed, a path containing a comma or significant leading/trailing whitespace can't be expressed here; use `retired_keys` in source for those. | [`config/runtime.exs:400`](../config/runtime.exs#L400) |
 | `KILN_PROVENANCE_ENABLED` | `false` | Set to `true`/`1`/`yes`/`on` to produce signed manifests for fired artifacts and serve `/api/provenance/*`. **A signing key alone is not enough**: with this unset, the key signs history anchors and every provenance endpoint still returns `404`. Parsed by the shared [on/off rules](#onoff-variables), so an unrecognized value keeps the default and warns rather than turning signing off. Ignored under `MIX_ENV=test`. See [provenance.md](provenance.md). | [`config/runtime.exs:361`](../config/runtime.exs#L361) |
-| `KILN_PROVENANCE_SIGNER` | `:site_name` | Human-readable signer identity recorded in every manifest a consumer verifies — part of what the deployment publicly asserts about its content (#644). Unset falls back to the site name (which a released image can already set), so it is lower stakes than the three above; set it only to override the claim's signer without a rebuild. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1110`](../config/runtime.exs#L1110) |
-| `KILN_PROVENANCE_ORIGIN` | `:public_base_url` | Origin URL recorded in the manifest claim (#644). Unset falls back to the public base URL a released image already configures; set it only to override. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1116`](../config/runtime.exs#L1116) |
-| `KILN_PROVENANCE_AI_DISCLOSURE` | `human` | Default AI-generation disclosure embedded when a document declares none (an editor can override per-document via `custom_fields["ai_disclosure"]`). One of `human`/`ai_assisted`/`ai_generated` (case-insensitive). **An unrecognized value warns and keeps the default** rather than being coerced — it rides into a signed claim, so a typo must not silently rewrite what the deployment asserts (#644). A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1129`](../config/runtime.exs#L1129) |
+| `KILN_PROVENANCE_SIGNER` | `:site_name` | Human-readable signer identity recorded in every manifest a consumer verifies — part of what the deployment publicly asserts about its content (#644). Unset falls back to the site name (which a released image can already set), so it is lower stakes than the three above; set it only to override the claim's signer without a rebuild. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1138`](../config/runtime.exs#L1138) |
+| `KILN_PROVENANCE_ORIGIN` | `:public_base_url` | Origin URL recorded in the manifest claim (#644). Unset falls back to the public base URL a released image already configures; set it only to override. A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1144`](../config/runtime.exs#L1144) |
+| `KILN_PROVENANCE_AI_DISCLOSURE` | `human` | Default AI-generation disclosure embedded when a document declares none (an editor can override per-document via `custom_fields["ai_disclosure"]`). One of `human`/`ai_assisted`/`ai_generated` (case-insensitive). **An unrecognized value warns and keeps the default** rather than being coerced — it rides into a signed claim, so a typo must not silently rewrite what the deployment asserts (#644). A blank value counts as unset. Ignored under `MIX_ENV=test`. | [`config/runtime.exs:1157`](../config/runtime.exs#L1157) |
 
 > **Rotating the signing key.** Verification resolves the key named by each
 > signature's `key_id`, so pre-rotation anchors and manifests keep verifying —
