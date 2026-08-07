@@ -62,7 +62,7 @@ defmodule KilnCMSWeb.OverviewLive do
     # The dynamic half of the registry is per-org (epic #336), so it has to be
     # asked for THIS site's types — the arity-0 default resolves the default
     # org, which on a multi-site install is the wrong site's custom types.
-    types = ContentTypes.all() ++ ContentTypes.dynamic_all(org.id)
+    types = ContentTypes.all_for_org(org.id)
 
     rows = content_rows(types, actor, org)
     by_state = Enum.frequencies_by(rows, fn {_kind, r} -> r.state end)

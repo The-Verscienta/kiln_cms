@@ -29,7 +29,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
      |> assign(:admin?, KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin)
      |> assign(:page_title, gettext("Taxonomy"))
      |> assign(:edit, nil)
-     |> assign(:content_type_options, content_type_options(org))
+     |> assign(:content_type_options, ContentTypes.options(org))
      |> assign(:cat_form, create_form(:category, actor, org))
      |> assign(:group_form, create_form(:tag_group, actor, org))
      |> assign(:tag_form, create_form(:tag, actor, org))
@@ -209,18 +209,6 @@ defmodule KilnCMSWeb.TaxonomyLive do
       _ -> named ++ [{nil, gettext("Ungrouped"), loose}]
     end
   end
-
-  # Every content type a tag group can be scoped to — compiled and admin-defined
-  # alike, addressed by the public type-name string (`ContentTypes.type_name/1`'s
-  # currency). Same enumeration the editor and field-definition admin use.
-  defp content_type_options(org) do
-    (ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org)))
-    |> Enum.map(&{&1.label, to_string(&1.type)})
-    |> Enum.sort_by(&elem(&1, 0))
-  end
-
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
 
   # Distinct form names keep input ids unique across the create forms (and the
   # inline edit form) on the same page. `tenant:` stamps the new row's org so

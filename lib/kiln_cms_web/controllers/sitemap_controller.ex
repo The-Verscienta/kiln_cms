@@ -41,7 +41,7 @@ defmodule KilnCMSWeb.SitemapController do
   # capped, and accumulation stops once the overall ceiling is reached.
   # Dynamic types (D17) are included — their entries carry the same read policy.
   defp build_urls(org) do
-    Enum.reduce_while(ContentTypes.all() ++ ContentTypes.dynamic_all(org.id), [], fn ct, acc ->
+    Enum.reduce_while(ContentTypes.all_for_org(org.id), [], fn ct, acc ->
       remaining = @max_urls - length(acc)
 
       if remaining <= 0 do
