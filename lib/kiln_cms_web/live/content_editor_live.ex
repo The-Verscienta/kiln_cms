@@ -313,6 +313,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
          )
          # `TagGroup`'s primary read is already ordered by position then name.
          |> assign(:tag_groups, CMS.list_tag_groups!(actor: actor, tenant: org))
+         # Which tag-picker sections render expanded, and which have rendered at
+         # all (#523). Both start empty and are filled by `assign_record/2`
+         # below — see `refresh_tag_sections_open/1`.
+         |> assign(:tag_sections_open, MapSet.new())
+         |> assign(:tag_sections_seen, MapSet.new())
          |> assign(:audiences, audience_options())
          |> assign(:field_definitions, field_definitions)
          |> assign(:reference_options, reference_options(field_definitions, actor, org))
@@ -540,6 +545,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
     |> assign(:form, build_form(record, socket.assigns.actor))
+    |> refresh_tag_sections_open()
     |> seed_block_children(record)
     |> refresh_preview()
     |> load_versions()
@@ -4021,6 +4027,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :tag_groups, :list, required: true
   attr :kind, :any, required: true
   attr :record, :any, required: true
+  attr :open_sections, :any, required: true
 
   defp tag_picker(assigns) do
     # What's *persisted* on the record, as distinct from what's currently
@@ -4079,15 +4086,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
           />
         </div>
 
-        <%!-- `data-tag-open-default` is the server's own choice, re-rendered on
-              every patch — what the filter hook restores to when the box is
-              cleared (it can't stash that on the element itself; morphdom would
-              drop it). --%>
+        <%!-- `open` comes from a set judged once per section, never from the
+              live tick count — see `refresh_tag_sections_open/1`. A server value
+              that moves mid-session overrides the app-wide <details>
+              preservation in `app.js`, and folded a section shut under the
+              cursor (#523). Toggling one after that is the editor's business,
+              and the filter hook's for the sections it force-opened. --%>
+        <%!-- The id is load-bearing, not a handle: without one morphdom pairs
+              these positionally, so a section appearing mid-list (a group that
+              was empty at mount gaining an attached tag) shifts every section
+              below it onto its neighbour's node — carrying that node's `open`,
+              its `data-server-open` baseline and its filter-hook bookkeeping
+              onto the wrong group. --%>
         <details
           :for={section <- @sections}
+          id={tag_section_id(section.key)}
           data-tag-section
-          data-tag-open-default={to_string(section.open?)}
-          open={section.open?}
+          open={MapSet.member?(@open_sections, section.key)}
           class="rounded border border-base-content/15"
         >
           <summary class="cursor-pointer px-2 py-1.5 text-sm font-medium">
@@ -4157,10 +4172,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     grouped =
       Enum.map(applicable, fn group ->
-        section(group.name, Map.get(by_bucket, {:group, group.id}, []), selected)
+        section(
+          {:group, group.id},
+          group.name,
+          Map.get(by_bucket, {:group, group.id}, []),
+          selected
+        )
       end)
 
-    ungrouped = section(gettext("Ungrouped"), Map.get(by_bucket, :ungrouped, []), selected)
+    ungrouped =
+      section(:ungrouped, gettext("Ungrouped"), Map.get(by_bucket, :ungrouped, []), selected)
 
     # Out-of-scope groups contribute only what the record ALREADY carries.
     # Keyed on `attached` (the persisted set) rather than `selected` (the live
@@ -4174,6 +4195,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     orphaned =
       section(
+        :out_of_scope,
         gettext("Also attached"),
         orphaned_tags,
         selected,
@@ -4202,12 +4224,57 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp applies_to?(%{content_types: types}, kind) when is_list(types), do: kind in types
   defp applies_to?(_group, _kind), do: true
 
-  # Sections holding a selection start expanded, so what's already on the item
-  # is visible without clicking through every group.
-  defp section(label, tags, selected, note \\ nil) do
+  defp tag_section_id({:group, id}), do: "tag-section-group-#{id}"
+  defp tag_section_id(key) when is_atom(key), do: "tag-section-#{key}"
+
+  # `key` identifies the section across re-renders (the label is translated and
+  # a group's name is editable, so neither is stable) — `@open_sections` is a
+  # set of these, and `tag_section_id/1` turns one into the DOM id.
+  defp section(key, label, tags, selected, note \\ nil) do
     count = Enum.count(tags, &(to_string(&1.id) in selected))
 
-    %{label: label, tags: tags, selected_count: count, open?: count > 0, note: note}
+    %{key: key, label: label, tags: tags, selected_count: count, note: note}
+  end
+
+  # Which sections the picker renders expanded — a section carrying a tag the
+  # record already has starts open, so what's on the item is visible without
+  # clicking through every group.
+  #
+  # Deliberately NOT re-derived per render (#523). `open` was `selected_count >
+  # 0` on every patch, and `app.js`'s app-wide <details> preservation only holds
+  # the editor's own toggle while the *server-rendered* value is unchanged — so
+  # unticking a group's last tag flipped that value true→false, the guard was
+  # skipped, and the section folded shut under the cursor, hiding the siblings
+  # they were about to click.
+  #
+  # So a section is judged EXACTLY ONCE: the first time it renders, when there
+  # is no editor toggle to overrule. `@sections` is rebuilt from the reloaded
+  # `record.tags` on every save, so that isn't only at mount — a section can
+  # appear mid-session, most importantly "Also attached", which surfaces a tag a
+  # collaborator hung off an out-of-scope group (#522) precisely so it can be
+  # seen and undone before the next `append_and_remove` save, and which arriving
+  # collapsed would undercut. After that first render the attribute is the
+  # editor's (and the filter hook's), in both directions, for the session.
+  defp refresh_tag_sections_open(socket) do
+    %{tags: tags, tag_groups: groups, kind: kind, record: record} = socket.assigns
+    attached = record.tags |> current_ids() |> Enum.map(&to_string/1)
+    seen = socket.assigns.tag_sections_seen
+
+    sections =
+      tags
+      |> all_pickable_tags(record.tags)
+      |> tag_sections(groups, kind, attached, attached)
+
+    fresh =
+      for section <- sections,
+          not MapSet.member?(seen, section.key),
+          section.selected_count > 0,
+          into: MapSet.new(),
+          do: section.key
+
+    socket
+    |> update(:tag_sections_open, &MapSet.union(&1, fresh))
+    |> assign(:tag_sections_seen, MapSet.union(seen, MapSet.new(sections, & &1.key)))
   end
 
   # Featured-image chooser (#154): a thumbnail of the current selection plus a
@@ -7441,6 +7508,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   tag_groups={@tag_groups}
                   kind={@kind}
                   record={@record}
+                  open_sections={@tag_sections_open}
                 />
 
                 <.featured_image_field form={@form} media={@media} />

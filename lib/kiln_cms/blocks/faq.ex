@@ -70,6 +70,17 @@ defmodule KilnCMS.Blocks.Faq do
     end
   end
 
+  # `items/1` normalizes every entry, so the delivered array is never null and
+  # both keys are always present strings.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "items" => Kiln.Block.JsonSchema.object_array(~w(question answer))
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     text = block |> pairs() |> Enum.map_join(" ", fn {q, a} -> String.trim("#{q} #{a}") end)

@@ -87,6 +87,19 @@ defmodule KilnCMS.Blocks.Accordion do
   # that happens to be collapsed" — presentation is not structured data.
   def render(_block, :json_ld), do: nil
 
+  # `panels/1` normalizes every entry, so the delivered array is never null and
+  # both keys are always present strings. `first_open` is coerced to a real
+  # boolean on render.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "panels" => Kiln.Block.JsonSchema.object_array(~w(title content)),
+        "first_open" => %{"type" => "boolean", "default" => false}
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     text = block |> pairs() |> Enum.map_join(" ", fn {t, c} -> String.trim("#{t} #{c}") end)

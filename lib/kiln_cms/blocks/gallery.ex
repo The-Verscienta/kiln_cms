@@ -160,6 +160,25 @@ defmodule KilnCMS.Blocks.Gallery do
     end
   end
 
+  # `images/1` normalizes every entry, so the delivered array is never null and
+  # every item carries all four keys as strings — which "array of object" (all
+  # a `{:array, :map}` field can be derived to) does not say. `layout` falls
+  # back to the default, so it is never null either.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "properties" => %{
+        "images" => Kiln.Block.JsonSchema.object_array(~w(media_id url alt caption)),
+        # `layout` is NOT an enum. The `:json` render emits
+        # `block.layout || @default_layout` with no allowlist pass — only the
+        # `:web` render resolves it through `@layouts` — and nothing validates
+        # the field on write, so an authored "polaroid" (or a form's "", which
+        # is truthy, so the `||` never fires) is served verbatim.
+        "layout" => %{"type" => ["string", "null"], "default" => @default_layout}
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     text =

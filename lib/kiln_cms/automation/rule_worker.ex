@@ -17,6 +17,31 @@ defmodule KilnCMS.Automation.RuleWorker do
     * `:newsletter` — send the published document to subscribers via
       `KilnCMS.Newsletter` (#376; `config` `"segment_id"`/`"subject"`, both
       optional). Deduped per {rule, content, publish revision}.
+    * `:flag_duplicates` / `:suggest_tags` / `:suggest_links` /
+      `:suggest_metadata` — the editorial-intelligence reactions (#377); see
+      below.
+
+  ## The editorial-intelligence reactions suggest, and never write
+
+  `docs/automation.md` states it as a rule and this is where it is enforced:
+  these four compute something about the document under review and **email the
+  findings**. None of them touches the record.
+
+  That is the design answer to why #377's automation form was held back.
+  Generated metadata lands in `<meta>` tags on the public site, so a successful
+  prompt injection through the body buys SEO cloaking on the operator's own
+  domain — and human-in-the-loop is the *primary* control against that; the
+  output constraints in `KilnCMS.Seo.Draft` are only the second layer. A
+  reaction that wrote `seo_description` unattended on a state transition would
+  delete the primary control. So automation makes the **computation**
+  unattended — the editor no longer has to open the panel and ask — while
+  accepting a value stays a click in the editor, where a human sees it first.
+
+  For the same reason these reactions are advisory about their own failures: a
+  provider outage, an exhausted budget bucket or an unconfigured generator is
+  logged and dropped, not retried. Retrying a nice-to-have suggestion five
+  times per document costs real tokens to tell an editor something they can ask
+  for directly.
   """
   use Oban.Worker, queue: :default, max_attempts: 5
 
@@ -107,14 +132,32 @@ defmodule KilnCMS.Automation.RuleWorker do
   # Embedding-driven editorial intelligence (#377): notify editors of
   # near-duplicate content — a lightweight review gate ("on in_review → email
   # any suspiciously similar documents"). Silent when nothing is found.
-  defp run(%{action: :flag_duplicates, config: config, org_id: org_id}, event, payload) do
-    intelligence(event, payload, org_id, config, &duplicate_findings/1)
+  defp run(%{action: :flag_duplicates} = rule, event, payload) do
+    intelligence(rule, event, payload, &duplicate_findings/2)
   end
 
   # Tag suggestions for the document under review (#377), from the existing
   # taxonomy ranked by semantic similarity. Silent when nothing to suggest.
-  defp run(%{action: :suggest_tags, config: config, org_id: org_id}, event, payload) do
-    intelligence(event, payload, org_id, config, &tag_findings/1)
+  defp run(%{action: :suggest_tags} = rule, event, payload) do
+    intelligence(rule, event, payload, &tag_findings/2)
+  end
+
+  # #377 box 1, auto internal-linking, in its automation form: the same
+  # `KilnCMS.Seo.Links` suggester the editor panel lazy-loads, run on the
+  # transition instead of on a panel open, and mailed as copyable paths.
+  #
+  # Deterministic and local — the semantic leg is pgvector over content this
+  # deployment already indexed, and the keyword fallback is Postgres full-text.
+  # No model, no egress, works on a default install.
+  defp run(%{action: :suggest_links} = rule, event, payload) do
+    intelligence(rule, event, payload, &link_findings/2)
+  end
+
+  # #377 box 2, metadata generation on a state transition. Runs the same
+  # `KilnCMS.Seo.draft/2` the editor's "Suggest with AI" button runs and mails
+  # the proposal. **Nothing is written** — see the moduledoc.
+  defp run(%{action: :suggest_metadata} = rule, event, payload) do
+    intelligence(rule, event, payload, &metadata_findings/2)
   end
 
   defp run(%{action: :reindex, org_id: org_id}, event, payload) do
@@ -186,11 +229,23 @@ defmodule KilnCMS.Automation.RuleWorker do
   # Load the live document, run the finder, and email the findings (if any).
   # A transient read failure returns the error so Oban retries; a vanished
   # type/document or empty findings is a clean no-op.
-  defp intelligence(event, payload, org_id, config, finder) do
+  defp intelligence(%{config: config, org_id: org_id, id: rule_id}, event, payload, finder) do
     case load_document(event, payload, org_id) do
-      {:ok, record} -> deliver_findings(finder.(record), config)
-      {:error, error} -> {:error, error}
-      :skip -> :ok
+      {:ok, record} ->
+        context = %{
+          org_id: org_id,
+          rule_id: rule_id,
+          config: config,
+          content_type: event_type(event)
+        }
+
+        deliver_findings(finder.(record, context), config)
+
+      {:error, error} ->
+        {:error, error}
+
+      :skip ->
+        :ok
     end
   end
 
@@ -206,8 +261,35 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   defp deliver_findings(:none, _config), do: :ok
 
-  defp deliver_findings({subject, html_body}, config),
-    do: send_rule_email(config, escape(subject, :text), html_body)
+  # A reason the finder couldn't run at all — an unconfigured generator, an
+  # exhausted budget, a provider that fell over. Logged and dropped rather than
+  # returned as an error: see the moduledoc on why these reactions don't retry.
+  defp deliver_findings({:skip, reason}, _config) do
+    Logger.info("Automation intelligence rule produced nothing: #{reason}")
+    :ok
+  end
+
+  # The delivery half of the same no-retry posture. `Mail.deliver_for_worker/2`
+  # *raises* on a transient failure (greylisting, a DNS blip, a refused relay)
+  # so Oban retries the job — and a retry re-enters `run/3` from the top, which
+  # for `:suggest_metadata` means generating the draft again. A greylisted
+  # relay during a bulk move to `in_review` would then bill five generations,
+  # and ship five copies of each body off-site, to deliver one email.
+  #
+  # Only these reactions swallow it. A `:send_email` or `:newsletter` rule is
+  # the message; here the message is advisory and the expensive part already
+  # happened.
+  defp deliver_findings({subject, html_body}, config) do
+    send_rule_email(config, escape(subject, :text), html_body)
+  rescue
+    error in [KilnCMS.Mail.TransientDeliveryError] ->
+      Logger.warning(
+        "Automation intelligence rule couldn't deliver its findings; dropping rather " <>
+          "than retrying a generation that already ran: #{Exception.message(error)}"
+      )
+
+      :ok
+  end
 
   # One delivery skeleton for every emailing reaction, so header/policy
   # changes (from-address, missing-`to` handling) can't diverge per action.
@@ -227,7 +309,118 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
-  defp duplicate_findings(record) do
+  # ── #377 box 1: auto internal-linking ─────────────────────────────────────
+
+  defp link_findings(record, _context) do
+    case KilnCMS.Seo.Links.suggest(record) do
+      [] ->
+        :none
+
+      suggestions ->
+        items =
+          Enum.map_join(suggestions, "", fn s ->
+            "<li><code>#{escape(s.path, :html)}</code> — #{escape(s.title || s.slug, :html)}" <>
+              " <em>(#{s.source})</em></li>"
+          end)
+
+        {"Internal links to consider for \"#{record.title}\"",
+         "<p>Pages worth linking to from <strong>#{escape(record.title, :html)}</strong>:</p>" <>
+           "<ul>#{items}</ul>" <>
+           "<p>These are paths to paste into the body — nothing was inserted. " <>
+           "Insertion is a client-side editor command by design; see " <>
+           "<code>KilnCMS.Seo.Links</code>.</p>"}
+    end
+  end
+
+  # ── #377 box 2: metadata generation on a state transition ─────────────────
+
+  # Off on a default install (`generator: nil`), so a rule created against a
+  # deployment that never configured drafting is inert rather than broken.
+  defp metadata_findings(record, context) do
+    cond do
+      not KilnCMS.Seo.enabled?() ->
+        {:skip, "SEO drafting is not configured (config :kiln_cms, KilnCMS.Seo, generator:)"}
+
+      KilnCMS.Seo.egress?() and not egress_allowed?(context.config) ->
+        # The panel is one editor deciding to spend one request. A rule is every
+        # matching document, forever, with nobody watching — a materially
+        # different egress posture than the one the operator agreed to when they
+        # configured a third-party provider for the *panel*. Opting in per rule
+        # keeps a provider switch from silently turning the whole publish
+        # pipeline into an outbound feed.
+        {:skip,
+         "refusing to send content to #{KilnCMS.Seo.endpoint_host() || KilnCMS.Seo.provider()} " <>
+           "unattended: set the rule's config `allow_egress` to true to permit it"}
+
+      true ->
+        draft_findings(record, context)
+    end
+  end
+
+  # Strictly the JSON boolean. Every other key in that textarea is a string, so
+  # `"allow_egress": "true"` is the natural mistake — and it fails closed, which
+  # from the outside looks like a rule that is enabled, green, and silently
+  # emails nothing forever. Warn loudly about the near-miss so it's diagnosable;
+  # don't coerce it, because "what counts as true" is the wrong thing to be
+  # generous about on an egress gate.
+  defp egress_allowed?(%{"allow_egress" => true}), do: true
+
+  defp egress_allowed?(%{"allow_egress" => other}) do
+    Logger.warning(
+      "Automation rule's `allow_egress` must be the JSON boolean true, got #{inspect(other)}; " <>
+        "treating it as not permitted."
+    )
+
+    false
+  end
+
+  defp egress_allowed?(_config), do: false
+
+  defp draft_findings(record, context) do
+    document = KilnCMS.Seo.Document.from_record(record, content_type: context.content_type)
+
+    case KilnCMS.Seo.draft(document, org_id: context.org_id, user_id: budget_identity(context)) do
+      {:ok, draft} -> {metadata_subject(record), metadata_body(record, draft)}
+      {:error, reason} -> {:skip, "SEO draft failed: #{inspect(reason)}"}
+    end
+  end
+
+  # There is no user, but the per-user bucket is the only per-caller ceiling
+  # `KilnCMS.LLM.Budget` offers — and without one, a single hot rule (say
+  # `*.updated → suggest_metadata`) drains the org's whole allowance, and the
+  # first an editor knows of it is their own "Suggest with AI" button returning
+  # a rate-limit error caused by a background rule they can't see.
+  #
+  # Keying it by rule id gives each rule its own ceiling and keeps one runaway
+  # rule off the others. The shared per-org bucket still applies on top, so the
+  # operator's total ceiling is the one they configured.
+  defp budget_identity(%{rule_id: rule_id}), do: "automation:#{rule_id}"
+
+  defp metadata_subject(record), do: "Suggested SEO metadata for \"#{record.title}\""
+
+  # Every value here is model output over an untrusted body, so all of it is
+  # escaped — the same posture `KilnCMS.Seo.Draft.normalize/1` takes on the
+  # values themselves.
+  defp metadata_body(record, draft) do
+    rows =
+      [
+        {"Title", draft.seo_title},
+        {"Description", draft.seo_description},
+        {"Keywords", KilnCMS.Seo.Draft.keywords_string(draft)}
+      ]
+      |> Enum.reject(fn {_label, value} -> value in [nil, ""] end)
+      |> Enum.map_join("", fn {label, value} ->
+        "<li><strong>#{label}:</strong> #{escape(value, :html)}</li>"
+      end)
+
+    "<p>Proposed metadata for <strong>#{escape(record.title, :html)}</strong>:</p>" <>
+      "<ul>#{rows}</ul>" <>
+      "<p><strong>Nothing was written.</strong> Open the SEO panel in the editor to " <>
+      "review and accept these — generated metadata is served to search engines, " <>
+      "so a human sees it before the public does.</p>"
+  end
+
+  defp duplicate_findings(record, _context) do
     case KilnCMS.Search.Related.near_duplicates(record) do
       [] ->
         :none
@@ -244,7 +437,7 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
-  defp tag_findings(record) do
+  defp tag_findings(record, _context) do
     case KilnCMS.Search.Related.suggest_tags(record) do
       [] ->
         :none

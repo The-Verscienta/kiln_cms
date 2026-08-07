@@ -37,6 +37,11 @@ defmodule KilnCMS.Blocks.Image do
     |> put_if("name", block.alt)
   end
 
+  # `media_id` is an authoring-side pointer at the library item; the `:json`
+  # render resolves it (or the pasted url) into `url` and never projects it.
+  @impl Kiln.Block.Renderer
+  def json_schema, do: %{"x-kiln-drop" => ["media_id"]}
+
   @impl Kiln.Block.Renderer
   def search_text(block),
     do: [block.alt, block.caption] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")

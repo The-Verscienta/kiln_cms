@@ -2137,6 +2137,147 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ ~s(value="#{stray.id}")
     end
 
+    # A section's `open` used to be re-derived per render as `selected_count >
+    # 0`. `app.js` only preserves the editor's own <details> toggle while the
+    # *server-rendered* value is unchanged, so unticking a group's last tag
+    # moved it true→false and the section folded shut under the cursor, hiding
+    # the siblings they were about to click (#523). The open set is decided once
+    # at mount and must not move for the rest of the session.
+    test "a section stays open after its last tag is unticked", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "OpenThemes", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "opentag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      # The section holds the selection, so it mounts expanded.
+      assert tag_section(html, "OpenThemes") =~ ~r/\sopen=/
+
+      # Untick it: the section's contents must still be on screen.
+      html = lv |> form("#post-editor", form: %{tag_ids: [""]}) |> render_change()
+
+      assert tag_section(html, "OpenThemes") =~ ~r/\sopen=/
+      assert html =~ "opentag"
+    end
+
+    # The mirror image: a section that mounted collapsed must not spring open
+    # when a tag inside it is ticked, for the same reason — any server-side flip
+    # of `open` overwrites whatever the editor has toggled by hand.
+    test "a section stays closed after a tag inside it is ticked", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "ShutThemes", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "shuttag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+
+      refute tag_section(html, "ShutThemes") =~ ~r/\sopen=/
+
+      html = lv |> form("#post-editor", form: %{tag_ids: [tag.id]}) |> render_change()
+
+      refute tag_section(html, "ShutThemes") =~ ~r/\sopen=/
+
+      # ...and the tick itself still registers.
+      assert html =~ ~r/<input[^>]*value="#{tag.id}"[^>]*checked|checked[^>]*value="#{tag.id}"/
+    end
+
+    # The same rule in the opening direction, and the one a save can break: a
+    # section already on screen must not be re-judged when the tick it holds
+    # becomes persisted. `app.js`'s preservation is skipped on exactly the patch
+    # where the server value moves, so a false→true flip would spring open a
+    # section the editor had deliberately collapsed.
+    test "a section already on screen stays closed once its tag is saved", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "SavedThemes", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "savedtag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      refute tag_section(html, "SavedThemes") =~ ~r/\sopen=/
+
+      # Tick it and let the autosave persist it — `assign_record/2` reloads the
+      # record, so the section now genuinely holds an attached tag.
+      lv |> form("#post-editor", form: %{tag_ids: [tag.id]}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      # The save really landed — otherwise the assertion below proves nothing.
+      assert [%{id: saved}] = CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags
+      assert saved == tag.id
+
+      refute tag_section(html, "SavedThemes") =~ ~r/\sopen=/
+    end
+
+    # The counterweight to the freeze: `@sections` is rebuilt from the reloaded
+    # record, so a section can appear mid-session that mount never saw. "Also
+    # attached" is the one that matters — it exists so a tag a collaborator hung
+    # off an out-of-scope group is visible and undoable before the next
+    # append_and_remove save (#522), which a collapsed section undercuts. Growing
+    # the open set is safe; only shrinking it is what #523 forbids.
+    test "a section that first appears mid-session arrives expanded", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "PagesOnly",
+          slug: "g-#{uniq()}",
+          content_types: ["page"]
+        })
+
+      post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
+
+      # Mount with nothing attached, so no "Also attached" section exists yet.
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      refute html =~ "Also attached"
+
+      # A collaborator attaches a tag from that page-only group. Seeded directly
+      # so the post's lock_version doesn't move and the autosave below re-fetches
+      # rather than hitting a stale-record conflict.
+      late = Ash.Seed.seed!(Tag, %{name: "latetag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      Ash.Seed.seed!(KilnCMS.CMS.Tagging, %{
+        org_id: post.org_id,
+        subject_id: post.id,
+        tag_id: late.id
+      })
+
+      lv |> form("#post-editor", form: %{title: "Edited"}) |> render_change()
+      send(lv.pid, :autosave)
+      html = render(lv)
+
+      assert tag_section(html, "Also attached") =~ ~r/\sopen=/
+      assert html =~ "latetag"
+    end
+
+    # The opening `<details …>` tag of the picker section whose *summary* reads
+    # `label` — `open` lives there. Scoped by label rather than by position so
+    # another section appearing in the picker can't silently retarget an
+    # assertion, and matched only against the summary so a tag sharing a name
+    # with a group can't either.
+    defp tag_section(html, label) do
+      html
+      |> String.split("<details")
+      |> Enum.find_value(fn chunk ->
+        [summary | _] = String.split(chunk, "</summary>", parts: 2)
+        [attrs | _] = String.split(summary, ">", parts: 2)
+
+        if attrs =~ "data-tag-section" and String.contains?(summary, label),
+          do: "<details" <> attrs
+      end)
+      |> case do
+        nil -> flunk(~s(no tag-picker section whose summary reads "#{label}"))
+        tag -> tag
+      end
+    end
+
     test "unchecking the last tag actually detaches it", %{conn: conn} do
       editor = authed_user(:editor)
       tag = Ash.Seed.seed!(Tag, %{name: "onlytag", slug: "t-#{uniq()}"})
