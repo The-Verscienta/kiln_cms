@@ -102,6 +102,8 @@ defmodule KilnCMS.Accounts.SecondFactorTest do
       assert :invalid = SecondFactor.check(user, "000000")
       assert {:ok, verified} = SecondFactor.check(user, current_code(secret))
       assert verified.id == user.id
+      # The accepted factor is reported so a gate can mark the session (#786).
+      assert Ash.Resource.get_metadata(verified, :second_factor_method) == :totp
 
       # Full budget back, rather than the earlier failure carried into it.
       assert :invalid = SecondFactor.check(user, "000000")
@@ -119,6 +121,9 @@ defmodule KilnCMS.Accounts.SecondFactorTest do
       assert {:ok, verified} = SecondFactor.check(user, code)
       # The updated record comes back, so the burn is not lost.
       assert length(verified.totp_recovery_hashes) == length(codes) - 1
+      # Reported as a recovery-code sign-in, which is what lets the gate mark the
+      # session recovery-established so re-enrolment can waive the current code (#786).
+      assert Ash.Resource.get_metadata(verified, :second_factor_method) == :recovery
 
       # Re-presenting it is now just a wrong code — checked against a record
       # read back from the database, because that is what a second request
