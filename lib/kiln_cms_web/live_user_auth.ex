@@ -65,7 +65,12 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # still the authorization boundary — this makes the assign mean what its
   # callers already assumed, it does not replace authorizing against it.
   def on_mount(:assign_current_org, _params, _session, socket) do
-    {:cont, assign(socket, :current_org, request_org!(socket))}
+    # `request_org!` first: it is what judges the client's claim, and it reads
+    # `socket.host_uri` to do so. Vouching before it would erase the very claim
+    # `refuse_foreign_claim!/3` exists to catch.
+    org = request_org!(socket)
+
+    {:cont, socket |> assign(:current_org, org) |> vouch_host_uri()}
   end
 
   def on_mount(:live_user_optional, _params, _session, socket) do
@@ -150,6 +155,92 @@ defmodule KilnCMSWeb.LiveUserAuth do
 
     socket = assign_new(socket, :current_scope, fn -> nil end)
     {:cont, socket}
+  end
+
+  @doc """
+  Re-root `uri` on the socket's vouched authority, keeping its path and query.
+
+  `handle_params/3`'s `uri` argument is whatever URL the client put in its
+  `live_patch` payload. LiveView's own Route.live_link_info!/3 checks the
+  view module and the `live_session` name before accepting it — and **not the
+  host** — so a socket legitimately mounted on `orga.example.com` can patch to
+  `https://orgb.example.com/same/path` and be handed the attacker's host.
+
+  Every `handle_params/3` in this app spells the argument `_uri` and is guarded
+  by a test that says so, which is the real defence. This is for the one place
+  that must pass a URI on to code we do not own (`KilnCMSWeb.SignInLive` hands
+  it to AshAuthentication): the path is the caller's to choose, the authority
+  is not.
+
+  Falls back to `uri` unchanged when the socket carries no vouched authority —
+  a `live_render/3` child or a socket mounted without `:assign_current_org` has
+  nothing better to offer, and mangling the URL would be worse than passing it.
+  """
+  @spec vouch_uri(Phoenix.LiveView.Socket.t(), String.t()) :: String.t()
+  def vouch_uri(socket, uri) when is_binary(uri) do
+    case socket.host_uri do
+      %URI{host: host} = vouched when is_binary(host) and host != "" ->
+        client = URI.parse(uri)
+
+        %URI{vouched | path: client.path, query: client.query, fragment: client.fragment}
+        |> URI.to_string()
+
+      _not_vouched ->
+        uri
+    end
+  end
+
+  # Replace the client's claim with what the server can vouch for (#687).
+  #
+  # `refuse_foreign_claim!/3` above stops a socket ACTING as another tenant, but
+  # that guarantee is about `:current_org` and stops at mount. `host_uri` itself
+  # keeps living: `Phoenix.VerifiedRoutes.url/1` inside a LiveView reads it,
+  # LiveView builds redirect and navigate URLs from it, and a `live_patch`
+  # hands `handle_params/3` a URL the client chose outright. So the next feature
+  # that builds an absolute URL — a canonical tag, an email link, an OAuth
+  # `redirect_uri` — would take its host, scheme or port from client input, with
+  # no test failing and no reviewer prompted to look.
+  #
+  # Note the CLAIM is refused only when it names a different *org*; two
+  # spellings of one org's host are both accepted, and the client's scheme and
+  # port are never judged at all. `http://` and `:1337` therefore survive a
+  # legitimate join. Rewriting from the endpoint's own config is what makes
+  # `url/1` inside a LiveView agree with `url/1` everywhere else in the app,
+  # which is the property callers already assume it has.
+  #
+  # Three things are deliberately left alone:
+  #
+  #   * `:not_mounted_at_router` — the socket claimed no URL, so there is
+  #     nothing to vouch, and `KilnCMSWeb.LiveRouteGuard` matches on that exact
+  #     sentinel. Replacing it with a URI would silently disarm that guard.
+  #   * A socket whose host we could not resolve — a `live_render/3` child or
+  #     `live_isolated/3`, which is not host-scoped at all.
+  #   * The host, on a disconnected mount: it came from the conn, which is the
+  #     same `Host` header `SetTenant` trusts, not from a join payload.
+  defp vouch_host_uri(socket) do
+    with %URI{} <- socket.host_uri,
+         host when is_binary(host) and host != "" <- vouched_host(socket) do
+      %{socket | host_uri: %{KilnCMSWeb.Endpoint.struct_url() | host: host}}
+    else
+      _nothing_to_vouch -> socket
+    end
+  end
+
+  # The host the server is willing to stand behind, by the same split
+  # `request_org!/1` makes: the handshake's own request URI when connected, the
+  # conn-derived one when not.
+  defp vouched_host(socket) do
+    if Phoenix.LiveView.connected?(socket) do
+      case Phoenix.LiveView.get_connect_info(socket, :uri) do
+        %URI{host: host} -> host
+        _no_request_uri -> nil
+      end
+    else
+      case socket.host_uri do
+        %URI{host: host} -> host
+        _not_host_scoped -> nil
+      end
+    end
   end
 
   # A DISCONNECTED mount is a plain HTTP request: `host_uri` was built from the

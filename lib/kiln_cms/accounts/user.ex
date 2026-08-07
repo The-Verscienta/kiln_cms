@@ -566,6 +566,13 @@ defmodule KilnCMS.Accounts.User do
       # 6-digit space for that same pending secret and confirm it out from
       # under them. It also budgets grinding of `current_code` below.
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
+      # Re-read the staged secret from the DB before the validation and the
+      # promotion below both read it off `changeset.data` — a second settings
+      # tab may have staged a newer one, leaving this caller's `current_user`
+      # assign holding a superseded secret (#787). Must be declared above
+      # `ValidTotpCode`: changes and validations run in declaration order at
+      # build time.
+      change KilnCMS.Accounts.Changes.ReloadPendingTotpSecret
       validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret}
       # Replacing a live factor needs the outgoing code (or a recovery-code
       # session) — a bare setup_totp+confirm_totp can no longer swap the secret

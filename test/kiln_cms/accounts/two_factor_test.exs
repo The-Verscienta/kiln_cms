@@ -189,4 +189,55 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
                )
     end
   end
+
+  # #787: two settings tabs open on the same account are two LiveView processes,
+  # each holding its own `current_user` assign. `:confirm_totp` used to read the
+  # pending secret off the passed-in struct, so the tab that staged first could
+  # confirm a secret the DB no longer holds and silently discard the tab that
+  # staged second. `:confirm_totp` now re-reads the pending secret from the DB,
+  # pinning "last `:setup_totp` wins; a stale confirm is rejected".
+  describe "two tabs racing a re-enrolment (#787)" do
+    test "a stale confirm is rejected once a second tab has staged a newer secret" do
+      user = user()
+
+      # Two "tabs", both derived from the same original record.
+      {:ok, tab_a} = Accounts.setup_totp(user, %{}, actor: user)
+      secret_a = tab_a.totp_pending_secret
+
+      # Tab B stages a newer secret. The DB now holds B; tab A's struct is stale.
+      {:ok, tab_b} = Accounts.setup_totp(user, %{}, actor: user)
+      secret_b = tab_b.totp_pending_secret
+      refute secret_a == secret_b
+
+      # Tab A submits a valid code for its now-superseded secret A. Because the
+      # action re-reads the staged secret (B), A's code no longer matches and the
+      # confirm is rejected — A is NOT promoted.
+      code_a = Totp.code_at(secret_a, System.system_time(:second))
+      assert {:error, _} = Accounts.confirm_totp(tab_a, %{code: code_a}, actor: tab_a)
+
+      reloaded = Accounts.get_user!(user.id, authorize?: false)
+      refute Accounts.totp_enabled?(reloaded)
+      assert reloaded.totp_pending_secret == secret_b
+
+      # Tab B can still finish its own enrolment.
+      code_b = Totp.code_at(secret_b, System.system_time(:second))
+      {:ok, confirmed} = Accounts.confirm_totp(tab_b, %{code: code_b}, actor: tab_b)
+      assert Accounts.totp_enabled?(confirmed)
+      assert confirmed.totp_secret == secret_b
+      assert is_nil(confirmed.totp_pending_secret)
+    end
+
+    test "the sole active enrolment confirms normally (reload is a no-op)" do
+      # No second tab: the DB read returns the same secret the struct carries, so
+      # the happy path is unchanged.
+      user = user()
+      {:ok, staged} = Accounts.setup_totp(user, %{}, actor: user)
+
+      {:ok, confirmed} =
+        Accounts.confirm_totp(staged, %{code: current_code(staged)}, actor: staged)
+
+      assert Accounts.totp_enabled?(confirmed)
+      assert confirmed.totp_secret == staged.totp_pending_secret
+    end
+  end
 end

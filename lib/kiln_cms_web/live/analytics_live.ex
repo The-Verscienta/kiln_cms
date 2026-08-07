@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
   alias KilnCMS.Analytics
   alias KilnCMS.Analytics.FunnelReport
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMSWeb.Params
 
   @top_limit 50
   @ranges [7, 30]
@@ -102,14 +103,17 @@ defmodule KilnCMSWeb.AnalyticsLive do
 
   # An unknown or hostile `?range=` falls back to the default rather than
   # raising — this is a bookmarkable URL, not a form submission.
-  defp range_from(%{"range" => raw}) do
-    case Integer.parse(raw) do
-      {n, ""} -> if n in @ranges, do: n, else: @default_range
-      _ -> @default_range
-    end
-  end
+  #
+  # Read through `KilnCMSWeb.Params` (#764), because the client picks the
+  # parameter's *shape* as well as its value: `?range[]=7` decodes to a LIST,
+  # which the previous `Integer.parse/1` had no clause for and raised on. The
+  # old comment covered a hostile *string* only, and the difference is a link
+  # someone can be sent.
+  defp range_from(params) do
+    range = Params.integer(params, "range", @default_range, 0..1_000_000)
 
-  defp range_from(_params), do: @default_range
+    if range in @ranges, do: range, else: @default_range
+  end
 
   # The export links (#618) mirror the dashboard's own current window, so
   # "Export CSV" downloads exactly what's on screen rather than a separate

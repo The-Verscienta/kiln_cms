@@ -83,7 +83,13 @@ defmodule KilnCMS.CMS.Tag do
     default_accept [:name, :slug, :tag_group_id]
 
     create :create, primary?: true
-    update :update, primary?: true
+
+    # `require_atomic? false`: `TagGroupInTenant` reads the group to prove it is
+    # same-org, which can't run inside an atomic UPDATE.
+    update :update do
+      primary? true
+      require_atomic? false
+    end
 
     read :by_slug do
       get? true
@@ -142,6 +148,13 @@ defmodule KilnCMS.CMS.Tag do
     policy action_type(:destroy) do
       forbid_if always()
     end
+  end
+
+  validations do
+    # The FK on `tag_group_id` carries no org component, so nothing else stops a
+    # tag being filed under another org's group (#526). Reject at the source,
+    # resolving the group under the tag's own org. Only on writes.
+    validate {KilnCMS.CMS.Validations.TagGroupInTenant, []}, on: [:create, :update]
   end
 
   # Multi-tenancy (epic #336): taxonomy is per-site, partitioned by `org_id`

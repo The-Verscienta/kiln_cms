@@ -65,7 +65,7 @@ declarative, so the module *is* the specification.
 
 | You want to… | Read |
 |--------------|------|
-| Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md) |
+| Use the editor | [Editor shortcuts](editor-shortcuts.md), [Editorial advisories](advisories.md), [Claim checking](compliance.md) |
 | Model new content | [Extending the content model](extending-content.md) |
 | Understand who can do what | [Authorization policy matrix](policy-matrix.md), [Granular RBAC](granular-rbac.md) |
 | Consume the content headlessly | [Headless consumer guide](headless-consumer-guide.md) — it routes you to [JSON:API](json-api.md), [GraphQL](headless-graphql-api.md), [MCP](mcp.md) or [RAG](rag.md) |
