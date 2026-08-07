@@ -476,8 +476,16 @@ defmodule KilnCMSWeb.MediaLive do
   defp store_entry_as_document(path, entry, actor, org) do
     case DocumentProcessor.validate_upload(path) do
       {:ok, %{ext: ext, content_type: content_type}} ->
-        with :ok <- check_size(path, @max_document_size) do
-          store_as_is(path, ext, content_type, entry, actor, org)
+        # Strip BEFORE the size check reads the file we store, and store the
+        # stripped copy — the image path draws the same line, for the same
+        # reason: what gets recorded must be what a reader will download.
+        with :ok <- check_size(path, @max_document_size),
+             {:ok, stripped} <- DocumentProcessor.strip_metadata(path) do
+          try do
+            store_as_is(stripped, ext, content_type, entry, actor, org)
+          after
+            File.rm(stripped)
+          end
         end
 
       {:error, reason} ->
@@ -915,6 +923,17 @@ defmodule KilnCMSWeb.MediaLive do
   defp upload_failure_reason(:too_large), do: gettext("file is too large for its type")
   defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
   defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")
+
+  # #807. Both of these mean "we could not remove this PDF's metadata", and the
+  # upload is refused rather than stored unstripped — so the message has to name
+  # the server as the problem, not the file. An editor told "unsupported format"
+  # about a PDF that opens fine everywhere would keep retrying it.
+  defp upload_failure_reason(:unavailable),
+    do: gettext("can't be processed — PDF metadata stripping isn't available on this server")
+
+  defp upload_failure_reason(:strip_failed),
+    do: gettext("couldn't have its metadata removed, so it wasn't stored")
+
   defp upload_failure_reason(_invalid), do: gettext("not a supported file")
 
   defp humanize_bytes(nil), do: "—"
