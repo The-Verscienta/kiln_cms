@@ -35,6 +35,73 @@ defmodule KilnCMS.Search.BlockIndexer do
     {:ok, embedded}
   end
 
+  @doc """
+  The vectors `reindex/1` *would* store, computed and thrown away (#852).
+
+  Block embeddings are only written by firing, and firing runs on publish — so a
+  document that has never been published has no vectors, and near-duplicate
+  detection, which is a **pre**-publication check, could not run on exactly the
+  case it exists for.
+
+  This is the anchor-side answer, and it deliberately stores nothing.
+  `block_embeddings` rows carry `ancestor_context` — block text copied out of
+  the document — with no state or audience column to filter on, which is why
+  their read policy is editor-only (#565). Writing a draft's blocks there would
+  put unpublished text into an index whose other consumers
+  (`KilnCMS.Search.BlockSearch`, and anything added later) have nothing to
+  exclude it *by*. Keeping the draft's vectors in memory keeps that property.
+
+  The projection is shared with `reindex/1` down to the concatenation, because
+  the whole point is to produce a vector comparable with the stored ones. A
+  second spelling of `"\#{context}\\n\\n\#{text}"` here would silently place the
+  anchor in a slightly different space and quietly degrade every distance.
+  """
+  @spec block_vectors(struct()) :: [[float()]]
+  def block_vectors(document) do
+    document
+    |> embedding_inputs()
+    |> Enum.flat_map(fn input ->
+      case Search.embed(input) do
+        {:ok, vector} -> [vector]
+        _error -> []
+      end
+    end)
+  end
+
+  @doc """
+  Exactly the strings `block_vectors/1` would embed, in order.
+
+  One function rather than two so a caller can key a cache on the inputs and
+  then embed the same list: a fingerprint computed by a second walk would have
+  to be kept in lockstep with this one by hand, and a skip rule added to only
+  one of them would leave the key no longer describing the value.
+
+  Returns `[]` for a document whose `blocks` were not loaded — a select-limited
+  read (`teaser_fields`) is a legitimate shape, and the old stored-vector path
+  answered "no centroid" for it rather than raising.
+  """
+  @spec embedding_inputs(struct()) :: [String.t()]
+  def embedding_inputs(document) do
+    case Map.get(document, :blocks) do
+      blocks when is_list(blocks) ->
+        context = document_context(document)
+
+        blocks
+        |> TypedBlocks.to_typed()
+        |> Enum.flat_map(&embedding_input(&1, context))
+
+      _unloaded_or_absent ->
+        []
+    end
+  end
+
+  defp embedding_input(block, context) do
+    case Blocks.search_text(block) do
+      "" -> []
+      text -> ["#{context}\n\n#{text}"]
+    end
+  end
+
   defp index_block(org_id, type, document_id, %module{} = block, index, context, hashes) do
     text = Blocks.search_text(block)
 

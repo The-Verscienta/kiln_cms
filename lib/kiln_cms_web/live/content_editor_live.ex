@@ -3610,35 +3610,54 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Why the intelligence panel came back empty. Both halves compare *this*
-  # document's block embeddings against something, and there are two ways to
-  # have none — the feature is off, or this document has never been indexed —
-  # which want different answers: one is the operator's setting, the other is
-  # fixed by publishing. Embeddings are written by firing, and firing runs on
-  # publish, so a never-published draft genuinely has nothing to compare.
+  # Why the intelligence panel came back empty.
+  #
+  # "Publish this page to index it" used to be one of the answers, and it is
+  # gone because it stopped being true (#852): an unpublished anchor now has its
+  # centroid computed in memory, so a never-published draft compares like any
+  # other document. What is left is the operator's setting, and genuinely
+  # finding nothing.
   defp intel_empty_reason(record) do
-    cond do
-      not KilnCMS.Search.semantic?() ->
-        gettext("Semantic search is off, so there is nothing to compare against.")
-
-      record.state != :published and is_nil(record.published_at) ->
-        gettext("Publish this page to index it — suggestions come from indexed content.")
-
-      true ->
-        gettext("Nothing similar found.")
+    if KilnCMS.Search.semantic?() do
+      empty_document_reason(record)
+    else
+      gettext("Semantic search is off, so there is nothing to compare against.")
     end
   end
 
+  # An empty document has no block text to embed, so there is nothing to compare
+  # *from* — distinct from comparing and finding nothing, and fixable by writing
+  # something rather than by waiting.
+  defp empty_document_reason(record) do
+    if blank_document?(record) do
+      gettext("Add some content — suggestions come from what this page says.")
+    else
+      gettext("Nothing similar found.")
+    end
+  end
+
+  # Shares `BlockIndexer`'s projection rather than re-deriving "has any text":
+  # the question the panel is answering is "was there anything to embed", and
+  # the answer has to be the one the embedder would give. It also handles an
+  # unloaded `blocks` without raising.
+  defp blank_document?(record), do: KilnCMS.Search.BlockIndexer.embedding_inputs(record) == []
+
   # Why the suggestion list came back empty — an unexplained empty panel reads
-  # as broken, and the usual cause (a draft that has never been indexed) is
-  # both common and fixable.
+  # as broken. Same #852 change: the anchor no longer has to be published for
+  # its neighbours to be found, so "publish this page" is no longer the reason.
+  # (Only the *neighbours* are still published-only, which is a property of the
+  # reader-facing surface and not something the author can act on here.)
+  # Semantic search is checked FIRST, unlike the duplicates panel. With it off,
+  # `Seo.Links.candidates/2` falls back to a keyword search built from the title
+  # and focus keyphrase, which never reads the blocks — so telling the author to
+  # add content would be advice that changes nothing.
   defp link_empty_reason(record) do
     cond do
-      record.state != :published and is_nil(record.published_at) ->
-        gettext("Publish this page to index it — suggestions come from indexed content.")
-
       not KilnCMS.Search.semantic?() ->
         gettext("No related pages matched. Enabling semantic search improves these results.")
+
+      blank_document?(record) ->
+        gettext("Add some content — suggestions come from what this page says.")
 
       true ->
         gettext("No related pages found yet.")
