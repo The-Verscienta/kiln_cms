@@ -121,6 +121,33 @@ defmodule KilnCMS.Search do
   def rerank_model, do: cfg(:rerank_model, "BAAI/bge-reranker-base")
 
   @doc """
+  Maximum cosine distance a semantic hit may have and still count as a match,
+  or `nil` (the default) for no floor.
+
+  Nearest-neighbour search always returns neighbours. Without a floor the
+  semantic leg answers *every* query with its full candidate set, however
+  unrelated — a search for gibberish comes back as confident-looking as a real
+  one, and because `hybrid/3` fuses that leg in, "no results" becomes
+  unreachable. The floor is what lets a semantic search legitimately return
+  nothing.
+
+  pgvector's `<=>` yields cosine distance in `[0, 2]`: `0` identical, `1`
+  orthogonal (no relationship), `2` opposed. The useful cutoff is **model
+  specific** — instruction-tuned embedders like bge sit in a narrow, high
+  baseline band, so a value that filters well for one model can silently
+  discard everything under another. That is why this defaults to `nil` rather
+  than a guess: measure your own corpus with `semantic_distances/3`, then set
+  the value just above where the genuinely related results stop.
+
+      config :kiln_cms, KilnCMS.Search, semantic_max_distance: 0.55
+
+  Rows with no embedding are excluded once a floor is set (`NULL <=> v` is
+  `NULL`); unset, they merely sort last.
+  """
+  @spec semantic_max_distance() :: float() | nil
+  def semantic_max_distance, do: cfg(:semantic_max_distance, nil)
+
+  @doc """
   Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when
   the `:exla` dependency is compiled in (dev/test); otherwise returns `[]` so the
   servings fall back to Nx's default backend instead of crashing on a missing
@@ -253,6 +280,40 @@ defmodule KilnCMS.Search do
     case Keyword.fetch(opts, :query_vector) do
       {:ok, vector} -> %{query_vector: vector}
       :error -> %{}
+    end
+  end
+
+  @doc """
+  The nearest rows of `type` to `query` with their raw cosine distances —
+  the measurement behind `semantic_max_distance/0`.
+
+      iex> KilnCMS.Search.semantic_distances(:page, "reishi mushroom")
+      {:ok, [{"Ling Zhi", 0.31}, {"Medicinal Mushrooms", 0.42}, {"Sitemap", 0.83}]}
+
+  Run it for a query that *should* match and one that should not: the cutoff
+  goes between the two, and if they overlap your corpus isn't separable by
+  distance alone and wants reranking instead. Deliberately ignores any
+  configured floor — you cannot tune a threshold that has already been applied.
+
+  Options: `:limit` (default 20), plus `:actor` / `:authorize?` / `:tenant`.
+  """
+  @spec semantic_distances(module() | atom(), String.t(), keyword()) ::
+          {:ok, [{String.t(), float()}]} | {:error, term()}
+  def semantic_distances(type, query, opts \\ []) when is_binary(query) do
+    resource = search_resource(type)
+    read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
+
+    with {:ok, vector} <- embed_query(query) do
+      resource
+      |> Ash.Query.new()
+      |> Ash.Query.load(semantic_distance: %{query_vector: vector})
+      |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+      |> Ash.Query.limit(Keyword.get(opts, :limit, 20))
+      |> Ash.read(read_opts)
+      |> case do
+        {:ok, rows} -> {:ok, Enum.map(rows, &{&1.title, &1.semantic_distance})}
+        error -> error
+      end
     end
   end
 
