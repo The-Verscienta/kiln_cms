@@ -91,4 +91,61 @@ defmodule KilnCMS.AskTest do
   test "an empty question returns no sources and no answer" do
     assert %{answer: nil, generated: false, sources: []} = Ask.answer("   ")
   end
+
+  describe "why generation did not run (#853)" do
+    # `generated: false` alone cannot be acted on: "this deployment does not
+    # generate" and "you asked too fast" look identical, and only the second has
+    # a recovery. Each case below pins the reason AND the retry deadline, since
+    # the deadline is the whole reason a client would treat them differently.
+
+    test "no generator configured reports :disabled, with no retry deadline" do
+      actor = admin()
+      term = "zorptastic#{System.unique_integer([:positive])}"
+      published(actor, "The #{term} handbook")
+
+      result = Ask.answer(term, generator: nil)
+
+      assert result.generation == :disabled
+      assert result.retry_after == nil
+      assert result.generated == false
+      assert result.sources != []
+    end
+
+    test "a generator that raises reports :failed, with no retry deadline" do
+      actor = admin()
+      term = "zorptastic#{System.unique_integer([:positive])}"
+      published(actor, "The #{term} handbook")
+
+      result = Ask.answer(term, generator: BoomGenerator)
+
+      assert result.generation == :failed
+      # Deliberately nil: the generator failing says nothing about when it will
+      # stop failing, and inventing a number would be worse than saying nothing.
+      assert result.retry_after == nil
+    end
+
+    # The `:rate_limited` case lives in `KilnCMS.Ask.GeneratorTest` instead —
+    # it has to swap global app env to tighten the budget, and that file is
+    # `async: false` for exactly that reason.
+
+    test "a generated answer reports nil, the one value that means success" do
+      actor = admin()
+      term = "zorptastic#{System.unique_integer([:positive])}"
+      published(actor, "The #{term} handbook")
+
+      result = Ask.answer(term, generator: StubGenerator)
+
+      assert result.generation == nil
+      assert result.retry_after == nil
+      assert result.generated == true
+    end
+
+    test "a blank question reports :no_question rather than looking like success" do
+      result = Ask.answer("   ")
+
+      assert result.generation == :no_question
+      assert result.retry_after == nil
+      assert result.generated == false
+    end
+  end
 end
