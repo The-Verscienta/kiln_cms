@@ -338,10 +338,12 @@ const Hooks = {
   // The filter input is inside the content form, so it is deliberately unnamed
   // and wrapped in phx-update="ignore"; `updated()` re-applies the current query
   // after a LiveView patch re-renders the sections underneath it.
+  //
+  // The whole body — filter box included — is absent while the picker has no
+  // sections to show (#524), and a reload can grow one into existence, so the
+  // hook re-resolves its handles on every patch rather than once at mount.
   TagFilter: {
     mounted() {
-      this.input = this.el.querySelector("[data-tag-filter-input]")
-      this.empty = this.el.querySelector("[data-tag-filter-empty]")
       // The sections *this hook* forced open to surface a match (mapped to
       // their tick count at that moment), so clearing the query closes only
       // those (#523). `open` is otherwise owned by the editor and by the
@@ -350,7 +352,31 @@ const Hooks = {
       // depended on whether `updated()` ran before or after the patch. A
       // WeakMap so a section morphdom replaces is simply forgotten.
       this.forced = new WeakMap()
-      if (!this.input) return
+      this.bind()
+    },
+
+    updated() {
+      this.bind()
+      this.filter()
+    },
+
+    destroyed() {
+      this.unbind()
+    },
+
+    // Wire the filter box, if there is one. Idempotent: the input lives inside
+    // phx-update="ignore", so on most patches it is the same node and this is a
+    // no-op — but it is a *different* node once the picker goes from an empty
+    // state to having sections, and an unbound box is worse than no box at all
+    // (it filters nothing, and its keystrokes reach the form's phx-change).
+    bind() {
+      const input = this.el.querySelector("[data-tag-filter-input]")
+      this.empty = this.el.querySelector("[data-tag-filter-empty]")
+      if (input === this.input) return
+
+      this.unbind()
+      this.input = input
+      if (!input) return
 
       // stopPropagation is load-bearing, not tidiness: LiveView binds `change`
       // on the *form* and gates only on "is this a form-associated element",
@@ -361,34 +387,41 @@ const Hooks = {
         e.stopPropagation()
         this.filter()
       }
-      this.input.addEventListener("input", this.onInput)
+      input.addEventListener("input", this.onInput)
       // Same reason, for the blur-time `change` event.
       this.onChange = e => e.stopPropagation()
-      this.input.addEventListener("change", this.onChange)
+      input.addEventListener("change", this.onChange)
       // Enter in a search field would otherwise submit the whole content form.
       this.onKey = e => {
         if (e.key === "Enter") e.preventDefault()
       }
-      this.input.addEventListener("keydown", this.onKey)
+      input.addEventListener("keydown", this.onKey)
     },
 
-    updated() {
-      this.filter()
-    },
-
-    destroyed() {
+    unbind() {
       if (!this.input) return
       this.input.removeEventListener("input", this.onInput)
       this.input.removeEventListener("change", this.onChange)
       this.input.removeEventListener("keydown", this.onKey)
+      this.input = null
     },
 
     filter() {
       if (!this.input) return
       const q = this.input.value.trim().toLowerCase()
+      const sections = this.el.querySelectorAll("[data-tag-section]")
+      // Nothing to narrow. Bailing here rather than falling through keeps the
+      // hook from asserting the picker's markup shape: the loop below never
+      // runs, so `anyVisible` would stay false and "No tags match that filter."
+      // would appear under an untouched filter box (#524).
+      if (sections.length === 0) {
+        if (this.empty) this.empty.hidden = true
+        return
+      }
+
       let anyVisible = false
 
-      this.el.querySelectorAll("[data-tag-section]").forEach(section => {
+      sections.forEach(section => {
         let matches = 0
         section.querySelectorAll("[data-tag-item]").forEach(item => {
           const hit = q === "" || (item.dataset.tagItem || "").includes(q)

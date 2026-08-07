@@ -4049,28 +4049,62 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> selected_ids(:tag_ids, current_ids(assigns.record.tags))
       |> Enum.map(&to_string/1)
 
+    sections = tag_sections(pickable, assigns.tag_groups, assigns.kind, selected, attached)
+
     assigns =
       assigns
       |> assign(:selected, selected)
-      |> assign(:no_tags?, pickable == [])
+      |> assign(:sections, sections)
+      # Why an empty picker is empty, which is not one question but two, and the
+      # difference is what the editor should do next (#524). `pickable` and
+      # `sections` are narrowed independently — every tag in the org can sit in
+      # groups scoped to *other* content types, with none of them on this record,
+      # and then there are tags but nothing to show. The old guard keyed the
+      # whole body on `pickable`, so that case rendered a legend, a filter box
+      # and nothing else — no explanation, and no way to tell it from a bug.
       |> assign(
-        :sections,
-        tag_sections(pickable, assigns.tag_groups, assigns.kind, selected, attached)
+        :empty_reason,
+        cond do
+          pickable == [] -> :no_tags
+          sections == [] -> :none_apply
+          true -> nil
+        end
       )
       |> assign(:name, assigns.form[:tag_ids].name <> "[]")
 
     ~H"""
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
       <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
-      <p :if={@no_tags?} class="text-xs text-base-content/70">{gettext("No tags yet.")}</p>
+      <p :if={@empty_reason == :no_tags} class="text-xs text-base-content/70">
+        {gettext("No tags yet.")}
+      </p>
+      <%!-- Says only what is observable. `tag_sections/5` drops an *applicable*
+            group that happens to be empty exactly as it drops a non-applicable
+            one, so "every group is scoped to other types" would be wrong about
+            as often as it was right — and would send the editor hunting for a
+            scope to widen when the fix is a tag to create. The link goes where
+            both fixes live; same shape as the media picker's empty state. --%>
+      <p :if={@empty_reason == :none_apply} class="text-xs text-base-content/70">
+        {gettext("No tags are available on this content type — set them up under")} <.link
+          navigate={~p"/editor/taxonomy"}
+          class="underline"
+        >{gettext("taxonomy")}</.link>.
+      </p>
 
       <%!-- Browsers omit an all-unchecked checkbox group from the payload
             entirely, which `selected_ids/3` can only read as "untouched" — so
             the last tag could never be removed. This sentinel keeps the key
-            present; `normalize_tag_ids/1` drops it before the changeset. --%>
-      <input :if={not @no_tags?} type="hidden" name={@name} value="" />
+            present; `normalize_tag_ids/1` drops it before the changeset.
 
-      <div :if={not @no_tags?} class="space-y-2">
+            Gated on the sections, not on `pickable`: with nothing rendered to
+            tick, submitting the key at all would post an empty `tag_ids` that
+            `append_and_remove` reads as "detach everything". (Unreachable
+            today — every attached tag lands in some section, so no sections
+            means no attached tags — but the sentinel's whole job is to make an
+            empty submission meaningful, and it must not do that here.) --%>
+      <input :if={@sections != []} type="hidden" name={@name} value="" />
+
+      <div :if={@sections != []} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
               phx-update="ignore" so a re-render can't clobber what's typed.
               Unnamed does NOT stop the enclosing form's phx-change from firing,

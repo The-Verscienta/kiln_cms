@@ -2257,6 +2257,86 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "latetag"
     end
 
+    # `pickable` and `@sections` are narrowed independently, so "there are tags"
+    # and "there is something to show" are two different questions. When every
+    # group is scoped to other content types and the record carries none of
+    # their tags, the picker used to render a legend and a filter box over
+    # nothing — no explanation, and the client-side filter then announced "No
+    # tags match that filter." under an untouched box (#524).
+    test "an org whose every tag is out of scope gets an explanation, not a blank box",
+         %{conn: conn} do
+      post = draft_post()
+
+      group =
+        Ash.Seed.seed!(TagGroup, %{
+          name: "PagesOnly",
+          slug: "g-#{uniq()}",
+          content_types: ["page"]
+        })
+
+      Ash.Seed.seed!(Tag, %{name: "pagetag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "No tags are available on this content type"
+      refute html =~ "No tags yet."
+
+      # Nothing to filter, so no filter box — and nothing that could then claim
+      # the filter matched nothing.
+      refute html =~ "data-tag-filter-input"
+      refute html =~ "data-tag-filter-empty"
+      refute html =~ "data-tag-section"
+
+      # And no sentinel: an empty `tag_ids` with no boxes to tick would read as
+      # "detach everything" rather than "the editor cleared the field".
+      refute html =~ ~s(name="form[tag_ids][]")
+    end
+
+    # The state is also reachable mid-session, and this is the route most
+    # editors take into it: the record's only tag came from a group later scoped
+    # to other types, so it renders under "Also attached" — and detaching it
+    # empties the last section there is. The picker has to explain itself on that
+    # patch too, not just at mount.
+    test "detaching the last out-of-scope tag leaves the explanation, not a blank box",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+
+      group = Ash.Seed.seed!(TagGroup, %{name: "WasEverywhere", slug: "g-#{uniq()}"})
+      tag = Ash.Seed.seed!(Tag, %{name: "onlytag", slug: "t-#{uniq()}", tag_group_id: group.id})
+
+      post =
+        CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
+
+      # Narrowed after the fact — the tag is now on the record but its group no
+      # longer applies, so it lands in the rescue section.
+      CMS.update_tag_group!(group, %{content_types: ["page"]}, authorize?: false)
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      assert html =~ "Also attached"
+      refute html =~ "No tags are available on this content type"
+
+      # Untick and save: with nothing attached, the out-of-scope group
+      # contributes nothing, and there is no other section to fall back to.
+      lv |> form("#post-editor", form: %{tag_ids: [""]}) |> render_submit()
+      html = render(lv)
+
+      assert CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags == []
+      assert html =~ "No tags are available on this content type"
+      refute html =~ "Also attached"
+      refute html =~ "data-tag-filter-input"
+    end
+
+    test "an org with no tags at all still says so", %{conn: conn} do
+      post = draft_post()
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+
+      assert html =~ "No tags yet."
+      refute html =~ "No tags are available on this content type"
+    end
+
     # The opening `<details …>` tag of the picker section whose *summary* reads
     # `label` — `open` lives there. Scoped by label rather than by position so
     # another section appearing in the picker can't silently retarget an

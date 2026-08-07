@@ -67,5 +67,14 @@ defmodule KilnCMS.Blocks.Fragment do
   def render(_block, _surface), do: []
 
   @impl Kiln.Block.Renderer
+  # `ref` and `label` are input-side fields: `ref` is `required: true` because a
+  # fragment block with no target is not valid *input*, and `label` is editor
+  # chrome. Neither is ever emitted — see `render/2` above, which withholds the
+  # reference on purpose. Without dropping them the exported schema would demand
+  # a `ref` the renderer is deliberately refusing to publish, so every fragment
+  # block would fail its own schema.
+  def json_schema, do: %{"x-kiln-drop" => ["ref", "label"]}
+
+  @impl Kiln.Block.Renderer
   def search_text(_block), do: ""
 end
