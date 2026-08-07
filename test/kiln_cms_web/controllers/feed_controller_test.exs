@@ -241,7 +241,12 @@ defmodule KilnCMSWeb.FeedControllerTest do
 
     test "nothing is advertised when nothing syndicates", %{conn: conn} do
       post = published_post()
-      put_config(exclude: ["post", "page"])
+      # Every *registered* type, not the core two by name. A downstream project
+      # that registers its own content types on `:content_domains` still
+      # syndicates them, so hardcoding ["post", "page"] leaves the site-wide
+      # feed advertised and the assertion below fails for a reason that has
+      # nothing to do with what this test is checking.
+      put_config(exclude: Enum.map(KilnCMS.CMS.ContentTypes.all(), &to_string(&1.type)))
 
       html = response(get(conn, ~p"/blog/#{post.slug}"), 200)
 

@@ -194,6 +194,45 @@ defmodule KilnCMS.Seo.LinksTest do
       assert Enum.any?(Links.suggest(anchor), &(&1.id == target.id))
     end
 
+    test "never suggests a page from another organization (#869)" do
+      actor = admin()
+
+      # A published page in ANOTHER org that matches the keyphrase. Scoping comes
+      # from the anchor's own `org_id`, so this must never surface — if a future
+      # change dropped the tenant thread, it would.
+      other_org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Other",
+          slug: "links-org-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      foreign =
+        CMS.create_post!(
+          %{
+            title: "Foreign kiln firing",
+            slug: "links-foreign-#{System.unique_integer([:positive])}",
+            blocks: [
+              %{type: :rich_text, content: "<p>a thorough guide to kiln firing</p>", order: 0}
+            ]
+          },
+          actor: actor,
+          tenant: other_org
+        )
+
+      {:ok, foreign} = CMS.publish_post(foreign, %{}, actor: actor, tenant: other_org)
+
+      anchor =
+        post(actor, "notes on kiln firing",
+          title: "Anchor",
+          index?: false,
+          attrs: %{seo_keywords: "kiln firing"}
+        )
+
+      refute Enum.any?(Links.suggest(anchor), &(&1.id == foreign.id)),
+             "a suggestion must not cross the org boundary"
+    end
+
     test "keyword suggestions carry a path but no distance" do
       actor = admin()
 

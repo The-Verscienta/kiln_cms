@@ -131,7 +131,7 @@ defmodule KilnCMSWeb.ContentController do
     serve_alias(conn, path) ||
       case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
         nil ->
-          serve_teaser(conn, path, ct) || not_found(conn)
+          serve_teaser(conn, path, ct) || not_found(conn, path)
 
         %{to: to} ->
           moved_permanently(conn, to)
@@ -945,7 +945,18 @@ defmodule KilnCMSWeb.ContentController do
   defp srcset(item), do: KilnCMS.Media.Presentation.srcset(item)
   defp focal_style(item), do: KilnCMS.Media.Presentation.focal_style(item)
 
-  defp not_found(conn) do
+  defp not_found(conn, path) do
+    # Every HTML URL miss funnels through here, so this is where the aggregated
+    # 404 counter is written (#472) — after the alias table, the redirect table
+    # and the teaser have all missed, i.e. only for paths nothing can serve.
+    # Off the request path and best-effort; see `KilnCMSWeb.MissedPathTracking`.
+    #
+    # `path` is the caller's, NOT `conn.request_path`: the two diverge (empty
+    # segments collapse, `%xx` stays encoded in `request_path`), and this is the
+    # exact string `Redirects.resolve/3` was just asked for. Recording anything
+    # else would list a path whose one-click redirect could never fire.
+    KilnCMSWeb.MissedPathTracking.track(path, locale(conn), current_org_id(conn))
+
     conn
     # A 404 may be an unpublished/draft slug — never let a CDN or browser cache
     # it (it would mask the page once published).
