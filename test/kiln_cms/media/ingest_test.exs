@@ -68,6 +68,33 @@ defmodule KilnCMS.Media.IngestTest do
 
       assert File.exists?(path)
     end
+
+    # #807 stripped PDF metadata in `MediaLive`'s own upload chain. Moving that
+    # chain into this module (#487) could silently drop it — nothing else asserts
+    # that an INGESTED pdf is stripped, only that `DocumentProcessor` can strip
+    # one. So the guarantee is pinned against the blob that actually gets stored.
+    @tag :qpdf
+    test "a pdf is stored stripped of its metadata" do
+      path = Path.join(System.tmp_dir!(), "ingest-#{System.unique_integer([:positive])}.pdf")
+      File.write!(path, KilnCMS.PdfFixtures.pdf(metadata: true))
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:ok, item} = Ingest.store_file(path, "report.pdf", actor: actor())
+
+      {:ok, stored} = KilnCMS.Storage.fetch(item.storage_key)
+
+      # The STORED blob, not the strip's return value: the bug this guards
+      # against is storing the original after stripping a copy.
+      for marker <- KilnCMS.PdfFixtures.metadata_markers() do
+        refute String.contains?(stored, marker), "#{marker} survived into the stored blob"
+      end
+
+      # That the content survives a strip is `DocumentProcessorTest`'s job (it
+      # expands the compressed streams to check). Here it is enough that what
+      # landed is still a PDF and not a truncated or empty file.
+      assert String.starts_with?(stored, "%PDF-")
+      assert byte_size(stored) > 100
+    end
   end
 
   describe "max_upload_size/0" do
