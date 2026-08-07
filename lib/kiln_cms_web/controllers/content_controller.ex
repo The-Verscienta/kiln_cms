@@ -226,7 +226,7 @@ defmodule KilnCMSWeb.ContentController do
       {ct, record} ->
         payload = %{
           record: record,
-          blocks: blocks(record, org_id),
+          blocks: blocks(record, org_id, audiences),
           translations: translations(ct, record.slug, org_id, audiences)
         }
 
@@ -476,7 +476,7 @@ defmodule KilnCMSWeb.ContentController do
       record ->
         %{
           record: record,
-          blocks: blocks(record, org_id),
+          blocks: blocks(record, org_id, audiences),
           translations: translations(ct, record.slug, org_id, audiences)
         }
     end
@@ -676,18 +676,35 @@ defmodule KilnCMSWeb.ContentController do
     Phoenix.HTML.raw(~s(<script type="application/ld+json">#{json}</script>))
   end
 
-  defp blocks(record, org_id) do
+  defp blocks(record, org_id, audiences) do
     # Blocks are stored as the typed union (Kiln v2); convert back to legacy block
     # structs so the existing media-enriching renderer (`BlockComponents`) is
     # unchanged. A `columns` block (#335) nests child blocks, so the tree is built
     # recursively and flattened once for the media/form preloads — a nested image
     # or form is loaded in the same batched query as a top-level one.
-    tree = block_tree(record.blocks)
+    #
+    # Reusable fragments (#479) are inlined first, so everything after this line
+    # — the media/form preloads included — sees the real tree. HTML delivery
+    # renders live from the block tree rather than from the fired artifact, so
+    # the expansion has to happen on this path too. `audiences` is the reader's,
+    # and the payload cache is already keyed on it.
+    tree = record |> expand_fragments(org_id, audiences) |> block_tree()
     flat = flatten_block_tree(tree)
 
     media = load_block_media(flat, org_id)
     forms = load_block_forms(flat, org_id)
     Enum.map(tree, &enrich_block(&1, media, forms))
+  end
+
+  defp expand_fragments(record, org_id, audiences) do
+    record.blocks
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> KilnCMS.CMS.Fragments.expand(org_id,
+      audiences: audiences,
+      # Seeded with the record itself: a page embedding *itself* would otherwise
+      # inline its own body once before the cycle guard caught it a level down.
+      ancestry: [{KilnCMS.Firing.Engine.public_type(record), record.id}]
+    )
   end
 
   # Typed union → legacy `KilnCMS.CMS.Block` structs, recursing into `columns`
