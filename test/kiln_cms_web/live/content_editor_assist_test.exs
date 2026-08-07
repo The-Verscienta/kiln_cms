@@ -25,15 +25,21 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, grants \\ %{}) do
     email = "assist-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        grants
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -158,6 +164,29 @@ defmodule KilnCMSWeb.ContentEditorAssistTest do
 
       refute html =~ "Suggestion"
       assert render_async(lv, 2_000) =~ "Understanding kiln firing"
+    end
+
+    test "a read-only editor cannot spend LLM budget via a forged assist_run (#550)", %{
+      conn: conn
+    } do
+      # Same write-authorization boundary as SEO suggest: block assist also bills
+      # an org run, so read access must not be enough to trigger it. The counting
+      # stub proves the handler refused, independent of what rendered.
+      put_assist(generator: KilnCMS.StubAssistGenerator.Counting, model: "stub:stub")
+      {:ok, _} = KilnCMS.StubAssistGenerator.Counting.start_link()
+      KilnCMS.StubAssistGenerator.Counting.reset()
+
+      # An editor scoped to author only "post" reads pages but cannot autosave one.
+      reader = authed_user(:editor, %{editable_types: ["post"], readable_types: []})
+      target = page(authed_user(:admin))
+      {lv, html} = open_editor(conn, reader, target)
+
+      refute html =~ "AI assist"
+
+      render_click(lv, "assist_run", %{"bid" => block_id(target)})
+      render_async(lv, 2_000)
+
+      assert KilnCMS.StubAssistGenerator.Counting.count() == 0
     end
   end
 

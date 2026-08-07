@@ -485,12 +485,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:page_title, record.title)
     |> assign(:slug_customized?, slug_customized?(socket))
+    |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
     |> assign(:form, build_form(record, socket.assigns.actor))
     |> seed_block_children(record)
     |> refresh_preview()
     |> load_versions()
     |> load_translations()
   end
+
+  # Whether the actor may WRITE this record — the authorization both AI-assist
+  # affordances need and a read-only viewer lacks (#550). The route's editor-tier
+  # gate and the mount read-check are coarser: they admit a reviewer or a
+  # read-only-on-one-type role who can OPEN someone else's draft, and both
+  # `seo_suggest` and `assist_run` bill an org LLM run, so read access must not
+  # be enough to spend that budget. Keyed on `:autosave` — the action the editor
+  # actually persists through, and the same gate the collab channel admits
+  # editors with (`KilnCMSWeb.CollabChannel`). Recomputed here (not once at
+  # mount) so a reload that lands a state change — e.g. a publish — re-evaluates.
+  defp may_write?(record, actor, org), do: Ash.can?({record, :autosave}, actor, tenant: org)
 
   # Whether the slug is the author's own (pinned) or still auto-derived — while
   # not customized, editing a slug-source field re-derives the slug live
@@ -1323,7 +1335,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Ignore a re-click while a run is in flight: the disabled attribute is
     # client-side only, so a fast double-click (or a replayed event) would
     # otherwise start a second generation and bill for it.
-    if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? do
+    #
+    # `may_write?` is the authorization boundary (#550): read access is enough to
+    # REACH this handler (a reviewer can open the record), but billing an org LLM
+    # run needs write access. The hidden button is not the control — a
+    # replayed/forged event reaches here regardless — so refuse server-side.
+    if socket.assigns.seo_drafting? or not socket.assigns.seo_enabled? or
+         not socket.assigns.may_write? do
       {:noreply, socket}
     else
       document = seo_document(socket)
@@ -3539,7 +3557,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Whether a run may start: the feature on, nothing already in flight, the id
   # matching the open panel, and the id naming a rich-text block on this form.
   defp assist_runnable?(socket, block_id) do
+    # Same write-authorization boundary as `seo_suggest` (#550): block assist
+    # also bills an org LLM run, so read access to the record must not be
+    # enough to spend it. Refused server-side, not just hidden.
     socket.assigns.assist_enabled? and
+      socket.assigns.may_write? and
       not socket.assigns.assist_running? and
       socket.assigns.assist_block == block_id and
       not is_nil(assist_block_form(socket.assigns.form, block_id))
@@ -6861,7 +6883,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             matches on `data-block-id`, so a block without one
                             has nothing to deliver to. --%>
                       <.assist_panel
-                        :if={@assist_enabled? and bf[:id].value}
+                        :if={@assist_enabled? and @may_write? and bf[:id].value}
                         block_id={bf[:id].value}
                         open?={@assist_block == bf[:id].value}
                         action={@assist_action}
@@ -7163,7 +7185,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   slug_customized?={@slug_customized?}
                   class="rounded border border-base-content/10 bg-base-200/40 p-2"
                 />
-                <div :if={@seo_enabled?}>
+                <div :if={@seo_enabled? and @may_write?}>
+                  <%!-- Gated on write access, not just the feature flag (#550):
+                        a read-only viewer must not see a control that would bill
+                        the org for a record they cannot edit. The server handler
+                        re-checks; this only keeps the affordance honest. --%>
                   <%!-- `type="button"` is mandatory: this sits inside the main
                         <.form>, so the default type would submit it. --%>
                   <button
