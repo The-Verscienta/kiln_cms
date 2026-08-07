@@ -17,13 +17,13 @@ msgstr ""
 msgid "Actions"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:813
-#: lib/kiln_cms_web/components/layouts.ex:828
+#: lib/kiln_cms_web/components/layouts.ex:816
+#: lib/kiln_cms_web/components/layouts.ex:831
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:735
+#: lib/kiln_cms_web/components/layouts.ex:738
 #: lib/kiln_cms_web/controllers/content_controller.ex:275
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
@@ -35,17 +35,17 @@ msgstr ""
 msgid "No posts yet."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:780
+#: lib/kiln_cms_web/components/layouts.ex:783
 #, elixir-autogen, elixir-format
 msgid "Powered by KilnCMS."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:820
+#: lib/kiln_cms_web/components/layouts.ex:823
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:805
+#: lib/kiln_cms_web/components/layouts.ex:808
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr ""
@@ -55,7 +55,7 @@ msgstr ""
 msgid "close"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:677
+#: lib/kiln_cms_web/live/editor_live.ex:683
 #: lib/kiln_cms_web/live/form_builder_live.ex:969
 #, elixir-autogen, elixir-format
 msgid "%{count} selected"
@@ -84,7 +84,7 @@ msgstr[1] ""
 msgid "All content"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:538
+#: lib/kiln_cms_web/components/layouts.ex:541
 #: lib/kiln_cms_web/live/analytics_live.ex:32
 #: lib/kiln_cms_web/live/analytics_live.ex:344
 #: lib/kiln_cms_web/live/funnel_live.ex:103
@@ -92,9 +92,9 @@ msgstr ""
 msgid "Analytics"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:433
-#: lib/kiln_cms_web/live/editor_live.ex:441
-#: lib/kiln_cms_web/live/editor_live.ex:448
+#: lib/kiln_cms_web/live/editor_live.ex:439
+#: lib/kiln_cms_web/live/editor_live.ex:447
+#: lib/kiln_cms_web/live/editor_live.ex:454
 #: lib/kiln_cms_web/live/release_live.ex:781
 #, elixir-autogen, elixir-format
 msgid "Archive"
@@ -103,8 +103,8 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex:337
 #: lib/kiln_cms_web/live/billing_live.ex:613
 #: lib/kiln_cms_web/live/content_editor_live.ex:4626
-#: lib/kiln_cms_web/live/editor_live.ex:740
-#: lib/kiln_cms_web/live/editor_live.ex:767
+#: lib/kiln_cms_web/live/editor_live.ex:746
+#: lib/kiln_cms_web/live/editor_live.ex:773
 #: lib/kiln_cms_web/live/field_definition_live.ex:526
 #: lib/kiln_cms_web/live/settings_live.ex:474
 #: lib/kiln_cms_web/live/taxonomy_live.ex:553
@@ -117,11 +117,11 @@ msgstr ""
 msgid "Cancel"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:511
+#: lib/kiln_cms_web/components/layouts.ex:514
 #: lib/kiln_cms_web/live/analytics_live.ex:495
-#: lib/kiln_cms_web/live/editor_live.ex:34
-#: lib/kiln_cms_web/live/editor_live.ex:542
-#: lib/kiln_cms_web/live/editor_live.ex:587
+#: lib/kiln_cms_web/live/editor_live.ex:35
+#: lib/kiln_cms_web/live/editor_live.ex:548
+#: lib/kiln_cms_web/live/editor_live.ex:593
 #: lib/kiln_cms_web/live/overview_live.ex:238
 #: lib/kiln_cms_web/live/release_live.ex:583
 #: lib/kiln_cms_web/live/translations_live.ex:162
@@ -130,8 +130,8 @@ msgid "Content"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex:560
-#: lib/kiln_cms_web/live/editor_live.ex:450
-#: lib/kiln_cms_web/live/editor_live.ex:711
+#: lib/kiln_cms_web/live/editor_live.ex:456
+#: lib/kiln_cms_web/live/editor_live.ex:717
 #: lib/kiln_cms_web/live/media_live.ex:1164
 #: lib/kiln_cms_web/live/release_live.ex:790
 #, elixir-autogen, elixir-format
@@ -141,7 +141,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex:299
 #: lib/kiln_cms_web/live/billing_live.ex:549
 #: lib/kiln_cms_web/live/content_editor_live.ex:7953
-#: lib/kiln_cms_web/live/editor_live.ex:899
+#: lib/kiln_cms_web/live/editor_live.ex:905
 #: lib/kiln_cms_web/live/field_definition_live.ex:450
 #: lib/kiln_cms_web/live/taxonomy_live.ex:509
 #: lib/kiln_cms_web/live/team_live.ex:433
@@ -152,7 +152,7 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:894
+#: lib/kiln_cms_web/components/layouts.ex:897
 #, elixir-autogen, elixir-format
 msgid "Editor"
 msgstr ""
@@ -167,8 +167,8 @@ msgstr ""
 msgid "Most viewed"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:559
-#: lib/kiln_cms_web/live/editor_live.ex:579
+#: lib/kiln_cms_web/live/editor_live.ex:565
+#: lib/kiln_cms_web/live/editor_live.ex:585
 #, elixir-autogen, elixir-format
 msgid "New %{type}"
 msgstr ""
@@ -180,12 +180,12 @@ msgid "No views recorded yet."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4943
-#: lib/kiln_cms_web/live/editor_live.ex:678
+#: lib/kiln_cms_web/live/editor_live.ex:684
 #, elixir-autogen, elixir-format
 msgid "None selected"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:780
+#: lib/kiln_cms_web/live/editor_live.ex:786
 #, elixir-autogen, elixir-format
 msgid "Nothing matches the current filter."
 msgstr ""
@@ -196,41 +196,41 @@ msgid "Privacy-first content views — aggregate counts only, no visitor trackin
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:8011
-#: lib/kiln_cms_web/live/editor_live.ex:431
-#: lib/kiln_cms_web/live/editor_live.ex:446
-#: lib/kiln_cms_web/live/editor_live.ex:731
-#: lib/kiln_cms_web/live/editor_live.ex:857
+#: lib/kiln_cms_web/live/editor_live.ex:437
+#: lib/kiln_cms_web/live/editor_live.ex:452
+#: lib/kiln_cms_web/live/editor_live.ex:737
+#: lib/kiln_cms_web/live/editor_live.ex:863
 #: lib/kiln_cms_web/live/release_live.ex:393
 #, elixir-autogen, elixir-format
 msgid "Publish"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:647
 #: lib/kiln_cms_web/live/editor_live.ex:653
-#: lib/kiln_cms_web/live/editor_live.ex:654
+#: lib/kiln_cms_web/live/editor_live.ex:659
+#: lib/kiln_cms_web/live/editor_live.ex:660
 #, elixir-autogen, elixir-format
 msgid "Search by title"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:673
+#: lib/kiln_cms_web/live/editor_live.ex:679
 #, elixir-autogen, elixir-format
 msgid "Select all"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:958
+#: lib/kiln_cms_web/components/layouts.ex:961
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex:23
 #, elixir-autogen, elixir-format
 msgid "Sign in"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:351
-#: lib/kiln_cms_web/components/layouts.ex:352
-#: lib/kiln_cms_web/components/layouts.ex:959
+#: lib/kiln_cms_web/components/layouts.ex:354
+#: lib/kiln_cms_web/components/layouts.ex:355
+#: lib/kiln_cms_web/components/layouts.ex:962
 #, elixir-autogen, elixir-format
 msgid "Sign out"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:513
+#: lib/kiln_cms_web/components/layouts.ex:516
 #: lib/kiln_cms_web/live/search_palette_live.ex:164
 #: lib/kiln_cms_web/live/taxonomy_live.ex:30
 #: lib/kiln_cms_web/live/taxonomy_live.ex:317
@@ -243,7 +243,7 @@ msgstr ""
 msgid "Total views"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:647
+#: lib/kiln_cms_web/components/layouts.ex:650
 #: lib/kiln_cms_web/live/media_live.ex:949
 #: lib/kiln_cms_web/live/trash_live.ex:28
 #: lib/kiln_cms_web/live/trash_live.ex:249
@@ -261,11 +261,11 @@ msgid "Type"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:8037
-#: lib/kiln_cms_web/live/editor_live.ex:432
-#: lib/kiln_cms_web/live/editor_live.ex:440
-#: lib/kiln_cms_web/live/editor_live.ex:447
-#: lib/kiln_cms_web/live/editor_live.ex:732
-#: lib/kiln_cms_web/live/editor_live.ex:877
+#: lib/kiln_cms_web/live/editor_live.ex:438
+#: lib/kiln_cms_web/live/editor_live.ex:446
+#: lib/kiln_cms_web/live/editor_live.ex:453
+#: lib/kiln_cms_web/live/editor_live.ex:738
+#: lib/kiln_cms_web/live/editor_live.ex:883
 #: lib/kiln_cms_web/live/release_live.ex:394
 #, elixir-autogen, elixir-format
 msgid "Unpublish"
@@ -797,7 +797,7 @@ msgid "Tags"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:2639
-#: lib/kiln_cms_web/live/editor_live.ex:399
+#: lib/kiln_cms_web/live/editor_live.ex:405
 #, elixir-autogen, elixir-format
 msgid "That action isn't allowed right now."
 msgstr ""
@@ -923,7 +923,7 @@ msgstr ""
 msgid "…or paste a URL"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:857
+#: lib/kiln_cms_web/live/editor_live.ex:863
 #, elixir-autogen, elixir-format
 msgid "Approve"
 msgstr ""
@@ -943,25 +943,25 @@ msgstr ""
 msgid "Request changes"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:867
+#: lib/kiln_cms_web/live/editor_live.ex:873
 #, elixir-autogen, elixir-format
 msgid "Return"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_components.ex:257
-#: lib/kiln_cms_web/live/editor_live.ex:847
+#: lib/kiln_cms_web/live/editor_live.ex:853
 #: lib/kiln_cms_web/live/form_builder_live.ex:602
 #: lib/kiln_cms_web/live/form_builder_live.ex:789
 #, elixir-autogen, elixir-format
 msgid "Submit"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:503
+#: lib/kiln_cms_web/live/editor_live.ex:509
 #, elixir-autogen, elixir-format
 msgid "%{action}: %{count} updated"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:498
+#: lib/kiln_cms_web/live/editor_live.ex:504
 #, elixir-autogen, elixir-format
 msgid "%{action}: %{count} updated, %{skipped} skipped"
 msgstr ""
@@ -997,8 +997,8 @@ msgstr ""
 msgid "KilnCMS combines Ash resources, a LiveView block editor, version history, and headless GraphQL + JSON:API delivery — Postgres-centric, real-time by default, and built for teams who want control without the ops tax."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:743
-#: lib/kiln_cms_web/components/layouts.ex:850
+#: lib/kiln_cms_web/components/layouts.ex:746
+#: lib/kiln_cms_web/components/layouts.ex:853
 #, elixir-autogen, elixir-format
 msgid "Language"
 msgstr ""
@@ -1038,7 +1038,7 @@ msgstr ""
 msgid "TipTap rich text, drag-and-drop blocks, live preview, and version restore — all in LiveView."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:398
+#: lib/kiln_cms_web/live/editor_live.ex:404
 #, elixir-autogen, elixir-format
 msgid "Updated."
 msgstr ""
@@ -1149,7 +1149,7 @@ msgstr ""
 msgid "Webhook deleted."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:594
+#: lib/kiln_cms_web/components/layouts.ex:597
 #: lib/kiln_cms_web/live/overview_live.ex:445
 #: lib/kiln_cms_web/live/webhook_live.ex:22
 #: lib/kiln_cms_web/live/webhook_live.ex:241
@@ -1182,7 +1182,7 @@ msgstr ""
 msgid "Couldn't save your preferences."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:777
+#: lib/kiln_cms_web/live/editor_live.ex:783
 #, elixir-autogen, elixir-format
 msgid "Create your first page or post to get started."
 msgstr ""
@@ -1248,8 +1248,8 @@ msgstr ""
 msgid "Insert block"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:233
-#: lib/kiln_cms_web/components/layouts.ex:373
+#: lib/kiln_cms_web/components/layouts.ex:236
+#: lib/kiln_cms_web/components/layouts.ex:376
 #, elixir-autogen, elixir-format
 msgid "Menu"
 msgstr ""
@@ -1259,7 +1259,7 @@ msgstr ""
 msgid "No blocks match."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:775
+#: lib/kiln_cms_web/live/editor_live.ex:781
 #, elixir-autogen, elixir-format
 msgid "No content yet"
 msgstr ""
@@ -1346,9 +1346,9 @@ msgstr ""
 msgid "Section title"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:656
-#: lib/kiln_cms_web/components/layouts.ex:665
-#: lib/kiln_cms_web/components/layouts.ex:919
+#: lib/kiln_cms_web/components/layouts.ex:659
+#: lib/kiln_cms_web/components/layouts.ex:668
+#: lib/kiln_cms_web/components/layouts.ex:922
 #: lib/kiln_cms_web/live/content_editor_live.ex:7805
 #: lib/kiln_cms_web/live/funnel_builder_live.ex:224
 #: lib/kiln_cms_web/live/settings_live.ex:21
@@ -1455,7 +1455,7 @@ msgstr ""
 msgid "Add typed fields to a content type without a code change. Editors fill them in the content editor; values are validated against these definitions."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:923
+#: lib/kiln_cms_web/live/editor_live.ex:929
 #: lib/kiln_cms_web/live/form_builder_live.ex:296
 #: lib/kiln_cms_web/live/newsletter_live.ex:448
 #, elixir-autogen, elixir-format
@@ -1463,7 +1463,7 @@ msgid "All"
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex:234
-#: lib/kiln_cms_web/live/editor_live.ex:931
+#: lib/kiln_cms_web/live/editor_live.ex:937
 #: lib/kiln_cms_web/live/release_live.ex:385
 #, elixir-autogen, elixir-format
 msgid "Archived"
@@ -1578,7 +1578,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex:231
 #: lib/kiln_cms_web/live/content_editor_live.ex:3649
-#: lib/kiln_cms_web/live/editor_live.ex:928
+#: lib/kiln_cms_web/live/editor_live.ex:934
 #, elixir-autogen, elixir-format
 msgid "Draft"
 msgstr ""
@@ -1609,16 +1609,16 @@ msgstr ""
 msgid "Field type"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:576
-#: lib/kiln_cms_web/components/layouts.ex:926
+#: lib/kiln_cms_web/components/layouts.ex:579
+#: lib/kiln_cms_web/components/layouts.ex:929
 #: lib/kiln_cms_web/components/version_diff_components.ex:75
 #: lib/kiln_cms_web/live/form_builder_live.ex:444
 #, elixir-autogen, elixir-format
 msgid "Fields"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:595
-#: lib/kiln_cms_web/live/editor_live.ex:599
+#: lib/kiln_cms_web/live/editor_live.ex:601
+#: lib/kiln_cms_web/live/editor_live.ex:605
 #: lib/kiln_cms_web/live/form_builder_live.ex:937
 #, elixir-autogen, elixir-format
 msgid "Filter by status"
@@ -1636,8 +1636,8 @@ msgstr ""
 msgid "Go to the homepage"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:334
-#: lib/kiln_cms_web/components/layouts.ex:887
+#: lib/kiln_cms_web/components/layouts.ex:337
+#: lib/kiln_cms_web/components/layouts.ex:890
 #, elixir-autogen, elixir-format
 msgid "GraphQL"
 msgstr ""
@@ -1655,13 +1655,13 @@ msgid "Help text"
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex:232
-#: lib/kiln_cms_web/live/editor_live.ex:929
+#: lib/kiln_cms_web/live/editor_live.ex:935
 #, elixir-autogen, elixir-format
 msgid "In review"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:337
-#: lib/kiln_cms_web/components/layouts.ex:888
+#: lib/kiln_cms_web/components/layouts.ex:340
+#: lib/kiln_cms_web/components/layouts.ex:891
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex:56
 #, elixir-autogen, elixir-format
 msgid "JSON:API"
@@ -1691,7 +1691,7 @@ msgstr ""
 msgid "Manage your profile, password, and notification preferences."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:512
+#: lib/kiln_cms_web/components/layouts.ex:515
 #: lib/kiln_cms_web/live/backup_live.ex:237
 #: lib/kiln_cms_web/live/overview_live.ex:432
 #: lib/kiln_cms_web/live/search_palette_live.ex:152
@@ -1817,7 +1817,7 @@ msgid "Profile updated."
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex:233
-#: lib/kiln_cms_web/live/editor_live.ex:930
+#: lib/kiln_cms_web/live/editor_live.ex:936
 #: lib/kiln_cms_web/live/release_live.ex:381
 #: lib/kiln_cms_web/live/release_live.ex:397
 #: lib/kiln_cms_web/live/release_live.ex:482
@@ -1865,10 +1865,10 @@ msgstr ""
 msgid "Saving…"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:203
-#: lib/kiln_cms_web/components/layouts.ex:301
-#: lib/kiln_cms_web/components/layouts.ex:387
-#: lib/kiln_cms_web/components/layouts.ex:738
+#: lib/kiln_cms_web/components/layouts.ex:206
+#: lib/kiln_cms_web/components/layouts.ex:304
+#: lib/kiln_cms_web/components/layouts.ex:390
+#: lib/kiln_cms_web/components/layouts.ex:741
 #: lib/kiln_cms_web/controllers/content_controller.ex:342
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/analytics_live.ex:266
@@ -1905,7 +1905,7 @@ msgstr ""
 msgid "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:797
+#: lib/kiln_cms_web/live/editor_live.ex:803
 #, elixir-autogen, elixir-format
 msgid "Select %{title}"
 msgstr ""
@@ -1920,7 +1920,7 @@ msgstr ""
 msgid "Submitting…"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:980
+#: lib/kiln_cms_web/components/layouts.ex:983
 #, elixir-autogen, elixir-format
 msgid "Theme"
 msgstr ""
@@ -1936,17 +1936,17 @@ msgstr ""
 msgid "Upload progress for %{name}"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:1006
+#: lib/kiln_cms_web/components/layouts.ex:1009
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:997
+#: lib/kiln_cms_web/components/layouts.ex:1000
 #, elixir-autogen, elixir-format
 msgid "Use light theme"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:988
+#: lib/kiln_cms_web/components/layouts.ex:991
 #, elixir-autogen, elixir-format
 msgid "Use system theme"
 msgstr ""
@@ -2047,7 +2047,7 @@ msgstr ""
 msgid "April"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:470
+#: lib/kiln_cms_web/live/editor_live.ex:476
 #, elixir-autogen, elixir-format
 msgid "Archive %{count} selected item(s)? Archived content leaves the site; you can unarchive it later."
 msgstr ""
@@ -2082,7 +2082,7 @@ msgstr ""
 msgid "Back to the homepage"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:626
+#: lib/kiln_cms_web/live/editor_live.ex:632
 #: lib/kiln_cms_web/live/field_definition_live.ex:327
 #, elixir-autogen, elixir-format
 msgid "Built-in"
@@ -2103,7 +2103,7 @@ msgstr ""
 msgid "Content type restored."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:570
+#: lib/kiln_cms_web/components/layouts.ex:573
 #: lib/kiln_cms_web/live/taxonomy_live.ex:580
 #: lib/kiln_cms_web/live/type_definition_live.ex:164
 #: lib/kiln_cms_web/live/type_definition_live.ex:172
@@ -2126,7 +2126,7 @@ msgstr ""
 msgid "Create content type"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:635
+#: lib/kiln_cms_web/live/editor_live.ex:641
 #: lib/kiln_cms_web/live/field_definition_live.ex:336
 #, elixir-autogen, elixir-format
 msgid "Custom"
@@ -2218,7 +2218,7 @@ msgstr ""
 msgid "June"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:912
+#: lib/kiln_cms_web/live/editor_live.ex:918
 #: lib/kiln_cms_web/live/media_live.ex:1179
 #: lib/kiln_cms_web/live/media_live.ex:1280
 #: lib/kiln_cms_web/live/trash_live.ex:336
@@ -2226,7 +2226,7 @@ msgstr ""
 msgid "Load more"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:909
+#: lib/kiln_cms_web/live/editor_live.ex:915
 #: lib/kiln_cms_web/live/media_live.ex:1176
 #: lib/kiln_cms_web/live/media_live.ex:1280
 #: lib/kiln_cms_web/live/trash_live.ex:333
@@ -2254,17 +2254,17 @@ msgstr ""
 msgid "More content"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:480
+#: lib/kiln_cms_web/live/editor_live.ex:486
 #, elixir-autogen, elixir-format
 msgid "Move %{count} selected item(s) to trash? Admins can restore them from Trash for 30 days."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:492
+#: lib/kiln_cms_web/live/editor_live.ex:498
 #, elixir-autogen, elixir-format
 msgid "Moved %{count} item(s) to trash"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:488
+#: lib/kiln_cms_web/live/editor_live.ex:494
 #, elixir-autogen, elixir-format
 msgid "Moved %{count} item(s) to trash, %{skipped} skipped"
 msgstr ""
@@ -2316,7 +2316,7 @@ msgstr ""
 msgid "Preview: %{title}"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:458
+#: lib/kiln_cms_web/live/editor_live.ex:464
 #, elixir-autogen, elixir-format
 msgid "Publish %{count} selected item(s)? They go live on the site immediately."
 msgstr ""
@@ -2327,7 +2327,7 @@ msgstr ""
 msgid "References content of type"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:817
+#: lib/kiln_cms_web/live/editor_live.ex:823
 #, elixir-autogen, elixir-format
 msgid "Scheduled to publish"
 msgstr ""
@@ -2364,7 +2364,7 @@ msgstr ""
 msgid "Too many requests"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:940
+#: lib/kiln_cms_web/components/layouts.ex:943
 #, elixir-autogen, elixir-format
 msgid "Types"
 msgstr ""
@@ -2380,20 +2380,20 @@ msgid "URL segment (defaults to machine name + \"s\")"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:8047
-#: lib/kiln_cms_web/live/editor_live.ex:434
-#: lib/kiln_cms_web/live/editor_live.ex:442
-#: lib/kiln_cms_web/live/editor_live.ex:449
-#: lib/kiln_cms_web/live/editor_live.ex:887
+#: lib/kiln_cms_web/live/editor_live.ex:440
+#: lib/kiln_cms_web/live/editor_live.ex:448
+#: lib/kiln_cms_web/live/editor_live.ex:455
+#: lib/kiln_cms_web/live/editor_live.ex:893
 #, elixir-autogen, elixir-format
 msgid "Unarchive"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:476
+#: lib/kiln_cms_web/live/editor_live.ex:482
 #, elixir-autogen, elixir-format
 msgid "Unarchive %{count} selected item(s)? They return to draft."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:464
+#: lib/kiln_cms_web/live/editor_live.ex:470
 #, elixir-autogen, elixir-format
 msgid "Unpublish %{count} selected item(s)? They come off the site and return to draft."
 msgstr ""
@@ -2634,7 +2634,7 @@ msgstr ""
 msgid "Local mailbox (no real delivery)"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:622
+#: lib/kiln_cms_web/components/layouts.ex:625
 #: lib/kiln_cms_web/live/mail_settings_live.ex:24
 #: lib/kiln_cms_web/live/mail_settings_live.ex:374
 #, elixir-autogen, elixir-format
@@ -2960,7 +2960,7 @@ msgstr ""
 msgid "API key created — copy it now, it won't be shown again."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:947
+#: lib/kiln_cms_web/components/layouts.ex:950
 #: lib/kiln_cms_web/live/api_key_live.ex:29
 #: lib/kiln_cms_web/live/api_key_live.ex:127
 #, elixir-autogen, elixir-format
@@ -3162,7 +3162,7 @@ msgstr ""
 msgid "Auto-fills each entry's multi-segment canonical URL. Same tokens plus [slug]; segments that expand empty drop out. Blank = flat URLs."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:612
+#: lib/kiln_cms_web/components/layouts.ex:615
 #: lib/kiln_cms_web/live/automation_live.ex:23
 #: lib/kiln_cms_web/live/automation_live.ex:234
 #, elixir-autogen, elixir-format
@@ -3179,8 +3179,8 @@ msgstr ""
 msgid "Build public forms, place them on content with the form block, and review submissions here."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:516
-#: lib/kiln_cms_web/components/layouts.ex:901
+#: lib/kiln_cms_web/components/layouts.ex:519
+#: lib/kiln_cms_web/components/layouts.ex:904
 #: lib/kiln_cms_web/live/calendar_live.ex:23
 #: lib/kiln_cms_web/live/overview_live.ex:498
 #, elixir-autogen, elixir-format
@@ -3233,7 +3233,7 @@ msgstr ""
 msgid "Comma-separated; the first keyphrase drives the auto-derived slug."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:685
+#: lib/kiln_cms_web/components/layouts.ex:688
 #, elixir-autogen, elixir-format
 msgid "Configure"
 msgstr ""
@@ -3821,8 +3821,8 @@ msgstr ""
 msgid "Form preview"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:582
-#: lib/kiln_cms_web/components/layouts.ex:933
+#: lib/kiln_cms_web/components/layouts.ex:585
+#: lib/kiln_cms_web/components/layouts.ex:936
 #: lib/kiln_cms_web/live/form_live.ex:22
 #: lib/kiln_cms_web/live/form_live.ex:163
 #: lib/kiln_cms_web/live/overview_live.ex:463
@@ -3865,7 +3865,7 @@ msgstr ""
 msgid "General"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:637
+#: lib/kiln_cms_web/components/layouts.ex:640
 #: lib/kiln_cms_web/live/governance_live.ex:15
 #: lib/kiln_cms_web/live/governance_live.ex:172
 #, elixir-autogen, elixir-format
@@ -4043,7 +4043,7 @@ msgstr ""
 msgid "Name (optional)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:568
+#: lib/kiln_cms_web/live/editor_live.ex:574
 #: lib/kiln_cms_web/live/form_builder_live.ex:297
 #: lib/kiln_cms_web/live/form_builder_live.ex:314
 #: lib/kiln_cms_web/live/slug_regen_live.ex:228
@@ -4056,7 +4056,7 @@ msgstr ""
 msgid "New recovery codes generated — the old ones no longer work."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:625
+#: lib/kiln_cms_web/components/layouts.ex:628
 #: lib/kiln_cms_web/live/account_live.ex:319
 #: lib/kiln_cms_web/live/newsletter_live.ex:24
 #: lib/kiln_cms_web/live/newsletter_live.ex:287
@@ -4297,7 +4297,7 @@ msgstr ""
 msgid "Outdated"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:507
+#: lib/kiln_cms_web/components/layouts.ex:510
 #: lib/kiln_cms_web/live/overview_live.ex:50
 #: lib/kiln_cms_web/live/overview_live.ex:188
 #: lib/kiln_cms_web/live/overview_live.ex:193
@@ -4305,7 +4305,7 @@ msgstr ""
 msgid "Overview"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:589
+#: lib/kiln_cms_web/live/editor_live.ex:595
 #, elixir-autogen, elixir-format
 msgid "Pages, posts and custom types across your site."
 msgstr ""
@@ -4397,7 +4397,7 @@ msgstr ""
 msgid "Previous month"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:328
+#: lib/kiln_cms_web/components/layouts.ex:331
 #, elixir-autogen, elixir-format
 msgid "Primary"
 msgstr ""
@@ -4512,7 +4512,7 @@ msgstr ""
 msgid "Redirect from %{path} created."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:600
+#: lib/kiln_cms_web/components/layouts.ex:603
 #: lib/kiln_cms_web/live/redirect_live.ex:32
 #: lib/kiln_cms_web/live/redirect_live.ex:230
 #, elixir-autogen, elixir-format
@@ -4692,7 +4692,7 @@ msgstr ""
 msgid "Scheduled publish"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:829
+#: lib/kiln_cms_web/live/editor_live.ex:835
 #, elixir-autogen, elixir-format
 msgid "Scheduled to unpublish"
 msgstr ""
@@ -4852,7 +4852,7 @@ msgstr ""
 msgid "Slug regeneration finished: %{changed} renamed."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:606
+#: lib/kiln_cms_web/components/layouts.ex:609
 #: lib/kiln_cms_web/live/slug_regen_live.ex:35
 #, elixir-autogen, elixir-format
 msgid "Slugs"
@@ -4961,7 +4961,7 @@ msgstr ""
 msgid "Target type"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:643
+#: lib/kiln_cms_web/components/layouts.ex:646
 #: lib/kiln_cms_web/live/team_live.ex:34
 #: lib/kiln_cms_web/live/team_live.ex:361
 #, elixir-autogen, elixir-format
@@ -5137,8 +5137,8 @@ msgstr ""
 msgid "Trail"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:532
-#: lib/kiln_cms_web/components/layouts.ex:912
+#: lib/kiln_cms_web/components/layouts.ex:535
+#: lib/kiln_cms_web/components/layouts.ex:915
 #: lib/kiln_cms_web/live/content_editor_live.ex:7441
 #: lib/kiln_cms_web/live/overview_live.ex:398
 #: lib/kiln_cms_web/live/translations_live.ex:26
@@ -5529,13 +5529,13 @@ msgstr ""
 msgid "went live"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:622
+#: lib/kiln_cms_web/live/editor_live.ex:628
 #, elixir-autogen, elixir-format
 msgid "All types"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:613
 #: lib/kiln_cms_web/live/editor_live.ex:619
+#: lib/kiln_cms_web/live/editor_live.ex:625
 #, elixir-autogen, elixir-format
 msgid "Filter by type"
 msgstr ""
@@ -6063,7 +6063,7 @@ msgstr ""
 msgid "No build stamp. Pass --build-arg GIT_SHA and --build-arg BUILD_DATE when building the image to record exactly which commit is deployed."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:650
+#: lib/kiln_cms_web/components/layouts.ex:653
 #: lib/kiln_cms_web/live/system_live.ex:36
 #: lib/kiln_cms_web/live/system_live.ex:134
 #, elixir-autogen, elixir-format
@@ -6215,7 +6215,7 @@ msgstr ""
 msgid "Brand colour"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:558
+#: lib/kiln_cms_web/components/layouts.ex:561
 #: lib/kiln_cms_web/live/branding_live.ex:29
 #: lib/kiln_cms_web/live/branding_live.ex:169
 #, elixir-autogen, elixir-format
@@ -6272,7 +6272,7 @@ msgstr ""
 msgid "Logo URL"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:778
+#: lib/kiln_cms_web/components/layouts.ex:781
 #, elixir-autogen, elixir-format
 msgid "Powered by %{name}."
 msgstr ""
@@ -6357,7 +6357,7 @@ msgstr ""
 msgid "Audience granted"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:631
+#: lib/kiln_cms_web/components/layouts.ex:634
 #: lib/kiln_cms_web/live/billing_live.ex:38
 #: lib/kiln_cms_web/live/billing_live.ex:354
 #, elixir-autogen, elixir-format
@@ -7200,12 +7200,12 @@ msgstr ""
 msgid "Restoring a version reverts editorial content. Workflow state, schedule and author stay as they are."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:453
+#: lib/kiln_cms_web/components/layouts.ex:456
 #, elixir-autogen, elixir-format
 msgid "Environment: %{label}"
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:440
+#: lib/kiln_cms_web/components/layouts.ex:443
 #, elixir-autogen, elixir-format
 msgid "Deployment environment"
 msgstr ""
@@ -7260,7 +7260,7 @@ msgstr ""
 msgid "Anything you paste here is served to every visitor, exactly as written, with no filtering. Only add snippets from a source you trust — an analytics tag, a verification meta tag, a support widget. Every change is recorded with your name against it."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:564
+#: lib/kiln_cms_web/components/layouts.ex:567
 #: lib/kiln_cms_web/live/code_injection_live.ex:35
 #: lib/kiln_cms_web/live/code_injection_live.ex:175
 #, elixir-autogen, elixir-format
@@ -7613,7 +7613,7 @@ msgstr ""
 msgid "Funnel deleted."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:588
+#: lib/kiln_cms_web/components/layouts.ex:591
 #: lib/kiln_cms_web/live/analytics_live.ex:452
 #: lib/kiln_cms_web/live/funnel_builder_live.ex:218
 #: lib/kiln_cms_web/live/funnel_live.ex:21
@@ -7722,7 +7722,7 @@ msgstr ""
 msgid "Last swept %{at}."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:547
+#: lib/kiln_cms_web/components/layouts.ex:550
 #: lib/kiln_cms_web/live/link_report_live.ex:29
 #, elixir-autogen, elixir-format
 msgid "Links"
@@ -8022,7 +8022,7 @@ msgid "+ Assign"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4629
-#: lib/kiln_cms_web/live/editor_live.ex:893
+#: lib/kiln_cms_web/live/editor_live.ex:899
 #, elixir-autogen, elixir-format
 msgid "Assign"
 msgstr ""
@@ -8427,7 +8427,7 @@ msgstr ""
 msgid "Backup started — this page updates when it finishes."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:618
+#: lib/kiln_cms_web/components/layouts.ex:621
 #: lib/kiln_cms_web/live/backup_live.ex:37
 #: lib/kiln_cms_web/live/backup_live.ex:130
 #, elixir-autogen, elixir-format
@@ -8578,7 +8578,7 @@ msgstr ""
 msgid "A shareable link showing the site as this release would leave it."
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:737
+#: lib/kiln_cms_web/live/editor_live.ex:743
 #, elixir-autogen, elixir-format
 msgid "Add %{count} item(s)"
 msgstr ""
@@ -8589,17 +8589,17 @@ msgid "Add content to it from the content list."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4709
-#: lib/kiln_cms_web/live/editor_live.ex:701
+#: lib/kiln_cms_web/live/editor_live.ex:707
 #, elixir-autogen, elixir-format
 msgid "Add to release"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:509
+#: lib/kiln_cms_web/live/editor_live.ex:515
 #, elixir-autogen, elixir-format
 msgid "Added %{count} item(s) to the release"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:512
+#: lib/kiln_cms_web/live/editor_live.ex:518
 #, elixir-autogen, elixir-format
 msgid "Added %{count} item(s); %{skipped} skipped — already in another open release, or not addable"
 msgstr ""
@@ -8726,12 +8726,12 @@ msgid "Nothing in this release"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4698
-#: lib/kiln_cms_web/live/editor_live.ex:729
+#: lib/kiln_cms_web/live/editor_live.ex:735
 #, elixir-autogen, elixir-format
 msgid "On go-live"
 msgstr ""
 
-#: lib/kiln_cms_web/live/editor_live.ex:238
+#: lib/kiln_cms_web/live/editor_live.ex:244
 #, elixir-autogen, elixir-format
 msgid "Pick a release first."
 msgstr ""
@@ -8769,7 +8769,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex:81
 #: lib/kiln_cms_web/live/content_editor_live.ex:4684
 #: lib/kiln_cms_web/live/content_editor_live.ex:7062
-#: lib/kiln_cms_web/live/editor_live.ex:723
+#: lib/kiln_cms_web/live/editor_live.ex:729
 #: lib/kiln_cms_web/live/release_live.ex:478
 #, elixir-autogen, elixir-format
 msgid "Release"
@@ -8815,7 +8815,7 @@ msgstr ""
 msgid "Release scheduled."
 msgstr ""
 
-#: lib/kiln_cms_web/components/layouts.ex:525
+#: lib/kiln_cms_web/components/layouts.ex:528
 #: lib/kiln_cms_web/live/release_live.ex:42
 #: lib/kiln_cms_web/live/release_live.ex:67
 #: lib/kiln_cms_web/live/release_live.ex:421

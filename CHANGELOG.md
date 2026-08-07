@@ -29,6 +29,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`mix kiln.audit.checkpoint --audit` walks the checkpoint run's predecessor
+  links, and its structural half now runs without a witness.** Each
+  `chain_checkpoints` row signs its predecessor's id and a digest of its
+  contents; nothing walked them. A checkpoint rewritten in place while keeping
+  its sequence number was caught only by its own signature failing — which on an
+  unsigned deployment it does not (#732).
+
+  Contiguity and the link walk read `chain_checkpoints` alone, so they now run on
+  every deployment, including the default one that publishes nowhere. Previously
+  the whole audit exited early without a sink, which made both checks dead code
+  on exactly the deployments where they are the only structural evidence there
+  is. The missing-witness case is still a failure and still exits non-zero.
+
+  Read the walk for what it is: `Checkpoint.digest/1` is an unkeyed hash over
+  public columns, so an attacker who rewrites a row can recompute every digest
+  after it, and the newest checkpoint has no successor to record its digest at
+  all. It catches a careless edit, and it makes a careful one expensive — the
+  cascade forces a rewrite of every *published* object downstream, turning one
+  witness mismatch into many. It does not replace the witness.
+
 - **Editorial claim checking.** A **Compliance** panel in the content editor
   flags the phrases a regulator or a house style guide would want a second look
   at — "FDA approved", "no side effects", "guaranteed results" — plus an
@@ -1432,6 +1452,32 @@ migration, a rewritten column, a dropped config key).
   partner site in never takes the CMS's own host out. (#562)
 
 ### Fixed
+
+- **The remaining auth pages no longer render another tenant's branding.**
+  `/password-reset/:token`, `/confirm_new_user/:token`, `/magic_link/:token`
+  and `/sign-out` are now routed through thin Kiln wrappers
+  (`KilnCMSWeb.AuthLive`), which puts them under `use KilnCMSWeb, :live_view`
+  and so under the url-less-join guard from #688 (#701).
+
+  They were the last views outside it, because `AshAuthentication.Phoenix`
+  ships them and a library module cannot use Kiln's macro. A `/live` join
+  carrying no URL matches no route, so it skipped their
+  `{LiveUserAuth, :assign_current_org}` hook and left `:current_org` unassigned
+  — and `Layouts.brand_or_unbranded/1`, which fails closed on exactly that,
+  never ran, because the channel takes the layout from the matched route too.
+  `Branding.for_org(nil)` answered with the **default organization**, so a
+  password-reset page joined that way on a tenant host drew another site's name
+  and logo. No authorization was involved (these pages are unauthenticated by
+  design); the leak was identity, which is what #48 exists to prevent.
+
+  Wrapping refuses the join outright rather than trying to render it correctly.
+
+  `/sign-out` is worth knowing about separately: `sign_out_route/3` emits a
+  `DELETE` to the auth controller **and** a `live` route in its own
+  `live_session`, and only the first is visible at the call site. It reads as
+  controller-only and is not, so its live half had a replayable session like
+  every other page here. `KilnCMSWeb.LiveJoinWithoutUrlTest`'s exemption list is
+  now empty, which is what keeps that true as views are added.
 
 - **A client-chosen payload shape no longer crashes an editor LiveView.** A
   `handle_event/3` payload is arbitrary client JSON and `handle_params/3` has a
