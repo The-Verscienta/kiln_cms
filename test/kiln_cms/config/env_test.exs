@@ -99,6 +99,199 @@ defmodule KilnCMS.Config.EnvTest do
     end
   end
 
+  # #634: the stderr line is the only signal an operator gets that a flag did not
+  # take effect, and in a release it reaches container stdout and nothing else.
+  # `collected/0` is what lets `KilnCMS.Application` replay it through `Logger`.
+  describe "collected/0" do
+    setup do
+      # No `on_exit` drain: `on_exit` callbacks run in a separate process from
+      # the test, so they would drain the runner's (empty) dictionary, never
+      # this one. Each test already gets a fresh process; this is the only
+      # clearing that can do anything, and it is here for the doctest's sake.
+      Env.take_collected()
+      :ok
+    end
+
+    test "an unrecognized read is recorded, with what the operator typed" do
+      put(" Enabled ")
+      quietly(fn -> Env.fetch(@var) end)
+
+      # The raw value, for the same reason the stderr line quotes it: the
+      # trimming and downcasing are what caused the mismatch, so the normalized
+      # form is the one string that isn't in their compose file.
+      assert Env.collected() == [{@var, " Enabled "}]
+    end
+
+    test "recognized values, blanks and unset reads record nothing" do
+      for value <- ["true", "OFF", "1", "", " ", nil] do
+        put(value)
+        quietly(fn -> Env.fetch(@var) end)
+      end
+
+      assert Env.collected() == []
+    end
+
+    test "several unrecognized reads are kept in the order they happened" do
+      # A boot reads a dozen flags; an operator who fat-fingered two wants both,
+      # in the order `runtime.exs` reached them.
+      for value <- ["ture", "yess", "of"] do
+        put(value)
+        quietly(fn -> Env.fetch(@var) end)
+      end
+
+      assert Env.collected() == [{@var, "ture"}, {@var, "yess"}, {@var, "of"}]
+    end
+
+    test "flag/2 records too — it is the form most call sites use" do
+      put("ture")
+      assert quietly(fn -> Env.flag(@var, false) end) == false
+      assert Env.collected() == [{@var, "ture"}]
+    end
+
+    test "truthy?/1 records nothing, because it warns about nothing" do
+      # Every non-false value is meaningful for PHX_SERVER, so there is no
+      # unrecognized case to report.
+      put("please")
+      assert Env.truthy?(@var)
+      assert Env.collected() == []
+    end
+  end
+
+  describe "replay_collected/0" do
+    setup do
+      previous = Application.get_env(:kiln_cms, :config_warnings)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:kiln_cms, :config_warnings)
+          list -> Application.put_env(:kiln_cms, :config_warnings, list)
+        end
+      end)
+    end
+
+    defp replay(warnings) do
+      Application.put_env(:kiln_cms, :config_warnings, warnings)
+      ExUnit.CaptureLog.capture_log(fn -> assert Env.replay_collected() == :ok end)
+    end
+
+    test "each collected warning is re-emitted through Logger" do
+      # The point of #634: `Logger` is what reaches Sentry and every other sink.
+      # The stderr line `fetch/1` writes never leaves container stdout.
+      log = replay([{"DATABASE_SSL", "enabled"}, {"KILN_AUDIT_ANCHOR_EVERY_WRITE", "ture"}])
+
+      assert log =~ "DATABASE_SSL is set to an unrecognized value"
+      assert log =~ ~s("enabled")
+      assert log =~ "KILN_AUDIT_ANCHOR_EVERY_WRITE is set to an unrecognized value"
+      assert log =~ ~s("ture")
+    end
+
+    test "it says the variable had no effect, and what to write instead" do
+      # The operator's actual question is "did my flag apply?", and the answer
+      # has to be in the line itself — they are reading it in Sentry, detached
+      # from the config file that produced it.
+      log = replay([{"DATABASE_SSL", "enabled"}])
+
+      assert log =~ "had no effect"
+      assert log =~ "true/1/yes/on"
+      assert log =~ "false/0/no/off"
+    end
+
+    test "it warns, not infos — this is a misconfiguration" do
+      assert replay([{"DATABASE_SSL", "enabled"}]) =~ "[warning]"
+    end
+
+    # `Sentry.Test`'s collector needs `test_mode: true` in the :sentry app config,
+    # which is a global change this file has no business making. Instead: give
+    # Sentry a DSN (so it will run user callbacks at all) and a `before_send`
+    # that captures the event and returns nil. `before_send` runs BEFORE the DSN
+    # is used in `Sentry.Client.send_event/2`, and returning nil drops the event
+    # — so nothing is ever sent anywhere.
+    defp capturing_sentry(fun) do
+      test_pid = self()
+      previous_dsn = Sentry.Config.dsn()
+      previous_hook = Sentry.Config.before_send()
+
+      on_exit(fn ->
+        Sentry.Config.persist(dsn: previous_dsn, before_send: previous_hook)
+      end)
+
+      Sentry.Config.persist(
+        dsn: "https://public@example.invalid/1",
+        before_send: fn event ->
+          send(test_pid, {:sentry_event, event})
+          nil
+        end
+      )
+
+      fun.()
+    end
+
+    test "it also reports to Sentry, which a Logger.warning alone does not reach" do
+      # The point of the whole change, and the one part `Logger` cannot deliver:
+      # `Sentry.LoggerHandler` is attached with the library's defaults
+      # (`level: :error`, `capture_log_messages: false`), so a `:warning` with a
+      # bare string is dropped at its first filter, and a bare string log with no
+      # `:crash_reason` metadata is ignored even above that level. Without an
+      # explicit `capture_message/2` this is inert for Sentry — the exact state
+      # #634 was filed to end.
+      capturing_sentry(fn -> replay([{"DATABASE_SSL", "enabled"}]) end)
+
+      assert_receive {:sentry_event, event}
+      assert event.message.formatted =~ "DATABASE_SSL is set to an unrecognized value"
+      assert event.message.formatted =~ ~s("enabled")
+      assert event.level == :warning
+      # Grouped per variable, so a flag that stays wrong is one issue rather
+      # than a new one on every restart.
+      assert event.fingerprint == ["kiln-config-warning", "DATABASE_SSL"]
+      assert event.extra[:value] == "enabled"
+      assert event.extra[:variable] == "DATABASE_SSL"
+    end
+
+    test "a clean boot reports nothing to Sentry" do
+      capturing_sentry(fn -> replay([]) end)
+      refute_receive {:sentry_event, _}, 50
+    end
+
+    test "an empty or absent list logs nothing" do
+      # `refute =~`, not `== ""`: `capture_log/1` captures every process's log
+      # events, so any `warning` the running application emits in this window
+      # would fail an exact-equality assertion for reasons unrelated to this.
+      refute replay([]) =~ "unrecognized value"
+
+      Application.delete_env(:kiln_cms, :config_warnings)
+
+      refute ExUnit.CaptureLog.capture_log(fn -> Env.replay_collected() end) =~
+               "unrecognized value"
+    end
+  end
+
+  describe "the runtime.exs handoff (#634)" do
+    @runtime_exs Path.join([__DIR__, "..", "..", "..", "config", "runtime.exs"])
+
+    test "runtime.exs hands the collected list to :config_warnings" do
+      assert File.read!(@runtime_exs) =~
+               "config :kiln_cms, :config_warnings, Env.take_collected()"
+    end
+
+    test "nothing reads a flag after the handoff line" do
+      # Ordering is the whole correctness argument: a variable read below the
+      # handoff is warned about on stderr and nowhere else, which is exactly the
+      # failure #634 exists to close. Cheap to state here, invisible otherwise —
+      # a new flag appended to the bottom of runtime.exs is the natural mistake.
+      source = File.read!(@runtime_exs)
+
+      [_before, after_handoff] =
+        String.split(source, "config :kiln_cms, :config_warnings", parts: 2)
+
+      refute after_handoff =~ ~r/\bEnv\.(flag|fetch|truthy\?)\(/,
+             """
+             config/runtime.exs reads an environment flag below the \
+             `:config_warnings` handoff. Move the read above it, or that \
+             variable's unrecognized-value warning reaches stderr only (#634).\
+             """
+    end
+  end
+
   describe "truthy?/1" do
     test "an explicit off-spelling disables, whatever the case or padding" do
       # The only thing this changes from a bare presence check — and the one

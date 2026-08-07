@@ -63,6 +63,13 @@ defmodule KilnCMSWeb.TwoFactorController do
     with {:ok, %{user: user, remember_me?: remember_me?}} <- pending(conn),
          {:ok, user} <- SecondFactor.check(user, code) do
       conn
+      # Record that THIS session was established with a recovery code (#786), so
+      # a later re-enrolment on /editor/settings can promote a fresh TOTP secret
+      # over the live one without a current code — the owner who lost their
+      # authenticator has none to give, and the recovery code already stood in
+      # for the factor. Set from the verified record's own metadata, never from
+      # anything the client sent.
+      |> mark_recovery_login(user)
       # Only now. The remember-me cookie is a complete sign-in in a cookie — the
       # read plug hands it straight to `store_in_session/2` — so issuing it at
       # the first factor, which is what AshAuthentication does by default, would
@@ -102,6 +109,16 @@ defmodule KilnCMSWeb.TwoFactorController do
   end
 
   def create(conn, _params), do: redirect(conn, to: ~p"/sign-in")
+
+  # `SecondFactor.check/2` stamps which factor it accepted; only a recovery-code
+  # sign-in marks the session (#786). Kept for the session's lifetime — it does
+  # not weaken anything on its own; it only lets `:confirm_totp` waive the
+  # current-code proof for someone who provably had no live code.
+  defp mark_recovery_login(conn, user) do
+    if Ash.Resource.get_metadata(user, :second_factor_method) == :recovery,
+      do: put_session(conn, "totp_recovery_login", true),
+      else: conn
+  end
 
   # The session key is this gate's only difference from the headless one; the
   # blob itself — its lifetime, its payload, the four steps that turn it back

@@ -9,6 +9,9 @@ defmodule KilnCMS.Application do
   def start(_type, _args) do
     assert_dev_routes_disabled_in_prod!()
     setup_observability()
+    # Strictly after `setup_observability/0` — that is where the Sentry logger
+    # handler is attached, and reaching Sentry is the whole point (#634).
+    KilnCMS.Config.Env.replay_collected()
 
     # Log Oban job lifecycle/exceptions. Without this, a failing delivery job
     # (e.g. a misconfigured mailer in prod) fails and retries silently — only

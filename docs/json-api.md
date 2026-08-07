@@ -343,6 +343,7 @@ Use the JSON:API media type on both `Accept` and `Content-Type`:
 | `POST /api/json/posts` | `:create` | `:read_write` key, editor+ | Creates a **draft**, attributed to the key's owner |
 | `PATCH /api/json/posts/:id` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if already published |
 | `PATCH /api/json/posts/:id/submit-for-review` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
+| `PATCH /api/json/posts/:id/return-to-draft` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
 | `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
 | `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
 | `DELETE /api/json/posts/:id` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
@@ -353,8 +354,9 @@ Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
 
 **Authorization** mirrors `/mcp`: a **read-only key** can run none of these; a
 **`:read_write` key on a `:viewer`** account can run none; a **`:read_write` key
-on an `:editor`** can create/update/submit; **publish, unpublish and delete
-require an `:admin`** account. Hard delete (`:purge`) is **never** routed and is
+on an `:editor`** can create/update/submit; **return-to-draft, publish, unpublish
+and delete require an `:admin`** account. An editor submits for review; deciding
+the outcome — approve or return — is the admin's half. Hard delete (`:purge`) is **never** routed and is
 API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
 
 ### Creating and editing
@@ -436,8 +438,8 @@ edits do not fire.
 
 ### Workflow routes take an empty resource object
 
-The workflow `PATCH` routes (`/publish`, `/unpublish`, `/submit-for-review`)
-carry no attributes — send the JSON:API resource identifier only:
+The workflow `PATCH` routes (`/publish`, `/unpublish`, `/submit-for-review`,
+`/return-to-draft`) carry no attributes — send the JSON:API resource identifier only:
 
 ```bash
 curl -s -X PATCH http://localhost:4000/api/json/posts/<uuid>/publish \

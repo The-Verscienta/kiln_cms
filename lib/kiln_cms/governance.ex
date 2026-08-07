@@ -166,6 +166,9 @@ defmodule KilnCMS.Governance do
       %{item: %{type, id, title, slug, state, published_at},
         timeline: [event],           # newest first
         publishes: [DateTime],       # publish points, newest first (for #338 links)
+        chain: verdict,              # KilnCMS.Governance.Chain.verdict/0
+        chain_gap: attested_gap,     # how far attestation reaches (#811)
+        chain_gap_range: %{attested, next, head} | nil,   # the same, for display
         consents: [%KilnCMS.CMS.Consent{}]}
   """
   @spec trail(String.t(), Ash.UUID.t(), Ash.UUID.t()) :: map() | nil
@@ -184,7 +187,10 @@ defmodule KilnCMS.Governance do
       # Anchors key on the STORAGE type (what the publish hook records) — the
       # generic :entry tier for dynamic types, not the public name.
       storage = to_string(ContentTypes.storage_type(ct))
-      anchor = KilnCMS.Governance.Chain.latest_anchor(storage, id, record.org_id)
+      # One anchors read serves both the head (for `unanchored_tail/2`) and the
+      # attestation reach (#811) — `latest_anchor/3` would have re-queried.
+      anchors = KilnCMS.Governance.Chain.anchors(storage, id, record.org_id)
+      anchor = List.first(anchors)
       timeline = timeline(versions, actor_names(versions))
 
       %{
@@ -210,6 +216,21 @@ defmodule KilnCMS.Governance do
           KilnCMS.Provenance.KeyRegistry.with_cache(fn ->
             KilnCMS.Governance.Chain.verify_loaded(versions, storage, id, record.org_id)
           end),
+        # How far the ATTESTED prefix reaches (#811). A chain can have anchors
+        # that verify and a newer one that does not, in which case `chain` above
+        # reads `:unsigned`/`:unverifiable` — and calling that "history intact"
+        # claims more than is known, because versions past the attested prefix
+        # are anchored by a row nothing attests.
+        chain_gap: KilnCMS.Governance.Chain.attested_gap(anchors),
+        # The same fact pre-resolved for rendering: `%{attested, next, head}` or
+        # nil. Done here, in plain Elixir, because a function component that
+        # pattern-matches the `{:gap, …}` tuple inside HEEx is opaque enough that
+        # dialyzer cannot see the clause is reachable.
+        chain_gap_range:
+          case KilnCMS.Governance.Chain.attested_gap(anchors) do
+            {:gap, attested, head} -> %{attested: attested, next: attested + 1, head: head}
+            _no_gap -> nil
+          end,
         # Edits since the last anchor — covered at the next publish.
         unanchored_tail: KilnCMS.Governance.Chain.unanchored_tail(versions, anchor),
         # Scoped to the record's own site (epic #336) so the trail only shows

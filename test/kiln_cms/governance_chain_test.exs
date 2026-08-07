@@ -1889,6 +1889,244 @@ defmodule KilnCMS.Governance.ChainTest do
     end
   end
 
+  # #811: the residual #708 does NOT close. #708 constrains a forged head to the
+  # newest anchor that still verifies — but only within THAT anchor's prefix. An
+  # attacker with DELETE as well as INSERT moves the doctoring past it.
+  describe "attested prefix short of the head (#811)" do
+    test "INSERT+DELETE of the verified head still reads :unsigned" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [head, second | _] = Chain.anchors("page", page.id, page.org_id)
+      # The counts are whatever the publish/update cadence produced; what the
+      # attack needs is only that the head covers strictly more than its
+      # predecessor, so there are versions outside `second`'s prefix to doctor.
+      assert head.version_count > second.version_count
+
+      # 1. Delete the verified head. Nothing references it, so the
+      #    `ON DELETE RESTRICT` on `prev_anchor_id` permits it.
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^head.id, :binary_id))
+      )
+
+      # 2. Doctor ONLY the newest version — the one beyond `second`'s prefix.
+      doctor_newest_version!(page)
+
+      # 3. Re-insert an unsigned anchor at the SAME position, refolded over the
+      #    doctored table. None of it needs the signing key.
+      reinsert_head!(page, second, head.sequence)
+
+      # The hole, asserted as it stands: the surviving attested prefix
+      # (versions 1-2) still reproduces, so #708's baseline is satisfied, and
+      # the head is merely unsigned — which `mix kiln.audit.verify` passes.
+      assert :unsigned = Chain.verify(Page, "page", page.id, page.org_id)
+
+      # What #811 adds: the attestation demonstrably stops at the predecessor's
+      # prefix, so the audit can say so instead of printing "intact (unsigned)".
+      assert {:gap, attested, head_count} =
+               Chain.attested_gap("page", page.id, page.org_id)
+
+      assert attested == second.version_count
+      assert head_count == head.version_count
+      assert attested < head_count
+    end
+
+    test "the same doctoring WITHOUT the delete is caught outright" do
+      # The counterfactual that makes the test above mean something: it is the
+      # DELETE of the verified head that launders the edit. Leave the head in
+      # place and the identical version rewrite is a plain tamper verdict, which
+      # is the #708 property #811 is a residual of.
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+      page = CMS.update_page!(page, %{title: "Third"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      doctor_newest_version!(page)
+
+      assert {:tampered, _reason} = Chain.verify(Page, "page", page.id, page.org_id)
+    end
+
+    test "an equal-coverage head is not reported as a gap" do
+      # `coverage_rises_with_position/1` rejects a DECREASE but permits equal
+      # counts, so a head covering no more than its predecessor is reachable.
+      # There are no versions beyond the attested prefix there, and reporting
+      # `{:gap, n, n}` would print an empty, inverted version range.
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      [head, second | _] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.delete_all(
+        from(a in "history_anchors", where: a.id == type(^head.id, :binary_id))
+      )
+
+      Ash.Seed.seed!(
+        KilnCMS.CMS.HistoryAnchor,
+        %{
+          org_id: page.org_id,
+          resource_type: "page",
+          source_id: page.id,
+          chain_hash: second.chain_hash,
+          version_count: second.version_count,
+          last_version_id: second.last_version_id,
+          last_version_at: second.last_version_at,
+          prev_anchor_id: second.id,
+          prev_anchor_digest: Chain.anchor_digest(second),
+          sequence: head.sequence,
+          signature: nil,
+          key_id: nil
+        }
+      )
+
+      assert :none = Chain.attested_gap("page", page.id, page.org_id)
+    end
+
+    test "one UPDATE of key_id makes the whole chain unattested, not a gap" do
+      # `anchor_digest/1` covers neither `key_id` nor `sequence`, so this leaves
+      # every link and every sequence number intact while making every anchor
+      # unjudgeable. Cheaper than the DELETE #811 describes, and it lands on
+      # `:unattested` — which is why the audit reports that too, rather than
+      # treating it as the milder finding.
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors",
+          where: a.source_id == type(^page.id, :binary_id),
+          update: [set: [key_id: "sha256:deadbeef"]]
+        ),
+        []
+      )
+
+      assert :unverifiable = Chain.verify(Page, "page", page.id, page.org_id)
+      assert :unattested = Chain.attested_gap("page", page.id, page.org_id)
+    end
+
+    test "anchoring switched off claims nothing" do
+      prev = Application.get_env(:kiln_cms, :audit_anchors_enabled, true)
+      Application.put_env(:kiln_cms, :audit_anchors_enabled, false)
+      on_exit(fn -> Application.put_env(:kiln_cms, :audit_anchors_enabled, prev) end)
+
+      assert :disabled = Chain.attested_gap("page", Ecto.UUID.generate(), nil)
+    end
+
+    test "a fully verified chain has no gap" do
+      actor = admin()
+      page = published_page(actor)
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      assert :verified = Chain.verify(Page, "page", page.id, page.org_id)
+      assert :none = Chain.attested_gap("page", page.id, page.org_id)
+    end
+
+    test "a chain with nothing signed is :unattested, not a gap" do
+      # The honest keyless deployment. There is no attested prefix to fall short
+      # of, and the verdict already says so — reporting a gap here would fail
+      # every run on every document for a deployment that made a choice.
+      actor = admin()
+
+      prev = Application.get_env(:kiln_cms, KilnCMS.Provenance)
+      Application.put_env(:kiln_cms, KilnCMS.Provenance, Keyword.delete(prev, :signing_key))
+
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Provenance, prev) end)
+      {page, _log} = with_log(fn -> published_page(actor) end)
+
+      Application.put_env(:kiln_cms, KilnCMS.Provenance, prev)
+
+      assert :unattested = Chain.attested_gap("page", page.id, page.org_id)
+    end
+
+    test "an unsigned anchor OLDER than the attested head is not a gap" do
+      # The floor is the weakest judgement across the whole chain, so this reads
+      # `:unsigned` — but the head itself is attested, so nothing is outside the
+      # attested prefix and there is nothing to report.
+      actor = admin()
+      page = published_page(actor)
+
+      [first] = Chain.anchors("page", page.id, page.org_id)
+
+      KilnCMS.Repo.update_all(
+        from(a in "history_anchors",
+          where: a.id == type(^first.id, :binary_id),
+          update: [set: [signature: nil, key_id: nil]]
+        ),
+        []
+      )
+
+      page = CMS.update_page!(page, %{title: "Second"}, actor: actor)
+      :ok = Chain.anchor(page)
+
+      assert :none = Chain.attested_gap("page", page.id, page.org_id)
+    end
+
+    test "an empty chain has no gap" do
+      assert :none = Chain.attested_gap("page", Ecto.UUID.generate(), nil)
+    end
+  end
+
+  # Re-insert a head at a position just deleted, linked to the anchor that
+  # preceded it — the DELETE half of #811, as distinct from `forge_head!`'s
+  # append.
+  defp reinsert_head!(page, previous, sequence) do
+    refolded = Chain.compute(Page, page.id, page.org_id)
+
+    Ash.Seed.seed!(
+      KilnCMS.CMS.HistoryAnchor,
+      %{
+        org_id: page.org_id,
+        resource_type: "page",
+        source_id: page.id,
+        chain_hash: refolded.chain_hash,
+        version_count: refolded.version_count,
+        last_version_id: refolded.last_version_id,
+        last_version_at: refolded.last_version_at,
+        prev_anchor_id: previous.id,
+        prev_anchor_digest: Chain.anchor_digest(previous),
+        sequence: sequence,
+        signature: nil,
+        key_id: nil
+      }
+    )
+  end
+
+  # Only the newest version row, so the versions inside the surviving attested
+  # anchor's prefix stay byte-identical and still reproduce.
+  defp doctor_newest_version!(page) do
+    [newest_id] =
+      KilnCMS.Repo.all(
+        from(v in "pages_versions",
+          where: v.version_source_id == type(^page.id, :binary_id),
+          # Same total order as the fold (`version_inserted_at`, then `id`), so a
+          # timestamp tie can't pick a row inside the surviving attested prefix.
+          order_by: [desc: v.version_inserted_at, desc: v.id],
+          limit: 1,
+          select: v.id
+        )
+      )
+
+    # Asserted, so a helper that silently matched nothing can't make a test pass
+    # by doctoring no rows at all.
+    assert {1, _} =
+             KilnCMS.Repo.update_all(
+               from(v in "pages_versions",
+                 where: v.id == ^newest_id,
+                 update: [set: [changes: type(^%{"title" => "Doctored"}, :map)]]
+               ),
+               []
+             )
+  end
+
   # What an attacker with INSERT can compute without the signing key: the fold
   # over the (doctored) version table, and the predecessor digest over the
   # current head's public columns.

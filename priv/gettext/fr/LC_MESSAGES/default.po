@@ -70,7 +70,7 @@ msgstr[1] "%{count} sélectionné(s)"
 #: lib/kiln_cms_web/live/content_editor_live.ex:6606
 #: lib/kiln_cms_web/live/field_definition_live.ex:299
 #: lib/kiln_cms_web/live/form_live.ex:161
-#: lib/kiln_cms_web/live/governance_live.ex:211
+#: lib/kiln_cms_web/live/governance_live.ex:233
 #: lib/kiln_cms_web/live/mail_settings_live.ex:372
 #: lib/kiln_cms_web/live/newsletter_live.ex:285
 #: lib/kiln_cms_web/live/system_live.ex:132
@@ -106,7 +106,7 @@ msgstr "Archiver"
 #: lib/kiln_cms_web/live/editor_live.ex:746
 #: lib/kiln_cms_web/live/editor_live.ex:773
 #: lib/kiln_cms_web/live/field_definition_live.ex:526
-#: lib/kiln_cms_web/live/settings_live.ex:474
+#: lib/kiln_cms_web/live/settings_live.ex:488
 #: lib/kiln_cms_web/live/taxonomy_live.ex:553
 #: lib/kiln_cms_web/live/team_live.ex:475
 #: lib/kiln_cms_web/live/team_live.ex:567
@@ -1095,7 +1095,7 @@ msgid "Delete webhook"
 msgstr "Supprimer le webhook"
 
 #: lib/kiln_cms_web/live/automation_live.ex:291
-#: lib/kiln_cms_web/live/settings_live.ex:444
+#: lib/kiln_cms_web/live/settings_live.ex:458
 #: lib/kiln_cms_web/live/webhook_live.ex:343
 #, elixir-autogen, elixir-format
 msgid "Disable"
@@ -1162,7 +1162,7 @@ msgstr "Webhooks"
 msgid "Add block"
 msgstr "Ajouter un bloc"
 
-#: lib/kiln_cms_web/live/settings_live.ex:544
+#: lib/kiln_cms_web/live/settings_live.ex:558
 #, elixir-autogen, elixir-format
 msgid "All notifications are on by default. Uncheck any you'd rather not receive."
 msgstr "Toutes les notifications sont activées par défaut. Décochez celles que vous ne souhaitez pas recevoir."
@@ -1172,12 +1172,12 @@ msgstr "Toutes les notifications sont activées par défaut. Décochez celles qu
 msgid "An account with this email already exists. We've sent a link to that address - confirm it to finish linking this provider to your account."
 msgstr "Un compte associé à cette adresse e-mail existe déjà. Nous avons envoyé un lien à cette adresse — confirmez-le pour terminer la liaison de ce fournisseur à votre compte."
 
-#: lib/kiln_cms_web/live/settings_live.ex:567
+#: lib/kiln_cms_web/live/settings_live.ex:581
 #, elixir-autogen, elixir-format
 msgid "Changes requested — content I authored was returned to draft"
 msgstr "Modifications demandées — un contenu dont je suis l'auteur a été renvoyé en brouillon"
 
-#: lib/kiln_cms_web/live/settings_live.ex:219
+#: lib/kiln_cms_web/live/settings_live.ex:233
 #, elixir-autogen, elixir-format
 msgid "Couldn't save your preferences."
 msgstr "Enregistrement de vos préférences impossible."
@@ -1192,7 +1192,7 @@ msgstr "Créez votre première page ou votre premier article pour commencer."
 msgid "Custom block payload"
 msgstr "Charge utile de bloc personnalisé"
 
-#: lib/kiln_cms_web/live/settings_live.ex:579
+#: lib/kiln_cms_web/live/settings_live.ex:593
 #, elixir-autogen, elixir-format
 msgid "Download a copy of your account profile and notification preferences as JSON."
 msgstr "Téléchargez une copie de votre profil de compte et de vos préférences de notification au format JSON."
@@ -1202,7 +1202,7 @@ msgstr "Téléchargez une copie de votre profil de compte et de vos préférence
 msgid "Draft preview — not the published page"
 msgstr "Aperçu du brouillon — pas la page publiée"
 
-#: lib/kiln_cms_web/live/settings_live.ex:542
+#: lib/kiln_cms_web/live/settings_live.ex:556
 #, elixir-autogen, elixir-format
 msgid "Email notifications"
 msgstr "Notifications par e-mail"
@@ -1213,7 +1213,7 @@ msgid "Embedded HTML or external content"
 msgstr "HTML intégré ou contenu externe"
 
 #: lib/kiln_cms_web/live/account_live.ex:349
-#: lib/kiln_cms_web/live/settings_live.ex:588
+#: lib/kiln_cms_web/live/settings_live.ex:602
 #, elixir-autogen, elixir-format
 msgid "Export my data"
 msgstr "Exporter mes données"
@@ -1269,7 +1269,7 @@ msgstr "Aucun contenu pour le moment"
 msgid "No media yet"
 msgstr "Aucun média pour le moment"
 
-#: lib/kiln_cms_web/live/settings_live.ex:213
+#: lib/kiln_cms_web/live/settings_live.ex:227
 #, elixir-autogen, elixir-format
 msgid "Notification preferences saved."
 msgstr "Préférences de notification enregistrées."
@@ -1289,7 +1289,7 @@ msgstr "Image avec texte alternatif et légende"
 msgid "Portable Text rich content"
 msgstr "Contenu enrichi Portable Text"
 
-#: lib/kiln_cms_web/live/settings_live.ex:562
+#: lib/kiln_cms_web/live/settings_live.ex:576
 #, elixir-autogen, elixir-format
 msgid "Published — content I authored went live"
 msgstr "Publié — un contenu dont je suis l'auteur a été mis en ligne"
@@ -1311,7 +1311,7 @@ msgstr "Recharger la dernière version"
 msgid "Reloaded the latest version."
 msgstr "Dernière version rechargée."
 
-#: lib/kiln_cms_web/live/settings_live.ex:557
+#: lib/kiln_cms_web/live/settings_live.ex:571
 #, elixir-autogen, elixir-format
 msgid "Review requested — content I can approve was submitted for review"
 msgstr "Révision demandée — un contenu que je peux approuver a été soumis pour révision"
@@ -1326,7 +1326,7 @@ msgstr "Bloc de texte enrichi"
 msgid "Rich text editor"
 msgstr "Éditeur de texte enrichi"
 
-#: lib/kiln_cms_web/live/settings_live.ex:571
+#: lib/kiln_cms_web/live/settings_live.ex:585
 #, elixir-autogen, elixir-format
 msgid "Save preferences"
 msgstr "Enregistrer les préférences"
@@ -1352,7 +1352,7 @@ msgstr "Titre de section"
 #: lib/kiln_cms_web/live/content_editor_live.ex:7805
 #: lib/kiln_cms_web/live/funnel_builder_live.ex:224
 #: lib/kiln_cms_web/live/settings_live.ex:21
-#: lib/kiln_cms_web/live/settings_live.ex:325
+#: lib/kiln_cms_web/live/settings_live.ex:339
 #, elixir-autogen, elixir-format
 msgid "Settings"
 msgstr "Paramètres"
@@ -1373,7 +1373,7 @@ msgid "Visual separator between sections"
 msgstr "Séparateur visuel entre les sections"
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex:199
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:73
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:80
 #, elixir-autogen, elixir-format
 msgid "You are now signed in"
 msgstr "Vous êtes maintenant connecté"
@@ -1406,7 +1406,7 @@ msgid "You need admin access to view that page."
 msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
 
 #: lib/kiln_cms_web/live/account_live.ex:343
-#: lib/kiln_cms_web/live/settings_live.ex:577
+#: lib/kiln_cms_web/live/settings_live.ex:591
 #, elixir-autogen, elixir-format
 msgid "Your data"
 msgstr "Vos données"
@@ -1488,12 +1488,12 @@ msgstr "Parcourir le blogue"
 msgid "By %{author}"
 msgstr "Par %{author}"
 
-#: lib/kiln_cms_web/live/settings_live.ex:380
+#: lib/kiln_cms_web/live/settings_live.ex:394
 #, elixir-autogen, elixir-format
 msgid "Change password"
 msgstr "Changer le mot de passe"
 
-#: lib/kiln_cms_web/live/settings_live.ex:377
+#: lib/kiln_cms_web/live/settings_live.ex:391
 #, elixir-autogen, elixir-format
 msgid "Confirm new password"
 msgstr "Confirmer le nouveau mot de passe"
@@ -1511,7 +1511,7 @@ msgstr "Type de contenu"
 msgid "Couldn't autosave — check for errors"
 msgstr "Enregistrement automatique impossible — vérifiez les erreurs"
 
-#: lib/kiln_cms_web/live/settings_live.ex:269
+#: lib/kiln_cms_web/live/settings_live.ex:283
 #, elixir-autogen, elixir-format
 msgid "Couldn't change your password. Check your current password and try again."
 msgstr "Changement de mot de passe impossible. Vérifiez votre mot de passe actuel et réessayez."
@@ -1526,12 +1526,12 @@ msgstr "Suppression de ce champ impossible."
 msgid "Couldn't delete that item."
 msgstr "Suppression de cet élément impossible."
 
-#: lib/kiln_cms_web/live/settings_live.ex:241
+#: lib/kiln_cms_web/live/settings_live.ex:255
 #, elixir-autogen, elixir-format
 msgid "Couldn't update your profile."
 msgstr "Mise à jour de votre profil impossible."
 
-#: lib/kiln_cms_web/live/settings_live.ex:365
+#: lib/kiln_cms_web/live/settings_live.ex:379
 #, elixir-autogen, elixir-format
 msgid "Current password"
 msgstr "Mot de passe actuel"
@@ -1571,7 +1571,7 @@ msgstr "Supprimer ce bloc ? Cette action est irréversible."
 msgid "Delete this field? Existing values stop being delivered."
 msgstr "Supprimer ce champ ? Les valeurs existantes ne seront plus diffusées."
 
-#: lib/kiln_cms_web/live/settings_live.ex:344
+#: lib/kiln_cms_web/live/settings_live.ex:358
 #, elixir-autogen, elixir-format
 msgid "Display name"
 msgstr "Nom d'affichage"
@@ -1583,7 +1583,7 @@ msgstr "Nom d'affichage"
 msgid "Draft"
 msgstr "Brouillon"
 
-#: lib/kiln_cms_web/live/settings_live.ex:352
+#: lib/kiln_cms_web/live/settings_live.ex:366
 #, elixir-autogen, elixir-format
 msgid "Enter your current password, then choose a new one (at least 8 characters)."
 msgstr "Saisissez votre mot de passe actuel, puis choisissez-en un nouveau (au moins 8 caractères)."
@@ -1686,7 +1686,7 @@ msgstr "Derniers articles."
 msgid "Machine name"
 msgstr "Nom machine"
 
-#: lib/kiln_cms_web/live/settings_live.ex:327
+#: lib/kiln_cms_web/live/settings_live.ex:341
 #, elixir-autogen, elixir-format
 msgid "Manage your profile, password, and notification preferences."
 msgstr "Gérez votre profil, votre mot de passe et vos préférences de notification."
@@ -1717,7 +1717,7 @@ msgstr "Monter le bloc"
 msgid "Moved block to position %{pos} of %{count}"
 msgstr "Bloc déplacé à la position %{pos} sur %{count}"
 
-#: lib/kiln_cms_web/live/settings_live.ex:371
+#: lib/kiln_cms_web/live/settings_live.ex:385
 #, elixir-autogen, elixir-format
 msgid "New password"
 msgstr "Nouveau mot de passe"
@@ -1772,12 +1772,12 @@ msgstr "Pages"
 msgid "Pagination"
 msgstr "Pagination"
 
-#: lib/kiln_cms_web/live/settings_live.ex:350
+#: lib/kiln_cms_web/live/settings_live.ex:364
 #, elixir-autogen, elixir-format
 msgid "Password"
 msgstr "Mot de passe"
 
-#: lib/kiln_cms_web/live/settings_live.ex:261
+#: lib/kiln_cms_web/live/settings_live.ex:275
 #, elixir-autogen, elixir-format
 msgid "Password changed."
 msgstr "Mot de passe changé."
@@ -1806,12 +1806,12 @@ msgstr "Position"
 msgid "Posts"
 msgstr "Articles"
 
-#: lib/kiln_cms_web/live/settings_live.ex:332
+#: lib/kiln_cms_web/live/settings_live.ex:346
 #, elixir-autogen, elixir-format
 msgid "Profile"
 msgstr "Profil"
 
-#: lib/kiln_cms_web/live/settings_live.ex:235
+#: lib/kiln_cms_web/live/settings_live.ex:249
 #, elixir-autogen, elixir-format
 msgid "Profile updated."
 msgstr "Profil mis à jour."
@@ -1852,7 +1852,7 @@ msgstr "Retirer"
 msgid "Required"
 msgstr "Obligatoire"
 
-#: lib/kiln_cms_web/live/settings_live.ex:345
+#: lib/kiln_cms_web/live/settings_live.ex:359
 #, elixir-autogen, elixir-format
 msgid "Save profile"
 msgstr "Enregistrer le profil"
@@ -1968,7 +1968,7 @@ msgstr "En cours…"
 msgid "You're signed in as a viewer, which can read published content but not edit. Ask an administrator to upgrade your account to gain editor access."
 msgstr "Vous êtes connecté en tant que lecteur : vous pouvez lire le contenu publié mais pas le modifier. Demandez à un administrateur de mettre à niveau votre compte pour obtenir un accès éditeur."
 
-#: lib/kiln_cms_web/live/settings_live.ex:334
+#: lib/kiln_cms_web/live/settings_live.ex:348
 #, elixir-autogen, elixir-format
 msgid "Your display name is used as the author byline on content you publish."
 msgstr "Votre nom d'affichage sert de signature d'auteur sur le contenu que vous publiez."
@@ -2824,7 +2824,7 @@ msgstr "catégorie"
 msgid "tag"
 msgstr "étiquette"
 
-#: lib/kiln_cms_web/live/governance_live.ex:219
+#: lib/kiln_cms_web/live/governance_live.ex:241
 #, elixir-autogen, elixir-format
 msgid "%{count} edit(s) since the last anchor — covered at the next publish."
 msgstr "%{count} modification(s) depuis le dernier ancrage — prises en compte à la prochaine publication."
@@ -2864,7 +2864,7 @@ msgstr "%{count} soumissions"
 msgid "%{count} submissions this week"
 msgstr "%{count} soumissions cette semaine"
 
-#: lib/kiln_cms_web/live/settings_live.ex:416
+#: lib/kiln_cms_web/live/settings_live.ex:430
 #, elixir-autogen, elixir-format
 msgid "%{count} unused recovery codes remain."
 msgstr "Il reste %{count} codes de récupération inutilisés."
@@ -2925,7 +2925,7 @@ msgstr "(non défini)"
 msgid "301s from retired URLs. Rows appear automatically when a published slug is renamed; add manual ones for legacy paths. Destinations follow the target record's current URL."
 msgstr "Redirections 301 depuis d'anciennes URL. Des lignes apparaissent automatiquement lorsqu'un slug publié est renommé ; ajoutez-en manuellement pour les chemins hérités. Les destinations suivent l'URL actuelle de l'enregistrement cible."
 
-#: lib/kiln_cms_web/live/settings_live.ex:470
+#: lib/kiln_cms_web/live/settings_live.ex:484
 #, elixir-autogen, elixir-format
 msgid "6-digit code"
 msgstr "Code à 6 chiffres"
@@ -2978,7 +2978,7 @@ msgstr "Clés API · %{count} plugins actifs"
 msgid "Access"
 msgstr "Accès"
 
-#: lib/kiln_cms_web/live/governance_live.ex:304
+#: lib/kiln_cms_web/live/governance_live.ex:326
 #, elixir-autogen, elixir-format
 msgid "Action"
 msgstr "Action"
@@ -3009,7 +3009,7 @@ msgstr "Ajouter un formulaire"
 msgid "Add a manual redirect"
 msgstr "Ajouter une redirection manuelle"
 
-#: lib/kiln_cms_web/live/settings_live.ex:534
+#: lib/kiln_cms_web/live/settings_live.ex:548
 #, elixir-autogen, elixir-format
 msgid "Add a passkey"
 msgstr "Ajouter une clé d'accès"
@@ -3065,7 +3065,7 @@ msgstr "Ajouter une étape"
 msgid "Add subscriber"
 msgstr "Ajouter un abonné"
 
-#: lib/kiln_cms_web/live/settings_live.ex:503
+#: lib/kiln_cms_web/live/settings_live.ex:517
 #, elixir-autogen, elixir-format
 msgid "Added %{date}"
 msgstr "Ajouté le %{date}"
@@ -3112,7 +3112,7 @@ msgstr "Rien à signaler."
 msgid "Analytics & search"
 msgstr "Statistiques et recherche"
 
-#: lib/kiln_cms_web/live/governance_live.ex:115
+#: lib/kiln_cms_web/live/governance_live.ex:118
 #, elixir-autogen, elixir-format
 msgid "Anchored history verified — chain intact, signature valid"
 msgstr "Historique ancré vérifié — chaîne intacte, signature valide"
@@ -3142,7 +3142,7 @@ msgstr "Application des renommages…"
 msgid "Attempts"
 msgstr "Tentatives"
 
-#: lib/kiln_cms_web/live/governance_live.ex:174
+#: lib/kiln_cms_web/live/governance_live.ex:196
 #, elixir-autogen, elixir-format
 msgid "Audit trail, consent records, and point-in-time history for your content."
 msgstr "Piste d'audit, registres de consentement et historique à un instant donné pour votre contenu."
@@ -3188,7 +3188,7 @@ msgid "Calendar"
 msgstr "Calendrier"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex:269
-#: lib/kiln_cms_web/live/governance_live.ex:306
+#: lib/kiln_cms_web/live/governance_live.ex:328
 #, elixir-autogen, elixir-format
 msgid "Changed"
 msgstr "Modifié"
@@ -3239,7 +3239,7 @@ msgid "Configure"
 msgstr "Configurer"
 
 #: lib/kiln_cms_web/live/newsletter_live.ex:406
-#: lib/kiln_cms_web/live/settings_live.ex:472
+#: lib/kiln_cms_web/live/settings_live.ex:486
 #, elixir-autogen, elixir-format
 msgid "Confirm"
 msgstr "Confirmer"
@@ -3254,7 +3254,7 @@ msgstr "Confirmations"
 msgid "Consent recorded."
 msgstr "Consentement enregistré."
 
-#: lib/kiln_cms_web/live/governance_live.ex:242
+#: lib/kiln_cms_web/live/governance_live.ex:264
 #, elixir-autogen, elixir-format
 msgid "Consent records"
 msgstr "Registres de consentement"
@@ -3360,7 +3360,7 @@ msgstr "Suppression de cette adresse impossible."
 msgid "Couldn't remove that member."
 msgstr "Retrait de ce membre impossible."
 
-#: lib/kiln_cms_web/live/settings_live.ex:96
+#: lib/kiln_cms_web/live/settings_live.ex:100
 #, elixir-autogen, elixir-format
 msgid "Couldn't remove that passkey."
 msgstr "Suppression de cette clé d'accès impossible."
@@ -3385,7 +3385,7 @@ msgstr "Enregistrement impossible."
 msgid "Couldn't set the focal point."
 msgstr "Définition du point focal impossible."
 
-#: lib/kiln_cms_web/live/settings_live.ex:122
+#: lib/kiln_cms_web/live/settings_live.ex:126
 #, elixir-autogen, elixir-format
 msgid "Couldn't start two-factor setup."
 msgstr "Démarrage de la configuration à deux facteurs impossible."
@@ -3395,7 +3395,7 @@ msgstr "Démarrage de la configuration à deux facteurs impossible."
 msgid "Couldn't update that rule."
 msgstr "Mise à jour de cette règle impossible."
 
-#: lib/kiln_cms_web/live/settings_live.ex:71
+#: lib/kiln_cms_web/live/settings_live.ex:75
 #, elixir-autogen, elixir-format
 msgid "Couldn't verify that passkey — try again."
 msgstr "Vérification de cette clé d'accès impossible — réessayez."
@@ -3566,7 +3566,7 @@ msgstr "Dupliquer le champ %{label}"
 msgid "Duplicate form"
 msgstr "Dupliquer le formulaire"
 
-#: lib/kiln_cms_web/live/settings_live.ex:400
+#: lib/kiln_cms_web/live/settings_live.ex:414
 #, elixir-autogen, elixir-format
 msgid "Each code signs you in once if you lose your authenticator."
 msgstr "Chaque code vous connecte une seule fois si vous perdez votre application d'authentification."
@@ -3658,7 +3658,7 @@ msgstr "Code d'intégration copié dans le presse-papiers."
 msgid "Embed on another site"
 msgstr "Intégrer sur un autre site"
 
-#: lib/kiln_cms_web/live/settings_live.ex:481
+#: lib/kiln_cms_web/live/settings_live.ex:495
 #, elixir-autogen, elixir-format
 msgid "Enable two-factor authentication"
 msgstr "Activer l'authentification à deux facteurs"
@@ -3673,12 +3673,12 @@ msgstr "Activé"
 msgid "Endpoint"
 msgstr "Point de terminaison"
 
-#: lib/kiln_cms_web/live/settings_live.ex:431
+#: lib/kiln_cms_web/live/settings_live.ex:445
 #, elixir-autogen, elixir-format
 msgid "Enter a current code to generate new recovery codes"
 msgstr "Saisissez un code actuel pour générer de nouveaux codes de récupération"
 
-#: lib/kiln_cms_web/live/settings_live.ex:442
+#: lib/kiln_cms_web/live/settings_live.ex:456
 #, elixir-autogen, elixir-format
 msgid "Enter a current code to turn it off"
 msgstr "Saisissez un code actuel pour la désactiver"
@@ -3688,7 +3688,7 @@ msgstr "Saisissez un code actuel pour la désactiver"
 msgid "Enter a path starting with /."
 msgstr "Saisissez un chemin commençant par /."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:136
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:153
 #, elixir-autogen, elixir-format
 msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
 msgstr "Saisissez le code à 6 chiffres de votre application d'authentification, ou l'un de vos codes de récupération."
@@ -3738,12 +3738,12 @@ msgstr "Expiration"
 msgid "Expires in"
 msgstr "Expire dans"
 
-#: lib/kiln_cms_web/live/governance_live.ex:236
+#: lib/kiln_cms_web/live/governance_live.ex:258
 #, elixir-autogen, elixir-format
 msgid "Export trail (CSV)"
 msgstr "Exporter la piste d'audit (CSV)"
 
-#: lib/kiln_cms_web/live/governance_live.ex:229
+#: lib/kiln_cms_web/live/governance_live.ex:251
 #, elixir-autogen, elixir-format
 msgid "Export trail (JSON)"
 msgstr "Exporter la piste d'audit (JSON)"
@@ -3867,7 +3867,7 @@ msgstr "Général"
 
 #: lib/kiln_cms_web/components/layouts.ex:640
 #: lib/kiln_cms_web/live/governance_live.ex:15
-#: lib/kiln_cms_web/live/governance_live.ex:172
+#: lib/kiln_cms_web/live/governance_live.ex:194
 #, elixir-autogen, elixir-format
 msgid "Governance"
 msgstr "Gouvernance"
@@ -3877,7 +3877,7 @@ msgstr "Gouvernance"
 msgid "Grant headless / third-party access to the delivery API and the MCP authoring endpoint. A key acts as its owning user; read-only keys can never modify content, while read + write keys can author content within the owner's role. For public-only access, mint a read-only key on a viewer account; for an LLM author, mint a read + write key on an editor account."
 msgstr "Accordez un accès headless ou tiers à l'API de diffusion et au point de terminaison d'écriture MCP. Une clé agit au nom de l'utilisateur qui la détient ; les clés en lecture seule ne peuvent jamais modifier le contenu, tandis que les clés lecture + écriture permettent de créer du contenu dans les limites du rôle du détenteur. Pour un accès public uniquement, générez une clé en lecture seule sur un compte lecteur ; pour un auteur LLM, générez une clé lecture + écriture sur un compte éditeur."
 
-#: lib/kiln_cms_web/live/governance_live.ex:280
+#: lib/kiln_cms_web/live/governance_live.ex:302
 #, elixir-autogen, elixir-format
 msgid "Grantor"
 msgstr "Auteur de l'autorisation"
@@ -3887,7 +3887,7 @@ msgstr "Auteur de l'autorisation"
 msgid "GraphQL API reference"
 msgstr "Référence de l'API GraphQL"
 
-#: lib/kiln_cms_web/live/governance_live.ex:142
+#: lib/kiln_cms_web/live/governance_live.ex:164
 #, elixir-autogen, elixir-format
 msgid "HISTORY TAMPERED: %{reason}"
 msgstr "HISTORIQUE ALTÉRÉ : %{reason}"
@@ -3917,12 +3917,12 @@ msgstr "Texte du titre"
 msgid "Headless consumer guide"
 msgstr "Guide du consommateur headless"
 
-#: lib/kiln_cms_web/live/governance_live.ex:121
+#: lib/kiln_cms_web/live/governance_live.ex:143
 #, elixir-autogen, elixir-format
 msgid "History intact (anchor unsigned — no signing key configured)"
 msgstr "Historique intact (ancrage non signé — aucune clé de signature configurée)"
 
-#: lib/kiln_cms_web/live/settings_live.ex:406
+#: lib/kiln_cms_web/live/settings_live.ex:420
 #, elixir-autogen, elixir-format
 msgid "I've saved them"
 msgstr "Je les ai enregistrés"
@@ -3974,7 +3974,7 @@ msgstr "Clés"
 msgid "Keys this field's value in submissions — renaming orphans old entries."
 msgstr "Sert de clé à la valeur de ce champ dans les soumissions — le renommer rend orphelines les anciennes entrées."
 
-#: lib/kiln_cms_web/live/governance_live.ex:270
+#: lib/kiln_cms_web/live/governance_live.ex:292
 #, elixir-autogen, elixir-format
 msgid "Kind"
 msgstr "Type"
@@ -4033,7 +4033,7 @@ msgstr "lun."
 msgid "More surfaces"
 msgstr "Autres surfaces"
 
-#: lib/kiln_cms_web/live/settings_live.ex:531
+#: lib/kiln_cms_web/live/settings_live.ex:545
 #, elixir-autogen, elixir-format
 msgid "Name (e.g. \"MacBook Touch ID\")"
 msgstr "Nom (par ex. « Touch ID du MacBook »)"
@@ -4051,7 +4051,7 @@ msgstr "Nom (facultatif)"
 msgid "New"
 msgstr "Nouveau"
 
-#: lib/kiln_cms_web/live/settings_live.ex:163
+#: lib/kiln_cms_web/live/settings_live.ex:177
 #, elixir-autogen, elixir-format
 msgid "New recovery codes generated — the old ones no longer work."
 msgstr "Nouveaux codes de récupération générés — les anciens ne fonctionnent plus."
@@ -4099,12 +4099,12 @@ msgstr "Aucune règle d'automatisation pour le moment."
 msgid "No campaigns yet."
 msgstr "Aucune campagne pour le moment."
 
-#: lib/kiln_cms_web/live/governance_live.ex:244
+#: lib/kiln_cms_web/live/governance_live.ex:266
 #, elixir-autogen, elixir-format
 msgid "No consent recorded for this content."
 msgstr "Aucun consentement enregistré pour ce contenu."
 
-#: lib/kiln_cms_web/live/governance_live.ex:178
+#: lib/kiln_cms_web/live/governance_live.ex:200
 #: lib/kiln_cms_web/live/translations_live.ex:155
 #, elixir-autogen, elixir-format
 msgid "No content yet."
@@ -4176,7 +4176,7 @@ msgstr "Aucun contenu correspondant à modifier."
 msgid "No suppressed addresses."
 msgstr "Aucune adresse bloquée."
 
-#: lib/kiln_cms_web/live/governance_live.ex:297
+#: lib/kiln_cms_web/live/governance_live.ex:319
 #, elixir-autogen, elixir-format
 msgid "No versions recorded."
 msgstr "Aucune version enregistrée."
@@ -4191,12 +4191,12 @@ msgstr "Aucun pour le moment."
 msgid "Not sure which surface to use? Start with the consumer guide:"
 msgstr "Vous ne savez pas quelle surface utiliser ? Commencez par le guide du consommateur :"
 
-#: lib/kiln_cms_web/live/governance_live.ex:135
+#: lib/kiln_cms_web/live/governance_live.ex:157
 #, elixir-autogen, elixir-format
 msgid "Not yet anchored — anchors are minted at publish"
 msgstr "Pas encore ancré — les ancrages sont créés à la publication"
 
-#: lib/kiln_cms_web/live/governance_live.ex:284
+#: lib/kiln_cms_web/live/governance_live.ex:306
 #, elixir-autogen, elixir-format
 msgid "Note"
 msgstr "Note"
@@ -4315,22 +4315,22 @@ msgstr "Pages, articles et types personnalisés de votre site."
 msgid "Paragraph text"
 msgstr "Texte du paragraphe"
 
-#: lib/kiln_cms_web/live/settings_live.ex:532
+#: lib/kiln_cms_web/live/settings_live.ex:546
 #, elixir-autogen, elixir-format
 msgid "Passkey"
 msgstr "Clé d'accès"
 
-#: lib/kiln_cms_web/live/settings_live.ex:67
+#: lib/kiln_cms_web/live/settings_live.ex:71
 #, elixir-autogen, elixir-format
 msgid "Passkey added — you can sign in with it now."
 msgstr "Clé d'accès ajoutée — vous pouvez désormais l'utiliser pour vous connecter."
 
-#: lib/kiln_cms_web/live/settings_live.ex:94
+#: lib/kiln_cms_web/live/settings_live.ex:98
 #, elixir-autogen, elixir-format
 msgid "Passkey removed."
 msgstr "Clé d'accès supprimée."
 
-#: lib/kiln_cms_web/live/settings_live.ex:82
+#: lib/kiln_cms_web/live/settings_live.ex:86
 #, elixir-autogen, elixir-format
 msgid "Passkey setup was cancelled or isn't supported by this browser."
 msgstr "La configuration de la clé d'accès a été annulée ou n'est pas prise en charge par ce navigateur."
@@ -4340,7 +4340,7 @@ msgstr "La configuration de la clé d'accès a été annulée ou n'est pas prise
 msgid "Passkey sign-in failed. Try another method."
 msgstr "La connexion par clé d'accès a échoué. Essayez une autre méthode."
 
-#: lib/kiln_cms_web/live/settings_live.ex:487
+#: lib/kiln_cms_web/live/settings_live.ex:501
 #, elixir-autogen, elixir-format
 msgid "Passkeys"
 msgstr "Clés d'accès"
@@ -4377,7 +4377,7 @@ msgstr "Tester"
 msgid "Placeholder"
 msgstr "Texte indicatif"
 
-#: lib/kiln_cms_web/live/governance_live.ex:307
+#: lib/kiln_cms_web/live/governance_live.ex:329
 #, elixir-autogen, elixir-format
 msgid "Point in time"
 msgstr "Instant"
@@ -4402,7 +4402,7 @@ msgstr "Mois précédent"
 msgid "Primary"
 msgstr "Navigation principale"
 
-#: lib/kiln_cms_web/live/settings_live.ex:460
+#: lib/kiln_cms_web/live/settings_live.ex:474
 #, elixir-autogen, elixir-format
 msgid "Provisioning URI"
 msgstr "URI de provisionnement"
@@ -4482,12 +4482,12 @@ msgstr "Échecs récents"
 msgid "Recent permanent failures and the addresses KilnCMS has stopped mailing as a result."
 msgstr "Échecs permanents récents et adresses auxquelles KilnCMS a cessé d'envoyer des e-mails en conséquence."
 
-#: lib/kiln_cms_web/live/governance_live.ex:261
+#: lib/kiln_cms_web/live/governance_live.ex:283
 #, elixir-autogen, elixir-format
 msgid "Record a consent"
 msgstr "Enregistrer un consentement"
 
-#: lib/kiln_cms_web/live/governance_live.ex:288
+#: lib/kiln_cms_web/live/governance_live.ex:310
 #, elixir-autogen, elixir-format
 msgid "Record consent"
 msgstr "Enregistrer le consentement"
@@ -4519,12 +4519,12 @@ msgstr "Redirection depuis %{path} créée."
 msgid "Redirects"
 msgstr "Redirections"
 
-#: lib/kiln_cms_web/live/governance_live.ex:276
+#: lib/kiln_cms_web/live/governance_live.ex:298
 #, elixir-autogen, elixir-format
 msgid "Reference (ticket / document id)"
 msgstr "Référence (ticket / identifiant de document)"
 
-#: lib/kiln_cms_web/live/settings_live.ex:433
+#: lib/kiln_cms_web/live/settings_live.ex:447
 #, elixir-autogen, elixir-format
 msgid "Regenerate"
 msgstr "Régénérer"
@@ -4554,7 +4554,7 @@ msgstr "Supprimer la colonne"
 msgid "Remove member"
 msgstr "Retirer le membre"
 
-#: lib/kiln_cms_web/live/settings_live.ex:518
+#: lib/kiln_cms_web/live/settings_live.ex:532
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
 msgstr "Supprimer la clé d'accès"
@@ -4574,7 +4574,7 @@ msgstr "Supprimer cette colonne et ses blocs ?"
 msgid "Remove this member from the site?"
 msgstr "Retirer ce membre du site ?"
 
-#: lib/kiln_cms_web/live/settings_live.ex:517
+#: lib/kiln_cms_web/live/settings_live.ex:531
 #, elixir-autogen, elixir-format
 msgid "Remove this passkey? You can no longer sign in with it."
 msgstr "Supprimer cette clé d'accès ? Vous ne pourrez plus l'utiliser pour vous connecter."
@@ -4599,7 +4599,7 @@ msgstr "Renommer un slug publié en enregistre une automatiquement."
 msgid "Reorder field %{label}"
 msgstr "Réordonner le champ %{label}"
 
-#: lib/kiln_cms_web/live/settings_live.ex:387
+#: lib/kiln_cms_web/live/settings_live.ex:401
 #, elixir-autogen, elixir-format
 msgid "Require a time-based code from an authenticator app (Google Authenticator, 1Password, …) as a second factor when you sign in."
 msgstr "Exiger un code temporaire issu d'une application d'authentification (Google Authenticator, 1Password, …) comme second facteur lors de la connexion."
@@ -4682,7 +4682,7 @@ msgstr "sam."
 msgid "Save failed"
 msgstr "Échec de l'enregistrement"
 
-#: lib/kiln_cms_web/live/settings_live.ex:450
+#: lib/kiln_cms_web/live/settings_live.ex:464
 #, elixir-autogen, elixir-format
 msgid "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
 msgstr "Scannez le QR code (ou ajoutez la clé) dans votre application d'authentification, puis saisissez le code à 6 chiffres pour confirmer."
@@ -4780,7 +4780,7 @@ msgstr "Définir le nom"
 msgid "Settings & keys"
 msgstr "Paramètres et clés"
 
-#: lib/kiln_cms_web/live/settings_live.ex:456
+#: lib/kiln_cms_web/live/settings_live.ex:470
 #, elixir-autogen, elixir-format
 msgid "Setup key"
 msgstr "Clé de configuration"
@@ -4810,7 +4810,7 @@ msgstr "Affiché sur la page de remerciement après une soumission réussie."
 msgid "Side-by-side columns holding nested blocks"
 msgstr "Colonnes côte à côte contenant des blocs imbriqués"
 
-#: lib/kiln_cms_web/live/settings_live.ex:489
+#: lib/kiln_cms_web/live/settings_live.ex:503
 #, elixir-autogen, elixir-format
 msgid "Sign in with your device's fingerprint, face, or PIN instead of a password. A passkey verifies you on the device, so it counts as two factors on its own."
 msgstr "Connectez-vous avec l'empreinte digitale, le visage ou le code PIN de votre appareil au lieu d'un mot de passe. Une clé d'accès vous authentifie sur l'appareil, elle compte donc à elle seule pour deux facteurs."
@@ -4978,18 +4978,18 @@ msgstr "Test mis en file d'attente — voir les envois ci-dessous."
 msgid "Thanks — your subscription to %{email} is confirmed."
 msgstr "Merci — votre abonnement pour %{email} est confirmé."
 
-#: lib/kiln_cms_web/live/settings_live.ex:196
+#: lib/kiln_cms_web/live/settings_live.ex:210
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — 2FA is still on."
 msgstr "Ce code n'est pas valide — l'authentification à deux facteurs reste activée."
 
-#: lib/kiln_cms_web/live/settings_live.ex:147
-#: lib/kiln_cms_web/live/settings_live.ex:171
+#: lib/kiln_cms_web/live/settings_live.ex:161
+#: lib/kiln_cms_web/live/settings_live.ex:185
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — try again."
 msgstr "Ce code n'est pas valide — réessayez."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:100
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:107
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Try again."
 msgstr "Ce code n'est pas valide. Réessayez."
@@ -5132,7 +5132,7 @@ msgstr "Aujourd'hui"
 msgid "Tokens: %{tokens}, [field:<name>]. Composes the last URL segment; blank = derive from the SEO keyphrase or title."
 msgstr "Jetons : %{tokens}, [field:<name>]. Compose le dernier segment d'URL ; vide = dérivé de l'expression clé SEO ou du titre."
 
-#: lib/kiln_cms_web/live/governance_live.ex:195
+#: lib/kiln_cms_web/live/governance_live.ex:217
 #, elixir-autogen, elixir-format
 msgid "Trail"
 msgstr "Piste d'audit"
@@ -5152,24 +5152,24 @@ msgstr "Traductions"
 msgid "Tue"
 msgstr "mar."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:131
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:135
-#: lib/kiln_cms_web/live/settings_live.ex:385
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:148
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:152
+#: lib/kiln_cms_web/live/settings_live.ex:399
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
 msgstr "Authentification à deux facteurs"
 
-#: lib/kiln_cms_web/live/settings_live.ex:189
+#: lib/kiln_cms_web/live/settings_live.ex:203
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication is now off."
 msgstr "L'authentification à deux facteurs est désormais désactivée."
 
-#: lib/kiln_cms_web/live/settings_live.ex:140
+#: lib/kiln_cms_web/live/settings_live.ex:154
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication is now on."
 msgstr "L'authentification à deux facteurs est désormais activée."
 
-#: lib/kiln_cms_web/live/settings_live.ex:413
+#: lib/kiln_cms_web/live/settings_live.ex:427
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication is on."
 msgstr "L'authentification à deux facteurs est activée."
@@ -5227,17 +5227,17 @@ msgstr "Utilisez « true » pour cocher la case par défaut."
 msgid "User"
 msgstr "Utilisateur"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:148
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:165
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr "Vérifier"
 
-#: lib/kiln_cms_web/live/governance_live.ex:295
+#: lib/kiln_cms_web/live/governance_live.ex:317
 #, elixir-autogen, elixir-format
 msgid "Version timeline"
 msgstr "Chronologie des versions"
 
-#: lib/kiln_cms_web/live/governance_live.ex:358
+#: lib/kiln_cms_web/live/governance_live.ex:380
 #, elixir-autogen, elixir-format
 msgid "View as of then"
 msgstr "Voir tel qu'à cette date"
@@ -5259,14 +5259,14 @@ msgstr "Mis en ligne"
 
 #: lib/kiln_cms_web/live/automation_live.ex:276
 #: lib/kiln_cms_web/live/automation_live.ex:365
-#: lib/kiln_cms_web/live/governance_live.ex:303
+#: lib/kiln_cms_web/live/governance_live.ex:325
 #: lib/kiln_cms_web/live/newsletter_live.ex:433
 #: lib/kiln_cms_web/live/webhook_live.ex:419
 #, elixir-autogen, elixir-format
 msgid "When"
 msgstr "Quand"
 
-#: lib/kiln_cms_web/live/governance_live.ex:305
+#: lib/kiln_cms_web/live/governance_live.ex:327
 #, elixir-autogen, elixir-format
 msgid "Who"
 msgstr "Qui"
@@ -5296,7 +5296,7 @@ msgstr "Vous ne recevrez plus de newsletters à l'adresse %{email}."
 msgid "You've been unsubscribed"
 msgstr "Vous avez été désabonné"
 
-#: lib/kiln_cms_web/live/settings_live.ex:537
+#: lib/kiln_cms_web/live/settings_live.ex:551
 #, elixir-autogen, elixir-format
 msgid "Your browser will prompt you to confirm with this device's screen lock."
 msgstr "Votre navigateur vous demandera de confirmer avec le verrouillage d'écran de cet appareil."
@@ -5311,7 +5311,7 @@ msgstr "Vos formulaires"
 msgid "Your name"
 msgstr "Votre nom"
 
-#: lib/kiln_cms_web/live/settings_live.ex:397
+#: lib/kiln_cms_web/live/settings_live.ex:411
 #, elixir-autogen, elixir-format
 msgid "Your recovery codes — save them now, they won't be shown again."
 msgstr "Vos codes de récupération — enregistrez-les maintenant, ils ne seront plus affichés."
@@ -5321,7 +5321,7 @@ msgstr "Vos codes de récupération — enregistrez-les maintenant, ils ne seron
 msgid "archived"
 msgstr "archivé"
 
-#: lib/kiln_cms_web/live/governance_live.ex:251
+#: lib/kiln_cms_web/live/governance_live.ex:273
 #, elixir-autogen, elixir-format
 msgid "by"
 msgstr "par"
@@ -5393,7 +5393,7 @@ msgstr "en révision"
 msgid "items in the library"
 msgstr "éléments dans la bibliothèque"
 
-#: lib/kiln_cms_web/live/settings_live.ex:507
+#: lib/kiln_cms_web/live/settings_live.ex:521
 #, elixir-autogen, elixir-format
 msgid "last used %{date}"
 msgstr "dernière utilisation le %{date}"
@@ -7008,7 +7008,7 @@ msgstr "Que doit faire le modèle ?"
 msgid "Writes new prose from your instruction. Describe what this section should say."
 msgstr "Rédige un nouveau texte à partir de votre consigne. Décrivez ce que cette section doit dire."
 
-#: lib/kiln_cms_web/live/governance_live.ex:127
+#: lib/kiln_cms_web/live/governance_live.ex:149
 #, elixir-autogen, elixir-format
 msgid "History intact; signed by a key we no longer hold — add its public half to KILN_PROVENANCE_RETIRED_KEY_FILES to re-check"
 msgstr "Historique intact ; signé avec une clé que nous ne détenons plus : ajoutez sa moitié publique à KILN_PROVENANCE_RETIRED_KEY_FILES pour revérifier"
@@ -7245,7 +7245,7 @@ msgstr "Utilisée par aucun document publié."
 msgid "and %{count} more"
 msgstr "et %{count} de plus"
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex:97
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex:104
 #, elixir-autogen, elixir-format
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr "Trop de tentatives. Patientez quelques minutes et réessayez."
@@ -7464,7 +7464,7 @@ msgstr "Supprimer l'image"
 msgid "Several images with captions, fired as ImageGallery structured data"
 msgstr "Plusieurs images avec légendes, publiées en données structurées ImageGallery"
 
-#: lib/kiln_cms_web/live/settings_live.ex:603
+#: lib/kiln_cms_web/live/settings_live.ex:617
 #, elixir-autogen, elixir-format
 msgid "Too many attempts — try again in %{seconds} seconds."
 msgstr "Trop de tentatives — réessayez dans %{seconds} secondes."
@@ -9119,6 +9119,11 @@ msgstr "L’avertissement obligatoire est absent. Ajoutez-le mot pour mot : « %
 #, elixir-autogen, elixir-format
 msgid "%{type} (unknown)"
 msgstr "%{type} (inconnu)"
+
+#: lib/kiln_cms_web/live/governance_live.ex:132
+#, elixir-autogen, elixir-format
+msgid "Attested only to version %{attested} — versions %{next}-%{head} are anchored but not attested"
+msgstr "Attesté seulement jusqu'à la version %{attested} : les versions %{next}-%{head} sont ancrées mais non attestées"
 
 #: lib/kiln_cms_web/controllers/manifest_controller.ex:122
 #, elixir-autogen, elixir-format

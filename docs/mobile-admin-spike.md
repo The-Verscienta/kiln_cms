@@ -189,13 +189,13 @@ meantime for GraphQL.
    error. `GraphqlSocket` and `BridgeSocket` both already carry `:uri` for
    exactly this reason and are the pattern to copy.
 
-3. **A `return_to_draft` endpoint.** The JSON:API surface routes
-   `submit_for_review`, `publish` and `unpublish` as PATCH endpoints, and
-   GraphQL exposes `submit_entry_for_review` / `publish_entry` /
-   `unpublish_entry`. **`return_to_draft` is exposed on neither.** Half of the
-   approve/return pair is LiveView-only, so a native or headless review client
-   cannot send anything back to its author. Filed as
-   [#626](https://github.com/The-Verscienta/kiln_cms/issues/626).
+3. ~~**A `return_to_draft` endpoint.**~~ **Done** —
+   [#626](https://github.com/The-Verscienta/kiln_cms/issues/626). Half of the
+   approve/return pair used to be LiveView-only, so a native or headless review
+   client could approve but could not send anything back to its author.
+   `PATCH /:id/return-to-draft` now exists on both the compiled types and
+   `/api/json/entries`, and GraphQL exposes `returnPostToDraft` /
+   `returnPageToDraft` / `returnEntryToDraft`. It is admin-gated, like `publish`.
 
 Item 3 also matters for the non-LVN route: if a native app is ever genuinely
 wanted, the cheaper path is a plain SwiftUI/Compose app over the existing
@@ -274,8 +274,9 @@ Honest limits. Each is filed, so closing #65 doesn't bury them:
    `phoenix_live_view ~> 1.2`, plus a released Jetpack client. Until both exist,
    this stays closed.
 4. **If a native app becomes a hard requirement before then**, build it over the
-   JSON:API with the #37 bearer token rather than LVN — and land the
-   `return_to_draft` endpoint first ([§4](#4-what-a-native-client-would-actually-need), item 3).
+   JSON:API with the #37 bearer token rather than LVN. The `return_to_draft`
+   endpoint that used to block this has landed
+   ([§4](#4-what-a-native-client-would-actually-need), item 3).
 
 ## Sources
 

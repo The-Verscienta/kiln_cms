@@ -13,7 +13,7 @@ defmodule KilnCMSWeb.SettingsLive do
   alias KilnCMS.Accounts.WebAuthn
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     user = socket.assigns.current_user
 
     {:ok,
@@ -23,6 +23,10 @@ defmodule KilnCMSWeb.SettingsLive do
      |> assign(:profile_form, profile_form(user))
      |> assign(:password_form, password_form(user))
      |> assign(:totp_enabled?, Accounts.totp_enabled?(user))
+     # Whether THIS session signed in with a recovery code (#786). Set by the
+     # 2FA gate; read here so re-enrolling over a live secret can waive the
+     # current-code proof for someone who lost their authenticator.
+     |> assign(:recovery_login?, session["totp_recovery_login"] == true)
      # Transient enrolment state (secret + provisioning URI + QR) while confirming.
      |> assign(:enrolling, nil)
      # Freshly minted recovery codes, shown exactly once (#331 phase 2).
@@ -126,10 +130,20 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("cancel_totp", _params, socket),
     do: {:noreply, assign(socket, :enrolling, nil)}
 
-  def handle_event("confirm_totp", %{"code" => code}, socket) do
+  def handle_event("confirm_totp", %{"code" => code} = params, socket) do
     user = socket.assigns.current_user
 
-    case Accounts.confirm_totp(user, %{code: code}, actor: user) do
+    args = %{
+      code: code,
+      # Only meaningful when replacing an already-confirmed secret (#786); the
+      # action ignores both on a first enrolment. `recovery_login?` comes from
+      # the session, not this payload — the current-code field is the only thing
+      # the form contributes.
+      current_code: params["current_code"],
+      recovery_login?: socket.assigns.recovery_login?
+    }
+
+    case Accounts.confirm_totp(user, args, actor: user) do
       {:ok, user} ->
         {:noreply,
          socket
