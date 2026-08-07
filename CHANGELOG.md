@@ -64,6 +64,34 @@ migration, a rewritten column, a dropped config key).
   wearing a different hat. Now rejected wherever a link href is stored: rich
   text, portable text, legacy HTML, and the new menu items.
 
+- **404 capture, paired with redirects.** `/editor/redirects` grows a **404s**
+  tab listing the paths delivery couldn't serve, most-requested first, each with
+  a one-click "Create redirect →" that drops the path into the form above (#472).
+  That pairing is the whole point: Kiln's redirect table was manual-entry only,
+  so after a migration off WordPress you had to guess what broke. Creating the
+  redirect clears the counter, so the list reads as a work queue rather than an
+  archive.
+
+  `KilnCMS.CMS.MissedPath` is a **counter** table, not a request log — one row
+  per `(path, locale)`, upserted atomically, so a crawler hammering one dead URL
+  adds one row rather than ten thousand. That keeps delivery's deliberate
+  "resolve misses quietly, no log noise" stance intact.
+
+  The path recorded is the one delivery resolved against — routed and
+  percent-decoded, empty segments collapsed — not the raw request target, so the
+  one-click redirect writes a rule that actually fires and `/café-gone` doesn't
+  become several rows.
+
+  It stores paths and nothing else: no IP, user agent, referrer or actor. Since
+  anonymous traffic writes it, three bounds apply — probe-shaped requests
+  (`/wp-login.php`, `/.env`, asset extensions) are never recorded; a per-site cap
+  where a new path **evicts the least-requested row** rather than being refused,
+  so one cheap flood can't pin the table full of junk and deny the feature; and a
+  nightly AshOban trigger that purges rows 30 days after their last hit. Writes
+  run off the request path in a supervised task. Turn the whole thing off with
+  `config :kiln_cms, :missed_paths, enabled: false`. The staging scrub purges the
+  table; see [Data flows](docs/data-flows.md).
+
 - **The editor PWA's web app manifest is localized.** `name`, `description` and
   both shortcut labels are translated, so the install dialog, app list, splash
   screen and long-press shortcut menu appear in the editor's language. The root
