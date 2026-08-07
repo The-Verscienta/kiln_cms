@@ -41,7 +41,7 @@ defmodule KilnCMS.Staging do
   @spec scrub!(keyword()) :: Scrub.summary()
   def scrub!(opts \\ []) do
     shell = Keyword.get(opts, :shell, &IO.puts/1)
-    {host, database} = target()
+    {host, database} = Repo.target()
 
     # KILN_STAGING_SCRUB is a sentinel word, not a boolean — typing `true` must
     # not confirm a destructive scrub. KILN_STAGING_FORCE *is* a boolean, so it
@@ -126,22 +126,6 @@ defmodule KilnCMS.Staging do
 
       email ->
         shell.("  staging admin:           #{email} (role :admin, pre-confirmed)")
-    end
-  end
-
-  # The database name + host the repo is connected to, for the guards and the
-  # printed target. Handles both `url:`-style config (prod/staging via
-  # DATABASE_URL) and discrete `database:`/`hostname:` config (dev/test).
-  defp target do
-    config = Repo.config()
-
-    case config[:url] do
-      url when is_binary(url) ->
-        uri = URI.parse(url)
-        {uri.host || "?", String.trim_leading(uri.path || "", "/")}
-
-      _ ->
-        {config[:hostname] || "?", to_string(config[:database] || "?")}
     end
   end
 
