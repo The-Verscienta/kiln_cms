@@ -404,13 +404,21 @@ build if a resource is ever registered without that authorizer.
   every `live` route in the router and fails if its view does not carry the
   guard, which is what enforces it for plugin panels rather than assuming it.
   *Watch:* third-party LiveViews keep the framework behaviour — AshAdmin's are
-  compile-gated to `:dev_routes`; AshAuthentication's remaining views
-  (`/password-reset/:token`, `/confirm`, `/magic-link`, `/sign-out`) are
-  unauthenticated, so a url-less join reaches no authorization it could not
-  reach signed out, but it does skip `:assign_current_org` and therefore renders
-  with the **default org's** branding on a tenant host (tracked in #701).
-  `/sign-in`, `/register` and `/reset` are routed to `KilnCMSWeb.SignInLive`
-  (#715), a Kiln module, so those three do carry the guard and are outside that.
+  compile-gated to `:dev_routes`. AshAuthentication's are now all routed through
+  thin Kiln wrappers, so they carry the guard like everything else:
+  `/sign-in`, `/register` and `/reset` through `KilnCMSWeb.SignInLive` (#715),
+  and `/password-reset/:token`, `/confirm_new_user/:token`, `/magic_link/:token`
+  and `/sign-out` through `KilnCMSWeb.AuthLive` (#701). Before that last one
+  those four skipped `:assign_current_org` on a url-less join and rendered with
+  the **default org's** branding on a tenant host — no authorization was
+  reachable that a signed-out visitor could not reach anyway, but the identity
+  on the page was another tenant's, the leak #48 exists to prevent.
+  `/sign-out` is worth calling out because it is the one that reads as
+  controller-only: `sign_out_route/3` emits a `DELETE` to the auth controller
+  **and** a `live` route in its own `live_session`, and only the first appears
+  at the call site. Its live half had a replayable session like any other.
+  `KilnCMSWeb.LiveJoinWithoutUrlTest`'s exemption list is now empty, which is
+  what keeps this true as views are added.
 - **Session as the credential** — the whole surface is gated by the session
   cookie plus the per-org effective tier, so the cookie's integrity is the
   boundary; see the `__Host-` prefix under Controls (#686).

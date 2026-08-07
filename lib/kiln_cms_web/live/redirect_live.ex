@@ -42,7 +42,7 @@ defmodule KilnCMSWeb.RedirectLive do
   end
 
   @impl true
-  def handle_event("search", %{"q" => q}, socket) do
+  def handle_event("search", %{"q" => q}, socket) when is_binary(q) do
     {:noreply, socket |> assign(:search, q) |> load_redirects()}
   end
 

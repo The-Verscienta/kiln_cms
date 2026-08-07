@@ -181,14 +181,15 @@ config :kiln_cms, KilnCMS.Search,
 # subtly-UTC answer, it gets an error.
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 
-# Editorial advisory checks (#476, #495) — the non-blocking advice panel in the
-# content editor. Order here is display order. Plugins append their own via the
-# `advisories/0` callback on `Kiln.Plugin`; a check that raises is dropped and
-# logged rather than taking the editor down. See `Kiln.Advisory`.
+# Editorial advisory checks (#476, #495, #377) — the non-blocking advice panels
+# in the content editor. Order here is display order. Plugins append their own
+# via the `advisories/0` callback on `Kiln.Plugin`; a check that raises is
+# dropped and logged rather than taking the editor down. See `Kiln.Advisory`.
 #
-# `Kiln.Advisory.Checks.*` are feature-neutral (an accessibility panel wants
-# them verbatim); `KilnCMS.Seo.Checks.*` are search-specific. Which panel each
-# one appears in is the check's own `lenses/0`, not this list — see
+# Three namespaces: `Kiln.Advisory.Checks.*` are feature-neutral (an
+# accessibility panel wants them verbatim), `KilnCMS.Seo.Checks.*` are
+# search-specific, `KilnCMS.Compliance.Checks.*` are claim checks. Which panel
+# each one appears in is the check's own `lenses/0`, not this list — see
 # `Kiln.Advisory`.
 config :kiln_cms, Kiln.Advisory,
   checks: [
@@ -199,8 +200,27 @@ config :kiln_cms, Kiln.Advisory,
     Kiln.Advisory.Checks.ImageAlt,
     Kiln.Advisory.Checks.InternalLinks,
     Kiln.Advisory.Checks.LinkText,
-    Kiln.Advisory.Checks.AllCaps
+    Kiln.Advisory.Checks.AllCaps,
+    KilnCMS.Compliance.Checks.Claims,
+    KilnCMS.Compliance.Checks.Disclaimer
   ]
+
+# Editorial claim checking (#377) — the compliance panel. Registered above but
+# inert until `enabled: true`: both checks return `:n_a` while it is off, so an
+# install that never asked for this pays a map lookup and shows no panel.
+#
+# `require_at_publish` is the separate, harder switch — it turns an
+# `:error`-severity match into a refused publish
+# (`KilnCMS.CMS.Validations.ComplianceClaims`) rather than advice.
+#
+# The shipped rule pack is deliberately narrow, and is meant to be extended per
+# publication. See `KilnCMS.Compliance` for why bare curative vocabulary
+# ("cures", "heals") is NOT in it.
+config :kiln_cms, KilnCMS.Compliance,
+  enabled: false,
+  require_at_publish: false,
+  disclaimer: nil,
+  rules: :default
 
 # Form submission spam scoring (#477) — post-storage triage on top of the
 # honeypot/rate-limit pre-storage defenses in `KilnCMS.Forms`. Order here is

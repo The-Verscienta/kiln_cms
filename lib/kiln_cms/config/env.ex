@@ -264,7 +264,7 @@ defmodule KilnCMS.Config.Env do
   Re-emits what `runtime.exs` collected, once the system is up, so a
   misconfigured flag reaches the places an operator actually watches (#634).
 
-  Called once from `KilnCMS.Application.start/2`, after `setup_observability/0`.
+  Called once from KilnCMS.Application's `start/2`, after `setup_observability/0`.
   The stderr line `fetch/1` already wrote stays: it is the only thing available
   if the application never starts at all, so this is a second copy of the same
   fact, not a replacement.
@@ -283,7 +283,7 @@ defmodule KilnCMS.Config.Env do
   issue asked for — so the Sentry event is reported explicitly instead.
 
   `Sentry.capture_message/2` no-ops when no DSN is configured
-  (`Sentry.Client.send_event/2` guards on `ensure_dsn_configured/0`), so this
+  (Sentry's `send_event` guards on a configured DSN), so this
   costs a deployment without Sentry nothing.
 
   Lives here rather than in `KilnCMS.Application` so the boot-time and

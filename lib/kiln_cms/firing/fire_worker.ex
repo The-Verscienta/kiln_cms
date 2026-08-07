@@ -21,7 +21,12 @@ defmodule KilnCMS.Firing.FireWorker do
       # `:org_id` in the dedup key so the same `{type, id}` in two orgs isn't
       # collapsed into one job (epic #336).
       keys: [:org_id, :type, :id],
-      states: [:scheduled, :available, :executing, :retryable, :suspended]
+      # `:cancelled` is in the list so a burst of reads against an orphan row
+      # collapses into one job rather than one per read (#664). It is not what
+      # makes that drip converge — the window is 60s and the firing cache TTL is
+      # an hour — `purge_orphan/3` is. This just stops the thundering herd while
+      # the first job is still doing the purging.
+      states: [:scheduled, :available, :executing, :retryable, :suspended, :cancelled]
     ]
 
   require Logger
@@ -30,25 +35,10 @@ defmodule KilnCMS.Firing.FireWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type_str, "id" => id}}) do
-    type = References.type_atom(type_str)
-
-    with false <- is_nil(type),
-         {:ok, document} <- References.load_published(org_id, type, id) do
-      # `fire/2` reads the tenant off `document.org_id`; the wave + indexing carry
-      # `org_id` explicitly so their reads/jobs stay scoped to this org.
-      Engine.fire(document)
-      References.invalidate(org_id, type, id, [References.key(type, id)])
-      enqueue_indexing(org_id, type, id)
-      :ok
-    else
-      # Unknown type, or the record was unpublished/deleted before firing ran —
-      # nothing to fire. (A later publish re-enqueues.)
-      _ -> :ok
+    case References.type_atom(type_str) do
+      nil -> {:cancel, "no content type answers to #{inspect(type_str)}"}
+      type -> fire(org_id, type, id)
     end
-  rescue
-    error ->
-      Logger.error("Firing failed for #{inspect(id)}: #{inspect(error)}")
-      :ok
   end
 
   # Back-compat (epic #336): a job enqueued by the pre-multi-tenancy release has
@@ -57,6 +47,60 @@ defmodule KilnCMS.Firing.FireWorker do
   # re-dispatch. Safe while the single-org rollout guard holds.
   def perform(%Oban.Job{args: %{"type" => _, "id" => _} = args} = job) do
     perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
+  end
+
+  # One clause per outcome of the load, because they are four different
+  # situations and used to be one (#664).
+  defp fire(org_id, type, id) do
+    case References.load_published(org_id, type, id) do
+      {:ok, document} ->
+        # `fire/2` reads the tenant off `document.org_id`; the wave + indexing carry
+        # `org_id` explicitly so their reads/jobs stay scoped to this org.
+        Engine.fire(document)
+        References.invalidate(org_id, type, id, [References.key(type, id)])
+        enqueue_indexing(org_id, type, id)
+        :ok
+
+      :absent ->
+        purge_orphan(org_id, type, id)
+
+      :unknown_type ->
+        {:cancel, "no compiled resource for #{inspect(type)}"}
+
+      {:error, reason} ->
+        # The read failed — which says nothing about whether the document is
+        # there. Retrying is the point: this used to answer `:ok`, so a
+        # just-published document whose load hit a blip never fired at all and
+        # `max_attempts` never engaged. Nothing re-enqueues it either, because
+        # the read path's stale check needs an artifact row that was never
+        # written.
+        {:error, reason}
+    end
+  rescue
+    error ->
+      # A render crash. Now an error rather than `:ok`, so Oban retries it and
+      # then *discards* it visibly instead of recording three successes that did
+      # nothing. Bounded by `max_attempts`.
+      Logger.error("Firing failed for #{inspect(id)}: #{inspect(error)}")
+      {:error, error}
+  end
+
+  # The document is settled-gone, so its artifacts are garbage: this is exactly
+  # what `KilnCMS.CMS.Changes.DeleteArtifacts` intends on unpublish, and rows
+  # survive it because that purge is best-effort inside a `try/rescue`.
+  #
+  # Deleting here is what makes the drip converge (#664). Before this, the row
+  # stayed stale, so the next cache miss re-enqueued — forever, one job per
+  # cache expiry, with no failed job and nothing marking the row as hopeless.
+  # Cancelling alone would not have done it: the unique window is 60s and the
+  # firing cache TTL is an hour, so the dedup never overlaps the next enqueue.
+  #
+  # Safe only because `:absent` now means *settled* absence. While it also
+  # covered "the read blew up", purging here would have deleted live artifacts
+  # for a published document during a connection blip.
+  defp purge_orphan(org_id, type, id) do
+    Engine.purge(org_id, type, id)
+    {:cancel, "no published #{type} #{inspect(id)}; purged its orphaned artifacts"}
   end
 
   defp enqueue_indexing(org_id, type, id) do

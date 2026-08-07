@@ -82,6 +82,13 @@ Phase 1 was a read model over what the cluster already produces. Phase 2
   - Publishing is half of it. `mix kiln.audit.checkpoint --audit` is what
     compares the sink to the database, and it wants to run somewhere the
     application host does not control.
+  - `--audit` also walks the run's **predecessor links** — each row records a
+    digest of the one before it (#732). That half needs no sink, so it runs on
+    the default adapter too, and it catches a checkpoint rewritten in place
+    without any signature to check against. It is not a substitute for the
+    witness: the digest is an unkeyed hash over public columns, so a careful
+    attacker recomputes every link after the row they edited, and the newest
+    checkpoint has no successor to record its digest at all.
 - **Consent recording UI** — record a consent (kind / grantor / reference /
   note) directly from the trail page.
 
