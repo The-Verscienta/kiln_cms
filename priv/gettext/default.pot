@@ -520,8 +520,9 @@ msgstr ""
 #: lib/kiln_cms_web/components/version_diff_components.ex:344
 #: lib/kiln_cms_web/live/content_editor_live.ex:7542
 #: lib/kiln_cms_web/live/preview_live.ex:223
-#: lib/kiln_cms_web/live/redirect_live.ex:256
-#: lib/kiln_cms_web/live/redirect_live.ex:303
+#: lib/kiln_cms_web/live/redirect_live.ex:396
+#: lib/kiln_cms_web/live/redirect_live.ex:456
+#: lib/kiln_cms_web/live/redirect_live.ex:503
 #, elixir-autogen, elixir-format
 msgid "Locale"
 msgstr ""
@@ -1394,7 +1395,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex:19
 #: lib/kiln_cms_web/live/mail_settings_live.ex:42
 #: lib/kiln_cms_web/live/newsletter_live.ex:35
-#: lib/kiln_cms_web/live/redirect_live.ex:39
+#: lib/kiln_cms_web/live/redirect_live.ex:56
 #: lib/kiln_cms_web/live/slug_regen_live.ex:45
 #: lib/kiln_cms_web/live/system_live.ex:44
 #: lib/kiln_cms_web/live/team_live.ex:42
@@ -2922,7 +2923,7 @@ msgstr ""
 msgid "(unset)"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:232
+#: lib/kiln_cms_web/live/redirect_live.ex:341
 #, elixir-autogen, elixir-format
 msgid "301s from retired URLs. Rows appear automatically when a published slug is renamed; add manual ones for legacy paths. Destinations follow the target record's current URL."
 msgstr ""
@@ -2947,7 +2948,7 @@ msgstr ""
 msgid "A custom role bundles granular scope — define \"Blog editor\" once, assign it to any member. A member's own scope overrides their role per axis."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:269
+#: lib/kiln_cms_web/live/redirect_live.ex:469
 #, elixir-autogen, elixir-format
 msgid "A draft target starts redirecting once it's published."
 msgstr ""
@@ -3006,7 +3007,7 @@ msgstr ""
 msgid "Add a form"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:239
+#: lib/kiln_cms_web/live/redirect_live.ex:439
 #, elixir-autogen, elixir-format
 msgid "Add a manual redirect"
 msgstr ""
@@ -3036,7 +3037,7 @@ msgstr ""
 msgid "Add question"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:267
+#: lib/kiln_cms_web/live/redirect_live.ex:467
 #, elixir-autogen, elixir-format
 msgid "Add redirect"
 msgstr ""
@@ -3302,7 +3303,7 @@ msgstr ""
 msgid "Couldn't delete that form."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:75
+#: lib/kiln_cms_web/live/redirect_live.ex:125
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that redirect."
 msgstr ""
@@ -3458,7 +3459,7 @@ msgstr ""
 msgid "Delete form"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:334
+#: lib/kiln_cms_web/live/redirect_live.ex:534
 #, elixir-autogen, elixir-format
 msgid "Delete redirect"
 msgstr ""
@@ -3488,7 +3489,7 @@ msgstr ""
 msgid "Delete this form and all its submissions?"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:333
+#: lib/kiln_cms_web/live/redirect_live.ex:533
 #, elixir-autogen, elixir-format
 msgid "Delete this redirect? The old URL will 404."
 msgstr ""
@@ -3685,7 +3686,7 @@ msgstr ""
 msgid "Enter a current code to turn it off"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:157
+#: lib/kiln_cms_web/live/redirect_live.ex:258
 #, elixir-autogen, elixir-format
 msgid "Enter a path starting with /."
 msgstr ""
@@ -3773,7 +3774,7 @@ msgstr ""
 msgid "Field settings"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:281
+#: lib/kiln_cms_web/live/redirect_live.ex:481
 #, elixir-autogen, elixir-format
 msgid "Filter by path…"
 msgstr ""
@@ -3837,12 +3838,12 @@ msgstr ""
 msgid "Fri"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:302
+#: lib/kiln_cms_web/live/redirect_live.ex:502
 #, elixir-autogen, elixir-format
 msgid "From"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:249
+#: lib/kiln_cms_web/live/redirect_live.ex:449
 #, elixir-autogen, elixir-format
 msgid "From path"
 msgstr ""
@@ -4076,7 +4077,7 @@ msgstr ""
 msgid "Next month"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:174
+#: lib/kiln_cms_web/live/redirect_live.ex:275
 #, elixir-autogen, elixir-format
 msgid "No %{type} with that slug and locale exists — check the target."
 msgstr ""
@@ -4162,7 +4163,7 @@ msgstr ""
 msgid "No recent delivery failures."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:293
+#: lib/kiln_cms_web/live/redirect_live.ex:493
 #, elixir-autogen, elixir-format
 msgid "No redirects"
 msgstr ""
@@ -4504,19 +4505,20 @@ msgstr ""
 msgid "Redelivery queued."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:73
+#: lib/kiln_cms_web/live/redirect_live.ex:123
 #, elixir-autogen, elixir-format
 msgid "Redirect deleted."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:56
+#: lib/kiln_cms_web/live/redirect_live.ex:106
 #, elixir-autogen, elixir-format
 msgid "Redirect from %{path} created."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:616
-#: lib/kiln_cms_web/live/redirect_live.ex:32
-#: lib/kiln_cms_web/live/redirect_live.ex:230
+#: lib/kiln_cms_web/live/redirect_live.ex:46
+#: lib/kiln_cms_web/live/redirect_live.ex:339
+#: lib/kiln_cms_web/live/redirect_live.ex:351
 #, elixir-autogen, elixir-format
 msgid "Redirects"
 msgstr ""
@@ -4591,7 +4593,7 @@ msgstr ""
 msgid "Rename these slugs? Published URLs will 301 to their new locations."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:295
+#: lib/kiln_cms_web/live/redirect_live.ex:495
 #, elixir-autogen, elixir-format
 msgid "Renaming a published slug records one automatically."
 msgstr ""
@@ -4792,7 +4794,7 @@ msgstr ""
 msgid "Shared draft preview — not the published page"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:286
+#: lib/kiln_cms_web/live/redirect_live.ex:486
 #, elixir-autogen, elixir-format
 msgid "Showing the %{count} most recent — narrow with the filter."
 msgstr ""
@@ -4953,12 +4955,12 @@ msgstr ""
 msgid "Suppressed addresses"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:265
+#: lib/kiln_cms_web/live/redirect_live.ex:465
 #, elixir-autogen, elixir-format
 msgid "Target slug"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:262
+#: lib/kiln_cms_web/live/redirect_live.ex:462
 #, elixir-autogen, elixir-format
 msgid "Target type"
 msgstr ""
@@ -5006,7 +5008,7 @@ msgstr ""
 msgid "That form doesn't exist."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:200
+#: lib/kiln_cms_web/live/redirect_live.ex:301
 #, elixir-autogen, elixir-format
 msgid "That path is already the target's own URL."
 msgstr ""
@@ -5031,7 +5033,7 @@ msgstr ""
 msgid "The focus keyphrase doesn't appear in the title or SEO title."
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:162
+#: lib/kiln_cms_web/live/redirect_live.ex:263
 #, elixir-autogen, elixir-format
 msgid "The path must start with /."
 msgstr ""
@@ -5119,7 +5121,7 @@ msgstr ""
 msgid "Thu"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:304
+#: lib/kiln_cms_web/live/redirect_live.ex:504
 #, elixir-autogen, elixir-format
 msgid "To (current)"
 msgstr ""
@@ -5213,7 +5215,7 @@ msgstr ""
 msgid "Unsubscribe"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:305
+#: lib/kiln_cms_web/live/redirect_live.ex:505
 #, elixir-autogen, elixir-format
 msgid "Updated"
 msgstr ""
@@ -5486,7 +5488,7 @@ msgstr ""
 msgid "taiji · centre"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:324
+#: lib/kiln_cms_web/live/redirect_live.ex:524
 #, elixir-autogen, elixir-format
 msgid "target missing"
 msgstr ""
@@ -5516,7 +5518,7 @@ msgstr ""
 msgid "translation gaps"
 msgstr ""
 
-#: lib/kiln_cms_web/live/redirect_live.ex:322
+#: lib/kiln_cms_web/live/redirect_live.ex:522
 #, elixir-autogen, elixir-format
 msgid "unpublished"
 msgstr ""
@@ -9290,4 +9292,79 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex:903
 #, elixir-autogen, elixir-format
 msgid "couldn't have its metadata removed, so it wasn't stored"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:352
+#, elixir-autogen, elixir-format
+msgid "404s (%{count})"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:170
+#, elixir-autogen, elixir-format
+msgid "Couldn't update the 404 list."
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:417
+#, elixir-autogen, elixir-format
+msgid "Create redirect"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:398
+#, elixir-autogen, elixir-format
+msgid "First seen"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:397
+#, elixir-autogen, elixir-format
+msgid "Hits"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:399
+#, elixir-autogen, elixir-format
+msgid "Last seen"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:379
+#, elixir-autogen, elixir-format
+msgid "No 404s recorded"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:381
+#, elixir-autogen, elixir-format
+msgid "Nothing has asked for a URL this site can't serve."
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:395
+#, elixir-autogen, elixir-format
+msgid "Path"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:370
+#, elixir-autogen, elixir-format
+msgid "Paths visitors asked for that nothing on the site could serve, most-requested first. Counters only — no IPs, no user agents. Rows are dropped %{days} days after they were last hit, and obvious vulnerability probing is never recorded."
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:426
+#, elixir-autogen, elixir-format
+msgid "Remove from the 404 list"
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:424
+#, elixir-autogen, elixir-format
+msgid "Remove this path from the list? It returns if it's hit again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:93
+#, elixir-autogen, elixir-format
+msgid "Removed from the 404 list."
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:385
+#, elixir-autogen, elixir-format
+msgid "Showing the %{count} most-requested of %{total}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex:80
+#, elixir-autogen, elixir-format
+msgid "That path is no longer listed."
 msgstr ""

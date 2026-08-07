@@ -280,6 +280,16 @@ defmodule KilnCMS.CMS do
       define :destroy_redirect, action: :destroy
     end
 
+    # Aggregated delivery 404s (#472) — the other half of the redirect story.
+    # Written by `KilnCMSWeb.MissedPathTracking` off the request path; read by
+    # `/editor/redirects`' 404s tab.
+    resource KilnCMS.CMS.MissedPath do
+      define :record_missed_path, action: :record
+      define :list_missed_paths, action: :top
+      define :get_missed_path, action: :read, get_by: [:id]
+      define :destroy_missed_path, action: :destroy
+    end
+
     # Per-site white-label branding (#48). Reads should go through
     # `KilnCMS.Branding` (cached + fallback-resolved), not this interface — it
     # exists for the settings UI's writes and for the resolver's own lookup.

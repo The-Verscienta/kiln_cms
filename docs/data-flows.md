@@ -39,6 +39,7 @@ your deployment.
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
 | Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
 | Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). |
+| Recorded 404 paths | `missed_paths` | Possibly | The unresolvable request path and its hit count — **no** IP, user agent, referrer, or actor. A path can still be incidentally identifying (`/invoices/jane-doe`), so rows are purged on retention (below). Vulnerability probing is filtered out before anything is written, and the table is hard-capped per site. See [404 capture](#404-capture-472). |
 | Funnel definitions | `funnels`, `funnel_steps` | No | Admin-authored ordered list of content items (landing → pricing → signup, #621). No visitor data, no counter table — step traffic is derived from `content_view_days` at read time. Not on a retention purge; kept until an admin deletes the funnel. |
 
 ## What data leaves the system
@@ -101,6 +102,7 @@ plugin; they run as trusted system jobs (no actor).
 | Recorded search queries | 90 days since last search | `SearchQuery` `:purge_expired` (`0 3 * * *`) | `config :kiln_cms, :search_analytics, retention_days: 90` |
 | Daily view buckets | 400 days since first recorded | `ContentViewDay` `:purge_expired` (`15 3 * * *`) | `config :kiln_cms, :view_analytics, retention_days: 400` |
 | Daily referrer buckets | 400 days since first recorded | `ReferrerDay` `:purge_expired` (`30 3 * * *`) | `config :kiln_cms, :view_analytics, retention_days: 400` (shared with view buckets) |
+| Recorded 404 paths | 30 days since last hit | `MissedPath` `:purge_expired` (`40 3 * * *`) | `config :kiln_cms, :missed_paths, retention_days: 30` |
 | Trashed (soft-deleted) content | 30 days | `Page`/`Post` `:purge_trashed` (`0 3 * * *`) | `config :kiln_cms, :trash, retention_days: 30` |
 
 View buckets keep a longer window than search queries on purpose: a bucket is
@@ -137,6 +139,43 @@ indefinitely: the `:purge_expired` trigger deletes rows last searched more than
 
 The search palette discloses this to editors inline ("Searches are logged
 anonymously … purged after N days"), so the logging is not silent.
+
+### 404 capture (#472)
+
+`missed_paths` records the paths **public delivery couldn't serve**, so
+`/editor/redirects` can show an admin what actually broke after a migration and
+offer a one-click redirect for it. It is a counter table, not a request log: one
+row per `(path, locale)` with a hit count, upserted atomically — a crawler
+hammering one dead URL adds one row, not ten thousand.
+
+Stored: the path, its locale, a count, and when it was last seen. **Not** stored:
+IP, user agent, referrer, or actor. The path alone can still be incidentally
+identifying, so rows are purged `retention_days` (default 30) after their last
+hit.
+
+Because anonymous traffic writes this table, three bounds apply, all in
+`KilnCMSWeb.MissedPathTracking`:
+
+* **junk filtering** — probe-shaped requests (`/wp-login.php`, `/.env`,
+  `/.git/…`, asset extensions, absurd lengths) are dropped before any DB work.
+  `.html`/`.htm` are deliberately kept: those are the legacy paths a migration
+  off a static site leaves behind;
+* **a per-site cap** (`max_paths`, default 5000) — at the cap a new path evicts
+  the least-requested row rather than being refused. Refusing would let one
+  cheap flood pin the table full of one-hit junk and deny the feature outright;
+  with eviction, displacing a genuine row costs an attacker more traffic than
+  that row has;
+* **off-request writes** — the upsert runs in a supervised task, so delivery
+  never waits on it and a spike drops counters rather than queueing 404s.
+
+The path recorded is the one delivery actually resolved against — routed and
+percent-decoded, empty segments collapsed — so the tab's one-click redirect
+writes a rule that fires, and one URL can't occupy several rows.
+
+Turn the whole thing off with `config :kiln_cms, :missed_paths, enabled: false`;
+delivery then does no extra work at all. `enabled` and `max_paths` are read at
+runtime; `retention_days` is compile-time (it is baked into the purge filter),
+so changing it needs a rebuild. The staging scrub purges the table.
 
 ## Subject-rights workflows
 
