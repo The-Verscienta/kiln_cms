@@ -45,6 +45,16 @@ defmodule KilnCMS.Blocks.RichText do
 
   def render(_block, :json_ld), do: nil
 
+  # Both render branches emit `body` as a real array (the fallback emits `[]`
+  # alongside the sanitized HTML), so it is required and never null.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "required" => ["_type", "body"],
+      "properties" => %{"body" => Kiln.Block.JsonSchema.type_schema(:rich_text, false)}
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     case block.body do

@@ -45,6 +45,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](../examples/README.md) |
 | **Locales**            | `GET /api/locales`                | Discover configured content locales + the default.    | [§ Locale discovery](#locale-discovery) |
+| **Schema**             | `GET /api/schema`                 | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
 | **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
 | **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
@@ -302,6 +303,80 @@ curl -s http://localhost:4000/api/locales
 
 Pass the returned codes as the `locale` argument/param to the other surfaces
 (`GET /api/content/:type/:slug?locale=fr`, `postBySlug(slug:, locale:)`, etc.).
+
+## Schema discovery (typed clients)
+
+`GET /api/schema` returns a JSON Schema (draft 2020-12) describing exactly what
+`GET /api/content/:type/:slug?surface=json` serves: the `_type`-discriminated
+block union and one document schema per content type. Generate types from it,
+or validate responses against it (#430).
+
+```bash
+curl -s http://localhost:4000/api/schema | jq '.["$defs"] | keys'
+# ["block","block_accordion",…,"content_page","content_post","portable_text_block"]
+```
+
+| Parameter | Effect |
+|-----------|--------|
+| `?type=post,page` | Only these content types. An unknown name is a `400`, not a silent full export. |
+| `?blocks=only` | The block union alone — no content types, no database read. |
+
+It is **per site**: dynamic content types and custom fields are
+organization-scoped, so the document is built for the org the request host
+resolves to, and an admin adding a custom field changes it without a redeploy.
+No auth required; cacheable (`Cache-Control: public, max-age=300`).
+
+Notable properties:
+
+- every block object is closed (`additionalProperties: false`) and pinned by a
+  `_type` `const`, so a `oneOf` match is unambiguous;
+- `_id` is the block's stable id — the same anchor the visual-editing bridge
+  uses. It is absent on a block that has never been persisted;
+- a `columns` block's children `$ref` back to the union, so nesting is typed all
+  the way down (the storage union has to stay flat — see
+  `KilnCMS.Blocks.Columns`);
+- `custom_fields` is **open**, and nothing in it is `required`: a definition
+  added after a document was last saved has no stored value and publishing does
+  not invent one, while a point-in-time read (`?as_of=`) serves the values
+  stored at that instant — which may include fields since removed;
+- a `required: true` block field is listed in `required` (the key is always
+  present) but is still nullable. Container children bypass the embedded
+  resource's `allow_nil?`, so a nested block can carry a nil where its
+  top-level twin cannot, and both share one definition.
+
+It publishes **shape**, not editorial content: field `help_text` and a
+`:select`'s option list are deliberately withheld, as is the organization id.
+Type and field *names* are published, so a site where an unannounced content
+type is itself sensitive should keep this endpoint off the public internet.
+
+This describes the **read** surface. The write API's authoring shape (which
+differs — a `video`'s stored `media_id`/`url` pair is delivered as one resolved
+`src`) is described by the OpenAPI document at `/api/json/open_api`.
+
+### Generating types at build time
+
+```bash
+mix kiln.export.schema --out priv/static/schema.json --pretty
+mix kiln.export.schema --format ts --out assets/js/kiln.d.ts
+```
+
+The `.d.ts` emitter is built in, so no Node toolchain is needed:
+
+```ts
+export interface HeadingBlock {
+  _id?: string;
+  _type: "heading";
+  level?: number;
+  text: string;
+}
+
+export type KilnBlock = AccordionBlock | AudioBlock | … | VideoBlock;
+export type KilnDocument = PageDocument | PostDocument;
+```
+
+`--blocks-only` skips content types entirely (and the database with them), which
+is what a CI job that only wants block types should use. `--all-orgs --out <dir>`
+writes one document per site; `mix help kiln.export.schema` has the rest.
 
 ## Feeds
 
