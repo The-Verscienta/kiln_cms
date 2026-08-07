@@ -698,7 +698,17 @@ defmodule KilnCMSWeb.Router do
     # its own `live_session`. The second is easy to miss and is joinable at the
     # channel with a scraped session blob like any other, so it needs the same
     # wrapper as the token pages below (#701).
-    sign_out_route AuthController, "/sign-out", live_view: KilnCMSWeb.SignOutLive
+    #
+    # `layout:` / `on_mount:` / `overrides:` mirror the token routes below: this
+    # route defaulted `overrides:` to the library's `Default`, so Kiln's
+    # `SignOutLive` / `Components.SignOut` overrides never applied and the page
+    # shipped the library's `dark:` classes instead of Kiln's `data-theme` ones,
+    # and it drew no white-label banner (#884).
+    sign_out_route AuthController, "/sign-out",
+      live_view: KilnCMSWeb.SignOutLive,
+      layout: {KilnCMSWeb.Layouts, :auth},
+      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
+      overrides: [KilnCMSWeb.AuthOverrides]
 
     # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
     # account (#331). Gated by the signed :pending_2fa session token, not a login.
