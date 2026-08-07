@@ -98,6 +98,98 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
     end
   end
 
+  describe "replacing a confirmed secret needs proof of the outgoing one (#786)" do
+    # Enrol, then stage a fresh pending secret over the live one.
+    defp re_enrolling do
+      user = user()
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      {:ok, enrolled} = Accounts.confirm_totp(user, %{code: current_code(user)}, actor: user)
+      {:ok, restarted} = Accounts.setup_totp(enrolled, %{}, actor: enrolled)
+
+      %{
+        enrolled: enrolled,
+        restarted: restarted,
+        new_code: Totp.code_at(restarted.totp_pending_secret, System.system_time(:second)),
+        live_code: Totp.code_at(restarted.totp_secret, System.system_time(:second))
+      }
+    end
+
+    test "the new secret's own code alone cannot promote it over the live one" do
+      %{enrolled: enrolled, restarted: restarted, new_code: new_code} = re_enrolling()
+
+      # The #786 attack: a session runs setup_totp + confirm_totp with the pending
+      # secret's own code (trivially known) and would otherwise swap the factor.
+      assert {:error, _} = Accounts.confirm_totp(restarted, %{code: new_code}, actor: restarted)
+
+      reloaded = Accounts.get_user!(enrolled.id, authorize?: false)
+
+      assert reloaded.totp_secret == enrolled.totp_secret,
+             "the live secret must be untouched"
+    end
+
+    test "a code from the current authenticator promotes it" do
+      %{enrolled: enrolled, restarted: restarted, new_code: new_code, live_code: live_code} =
+        re_enrolling()
+
+      assert {:ok, swapped} =
+               Accounts.confirm_totp(restarted, %{code: new_code, current_code: live_code},
+                 actor: restarted
+               )
+
+      assert swapped.totp_secret == restarted.totp_pending_secret
+      refute swapped.totp_secret == enrolled.totp_secret
+    end
+
+    test "a wrong current code is refused" do
+      %{restarted: restarted, new_code: new_code} = re_enrolling()
+
+      assert {:error, _} =
+               Accounts.confirm_totp(restarted, %{code: new_code, current_code: "000000"},
+                 actor: restarted
+               )
+    end
+
+    test "a recovery-code session may promote it without a current code" do
+      %{enrolled: enrolled, restarted: restarted, new_code: new_code} = re_enrolling()
+
+      # `recovery_login?` stands in for the outgoing factor: the owner who lost
+      # their authenticator signed in with a recovery code and has no live code.
+      assert {:ok, swapped} =
+               Accounts.confirm_totp(restarted, %{code: new_code, recovery_login?: true},
+                 actor: restarted
+               )
+
+      assert swapped.totp_secret == restarted.totp_pending_secret
+      refute swapped.totp_secret == enrolled.totp_secret
+    end
+
+    test "an account confirmed but with a nil secret still can't be swapped without proof" do
+      # `totp_confirmed_at` set while `totp_secret` is nil — no shipped action
+      # produces it (a partial write / restore / future rotate would), but 2FA is
+      # still enforced there via recovery codes, so the replacement check must not
+      # be skippable. Keying on `totp_confirmed_at` alone covers it.
+      base = user()
+      {:ok, base} = Accounts.setup_totp(base, %{}, actor: base)
+      {:ok, enrolled} = Accounts.confirm_totp(base, %{code: current_code(base)}, actor: base)
+
+      # Force the pathological state (no shipped action does), then stage a fresh
+      # secret over it.
+      nil_secret = Ash.Seed.update!(enrolled, %{totp_secret: nil})
+      {:ok, restarted} = Accounts.setup_totp(nil_secret, %{}, actor: nil_secret)
+      new_code = Totp.code_at(restarted.totp_pending_secret, System.system_time(:second))
+
+      # No current code is even possible (the secret is nil); without a recovery
+      # session it must be refused rather than silently promoted.
+      assert {:error, _} = Accounts.confirm_totp(restarted, %{code: new_code}, actor: restarted)
+
+      # A recovery-code session is still the sanctioned way back in.
+      assert {:ok, _} =
+               Accounts.confirm_totp(restarted, %{code: new_code, recovery_login?: true},
+                 actor: restarted
+               )
+    end
+  end
+
   # #787: two settings tabs open on the same account are two LiveView processes,
   # each holding its own `current_user` assign. `:confirm_totp` used to read the
   # pending secret off the passed-in struct, so the tab that staged first could

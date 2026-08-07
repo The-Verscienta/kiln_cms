@@ -79,13 +79,18 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
   # a re-enrolment. Give it one so the generic tests below still exercise "the
   # code that would otherwise succeed", the same property they check for the
   # other two actions against the live secret.
+  # Returns the whole params map, not just a code: since #786 a `:confirm_totp`
+  # that replaces an already-CONFIRMED secret must also carry `current_code`, so
+  # "the attempt that would otherwise succeed" is no longer a bare `%{code: _}`.
   defp fresh_valid_attempt(:confirm_totp, user) do
     pending = :crypto.strong_rand_bytes(20)
     updated = Ash.Seed.update!(user, %{totp_pending_secret: pending})
-    {updated, Totp.code_at(pending, System.system_time(:second))}
+
+    {updated,
+     %{code: Totp.code_at(pending, System.system_time(:second)), current_code: valid_code()}}
   end
 
-  defp fresh_valid_attempt(_action, user), do: {user, valid_code()}
+  defp fresh_valid_attempt(_action, user), do: {user, %{code: valid_code()}}
 
   for action <- [:disable_totp, :regenerate_totp_recovery_codes, :confirm_totp] do
     describe "#{action}" do
@@ -109,22 +114,22 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
         # correct code would sail through a spent budget — and an attacker who
         # guessed right on attempt 5,000 would still win.
         user = enabled_user()
-        {user, code} = fresh_valid_attempt(@action, user)
+        {user, params} = fresh_valid_attempt(@action, user)
         exhaust(user, @action)
 
-        assert throttled?(apply(Accounts, @action, [user, %{code: code}, [actor: user]]))
+        assert throttled?(apply(Accounts, @action, [user, params, [actor: user]]))
       end
 
       test "a correct code clears the counter" do
         user = enabled_user()
-        {user, code} = fresh_valid_attempt(@action, user)
+        {user, params} = fresh_valid_attempt(@action, user)
 
         # One wrong, then right: the next run must get a full budget back,
         # rather than carrying the failure into it.
         apply(Accounts, @action, [user, %{code: "000000"}, [actor: user]])
 
         assert {:ok, user} =
-                 apply(Accounts, @action, [user, %{code: code}, [actor: user]])
+                 apply(Accounts, @action, [user, params, [actor: user]])
 
         AccountThrottle.forgive_second_factor(user.id)
         refute throttled?(apply(Accounts, @action, [user, %{code: "000000"}, [actor: user]]))
@@ -202,8 +207,15 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
     test "a correct code for the pending secret promotes it, replacing the live one" do
       user = enabled_user() |> with_pending()
 
+      # `current_code` is required since #786 — replacing a CONFIRMED secret takes
+      # proof of the outgoing one. Without it this test asserted the swap #786
+      # exists to refuse.
       assert {:ok, updated} =
-               Accounts.confirm_totp(user, %{code: pending_code(user)}, actor: user)
+               Accounts.confirm_totp(
+                 user,
+                 %{code: pending_code(user), current_code: valid_code()},
+                 actor: user
+               )
 
       assert updated.totp_secret == user.totp_pending_secret
       refute updated.totp_secret == @secret
