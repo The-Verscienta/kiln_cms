@@ -126,6 +126,65 @@ defmodule KilnCMS.Search.RelatedTest do
     refute Enum.any?(gaps, &(&1.query == "found topic"))
   end
 
+  test "content_gaps with an actor is authorized as that actor" do
+    org = KilnCMS.Accounts.default_org_id()
+    KilnCMS.Search.record_query("missing topic", 0, org_id: org)
+
+    editor =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "rel-editor-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :editor
+      })
+
+    viewer =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "rel-viewer-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :viewer
+      })
+
+    assert Enum.any?(Related.content_gaps(org, actor: editor), &(&1.query == "missing topic"))
+
+    # Search analytics is editor-or-above; passing an actor means the policy
+    # decides, rather than the caller's own guess at who may see this. A read
+    # policy filters rather than refuses, so a viewer simply sees nothing.
+    assert Related.content_gaps(org, actor: viewer) == []
+  end
+
+  test "near_duplicates with an actor hides content that actor may not read" do
+    admin = admin()
+
+    restricted =
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "rel-restricted-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :editor,
+        # Granular RBAC (#332): this editor sees drafts in "page" only.
+        readable_types: ["page"]
+      })
+
+    # Identical *documents*: block embeddings are hierarchical, so a differing
+    # title alone puts two copies of the same prose past the near-dup threshold.
+    anchor = indexed_post(admin, "identical restricted passage", title: "Same")
+
+    hidden =
+      indexed_post(admin, "identical restricted passage", title: "Same", publish?: false)
+
+    # Unauthorized (the automation path) still sees it…
+    assert Enum.any?(Related.near_duplicates(anchor), &(&1.id == hidden.id))
+
+    # …but resolved as the restricted editor, the unpublished post drops out
+    # rather than leaking its title into an editor-facing panel.
+    refute Enum.any?(
+             Related.near_duplicates(anchor, actor: restricted),
+             &(&1.id == hidden.id)
+           )
+  end
+
   test "the public related endpoint serves published neighbours" do
     actor = admin()
     anchor = indexed_post(actor, "shared endpoint passage", title: "Anchor")

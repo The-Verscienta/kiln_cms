@@ -14,9 +14,11 @@ defmodule KilnCMSWeb.AnalyticsLive do
   alias KilnCMS.Analytics
   alias KilnCMS.Analytics.FunnelReport
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Search.Related
   alias KilnCMSWeb.Params
 
   @top_limit 50
+  @gap_limit 20
   @ranges [7, 30]
   @default_range 30
 
@@ -98,7 +100,14 @@ defmodule KilnCMSWeb.AnalyticsLive do
      |> assign(:referrers_enabled, referrers_enabled)
      |> assign(:referrer_chart_entries, referrer_chart_entries)
      |> assign(:low_count_threshold, Analytics.low_count_threshold())
-     |> assign(:funnel_reports, funnel_reports)}
+     |> assign(:funnel_reports, funnel_reports)
+     # Content gaps (#339): what on-site searchers asked for and got nothing
+     # for. Deliberately *not* windowed by `?range=` — a gap is a standing
+     # absence, and the counter table keeps a running total per query rather
+     # than per-day buckets, so there is no honest way to slice it by date
+     # anyway. Its own retention window (`SearchQuery`'s nightly purge) is what
+     # keeps it from accumulating forever.
+     |> assign(:content_gaps, Related.content_gaps(org, actor: actor, limit: @gap_limit))}
   end
 
   # An unknown or hostile `?range=` falls back to the default rather than
@@ -481,6 +490,37 @@ defmodule KilnCMSWeb.AnalyticsLive do
               </tbody>
             </table>
           </div>
+        </div>
+
+        <%!-- Content gaps (#339): the zero-result half of the search log. The
+              "most viewed" table says what the site has that works; this says
+              what it doesn't have at all, which is the only thing on this page
+              that no view counter can ever show. --%>
+        <div :if={@content_gaps != []}>
+          <h2 class="mb-1 text-lg font-medium">{gettext("Content gaps")}</h2>
+          <p class="mb-3 text-xs text-base-content/60">
+            {gettext(
+              "On-site searches that returned nothing. Each is a reader who looked for something this site doesn't cover."
+            )}
+          </p>
+
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">{gettext("Search")}</th>
+                <th scope="col" class="text-right">{gettext("Times searched")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={gap <- @content_gaps}>
+                <%!-- A recorded search term is visitor input echoed to an
+                      editor. HEEx escapes it, and the width cap keeps a
+                      pathological query from stretching the table. --%>
+                <td class="max-w-md truncate">{gap.query}</td>
+                <td class="text-right font-medium tabular-nums">{gap.searches}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <div>

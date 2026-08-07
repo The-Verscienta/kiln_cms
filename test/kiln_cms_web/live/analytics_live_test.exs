@@ -454,4 +454,54 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
       assert html =~ "(deleted)"
     end
   end
+
+  describe "content gaps (#339)" do
+    defp searched!(query, result_count, times) do
+      for _ <- 1..times do
+        Analytics.record_search!(
+          %{query: query, locale: "en", result_count: result_count},
+          authorize?: false
+        )
+      end
+    end
+
+    test "zero-result searches are listed, most-searched first", %{conn: conn} do
+      searched!("moxibustion", 0, 2)
+      searched!("cupping therapy", 0, 5)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      assert html =~ "Content gaps"
+      assert html =~ "moxibustion"
+      assert html =~ "cupping therapy"
+
+      # Ordering is the point of the section: the gap searched most is the one
+      # worth writing about first.
+      assert :binary.match(html, "cupping therapy") < :binary.match(html, "moxibustion")
+    end
+
+    test "a search that DID find something is not a gap", %{conn: conn} do
+      searched!("acupuncture", 7, 3)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      refute html =~ "acupuncture"
+    end
+
+    test "the section is absent entirely when nothing came back empty", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      refute html =~ "Content gaps"
+    end
+
+    test "a query containing markup is escaped, not rendered", %{conn: conn} do
+      # A recorded query is visitor input echoed into an editor's page.
+      searched!("<script>alert(1)</script>", 0, 1)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      refute html =~ "<script>alert(1)</script>"
+      assert html =~ "&lt;script&gt;"
+    end
+  end
 end
