@@ -49,8 +49,19 @@ defmodule KilnCMS.Firing.RefireWorker do
         Engine.fire(document)
         References.invalidate(org_id, type, id, visited)
 
-      :error ->
+      # Settled-gone, or a type no compiled resource answers to. A wave reaches
+      # documents that merely *reference* the one that changed, so hitting an
+      # unpublished neighbour is routine, not an error — this is the common case
+      # and stays a clean no-op.
+      settled when settled in [:absent, :unknown_type] ->
         :ok
+
+      # The read failed. Unlike the case above this says nothing about whether
+      # the document is there, and swallowing it would silently drop a referrer
+      # from the wave — its artifact keeps the pre-change body with nothing
+      # queued to fix it (#664).
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 end

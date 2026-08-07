@@ -12,6 +12,8 @@ defmodule KilnCMSWeb.EditorLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
+  alias KilnCMS.Slug
+  alias KilnCMSWeb.Params
 
   @statuses ~w(all draft in_review published archived)
 
@@ -127,7 +129,12 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("new", %{"kind" => kind}, socket) do
     attrs = %{
       title: "Untitled #{kind}",
-      slug: "untitled-#{System.unique_integer([:positive])}"
+      # NOT `System.unique_integer/1` (#834): that counter resets on every VM
+      # start, while the `untitled-N` rows it must miss live in Postgres and
+      # outlive any restart — so a fresh node re-issues low numbers and the
+      # create fails with "slug has already been taken", leaving the button
+      # doing nothing.
+      slug: "untitled-#{Slug.random_suffix()}"
     }
 
     record = create!(kind, attrs, socket.assigns.actor, socket.assigns.current_org)
@@ -145,12 +152,15 @@ defmodule KilnCMSWeb.EditorLive do
     {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query, type))}
   end
 
-  def handle_event("search", %{"q" => q}, socket) do
+  # `is_binary(q)` guards the body's `String.replace/3` — a pushed `%{"q" => []}`
+  # matched this head and raised inside `search_filter/1` (#764). A wrong shape
+  # now falls through to the catch-all `KilnCMSWeb.MalformedEvent` appends.
+  def handle_event("search", %{"q" => q}, socket) when is_binary(q) do
     path = list_path(socket.assigns.status, q, socket.assigns.type)
     {:noreply, push_patch(socket, to: path, replace: true)}
   end
 
-  def handle_event("toggle_select", %{"key" => key}, socket) do
+  def handle_event("toggle_select", %{"key" => key}, socket) when is_binary(key) do
     selected = socket.assigns.selected
 
     selected =
@@ -355,7 +365,9 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:content_types, types)
      |> assign(:status, status)
      |> assign(:type, type)
-     |> assign(:query, params["q"] || "")
+     # `?q[a]=1` decodes to a MAP, which reached `search_filter/1`'s
+     # `String.replace/3` and raised (#764).
+     |> assign(:query, Params.string(params, "q", ""))
      |> load_releases()
      |> load_items()}
   end

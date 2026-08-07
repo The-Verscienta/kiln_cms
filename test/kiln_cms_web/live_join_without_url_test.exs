@@ -38,16 +38,20 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
   # namespace so that a *new* third-party LiveView in the router fails this test
   # and gets looked at.
   #
-  # `AshAuthentication.Phoenix.SignInLive` is *not* on this list: `/sign-in`,
-  # `/register` and `/reset` are routed to `KilnCMSWeb.SignInLive`, which wraps
-  # it in order to attach the client address (#715) and picks up the guard on
-  # the way past.
-  @unguarded_views [
-    AshAuthentication.Phoenix.ConfirmLive,
-    AshAuthentication.Phoenix.MagicSignInLive,
-    AshAuthentication.Phoenix.ResetLive,
-    AshAuthentication.Phoenix.SignOutLive
-  ]
+  # This list used to hold four and is now **empty**, which is the point: #701
+  # routed every remaining AshAuthentication view through a thin Kiln wrapper
+  # (`KilnCMSWeb.AuthLive`), for the same reason
+  # `AshAuthentication.Phoenix.SignInLive` already went through
+  # `KilnCMSWeb.SignInLive` (#715). It is kept rather than deleted so a *new*
+  # third-party LiveView in the router fails the coverage test below and gets
+  # looked at, instead of quietly being added here.
+  #
+  # `SignOutLive` was the near-miss: `sign_out_route/3` emits a `DELETE` to the
+  # auth controller **and** a `live` route in its own `live_session`. Only the
+  # first is visible at the call site, and an earlier draft of #701 exempted it
+  # on the strength of that — but the live route has a signed session blob like
+  # any other, and a url-less join to it was accepted.
+  @unguarded_views []
 
   defp authed_user(role) do
     email = "join-#{System.unique_integer([:positive])}@example.com"
@@ -176,6 +180,72 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
         end)
 
       assert refusals == Map.new(@routes, &{&1, :refused})
+    end
+  end
+
+  describe "the token-bearing auth pages (#701)" do
+    # These are the views that were outside the guard until #701, and the
+    # consequence was specific: a url-less join skips `:assign_current_org`, so
+    # the page rendered with no `:current_org` — and it never reached
+    # `Layouts.brand_or_unbranded/1`, which fails closed, because the channel
+    # takes the layout from the matched route and this join matched none.
+    # `Branding.for_org(nil)` answered with the DEFAULT org's name and logo,
+    # i.e. another tenant's identity on a tenant host.
+    #
+    # Unauthenticated pages, so there is no session to scrape from a prior
+    # visit — the join is driven with the blob these pages themselves serve.
+    @token_paths [
+      "/password-reset/some-token",
+      "/confirm_new_user/some-token",
+      "/magic_link/some-token",
+      # Not token-bearing, but the same wrapper and the same live route — see
+      # `@unguarded_views` on why it is easy to miss that this one exists.
+      "/sign-out"
+    ]
+
+    test "refuse a url-less join", %{conn: conn} do
+      refusals =
+        Map.new(@token_paths, fn path ->
+          {id, session} = scrape_token(conn, path)
+
+          outcome =
+            case join_without_url(live_socket(path), id, session) do
+              {:error, %{reason: "reload", status: 404}} -> :refused
+              other -> other
+            end
+
+          {path, outcome}
+        end)
+
+      assert refusals == Map.new(@token_paths, &{&1, :refused})
+    end
+
+    # The negative control: an ordinary routed join still renders. This is what
+    # would break if a wrapper dropped `mount/3` (KeyError on `:overrides`),
+    # `handle_params/3` (KeyError on `:token`) or `render/1` (a compile error).
+    test "still render for an ordinary connected mount", %{conn: conn} do
+      for path <- @token_paths do
+        assert {:ok, _view, _html} = live(conn, path),
+               "#{path} stopped rendering on a routed join"
+      end
+    end
+
+    # Asserted structurally, because it cannot be asserted behaviourally here:
+    # none of these pages' components call `put_flash!/3` (the two that do
+    # belong to the sign-in tree), and `Layouts.auth/1` renders no flash group
+    # at all — so deleting the hook leaves every other test in this file
+    # passing. Verified: it does.
+    #
+    # The hook is still restated by `KilnCMSWeb.AuthLive` for parity with the
+    # library's own `:live_view` macro, so an upstream release that starts
+    # flashing from one of these pages does not silently lose it.
+    test "keep the upstream Flash hook", %{conn: conn} do
+      for path <- @token_paths do
+        {:ok, view, _html} = live(conn, path)
+        hooks = :sys.get_state(view.pid).socket.private.lifecycle.handle_info
+
+        assert Enum.any?(hooks, &(&1.id == :flash)), "#{path} lost the Flash hook"
+      end
     end
   end
 

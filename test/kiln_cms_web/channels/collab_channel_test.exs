@@ -283,6 +283,39 @@ defmodule KilnCMSWeb.CollabChannelTest do
     assert_reply ref, :error, %{reason: "bad update"}
   end
 
+  # `handle_in/3` runs in the sender's own channel process, so a crash drops
+  # that client to a rejoin mid-edit (#764). The second client below is here to
+  # pin the other half — that the room and the doc server are NOT taken with it,
+  # which is what `Collab.DocServer` monitoring rather than linking buys.
+  test "a wrong-shaped or unknown frame is ignored, room intact", %{actor: actor, page: page} do
+    topic = topic(page)
+    {_reply, socket} = join!(actor, topic)
+    # A second client, so the assertion covers the room surviving as well as
+    # the sender's own socket.
+    {_reply2, sock_b} = join!(actor, topic)
+
+    # `"update"` matched on the key and never the value, so `Base.decode64/2`
+    # raised on anything non-binary.
+    for shape <- [[], ["x"], %{"a" => "1"}, 1, nil, true] do
+      push(socket, "update", %{"update" => shape})
+    end
+
+    # `handle_in/3` had no catch-all, so an unknown name was a
+    # FunctionClauseError.
+    push(socket, "no_such_event", %{})
+    push(socket, "update", %{"not_the_key" => "x"})
+
+    # The room still works: a real update from the surviving socket still
+    # reaches the other client.
+    doc = Yex.Doc.new()
+    doc |> Yex.Doc.get_text("block-0") |> Yex.Text.insert(0, "alive")
+    {:ok, update} = Yex.encode_state_as_update(doc)
+
+    ref = push(sock_b, "update", %{"update" => Base.encode64(update)})
+    assert_reply ref, :ok
+    assert_push "update", %{"update" => _}
+  end
+
   test "awareness payloads relay verbatim to the other clients", %{actor: actor, page: page} do
     topic = topic(page)
     {_reply, sock_a} = join!(actor, topic)

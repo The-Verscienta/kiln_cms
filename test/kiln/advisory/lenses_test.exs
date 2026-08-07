@@ -56,6 +56,30 @@ defmodule Kiln.Advisory.LensesTest do
 
   defp context, do: %Context{body: %Body{}}
 
+  # A document messy enough that most real checks actually produce findings —
+  # an empty one makes them all `:n_a` and turns any assertion about their
+  # findings vacuous.
+  defp rich_context do
+    body = %Body{
+      text: "Alpha beta gamma.",
+      folded_text: "alpha beta gamma.",
+      folded_words: ~w[alpha beta gamma],
+      word_count: 3,
+      first_paragraph: "Alpha beta gamma.",
+      headings: [%{level: 3, text: "Skipped down to three"}],
+      sentence_count: 1,
+      sentence_word_counts: [3],
+      paragraph_word_counts: [3],
+      image_count: 1,
+      images_missing_alt: [0],
+      links: [%{text: "click here", href: "https://example.com", index: 0}],
+      empty_headings: [0],
+      capitalised_runs: ["THIS IS A REALLY IMPORTANT NOTICE"]
+    }
+
+    Context.new(%{title: "", slug: "", seo_description: ""}, body, locale: "en")
+  end
+
   defp codes(outcomes, lens) do
     outcomes
     |> Registry.by_lens(lens)
@@ -120,8 +144,37 @@ defmodule Kiln.Advisory.LensesTest do
         assert lenses != [],
                "#{inspect(module)} declares no lenses, so its findings render nowhere"
 
-        assert Enum.all?(lenses, &(&1 in [:seo, :accessibility])),
+        assert Enum.all?(lenses, &(&1 in [:seo, :accessibility, :compliance])),
                "#{inspect(module)} declares an unknown lens: #{inspect(lenses)}"
+      end
+    end
+
+    # `:compliance` (#377) is the one lens NOT in the default `lenses/0`, so an
+    # ordinary check must never land in it. That panel's value depends on it
+    # not crying wolf, and a generic check drifting into it is exactly how that
+    # would happen without anyone noticing.
+    test "only checks that opt in report into the compliance panel" do
+      for module <- Registry.checks(), :compliance in module.lenses() do
+        assert module.lenses() == [:compliance],
+               "#{inspect(module)} mixes :compliance with another lens: " <>
+                 "#{inspect(module.lenses())}"
+      end
+
+      refute :compliance in KilnCMS.Seo.Checks.Meta.lenses()
+      refute :compliance in Kiln.Advisory.Checks.Headings.lenses()
+    end
+
+    # `by_lens/2` reads a per-FINDING `lenses` before falling back to the
+    # check's, so pinning `lenses/0` alone leaves a way in: any check may call
+    # `Kiln.Advisory.lensed/2` to narrow one finding, and `Seo.Checks.Readability`
+    # already does. Nothing outside the compliance namespace may use it to
+    # reach that panel.
+    test "no non-compliance check narrows a finding INTO the compliance panel" do
+      for module <- Registry.checks(), module.lenses() != [:compliance] do
+        outcomes = Registry.run(rich_context(), [module])
+
+        assert [] == Registry.by_lens(outcomes, :compliance),
+               "#{inspect(module)} produced a finding lensed into :compliance"
       end
     end
 

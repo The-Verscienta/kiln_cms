@@ -19,6 +19,22 @@ defmodule Mix.Tasks.Kiln.Audit.Checkpoint do
     * a checkpoint **never published** — the row has no receipt, so nothing
       outside the database attests it.
 
+  ## The structural half runs without a sink
+
+  Contiguity and the predecessor links (#732) are derived from
+  `chain_checkpoints` alone, so they run on **every** deployment, including the
+  default one that publishes nowhere. On a deployment with a witness they add
+  little — `compare/2` re-derives the whole published document and already sees
+  any in-place rewrite. On one without, they are the only structural evidence
+  there is.
+
+  Read them for what they are. An attacker who can rewrite a row can recompute
+  every digest downstream of it, and the newest checkpoint has no successor to
+  record its digest at all — so this is a check on a *careless* edit, and a
+  multiplier against a careful one (cascading forces a rewrite of every published
+  object after the doctored row, turning one sink mismatch into many). It is not
+  a substitute for the witness.
+
   Run it from somewhere that is **not** the application host, using credentials
   that can read the sink and not write it. An audit run on the same machine, by
   the same role that writes the checkpoints, checks that a system agrees with
@@ -67,25 +83,50 @@ defmodule Mix.Tasks.Kiln.Audit.Checkpoint do
   defp published(%{witnessed_at: nil, witness_error: error}), do: "[NOT PUBLISHED: #{error}]"
   defp published(_checkpoint), do: "[published]"
 
-  # Without a sink there is nothing to compare against, and saying so once beats
-  # one error per checkpoint and a non-zero exit on every stock deployment —
-  # which trains operators to ignore the exit code of the one tool that has to
-  # be trusted.
+  # Two halves, and only the second needs a sink.
+  #
+  # The structural checks — contiguity and the predecessor links (#732) — read
+  # nothing but `chain_checkpoints`, so they run on EVERY deployment. That is the
+  # only place they carry weight nothing else does: where a witness is
+  # configured, `compare/2` re-derives the whole published document and so
+  # already sees any in-place rewrite the links could. Gating them behind
+  # `Witness.enabled?()` made them dead code on the default adapter
+  # (`Witness.None`) — i.e. on precisely the unsigned deployments where they are
+  # the only structural evidence available.
+  #
+  # The sink comparison still can't run without a sink, and saying so once beats
+  # one error per checkpoint on every stock deployment — which trains operators
+  # to ignore the exit code of the one tool that has to be trusted. It is still
+  # a failure: a deployment with nothing outside the database attesting its
+  # checkpoints has not been audited, whatever the structure looks like.
   defp audit(orgs) do
-    if Witness.enabled?() do
-      failures = Enum.flat_map(orgs, &audit_org/1)
+    structural = Enum.flat_map(orgs, &audit_structure/1)
 
-      Mix.shell().info("#{length(failures)} checkpoint discrepancy/ies.")
+    witnessed =
+      if Witness.enabled?() do
+        Enum.flat_map(orgs, &audit_org/1)
+      else
+        Mix.shell().error(
+          "No witness is configured (KILN_GOVERNANCE_WITNESS), so checkpoints exist only in " <>
+            "the database and there is nothing outside it to audit them against. The " <>
+            "structural checks above still ran, but they cannot see a run truncated at the " <>
+            "newest end, and an attacker who rewrites a row can recompute every digest " <>
+            "downstream of it. See #666."
+        )
 
-      if failures != [], do: exit({:shutdown, 1})
-    else
-      Mix.shell().error(
-        "No witness is configured (KILN_GOVERNANCE_WITNESS), so checkpoints exist only in " <>
-          "the database and there is nothing outside it to audit them against. See #666."
-      )
+        [:error]
+      end
 
-      exit({:shutdown, 1})
-    end
+    Mix.shell().info("#{length(structural ++ witnessed)} checkpoint discrepancy/ies.")
+
+    if structural != [] or witnessed != [], do: exit({:shutdown, 1})
+  end
+
+  # The half that needs no sink: everything derivable from the rows themselves.
+  defp audit_structure(org_id) do
+    rows = Checkpoint.recent(org_id)
+
+    Enum.reject([contiguous(rows)] ++ links(rows), &(&1 == :ok))
   end
 
   # Both directions, and the second is the load-bearing one.
@@ -101,9 +142,20 @@ defmodule Mix.Tasks.Kiln.Audit.Checkpoint do
     row_sequences = MapSet.new(rows, & &1.sequence)
 
     Enum.reject(
-      Enum.map(rows, &compare(&1, org_id)) ++ orphans(org_id, row_sequences) ++ [contiguous(rows)],
+      Enum.map(rows, &compare(&1, org_id)) ++ orphans(org_id, row_sequences),
       &(&1 == :ok)
     )
+  end
+
+  # Walk the `prev_checkpoint_id` / `prev_checkpoint_digest` links (#732).
+  # `contiguous/1` above reads the sequence NUMBERS; this reads what each row
+  # actually recorded about its predecessor, which is what makes a row rewritten
+  # in place visible without a signature to check it against.
+  #
+  # The rule lives in `Checkpoint.link_failures/1` so it is unit-testable
+  # against hand-built runs; this only formats.
+  defp links(rows) do
+    Enum.map(Checkpoint.link_failures(rows), &fail("checkpoints", &1))
   end
 
   # Keys the sink holds that the database no longer accounts for.

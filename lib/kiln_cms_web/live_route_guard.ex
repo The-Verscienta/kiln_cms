@@ -76,17 +76,24 @@ defmodule KilnCMSWeb.LiveRouteGuard do
   `KilnCMSWeb.LiveJoinWithoutUrlTest` enforces for every `live` route in the
   router. Third-party views mounted by dependencies keep the framework
   behaviour: AshAdmin's are compile-gated to `:dev_routes` and so do not exist
-  in production, and AshAuthentication's remaining views (`/password-reset`,
-  `/confirm`, `/magic-link`, `/sign-out`) are unauthenticated, so a url-less
-  join to one reaches no authorization it could not reach signed out — though it
-  does skip `:assign_current_org`, which leaves the page wearing the default
-  org's branding rather than the host's (#701).
+  in production.
 
-  `/sign-in`, `/register` and `/reset` were in that gap until #715 routed them
-  to `KilnCMSWeb.SignInLive`, which wraps the library's view for an unrelated
-  reason — attaching the client address to the sign-in form — and picks this up
-  on the way past. Worth knowing rather than relying on: it is a side effect of
-  a wrapper that exists for something else.
+  AshAuthentication's used to be the standing gap. A url-less join to one
+  reached no authorization a signed-out visitor could not — they are
+  unauthenticated pages — but it skipped `:assign_current_org`, leaving the page
+  wearing the **default org's** branding rather than the host's (#701).
+
+  There is no gap now: every one of them is routed to a thin Kiln wrapper, so
+  they carry this guard like everything else. `/sign-in`, `/register` and
+  `/reset` go through `KilnCMSWeb.SignInLive`, which #715 introduced for an
+  unrelated reason — attaching the client address to the sign-in form — and
+  picked this up on the way past; `/password-reset/:token`,
+  `/confirm_new_user/:token`, `/magic_link/:token` and `/sign-out` go through
+  `KilnCMSWeb.AuthLive`, which exists for this reason alone (#701).
+
+  `/sign-out` is the one to know about: `sign_out_route/3` emits a `DELETE` to
+  the auth controller **and** a `live` route, and only the first is visible at
+  the call site.
 
   It also covers only a *well-formed* join. A payload whose `"url"` is present
   but not a binary — `nil`, a number, a map — never reaches a mount hook at all:

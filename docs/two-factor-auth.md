@@ -17,7 +17,11 @@ every sign-in, after the first factor.
   2. The user adds it to their authenticator app and enters a current code to
      confirm (`confirm_totp`), which is checked against the *pending* secret.
      Only on success is it promoted to the live secret and 2FA enforced —
-     `setup_totp` alone never flips that switch.
+     `setup_totp` alone never flips that switch. `confirm_totp` re-reads the
+     pending secret from the database, so if a second settings tab started a
+     newer enrolment in the meantime, **the last `setup_totp` wins**: a code
+     from the older tab's now-superseded secret is rejected as invalid rather
+     than silently promoting a secret the database no longer holds (#787).
   3. *Disable* (`disable_totp`) requires a current *live* code, so a walk-up
      attacker on an open session still can't remove the factor — and clears any
      abandoned pending secret along with it.
