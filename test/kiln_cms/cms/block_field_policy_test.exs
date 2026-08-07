@@ -138,6 +138,163 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
     end
   end
 
+  describe "nested clear by omission (#774)" do
+    defp columns_with(child), do: %{"_type" => "columns", "columns" => [%{"blocks" => [child]}]}
+
+    defp nested_child(page) do
+      [%Ash.Union{value: columns}] = page.blocks
+      [%{"blocks" => [child | _]} | _] = columns.columns
+      child
+    end
+
+    setup do
+      admin = user(:admin)
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_with(quote_block(%{"featured" => true, "text" => "featured"}))
+        ])
+
+      %{page: page, admin: admin, editor: user(:editor)}
+    end
+
+    test "an editor cannot clear a nested admin-set field by omitting it", %{
+      page: page,
+      editor: editor
+    } do
+      # The #774 reproduction: nest a featured quote in a column (as admin), then
+      # resubmit the column with the child's `featured` gone. The old per-child
+      # rule only checked PRESENT values, so an omitted one sailed through and the
+      # stored child lost `featured`.
+      assert {:error, error} =
+               CMS.update_page(
+                 page,
+                 %{block_tree: [columns_with(quote_block(%{"text" => "edited"}))]},
+                 actor: editor
+               )
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "an editor may resubmit the column preserving the admin value, editing around it", %{
+      page: page,
+      editor: editor
+    } do
+      # Acceptance #2: the old per-child default rule refused this outright (any
+      # non-default nested restricted value was a violation). The multiset rule
+      # allows it — the admin value is preserved, only the permitted `text` moved.
+      assert {:ok, updated} =
+               CMS.update_page(
+                 page,
+                 %{
+                   block_tree: [
+                     columns_with(quote_block(%{"featured" => true, "text" => "edited"}))
+                   ]
+                 },
+                 actor: editor
+               )
+
+      assert nested_child(updated)["featured"] == true
+      assert nested_child(updated)["text"] == "edited"
+    end
+
+    test "an editor cannot set a nested admin-only field the stored tree didn't have", %{
+      editor: editor
+    } do
+      # A fresh page with an unfeatured nested quote; the editor then tries to
+      # turn on `featured` — introducing a value, refused like the smuggle case.
+      {:ok, plain} = create_page(editor, [columns_with(quote_block(%{}))])
+
+      assert {:error, error} =
+               CMS.update_page(
+                 plain,
+                 %{block_tree: [columns_with(quote_block(%{"featured" => true}))]},
+                 actor: editor
+               )
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "an admin may clear the nested field", %{page: page, admin: admin} do
+      assert {:ok, updated} =
+               CMS.update_page(
+                 page,
+                 %{block_tree: [columns_with(quote_block(%{"text" => "edited"}))]},
+                 actor: admin
+               )
+
+      assert nested_child(updated)["featured"] in [false, nil]
+    end
+  end
+
+  describe "nested multiset — boundaries of the whole-tree rule (#774)" do
+    defp columns_children(children),
+      do: %{"_type" => "columns", "columns" => [%{"blocks" => children}]}
+
+    test "an admin value nested two columns deep is still caught on omission" do
+      admin = user(:admin)
+
+      inner = columns_children([quote_block(%{"featured" => true})])
+      {:ok, page} = create_page(admin, [columns_children([inner])])
+
+      inner_omit = columns_children([quote_block(%{})])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [columns_children([inner_omit])]},
+                 actor: user(:editor)
+               )
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "dropping one of two admin-featured children is refused (multiset shrinks)" do
+      admin = user(:admin)
+
+      two =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "A"}),
+          quote_block(%{"featured" => true, "text" => "B"})
+        ])
+
+      {:ok, page} = create_page(admin, [two])
+
+      one =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "A"}),
+          quote_block(%{"featured" => false, "text" => "B"})
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [one]}, actor: user(:editor))
+
+      assert Exception.message(error) =~ "featured"
+    end
+
+    test "re-targeting an admin value between same-type children is allowed (accepted residual)" do
+      # The count is preserved, only which child holds `featured` moves. Closing
+      # this needs per-child identity (tracked); this pins the current behavior so
+      # a future identity fix has to change it deliberately.
+      admin = user(:admin)
+
+      before =
+        columns_children([
+          quote_block(%{"featured" => true, "text" => "A"}),
+          quote_block(%{"featured" => false, "text" => "B"})
+        ])
+
+      {:ok, page} = create_page(admin, [before])
+
+      swapped =
+        columns_children([
+          quote_block(%{"featured" => false, "text" => "A"}),
+          quote_block(%{"featured" => true, "text" => "B"})
+        ])
+
+      assert {:ok, _updated} =
+               CMS.update_page(page, %{block_tree: [swapped]}, actor: user(:editor))
+    end
+  end
+
   describe "clear by omission (#566)" do
     setup do
       admin = user(:admin)
