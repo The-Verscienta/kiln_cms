@@ -102,6 +102,9 @@ defmodule KilnCMSWeb.GovernanceLive do
     do: value |> inspect(limit: 8, printable_limit: 160) |> String.slice(0, 160)
 
   attr :chain, :any, required: true
+  # `%{attested, next, head}` when the attested prefix stops short of the head
+  # (#811), else nil. Resolved in `Governance.trail/3`, not here — see there.
+  attr :gap_range, :map, default: nil
 
   # Tamper-evidence status from the signed history anchors (#356).
   defp chain_badge(assigns) do
@@ -114,14 +117,33 @@ defmodule KilnCMSWeb.GovernanceLive do
         <.icon name="hero-shield-check" class="size-3.5" />
         {gettext("Anchored history verified — chain intact, signature valid")}
       </span>
+      <%!-- #811: a chain can have anchors that VERIFY and a newer one that does
+            not. The verdict still reads `unsigned`, but calling that "intact"
+            claims more than is known — versions past the attested prefix are
+            anchored by a row nothing attests, and this is exactly the shape an
+            INSERT+DELETE laundering produces. It is also what an honest key
+            loss produces, which is why it is stated rather than called
+            tampering. --%>
       <span
-        :if={@chain == :unsigned}
+        :if={@gap_range}
+        class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
+      >
+        <.icon name="hero-exclamation-triangle" class="size-3.5" />
+        {gettext(
+          "Attested only to version %{attested} — versions %{next}-%{head} are anchored but not attested",
+          attested: @gap_range.attested,
+          next: @gap_range.next,
+          head: @gap_range.head
+        )}
+      </span>
+      <span
+        :if={@chain == :unsigned and is_nil(@gap_range)}
         class="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success/80"
       >
         {gettext("History intact (anchor unsigned — no signing key configured)")}
       </span>
       <span
-        :if={@chain == :unverifiable}
+        :if={@chain == :unverifiable and is_nil(@gap_range)}
         class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning"
       >
         {gettext(
@@ -214,7 +236,7 @@ defmodule KilnCMSWeb.GovernanceLive do
         <p class="text-sm text-base-content/60">
           {@trail.item.type} · {@trail.item.state}
         </p>
-        <.chain_badge chain={@trail.chain} />
+        <.chain_badge chain={@trail.chain} gap_range={@trail.chain_gap_range} />
         <p :if={@trail.unanchored_tail > 0} class="mt-1 text-xs text-base-content/60">
           {gettext("%{count} edit(s) since the last anchor — covered at the next publish.",
             count: @trail.unanchored_tail

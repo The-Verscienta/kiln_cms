@@ -671,6 +671,36 @@ migration, a rewritten column, a dropped config key).
 
 ### Security
 
+- **`mix kiln.audit.verify` can now fail a run it previously passed, and no
+  longer calls a chain "intact" when its attestation stops short of the head.**
+  A chain can have anchors that verify *and* a newer one that does not;
+  verification can then only hold the document to the newest attested anchor's
+  prefix, so versions past that point are anchored by a row nothing attests
+  (#811). That is what an attacker with INSERT **and** DELETE on
+  `history_anchors` produces: delete the verified head, doctor only the versions
+  it covered, re-insert an unsigned anchor refolded over the doctored rows.
+
+  A chain where **nothing** verifies is reported on the same terms, for a
+  sharper reason: `Chain.anchor_digest/1` covers neither `key_id` nor
+  `sequence`, so a single `UPDATE ... SET key_id` makes every anchor of a
+  document unjudgeable while leaving every link and sequence number intact — a
+  cheaper primitive than the DELETE, landing on the same silent line.
+
+  Both shapes are equally what an honest deployment produces when its signing
+  key goes away between publishes. They are identical inside the table, so this
+  is **reported** rather than called tampering, and the verdict ladder is
+  unchanged.
+
+  **The exit code splits on whether a signing key is configured.** A deployment
+  that could have signed and did not now fails the run — if you audit in CI with
+  a key configured and unsigned anchors present, that job will start failing.
+  One with no key configured is describing its operator's own choice and does
+  not. Neither is settled here; the checkpoint witness (#666) is.
+
+  The governance dashboard shows the same fact on the trail, in place of the
+  "History intact (anchor unsigned...)" badge it showed unconditionally.
+
+
 - **Demoting, offboarding or erasing a user now drops their live sockets.**
   Authorization on every socket ran **once** — at connect, and at join for
   channels — and was never revisited. `CollabChannel.handle_in("update", …)`

@@ -983,6 +983,117 @@ defmodule KilnCMS.Governance.Chain do
     end
   end
 
+  @typedoc """
+  How far a chain's *attested* prefix reaches, relative to its head (#811).
+
+    * `:none` — the newest anchor that verifies IS the head (or there are no
+      anchors). Nothing is outside the attested prefix.
+    * `:unattested` — no anchor in the chain verifies under a held key. There is
+      no attested prefix at all. On a deployment that *holds* a key this is a
+      stronger statement than a gap, not a weaker one, and callers should treat
+      it as such: `anchor_digest/1` covers neither `key_id` nor `sequence`, so
+      one `UPDATE … SET key_id = '<unknown>'` over a document's anchors makes
+      every one of them unjudgeable while leaving every link intact.
+    * `:disabled` — anchoring is switched off, so there are no rows to reason
+      from and nothing is claimed.
+    * `{:gap, attested_versions, head_versions}` — some anchor verifies, but a
+      NEWER one does not. Versions past `attested_versions` are anchored and
+      unattested.
+  """
+  @type attested_gap ::
+          :none | :unattested | :disabled | {:gap, non_neg_integer(), non_neg_integer()}
+
+  @doc """
+  Whether this chain's attested prefix reaches its head (#811).
+
+  `verify/4` holds a doctored head to the newest anchor that still verifies
+  (#708) — but it can only constrain versions *within* that anchor's prefix. An
+  attacker with INSERT **and** DELETE on `history_anchors` moves the doctoring
+  past it: delete the verified head, doctor only the versions it covered,
+  re-insert an unsigned anchor at the same position whose `chain_hash` is
+  refolded over the doctored rows. The surviving attested prefix still
+  reproduces, so `attested_baseline/6` is satisfied, and the head reads
+  `:unsigned` — which is not a failure.
+
+  Nothing inside `history_anchors` can tell that from an honest deployment whose
+  signing key went away between publishes, because the two produce byte-identical
+  tables. So this deliberately does **not** return a tamper verdict. It returns
+  the fact both cases share — the attested prefix stops short of the head, and
+  everything past it is attested by nothing — and leaves the judgement to a
+  caller that knows more: `mix kiln.audit.verify` weighs it against whether a
+  signing key is configured at all, and the checkpoint witness settles it
+  outright when one is running (`witness_intact/4`).
+
+  Separate from `verify/4` rather than folded into its verdict so the verdict
+  ladder (and every dashboard, JSON and CSV consumer of it) is untouched. Callers
+  should ask only about chains that came back `:unsigned`/`:unverifiable`: a
+  `:verified` chain has an attested head by definition, and a tampered one has
+  already failed.
+  """
+  @spec attested_gap(String.t(), Ash.UUID.t(), Ash.UUID.t() | nil) :: attested_gap()
+  def attested_gap(type, source_id, org_id) do
+    # `:disabled` rather than `:none` when the kill switch is off, for the reason
+    # `witness_intact/4` special-cases the same switch: `anchors/4` returns `[]`,
+    # and answering "the attested prefix reaches the head" from zero rows is a
+    # verdict manufactured out of configuration.
+    if enabled?() do
+      type |> anchors(source_id, org_id) |> gap_from()
+    else
+      :disabled
+    end
+  end
+
+  @doc """
+  As `attested_gap/3`, over an already-loaded **newest-first** anchor list.
+
+  For a caller that has the anchors in hand — `KilnCMS.Governance.trail/3` loads
+  them for the timeline — so the gap costs no second query. The order is the
+  caller's responsibility: this reads `hd/1` as the head, and an ascending list
+  would silently compare against the oldest anchor.
+  """
+  @spec attested_gap([struct()]) :: attested_gap()
+  def attested_gap(anchors) when is_list(anchors), do: gap_from(anchors)
+
+  defp gap_from([]), do: :none
+
+  defp gap_from([head | _] = anchors) do
+    case newest_verified(anchors) do
+      nil ->
+        :unattested
+
+      %{id: attested_id} when attested_id == head.id ->
+        :none
+
+      attested ->
+        # Only a STRICTLY shorter attested prefix leaves versions outside it.
+        # `coverage_rises_with_position/1` rejects a decrease but permits equal
+        # counts, so a head covering no more than its predecessor is reachable —
+        # and reporting `{:gap, n, n}` there would print an empty, inverted
+        # version range for a chain that has nothing beyond the attested prefix.
+        if attested.version_count < head.version_count do
+          {:gap, attested.version_count, head.version_count}
+        else
+          :none
+        end
+    end
+  end
+
+  # The newest anchor that verifies, halting on a tampered signature exactly as
+  # `signatures_intact/1` does — an `Enum.find` would walk straight past one to
+  # an older verified anchor and disagree with the baseline `verify/4` used.
+  #
+  # Cheap where it matters: an unsigned anchor short-circuits in
+  # `anchor_signature/1` with no RSA work, so a keyless deployment pays nothing.
+  defp newest_verified(anchors) do
+    Enum.reduce_while(anchors, nil, fn anchor, none ->
+      case anchor_signature(anchor) do
+        :verified -> {:halt, anchor}
+        {:tampered, _} -> {:halt, none}
+        _unjudgeable -> {:cont, none}
+      end
+    end)
+  end
+
   # `:ok`/`:verified` is the strongest, then `:unsigned`, then `:unverifiable` —
   # "signed with a key we do not hold" says less than "not signed at all",
   # because the former is also what a tampered `key_id` looks like.
