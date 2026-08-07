@@ -13,8 +13,9 @@ defmodule KilnCMSWeb.AshStateMachineErrors do
   Neither `AshJsonApi.ToJsonApiError` nor `AshGraphql.Error` is implemented for
   it upstream, so without the impls below:
 
-    * JSON:API takes the fallback branch in `AshJsonApi.Error.to_json_api_error/1`
-      and returns an opaque `something_went_wrong` 400 with a random error id —
+    * JSON:API takes the fallback branch in `AshJsonApi.Error`'s
+      `to_json_api_error` clause and returns an opaque `something_went_wrong`
+      400 with a random error id —
       indistinguishable to a client from a genuine 500 — **and** logs a formatted
       stacktrace per request (the warning fires precisely because the protocol is
       unimplemented). A retrying client spams it.
