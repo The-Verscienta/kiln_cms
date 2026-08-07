@@ -926,6 +926,34 @@ if config_env() == :prod do
     config :kiln_cms, KilnCMS.Assist, model: assist_model, generator: assist_generator
   end
 
+  # ## Generated answers for /api/ask (optional)
+  #
+  # The third AI switch, and the one to think hardest about: `/api/ask` is a
+  # **public, anonymous** endpoint. Leave ASK_MODEL unset and it stays what it
+  # is by default — retrieval-only, returning cited published passages and
+  # `"answer": null` — with nothing leaving the deployment. Set it and a
+  # stranger's question causes the retrieved passages to be sent to the model.
+  #
+  #     ASK_MODEL=ollama:llama3.1           # on-prem, no egress
+  #     ASK_MODEL=anthropic:claude-sonnet-5 # hosted; also needs ANTHROPIC_API_KEY
+  #
+  # Only *published, world-readable* content is ever retrieved, so no draft can
+  # reach the model whatever the setting. Generation carries its own rate-limit
+  # buckets on top of the pipeline's per-IP limiter, keyed on the client address
+  # for anonymous callers; an exhausted bucket degrades to retrieval-only rather
+  # than refusing the request. Provider API keys are read by `req_llm` from its
+  # own environment — Kiln never reads or stores them. ASK_GENERATOR overrides
+  # the adapter module. See docs/rag.md.
+  if ask_model = System.get_env("ASK_MODEL") do
+    ask_generator =
+      case System.get_env("ASK_GENERATOR") do
+        nil -> KilnCMS.Ask.Generator.ReqLLM
+        module -> Module.concat([module])
+      end
+
+    config :kiln_cms, KilnCMS.Ask, model: ask_model, generator: ask_generator
+  end
+
   # ### Rich embed cards (#489)
   #
   # `OEMBED_ENABLED=true` lets Kiln fetch oEmbed metadata — title, author,

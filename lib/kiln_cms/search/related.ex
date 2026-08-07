@@ -45,13 +45,21 @@ defmodule KilnCMS.Search.Related do
 
     record
     |> neighbours(limit * 4)
-    |> resolve(record.org_id, published_only?: true)
+    |> resolve(record.org_id, published_only?: true, actor: nil)
     |> Enum.take(limit)
   end
 
   @doc """
   Documents whose closest block sits within `:threshold` cosine distance of
   this document (default 0.1) — near-duplicates, any workflow state.
+
+  Pass `:actor` and the neighbours are resolved as that user, so a document
+  they may not read never appears. Omit it (the automation path, which has no
+  actor and is already trusted) and the reads run unauthorized. Unlike
+  `related_documents/2` this deliberately spans every workflow state and
+  audience, so on an actor-facing surface — the editor's panel — the actor is
+  the only thing standing between a granular-RBAC-restricted editor (#332) and
+  the title of a draft in a content type they were not given.
   """
   @spec near_duplicates(struct(), keyword()) :: [neighbour()]
   def near_duplicates(record, opts \\ []) do
@@ -60,16 +68,22 @@ defmodule KilnCMS.Search.Related do
     record
     |> neighbours(Keyword.get(opts, :limit, 20))
     |> Enum.filter(&(&1.distance <= threshold))
-    |> resolve(record.org_id, published_only?: false)
+    |> resolve(record.org_id, published_only?: false, actor: opts[:actor])
   end
 
   @doc """
   Existing tags ranked by similarity to the document's content, excluding the
   ones already applied. Returns `[%{tag, distance}]`, best first. Options:
-  `:limit` (default 5).
+  `:limit` (default 5) and `:actor`.
+
+  With `:actor` the taxonomy is read as that user. Beyond the policy question,
+  that keeps an editor-facing caller honest: a suggestion for a tag the
+  editor's own tag picker doesn't list is a control with nothing to tick.
   """
   @spec suggest_tags(struct(), keyword()) :: [%{tag: struct(), distance: float()}]
   def suggest_tags(record, opts \\ []) do
+    actor = opts[:actor]
+
     with true <- Search.semantic?(),
          centroid when is_list(centroid) <- centroid(record) do
       applied =
@@ -79,7 +93,11 @@ defmodule KilnCMS.Search.Related do
         |> Enum.reject(&match?(%Ash.NotLoaded{}, &1))
         |> MapSet.new(& &1.id)
 
-      KilnCMS.CMS.list_tags!(authorize?: false, tenant: record.org_id)
+      KilnCMS.CMS.list_tags!(
+        actor: actor,
+        authorize?: not is_nil(actor),
+        tenant: record.org_id
+      )
       |> Enum.reject(&MapSet.member?(applied, &1.id))
       |> Enum.flat_map(fn tag ->
         case tag_vector(tag.name) do
@@ -100,12 +118,24 @@ defmodule KilnCMS.Search.Related do
   @doc """
   Recorded search queries that found nothing — what readers looked for and
   the site didn't have (the Analytics `:zero_result` read). Options:
-  `:limit` (default 20, most-searched first).
+  `:limit` (default 20, most-searched first) and `:actor`.
+
+  Unlike its siblings this reads no embeddings, so it is the one function here
+  that still answers on a deployment with semantic search off — a keyword-only
+  site records zero-result queries just the same.
+
+  Pass `:actor` from a request context and the read is authorized as that user
+  (the analytics read policy is editor-or-above); omit it and the read runs
+  unauthorized, for the system callers — an automation job has no actor to
+  offer and is already trusted.
   """
-  @spec content_gaps(Ash.UUID.t(), keyword()) :: [map()]
+  @spec content_gaps(Ash.UUID.t() | struct(), keyword()) :: [map()]
   def content_gaps(org_id, opts \\ []) do
+    actor = Keyword.get(opts, :actor)
+
     KilnCMS.Analytics.zero_result_searches!(
-      authorize?: false,
+      actor: actor,
+      authorize?: not is_nil(actor),
       tenant: org_id,
       query: [limit: Keyword.get(opts, :limit, 20)]
     )
@@ -156,9 +186,15 @@ defmodule KilnCMS.Search.Related do
     end
   end
 
-  defp resolve(neighbours, org_id, published_only?: published_only?) do
+  # A forbidden read comes back as an error tuple, which drops the neighbour —
+  # the same path a deleted one takes. The vector query above stays
+  # unauthorized either way: `BlockEmbedding` is an internal index, and the
+  # documents it points at are filtered here, one read at a time.
+  defp resolve(neighbours, org_id, published_only?: published_only?, actor: actor) do
+    read_opts = [actor: actor, authorize?: not is_nil(actor), tenant: org_id]
+
     Enum.flat_map(neighbours, fn %{type: storage, id: id, distance: distance} ->
-      case ContentTypes.get_record(to_string(storage), id, authorize?: false, tenant: org_id) do
+      case ContentTypes.get_record(to_string(storage), id, read_opts) do
         {:ok, doc} -> neighbour_entry(doc, distance, published_only?)
         _ -> []
       end
