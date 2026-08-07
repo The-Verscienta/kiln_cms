@@ -285,15 +285,43 @@ defmodule KilnCMS.CMS.Changes.EnforceBlockFieldPolicy do
 
   defp nested_maps(_other), do: []
 
+  # A child is collected only from a position the RENDERER reads — a column's
+  # `"blocks"` list, mirroring `KilnCMS.Blocks.Columns`'s own `raw_blocks/1`.
+  #
+  # Collecting every map that merely carried a `_type` key, wherever it sat, was
+  # defeatable by the very omission this comparison exists to catch: a `_type`
+  # (plus the restricted field) added as a SIBLING key on the column wrapper is
+  # never rendered, but counted into the multiset — so it offset the removal of a
+  # real admin-set child value and the two sides compared equal. `field :columns,
+  # {:array, :map}` has no `fields` constraint, so such a key survives cast and
+  # the JSONB round-trip.
+  #
+  # A map is collected by its PARENT, never by itself, so each is counted once.
+  # Descent still walks every list value, so columns-nested-in-columns is reached
+  # at any depth — only *collection* is restricted to the rendered slot.
+  #
+  # If a future block nests children under a different key, this and
+  # `Columns.raw_blocks/1` have to change together; they are the same fact stated
+  # twice, deliberately, because reading the renderer is what makes this safe.
   defp collect_maps(list) when is_list(list), do: Enum.flat_map(list, &collect_maps/1)
   defp collect_maps(%Ash.Union{}), do: []
 
   defp collect_maps(%{} = map) when not is_struct(map) do
-    typed = if Map.has_key?(map, "_type") or Map.has_key?(map, :_type), do: [map], else: []
-    typed ++ Enum.flat_map(Map.values(map), &collect_maps/1)
+    rendered_children = map |> child_blocks() |> Enum.filter(&typed_map?/1)
+
+    rendered_children ++ Enum.flat_map(Map.values(map), &collect_maps/1)
   end
 
   defp collect_maps(_other), do: []
+
+  # Same accessor as `KilnCMS.Blocks.Columns.raw_blocks/1`, string or atom key.
+  defp child_blocks(map),
+    do: (Map.get(map, "blocks") || Map.get(map, :blocks) || []) |> List.wrap()
+
+  defp typed_map?(map) when is_map(map) and not is_struct(map),
+    do: Map.has_key?(map, "_type") or Map.has_key?(map, :_type)
+
+  defp typed_map?(_other), do: false
 
   defp collect_restricted(map, role, acc) do
     with {:ok, type} <- fetch_type(map),

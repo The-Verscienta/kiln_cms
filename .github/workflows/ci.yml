@@ -155,6 +155,29 @@ jobs:
       - name: Sobelow (security scan)
         run: mix sobelow --config
 
+      # PDF metadata stripping (#807) shells out to qpdf, and the tests that
+      # prove an uploaded PDF really loses its /Info and XMP need a real one.
+      #
+      # The options arrived in qpdf 11.10. Ubuntu 24.04 packages 11.9.0 — one
+      # minor short — and 26.04 packages 12.3.2, so whether these tests run
+      # depends on where `ubuntu-latest` currently points. `test_helper.exs`
+      # excludes the `:qpdf` tag when the installed qpdf can't strip and says
+      # so on stderr, so this degrades visibly rather than silently passing.
+      # The line below reports it in the job log too, where someone will
+      # actually see it. The RELEASE image is Debian trixie (qpdf 12.2.0) and
+      # is not affected either way.
+      - name: Install qpdf (PDF metadata stripping tests)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qpdf
+          qpdf --version | head -1
+          if qpdf --help=all 2>&1 | grep -q -- '--remove-info'; then
+            echo "qpdf supports --remove-info; :qpdf tests will run"
+          else
+            echo "::warning::qpdf $(qpdf --version | head -1) predates 11.10 —" \
+                 ":qpdf tests (#807 PDF metadata stripping) will be EXCLUDED"
+          fi
+
       - name: Run tests
         run: mix test
 
