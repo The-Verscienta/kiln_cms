@@ -458,10 +458,13 @@ to send each block's id — a tree carrying ids is judged block by block as
 before, so inserting a new block beside a restricted one is unaffected.
 
 Nested children of a `columns` block are raw maps rather than union members, so
-they carry no identity at all and are held to the stricter default-value rule.
-See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
-and does not guarantee — in particular that reusing another block's id is a
-separate, still-open hole.
+they carry no identity to diff one-for-one. They are covered by requiring the
+whole tree's multiset of role-restricted non-default nested values to be
+identical before and after a non-admin write (#774): such a value can be neither
+introduced nor dropped, but a column already holding an admin-set value may be
+resubmitted unchanged. See residual risk 8 in
+[`threat-model.md`](threat-model.md) for what this does and does not guarantee —
+in particular that reusing another block's id is a separate, still-open hole.
 
 ## Coverage
 
