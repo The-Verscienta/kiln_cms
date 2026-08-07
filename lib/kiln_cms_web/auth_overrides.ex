@@ -121,19 +121,11 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :text, "or"
   end
 
-  # Theme tokens (not hardcoded emerald/rose) so auth toasts meet contrast in
-  # both light and dark themes, matching CoreComponents.flash (#173).
-  override Components.Flash do
-    set :message_class_info, """
-    fixed top-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border
-    border-info/30 bg-base-100 px-4 py-3 text-sm text-base-content shadow-lg
-    """
-
-    set :message_class_error, """
-    fixed top-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border
-    border-error/30 bg-base-100 px-4 py-3 text-sm text-base-content shadow-lg
-    """
-  end
+  # No `Components.Flash` override: every auth route now renders through
+  # `Layouts.auth/1`, which draws Kiln's own `flash_group` (#884). The library's
+  # `Components.Flash` — the only thing this override styled — is no longer
+  # rendered on any path, so the override was dead. Auth toasts inherit
+  # `CoreComponents.flash`'s theme-token styling (#173) with the rest of the app.
 
   override Components.MagicLink do
     set :root_class, "mt-4 mb-4"

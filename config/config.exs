@@ -165,7 +165,14 @@ config :kiln_cms, KilnCMS.Search,
   # `hybrid(..., rerank: true)` calls use it.
   rerank: false,
   reranker: KilnCMS.Search.Reranker.Bumblebee,
-  rerank_model: "BAAI/bge-reranker-base"
+  rerank_model: "BAAI/bge-reranker-base",
+  # Cosine-distance ceiling for a semantic hit, or nil for none. Nearest
+  # neighbours always exist, so without a ceiling the semantic leg answers
+  # every query — gibberish included — and "no results" never happens. The
+  # right value is model- and corpus-specific, so there is no safe default to
+  # ship: measure with `KilnCMS.Search.semantic_distances/3` and set it just
+  # above where real matches stop. See `KilnCMS.Search.semantic_max_distance/0`.
+  semantic_max_distance: nil
 
 # AI-assisted SEO drafting (#60). The deterministic analysis and score in the
 # editor are ALWAYS on and need none of this — the block below gates the
