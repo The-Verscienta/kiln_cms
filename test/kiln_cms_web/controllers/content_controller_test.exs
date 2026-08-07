@@ -134,6 +134,105 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ ~s(width="1600")
     end
 
+    # #473: a browser takes the first `<source>` type it supports, so WebP has to
+    # be offered ahead of the `<img>` fallback — and the fallback's `srcset` must
+    # stay single-encoding or a WebP-less client can be handed one by width.
+    test "modern-format variants render as <picture> sources, not in the srcset", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "pic.jpg",
+          url: "/uploads/p-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          alt: "Described",
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/p-thumb.jpg",
+              "width" => 400,
+              "height" => 267,
+              "content_type" => "image/jpeg"
+            },
+            "thumb.webp" => %{
+              "key" => "tw",
+              "url" => "/uploads/p-thumb.webp",
+              "width" => 400,
+              "height" => 267,
+              "content_type" => "image/webp"
+            },
+            # A crop — excluded from both, in every encoding.
+            "card.webp" => %{
+              "key" => "cw",
+              "url" => "/uploads/p-card.webp",
+              "width" => 800,
+              "height" => 450,
+              "content_type" => "image/webp"
+            }
+          }
+        })
+
+      page =
+        page(%{
+          title: "Picture Page",
+          blocks: [
+            %{type: :image, content: "/uploads/p-orig", data: %{"media_id" => media.id}, order: 0}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "<picture>"
+      assert html =~ ~s(type="image/webp")
+      assert html =~ "/uploads/p-thumb.webp 400w"
+
+      # The `<img>` fallback carries the source format only — scoped to the
+      # `<picture>`, since the console layout has an `<img>` of its own.
+      [_, picture] = String.split(html, "<picture>", parts: 2)
+      [picture, _] = String.split(picture, "</picture>", parts: 2)
+      [_, img] = String.split(picture, "<img", parts: 2)
+
+      assert img =~ "/uploads/p-thumb.jpg 400w"
+      refute img =~ "p-thumb.webp"
+
+      # The crop is in neither.
+      refute html =~ "p-card.webp"
+    end
+
+    # An upload processed before #473 has no alternates; the markup must be
+    # exactly what it was, not an empty `<picture>` wrapper with no sources.
+    test "an item with no alternates renders no <source> elements", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "old.jpg",
+          url: "/uploads/o-orig",
+          content_type: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          variants: %{
+            "thumb" => %{
+              "key" => "t",
+              "url" => "/uploads/o-thumb",
+              "width" => 400,
+              "height" => 267
+            }
+          }
+        })
+
+      page =
+        page(%{
+          title: "Legacy Img",
+          blocks: [
+            %{type: :image, content: "/uploads/o-orig", data: %{"media_id" => media.id}, order: 0}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ "/uploads/o-thumb 400w"
+      refute html =~ "<source"
+    end
+
     test "focal point flows to object-position; cropped variants stay out of srcset", %{
       conn: conn
     } do
