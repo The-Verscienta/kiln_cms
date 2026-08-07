@@ -9633,3 +9633,8 @@ msgstr "Formatos de variante: %{formats}. Ejecuta esto después de cambiarlos."
 #, elixir-autogen, elixir-format
 msgid "source format only"
 msgstr "solo el formato de origen"
+
+#: lib/kiln_cms_web/live/automation_live.ex:403
+#, elixir-autogen, elixir-format
+msgid "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. They email their findings and never write to the record. suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
+msgstr "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: to. Envían sus hallazgos por correo y nunca escriben en el registro. suggest_metadata además necesita allow_egress: true cuando el proveedor de modelo configurado está fuera del sitio."

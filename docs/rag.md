@@ -149,8 +149,11 @@ read (nearest neighbours of an already-computed vector, self-excluded).
   Not windowed by the dashboard's `?range=`: a gap is a standing absence, and
   the counter table keeps a running total per query rather than per-day buckets.
   Its own retention window (`SearchQuery`'s nightly purge) bounds it instead.
-- **Automation rules** — `:flag_duplicates` and `:suggest_tags` reactions email
-  findings on an event such as "moved to in review" (#377).
+- **Automation rules** — the `:flag_duplicates`, `:suggest_tags`,
+  `:suggest_links` and `:suggest_metadata` reactions email findings on an event
+  such as "moved to in review" (#377). All four suggest and never write; see
+  [Editorial automation](automation.md#the-intelligence-reactions-suggest-and-never-write)
+  for why that boundary is the point.
 
 Both editor surfaces need this document's own block embeddings, which are
 written by firing, and firing runs on publish. A never-published draft

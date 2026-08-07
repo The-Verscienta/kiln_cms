@@ -58,10 +58,13 @@ No backfills required; no locks beyond ordinary DDL.
    ("on `post.published` → `newsletter`", optional `segment_id`/`subject`).
    One campaign per {rule, content, publish revision}; default-locale variant
    only.
-4. **Intelligence reactions** (#377) need semantic search enabled
+4. **Intelligence reactions** (#377) mostly need semantic search enabled
    (`KilnCMS.Search semantic: true` + an embedding backfill via
    `mix kiln.embed_all`) — without it, `:flag_duplicates`/`:suggest_tags`
-   and `/related` are clean no-ops.
+   and `/related` are clean no-ops. `:suggest_links` still works (it falls back
+   to a keyword sweep), and `:suggest_metadata` depends on a configured
+   `KilnCMS.Seo` generator instead, plus `"allow_egress": true` on the rule
+   when that provider is off-site.
 5. **Governance dashboard** now shows the chain verdict per document; after a
    provenance-key rotation old anchors read "signed under a previous key"
    (never TAMPERED) — see docs/editorial-consent.md.
