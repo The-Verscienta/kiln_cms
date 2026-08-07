@@ -129,13 +129,36 @@ defmodule Kiln.FieldType do
   """
   @callback tokens(definition :: struct()) :: [Kiln.Tokens.definition()]
 
+  @doc """
+  The JSON Schema for this type's **delivered** value (#430).
+
+  `KilnCMS.SchemaExport` otherwise infers a shape from the editor widget —
+  `c:input_parts/1` for a composite, `c:input_type/0` for a scalar. That
+  inference is a guess about the *form*, and `c:cast/2` is free to disagree
+  with it: `KilnCMS.CMS.FieldTypes.Recurrence` renders its exclusion dates as
+  one text input but stores a **list**, and
+  `KilnCMS.CMS.FieldTypes.Computed` renders a formula but stores whatever the
+  expression evaluated to — a number, a boolean, a string.
+
+  Implement this when `cast/2`'s return value is not what the widget suggests.
+  Anything you return is used verbatim, so it should describe the JSON that
+  reaches `custom_fields` on the fired artifact, `null` included.
+
+  Optional: a type whose stored value matches its widget needs nothing here.
+  """
+  @callback json_schema(definition :: struct()) :: map()
+
   # `input_parts/1` and `tokens/1` were added after this contract shipped.
   # `use Kiln.FieldType` defaults them, but a plugin that hand-rolls
   # `@behaviour Kiln.FieldType` is explicitly sanctioned (`mix
   # kiln.plugins.doctor` requires only `cast/2` and `name/0`), and such a
   # module would otherwise fail to compile under `--warnings-as-errors` on
   # upgrade. Optional here, defaulted there.
-  @optional_callbacks input_parts: 1, tokens: 1
+  # `json_schema/1` is deliberately *not* defaulted by `use Kiln.FieldType`:
+  # `KilnCMS.SchemaExport` probes for it with `function_exported?` and falls
+  # back to widget inference, so defining a default would mean every type
+  # silently claiming to describe itself.
+  @optional_callbacks input_parts: 1, tokens: 1, json_schema: 1
 
   defmacro __using__(_opts) do
     quote do

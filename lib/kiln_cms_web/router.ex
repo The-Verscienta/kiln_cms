@@ -524,6 +524,12 @@ defmodule KilnCMSWeb.Router do
     # hreflang set without hard-coding the site's configured languages.
     get "/locales", LocalesController, :index
 
+    # JSON Schema for this site's delivery payloads (#430): the block union and
+    # one document schema per content type, so a typed client generates against
+    # the live schema instead of a vendored copy. Per-org, because dynamic types
+    # and custom fields are.
+    get "/schema", SchemaController, :show
+
     # Path resolution for headless routing: what lives at this URL — published
     # content ("ok"), a pathauto redirect ("moved", 301 it yourself), or 404.
     get "/resolve", ResolveController, :show

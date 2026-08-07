@@ -29,6 +29,34 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **JSON Schema / TypeScript export of block definitions.** The last unshipped
+  "one definition fans out" item from the v2 plan (#430). `GET /api/schema`
+  serves a draft-2020-12 JSON Schema describing what
+  `GET /api/content/:type/:slug?surface=json` returns — the `_type`-discriminated
+  block union plus one document schema per content type — and
+  `mix kiln.export.schema` writes the same document, or a `.d.ts` built from it,
+  for a build step. Typed clients had nothing to generate against for block
+  payloads; now they do.
+
+  Per **site**, not per deployment: dynamic content types and custom fields are
+  organization-scoped, so an admin adding a field changes the schema with no
+  redeploy. Container blocks `$ref` back into the union, so nesting is typed all
+  the way down — something the storage union cannot express.
+
+  It describes the **read** surface. Delivery projects rather than mirrors (an
+  `image`'s `media_id` never reaches the payload; a `video`'s `media_id`/`url`
+  pair is delivered as one resolved `src`), so blocks whose `:json` render
+  diverges from their fields declare the difference through the new optional
+  `c:Kiln.Block.Renderer.json_schema/0` — next to the render it describes, and
+  covered by a conformance test that renders every registered block against its
+  own exported schema. The authoring shape stays where it was, in the OpenAPI
+  document at `/api/json/open_api`. See [§ Schema discovery](docs/api.md#schema-discovery-typed-clients).
+
+  `Kiln.FieldType` gains an optional `json_schema/1` for the same reason on the
+  custom-field side: a type whose `cast/2` result diverges from its editor
+  widget — `:recurrence` renders one text input but stores a list — declares
+  the shape it actually delivers instead of being guessed at.
+
 - **The editor PWA's web app manifest is localized.** `name`, `description` and
   both shortcut labels are translated, so the install dialog, app list, splash
   screen and long-press shortcut menu appear in the editor's language. The root

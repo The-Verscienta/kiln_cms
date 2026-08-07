@@ -79,6 +79,20 @@ defmodule KilnCMS.Blocks.Audio do
     end
   end
 
+  # `media_id` and `url` are two authoring routes to one playable source; the
+  # `:json` render resolves them into `src` and drops the raw `url`. A block
+  # with neither renders `_type` alone, so nothing else is required.
+  @impl Kiln.Block.Renderer
+  def json_schema do
+    %{
+      "x-kiln-drop" => ["url"],
+      "properties" => %{
+        "src" => Kiln.Block.JsonSchema.resolved_src(),
+        "loop" => %{"type" => "boolean", "default" => false}
+      }
+    }
+  end
+
   @impl Kiln.Block.Renderer
   def search_text(block) do
     [block.title, block.caption] |> Enum.reject(&blank?/1) |> Enum.join(" ")
