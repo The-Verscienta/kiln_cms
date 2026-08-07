@@ -13,6 +13,22 @@ defmodule KilnCMS.CMS.Validations.KnownContentTypes do
 
   Resolution is org-aware — dynamic types are per-org — via
   `ContentTypes.get/2` under the group's own `org_id`.
+
+  ## Only what the write supplies
+
+  `Ash.Changeset.get_attribute/2` falls back to `get_data/2`, so validating
+  unconditionally re-judged the row's **stored** list on every update — and an
+  entry can go stale without anyone touching the group (archiving a dynamic type
+  drops it from `ContentTypes.dynamic_all/1`). That froze the record: renaming or
+  repositioning it was rejected on a field the write never mentioned, from
+  AshAdmin, seeds and the code interfaces alike, with no way back except editing
+  the column by hand.
+
+  It also contradicted the feature's own UI, which deliberately renders a stale
+  entry as `"<name> (unknown)"` — i.e. the row is expected to persist and stay
+  editable so an admin can fix it.
+
+  So this validates only when the write is actually changing `content_types`.
   """
   use Ash.Resource.Validation
 
@@ -21,6 +37,14 @@ defmodule KilnCMS.CMS.Validations.KnownContentTypes do
 
   @impl true
   def validate(changeset, _opts, _context) do
+    if Ash.Changeset.changing_attribute?(changeset, :content_types) do
+      validate_supplied(changeset)
+    else
+      :ok
+    end
+  end
+
+  defp validate_supplied(changeset) do
     case changeset
          |> Ash.Changeset.get_attribute(:content_types)
          |> unknown_types(org_id(changeset)) do
