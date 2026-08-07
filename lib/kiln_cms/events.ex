@@ -138,7 +138,7 @@ defmodule KilnCMS.Events do
     # now runs on `FieldDefinition` writes too, since a field is what decides
     # the answer.
     KilnCMS.Cache.fetch(KilnCMS.Cache.calendar_types_key(org_id), @registry_ttl, fn ->
-      (ContentTypes.all() ++ ContentTypes.dynamic_all(org_id))
+      ContentTypes.all_for_org(org_id)
       |> Enum.filter(&event_type?(scope_for_descriptor(&1), org_id))
     end)
   end

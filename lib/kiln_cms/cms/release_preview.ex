@@ -115,17 +115,9 @@ defmodule KilnCMS.CMS.ReleasePreview do
   end
 
   defp type_label(content_type, opts) do
-    case ContentTypes.get(content_type, org_id(opts)) do
+    case ContentTypes.get(content_type, Keyword.get(opts, :tenant)) do
       %{label: label} -> label
       _ -> content_type
-    end
-  end
-
-  defp org_id(opts) do
-    case Keyword.get(opts, :tenant) do
-      %{id: id} -> id
-      id when is_binary(id) -> id
-      _ -> KilnCMS.Accounts.default_org_id()
     end
   end
 end

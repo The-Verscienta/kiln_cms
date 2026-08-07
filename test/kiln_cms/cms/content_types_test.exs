@@ -81,4 +81,74 @@ defmodule KilnCMS.CMS.ContentTypesTest do
       assert published.state == :published
     end
   end
+
+  # #527: `all_for_org/1` and `options/2` replace ~20 hand-rolled
+  # `all() ++ dynamic_all(org_id(...))` expressions, whose per-call-site `org_id`
+  # helpers disagreed on `nil` — several raised where the rest fell back.
+  describe "per-organization enumeration" do
+    defp define_type!(label) do
+      admin =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "ct-admin-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      CMS.create_type_definition!(
+        %{name: "t#{System.unique_integer([:positive])}", label: label},
+        actor: admin
+      )
+    end
+
+    test "all_for_org/1 takes an org struct, a bare id, or nil" do
+      org =
+        KilnCMS.Accounts.get_organization!(KilnCMS.Accounts.default_org_id(), authorize?: false)
+
+      expected = ContentTypes.all_for_org(org.id)
+      assert ContentTypes.all_for_org(org) == expected
+      assert ContentTypes.all_for_org(nil) == expected
+    end
+
+    test "all_for_org/1 lists the compiled types, then the org's dynamic ones" do
+      definition = define_type!("Zebra")
+      descriptors = ContentTypes.all_for_org(nil)
+
+      compiled = Enum.filter(descriptors, &(&1.source == :compiled))
+      assert Enum.map(compiled, & &1.type) == Enum.map(ContentTypes.all(), & &1.type)
+
+      # Sorted by label within each half, and NOT resorted across the seam —
+      # "Zebra" stays after every compiled type despite sorting last overall.
+      assert List.last(descriptors).type == definition.name
+    end
+
+    # The pick-list agrees with `all_for_org/1`, and with the grouped
+    # "Built-in"/"Custom" pickers: compiled first, then the org's own. Guarded
+    # with a label that sorts before every compiled one, so a sort across the
+    # seam would move it to the front.
+    test "options/2 keeps the compiled/dynamic seam, it does not sort across it" do
+      definition = define_type!("Aardvark")
+      options = ContentTypes.options(nil)
+
+      assert Enum.map(options, &elem(&1, 0)) ==
+               Enum.map(ContentTypes.all_for_org(nil), & &1.label)
+
+      assert List.last(options) == {"Aardvark", definition.name}
+    end
+
+    test "options/2 returns {label, type-name string} pairs" do
+      definition = define_type!("Recipe")
+      options = ContentTypes.options(nil)
+
+      assert {"Page", "page"} in options
+      assert {"Recipe", definition.name} in options
+    end
+
+    test "options/2 puts :prompt first and never sorts it into the list" do
+      [first | rest] = ContentTypes.options(nil, prompt: {"— Zzz —", ""})
+
+      assert first == {"— Zzz —", ""}
+      assert rest == ContentTypes.options(nil)
+    end
+  end
 end

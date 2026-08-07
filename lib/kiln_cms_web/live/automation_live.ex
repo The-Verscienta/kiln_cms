@@ -152,10 +152,6 @@ defmodule KilnCMSWeb.AutomationLive do
     |> to_form()
   end
 
-  # The dynamic-type registry (`ContentTypes.*`) keys by a raw org_id.
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
-
   # `config` is entered as JSON in a textarea; decode it to a map before submit
   # (a :map attribute can't take the raw string). Invalid JSON surfaces its own
   # outcome so the caller can flash a friendly message.
@@ -183,19 +179,16 @@ defmodule KilnCMSWeb.AutomationLive do
 
   defp decode_config(params), do: {:ok, params}
 
+  # Editorial tasks (#501) aren't a content type — `task.assigned` /
+  # `task.overdue` are task-domain events dispatched through the same
+  # `<type>.<verb>` funnel with a literal "task" type (see
+  # `KilnCMS.Automation.Rule`'s `@triggers` moduledoc note). Without the trailing
+  # entry, a rule triggered on `:assigned`/`:overdue` could only be left at "Any
+  # content type" (matches every event, not just task ones) or pointed at an
+  # existing content type — which `Rule.matching`'s exact-match filter then never
+  # fires for: a silently dead rule.
   defp type_options(org) do
-    types = ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org))
-
-    # Editorial tasks (#501) aren't a content type — `task.assigned` /
-    # `task.overdue` are task-domain events dispatched through the same
-    # `<type>.<verb>` funnel with a literal "task" type (see
-    # `KilnCMS.Automation.Rule`'s `@triggers` moduledoc note). Without this,
-    # a rule triggered on `:assigned`/`:overdue` could only be left at "Any
-    # content type" (matches every event, not just task ones) or pointed at
-    # an existing content type — which `Rule.matching`'s exact-match filter
-    # then never fires for: a silently dead rule.
-    [{gettext("Any content type"), ""}] ++
-      Enum.map(types, &{&1.label, to_string(&1.type)}) ++
+    ContentTypes.options(org, prompt: {gettext("Any content type"), ""}) ++
       [{gettext("Tasks"), "task"}]
   end
 

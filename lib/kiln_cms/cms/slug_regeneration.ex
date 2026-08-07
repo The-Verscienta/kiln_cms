@@ -160,10 +160,8 @@ defmodule KilnCMS.CMS.SlugRegeneration do
     end
   end
 
-  defp types(:all, tenant),
-    do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(tenant))
-
-  defp types(kind, tenant), do: kind |> ContentTypes.get(org_id(tenant)) |> List.wrap()
+  defp types(:all, tenant), do: ContentTypes.all_for_org(tenant)
+  defp types(kind, tenant), do: kind |> ContentTypes.get(tenant) |> List.wrap()
 
   defp records(ct, tenant) do
     query =
@@ -182,8 +180,4 @@ defmodule KilnCMS.CMS.SlugRegeneration do
 
     Ash.stream!(query, authorize?: false, tenant: tenant, batch_size: 100)
   end
-
-  defp org_id(%{id: id}), do: id
-  defp org_id(tenant) when is_binary(tenant), do: tenant
-  defp org_id(_tenant), do: KilnCMS.Accounts.default_org_id()
 end

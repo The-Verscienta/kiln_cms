@@ -110,7 +110,7 @@ defmodule KilnCMSWeb.EditorLive do
   # Scoped to the current site's org (epic #336), like every sibling page
   # (`trash_live`, `calendar_live`, …): the dynamic registry is per-org, so the
   # type filter and the "New …" buttons must offer *this* site's types.
-  defp editable_types(org_id), do: ContentTypes.all() ++ ContentTypes.dynamic_all(org_id)
+  defp editable_types(org_id), do: ContentTypes.all_for_org(org_id)
 
   # The types this page pulls rows from: every editable type, or just the one
   # the `type` filter names. Filtering here rather than after the merge keeps

@@ -82,6 +82,22 @@ defmodule KilnCMS.MultitenancyDynamicTypesTest do
       refute ctx.na in b_names
     end
 
+    # `all_for_org/1` and `options/2` are the shared enumerations that replaced
+    # ~20 hand-rolled `all() ++ dynamic_all(org_id(...))` expressions (#527), so
+    # they are now the single place a leak between sites would appear.
+    test "all_for_org/1 and options/2 carry only the org's own dynamic types", ctx do
+      a_types = ContentTypes.all_for_org(ctx.a) |> Enum.map(& &1.type)
+      assert ctx.na in a_types
+      refute ctx.nb in a_types
+
+      # ...and an org struct and its bare id are the same org.
+      assert ContentTypes.all_for_org(ctx.b.id) == ContentTypes.all_for_org(ctx.b)
+
+      a_values = ctx.a |> ContentTypes.options() |> Enum.map(&elem(&1, 1))
+      assert ctx.na in a_values
+      refute ctx.nb in a_values
+    end
+
     test "get_dynamic/2 resolves a name only within its own site", ctx do
       assert %{type: type} = ContentTypes.get_dynamic(ctx.na, ctx.a.id)
       assert type == ctx.na
