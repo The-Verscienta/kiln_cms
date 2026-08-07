@@ -35,6 +35,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
+  alias KilnCMS.Search.Related
   alias KilnCMS.Slug
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
@@ -195,6 +196,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # record read per neighbour, which no page-load should pay.
          |> assign(:seo_links, nil)
          |> assign(:seo_links_loading?, false)
+         # Content intelligence (#339): near-duplicates + tag suggestions, both
+         # from the block embeddings this document already has. Same deferral
+         # and the same reason as the link suggestions above, doubled — this
+         # runs the vector query *and* embeds every unapplied tag name.
+         # `nil` = never run; `[]` = ran and found nothing.
+         |> assign(:intel_duplicates, nil)
+         |> assign(:intel_tags, nil)
+         |> assign(:intel_loading?, false)
          # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
          # `picking` is nil (closed), a block index (fill that image block), or
          # `:new` (insert a new image block — opened from the editor chrome).
@@ -437,6 +446,46 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # An empty list rather than nil: nil means "not loaded yet" and would make
     # the panel try again on every open.
     {:noreply, socket |> assign(:seo_links_loading?, false) |> assign(:seo_links, [])}
+  end
+
+  # Content intelligence (#339). Stamped with the editor version like the other
+  # async results: a run started before a conflict reload describes content the
+  # author no longer has, and its tag suggestions would be applied to a form
+  # that was replaced underneath them.
+  def handle_async(:content_intel, {:ok, {version, %{} = intel}}, socket) do
+    if version == socket.assigns.editor_version do
+      {:noreply,
+       socket
+       |> assign(:intel_loading?, false)
+       |> assign(:intel_duplicates, intel.duplicates)
+       |> assign(:intel_tags, intel.tags)}
+    else
+      {:noreply, assign(socket, :intel_loading?, false)}
+    end
+  end
+
+  def handle_async(:content_intel, {:exit, reason}, socket) do
+    Logger.warning("Content intelligence task exited: #{inspect(reason)}")
+
+    # `[]`, not nil, so the button stops offering a first run it already made.
+    # But `[]` alone renders the panel's ordinary empty state — "Nothing similar
+    # found." — which is a *result*, and this is the absence of one. The flash
+    # is what carries that difference; without it a crashed analysis is
+    # indistinguishable from a clean bill of health, and an author would
+    # reasonably publish the duplicate we failed to look for.
+    #
+    # Only a *task-level* failure lands here (a lost DB connection, say). An
+    # embedder that raises does not: `KilnCMS.Cache.fetch/3` wraps it in
+    # `Cachex.fetch`, which catches fallback exceptions, so a broken model
+    # degrades to an empty suggestion list through the `{:ok, _}` clause above
+    # and still reads as "nothing found". Widening that is #851's neighbourhood,
+    # not this clause's.
+    {:noreply,
+     socket
+     |> assign(:intel_loading?, false)
+     |> assign(:intel_duplicates, [])
+     |> assign(:intel_tags, [])
+     |> put_flash(:error, gettext("Couldn't analyze this content. Please try again."))}
   end
 
   def handle_async(:seo_draft, {:exit, reason}, socket) do
@@ -1381,6 +1430,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
       do: {:noreply, socket},
       else: {:noreply, load_link_suggestions(socket)}
   end
+
+  # ── Content intelligence (#339) ───────────────────────────────────────────
+
+  # Near-duplicates + tag suggestions, on an explicit click. Same "never on
+  # mount" rule as the link suggestions: this is a pgvector query, a record read
+  # per neighbour, and one embedding per unapplied tag name.
+  def handle_event("content_intel_refresh", _params, socket) do
+    if socket.assigns.intel_loading?,
+      do: {:noreply, socket},
+      else: {:noreply, load_content_intel(socket)}
+  end
+
+  # Attach a suggested tag. Writes through the form rather than the record, so
+  # it lands in the same save as everything else the author is editing and is
+  # undoable by unticking the checkbox the picker already renders for it.
+  def handle_event("intel_add_tag", %{"id" => id}, socket) when is_binary(id) do
+    {:noreply, add_suggested_tag(socket, id)}
+  end
+
+  def handle_event("intel_add_tag", _params, socket), do: {:noreply, socket}
 
   # The `Clipboard` JS hook pushes this after a successful copy. Without a
   # clause here the push would crash the LiveView — the hook predates this
@@ -2427,6 +2496,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> clear_seo_suggestions()
     |> close_assist()
     |> assign(:seo_links, nil)
+    # Same rule for the intelligence panel: its tag suggestions are computed
+    # against the content being discarded, and "Add" writes into the form that
+    # is about to be replaced.
+    |> assign(:intel_duplicates, nil)
+    |> assign(:intel_tags, nil)
   end
 
   defp clear_seo_suggestions(socket) do
@@ -3358,6 +3432,88 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> start_async(:seo_links, fn ->
       KilnCMS.Seo.Links.suggest(record, actor: actor, exclude_paths: linked)
     end)
+  end
+
+  # ── Content intelligence (#339) ────────────────────────────────────────────
+
+  defp load_content_intel(socket) do
+    # Plain data only into the task, never the socket or the form: both are
+    # stale the moment an autosave rebuilds them. `record` is refreshed on every
+    # autosave, so the neighbour queries run against saved content — a passage
+    # typed since the last save isn't indexed yet either way.
+    record = socket.assigns.record
+    version = socket.assigns.editor_version
+    # The actor is not optional here. Near-duplicates span every workflow state
+    # and audience, and the taxonomy read has to agree with the tag picker's —
+    # a suggestion for a tag this editor's picker doesn't list is an Add button
+    # with no checkbox to tick.
+    actor = socket.assigns.actor
+
+    socket
+    |> assign(:intel_loading?, true)
+    |> start_async(:content_intel, fn ->
+      {version,
+       %{
+         duplicates: Related.near_duplicates(record, actor: actor),
+         tags: Related.suggest_tags(record, actor: actor)
+       }}
+    end)
+  end
+
+  # Tick a suggested tag in the form's `tag_ids`, then drop it from the panel.
+  #
+  # The current selection is read the same way `tag_picker/1` reads it —
+  # form value first, persisted tags as the fallback — because a form that has
+  # never had its tag group submitted carries no `tag_ids` at all, and putting
+  # a one-element list there would submit "these are the only tags", detaching
+  # every tag already on the record (#522's failure, from the other direction).
+  defp add_suggested_tag(socket, tag_id) do
+    suggestions = socket.assigns.intel_tags || []
+
+    cond do
+      not Enum.any?(suggestions, &(to_string(&1.tag.id) == tag_id)) ->
+        # Not a tag we offered — a replayed or forged event. Ignore it rather
+        # than attaching whatever id was pushed.
+        socket
+
+      socket.assigns.conflict ->
+        put_flash(socket, :error, gettext("Reload the page before changing tags."))
+
+      true ->
+        current =
+          socket.assigns.form
+          |> selected_ids(:tag_ids, current_ids(socket.assigns.record.tags))
+          |> Enum.map(&to_string/1)
+
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> Map.put("tag_ids", Enum.uniq(current ++ [tag_id]))
+
+        socket
+        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+        |> assign(:intel_tags, Enum.reject(suggestions, &(to_string(&1.tag.id) == tag_id)))
+        |> mark_dirty()
+    end
+  end
+
+  # Why the intelligence panel came back empty. Both halves compare *this*
+  # document's block embeddings against something, and there are two ways to
+  # have none — the feature is off, or this document has never been indexed —
+  # which want different answers: one is the operator's setting, the other is
+  # fixed by publishing. Embeddings are written by firing, and firing runs on
+  # publish, so a never-published draft genuinely has nothing to compare.
+  defp intel_empty_reason(record) do
+    cond do
+      not KilnCMS.Search.semantic?() ->
+        gettext("Semantic search is off, so there is nothing to compare against.")
+
+      record.state != :published and is_nil(record.published_at) ->
+        gettext("Publish this page to index it — suggestions come from indexed content.")
+
+      true ->
+        gettext("Nothing similar found.")
+    end
   end
 
   # Why the suggestion list came back empty — an unexplained empty panel reads
@@ -7493,6 +7649,95 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     else: gettext("Refresh")}
                   <.icon
                     :if={@seo_links_loading?}
+                    name="hero-arrow-path"
+                    class="ml-1 size-3 motion-safe:animate-spin"
+                  />
+                </button>
+              </.inspector_section>
+
+              <%!-- Content intelligence (#339). Same click-to-load contract as
+                    Internal links above, and deliberately the section below it:
+                    all three read the same embeddings, and an author who has
+                    just paid for one query is the one most likely to want the
+                    others. No `<form>` here — the Settings rail is already
+                    inside `id="page-editor"`'s form, and a nested one is
+                    dropped by the HTML parser. --%>
+              <.inspector_section title={gettext("Similar content")}>
+                <p class="text-xs text-base-content/60">
+                  {gettext("Near-duplicates of this page, and tags its content suggests.")}
+                </p>
+
+                <p
+                  :if={@intel_duplicates == [] and @intel_tags == []}
+                  class="text-xs text-base-content/60"
+                >
+                  {intel_empty_reason(@record)}
+                </p>
+
+                <div :if={@intel_duplicates not in [nil, []]} class="space-y-1.5">
+                  <%!-- `-ink`, not `text-warning` — the accents are tuned to
+                        carry white on a solid fill and only reach ~2-4:1 as
+                        text on a light surface (the standing rule from #543). --%>
+                  <h4 class="text-xs font-medium text-warning-ink">
+                    {ngettext(
+                      "%{count} possible duplicate",
+                      "%{count} possible duplicates",
+                      length(@intel_duplicates)
+                    )}
+                  </h4>
+
+                  <ul class="space-y-1.5">
+                    <li
+                      :for={dup <- @intel_duplicates}
+                      class="rounded border border-warning/40 bg-warning/10 p-2"
+                    >
+                      <p class="text-xs font-medium text-warning-ink">{dup.title || dup.slug}</p>
+                      <%!-- Opens in a new tab: this is a *different* document,
+                            and navigating away would abandon unsaved edits. --%>
+                      <a
+                        href={~p"/editor/content/#{dup.type}/#{dup.id}"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-xs text-warning-ink underline"
+                      >
+                        {gettext("Open %{type}", type: dup.type)} &nearr;
+                        <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+                      </a>
+                    </li>
+                  </ul>
+                </div>
+
+                <div :if={@intel_tags not in [nil, []]} class="space-y-1.5">
+                  <h4 class="text-xs font-medium">{gettext("Suggested tags")}</h4>
+
+                  <div class="flex flex-wrap gap-1.5">
+                    <%!-- Ticks the tag in the picker above rather than writing
+                          to the record: it saves with everything else, and
+                          unticking the checkbox undoes it. --%>
+                    <button
+                      :for={suggestion <- @intel_tags}
+                      type="button"
+                      phx-click="intel_add_tag"
+                      phx-value-id={suggestion.tag.id}
+                      class="inline-flex items-center gap-1 rounded border border-base-content/20 px-2 py-1 text-xs hover:bg-base-200"
+                    >
+                      <.icon name="hero-plus" class="size-3" />
+                      {suggestion.tag.name}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  phx-click="content_intel_refresh"
+                  disabled={@intel_loading?}
+                  class="btn btn-sm btn-default"
+                >
+                  {if @intel_duplicates == nil,
+                    do: gettext("Analyze content"),
+                    else: gettext("Refresh")}
+                  <.icon
+                    :if={@intel_loading?}
                     name="hero-arrow-path"
                     class="ml-1 size-3 motion-safe:animate-spin"
                   />
