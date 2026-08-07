@@ -30,6 +30,11 @@ import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
+// How many boxes are ticked inside an element — see TagFilter, which uses it to
+// tell "the editor selected something while I had this open" from "it already
+// held selections before the search".
+const checkedCount = (el) => el.querySelectorAll("input:checked").length
+
 const Hooks = {
   FocusTrap,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
@@ -337,11 +342,14 @@ const Hooks = {
     mounted() {
       this.input = this.el.querySelector("[data-tag-filter-input]")
       this.empty = this.el.querySelector("[data-tag-filter-empty]")
-      // Whether the *previous* pass was narrowing. Hook state, not a DOM
-      // attribute: morphdom strips client-set attributes on the next patch, so
-      // anything remembered on the element itself is gone the moment the
-      // editor autosaves.
-      this.filtering = false
+      // The sections *this hook* forced open to surface a match (mapped to
+      // their tick count at that moment), so clearing the query closes only
+      // those (#523). `open` is otherwise owned by the editor and by the
+      // app-wide <details> preservation in the LiveSocket `dom` option below —
+      // a second writer here fought it for the attribute, and which one won
+      // depended on whether `updated()` ran before or after the patch. A
+      // WeakMap so a section morphdom replaces is simply forgotten.
+      this.forced = new WeakMap()
       if (!this.input) return
 
       // stopPropagation is load-bearing, not tidiness: LiveView binds `change`
@@ -378,10 +386,6 @@ const Hooks = {
     filter() {
       if (!this.input) return
       const q = this.input.value.trim().toLowerCase()
-      // Only the filtering→cleared transition restores the server's own
-      // open/closed choice. Re-applying it on every pass would slam shut any
-      // section the editor opened by hand, every time a patch lands.
-      const restoring = this.filtering && q === ""
       let anyVisible = false
 
       this.el.querySelectorAll("[data-tag-section]").forEach(section => {
@@ -392,14 +396,28 @@ const Hooks = {
           if (hit) matches++
         })
         section.hidden = matches === 0
-        // A search should surface hits wherever they live, so expand while
-        // filtering.
-        if (q !== "") section.open = true
-        else if (restoring) section.open = section.dataset.tagOpenDefault === "true"
+        if (q !== "") {
+          // A search should surface hits wherever they live, so expand while
+          // filtering — but remember only the sections that were actually
+          // closed, so an editor's own toggle survives the query being cleared.
+          // Alongside each, how many boxes were ticked at that moment.
+          if (!section.open) {
+            section.open = true
+            this.forced.set(section, checkedCount(section))
+          }
+        } else if (this.forced.has(section)) {
+          const before = this.forced.get(section)
+          this.forced.delete(section)
+          // ...unless the editor ticked something while it was open. Folding it
+          // away then is the same harm as #523's server flip: it hides the box
+          // they just ticked and the sibling they were reaching for. A section
+          // that merely *held* ticks before the search still closes — that is
+          // the state they left it in.
+          if (checkedCount(section) === before) section.open = false
+        }
         anyVisible = anyVisible || matches > 0
       })
 
-      this.filtering = q !== ""
       if (this.empty) this.empty.hidden = anyVisible
     },
   },
