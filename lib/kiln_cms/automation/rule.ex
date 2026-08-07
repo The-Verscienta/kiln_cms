@@ -42,9 +42,18 @@ defmodule KilnCMS.Automation.Rule do
   # feature's job; automation adds the reactions webhooks can't do.
   # `:newsletter` (#376) fans a published document out to subscribers via the
   # existing newsletter machinery — "on publish → send the newsletter".
-  # `:flag_duplicates` / `:suggest_tags` (#377) are the embedding-driven
-  # editorial-intelligence reactions — e.g. "on in_review → email the editors
-  # any near-duplicates" as a lightweight review gate.
+  # `:flag_duplicates` / `:suggest_tags` / `:suggest_links` / `:suggest_metadata`
+  # (#377) are the editorial-intelligence reactions — e.g. "on in_review → email
+  # the editors any near-duplicates" as a lightweight review gate.
+  #
+  # Every one of them **suggests and never writes**, which is the design answer
+  # to the reason this issue's automation form was held back: drafted metadata
+  # lands in `<meta>` tags on the public site, so a successful prompt injection
+  # buys SEO cloaking on the operator's own domain, and human-in-the-loop is the
+  # primary control against that. Automation makes the *computation* unattended;
+  # accepting a value stays a click in the editor. A reaction that wrote
+  # `seo_description` on a state transition would remove the primary control
+  # entirely — see `KilnCMS.Seo.Generator`.
   @action_kinds [
     :send_email,
     :broadcast,
@@ -52,7 +61,9 @@ defmodule KilnCMS.Automation.Rule do
     :reindex,
     :newsletter,
     :flag_duplicates,
-    :suggest_tags
+    :suggest_tags,
+    :suggest_links,
+    :suggest_metadata
   ]
 
   @doc "Lifecycle events a rule can trigger on."
