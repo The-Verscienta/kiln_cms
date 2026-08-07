@@ -96,6 +96,54 @@ migration, a rewritten column, a dropped config key).
   `Content-Length` is a claim the remote server makes, and a size check that
   runs after the download has already lost.
 
+- **WebP/AVIF variants, quality settings, and bulk regeneration.** Kiln's image
+  pipeline wrote derivatives in the *source* extension — a JPEG upload yielded
+  JPEG thumbnails — and passed no quality setting at all. Now every variant is
+  written once per output format: the source's own, plus each configured
+  alternate (#473). WebP is on by default (25–35% smaller than JPEG at equal
+  quality); AVIF is opt-in, because encoding it costs roughly an order of
+  magnitude more CPU per image, which is a real bill on a bulk run.
+
+  ```elixir
+  config :kiln_cms, :image_variants,
+    formats: [:webp], webp_quality: 82, avif_quality: 50, jpg_quality: 82
+  ```
+
+  Quality covers the lossy formats only — libvips has none for PNG — and is
+  clamped to `1..100`, because a rejected write produces *no* variant and an
+  unclamped `System.get_env/1` string would empty the library rather than
+  degrade one format.
+
+  Variant keys still name exactly one file: the **bare label** is the source
+  format — the `<img src>` fallback, and how every map written before this is
+  keyed — and alternates take a `<label>.<format>` suffix, each carrying its own
+  `content_type` for `<picture>`. A source format that is also a configured
+  alternate is written once, not twice under two keys.
+
+  Delivery renders `<picture>`. `Media.Presentation.srcset/1` stays
+  source-format-only and `sources/1` returns one `srcset` per alternate, most
+  efficient first — because a browser picks from a `srcset` on width alone, so
+  mixing encodings there would hand a WebP-less client a WebP, while `<picture>`
+  is the one construct where it is told what it is choosing. An item with no
+  alternates renders exactly the `<img>` it did before.
+
+  Alternates include a **full-size** encoding, which is load-bearing rather than
+  an extra: a matching `<source>` *replaces* the `<img>`'s srcset instead of
+  adding to it, so without a candidate at the original's width every content
+  image would quietly render smaller on exactly the browsers this feature exists
+  to serve.
+
+  **Bulk regeneration** (`mix kiln.media.regenerate_variants`, and a Regenerate
+  variants button in `/media`) rolls a configuration change out over media
+  uploaded before it — the Regenerate Thumbnails analogue, needed again every
+  time a width or quality changes. It enqueues onto the throttled `:media` queue
+  at the lowest priority (so a bulk run can't leave new uploads thumbnail-less
+  for hours), deduplicates per item, and reclaims the storage the replaced
+  variants held — every other deletion path reads the current map, so without
+  that one run over a large library would orphan tens of thousands of files.
+  Originals are never rewritten: published snapshots point at them by key. See
+  [Media pipeline](docs/media-pipeline.md).
+
 - **Editor-managed navigation menus.** `/editor/menus` builds ordered trees of
   links — "Main navigation", "Footer" — and `GET /api/menus/:key` serves them to
   a front end (#466). Kiln had no navigation resource at all: categories are
