@@ -7,10 +7,8 @@ defmodule KilnCMSWeb.MediaLive do
 
   import Ash.Expr, only: [expr: 1]
 
-  alias KilnCMS.AVProcessor
   alias KilnCMS.CMS
-  alias KilnCMS.DocumentProcessor
-  alias KilnCMS.ImageProcessor
+  alias KilnCMS.Media.Ingest
   alias KilnCMS.MediaKind
   alias KilnCMS.Storage
   alias KilnCMS.Unsplash
@@ -20,20 +18,12 @@ defmodule KilnCMSWeb.MediaLive do
   @max_entries 10
   # Phoenix's `allow_upload` takes one ceiling for every entry (there's no
   # per-accept-type cap in the API), so this is the LARGEST of the per-type
-  # caps below — `check_size/2` enforces the tighter one for whichever type an
-  # upload turns out to be, after `ImageProcessor`/`DocumentProcessor`/
-  # `AVProcessor` has byte-sniffed it.
-  @max_image_size 10_000_000
-  @max_document_size 25_000_000
-  # Video is the outlier and the reason the ceiling moved (#494): a few
-  # minutes of web-ready H.264 is comfortably past every other cap here.
-  # There is no transcoding, so this is also the practical statement of "how
-  # big a file will Kiln accept" — see docs/media-pipeline.md.
-  @max_video_size 500_000_000
-  @max_audio_size 100_000_000
-  # A caption track is text; anything remotely this size is not a `.vtt`.
-  @max_captions_size 2_000_000
-  @max_file_size 500_000_000
+  # caps — `KilnCMS.Media.Ingest` enforces the tighter one for whichever type
+  # an upload turns out to be, after byte-sniffing it. Video is the outlier and
+  # the reason the ceiling is what it is (#494), which makes this also the
+  # practical statement of "how big a file will Kiln accept" — see
+  # docs/media-pipeline.md.
+  @max_file_size Ingest.max_upload_size()
   # Server-side page size: the grid loads pages of newest-first items and any
   # older item is reachable via Load more or the (server-side) filter.
   @page_size 60
@@ -429,243 +419,42 @@ defmodule KilnCMSWeb.MediaLive do
 
   # --- helpers ---------------------------------------------------------------
 
-  # Tries the image path first (the common case), then A/V (#494), then
-  # documents (#481) — the byte-sniffers are independent and a file can only
-  # ever satisfy one, so trying each in turn costs nothing an outright
-  # rejection wouldn't already cost. The *last* sniffer's error is the one
-  # reported, which is why documents go last: "unsupported format" from the
-  # narrowest validator is the least misleading message for a file that
-  # matched nothing.
+  # --- ingest ----------------------------------------------------------------
+
+  # The upload pipeline (sniff -> cap -> strip -> store -> item -> derive) is
+  # `KilnCMS.Media.Ingest`, shared with the Unsplash import here and the bulk
+  # importers (#487). This module keeps only the LiveView-shaped edges: what a
+  # temp file is called, and what the editor is told when one fails.
   #
-  # `source`, when removed, is the server-built stripped temp file (UUID path),
-  # never user input — the File.rm traversal warning is a false positive.
-  # sobelow_skip ["Traversal.FileModule"]
-  # Returns :ok or {:error, reason} — the reason reaches the failure flash so
-  # editors learn WHICH file failed and why, not just a count (audit U-M5).
+  # The returned reason reaches the failure flash so editors learn WHICH file
+  # failed and why, not just a count (audit U-M5).
   defp store_entry(path, entry, actor, org) do
-    case ImageProcessor.validate_upload(path) do
-      {:ok, %{ext: ext, content_type: content_type}} ->
-        with :ok <- check_size(path, @max_image_size) do
-          store_image(path, ext, content_type, entry, actor, org)
-        end
-
-      {:error, _reason} ->
-        store_entry_as_av(path, entry, actor, org)
-    end
-  end
-
-  defp store_entry_as_av(path, entry, actor, org) do
-    case AVProcessor.validate_upload(path) do
-      {:ok, %{ext: ext, content_type: content_type, kind: kind}} ->
-        with :ok <- check_size(path, av_size_cap(kind)) do
-          # No metadata-stripping step, same as the document path: an MP4's
-          # metadata atoms need container-specific tooling this codebase
-          # doesn't have (tracked separately).
-          store_as_is(path, ext, content_type, entry, actor, org)
-        end
-
-      {:error, _reason} ->
-        store_entry_as_document(path, entry, actor, org)
-    end
-  end
-
-  defp av_size_cap(:video), do: @max_video_size
-  defp av_size_cap(:audio), do: @max_audio_size
-  defp av_size_cap(:captions), do: @max_captions_size
-
-  defp store_entry_as_document(path, entry, actor, org) do
-    case DocumentProcessor.validate_upload(path) do
-      {:ok, %{ext: ext, content_type: content_type}} ->
-        # Strip BEFORE the size check reads the file we store, and store the
-        # stripped copy — the image path draws the same line, for the same
-        # reason: what gets recorded must be what a reader will download.
-        with :ok <- check_size(path, @max_document_size),
-             {:ok, stripped} <- DocumentProcessor.strip_metadata(path) do
-          try do
-            store_as_is(stripped, ext, content_type, entry, actor, org)
-          after
-            File.rm(stripped)
-          end
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Measured from the RECEIVED FILE, not `entry.client_size`.
-  #
-  # `client_size` is a number the browser put in the upload payload; a modified
-  # client can declare anything. LiveView enforces the real byte count only
-  # against `allow_upload`'s single `max_file_size`, which is the largest cap
-  # here (500 MB, for video) — so trusting `client_size` would make every
-  # tighter per-kind cap advisory, and a "2 MB" caption track could be 500 MB
-  # of anything. `File.stat` is the only number nobody outside this server
-  # chose.
-  #
-  # `path` is LiveView's own server-generated upload temp file — the traversal
-  # warning is the same false positive as elsewhere in this module.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp check_size(path, max) do
-    case File.stat(path) do
-      {:ok, %{size: size}} when size <= max -> :ok
-      {:ok, _stat} -> {:error, :too_large}
+    case Ingest.store_file(path, entry.client_name, actor: actor, tenant: org) do
+      {:ok, _item} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
-  # The stored blob's real size, for `MediaItem.byte_size`. Same reasoning as
-  # `check_size/2`: what gets recorded should be what a reader will actually
-  # download, which for an image is the *stripped* copy rather than what the
-  # client uploaded or claimed.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp stored_size(path) do
-    case File.stat(path) do
-      {:ok, %{size: size}} -> size
-      _ -> nil
-    end
-  end
-
-  defp store_image(path, ext, content_type, entry, actor, org) do
-    key = Storage.generate_key_with_ext(ext)
-    # Strip EXIF/GPS + the client filename before persisting (#215). On any
-    # strip failure we fall back to the original so a valid upload still saves.
-    {source, stripped?} = stripped_source(path, ext)
-
-    try do
-      case Storage.store(key, source) do
-        {:ok, ^key} ->
-          create_from_upload(key, content_type, stored_size(source), entry, actor, org)
-
-        _ ->
-          {:error, :storage_failed}
-      end
-    after
-      if stripped?, do: File.rm(source)
-    end
-  end
-
-  # No metadata-stripping step (#481 follow-up: PDF metadata needs
-  # PDF-specific tooling this codebase doesn't have yet, unlike
-  # ImageProcessor's libvips-based strip; the same is true of MP4 atoms) —
-  # the upload's own temp file is stored as-is, matching what the image path
-  # does when stripping fails. Shared by the document and A/V paths.
-  defp store_as_is(path, ext, content_type, entry, actor, org) do
-    key = Storage.generate_key_with_ext(ext)
-
-    case Storage.store(key, path) do
-      {:ok, ^key} -> create_from_upload(key, content_type, stored_size(path), entry, actor, org)
-      _ -> {:error, :storage_failed}
-    end
-  end
-
   # Import an Unsplash photo: download (which also reports the download to
-  # Unsplash, per their guidelines), then run the same validate → strip →
-  # store → create pipeline as a direct upload. Runs inside start_async.
-  # sobelow_skip ["Traversal.FileModule"] — path is a server-generated temp file.
+  # Unsplash, per their guidelines), then the same pipeline as a direct upload.
+  # Runs inside start_async.
+  #
+  # `Unsplash.download/1` returns a server-generated temp path — the File.rm
+  # traversal warning is a false positive.
+  # sobelow_skip ["Traversal.FileModule"]
   defp import_unsplash(photo, actor, org) do
     with {:ok, path} <- Unsplash.download(photo) do
       try do
-        store_unsplash(path, photo, actor, org)
+        # No extension: `Ingest` appends the one it sniffs from the bytes.
+        Ingest.store_file(path, "unsplash-#{photo.id}",
+          actor: actor,
+          tenant: org,
+          alt: photo.alt,
+          caption: Unsplash.attribution(photo)
+        )
       after
         File.rm(path)
       end
-    end
-  end
-
-  # sobelow_skip ["Traversal.FileModule"]
-  defp store_unsplash(path, photo, actor, org) do
-    case ImageProcessor.validate_upload(path) do
-      {:ok, %{ext: ext, content_type: content_type}} ->
-        key = Storage.generate_key_with_ext(ext)
-        {source, stripped?} = stripped_source(path, ext)
-
-        try do
-          case Storage.store(key, source) do
-            {:ok, ^key} ->
-              attrs = %{
-                filename: "unsplash-#{photo.id}#{ext}",
-                content_type: content_type,
-                byte_size: File.stat!(source).size,
-                storage_key: key,
-                url: Storage.url(key),
-                alt: photo.alt,
-                caption: Unsplash.attribution(photo)
-              }
-
-              case CMS.create_media_item(attrs, actor: actor, tenant: org) do
-                {:ok, item} ->
-                  enqueue_processing(item)
-                  {:ok, item}
-
-                _ ->
-                  Storage.delete(key)
-                  {:error, :create_failed}
-              end
-
-            _ ->
-              {:error, :storage_failed}
-          end
-        after
-          if stripped?, do: File.rm(source)
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # {temp_path, true} when a metadata-stripped copy was produced (caller cleans
-  # it up); {original_path, false} when stripping wasn't possible.
-  defp stripped_source(path, ext) do
-    case ImageProcessor.strip_metadata(path, ext) do
-      {:ok, tmp} -> {tmp, true}
-      {:error, _} -> {path, false}
-    end
-  end
-
-  defp create_from_upload(key, content_type, byte_size, entry, actor, org) do
-    attrs = %{
-      filename: entry.client_name,
-      content_type: content_type,
-      byte_size: byte_size,
-      storage_key: key,
-      url: Storage.url(key)
-    }
-
-    case CMS.create_media_item(attrs, actor: actor, tenant: org) do
-      {:ok, item} ->
-        enqueue_processing(item)
-        :ok
-
-      _ ->
-        Storage.delete(key)
-        {:error, :create_failed}
-    end
-  end
-
-  # Queue background dimension/variant processing (keeps libvips and ffmpeg
-  # off the upload request). The worker re-fetches the original from storage,
-  # so there's no node-local temp hand-off.
-  #
-  # A/V goes to `Media.AVWorker` instead (#494), and a caption track / a
-  # document goes nowhere at all: neither has anything to derive, and
-  # `VariantWorker` would just fetch the blob to discover libvips can't read
-  # it.
-  defp enqueue_processing(item) do
-    # Carry the item's org so the worker re-fetches/updates under its tenant
-    # (epic #336) — future-proof for the strict `global?: false` flip.
-    args = %{media_item_id: item.id, org_id: item.org_id}
-
-    cond do
-      MediaKind.playable?(item.content_type) ->
-        args |> KilnCMS.Media.AVWorker.new() |> Oban.insert!()
-
-      MediaKind.of(item.content_type) == :image ->
-        args |> KilnCMS.Media.VariantWorker.new() |> Oban.insert!()
-
-      true ->
-        :ok
     end
   end
 

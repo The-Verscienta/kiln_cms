@@ -1,0 +1,142 @@
+defmodule KilnCMS.Portability.CLI do
+  @moduledoc """
+  The shared command-line edges of the import/export tasks (#487): resolving
+  which user and organization a run acts as, and printing a report.
+
+  Kept out of the mix tasks themselves so `kiln.import.wordpress`,
+  `kiln.import.content` and `kiln.export.content` cannot drift on the one thing
+  an operator must be able to trust across all three — *who* the run acted as.
+  A task that quietly fell back to a different actor than the one printed would
+  produce content attributed to the wrong person with no way to tell afterwards.
+
+  Not localized. These are operator tools invoked from a shell on a server, and
+  their output is read next to logs; the admin-facing surfaces are where
+  gettext belongs.
+  """
+
+  alias KilnCMS.Accounts
+
+  @doc """
+  Resolve `--actor` / `--org` into the `[actor:, tenant:]` every portability
+  call takes, printing what it settled on.
+
+  Raises when no usable actor exists. An import that ran with `actor: nil`
+  would either be refused by policy (confusing) or, worse, create content with
+  no author — so refusing up front is the kinder failure.
+  """
+  @spec scope!(keyword()) :: keyword()
+  def scope!(opts) do
+    actor = resolve_actor!(opts[:actor])
+    tenant = resolve_org!(opts[:org])
+
+    Mix.shell().info("Acting as #{actor.email} in org #{org_label(tenant)}\n")
+
+    [actor: actor, tenant: tenant]
+  end
+
+  defp resolve_actor!(nil) do
+    case Accounts.list_users!(authorize?: false, query: [filter: [role: :admin], limit: 1]) do
+      [admin | _] ->
+        admin
+
+      [] ->
+        Mix.raise("""
+        No admin user to run as, and no --actor given.
+
+        Pass --actor EMAIL, or create an admin first.
+        """)
+    end
+  end
+
+  defp resolve_actor!(email) do
+    case Accounts.list_users!(authorize?: false, query: [filter: [email: email], limit: 1]) do
+      [user | _] -> user
+      [] -> Mix.raise("No user with email #{email}")
+    end
+  end
+
+  defp resolve_org!(nil), do: Accounts.default_org_id()
+
+  defp resolve_org!(slug) do
+    case Accounts.list_organizations!(authorize?: false, query: [filter: [slug: slug], limit: 1]) do
+      [org | _] -> org.id
+      [] -> Mix.raise("No organization with slug #{slug}")
+    end
+  end
+
+  defp org_label(id) when is_binary(id), do: id
+  defp org_label(%{slug: slug}), do: slug
+  defp org_label(other), do: inspect(other)
+
+  @doc """
+  Print an import report.
+
+  A dry run is labelled loudly. The most common way to lose data with an
+  importer is to believe a dry run was the real thing (or the reverse), so the
+  distinction is the first and last thing printed.
+  """
+  @spec print_report(map()) :: :ok
+  def print_report(report) do
+    shell = Mix.shell()
+
+    if report.dry_run do
+      shell.info("── DRY RUN — nothing was written ──────────────────────────")
+    end
+
+    shell.info("""
+    Records:   #{length(report.created)} #{verb(report.dry_run, "would be created", "created")}, \
+    #{length(report.skipped)} skipped (already present), #{length(report.failed)} failed
+    Taxonomy:  #{term_line(report.taxonomy.categories)} categories, \
+    #{term_line(report.taxonomy.tags)} tags
+    Media:     #{media_line(report.media)}
+    Redirects: #{Map.get(report.redirects, :created, 0)} \
+    #{verb(report.dry_run, "would be created", "created")}\
+    """)
+
+    print_list(shell, "Failed", report.failed, &"  #{&1.kind} #{inspect(&1.title)}: #{&1.reason}")
+
+    print_list(
+      shell,
+      "Media that could not be fetched",
+      Map.get(report.media, :failed, []),
+      &"  #{&1.url}: #{inspect(&1.reason)}"
+    )
+
+    if report.dry_run do
+      shell.info("\n── DRY RUN — re-run without --dry-run to apply ────────────")
+    end
+
+    :ok
+  end
+
+  # Truncated: a failing import can fail thousands of times, and a wall of
+  # identical messages buries the one line that explains why. The count in the
+  # summary above is the complete number.
+  @max_listed 20
+
+  defp print_list(_shell, _heading, [], _format), do: :ok
+
+  defp print_list(shell, heading, items, format) do
+    shell.info("\n#{heading} (#{length(items)}):")
+    items |> Enum.take(@max_listed) |> Enum.each(&shell.info(format.(&1)))
+
+    if length(items) > @max_listed do
+      shell.info("  … and #{length(items) - @max_listed} more")
+    end
+  end
+
+  defp verb(true, dry, _real), do: dry
+  defp verb(_false, _dry, real), do: real
+
+  defp term_line(%{matched: matched, created: created}),
+    do: "#{created} new / #{matched} matched"
+
+  defp term_line(other), do: inspect(other)
+
+  defp media_line(%{imported: imported, failed: failed}),
+    do: "#{imported} imported, #{length(failed)} failed"
+
+  defp media_line(%{would_import: n}), do: "#{n} would be imported"
+  defp media_line(%{skipped: n}), do: "#{n} skipped (--skip-media)"
+  defp media_line(other), do: inspect(other)
+end
