@@ -102,7 +102,14 @@ Deliberate semantics:
 - Relationship arguments (tags, related links) are curation, not attributes —
   ungoverned by grants.
 - Creates are ungoverned: authoring a *new* document is gated by
-  `editable_types`; grants refine stewardship of existing content.
+  `editable_types`; grants refine stewardship of existing content. The one
+  exception is **duplication** (`KilnCMS.CMS.Duplication`), the only create
+  that carries *another record's* values: a field-granted editor's copy carries
+  only the attributes their grant names (blocks only with the `"blocks"`
+  grant). Two attributes are exempt — `title`, because the copy needs one to
+  exist, and `audience`, because dropping it would fall back to the `:public`
+  default and quietly *widen* access to a gated body. Links stay ungoverned
+  there too.
 - `custom_fields` is granted as a whole attribute; per-custom-field keys
   (`custom_fields.<name>`) are a possible later refinement.
 - **Version restores require full field access**: `restore_version` rewrites

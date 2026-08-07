@@ -19,25 +19,17 @@ defmodule KilnCMS.CMS.Translations do
   and admin-defined dynamic entries (D17) behave identically.
   """
 
+  alias KilnCMS.CMS.ContentCopy
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
 
-  # Content fields copied into a new translation. Workflow (state, schedules)
-  # and delivery bookkeeping (published_version, artifacts) start fresh;
-  # canonical_url is locale-specific by nature, so it isn't carried over.
-  @copied_attrs [
-    :title,
-    :slug,
-    :excerpt,
-    :seo_title,
-    :seo_description,
-    :seo_keywords,
-    :seo_image,
-    :audience,
-    :custom_fields,
-    :category_id,
-    :featured_image_id
-  ]
+  # Content fields copied into a new translation: the payload every clone
+  # carries (`ContentCopy`) plus the slug — a translation is the *same*
+  # document in another locale, and the `[slug, locale]` identity is what pairs
+  # them. Workflow (state, schedules) and delivery bookkeeping
+  # (published_version, artifacts) start fresh; canonical_url is locale-specific
+  # by nature, so it isn't carried over.
+  @copied_attrs [:slug | ContentCopy.content_attrs()]
 
   @doc """
   Every locale variant sharing `record`'s slug (including `record` itself),
@@ -98,46 +90,16 @@ defmodule KilnCMS.CMS.Translations do
   def create_translation!(kind, record, target_locale, opts \\ []) do
     # Re-fetch with tags so the copy carries them regardless of what the
     # caller had loaded.
-    record = ContentTypes.get_record!(kind, record.id, Keyword.put(opts, :load, [:tags]))
+    record =
+      ContentTypes.get_record!(kind, record.id, Keyword.put(opts, :load, ContentCopy.tag_load()))
 
     attrs =
-      @copied_attrs
-      |> Enum.reduce(%{}, fn key, acc ->
-        case Map.get(record, key) do
-          nil -> acc
-          value -> Map.put(acc, key, value)
-        end
-      end)
+      record
+      |> ContentCopy.take(@copied_attrs)
       |> Map.put(:locale, target_locale)
-      |> Map.put(:blocks, dump_blocks(record))
-      |> Map.put(:tag_ids, tag_ids(record))
+      |> Map.put(:blocks, ContentCopy.dump_blocks(record))
+      |> Map.put(:tag_ids, ContentCopy.tag_ids(record))
 
     ContentTypes.create!(kind, attrs, opts)
-  end
-
-  # Blocks are stored union structs; dump them back to the storage shape so
-  # the create action re-casts them — minus their ids, so the copy gets fresh
-  # stable block ids. The union dumps nested (`%{"type" => …, "value" => %{…}}`),
-  # so the id lives inside the value map.
-  defp dump_blocks(record) do
-    attribute = Ash.Resource.Info.attribute(record.__struct__, :blocks)
-
-    {:ok, dumped} =
-      Ash.Type.dump_to_embedded(attribute.type, record.blocks || [], attribute.constraints)
-
-    Enum.map(dumped, &strip_block_id/1)
-  end
-
-  defp strip_block_id(%{"value" => value} = dumped) when is_map(value),
-    do: %{dumped | "value" => Map.drop(value, ["id", :id])}
-
-  defp strip_block_id(dumped), do: Map.drop(dumped, ["id", :id])
-
-  # The source's tags, as the ids the create action's `tag_ids` argument takes.
-  defp tag_ids(record) do
-    case record.tags do
-      tags when is_list(tags) -> Enum.map(tags, & &1.id)
-      _not_loaded -> []
-    end
   end
 end
