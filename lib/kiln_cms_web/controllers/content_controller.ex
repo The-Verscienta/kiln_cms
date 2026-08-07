@@ -131,7 +131,7 @@ defmodule KilnCMSWeb.ContentController do
     serve_alias(conn, path) ||
       case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
         nil ->
-          serve_teaser(conn, path, ct) || not_found(conn)
+          serve_teaser(conn, path, ct) || not_found(conn, path)
 
         %{to: to} ->
           moved_permanently(conn, to)
@@ -801,6 +801,9 @@ defmodule KilnCMSWeb.ContentController do
 
         Map.merge(base, %{
           srcset: srcset(item),
+          # Alternate encodings for `<picture>` (#473). Separate from `srcset`
+          # on purpose — see `Media.Presentation`.
+          sources: KilnCMS.Media.Presentation.sources(item),
           # The block's own alt wins, with the library row as the fallback
           # behind it. This used to take `item.alt` unconditionally, which put
           # this surface at odds with every other one: the fired `:web`
@@ -836,26 +839,29 @@ defmodule KilnCMSWeb.ContentController do
   defp enrich_gallery(base, block, media) do
     images =
       for image <- block.data["images"] || [], is_map(image) do
-        item = media[image["media_id"]]
-
-        %{
-          url: image["url"],
-          # The item's own alt wins: it is the one written *for this placement*,
-          # and `MediaItem.alt` is the library-wide default behind it. Same
-          # precedence #403 established for the single-image block.
-          alt: presence(image["alt"]) || (item && item.alt),
-          caption: image["caption"],
-          srcset: item && KilnCMS.Media.Presentation.srcset(item),
-          width: item && item.width,
-          height: item && item.height,
-          focal: item && KilnCMS.Media.Presentation.focal_style(item)
-        }
+        gallery_image(image, media[image["media_id"]])
       end
 
     Map.merge(base, %{
       images: images,
       style: KilnCMS.Blocks.Gallery.layout_style(block.data["layout"])
     })
+  end
+
+  defp gallery_image(image, item) do
+    %{
+      url: image["url"],
+      # The item's own alt wins: it is the one written *for this placement*,
+      # and `MediaItem.alt` is the library-wide default behind it. Same
+      # precedence #403 established for the single-image block.
+      alt: presence(image["alt"]) || (item && item.alt),
+      caption: image["caption"],
+      srcset: item && KilnCMS.Media.Presentation.srcset(item),
+      sources: (item && KilnCMS.Media.Presentation.sources(item)) || [],
+      width: item && item.width,
+      height: item && item.height,
+      focal: item && KilnCMS.Media.Presentation.focal_style(item)
+    }
   end
 
   defp presence(value) when is_binary(value) do
@@ -928,7 +934,18 @@ defmodule KilnCMSWeb.ContentController do
   defp srcset(item), do: KilnCMS.Media.Presentation.srcset(item)
   defp focal_style(item), do: KilnCMS.Media.Presentation.focal_style(item)
 
-  defp not_found(conn) do
+  defp not_found(conn, path) do
+    # Every HTML URL miss funnels through here, so this is where the aggregated
+    # 404 counter is written (#472) — after the alias table, the redirect table
+    # and the teaser have all missed, i.e. only for paths nothing can serve.
+    # Off the request path and best-effort; see `KilnCMSWeb.MissedPathTracking`.
+    #
+    # `path` is the caller's, NOT `conn.request_path`: the two diverge (empty
+    # segments collapse, `%xx` stays encoded in `request_path`), and this is the
+    # exact string `Redirects.resolve/3` was just asked for. Recording anything
+    # else would list a path whose one-click redirect could never fire.
+    KilnCMSWeb.MissedPathTracking.track(path, locale(conn), current_org_id(conn))
+
     conn
     # A 404 may be an unpublished/draft slug — never let a CDN or browser cache
     # it (it would mask the page once published).

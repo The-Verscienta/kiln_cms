@@ -527,6 +527,7 @@ defmodule KilnCMSWeb.Layouts do
       %{key: :content, label: gettext("Content"), path: ~p"/editor", icon: "hero-document-text"},
       %{key: :media, label: gettext("Media"), path: ~p"/media", icon: "hero-photo"},
       %{key: :taxonomy, label: gettext("Taxonomy"), path: ~p"/editor/taxonomy", icon: "hero-tag"},
+      %{key: :menus, label: gettext("Menus"), path: ~p"/editor/menus", icon: "hero-bars-3"},
       %{
         key: :calendar,
         label: gettext("Calendar"),

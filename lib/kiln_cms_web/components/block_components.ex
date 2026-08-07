@@ -30,18 +30,32 @@ defmodule KilnCMSWeb.BlockComponents do
         <% @type == "quote" -> %>
           <blockquote class="border-l-4 border-base-300 pl-3 italic">{@block.content}</blockquote>
         <% @type == "image" -> %>
-          <img
-            :if={src = HTMLSanitizer.safe_image_src(@block.content)}
-            src={src}
-            srcset={@block[:srcset]}
-            sizes={@block[:srcset] && "(max-width: 768px) 100vw, 768px"}
-            alt={@block[:alt] || ""}
-            width={@block[:width]}
-            height={@block[:height]}
-            style={@block[:focal]}
-            loading="lazy"
-            class="max-w-full rounded"
-          />
+          <%!-- `<picture>` so a browser that supports WebP/AVIF takes the
+                smaller encoding and every other one falls through to the `<img>`
+                (#473). The `<source>`s are ordered most-efficient-first by
+                `Media.Presentation.sources/1`, because the browser takes the
+                first `type` it understands and stops looking. With no
+                alternates the element degrades to exactly the `<img>` that was
+                here before. --%>
+          <picture :if={src = HTMLSanitizer.safe_image_src(@block.content)}>
+            <source
+              :for={source <- @block[:sources] || []}
+              type={source.type}
+              srcset={source.srcset}
+              sizes="(max-width: 768px) 100vw, 768px"
+            />
+            <img
+              src={src}
+              srcset={@block[:srcset]}
+              sizes={@block[:srcset] && "(max-width: 768px) 100vw, 768px"}
+              alt={@block[:alt] || ""}
+              width={@block[:width]}
+              height={@block[:height]}
+              style={@block[:focal]}
+              loading="lazy"
+              class="max-w-full rounded"
+            />
+          </picture>
         <% @type == "columns" -> %>
           <%!-- Nested-layout container (#335): a CSS grid whose cells each hold a
                 recursively-rendered child block list. `style` is built from
@@ -70,18 +84,25 @@ defmodule KilnCMSWeb.BlockComponents do
                 :for={image <- gallery_images(@block)}
                 class="kiln-gallery-item m-0"
               >
-                <img
-                  :if={src = HTMLSanitizer.safe_image_src(image[:url])}
-                  src={src}
-                  srcset={image[:srcset]}
-                  sizes={image[:srcset] && "(max-width: 768px) 50vw, 320px"}
-                  alt={image[:alt] || ""}
-                  width={image[:width]}
-                  height={image[:height]}
-                  style={image[:focal]}
-                  loading="lazy"
-                  class="w-full rounded"
-                />
+                <picture :if={src = HTMLSanitizer.safe_image_src(image[:url])}>
+                  <source
+                    :for={source <- image[:sources] || []}
+                    type={source.type}
+                    srcset={source.srcset}
+                    sizes="(max-width: 768px) 50vw, 320px"
+                  />
+                  <img
+                    src={src}
+                    srcset={image[:srcset]}
+                    sizes={image[:srcset] && "(max-width: 768px) 50vw, 320px"}
+                    alt={image[:alt] || ""}
+                    width={image[:width]}
+                    height={image[:height]}
+                    style={image[:focal]}
+                    loading="lazy"
+                    class="w-full rounded"
+                  />
+                </picture>
                 <figcaption
                   :if={image[:caption] not in [nil, ""]}
                   class="mt-1 text-sm text-base-content/70"

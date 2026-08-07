@@ -19,6 +19,8 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
   """
   use KilnCMS.DataCase, async: false
 
+  import KilnCMS.RateLimitHelpers
+
   alias KilnCMS.Accounts.Preparations.ThrottleSignIn
   alias KilnCMS.Accounts.User
   alias KilnCMSWeb.RateLimit
@@ -49,16 +51,6 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
 
     on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
     :ok
-  end
-
-  # A fresh address per call, spread across a /8 so the counter would have to
-  # run 16M times before repeating. `rem(n, 250)` on one octet is not enough:
-  # `unique_integer` is increasing but not contiguous, so two tests can collide
-  # — and with the window widened to an hour, a poisoned bucket survives every
-  # retry in the run.
-  defp client_ip do
-    n = System.unique_integer([:positive])
-    "10.#{n |> div(65_536) |> rem(256)}.#{n |> div(256) |> rem(256)}.#{rem(n, 256)}"
   end
 
   defp context(ip), do: ThrottleSignIn.client_ip_context(ip)
@@ -263,12 +255,23 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
       # pipeline that charged `:auth` at 20/min — four times the ceiling the
       # LiveView door enforces, and it spent the SIGN-IN bucket doing it, which
       # is exactly the coupling `:register` exists to prevent.
-      conn = Phoenix.ConnTest.build_conn()
-      before_register = RateLimit.check(:register, "127.0.0.1")
-      assert before_register == :allow
+      # On an address of this test's own, not the `build_conn/0` default: these
+      # are delta assertions, and `auth:127.0.0.1` is the bucket the whole
+      # suite charges, so its count is not this test's to reason about (#877).
+      # `spent/2` sums every window for a key, and Hammer's minute cleaner
+      # deletes closed windows — so a tick between these reads and the ones
+      # below takes a stale window's count with it, and `== auth_before` fails
+      # claiming the route "spent the sign-in bucket" when it did nothing.
+      {conn, ip} = client_conn(Phoenix.ConnTest.build_conn())
 
-      auth_before = spent("auth", "127.0.0.1")
-      register_before = spent("register", "127.0.0.1")
+      # Both baselines are 0 on a fresh address, so these are absolute counts
+      # written as deltas. Asserted with `==`, not `>`: the regression #724
+      # guards against is a DOUBLE charge — the plug charging `:register` and
+      # the action charging it again — and `>` is satisfied by two just as
+      # well as by one. The hour-wide scale this file sets makes a mid-test
+      # window rollover impossible, so the tight assertion cannot flake.
+      auth_before = spent("auth", ip)
+      register_before = spent("register", ip)
 
       Phoenix.ConnTest.dispatch(
         conn,
@@ -284,20 +287,12 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
         }
       )
 
-      assert spent("register", "127.0.0.1") > register_before,
-             "the HTTP registration route did not charge :register"
+      assert spent("register", ip) == register_before + 1,
+             "the HTTP registration route did not charge :register exactly once"
 
-      assert spent("auth", "127.0.0.1") == auth_before,
+      assert spent("auth", ip) == auth_before,
              "the HTTP registration route spent the sign-in bucket"
     end
-  end
-
-  defp spent(bucket, ip) do
-    RateLimit
-    |> :ets.tab2list()
-    |> Enum.filter(fn {{key, _window}, _count, _expiry} -> key == "#{bucket}:" <> ip end)
-    |> Enum.map(fn {_key, count, _expiry} -> count end)
-    |> Enum.sum()
   end
 
   describe "the context key" do

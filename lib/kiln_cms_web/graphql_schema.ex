@@ -23,10 +23,68 @@ defmodule KilnCMSWeb.GraphqlSchema do
     field :published_at, non_null(:datetime)
   end
 
+  @desc """
+  A resolved navigation item (#466): the label, the **live** URL its stored
+  reference currently points at, and its children.
+  """
+  object :menu_node do
+    field :id, non_null(:id)
+    field :label, non_null(:string)
+
+    @desc "nil for a heading (`link_type: NONE`) — everything else carries one."
+    field :url, :string
+
+    field :link_type, non_null(:string) do
+      resolve fn node, _, _ -> {:ok, to_string(node.link_type)} end
+    end
+
+    field :open_in_new_tab, non_null(:boolean)
+    field :children, non_null(list_of(non_null(:menu_node)))
+  end
+
+  @desc "A resolved navigation menu (#466)."
+  object :menu do
+    field :key, non_null(:string)
+    field :name, non_null(:string)
+    field :locale, non_null(:string)
+    field :items, non_null(list_of(non_null(:menu_node)))
+  end
+
   query do
     @desc "Lightweight GraphQL health probe"
     field :health, :string do
       resolve fn _, _, _ -> {:ok, "ok"} end
+    end
+
+    @desc """
+    One navigation menu by its stable key, resolved (#466) — the GraphQL twin of
+    `GET /api/menus/:key`.
+
+    Every `:content` item's `url` is the target's *current* published path, and
+    items pointing at unpublished content — or hidden by an editor — are omitted
+    along with their children. The stored rows are deliberately **not** on the
+    auto GraphQL surface: they carry references rather than URLs, and they carry
+    exactly what those rules exist to withhold.
+
+    `locale` defaults to the site's default locale. A menu that has no variant
+    in the requested locale returns `null` rather than falling back — serving
+    English navigation on a French page is a worse answer than serving none.
+    """
+    field :menu, :menu do
+      arg :key, non_null(:string)
+      arg :locale, :string
+
+      resolve fn args, resolution ->
+        locale = KilnCMS.I18n.normalize(args[:locale])
+
+        case KilnCMS.CMS.Menus.resolve(args.key, locale, graphql_org_id(resolution)) do
+          {:ok, menu, items} ->
+            {:ok, %{key: menu.key, name: menu.name, locale: menu.locale, items: items}}
+
+          :not_found ->
+            {:ok, nil}
+        end
+      end
     end
 
     @desc """
