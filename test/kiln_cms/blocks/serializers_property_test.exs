@@ -7,7 +7,8 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
   use ExUnitProperties
 
   alias KilnCMS.Blocks
-  alias KilnCMS.Blocks.{Accordion, Audio, Claim, Columns, Custom, Divider, Embed, Faq, Form}
+  alias KilnCMS.Blocks.{Accordion, Audio, Claim, Columns, Custom, Divider, Embed, Faq}
+  alias KilnCMS.Blocks.{Form, Fragment}
   alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText, Video}
   # Not aliased bare as `File` — that would shadow the stdlib module.
   alias KilnCMS.Blocks.File, as: FileBlock
@@ -63,6 +64,13 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
         fn panels -> %Accordion{panels: panels} end
       ),
       StreamData.map(text(), fn s -> %Form{form_slug: s} end),
+      # A fragment renders nothing on every surface — it is *inlined* by
+      # `KilnCMS.CMS.Fragments` before any serializer sees it (#479). The
+      # generator exists so the totality property still covers "what happens if
+      # one reaches a renderer anyway", which is the fail-closed path.
+      StreamData.map(StreamData.tuple({text(), text()}), fn {type, id} ->
+        %Fragment{ref: %{"type" => type, "id" => id}}
+      end),
       StreamData.constant(%Divider{}),
       StreamData.map(StreamData.tuple({text(), text(), text(), text()}), fn {t, st, su, r} ->
         %Claim{text: t, source_title: st, source_url: su, rating: r}

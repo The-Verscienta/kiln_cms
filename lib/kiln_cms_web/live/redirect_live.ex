@@ -211,7 +211,7 @@ defmodule KilnCMSWeb.RedirectLive do
   end
 
   defp targets_for_type(type, rows, org) do
-    case ContentTypes.get(type, org_id(org)) do
+    case ContentTypes.get(type, org) do
       nil ->
         Enum.map(rows, &{&1.id, nil})
 
@@ -265,7 +265,7 @@ defmodule KilnCMSWeb.RedirectLive do
   end
 
   defp find_target(type, slug, locale, org) do
-    with ct when not is_nil(ct) <- ContentTypes.get(type, org_id(org)),
+    with ct when not is_nil(ct) <- ContentTypes.get(type, org),
          slug when slug not in [nil, ""] <- slug && String.trim(slug),
          record when not is_nil(record) <- fetch_target(ct, slug, locale, org) do
       {:ok, ct, record}
@@ -311,14 +311,7 @@ defmodule KilnCMSWeb.RedirectLive do
   defp tab_path("redirects"), do: ~p"/editor/redirects"
   defp tab_path(tab), do: ~p"/editor/redirects?#{[tab: tab]}"
 
-  defp org_id(nil), do: KilnCMS.Accounts.default_org_id()
-  defp org_id(org), do: org.id
-
-  defp type_options(org) do
-    Enum.map(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org)), fn ct ->
-      {ct.label, to_string(ct.type)}
-    end)
-  end
+  defp type_options(org), do: ContentTypes.options(org)
 
   defp locale_options, do: I18n.locales()
 

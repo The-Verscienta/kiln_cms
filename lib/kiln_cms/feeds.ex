@@ -58,7 +58,7 @@ defmodule KilnCMS.Feeds do
   @doc "The content types this org syndicates, in `ContentTypes` descriptor form."
   @spec syndicated_types(Ash.UUID.t()) :: [map()]
   def syndicated_types(org_id) do
-    Enum.filter(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id), &syndicated?/1)
+    Enum.filter(ContentTypes.all_for_org(org_id), &syndicated?/1)
   end
 
   @doc "Whether `type` syndicates — the guard behind its own feed route."

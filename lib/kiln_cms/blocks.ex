@@ -41,6 +41,10 @@ defmodule KilnCMS.Blocks do
     faq: KilnCMS.Blocks.Faq,
     how_to: KilnCMS.Blocks.HowTo,
     claim: KilnCMS.Blocks.Claim,
+    # Reusable content fragments (#479): a reference that is *inlined* before
+    # any renderer runs (see `KilnCMS.CMS.Fragments`), so it has no surface
+    # output of its own.
+    fragment: KilnCMS.Blocks.Fragment,
     custom: KilnCMS.Blocks.Custom
   ]
 

@@ -26,7 +26,7 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
     with :admin <- KilnCMSWeb.LiveUserAuth.effective_tier(socket),
          {:ok, funnel} <-
            Analytics.get_funnel(id, actor: actor, tenant: socket.assigns.current_org) do
-      type_options = type_options(org_id(socket.assigns.current_org))
+      type_options = ContentTypes.options(socket.assigns.current_org)
       first_type = type_options |> List.first() |> then(&(&1 && elem(&1, 1)))
 
       {:ok,
@@ -161,15 +161,10 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
   defp next_position([]), do: 0
   defp next_position(steps), do: Enum.max_by(steps, & &1.position).position + 1
 
-  defp type_options(org_id) do
-    (ContentTypes.all() ++ ContentTypes.dynamic_all(org_id))
-    |> Enum.map(&{&1.label, to_string(&1.type)})
-  end
-
   defp content_options(nil, _socket, _actor), do: []
 
   defp content_options(type, socket, actor) do
-    case ContentTypes.get(type, org_id(socket.assigns.current_org)) do
+    case ContentTypes.get(type, socket.assigns.current_org) do
       nil ->
         []
 
@@ -183,9 +178,6 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
         |> Enum.map(&{&1.title, &1.id})
     end
   end
-
-  defp org_id(%{id: id}), do: id
-  defp org_id(id) when is_binary(id), do: id
 
   defp step_title(step, titles, org), do: Titles.title_for(step, titles, org)
 

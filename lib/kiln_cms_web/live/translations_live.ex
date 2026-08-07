@@ -61,7 +61,7 @@ defmodule KilnCMSWeb.TranslationsLive do
 
     # Scope the translation dashboard to the editor's current site (epic #336).
     rows =
-      (ContentTypes.all() ++ ContentTypes.dynamic_all(org.id))
+      ContentTypes.all_for_org(org.id)
       |> Enum.flat_map(fn ct ->
         ct
         |> ContentTypes.list!(

@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.SlugRegenLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.Accounts
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.SlugRegeneration
   alias KilnCMS.CMS.Workers.SlugRegenerationWorker
@@ -26,7 +27,10 @@ defmodule KilnCMSWeb.SlugRegenLive do
       org = socket.assigns.current_org
 
       if connected?(socket) do
-        Phoenix.PubSub.subscribe(KilnCMS.PubSub, SlugRegenerationWorker.topic(org_id(org)))
+        Phoenix.PubSub.subscribe(
+          KilnCMS.PubSub,
+          SlugRegenerationWorker.topic(Accounts.org_id(org))
+        )
       end
 
       {:ok,
@@ -64,7 +68,7 @@ defmodule KilnCMSWeb.SlugRegenLive do
   def handle_event("apply", _params, socket) do
     {:ok, _job} =
       SlugRegenerationWorker.enqueue(
-        org_id(socket.assigns.current_org),
+        Accounts.org_id(socket.assigns.current_org),
         socket.assigns.kind,
         socket.assigns.include_pinned,
         socket.assigns.actor
@@ -106,15 +110,8 @@ defmodule KilnCMSWeb.SlugRegenLive do
 
   defp preview_cap, do: @preview_cap
 
-  defp org_id(nil), do: KilnCMS.Accounts.default_org_id()
-  defp org_id(org), do: org.id
-
-  defp type_options(org) do
-    [{gettext("All content types"), "all"}] ++
-      Enum.map(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org)), fn ct ->
-        {ct.label, to_string(ct.type)}
-      end)
-  end
+  defp type_options(org),
+    do: ContentTypes.options(org, prompt: {gettext("All content types"), "all"})
 
   @impl true
   def render(assigns) do

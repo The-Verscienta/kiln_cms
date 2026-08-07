@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.MenuLive do
 
   require Ash.Query
 
+  alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.MenuItem
@@ -259,7 +260,7 @@ defmodule KilnCMSWeb.MenuLive do
 
     socket
     |> assign(:items, items)
-    |> assign(:tree, Menus.tree(menu, org_id(org), include_hidden?: true))
+    |> assign(:tree, Menus.tree(menu, Accounts.org_id(org), include_hidden?: true))
     |> assign(:max_depth, MenuItem.max_depth())
   end
 
@@ -326,7 +327,8 @@ defmodule KilnCMSWeb.MenuLive do
     type = params["target_type"]
     slug = params["target_slug"]
 
-    with ct when not is_nil(ct) <- ContentTypes.get(type, org_id(socket.assigns.current_org)),
+    with ct when not is_nil(ct) <-
+           ContentTypes.get(type, socket.assigns.current_org),
          slug when is_binary(slug) and slug != "" <- slug && String.trim(to_string(slug)),
          %{id: id} <- fetch_target(ct, slug, socket) do
       {to_string(ct.type), id}
@@ -410,14 +412,7 @@ defmodule KilnCMSWeb.MenuLive do
   defp first_id([%{id: id} | _rest]), do: id
   defp first_id(_empty), do: nil
 
-  defp org_id(nil), do: KilnCMS.Accounts.default_org_id()
-  defp org_id(org), do: org.id
-
-  defp type_options(org) do
-    Enum.map(ContentTypes.all() ++ ContentTypes.dynamic_all(org_id(org)), fn ct ->
-      {ct.label, to_string(ct.type)}
-    end)
-  end
+  defp type_options(org), do: ContentTypes.options(org)
 
   defp link_type_options do
     [
