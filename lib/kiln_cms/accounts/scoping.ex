@@ -102,12 +102,21 @@ defmodule KilnCMS.Accounts.Scoping do
   attribute names otherwise, and `[]` (nothing changeable) for a foreign-org
   actor. Non-list grant values are ignored defensively — the write-time shape
   validation is the real guard.
+
+  `subject` takes the same shapes as `effective_tier/2` — the changeset under
+  authorization (how `Changes.EnforceFieldGrants` calls it), a raw org id, an
+  `%Organization{}`, or nil for the default org — so a caller outside a write
+  (e.g. `KilnCMS.CMS.Duplication`) can resolve the same grant.
   """
-  @spec field_grant(map(), Ash.Changeset.t() | nil, String.t() | nil) :: [String.t()] | nil
+  @spec field_grant(
+          map(),
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil,
+          String.t() | nil
+        ) :: [String.t()] | nil
   def field_grant(_actor, _subject, nil), do: nil
 
   def field_grant(actor, subject, type_name) do
-    case affiliation(actor, org_id(subject)) do
+    case affiliation(actor, subject_org_id(subject)) do
       {:member, membership} ->
         grant_key(membership, type_name) ||
           grant_key(role_of(membership), type_name) ||
