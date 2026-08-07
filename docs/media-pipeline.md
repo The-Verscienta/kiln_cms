@@ -237,9 +237,19 @@ variants.
 ### PDF metadata stripping (#807)
 
 An uploaded PDF is rewritten without its **`/Info` dictionary** (title, author,
-creator, producer) and its **XMP metadata stream** before the blob is stored —
+creator, producer), its **XMP metadata stream**, and every **per-object
+`/Metadata` packet and `/PieceInfo` dictionary** before the blob is stored —
 the document-library counterpart to the EXIF stripping images get. Outlines,
 form fields, attachments and page content are untouched.
+
+The per-object half needs saying, because it is the half that is easy to miss
+(#918). `--remove-info --remove-metadata` clears the two *document-level*
+fields and nothing else — a page-level XMP packet and a `/PieceInfo` private
+blob both survive them, and `/PieceInfo` is where Illustrator, InDesign and
+Acrobat park the author name and the authoring machine's filesystem path
+(`C:\Users\jane\...`). qpdf has no flag for it, so the strip runs in two
+passes: dump the object dictionaries with `--json-output`, prune those keys,
+and apply the result with `--update-from-json`.
 
 **qpdf is required, and a PDF that cannot be stripped is refused.** This is a
 deliberate departure from how ffmpeg is treated (see below): a missing ffmpeg
@@ -249,13 +259,46 @@ worse than no control, because the operator believes it did. The editor sees
 "PDF metadata stripping isn't available on this server" rather than a
 misleading "unsupported format".
 
-Two operational notes:
+**A password-protected PDF is refused**, with `is password-protected, so its
+metadata can't be removed — upload an unlocked copy`. qpdf cannot open a
+user-password-encrypted file, so it cannot strip one, and storing it unstripped
+would defeat the guarantee above. This is a real narrowing: such a file was
+storable before #807 and opens fine in every reader, so a signed contract or a
+bank statement has to be unlocked before it can be added to the library. It is
+the one refusal here the uploader can act on, which is why it gets its own
+message rather than the generic "couldn't have its metadata removed".
+
+**Owner-password-only PDFs are not affected** — the "restrict printing/editing"
+export that opens with no password anywhere. Encryption is classified from the
+strip *failure*, not probed up front, because `qpdf --is-encrypted` exits 0 for
+those too: probing would have refused a large class of ordinary documents and
+told the uploader to remove a password that does not exist.
+
+Three operational notes:
 
 - **qpdf ≥ 11.10** is required — `--remove-info`/`--remove-metadata` arrived in
   that release. `KilnCMS.DocumentProcessor.available?/0` checks the
   *capability*, not just that a `qpdf` binary exists, because Debian bookworm's
   11.3.0 would pass the latter and fail every strip. The release image runs
   **Debian trixie** (qpdf 12.2.0) for exactly this reason.
+- **The prune covers stream objects and nested dictionaries**, not just page
+  dictionaries. qpdf's JSON gives a stream object a different shape from a
+  plain one, and image and Form XObjects *are* streams — which is where a
+  placed asset's original XMP (photographer, GPS) and Photoshop's `/PieceInfo`
+  live. `/Metadata` and `/PieceInfo` are also legal at any depth, so the prune
+  recurses. The object dump is written to a file rather than read from stdout:
+  qpdf merges stderr into stdout, and any file whose xref it reconstructs
+  prints `WARNING:` lines first, which would otherwise break the JSON parse on
+  exactly the files most likely to need the prune.
+- **Streams are copied, not decoded** (`--decode-level=none`). A ≤25 MB PDF can
+  hold a FlateDecode stream that inflates to tens of gigabytes, and qpdf's
+  default `generalized` decode level would expand it — a decompression bomb by
+  another name, and the reason the 30-second cap used to be reachable at all.
+  Nothing in the strip inspects stream contents, so decoding them was only ever
+  cost. If the cap *is* hit, the qpdf process is killed by pid: closing an
+  Erlang port shuts the pipes without signalling the child, which used to leave
+  an orphan burning CPU and then writing an unreferenced file into the temp dir
+  minutes after the upload had already been refused.
 - **Not exiftool.** `exiftool -all=` on a PDF writes an incremental update that
   marks the metadata deleted while leaving the original bytes in the file,
   recoverable by anything that reads it with a parser rather than a viewer. It

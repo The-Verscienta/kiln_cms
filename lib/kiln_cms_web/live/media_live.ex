@@ -723,6 +723,13 @@ defmodule KilnCMSWeb.MediaLive do
   defp upload_failure_reason(:strip_failed),
     do: gettext("couldn't have its metadata removed, so it wasn't stored")
 
+  # #918. Unlike the two above, this one IS about the file, and it is the only
+  # refusal here the uploader can actually resolve — so it says what to do
+  # instead of blaming the server.
+  defp upload_failure_reason(:encrypted),
+    do:
+      gettext("is password-protected, so its metadata can't be removed — upload an unlocked copy")
+
   defp upload_failure_reason(_invalid), do: gettext("not a supported file")
 
   defp humanize_bytes(nil), do: "—"
