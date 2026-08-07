@@ -159,6 +159,38 @@ defmodule KilnCMSWeb.MediaLive do
 
   # --- trash -----------------------------------------------------------------
 
+  # Bulk variant regeneration (#473) — admin-only.
+  #
+  # The scan runs in a supervised task, not here. Oban's unique inserts are one
+  # transaction per row, so enqueuing a ten-thousand-image library is tens of
+  # thousands of serialized round trips — long enough to block this LiveView
+  # past the heartbeat and drop the socket. The work itself then runs on the
+  # throttled `:media` queue at the lowest priority.
+  #
+  # The tier is re-read rather than trusted from the mount assign: `Regeneration`
+  # reads with `authorize?: false`, so this check is the only one, and an
+  # assign captured at mount outlives a revoked role for the life of the socket.
+  def handle_event("regenerate_variants", _params, socket) do
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+      org_id = socket.assigns.current_org.id
+
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+        KilnCMS.Media.Regeneration.run(org_id, only_missing?: false)
+      end)
+
+      {:noreply,
+       put_flash(
+         socket,
+         :info,
+         gettext(
+           "Reprocessing the library in the background. Originals are untouched; new variants appear as jobs finish."
+         )
+       )}
+    else
+      {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
+    end
+  end
+
   def handle_event("show_trash", _params, socket) do
     actor = socket.assigns.actor
 
@@ -970,6 +1002,26 @@ defmodule KilnCMSWeb.MediaLive do
           </div>
         </div>
 
+        <div :if={@is_admin} class="flex flex-wrap items-center gap-3 text-sm">
+          <button
+            type="button"
+            phx-click="regenerate_variants"
+            data-confirm={
+              gettext(
+                "Reprocess every image in the library? Originals are untouched — this rebuilds the responsive and modern-format variants in the background."
+              )
+            }
+            class="btn btn-sm btn-default"
+          >
+            <.icon name="hero-arrow-path" class="mr-1 size-4" />{gettext("Regenerate variants")}
+          </button>
+          <span class="text-xs text-base-content/60">
+            {gettext("Variant formats: %{formats}. Run this after changing them.",
+              formats: variant_format_summary()
+            )}
+          </span>
+        </div>
+
         <.trash_panel :if={@view == :trash} items={@trashed} />
 
         <.unsplash_panel
@@ -1638,5 +1690,14 @@ defmodule KilnCMSWeb.MediaLive do
       </div>
     </div>
     """
+  end
+
+  # Shown next to the regenerate button so an admin can see what a run would
+  # produce before starting one.
+  defp variant_format_summary do
+    case KilnCMS.ImageProcessor.variant_formats() do
+      [] -> gettext("source format only")
+      formats -> Enum.map_join(formats, ", ", &String.upcase(to_string(&1)))
+    end
   end
 end

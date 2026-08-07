@@ -13,8 +13,25 @@ defmodule KilnCMS.Media.VariantWorker do
   When processing finishes it broadcasts on `"media:updated"` so an open media
   library refreshes live. A non-raster upload (or a since-deleted item / missing
   original) is a graceful no-op — the original is still served.
+
+  Re-running the worker for an item that already has variants is safe and is how
+  bulk regeneration works (#473): each run writes a fresh set under fresh
+  storage keys, replaces the map wholesale, and then **deletes the blobs the old
+  map named**. Reclaiming them matters because regeneration is a documented,
+  encouraged operation — a single run over a ten-thousand-image library would
+  otherwise orphan tens of thousands of unreferenced files that no purge, trash
+  or task could ever find. Deleting only after the update commits means a failed
+  write leaves the old variants intact and still referenced.
+
+  Safe because no published document points at a variant key: delivery computes
+  `srcset` live from the current map, and the fired `:web` artifact carries a
+  bare `<img src>` of the original.
+
+  The **original** itself is never touched — published snapshots point at it.
   """
   use Oban.Worker, queue: :media, max_attempts: 3
+
+  require Logger
 
   alias KilnCMS.{CMS, ImageProcessor, Storage}
 
@@ -59,20 +76,59 @@ defmodule KilnCMS.Media.VariantWorker do
   defp generate(item, path, ext, tenant) do
     focal = %{x: item.focal_x || 0.5, y: item.focal_y || 0.5}
 
-    case ImageProcessor.process(path, ext, focal) do
-      {:ok, %{width: width, height: height, variants: files}} ->
-        {:ok, _item} =
-          CMS.update_media_item(
-            item,
-            %{width: width, height: height, variants: store_variants(files, ext)},
-            authorize?: false,
-            tenant: tenant
-          )
+    with {:ok, %{width: width, height: height, variants: files}} <-
+           ImageProcessor.process(path, ext, focal),
+         variants = store_variants(files),
+         :ok <- refuse_empty(variants, item) do
+      previous = item.variants || %{}
 
-      {:error, _} ->
-        # Not a processable raster image — keep the original only.
-        :ok
+      {:ok, _item} =
+        CMS.update_media_item(
+          item,
+          %{width: width, height: height, variants: variants},
+          authorize?: false,
+          tenant: tenant
+        )
+
+      reclaim(previous, variants)
+    else
+      # Not a processable raster image, or a run that produced nothing — keep
+      # what is already stored.
+      _ -> :ok
     end
+  end
+
+  # A run that writes *no* variants for an item that has some is a failure, not
+  # a result: an encoder that rejects a misconfigured quality fails every write,
+  # and persisting that would empty the library one item at a time (and, with
+  # the reclaim below, delete the blobs too). An item that legitimately has none
+  # — a source narrower than every target — is unaffected: it had none before.
+  defp refuse_empty(variants, item) do
+    if variants == %{} and map_size(item.variants || %{}) > 0 do
+      Logger.warning(
+        "VariantWorker produced no variants for #{item.id}; keeping the existing set"
+      )
+
+      :error
+    else
+      :ok
+    end
+  end
+
+  # Delete the blobs the replaced map named. Keys are regenerated per run, so
+  # anything not in the new map is unreachable — orphaned storage that nothing
+  # else in the system can find, since every other deletion path reads the
+  # *current* map.
+  defp reclaim(previous, current) do
+    kept = current |> Map.values() |> MapSet.new(& &1["key"])
+
+    for %{"key" => key} <- Map.values(previous),
+        is_binary(key),
+        not MapSet.member?(kept, key) do
+      Storage.delete(key)
+    end
+
+    :ok
   end
 
   # `tmp` paths are server-built (System.tmp_dir! + a UUID), never user input —
@@ -84,14 +140,31 @@ defmodule KilnCMS.Media.VariantWorker do
     tmp
   end
 
+  # Each variant carries its own extension and content type now that one label
+  # can exist in several encodings (#473) — the stored `content_type` is what a
+  # `<picture>` `<source type=…>` needs, and reconstructing it from the key at
+  # render time would put format knowledge in the templates.
+  # `try/after` so a storage failure part-way through doesn't strand the
+  # remaining temp files: one item now writes up to nine of them, and a bulk
+  # regeneration during an S3 outage would otherwise fill the disk.
   # sobelow_skip ["Traversal.FileModule"]
-  defp store_variants(files, ext) do
-    Map.new(files, fn %{label: label, path: tmp, width: w, height: h} ->
-      key = Storage.generate_key("#{label}#{ext}")
+  defp store_variants(files) do
+    Map.new(files, fn variant ->
+      %{label: label, path: tmp, width: w, height: h} = variant
+      key = Storage.generate_key("#{label}#{variant.ext}")
       {:ok, ^key} = Storage.store(key, tmp)
-      rm(tmp)
-      {label, %{"key" => key, "url" => Storage.url(key), "width" => w, "height" => h}}
+
+      {label,
+       %{
+         "key" => key,
+         "url" => Storage.url(key),
+         "width" => w,
+         "height" => h,
+         "content_type" => variant.content_type
+       }}
     end)
+  after
+    Enum.each(files, &rm(&1.path))
   end
 
   # sobelow_skip ["Traversal.FileModule"]
