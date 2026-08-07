@@ -287,6 +287,27 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("unarchive", params, socket),
     do: {:noreply, transition(socket, params, "unarchive")}
 
+  # Clone a row into a new draft and land the editor in it (#471) — the same
+  # verb the content editor's own Duplicate button runs.
+  def handle_event("duplicate", %{"kind" => kind, "id" => id}, socket) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    # `kind`/`id` come off the clicked row, so they are client input: pass them
+    # straight through rather than pre-fetching, so an unknown type or an
+    # unreachable id lands in the error branch instead of crashing the LiveView
+    # (`duplicate/3` re-reads the record either way).
+    case KilnCMS.CMS.Duplication.duplicate(kind, id, actor: actor, tenant: org) do
+      {:ok, copy} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, gettext("Duplicated as a new draft."))
+         |> push_navigate(to: edit_path(kind, copy.id))}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+    end
+  end
+
   def handle_event("load_more", _params, socket) do
     case List.last(socket.assigns.items) do
       nil ->
@@ -891,6 +912,16 @@ defmodule KilnCMSWeb.EditorLive do
                 class="btn btn-sm btn-default"
               >
                 {gettext("Unarchive")}
+              </button>
+              <button
+                type="button"
+                phx-click="duplicate"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                title={gettext("Copy into a new draft")}
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Duplicate")}
               </button>
               <.link
                 navigate={edit_path(kind, record.id) <> "?assign=1"}

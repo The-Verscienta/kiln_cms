@@ -2458,6 +2458,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply, put_flash(socket, :error, gettext("Couldn't create that translation."))}
   end
 
+  # One-click duplicate (#471): clone this record's saved payload into a new
+  # draft of the same locale and jump to it. Unsaved edits don't travel — the
+  # copy is made from the row, so the autosave that just ran is the boundary.
+  def handle_event("duplicate", _params, socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
+      {:ok, copy} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, gettext("Duplicated as a new draft."))
+         |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that content."))}
+    end
+  end
+
   # ── Version compare (#467) ─────────────────────────────────────────────────
 
   def handle_event("toggle_compare", %{"version_id" => version_id}, socket) do
@@ -6928,6 +6946,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
             >
               <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
             </.link>
+            <%!-- Duplicate into a new draft (#471). The copy is made from the
+                  saved row, so say so when the buffer is dirty. --%>
+            <button
+              type="button"
+              phx-click="duplicate"
+              data-confirm={
+                @save_state != :saved &&
+                  gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
+              }
+              class="btn btn-sm btn-default"
+            >
+              <.icon name="hero-document-duplicate" class="mr-1 size-4" />{gettext("Duplicate")}
+            </button>
           </div>
         </div>
 

@@ -324,7 +324,7 @@ defmodule KilnCMS.MixProject do
       "Email & notifications":
         ~r/^(Elixir\.)?KilnCMS\.(Mail|Mailer|Newsletter|Notifications)(\.|$)/,
       "Editorial operations":
-        ~r/^(Elixir\.)?KilnCMS\.(Governance|History|Provenance|Automation|Webhooks|Staging|Collab)(\.|$)/,
+        ~r/^(Elixir\.)?KilnCMS\.(Governance|History|Provenance|Automation|Webhooks|Staging|Collab|Beta)(\.|$)/,
       "Rendering & delivery":
         ~r/^(Elixir\.)?KilnCMS\.(Firing|HTMLSanitizer|Highlight|VisualEditing|Seo|Assist|LLM|Branding|I18n)(\.|$)/,
       Analytics: ~r/^(Elixir\.)?KilnCMS\.Analytics(\.|$)/,

@@ -349,20 +349,50 @@ Keep it lightweight so it actually happens.
 
 ### Before every round
 
-- [ ] Pick the round shape (authoring vs operator) and provision testers at the
-      right tier.
-- [ ] For an authoring round, have an `admin` seat ready to approve — Scenarios
-      A and C stall without one.
-- [ ] Freeze the editor surface; record the commit
-      (`git rev-parse --short HEAD`) and hand it to testers.
-- [ ] Seed each tester with content they can safely break — an empty CMS tests
-      nothing but the empty states.
-- [ ] Confirm optional infra the script touches is actually up (media storage;
-      `PRESENTATION_PREVIEW_URL` only if the round uses the console).
+Most of this is one command — `mix kiln.beta.round` does the provisioning,
+seeding and readiness reporting below, and is idempotent so you can re-run it
+mid-round to add a tester:
+
+```bash
+mix kiln.beta.round --yes --shape authoring --testers 4 --round 1
+```
+
+It refuses without `--yes`, and refuses a database whose name doesn't look like
+a beta/staging one — it mints accounts whose passwords it prints, so run it
+from a terminal you'd read a credential in rather than through a deploy
+platform's one-off runner. Use `--tester you@example.com` (repeatable) when
+testers need real addresses so password reset works, and `--reset-passwords` to
+re-issue a lost credential. See `KilnCMS.Beta`.
+
+**An address that already has an account here is adopted, not duplicated** —
+its role moves to the seat's tier and the handout says so. That's the right
+behaviour for an internal tester who already signs in, but it means an operator
+round can hand somebody `:admin`; put the role back when the round ends.
+
+- [x] Pick the round shape (authoring vs operator) and provision testers at the
+      right tier — `--shape`. An authoring round gets `editor` testers; an
+      operator round is `admin` throughout.
+- [x] For an authoring round, have an `admin` seat ready to approve — Scenarios
+      A and C stall without one. The task always creates the facilitator seat
+      for an authoring round, for exactly this reason.
+- [x] Freeze the editor surface; record the commit
+      (`git rev-parse --short HEAD`) and hand it to testers. The readiness
+      report prints it, and flags a **dirty** working tree — a round frozen
+      against uncommitted changes isn't frozen.
+- [x] Seed each tester with content they can safely break — an empty CMS tests
+      nothing but the empty states. Each tester gets a published post (so the
+      edit/unpublish steps have a live record they couldn't have published
+      themselves) and a draft page with history (so `restore_version`, one of
+      the few workflow actions an editor *may* run, has a target). Skip with
+      `--no-seed`.
+- [x] Confirm optional infra the script touches is actually up (media storage;
+      `PRESENTATION_PREVIEW_URL` only if the round uses the console) — both in
+      the readiness report, as warnings rather than failures.
 - [ ] Check the `beta` label exists:
       `gh label create beta --color 0E8A16 --description "Sourced from a beta testing session"`
       (GitHub silently drops labels an issue form references but the repo
-      doesn't define).
+      doesn't define). The task prints the command; it can't run it, because
+      that's a network call to GitHub and the round has no credential for it.
 
 When a round shows no new S1/S2 on the core flows and NPS is trending positive,
 the editor is ready for the v1 cut.
