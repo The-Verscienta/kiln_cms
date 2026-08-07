@@ -694,7 +694,11 @@ defmodule KilnCMSWeb.Router do
     post "/auth/passkey/verify", PasskeyController, :verify
 
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
-    sign_out_route AuthController
+    # Two routes, not one: a `DELETE` to the controller *and* a `live` route in
+    # its own `live_session`. The second is easy to miss and is joinable at the
+    # channel with a scraped session blob like any other, so it needs the same
+    # wrapper as the token pages below (#701).
+    sign_out_route AuthController, "/sign-out", live_view: KilnCMSWeb.SignOutLive
 
     # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
     # account (#331). Gated by the signed :pending_2fa session token, not a login.
@@ -735,19 +739,30 @@ defmodule KilnCMSWeb.Router do
                     overrides: [KilnCMSWeb.AuthOverrides]
     end
 
+    # `live_view:` on these three is the #701 fix, and it is the same move
+    # `sign_in_route` above already makes for a different reason. `layout:` and
+    # `on_mount:` here are the *route's*, and a url-less join matches no route,
+    # so it skips both — including `:assign_current_org`, which is what leaves
+    # the page rendering the default org's name and logo on a tenant host.
+    # Pointing at a Kiln wrapper puts these views under
+    # `use KilnCMSWeb, :live_view` and so under `KilnCMSWeb.LiveRouteGuard`
+    # (#688), which refuses that join outright. See `KilnCMSWeb.AuthLive`.
     reset_route auth_routes_prefix: "/auth",
+                live_view: KilnCMSWeb.ResetLive,
                 layout: {KilnCMSWeb.Layouts, :auth},
                 on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
                 overrides: [KilnCMSWeb.AuthOverrides]
 
     confirm_route KilnCMS.Accounts.User, :confirm_new_user,
       auth_routes_prefix: "/auth",
+      live_view: KilnCMSWeb.ConfirmLive,
       layout: {KilnCMSWeb.Layouts, :auth},
       on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
       overrides: [KilnCMSWeb.AuthOverrides]
 
     magic_sign_in_route(KilnCMS.Accounts.User, :magic_link,
       auth_routes_prefix: "/auth",
+      live_view: KilnCMSWeb.MagicSignInLive,
       layout: {KilnCMSWeb.Layouts, :auth},
       on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}],
       overrides: [KilnCMSWeb.AuthOverrides]

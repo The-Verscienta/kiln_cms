@@ -29,6 +29,63 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`mix kiln.audit.checkpoint --audit` walks the checkpoint run's predecessor
+  links, and its structural half now runs without a witness.** Each
+  `chain_checkpoints` row signs its predecessor's id and a digest of its
+  contents; nothing walked them. A checkpoint rewritten in place while keeping
+  its sequence number was caught only by its own signature failing — which on an
+  unsigned deployment it does not (#732).
+
+  Contiguity and the link walk read `chain_checkpoints` alone, so they now run on
+  every deployment, including the default one that publishes nowhere. Previously
+  the whole audit exited early without a sink, which made both checks dead code
+  on exactly the deployments where they are the only structural evidence there
+  is. The missing-witness case is still a failure and still exits non-zero.
+
+  Read the walk for what it is: `Checkpoint.digest/1` is an unkeyed hash over
+  public columns, so an attacker who rewrites a row can recompute every digest
+  after it, and the newest checkpoint has no successor to record its digest at
+  all. It catches a careless edit, and it makes a careful one expensive — the
+  cascade forces a rewrite of every *published* object downstream, turning one
+  witness mismatch into many. It does not replace the witness.
+
+- **Editorial claim checking.** A **Compliance** panel in the content editor
+  flags the phrases a regulator or a house style guide would want a second look
+  at — "FDA approved", "no side effects", "guaranteed results" — plus an
+  optional check that a configured disclaimer is present. Built on the existing
+  advisory framework as a third lens rather than a private panel, so it shares
+  the body walk, the severity vocabulary and the rendering (#377). See
+  [Editorial claim checking](docs/compliance.md).
+
+  **Off by default, behind two switches.** `enabled` turns the panel on;
+  `require_at_publish` then turns an `:error`-severity match into a refused
+  publish (`KilnCMS.CMS.Validations.ComplianceClaims`). It is read *through*
+  `enabled`, so setting it alone is inert. Most publications want the panel
+  long before they want a gate.
+
+  The gate covers every path that can put text on the public site: `:publish`,
+  `:publish_scheduled`, an `:update` to an already-live record, and a version
+  restore (which force-changes fields in a `before_action`, so a plain
+  validation never sees them). All are scoped to the claims *that write
+  introduces*, so switching the gate on doesn't make existing pages
+  un-editable. Note it costs a block-tree walk and a scan on every write to a
+  published record — unlike the alt-text gate it also reads the SEO fields, and
+  Ash's `where:` has no "any of these changed".
+
+  Three judgement calls worth knowing, all argued in the doc. The check is an
+  editor advisory rather than the background agent #377 sketched, because a
+  claim is a judgement about meaning and every honest implementation ends up
+  asking a human — who is already in the editor. The shipped rule pack omits
+  bare curative vocabulary ("cures", "heals"), which is the vocabulary a health
+  CMS most obviously wants and also the vocabulary with the most legitimate uses
+  — where that line falls is the operator's call, and a shipped guess means
+  every install starts by switching the panel off. And negation is deliberately
+  not handled: "does not cure cancer" is reported, because a negation window
+  would suppress "not only clinically proven, but…" just as readily.
+
+  Phrases match on whole-word boundaries — as a substring, `cures` matches
+  *manicures*, *procures* and *secures*.
+
 - **Beta testing program.** [Beta user testing](docs/beta-testing.md) documents
   the Phase 9 editor-UX beta: the surface under test, seven guided scenarios, a
   session notes form, and a feedback → issue → fix triage loop. A **Beta
@@ -1395,6 +1452,57 @@ migration, a rewritten column, a dropped config key).
   partner site in never takes the CMS's own host out. (#562)
 
 ### Fixed
+
+- **The remaining auth pages no longer render another tenant's branding.**
+  `/password-reset/:token`, `/confirm_new_user/:token`, `/magic_link/:token`
+  and `/sign-out` are now routed through thin Kiln wrappers
+  (`KilnCMSWeb.AuthLive`), which puts them under `use KilnCMSWeb, :live_view`
+  and so under the url-less-join guard from #688 (#701).
+
+  They were the last views outside it, because `AshAuthentication.Phoenix`
+  ships them and a library module cannot use Kiln's macro. A `/live` join
+  carrying no URL matches no route, so it skipped their
+  `{LiveUserAuth, :assign_current_org}` hook and left `:current_org` unassigned
+  — and `Layouts.brand_or_unbranded/1`, which fails closed on exactly that,
+  never ran, because the channel takes the layout from the matched route too.
+  `Branding.for_org(nil)` answered with the **default organization**, so a
+  password-reset page joined that way on a tenant host drew another site's name
+  and logo. No authorization was involved (these pages are unauthenticated by
+  design); the leak was identity, which is what #48 exists to prevent.
+
+  Wrapping refuses the join outright rather than trying to render it correctly.
+
+  `/sign-out` is worth knowing about separately: `sign_out_route/3` emits a
+  `DELETE` to the auth controller **and** a `live` route in its own
+  `live_session`, and only the first is visible at the call site. It reads as
+  controller-only and is not, so its live half had a replayable session like
+  every other page here. `KilnCMSWeb.LiveJoinWithoutUrlTest`'s exemption list is
+  now empty, which is what keeps that true as views are added.
+
+- **A client-chosen payload shape no longer crashes an editor LiveView.** A
+  `handle_event/3` payload is arbitrary client JSON and `handle_params/3` has a
+  controller's shape freedom, so `%{"q" => q}` constrains the key and never the
+  value — `String.trim/1` and `Integer.parse/1` have no clause for a list or a
+  map and raise (#764). The authenticated sibling of #751.
+
+  Two mechanisms, which only work together: a `when is_binary(…)` guard on the
+  clause heads that would otherwise raise inside their bodies, and a catch-all
+  `handle_event/3` that `KilnCMSWeb.MalformedEvent` appends to every Kiln
+  LiveView so an unmatched event is a no-op. A guard without the catch-all just
+  moves the crash from the body to the head. It has to be `@before_compile`:
+  a catch-all injected at the top of a module shadows every real handler in it.
+
+  The three cases reachable by a **crafted link** rather than a pushed event —
+  `/editor?q[a]=1`, `/media?q[a]=1`, `/editor/analytics?range[]=7` — now read
+  through `KilnCMSWeb.Params`, so a wrong shape is absent rather than coerced.
+
+  `KilnCMSWeb.CollabChannel` is separate: `handle_in/3` had no catch-all and
+  `Base.decode64/2` was called on an unguarded `"update"` value, so one
+  malformed frame killed that client's channel process and dropped its editor
+  to a rejoin mid-edit. It now guards the payload and ignores unknown frames.
+  The document room itself survives either way — each client gets its own
+  channel process, and `Collab.DocServer` monitors its channels rather than
+  linking them.
 
 - **`KILN_STRICT_TEST=true` ran the test suite without strict tenancy, and said
   nothing.** The flag was matched as `== "1"` while
