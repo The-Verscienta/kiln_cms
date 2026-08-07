@@ -272,6 +272,134 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
 
       refute Enum.any?(CMS.list_tags!(authorize?: false), &(&1.id == tag.id))
     end
+
+    # `edit` used a bang fetch with no not-found clause, so clicking Edit on a
+    # row another admin had just deleted crashed the LiveView — taking whatever
+    # was half-typed into all three create forms down with it (#531).
+    test "editing a row that has since been deleted says so instead of crashing",
+         %{conn: conn} do
+      tag = seed_tag(%{name: "Vanishing"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+
+      # Someone else removes it while this page is open.
+      CMS.destroy_tag!(tag, authorize?: false)
+
+      html =
+        lv
+        |> element(~s(button[phx-click="edit"][phx-value-id="#{tag.id}"]))
+        |> render_click()
+
+      assert html =~ "no longer available"
+      refute html =~ "Vanishing"
+    end
+
+    # The delete handler cleared `@edit` unconditionally and record-agnostically,
+    # so deleting anything threw away an in-progress inline rename of an
+    # unrelated record — and did so even when the delete itself failed (#531).
+    test "deleting one record leaves an in-progress edit of another alone", %{conn: conn} do
+      keeper = seed_category(%{name: "Keeper"})
+      doomed = seed_tag(%{name: "Doomed"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+
+      # Start renaming the category...
+      lv
+      |> element(~s(button[phx-click="edit"][phx-value-id="#{keeper.id}"]))
+      |> render_click()
+
+      lv
+      |> form("#edit-category-#{keeper.id}", taxonomy: %{name: "Half typed"})
+      |> render_change()
+
+      # ...then delete an unrelated tag.
+      lv
+      |> element(
+        ~s(button[phx-click="delete"][phx-value-type="tag"][phx-value-id="#{doomed.id}"])
+      )
+      |> render_click()
+
+      # The rename is still open, with what was typed into it.
+      html = render(lv)
+      assert html =~ "edit-category-#{keeper.id}"
+      assert html =~ "Half typed"
+    end
+
+    # A row someone else already deleted, a row this actor may not delete, and
+    # anything else are three different problems. Reporting them all as "you may
+    # not have permission" hid the first two — and the obvious way to say more,
+    # interpolating Ash's own error rendering, puts a class header and the raw
+    # primary key in the flash, in English, whatever the locale (#531).
+    test "a delete of a since-deleted row says so, and clears the phantom row",
+         %{conn: conn} do
+      tag = seed_tag(%{name: "Phantom"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+      CMS.destroy_tag!(tag, authorize?: false)
+
+      html =
+        lv
+        |> element(~s(button[phx-click="delete"][phx-value-id="#{tag.id}"]))
+        |> render_click()
+
+      assert html =~ "no longer available"
+      # Not Ash's internals, and not the record's id.
+      refute html =~ "Input Invalid"
+      refute html =~ tag.id
+
+      # The row is gone from the page, so the only affordance isn't to click
+      # Delete again and get the same message.
+      refute html =~ "Phantom"
+    end
+
+    # Taxonomy is world-readable, so an editor's fetch succeeds and only the
+    # admin-only destroy policy refuses — a genuinely different message.
+    test "a delete an editor isn't allowed says so, and keeps the row", %{conn: conn} do
+      tag = seed_tag(%{name: "Protected"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      # The editor's page renders no delete button, so push the event directly —
+      # the server must refuse on the policy, not on the missing control.
+      html = render_click(lv, "delete", %{"type" => "tag", "id" => tag.id})
+
+      assert html =~ "permission"
+      assert html =~ "Protected"
+      assert Enum.any?(CMS.list_tags!(authorize?: false), &(&1.id == tag.id))
+    end
+
+    # Every kind's flash comes out of one `labels/1` table now, so a copy/paste
+    # swap between rows would go unnoticed.
+    test "each kind's create flash names that kind", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      assert lv
+             |> form("#new-category-form", category: %{name: "Flash Cat"})
+             |> render_submit() =~ "Category added."
+
+      assert lv
+             |> form("#new-tag_group-form", tag_group: %{name: "Flash Group"})
+             |> render_submit() =~ "Tag group added."
+
+      assert lv
+             |> form("#new-tag-form", tag: %{name: "Flash Tag"})
+             |> render_submit() =~ "Tag added."
+    end
+
+    # `kind_params/1` finds the kind by which form key the payload carries. A
+    # payload naming none used to be a `MatchError` that took the LiveView down
+    # — discarding all three half-typed create forms, the very failure the edit
+    # handler was fixed to avoid.
+    test "a validate payload naming no known kind is ignored, not fatal", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/taxonomy")
+
+      lv |> form("#new-category-form", category: %{name: "Still here"}) |> render_change()
+
+      render_change(lv, "validate", %{"not_a_kind" => %{"name" => "x"}})
+      render_change(lv, "create", %{"not_a_kind" => %{"name" => "x"}})
+
+      assert render(lv) =~ "Still here"
+    end
   end
 
   describe "usage counts" do

@@ -7,6 +7,15 @@ defmodule KilnCMSWeb.TaxonomyLive do
 
   Tags are listed **under their group**, which is also how the content editor's
   picker renders them — see `KilnCMS.CMS.TagGroup`.
+
+  The three kinds are a **lookup table**, not three parallel code paths (#531).
+  Adding one used to mean touching ~10 sites — a create/validate `handle_event`
+  pair, `create_form/3`, `edit_form/4`, `destroy/4`, `extra_fields/1`,
+  `usage_line/1`, `scope_line/1`, `delete_confirm/1`, `none_yet/1`,
+  `kind_label/1` and the `<.taxonomy_column>` call — and the module keyed the
+  same three kinds three different ways along the way: atoms in one place,
+  strings in another, structs in a third. `@kinds` below is now the one
+  description of a kind, and everything downstream takes a descriptor from it.
   """
   use KilnCMSWeb, :live_view
 
@@ -16,12 +25,107 @@ defmodule KilnCMSWeb.TaxonomyLive do
   alias KilnCMS.CMS.Tag
   alias KilnCMS.CMS.TagGroup
 
-  @loads [:page_count, :post_count]
+  # One entry per taxonomy kind. `key` is the currency everywhere else: the
+  # form's `as:` (so params arrive under it), the `phx-value-type` on the row
+  # buttons, and the lookup into `labels/1`.
+  #
+  # Reads and writes go through the domain's code interfaces by NAME, applied
+  # generically (the idiom `ContentTypes.call/3` already uses) — a capture can't
+  # live in a module attribute, and calling `Ash.read!`/`Ash.destroy` directly
+  # would drop the domain indirection AGENTS.md requires.
+  #
+  # `loads` is the single statement of which aggregates a kind carries:
+  # `load_taxonomy/1` loads exactly these, and `usage_line/2` and
+  # `delete_confirm/2` render exactly these. A kind that named an aggregate in
+  # one place and not the other used to render `%Ash.NotLoaded{}` into
+  # `ngettext/4` — a 500 on the whole page, at render time, with nothing to
+  # suggest the table entry was incomplete.
+  #
+  # `sort: nil` means "whatever the primary read orders by" — `TagGroup`'s is
+  # already position-then-name, which an explicit name sort would override.
+  @kinds [
+    %{
+      key: "category",
+      resource: Category,
+      list: :list_categories!,
+      get: :get_category,
+      destroy: :destroy_category,
+      form: :category_form,
+      records: :categories,
+      loads: [:page_count, :post_count],
+      sort: [name: :asc],
+      description?: true,
+      extra_fields?: false,
+      grouped_by: nil
+    },
+    %{
+      key: "tag_group",
+      resource: TagGroup,
+      list: :list_tag_groups!,
+      get: :get_tag_group,
+      destroy: :destroy_tag_group,
+      form: :group_form,
+      records: :groups,
+      loads: [:tag_count],
+      sort: nil,
+      description?: true,
+      extra_fields?: true,
+      grouped_by: nil
+    },
+    %{
+      key: "tag",
+      resource: Tag,
+      list: :list_tags!,
+      get: :get_tag,
+      destroy: :destroy_tag,
+      form: :tag_form,
+      records: :tags,
+      loads: [:page_count, :post_count],
+      sort: [name: :asc],
+      description?: false,
+      extra_fields?: true,
+      # The assign holding this kind's `{key, label, records}` sections. `nil`
+      # renders one flat list.
+      grouped_by: :grouped_tags
+    }
+  ]
+
+  @kind_keys ~w(key resource list get destroy form records loads sort description? extra_fields? grouped_by)a
+
+  # A table row with a missing field is a render-time KeyError on a page an
+  # editor opens, so check the shape at compile time instead.
+  for kind <- @kinds do
+    missing = @kind_keys -- Map.keys(kind)
+
+    if missing != [] do
+      raise "taxonomy kind #{inspect(kind[:key])} is missing #{inspect(missing)}"
+    end
+  end
+
+  # Every taxonomy resource should appear in the admin that manages taxonomy.
+  # `KilnCMS.CMS.Taxonomy.searchable/0` discovers them from the domain (#530),
+  # so this catches a fourth resource that got a search surface and a REST/
+  # GraphQL surface from the macro but was never added here.
+  taxonomy_resources = Enum.map(KilnCMS.CMS.Taxonomy.searchable(), &elem(&1, 1))
+  listed = Enum.map(@kinds, & &1.resource)
+
+  case Enum.sort(taxonomy_resources) -- Enum.sort(listed) do
+    [] ->
+      :ok
+
+    unlisted ->
+      raise "taxonomy resources missing from TaxonomyLive's @kinds: #{inspect(unlisted)}"
+  end
 
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
+
+    socket =
+      Enum.reduce(@kinds, socket, fn kind, acc ->
+        assign(acc, kind.form, create_form(kind, actor, org))
+      end)
 
     {:ok,
      socket
@@ -30,85 +134,60 @@ defmodule KilnCMSWeb.TaxonomyLive do
      |> assign(:page_title, gettext("Taxonomy"))
      |> assign(:edit, nil)
      |> assign(:content_type_options, ContentTypes.options(org))
-     |> assign(:cat_form, create_form(:category, actor, org))
-     |> assign(:group_form, create_form(:tag_group, actor, org))
-     |> assign(:tag_form, create_form(:tag, actor, org))
      |> load_taxonomy()}
   end
 
   # --- create ----------------------------------------------------------------
 
   @impl true
-  def handle_event("validate_cat", %{"category" => params}, socket) do
-    {:noreply,
-     assign(socket, :cat_form, AshPhoenix.Form.validate(socket.assigns.cat_form, params))}
-  end
+  # A payload naming no known kind is ignored rather than matched against —
+  # `{kind, attrs} = :error` would take the LiveView down and discard every
+  # half-typed create form, which is the failure the `edit` handler below
+  # exists to avoid. Not reachable from the rendered forms; reachable from a
+  # crafted push, and from the next `phx-change` control added to this page.
+  def handle_event("validate", params, socket) do
+    case kind_params(params) do
+      {kind, attrs} ->
+        form = AshPhoenix.Form.validate(socket.assigns[kind.form], normalize_types(attrs))
+        {:noreply, assign(socket, kind.form, form)}
 
-  def handle_event("create_cat", %{"category" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.cat_form, params: with_slug(params)) do
-      {:ok, _category} ->
-        {:noreply,
-         socket
-         |> assign(
-           :cat_form,
-           create_form(:category, socket.assigns.actor, socket.assigns.current_org)
-         )
-         |> load_taxonomy()
-         |> put_flash(:info, gettext("Category added."))}
-
-      {:error, form} ->
-        {:noreply, assign(socket, :cat_form, form)}
+      :error ->
+        {:noreply, socket}
     end
   end
 
-  def handle_event("validate_group", %{"tag_group" => params}, socket) do
-    form = AshPhoenix.Form.validate(socket.assigns.group_form, normalize_types(params))
-    {:noreply, assign(socket, :group_form, form)}
-  end
-
-  def handle_event("create_group", %{"tag_group" => params}, socket) do
-    params = params |> with_slug() |> normalize_types()
-
-    case AshPhoenix.Form.submit(socket.assigns.group_form, params: params) do
-      {:ok, _group} ->
-        {:noreply,
-         socket
-         |> assign(
-           :group_form,
-           create_form(:tag_group, socket.assigns.actor, socket.assigns.current_org)
-         )
-         |> load_taxonomy()
-         |> put_flash(:info, gettext("Tag group added."))}
-
-      {:error, form} ->
-        {:noreply, assign(socket, :group_form, form)}
-    end
-  end
-
-  def handle_event("validate_tag", %{"tag" => params}, socket) do
-    {:noreply,
-     assign(socket, :tag_form, AshPhoenix.Form.validate(socket.assigns.tag_form, params))}
-  end
-
-  def handle_event("create_tag", %{"tag" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.tag_form, params: with_slug(params)) do
-      {:ok, _tag} ->
-        {:noreply,
-         socket
-         |> assign(:tag_form, create_form(:tag, socket.assigns.actor, socket.assigns.current_org))
-         |> load_taxonomy()
-         |> put_flash(:info, gettext("Tag added."))}
-
-      {:error, form} ->
-        {:noreply, assign(socket, :tag_form, form)}
+  def handle_event("create", params, socket) do
+    case kind_params(params) do
+      {kind, attrs} -> create(socket, kind, attrs)
+      :error -> {:noreply, socket}
     end
   end
 
   # --- inline edit -----------------------------------------------------------
 
+  # Non-bang, with an unknown-kind clause: the row this targets may be gone by
+  # the time it is clicked (another admin deleted it, or the tab has been open a
+  # while), and raising here takes the LiveView down — discarding whatever is
+  # half-typed into all three create forms along with it.
   def handle_event("edit", %{"type" => type, "id" => id}, socket) do
-    form = edit_form(type, id, socket.assigns.actor, socket.assigns.current_org)
-    {:noreply, assign(socket, :edit, %{type: type, id: id, form: form})}
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    with {:ok, kind} <- fetch_kind(type),
+         {:ok, record} <- fetch_record(kind, id, actor, org) do
+      form =
+        record
+        |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "taxonomy")
+        |> to_form()
+
+      {:noreply, assign(socket, :edit, %{type: type, id: id, form: form})}
+    else
+      _ ->
+        {:noreply,
+         socket
+         |> load_taxonomy()
+         |> put_flash(:error, gettext("That item is no longer available."))}
+    end
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -138,20 +217,81 @@ defmodule KilnCMSWeb.TaxonomyLive do
   # --- delete (admin only) ---------------------------------------------------
 
   def handle_event("delete", %{"type" => type, "id" => id}, socket) do
-    socket =
-      case destroy(type, id, socket.assigns.actor, socket.assigns.current_org) do
-        :ok ->
-          socket |> load_taxonomy() |> put_flash(:info, gettext("Deleted."))
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
 
-        _ ->
-          put_flash(
-            socket,
-            :error,
-            gettext("Couldn't delete that — you may not have permission.")
-          )
-      end
+    result =
+      with {:ok, kind} <- fetch_kind(type),
+           {:ok, record} <- fetch_record(kind, id, actor, org),
+           do: apply(CMS, kind.destroy, [record, [actor: actor, tenant: org]])
 
-    {:noreply, assign(socket, :edit, nil)}
+    {:noreply, after_delete(socket, result, type, id)}
+  end
+
+  defp fetch_record(kind, id, actor, org),
+    do: apply(CMS, kind.get, [id, [actor: actor, tenant: org]])
+
+  # An in-progress inline edit survives a delete of anything else — clearing it
+  # unconditionally threw away a half-typed rename of an unrelated record, and
+  # did so even when the delete itself failed. A row in edit mode renders its
+  # form instead of its buttons, so the matching case can only arrive from a
+  # stale or hand-made payload; it clears then, rather than leaving a form bound
+  # to a record that no longer exists.
+  defp after_delete(socket, :ok, type, id) do
+    socket
+    |> load_taxonomy()
+    |> put_flash(:info, gettext("Deleted."))
+    |> then(fn s -> if editing?(s.assigns.edit, type, id), do: assign(s, :edit, nil), else: s end)
+  end
+
+  # Reload on failure too: the commonest failure IS a row that no longer
+  # exists, and leaving it on screen means the only affordance is to click
+  # Delete again and get the same message.
+  defp after_delete(socket, error, _type, _id) do
+    socket |> load_taxonomy() |> put_flash(:error, delete_error(error))
+  end
+
+  # A row someone else already deleted, a row this actor may not delete, and
+  # anything else are three different problems with three different fixes —
+  # reporting them all as "you may not have permission" hid the first two.
+  #
+  # Deliberately NOT `Ash.Error.error_descriptions/1`: it assembles
+  # developer-facing text ("Input Invalid\n\n* record with id: \"3f2e…\" not
+  # found"), it echoes the primary key back into the UI, and it is always
+  # English — interpolating it into a translated frame leaves a hole the
+  # catalogs can't see.
+  defp delete_error({:error, %Ash.Error.Forbidden{}}),
+    do: gettext("You don't have permission to delete that.")
+
+  defp delete_error({:error, %Ash.Error.Invalid{errors: errors}}) do
+    if Enum.any?(errors, &is_struct(&1, Ash.Error.Query.NotFound)) do
+      # Same wording as the `edit` handler's, because it is the same event:
+      # the row on screen is gone.
+      gettext("That item is no longer available.")
+    else
+      gettext("Couldn't delete that.")
+    end
+  end
+
+  defp delete_error(_other), do: gettext("Couldn't delete that.")
+
+  defp create(socket, kind, attrs) do
+    attrs = attrs |> with_slug() |> normalize_types()
+
+    case AshPhoenix.Form.submit(socket.assigns[kind.form], params: attrs) do
+      {:ok, _record} ->
+        actor = socket.assigns.actor
+        org = socket.assigns.current_org
+
+        {:noreply,
+         socket
+         |> assign(kind.form, create_form(kind, actor, org))
+         |> load_taxonomy()
+         |> put_flash(:info, labels(kind.key).added)}
+
+      {:error, form} ->
+        {:noreply, assign(socket, kind.form, form)}
+    end
   end
 
   # --- data ------------------------------------------------------------------
@@ -160,23 +300,33 @@ defmodule KilnCMSWeb.TaxonomyLive do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
-    # `TagGroup`'s primary read is already ordered by position then name.
-    groups = CMS.list_tag_groups!(actor: actor, tenant: org, load: [:tag_count])
-
-    tags =
-      CMS.list_tags!(actor: actor, tenant: org, load: @loads, query: sort_by_name())
+    socket =
+      Enum.reduce(@kinds, socket, fn kind, acc ->
+        assign(acc, kind.records, read_kind!(kind, actor, org))
+      end)
 
     socket
-    |> assign(
-      :categories,
-      CMS.list_categories!(actor: actor, tenant: org, load: @loads, query: sort_by_name())
-    )
-    |> assign(:groups, groups)
-    |> assign(:tags, tags)
-    |> assign(:grouped_tags, group_tags(tags, groups))
+    |> assign(:grouped_tags, group_tags(socket.assigns.tags, socket.assigns.groups))
+    # Assigned here, not in `render/1`: an assign built during render is marked
+    # changed on every render, which would re-send every row on every keystroke.
+    # This one only moves when the groups do.
+    |> assign(:picklists, %{
+      groups: socket.assigns.groups,
+      content_types: socket.assigns.content_type_options
+    })
   end
 
-  defp sort_by_name, do: [sort: [name: :asc]]
+  # A descriptor by key, for the template. Raises on an unknown key, which is a
+  # typo in `render/1` rather than anything a request can cause.
+  defp kind(key) do
+    Enum.find(@kinds, &(&1.key == key)) || raise ArgumentError, "unknown taxonomy kind: #{key}"
+  end
+
+  defp read_kind!(kind, actor, org) do
+    query = if kind.sort, do: [sort: kind.sort], else: []
+
+    apply(CMS, kind.list, [[actor: actor, tenant: org, load: kind.loads, query: query]])
+  end
 
   # Tags bucketed by group, in picker order, with "Ungrouped" last. Every group
   # is listed even when empty so editors can see a bucket they've yet to fill;
@@ -210,55 +360,35 @@ defmodule KilnCMSWeb.TaxonomyLive do
     end
   end
 
-  # Distinct form names keep input ids unique across the create forms (and the
-  # inline edit form) on the same page. `tenant:` stamps the new row's org so
-  # taxonomy is created into the current site (epic #336).
-  defp create_form(:category, actor, org),
-    do:
-      AshPhoenix.Form.for_create(Category, :create, actor: actor, tenant: org, as: "category")
-      |> to_form()
+  # Which kind a create/validate payload came from. The forms serialize under
+  # their own `as:` — distinct so input ids stay unique on a page carrying all
+  # three — and that key is also what identifies the sender. Not `phx-value-*`:
+  # LiveView does not reliably deliver those alongside a `phx-change` payload
+  # (#764), and a hidden field would be a second source of truth for something
+  # the params already say.
+  defp kind_params(params) do
+    Enum.find_value(@kinds, :error, fn kind ->
+      case Map.fetch(params, kind.key) do
+        {:ok, attrs} when is_map(attrs) -> {kind, attrs}
+        _ -> nil
+      end
+    end)
+  end
 
-  defp create_form(:tag_group, actor, org),
-    do:
-      AshPhoenix.Form.for_create(TagGroup, :create, actor: actor, tenant: org, as: "tag_group")
-      |> to_form()
+  defp fetch_kind(key) do
+    case Enum.find(@kinds, &(&1.key == key)) do
+      nil -> :error
+      kind -> {:ok, kind}
+    end
+  end
 
-  defp create_form(:tag, actor, org),
-    do:
-      AshPhoenix.Form.for_create(Tag, :create, actor: actor, tenant: org, as: "tag")
-      |> to_form()
-
-  defp edit_form("category", id, actor, org) do
-    CMS.get_category!(id, actor: actor, tenant: org)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "taxonomy")
+  # `tenant:` stamps the new row's org so taxonomy is created into the current
+  # site (epic #336); `as:` keeps input ids unique across the three create forms
+  # (and the inline edit form) on the same page.
+  defp create_form(kind, actor, org) do
+    kind.resource
+    |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: kind.key)
     |> to_form()
-  end
-
-  defp edit_form("tag_group", id, actor, org) do
-    CMS.get_tag_group!(id, actor: actor, tenant: org)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "taxonomy")
-    |> to_form()
-  end
-
-  defp edit_form("tag", id, actor, org) do
-    CMS.get_tag!(id, actor: actor, tenant: org)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "taxonomy")
-    |> to_form()
-  end
-
-  defp destroy("category", id, actor, org) do
-    with {:ok, record} <- CMS.get_category(id, actor: actor, tenant: org),
-         do: CMS.destroy_category(record, actor: actor, tenant: org)
-  end
-
-  defp destroy("tag_group", id, actor, org) do
-    with {:ok, record} <- CMS.get_tag_group(id, actor: actor, tenant: org),
-         do: CMS.destroy_tag_group(record, actor: actor, tenant: org)
-  end
-
-  defp destroy("tag", id, actor, org) do
-    with {:ok, record} <- CMS.get_tag(id, actor: actor, tenant: org),
-         do: CMS.destroy_tag(record, actor: actor, tenant: org)
   end
 
   # Fill a blank slug from the name so editors only have to type a label. An
@@ -308,96 +438,83 @@ defmodule KilnCMSWeb.TaxonomyLive do
           </p>
         </div>
 
+        <%!-- Three explicit calls, not a `:for` over `@kinds`. A comprehension
+              would have to pair each kind with its form and record list, and
+              building those pairs in `render/1` puts them behind an assign
+              LiveView marks changed every time — so one keystroke in any create
+              form re-serializes every category, group and tag row over the
+              socket (measured: an incremental diff going from ~8% of a full
+              render to ~52%, and growing with the row count). Referencing the
+              tracked assigns directly keeps a validate patch scoped to the one
+              column that changed. Adding a kind costs a line here; sending the
+              whole page on every keystroke costs more. --%>
         <div class="grid gap-8 lg:grid-cols-2">
           <.taxonomy_column
-            kind="category"
-            heading={gettext("Categories")}
-            blurb={gettext("A piece of content belongs to one category.")}
-            form={@cat_form}
-            validate="validate_cat"
-            submit="create_cat"
+            kind={kind("category")}
+            form={@category_form}
             records={@categories}
             edit={@edit}
             admin?={@admin?}
-            with_description={true}
-            groups={@groups}
-            content_type_options={@content_type_options}
+            picklists={@picklists}
           />
           <.taxonomy_column
-            kind="tag_group"
-            heading={gettext("Tag groups")}
-            blurb={
-              gettext(
-                "Buckets that tags are filed under, so the editor's tag picker stays scannable."
-              )
-            }
+            kind={kind("tag_group")}
             form={@group_form}
-            validate="validate_group"
-            submit="create_group"
             records={@groups}
             edit={@edit}
             admin?={@admin?}
-            with_description={true}
-            groups={@groups}
-            content_type_options={@content_type_options}
+            picklists={@picklists}
           />
         </div>
 
         <.taxonomy_column
-          kind="tag"
-          heading={gettext("Tags")}
-          blurb={gettext("Content can carry any number of tags.")}
+          kind={kind("tag")}
           form={@tag_form}
-          validate="validate_tag"
-          submit="create_tag"
           records={@tags}
           grouped={@grouped_tags}
           edit={@edit}
           admin?={@admin?}
-          with_description={false}
-          groups={@groups}
-          content_type_options={@content_type_options}
+          picklists={@picklists}
         />
       </div>
     </Layouts.console>
     """
   end
 
-  attr :kind, :string, required: true
-  attr :heading, :string, required: true
-  attr :blurb, :string, required: true
+  attr :kind, :map, required: true
   attr :form, :any, required: true
-  attr :validate, :string, required: true
-  attr :submit, :string, required: true
   attr :records, :list, required: true
   attr :edit, :any, required: true
   attr :admin?, :boolean, required: true
-  attr :with_description, :boolean, required: true
-  attr :groups, :list, required: true
-  attr :content_type_options, :list, required: true
+  # The page's pick-list data — `%{groups:, content_types:}`. One assign rather
+  # than one attr per list: which of them a column reads is `extra_fields/1`'s
+  # business, not the column's.
+  attr :picklists, :map, required: true
   # `nil` renders one flat list; otherwise `{key, label, records}` sections.
   attr :grouped, :any, default: nil
 
   defp taxonomy_column(assigns) do
+    assigns = assign(assigns, :labels, labels(assigns.kind.key))
+
     ~H"""
     <section class="space-y-4">
       <div>
-        <h2 class="text-lg font-medium">{@heading} ({length(@records)})</h2>
-        <p class="text-sm text-base-content/60">{@blurb}</p>
+        <h2 class="text-lg font-medium">{@labels.heading} ({length(@records)})</h2>
+        <p class="text-sm text-base-content/60">{@labels.blurb}</p>
       </div>
 
       <.form
         for={@form}
-        id={"new-#{@kind}-form"}
-        phx-change={@validate}
-        phx-submit={@submit}
+        id={"new-#{@kind.key}-form"}
+        phx-change="validate"
+        phx-submit="create"
         class="card card-pad space-y-3"
       >
         <div class="grid gap-3 sm:grid-cols-2">
           <.input
             field={@form[:name]}
             label={gettext("Name")}
-            placeholder={gettext("New %{kind} name", kind: kind_label(@kind))}
+            placeholder={gettext("New %{kind} name", kind: @labels.noun)}
           />
           <.input
             field={@form[:slug]}
@@ -406,24 +523,19 @@ defmodule KilnCMSWeb.TaxonomyLive do
           />
         </div>
         <.input
-          :if={@with_description}
+          :if={@kind.description?}
           field={@form[:description]}
           type="textarea"
           label={gettext("Description")}
         />
-        <.extra_fields
-          kind={@kind}
-          form={@form}
-          groups={@groups}
-          content_type_options={@content_type_options}
-        />
+        <.extra_fields kind={@kind} form={@form} picklists={@picklists} />
         <.button type="submit" variant="primary">
-          {gettext("Add %{kind}", kind: kind_label(@kind))}
+          {gettext("Add %{kind}", kind: @labels.noun)}
         </.button>
       </.form>
 
       <p :if={@records == []} class="text-sm text-base-content/60">
-        {none_yet(@kind)}
+        {@labels.none_yet}
       </p>
 
       <ul :if={@records != [] and is_nil(@grouped)} class="card divide-y divide-base-content/10">
@@ -433,9 +545,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
           kind={@kind}
           edit={@edit}
           admin?={@admin?}
-          with_description={@with_description}
-          groups={@groups}
-          content_type_options={@content_type_options}
+          picklists={@picklists}
         />
       </ul>
 
@@ -454,9 +564,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
               kind={@kind}
               edit={@edit}
               admin?={@admin?}
-              with_description={@with_description}
-              groups={@groups}
-              content_type_options={@content_type_options}
+              picklists={@picklists}
             />
           </ul>
         </section>
@@ -466,23 +574,34 @@ defmodule KilnCMSWeb.TaxonomyLive do
   end
 
   attr :record, :any, required: true
-  attr :kind, :string, required: true
+  attr :kind, :map, required: true
   attr :edit, :any, required: true
   attr :admin?, :boolean, required: true
-  attr :with_description, :boolean, required: true
-  attr :groups, :list, required: true
-  attr :content_type_options, :list, required: true
+  attr :picklists, :map, required: true
 
   defp taxonomy_row(assigns) do
-    assigns = assign(assigns, :scope, scope_line(assigns.record, assigns.content_type_options))
+    # Only `scope_line/3` is precomputed: it is the one that needs `picklists`,
+    # and hoisting it keeps the template readable. `usage_line/2` and
+    # `delete_confirm/2` stay inline so they run only for the branch that shows
+    # them — the confirm text in particular is admin-only, and computing it for
+    # every row a viewer sees is work nobody reads.
+    assigns =
+      assign(
+        assigns,
+        :scope,
+        scope_line(assigns.kind, assigns.record, assigns.picklists.content_types)
+      )
 
     ~H"""
     <li class="p-3">
-      <div :if={!editing?(@edit, @kind, @record.id)} class="flex items-start justify-between gap-3">
+      <div
+        :if={!editing?(@edit, @kind.key, @record.id)}
+        class="flex items-start justify-between gap-3"
+      >
         <div class="min-w-0">
           <p class="truncate font-medium">{@record.name}</p>
           <p class="truncate text-xs text-base-content/70">
-            <code>{@record.slug}</code> · {usage_line(@record)}
+            <code>{@record.slug}</code> · {usage_line(@kind, @record)}
           </p>
           <p :if={@scope} class="truncate text-xs text-base-content/50">{@scope}</p>
         </div>
@@ -490,7 +609,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
           <button
             type="button"
             phx-click="edit"
-            phx-value-type={@kind}
+            phx-value-type={@kind.key}
             phx-value-id={@record.id}
             class="btn btn-sm btn-ghost"
           >
@@ -500,9 +619,9 @@ defmodule KilnCMSWeb.TaxonomyLive do
             :if={@admin?}
             type="button"
             phx-click="delete"
-            phx-value-type={@kind}
+            phx-value-type={@kind.key}
             phx-value-id={@record.id}
-            data-confirm={delete_confirm(@record)}
+            data-confirm={delete_confirm(@kind, @record)}
             aria-label={gettext("Delete %{name}", name: @record.name)}
             class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
           >
@@ -512,9 +631,9 @@ defmodule KilnCMSWeb.TaxonomyLive do
       </div>
 
       <.form
-        :if={editing?(@edit, @kind, @record.id)}
+        :if={editing?(@edit, @kind.key, @record.id)}
         for={@edit.form}
-        id={"edit-#{@kind}-#{@record.id}"}
+        id={"edit-#{@kind.key}-#{@record.id}"}
         phx-change="validate_edit"
         phx-submit="save_edit"
         class="space-y-3"
@@ -524,17 +643,12 @@ defmodule KilnCMSWeb.TaxonomyLive do
           <.input field={@edit.form[:slug]} label={gettext("Slug")} />
         </div>
         <.input
-          :if={@with_description}
+          :if={@kind.description?}
           field={@edit.form[:description]}
           type="textarea"
           label={gettext("Description")}
         />
-        <.extra_fields
-          kind={@kind}
-          form={@edit.form}
-          groups={@groups}
-          content_type_options={@content_type_options}
-        />
+        <.extra_fields kind={@kind} form={@edit.form} picklists={@picklists} />
         <div class="flex gap-2">
           <.button type="submit" variant="primary">{gettext("Save")}</.button>
           <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-default">
@@ -547,12 +661,11 @@ defmodule KilnCMSWeb.TaxonomyLive do
   end
 
   # Per-kind form fields beyond the shared name/slug/description trio.
-  attr :kind, :string, required: true
+  attr :kind, :map, required: true
   attr :form, :any, required: true
-  attr :groups, :list, required: true
-  attr :content_type_options, :list, required: true
+  attr :picklists, :map, required: true
 
-  defp extra_fields(%{kind: "tag_group"} = assigns) do
+  defp extra_fields(%{kind: %{key: "tag_group"}} = assigns) do
     assigns = assign(assigns, :selected, selected_types(assigns.form))
 
     ~H"""
@@ -575,7 +688,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
       <input type="hidden" name={@form[:content_types].name <> "[]"} value="" />
       <div class="flex flex-wrap gap-2">
         <label
-          :for={{label, value} <- @content_type_options}
+          :for={{label, value} <- @picklists.content_types}
           class="inline-flex cursor-pointer items-center gap-1.5 rounded border border-base-content/20 px-2 py-1 text-sm hover:bg-base-200"
         >
           <input
@@ -592,18 +705,19 @@ defmodule KilnCMSWeb.TaxonomyLive do
     """
   end
 
-  defp extra_fields(%{kind: "tag"} = assigns) do
+  defp extra_fields(%{kind: %{key: "tag"}} = assigns) do
     ~H"""
     <.input
       field={@form[:tag_group_id]}
       type="select"
       label={gettext("Group")}
       prompt={gettext("— Ungrouped —")}
-      options={Enum.map(@groups, &{&1.name, &1.id})}
+      options={Enum.map(@picklists.groups, &{&1.name, &1.id})}
     />
     """
   end
 
+  # A kind with nothing beyond the shared trio.
   defp extra_fields(assigns) do
     ~H"""
     """
@@ -619,28 +733,67 @@ defmodule KilnCMSWeb.TaxonomyLive do
     end
   end
 
-  # The "· N pages, N posts" (or "· N tags") line under a record's slug.
-  defp usage_line(%TagGroup{} = group),
-    do: ngettext("%{count} tag", "%{count} tags", group.tag_count, count: group.tag_count)
+  # Every literal a kind needs, in one clause per kind. These can't live in
+  # `@kinds` itself: `gettext/1` has to see a literal at the call site, and a
+  # module attribute would freeze the translation at compile time instead of
+  # resolving it per request locale.
+  defp labels("category"),
+    do: %{
+      heading: gettext("Categories"),
+      blurb: gettext("A piece of content belongs to one category."),
+      none_yet: gettext("No categories yet."),
+      # The translated noun for interpolations like "Add %{kind}" — the raw key
+      # would surface untranslated English ("Ajouter category").
+      noun: gettext("category"),
+      # A whole sentence, not "%{noun} added." — interpolating a noun into a
+      # frame gets the case and gender wrong in most languages that have them.
+      added: gettext("Category added.")
+    }
 
-  defp usage_line(record) do
-    pages =
-      ngettext("%{count} page", "%{count} pages", record.page_count, count: record.page_count)
+  defp labels("tag_group"),
+    do: %{
+      heading: gettext("Tag groups"),
+      blurb:
+        gettext("Buckets that tags are filed under, so the editor's tag picker stays scannable."),
+      none_yet: gettext("No tag groups yet."),
+      noun: gettext("tag group"),
+      added: gettext("Tag group added.")
+    }
 
-    posts =
-      ngettext("%{count} post", "%{count} posts", record.post_count, count: record.post_count)
+  defp labels("tag"),
+    do: %{
+      heading: gettext("Tags"),
+      blurb: gettext("Content can carry any number of tags."),
+      none_yet: gettext("No tags yet."),
+      noun: gettext("tag"),
+      added: gettext("Tag added.")
+    }
 
-    "#{pages}, #{posts}"
-  end
+  # The "· N pages, N posts" (or "· N tags") line under a record's slug —
+  # assembled from the kind's OWN `loads`, so it can't fall out of step with
+  # what was loaded. One `count_phrase/2` clause per aggregate, because
+  # `ngettext/4` needs literals.
+  defp usage_line(kind, record),
+    do: Enum.map_join(kind.loads, ", ", &count_phrase(&1, Map.fetch!(record, &1)))
+
+  defp count_phrase(:page_count, n), do: ngettext("%{count} page", "%{count} pages", n, count: n)
+  defp count_phrase(:post_count, n), do: ngettext("%{count} post", "%{count} posts", n, count: n)
+  defp count_phrase(:tag_count, n), do: ngettext("%{count} tag", "%{count} tags", n, count: n)
+
+  # How many things a record is holding onto, for the delete confirmation —
+  # same source as the usage line.
+  defp usage_total(kind, record),
+    do: kind.loads |> Enum.map(&Map.fetch!(record, &1)) |> Enum.sum()
 
   # Only tag groups carry a content-type scope; nil hides the line entirely.
-  defp scope_line(%TagGroup{content_types: []}, _options), do: gettext("All content types")
+  defp scope_line(%{key: "tag_group"}, %{content_types: []}, _options),
+    do: gettext("All content types")
 
   # Render from resolved labels, not the raw stored strings: an entry that names
   # no live type (a renamed/archived `TypeDefinition`, or a bad write predating
   # the `KnownContentTypes` validation) shows as "recipe (unknown)" rather than
   # "Only: recipe", which is indistinguishable from a type that exists (#526).
-  defp scope_line(%TagGroup{content_types: types}, options) do
+  defp scope_line(%{key: "tag_group"}, %{content_types: types}, options) do
     labels = Map.new(options, fn {label, type} -> {type, label} end)
 
     rendered =
@@ -654,21 +807,26 @@ defmodule KilnCMSWeb.TaxonomyLive do
     gettext("Only: %{types}", types: rendered)
   end
 
-  defp scope_line(_record, _options), do: nil
+  defp scope_line(_kind, _record, _options), do: nil
 
-  defp delete_confirm(%TagGroup{tag_count: 0} = group),
-    do: gettext("Delete “%{name}”?", name: group.name)
+  # Deleting a group keeps its tags (the FK nilifies); deleting a category or
+  # tag removes the links — different consequences, so different sentences.
+  defp delete_confirm(%{key: "tag_group"} = kind, group) do
+    case usage_total(kind, group) do
+      0 ->
+        gettext("Delete “%{name}”?", name: group.name)
 
-  defp delete_confirm(%TagGroup{} = group) do
-    gettext(
-      "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped.",
-      name: group.name,
-      count: group.tag_count
-    )
+      n ->
+        gettext(
+          "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped.",
+          name: group.name,
+          count: n
+        )
+    end
   end
 
-  defp delete_confirm(record) do
-    case record.page_count + record.post_count do
+  defp delete_confirm(kind, record) do
+    case usage_total(kind, record) do
       0 ->
         gettext("Delete “%{name}”?", name: record.name)
 
@@ -680,18 +838,4 @@ defmodule KilnCMSWeb.TaxonomyLive do
         )
     end
   end
-
-  # Whole translatable sentences instead of interpolating a naively
-  # pluralized English noun ("No categorys yet.").
-  defp none_yet("category"), do: gettext("No categories yet.")
-  defp none_yet("tag_group"), do: gettext("No tag groups yet.")
-  defp none_yet("tag"), do: gettext("No tags yet.")
-  defp none_yet(_kind), do: gettext("Nothing here yet.")
-
-  # The translated noun for interpolations like "Add %{kind}" — the raw kind
-  # string would surface untranslated English ("Ajouter category").
-  defp kind_label("category"), do: gettext("category")
-  defp kind_label("tag_group"), do: gettext("tag group")
-  defp kind_label("tag"), do: gettext("tag")
-  defp kind_label(kind), do: kind
 end

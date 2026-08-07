@@ -74,7 +74,7 @@ msgstr[1] "%{count} sélectionné(s)"
 #: lib/kiln_cms_web/live/mail_settings_live.ex:372
 #: lib/kiln_cms_web/live/newsletter_live.ex:285
 #: lib/kiln_cms_web/live/system_live.ex:132
-#: lib/kiln_cms_web/live/taxonomy_live.ex:303
+#: lib/kiln_cms_web/live/taxonomy_live.ex:433
 #: lib/kiln_cms_web/live/team_live.ex:359
 #: lib/kiln_cms_web/live/translations_live.ex:140
 #: lib/kiln_cms_web/live/trash_live.ex:247
@@ -108,7 +108,7 @@ msgstr "Archiver"
 #: lib/kiln_cms_web/live/field_definition_live.ex:513
 #: lib/kiln_cms_web/live/menu_live.ex:726
 #: lib/kiln_cms_web/live/settings_live.ex:488
-#: lib/kiln_cms_web/live/taxonomy_live.ex:541
+#: lib/kiln_cms_web/live/taxonomy_live.ex:655
 #: lib/kiln_cms_web/live/team_live.ex:475
 #: lib/kiln_cms_web/live/team_live.ex:567
 #: lib/kiln_cms_web/live/trash_live.ex:274
@@ -146,7 +146,7 @@ msgstr "Supprimer"
 #: lib/kiln_cms_web/live/editor_live.ex:936
 #: lib/kiln_cms_web/live/field_definition_live.ex:437
 #: lib/kiln_cms_web/live/menu_live.ex:652
-#: lib/kiln_cms_web/live/taxonomy_live.ex:497
+#: lib/kiln_cms_web/live/taxonomy_live.ex:616
 #: lib/kiln_cms_web/live/team_live.ex:433
 #: lib/kiln_cms_web/live/team_live.ex:535
 #: lib/kiln_cms_web/live/type_definition_live.ex:312
@@ -235,8 +235,8 @@ msgstr "Se déconnecter"
 
 #: lib/kiln_cms_web/components/layouts.ex:529
 #: lib/kiln_cms_web/live/search_palette_live.ex:181
-#: lib/kiln_cms_web/live/taxonomy_live.ex:30
-#: lib/kiln_cms_web/live/taxonomy_live.ex:305
+#: lib/kiln_cms_web/live/taxonomy_live.ex:134
+#: lib/kiln_cms_web/live/taxonomy_live.ex:435
 #, elixir-autogen, elixir-format
 msgid "Taxonomy"
 msgstr "Taxonomie"
@@ -294,12 +294,12 @@ msgstr "%{count} en train de modifier"
 msgid "%{name} is editing this field"
 msgstr "%{name} modifie ce champ"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:315
+#: lib/kiln_cms_web/live/taxonomy_live.ex:743
 #, elixir-autogen, elixir-format
 msgid "A piece of content belongs to one category."
 msgstr "Un contenu appartient à une seule catégorie."
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:421
+#: lib/kiln_cms_web/live/taxonomy_live.ex:533
 #, elixir-autogen, elixir-format
 msgid "Add %{kind}"
 msgstr "Ajouter une %{kind}"
@@ -312,7 +312,7 @@ msgstr "Ajouter une %{kind}"
 msgid "Alt text"
 msgstr "Texte alternatif"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:405
+#: lib/kiln_cms_web/live/taxonomy_live.ex:522
 #, elixir-autogen, elixir-format
 msgid "Auto from name"
 msgstr "Auto d'après le nom"
@@ -342,7 +342,7 @@ msgstr "URL canonique"
 msgid "Caption"
 msgstr "Légende"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:314
+#: lib/kiln_cms_web/live/taxonomy_live.ex:742
 #, elixir-autogen, elixir-format
 msgid "Categories"
 msgstr "Catégories"
@@ -354,7 +354,7 @@ msgstr "Catégories"
 msgid "Category"
 msgstr "Catégorie"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:57
+#: lib/kiln_cms_web/live/taxonomy_live.ex:750
 #, elixir-autogen, elixir-format
 msgid "Category added."
 msgstr "Catégorie ajoutée."
@@ -386,7 +386,7 @@ msgstr "Choisir dans la bibliothèque"
 msgid "Close"
 msgstr "Fermer"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:349
+#: lib/kiln_cms_web/live/taxonomy_live.ex:766
 #, elixir-autogen, elixir-format
 msgid "Content can carry any number of tags."
 msgstr "Un contenu peut porter autant d'étiquettes que nécessaire."
@@ -397,11 +397,6 @@ msgstr "Un contenu peut porter autant d'étiquettes que nécessaire."
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr "Copier"
-
-#: lib/kiln_cms_web/live/taxonomy_live.ex:150
-#, elixir-autogen, elixir-format
-msgid "Couldn't delete that — you may not have permission."
-msgstr "Suppression impossible — vous n'avez peut-être pas la permission."
 
 #: lib/kiln_cms_web/live/trash_live.ex:108
 #, elixir-autogen, elixir-format
@@ -419,7 +414,7 @@ msgstr "Restauration de cette version impossible."
 msgid "Couldn't save those details."
 msgstr "Enregistrement de ces détails impossible."
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:506
+#: lib/kiln_cms_web/live/taxonomy_live.ex:625
 #, elixir-autogen, elixir-format
 msgid "Delete %{name}"
 msgstr "Supprimer %{name}"
@@ -440,13 +435,13 @@ msgstr "Tout supprimer"
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:660
-#: lib/kiln_cms_web/live/taxonomy_live.ex:673
+#: lib/kiln_cms_web/live/taxonomy_live.ex:817
+#: lib/kiln_cms_web/live/taxonomy_live.ex:831
 #, elixir-autogen, elixir-format
 msgid "Delete “%{name}”?"
 msgstr "Supprimer « %{name} » ?"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:144
+#: lib/kiln_cms_web/live/taxonomy_live.ex:243
 #, elixir-autogen, elixir-format
 msgid "Deleted."
 msgstr "Supprimé."
@@ -460,8 +455,8 @@ msgstr "Décrivez l'image pour les lecteurs d'écran"
 #: lib/kiln_cms_web/live/billing_live.ex:581
 #: lib/kiln_cms_web/live/content_editor_live.ex:7385
 #: lib/kiln_cms_web/live/form_builder_live.ex:778
-#: lib/kiln_cms_web/live/taxonomy_live.ex:412
-#: lib/kiln_cms_web/live/taxonomy_live.ex:530
+#: lib/kiln_cms_web/live/taxonomy_live.ex:529
+#: lib/kiln_cms_web/live/taxonomy_live.ex:649
 #: lib/kiln_cms_web/live/team_live.ex:501
 #: lib/kiln_cms_web/live/team_live.ex:561
 #: lib/kiln_cms_web/live/type_definition_live.ex:206
@@ -532,7 +527,7 @@ msgstr "Bibliothèque (%{count})"
 msgid "Locale"
 msgstr "Langue"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:307
+#: lib/kiln_cms_web/live/taxonomy_live.ex:437
 #, elixir-autogen, elixir-format
 msgid "Manage the categories and tags content can be organized by."
 msgstr "Gérez les catégories et étiquettes qui organisent le contenu."
@@ -567,8 +562,8 @@ msgstr "%{name} déplacé vers la corbeille."
 #: lib/kiln_cms_web/live/menu_live.ex:487
 #: lib/kiln_cms_web/live/newsletter_live.ex:342
 #: lib/kiln_cms_web/live/release_live.ex:439
-#: lib/kiln_cms_web/live/taxonomy_live.ex:399
-#: lib/kiln_cms_web/live/taxonomy_live.ex:523
+#: lib/kiln_cms_web/live/taxonomy_live.ex:516
+#: lib/kiln_cms_web/live/taxonomy_live.ex:642
 #: lib/kiln_cms_web/live/team_live.ex:498
 #: lib/kiln_cms_web/live/team_live.ex:560
 #: lib/kiln_cms_web/live/type_definition_live.ex:189
@@ -577,7 +572,7 @@ msgstr "%{name} déplacé vers la corbeille."
 msgid "Name"
 msgstr "Nom"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:400
+#: lib/kiln_cms_web/live/taxonomy_live.ex:517
 #, elixir-autogen, elixir-format
 msgid "New %{kind} name"
 msgstr "Nom de la nouvelle %{kind}"
@@ -714,7 +709,7 @@ msgstr "Titre SEO"
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:454
 #: lib/kiln_cms_web/live/menu_live.ex:724
 #: lib/kiln_cms_web/live/presentation_live.ex:376
-#: lib/kiln_cms_web/live/taxonomy_live.ex:539
+#: lib/kiln_cms_web/live/taxonomy_live.ex:653
 #: lib/kiln_cms_web/live/team_live.ex:473
 #: lib/kiln_cms_web/live/team_live.ex:565
 #: lib/kiln_cms_web/live/type_definition_live.ex:382
@@ -746,7 +741,7 @@ msgstr "Détails enregistrés."
 #: lib/kiln_cms_web/live/in_context_edit_live.ex:169
 #: lib/kiln_cms_web/live/mail_settings_live.ex:120
 #: lib/kiln_cms_web/live/presentation_live.ex:169
-#: lib/kiln_cms_web/live/taxonomy_live.ex:131
+#: lib/kiln_cms_web/live/taxonomy_live.ex:210
 #: lib/kiln_cms_web/live/team_live.ex:118
 #: lib/kiln_cms_web/live/team_live.ex:163
 #: lib/kiln_cms_web/live/type_definition_live.ex:74
@@ -775,8 +770,8 @@ msgstr "Taille"
 #: lib/kiln_cms_web/live/menu_live.ex:587
 #: lib/kiln_cms_web/live/menu_live.ex:709
 #: lib/kiln_cms_web/live/newsletter_live.ex:343
-#: lib/kiln_cms_web/live/taxonomy_live.ex:404
-#: lib/kiln_cms_web/live/taxonomy_live.ex:524
+#: lib/kiln_cms_web/live/taxonomy_live.ex:521
+#: lib/kiln_cms_web/live/taxonomy_live.ex:643
 #, elixir-autogen, elixir-format
 msgid "Slug"
 msgstr "Slug"
@@ -796,13 +791,13 @@ msgstr "État :"
 msgid "Submit for review"
 msgstr "Soumettre pour révision"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:100
+#: lib/kiln_cms_web/live/taxonomy_live.ex:769
 #, elixir-autogen, elixir-format
 msgid "Tag added."
 msgstr "Étiquette ajoutée."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4073
-#: lib/kiln_cms_web/live/taxonomy_live.ex:348
+#: lib/kiln_cms_web/live/taxonomy_live.ex:765
 #, elixir-autogen, elixir-format
 msgid "Tags"
 msgstr "Étiquettes"
@@ -925,7 +920,7 @@ msgstr "type non pris en charge"
 msgid "· no alt"
 msgstr "· sans alt"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:676
+#: lib/kiln_cms_web/live/taxonomy_live.ex:834
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
 msgstr "« %{name} » est utilisé par %{count} élément(s). Le supprimer quand même ? Les liens seront retirés."
@@ -1753,7 +1748,7 @@ msgid "No results for “%{query}”."
 msgstr "Aucun résultat pour « %{query} »."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4075
-#: lib/kiln_cms_web/live/taxonomy_live.ex:688
+#: lib/kiln_cms_web/live/taxonomy_live.ex:767
 #, elixir-autogen, elixir-format
 msgid "No tags yet."
 msgstr "Aucune étiquette pour le moment."
@@ -1813,7 +1808,7 @@ msgstr "Supprimé définitivement."
 #: lib/kiln_cms_web/live/billing_live.ex:606
 #: lib/kiln_cms_web/live/field_definition_live.ex:356
 #: lib/kiln_cms_web/live/field_definition_live.ex:479
-#: lib/kiln_cms_web/live/taxonomy_live.ex:562
+#: lib/kiln_cms_web/live/taxonomy_live.ex:675
 #, elixir-autogen, elixir-format
 msgid "Position"
 msgstr "Position"
@@ -2022,14 +2017,14 @@ msgid_plural "%{count} files shown"
 msgstr[0] "%{count} fichier affiché"
 msgstr[1] "%{count} fichiers affichés"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:628
+#: lib/kiln_cms_web/live/taxonomy_live.ex:779
 #, elixir-autogen, elixir-format
 msgid "%{count} page"
 msgid_plural "%{count} pages"
 msgstr[0] "%{count} page"
 msgstr[1] "%{count} pages"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:631
+#: lib/kiln_cms_web/live/taxonomy_live.ex:780
 #, elixir-autogen, elixir-format
 msgid "%{count} post"
 msgid_plural "%{count} posts"
@@ -2123,7 +2118,7 @@ msgid "Content type restored."
 msgstr "Type de contenu restauré."
 
 #: lib/kiln_cms_web/components/layouts.ex:587
-#: lib/kiln_cms_web/live/taxonomy_live.ex:568
+#: lib/kiln_cms_web/live/taxonomy_live.ex:681
 #: lib/kiln_cms_web/live/type_definition_live.ex:164
 #: lib/kiln_cms_web/live/type_definition_live.ex:172
 #, elixir-autogen, elixir-format
@@ -2293,7 +2288,7 @@ msgstr "%{count} élément(s) déplacé(s) vers la corbeille, %{skipped} ignoré
 msgid "New content type"
 msgstr "Nouveau type de contenu"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:686
+#: lib/kiln_cms_web/live/taxonomy_live.ex:744
 #, elixir-autogen, elixir-format
 msgid "No categories yet."
 msgstr "Aucune catégorie pour le moment."
@@ -2307,11 +2302,6 @@ msgstr "Aucun type de contenu personnalisé pour le moment."
 #, elixir-autogen, elixir-format
 msgid "No media yet — upload some in the"
 msgstr "Aucun média pour le moment — téléversez-en dans la"
-
-#: lib/kiln_cms_web/live/taxonomy_live.ex:689
-#, elixir-autogen, elixir-format
-msgid "Nothing here yet."
-msgstr "Rien ici pour le moment."
 
 #: lib/kiln_cms_web/controllers/content_html.ex:30
 #, elixir-autogen, elixir-format
@@ -2833,12 +2823,12 @@ msgstr "ok"
 msgid "skipped"
 msgstr "ignoré"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:693
+#: lib/kiln_cms_web/live/taxonomy_live.ex:747
 #, elixir-autogen, elixir-format
 msgid "category"
 msgstr "catégorie"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:695
+#: lib/kiln_cms_web/live/taxonomy_live.ex:768
 #, elixir-autogen, elixir-format
 msgid "tag"
 msgstr "étiquette"
@@ -3111,7 +3101,7 @@ msgid "All confirmed subscribers"
 msgstr "Tous les abonnés confirmés"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex:114
-#: lib/kiln_cms_web/live/taxonomy_live.ex:637
+#: lib/kiln_cms_web/live/taxonomy_live.ex:790
 #, elixir-autogen, elixir-format
 msgid "All content types"
 msgstr "Tous les types de contenu"
@@ -5560,7 +5550,7 @@ msgstr "Tous les types"
 msgid "Filter by type"
 msgstr "Filtrer par type"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:624
+#: lib/kiln_cms_web/live/taxonomy_live.ex:781
 #, elixir-autogen, elixir-format
 msgid "%{count} tag"
 msgid_plural "%{count} tags"
@@ -5592,7 +5582,7 @@ msgstr "Déjà sur cet élément, depuis un groupe limité à d'autres types de 
 msgid "Also attached"
 msgstr "Également associées"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:330
+#: lib/kiln_cms_web/live/taxonomy_live.ex:757
 #, elixir-autogen, elixir-format
 msgid "Buckets that tags are filed under, so the editor's tag picker stays scannable."
 msgstr "Regroupements dans lesquels les étiquettes sont classées, pour que le sélecteur d'étiquettes de l'éditeur reste lisible."
@@ -5617,7 +5607,7 @@ msgstr "Filtrer les étiquettes"
 msgid "Filter tags…"
 msgstr "Filtrer les étiquettes…"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:600
+#: lib/kiln_cms_web/live/taxonomy_live.ex:713
 #, elixir-autogen, elixir-format
 msgid "Group"
 msgstr "Groupe"
@@ -5657,7 +5647,7 @@ msgstr "Insérer un bloc ici"
 msgid "Inspector"
 msgstr "Inspecteur"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:571
+#: lib/kiln_cms_web/live/taxonomy_live.ex:684
 #, elixir-autogen, elixir-format
 msgid "Leave all unchecked to offer this group on every content type."
 msgstr "Laissez tout décoché pour proposer ce groupe sur tous les types de contenu."
@@ -5667,12 +5657,12 @@ msgstr "Laissez tout décoché pour proposer ce groupe sur tous les types de con
 msgid "No blocks yet"
 msgstr "Aucun bloc pour le moment"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:687
+#: lib/kiln_cms_web/live/taxonomy_live.ex:758
 #, elixir-autogen, elixir-format
 msgid "No tag groups yet."
 msgstr "Aucun groupe d'étiquettes pour le moment."
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:448
+#: lib/kiln_cms_web/live/taxonomy_live.ex:558
 #, elixir-autogen, elixir-format
 msgid "No tags in this group yet."
 msgstr "Aucune étiquette dans ce groupe pour le moment."
@@ -5682,7 +5672,7 @@ msgstr "Aucune étiquette dans ce groupe pour le moment."
 msgid "No tags match that filter."
 msgstr "Aucune étiquette ne correspond à ce filtre."
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:654
+#: lib/kiln_cms_web/live/taxonomy_live.ex:807
 #, elixir-autogen, elixir-format
 msgid "Only: %{types}"
 msgstr "Uniquement : %{types}"
@@ -5697,12 +5687,12 @@ msgstr "Remplace le titre dans les résultats de recherche et les onglets du nav
 msgid "Publishes"
 msgstr "Publication le"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:81
+#: lib/kiln_cms_web/live/taxonomy_live.ex:760
 #, elixir-autogen, elixir-format
 msgid "Tag group added."
 msgstr "Groupe d'étiquettes ajouté."
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:328
+#: lib/kiln_cms_web/live/taxonomy_live.ex:755
 #, elixir-autogen, elixir-format
 msgid "Tag groups"
 msgstr "Groupes d'étiquettes"
@@ -5728,7 +5718,7 @@ msgid "Type / to format this text or insert a block below."
 msgstr "Tapez / pour mettre en forme ce texte ou insérer un bloc ci-dessous."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex:4214
-#: lib/kiln_cms_web/live/taxonomy_live.ex:209
+#: lib/kiln_cms_web/live/taxonomy_live.ex:359
 #, elixir-autogen, elixir-format
 msgid "Ungrouped"
 msgstr "Sans groupe"
@@ -5738,17 +5728,17 @@ msgstr "Sans groupe"
 msgid "Unpublishes"
 msgstr "Dépublication le"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:694
+#: lib/kiln_cms_web/live/taxonomy_live.ex:759
 #, elixir-autogen, elixir-format
 msgid "tag group"
 msgstr "groupe d'étiquettes"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:601
+#: lib/kiln_cms_web/live/taxonomy_live.ex:714
 #, elixir-autogen, elixir-format
 msgid "— Ungrouped —"
 msgstr "— Sans groupe —"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:663
+#: lib/kiln_cms_web/live/taxonomy_live.ex:820
 #, elixir-autogen, elixir-format
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."
 msgstr "« %{name} » contient %{count} étiquette(s). Supprimer le groupe quand même ? Les étiquettes sont conservées et se retrouvent sans groupe."
@@ -9139,7 +9129,7 @@ msgstr[1] "Aucun problème d’allégation trouvé dans %{count} vérifications 
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
 msgstr "L’avertissement obligatoire est absent. Ajoutez-le mot pour mot : « %{disclaimer} »"
 
-#: lib/kiln_cms_web/live/taxonomy_live.ex:649
+#: lib/kiln_cms_web/live/taxonomy_live.ex:802
 #, elixir-autogen, elixir-format
 msgid "%{type} (unknown)"
 msgstr "%{type} (inconnu)"
@@ -9678,3 +9668,20 @@ msgstr "Libellé (éditeur uniquement)"
 #, elixir-autogen, elixir-format
 msgid "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
 msgstr "Les blocs de la cible sont insérés à l'emplacement de ce bloc. Modifier la cible met à jour toutes les pages qui l'intègrent ; une cible non publiée ou restreinte n'affiche rien."
+
+#: lib/kiln_cms_web/live/taxonomy_live.ex:272
+#: lib/kiln_cms_web/live/taxonomy_live.ex:276
+#, elixir-autogen, elixir-format
+msgid "Couldn't delete that."
+msgstr "Suppression impossible."
+
+#: lib/kiln_cms_web/live/taxonomy_live.ex:189
+#: lib/kiln_cms_web/live/taxonomy_live.ex:270
+#, elixir-autogen, elixir-format
+msgid "That item is no longer available."
+msgstr "Cet élément n'est plus disponible."
+
+#: lib/kiln_cms_web/live/taxonomy_live.ex:264
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to delete that."
+msgstr "Vous n'avez pas la permission de supprimer cela."
