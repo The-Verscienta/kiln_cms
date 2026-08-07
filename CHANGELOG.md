@@ -29,6 +29,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **`mix kiln.audit.checkpoint --audit` walks the checkpoint run's predecessor
+  links, and its structural half now runs without a witness.** Each
+  `chain_checkpoints` row signs its predecessor's id and a digest of its
+  contents; nothing walked them. A checkpoint rewritten in place while keeping
+  its sequence number was caught only by its own signature failing — which on an
+  unsigned deployment it does not (#732).
+
+  Contiguity and the link walk read `chain_checkpoints` alone, so they now run on
+  every deployment, including the default one that publishes nowhere. Previously
+  the whole audit exited early without a sink, which made both checks dead code
+  on exactly the deployments where they are the only structural evidence there
+  is. The missing-witness case is still a failure and still exits non-zero.
+
+  Read the walk for what it is: `Checkpoint.digest/1` is an unkeyed hash over
+  public columns, so an attacker who rewrites a row can recompute every digest
+  after it, and the newest checkpoint has no successor to record its digest at
+  all. It catches a careless edit, and it makes a careful one expensive — the
+  cascade forces a rewrite of every *published* object downstream, turning one
+  witness mismatch into many. It does not replace the witness.
+
 - **Editorial claim checking.** A **Compliance** panel in the content editor
   flags the phrases a regulator or a house style guide would want a second look
   at — "FDA approved", "no side effects", "guaranteed results" — plus an
