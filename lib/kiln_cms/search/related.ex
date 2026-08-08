@@ -19,6 +19,7 @@ defmodule KilnCMS.Search.Related do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Search
   alias KilnCMS.Search.BlockIndexer
+  alias KilnCMS.Search.VectorCache
 
   @typedoc """
   A scored neighbouring document. `path` is the canonical *public page* path
@@ -208,32 +209,27 @@ defmodule KilnCMS.Search.Related do
     |> Enum.reject(&is_nil/1)
   end
 
-  # Memoized on what would actually be embedded, not on the record's timestamp:
-  # the editor's panel is re-openable and `:flag_duplicates` can fire more than
-  # once for a document, and this is N model inferences for an N-block document.
+  # The mean is arithmetic over vectors already memoized per block by
+  # `KilnCMS.Search.VectorCache` (#964). Not free — a fully warm 200-block
+  # document costs ~3ms of ETS copying and list arithmetic against ~7µs for a
+  # single cached centroid — but nothing next to the inference it replaces, and
+  # the centroid memo it replaces was the expensive kind of cheap.
   #
-  # The TTL is deliberately short. The anchor is by definition being edited, so
-  # a long-lived entry would answer for content the author has already changed —
-  # and every save mints a fresh key, leaving the old one resident. These share
-  # `KilnCMS.Cache` with the `published:record:*` entries that keep delivery
-  # serving through a database outage, and evicting those to hold stale draft
-  # centroids would trade a real guarantee for a saved inference.
+  # This used to memoize the whole centroid in `KilnCMS.Cache`, keyed on a hash
+  # of the document's embedding inputs. That was wrong twice over: every save
+  # minted a fresh key and left the previous one resident, and the entries it
+  # evicted to make room were the `published:record:*` ones delivery serves from
+  # during a database outage. Caching the *inputs* instead makes an edit cost one
+  # inference rather than N, shares an entry between two documents containing the
+  # same paragraph, and keeps an editing workload out of the delivery cache.
   #
   # Nothing is persisted — see `KilnCMS.Search.BlockIndexer.block_vectors/1` for
   # why a draft's vectors must not enter `block_embeddings`.
   defp computed_centroid(record) do
-    inputs = BlockIndexer.embedding_inputs(record)
-
-    key =
-      {:draft_centroid, Search.model(), KilnCMS.Firing.Engine.document_type(record), record.id,
-       :erlang.phash2(inputs)}
-
-    KilnCMS.Cache.fetch(key, :timer.seconds(60), fn ->
-      case BlockIndexer.block_vectors(record) do
-        [] -> nil
-        vectors -> mean(vectors)
-      end
-    end)
+    case BlockIndexer.block_vectors(record) do
+      [] -> nil
+      vectors -> mean(vectors)
+    end
   end
 
   # A forbidden read comes back as an error tuple, which drops the neighbour —
@@ -287,14 +283,13 @@ defmodule KilnCMS.Search.Related do
 
   # Tag-name vectors are pure functions of the (stable) name — memoized so a
   # 500-tag org doesn't re-run 500 model inferences per triggering event.
-  defp tag_vector(name) do
-    KilnCMS.Cache.fetch({:tag_vector, Search.model(), name}, :timer.hours(6), fn ->
-      case Search.embed_document(name) do
-        {:ok, vector} -> vector
-        _ -> nil
-      end
-    end)
-  end
+  #
+  # In `VectorCache`, not `KilnCMS.Cache` (#964): this is embedding data, and it
+  # was competing for the delivery cache's 10,000-entry budget with the
+  # `published:record:*` entries `Firing.Delivery` serves from during a database
+  # outage. An org with 500 tags running suggestions could evict pages that
+  # would then 503.
+  defp tag_vector(name), do: VectorCache.embed_document(name)
 
   defp mean(vectors) do
     count = length(vectors)
