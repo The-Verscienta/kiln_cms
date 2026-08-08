@@ -34,6 +34,8 @@ defmodule KilnCMSWeb.ContentLockTest do
 
   defp slug, do: "lock-#{System.unique_integer([:positive])}"
 
+  defp page_alias_suffix, do: "alias-#{System.unique_integer([:positive])}"
+
   defp secret_block do
     %{
       "_type" => "rich_text",
@@ -147,6 +149,45 @@ defmodule KilnCMSWeb.ContentLockTest do
     end
   end
 
+  describe "an aliased document" do
+    # An aliased document is served through `serve_alias/2` instead of
+    # `:public_by_slug`, so it does not inherit that action's filter. Before
+    # these, a locked page that happened to carry a `path_alias` was served in
+    # full at its canonical URL with no passphrase at all.
+    test "is locked at its alias, not served", ctx do
+      alias_path = "/deep/path/#{page_alias_suffix()}"
+      locked_page(ctx, %{path_alias: alias_path})
+
+      conn = get(ctx.conn, alias_path)
+
+      assert conn.status == 401
+      refute html_response(conn, 401) =~ @secret_body
+    end
+
+    test "unlocks at its alias", ctx do
+      page = locked_page(ctx, %{path_alias: "/deep/path/#{page_alias_suffix()}"})
+
+      conn =
+        post(ctx.conn, "/_unlock", %{
+          "path" => page.path_alias,
+          "type" => "page",
+          "locale" => page.locale,
+          "passphrase" => @passphrase
+        })
+
+      assert redirected_to(conn, 303) == page.path_alias
+
+      body = conn |> recycle() |> get(page.path_alias) |> html_response(200)
+      assert body =~ @secret_body
+    end
+
+    test "an unlocked aliased document is unaffected", ctx do
+      page = published_page(ctx.actor, %{path_alias: "/deep/path/#{page_alias_suffix()}"})
+
+      assert ctx.conn |> get(page.path_alias) |> html_response(200) =~ @secret_body
+    end
+  end
+
   describe "caching" do
     test "an unlocked render is never shared-cached", ctx do
       page = locked_page(ctx)
@@ -192,12 +233,15 @@ defmodule KilnCMSWeb.ContentLockTest do
       assert conn.status == 404
     end
 
-    test "answers the same for an unlocked document as for a wrong passphrase", ctx do
+    test "404s a path that names nothing locked", ctx do
       unlocked = published_page(ctx.actor)
 
       conn = unlock(ctx.conn, unlocked, @passphrase)
 
-      # Otherwise the endpoint enumerates which documents are locked.
+      # Distinguishable from the 401 a wrong passphrase gets, and deliberately
+      # so: a plain GET of this URL already shows the document, so there is
+      # nothing here to leak. The headless endpoint is the one that must not
+      # distinguish them — see the headless describe block.
       assert conn.status == 404
     end
   end

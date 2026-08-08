@@ -60,16 +60,40 @@ defmodule KilnCMS.CMS.Slugs do
   `audiences` defaults to `[]`, so a caller that passes none sees `:public` rows
   only, exactly as before.
   """
-  @spec find_published_by_alias(String.t(), String.t(), Ash.UUID.t(), [atom()]) ::
+  @spec find_published_by_alias(String.t(), String.t(), Ash.UUID.t(), [atom()], [String.t()]) ::
           {ContentTypes.t(), struct()} | nil
-  def find_published_by_alias(alias_path, locale, org_id, audiences \\ []) do
+  def find_published_by_alias(alias_path, locale, org_id, audiences \\ [], unlocks \\ []) do
     Enum.find_value(alias_resources(), fn resource ->
       resource
       |> Ash.Query.filter(
         path_alias == ^alias_path and locale == ^locale and state == :published and
-          (audience == :public or audience in ^audiences)
+          (audience == :public or audience in ^audiences) and
+          (is_nil(access_password_hash) or password_fingerprint in ^unlocks)
       )
       |> Ash.Query.load([:author, :category])
+      |> first_with_descriptor(org_id)
+    end)
+  end
+
+  @doc """
+  The LOCKED published record at `alias_path`, for a passphrase form (#496).
+
+  Sibling of `find_teaser_by_alias/3` and shaped the same way: it *requires* a
+  passphrase to be set, so it can never stand in for the entitled lookup, and it
+  selects only lock-page-safe columns — never the block tree. Takes `audiences`
+  because the lock is ANDed with the audience axis (see the delivery funnel).
+  """
+  @spec find_locked_by_alias(String.t(), String.t(), Ash.UUID.t(), [atom()]) ::
+          {ContentTypes.t(), struct()} | nil
+  def find_locked_by_alias(alias_path, locale, org_id, audiences \\ []) do
+    Enum.find_value(alias_resources(), fn resource ->
+      resource
+      |> Ash.Query.filter(
+        path_alias == ^alias_path and locale == ^locale and state == :published and
+          (audience == :public or audience in ^audiences) and
+          not is_nil(access_password_hash)
+      )
+      |> Ash.Query.select(lock_columns(resource))
       |> first_with_descriptor(org_id)
     end)
   end
@@ -95,6 +119,12 @@ defmodule KilnCMS.CMS.Slugs do
       |> first_with_descriptor(org_id)
     end)
   end
+
+  # The lock-page column set: the teaser's, plus the stored hash the unlock
+  # endpoint verifies against and the fingerprint it mints a grant from. Mirrors
+  # the `:locked_by_slug` action's select — still without the block tree.
+  defp lock_columns(resource),
+    do: teaser_columns(resource) ++ [:access_password_hash, :password_fingerprint]
 
   # The paywall-safe column set for a resource — `:excerpt` only where the type
   # opted into it. Mirrors the `:teaser_by_slug` action's select.

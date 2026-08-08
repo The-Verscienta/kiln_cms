@@ -396,7 +396,8 @@ defmodule KilnCMS.CMS.Content do
             # compiled types expose, over the shared entry tier. All are
             # policy/state-filtered, so anonymous callers see published rows only.
             queries do
-              # `hide_inputs [:audiences]` is a SECURITY control, not tidiness:
+              # `hide_inputs [:audiences, :unlocks]` is a SECURITY control, not
+              # tidiness:
               # AshGraphql auto-exposes public action arguments, so without it an
               # anonymous client could send
               # `entryBySlug(audiences: [MEMBER]) { blocks }` and walk straight
@@ -407,11 +408,11 @@ defmodule KilnCMS.CMS.Content do
               # a code interface at all.)
               get :entry_by_slug, :public_by_slug do
                 identity false
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               list :entry_translations, :published_translations do
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               # The published index (newest first), across all dynamic types —
@@ -526,16 +527,21 @@ defmodule KilnCMS.CMS.Content do
               # are state-filtered, so anonymous callers only ever see published rows.
               # `identity false` exposes the action's own slug/locale arguments
               # instead of the default `id` lookup.
-              # `hide_inputs [:audiences]` — see the dynamic tier: the delivery
-              # `audiences` argument must never reach the GraphQL schema, or an
-              # anonymous client could request gated content directly.
+              # `hide_inputs [:audiences, :unlocks]` — see the dynamic tier: both
+              # delivery-widening arguments must stay off the GraphQL schema, or
+              # an anonymous client could ask for gated (or passphrase-locked,
+              # #496) content directly. `unlocks` takes fingerprints that are
+              # never rendered anywhere, so this is defence in depth rather than
+              # a live hole — but it is the same class of hole the `audiences`
+              # control was built for, and a new delivery argument that skips it
+              # is exactly how the next one gets missed.
               get unquote(:"#{type}_by_slug"), :public_by_slug do
                 identity false
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               list unquote(:"#{type}_translations"), :published_translations do
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               # The published index (newest first).

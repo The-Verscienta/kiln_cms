@@ -24,7 +24,7 @@ msgid "Attempting to reconnect"
 msgstr "Tentative de reconnexion"
 
 #: lib/kiln_cms_web/components/layouts.ex:752
-#: lib/kiln_cms_web/controllers/content_controller.ex:416
+#: lib/kiln_cms_web/controllers/content_controller.ex:461
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
 msgid "Blog"
@@ -1689,7 +1689,7 @@ msgstr "JSON:API"
 msgid "Label"
 msgstr "Libellé"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:417
+#: lib/kiln_cms_web/controllers/content_controller.ex:462
 #, elixir-autogen, elixir-format
 msgid "Latest posts."
 msgstr "Derniers articles."
@@ -1771,7 +1771,7 @@ msgstr "Options (une par ligne — champ de sélection uniquement)"
 msgid "Page %{page}"
 msgstr "Page %{page}"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:1174
+#: lib/kiln_cms_web/controllers/content_controller.ex:1219
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex:7
 #, elixir-autogen, elixir-format
 msgid "Page not found"
@@ -1885,7 +1885,7 @@ msgstr "Enregistrement…"
 #: lib/kiln_cms_web/components/layouts.ex:317
 #: lib/kiln_cms_web/components/layouts.ex:403
 #: lib/kiln_cms_web/components/layouts.ex:755
-#: lib/kiln_cms_web/controllers/content_controller.ex:487
+#: lib/kiln_cms_web/controllers/content_controller.ex:532
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/analytics_live.ex:275
 #: lib/kiln_cms_web/live/analytics_live.ex:510

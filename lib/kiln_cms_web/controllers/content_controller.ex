@@ -163,10 +163,14 @@ defmodule KilnCMSWeb.ContentController do
   Verify a passphrase submitted from a lock page (#496) and, on success, record
   the grant and send the visitor back to the document.
 
-  A wrong passphrase re-renders the same lock page with an error and a `401`, so
-  the response is indistinguishable from a first visit to anything that isn't
-  watching the body — and identical whether the passphrase was wrong or the
-  document was never locked at all.
+  A wrong passphrase re-renders the same lock page with an error and a `401`. A
+  path that names nothing locked 404s through the normal funnel.
+
+  Those two answers differ, and that is fine *here*: a plain GET of the same URL
+  already distinguishes the cases (a lock page for a locked document, the
+  document itself for an open one), so this endpoint reveals nothing a visitor
+  could not already see. The headless unlock endpoint is the one that has to
+  answer identically, because there the GET is the thing being protected.
   """
   def unlock(conn, params) do
     path = local_path(Params.string(params, "path", ""))
@@ -175,7 +179,7 @@ defmodule KilnCMSWeb.ContentController do
     ct = path && ContentTypes.get(type)
 
     with ct when not is_nil(ct) <- ct,
-         record when not is_nil(record) <- locked_record(conn, path, ct, locale) do
+         {ct, record} when not is_nil(record) <- locked_at(conn, path, ct, locale) do
       verify_passphrase(conn, record, ct, path, params["passphrase"])
     else
       # No such type, an off-site path, or nothing locked there. Deliberately a
@@ -221,6 +225,26 @@ defmodule KilnCMSWeb.ContentController do
     case locked_record(conn, path, ct, locale(conn)) do
       nil -> nil
       record -> render_lock(conn, record, ct, path)
+    end
+  end
+
+  # The locked document a submitted `path` names — by `path_alias` first, then by
+  # slug, which is the order delivery itself resolves in.
+  #
+  # The alias branch is not optional: an aliased document's canonical URL has no
+  # relationship to its slug, so deriving one from the last path segment (which
+  # is all the slug branch can do) resolves the wrong document or none at all.
+  # Without it the lock page for an aliased document would render and then refuse
+  # every passphrase, which reads as "the passphrase is wrong".
+  defp locked_at(conn, path, ct, locale) do
+    audiences = reader_audiences(conn)
+    org_id = current_org_id(conn)
+
+    lookup = fn loc -> KilnCMS.CMS.Slugs.find_locked_by_alias(path, loc, org_id, audiences) end
+
+    case lookup.(locale) || lookup.(I18n.default_locale()) do
+      {_ct, _record} = found -> found
+      nil -> {ct, locked_record(conn, path, ct, locale)}
     end
   end
 
@@ -355,14 +379,16 @@ defmodule KilnCMSWeb.ContentController do
     org_id = current_org_id(conn)
 
     audiences = reader_audiences(conn)
+    unlocks = ContentLock.grants(conn)
 
     lookup = fn loc ->
-      KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id, audiences)
+      KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id, audiences, unlocks)
     end
 
     case lookup.(locale) || lookup.(I18n.default_locale()) do
       nil ->
-        teaser_alias(conn, path, locale, org_id)
+        lock_alias(conn, path, locale, org_id, audiences) ||
+          teaser_alias(conn, path, locale, org_id)
 
       {ct, record} ->
         payload = %{
@@ -372,6 +398,25 @@ defmodule KilnCMSWeb.ContentController do
         }
 
         serve(conn, alias_view(ct), to_string(ct.type), payload, ct, audiences)
+    end
+  end
+
+  # An aliased document behind a passphrase: the lock form at the alias, so its
+  # canonical URL doesn't silently 404 (#496).
+  #
+  # This mirrors the slug funnel deliberately. An aliased document is served
+  # through `serve_alias/2` INSTEAD of `:public_by_slug`, so without this pair —
+  # the lock clause on the lookup above and this interstitial — a locked page
+  # that happened to carry a `path_alias` would have been served in full at its
+  # canonical URL with no passphrase at all.
+  defp lock_alias(conn, path, locale, org_id, audiences) do
+    lookup = fn loc ->
+      KilnCMS.CMS.Slugs.find_locked_by_alias(path, loc, org_id, audiences)
+    end
+
+    case lookup.(locale) || lookup.(I18n.default_locale()) do
+      nil -> nil
+      {ct, record} -> render_lock(conn, record, ct, path)
     end
   end
 

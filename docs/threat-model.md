@@ -554,8 +554,10 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    12 hours and die the moment the passphrase is rotated, because a grant names
    a fingerprint of the stored hash rather than the document. The stored value
    is a bcrypt hash, excluded from version history so it does not outlive
-   rotation. The unlock endpoints answer identically for a wrong passphrase and
-   for an unlocked document, so they cannot enumerate what is locked.
+   rotation. The headless unlock endpoint answers identically for a wrong
+   passphrase and for an unlocked document, so it cannot enumerate what is
+   locked. (The built-in site's does not need to: a plain GET there already
+   shows a lock page or the document.)
 
    **Audiences remain the real access-control axis**, and the two compose by AND:
    a locked document in a gated audience needs both. Point operators at
