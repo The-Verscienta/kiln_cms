@@ -359,4 +359,120 @@ defmodule KilnCMS.Accounts.SecondFactorAlertTest do
       end)
     end
   end
+
+  # Reaching the settings forms needs a live SESSION, not a password. So a
+  # lockout there says something the sign-in alerts do not, and #757 is about
+  # saying it — previously `ThrottleSecondFactor`'s deny branch mailed nobody,
+  # which is the one lockout with no other symptom for the owner to notice.
+  describe "settings forms (#757)" do
+    @settings_subject "Two-factor settings changes blocked"
+
+    # `@budget + 1`: the budget is what is ALLOWED, so the refusal — and the
+    # alert with it — lands on the attempt after. The sign-in `exhaust/1` above
+    # needs only `@budget` because that path spends a unit minting the pending
+    # token before the code is ever checked.
+    defp exhaust_settings(user) do
+      Enum.each(1..(@budget + 1), fn _ ->
+        KilnCMS.Accounts.disable_totp(user, %{code: "000000"}, actor: user)
+      end)
+
+      drain_oban()
+    end
+
+    test "a lockout at the settings forms alerts the owner" do
+      {user, _secret} = enabled_user()
+
+      exhaust_settings(user)
+
+      assert_email_sent(fn email -> email.subject =~ @settings_subject end)
+    end
+
+    test "the copy names a stolen SESSION, not a stolen password" do
+      {user, _secret} = enabled_user()
+
+      exhaust_settings(user)
+
+      assert_email_sent(fn email ->
+        body = email.html_body
+
+        assert body =~ "already signed in"
+        assert body =~ "live session"
+        # The sign-in mail's framing would be wrong here: no password was used.
+        refute body =~ "completed the first step of signing in"
+        # And the first action is ending their session, not securing a password
+        # in the abstract — the reset link is offered *because* it signs
+        # everyone out.
+        assert body =~ "signs out every other"
+        true
+      end)
+    end
+
+    test "it does not send the sign-in second-factor mail" do
+      {user, _secret} = enabled_user()
+
+      exhaust_settings(user)
+
+      # The settings mail went; the sign-in one must not have. Asserting on the
+      # subject of what arrived is the check — `refute_email_sent/1` takes a
+      # pattern, not a predicate.
+      assert_email_sent(fn email ->
+        assert email.subject =~ @settings_subject
+        refute email.subject =~ @subject
+        true
+      end)
+
+      assert_no_email_sent()
+    end
+
+    test "one mail per window, not one per refusal" do
+      {user, _secret} = enabled_user()
+
+      exhaust_settings(user)
+      # Keep failing past the budget.
+      exhaust_settings(user)
+
+      assert_email_sent(fn email -> email.subject =~ @settings_subject end)
+      # Nothing else in the mailbox: the second run was suppressed.
+      assert_no_email_sent()
+    end
+
+    # The budgets are strictly ordered — a settings lockout is the strongest of
+    # the three — so a sign-in lockout must not have spent this one.
+    # The three budgets are strictly ordered — a settings lockout is the
+    # strongest — so spending the sign-in one must leave this one intact.
+    # Asserted directly on the budget rather than through the mailer, which is
+    # what the sign-in path leaves conn responses in.
+    test "its window is its own, not shared with the sign-in alert" do
+      {user, _secret} = enabled_user()
+
+      # Spend the SIGN-IN second-factor alert window.
+      assert AccountThrottle.second_factor_alert_allowed?(user.id)
+      refute AccountThrottle.second_factor_alert_allowed?(user.id)
+
+      # The settings window is untouched by that.
+      assert AccountThrottle.settings_second_factor_alert_allowed?(user.id)
+      refute AccountThrottle.settings_second_factor_alert_allowed?(user.id)
+    end
+
+    # It runs inside an `Ash.Changeset` build, so it must not be able to break
+    # either the action or the build.
+    test "the refusal still lands if the alert cannot be sent" do
+      {user, _secret} = enabled_user()
+
+      # Capture and RESTORE. `delete_env` in `on_exit` removes a key
+      # `config/test.exs` sets, leaking the default into every later test in
+      # the file — which is exactly how this broke the eleven tests above it.
+      previous = Application.fetch_env(:kiln_cms, :email_from)
+      Application.put_env(:kiln_cms, :email_from, nil)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:kiln_cms, :email_from, value)
+          :error -> Application.delete_env(:kiln_cms, :email_from)
+        end
+      end)
+
+      assert {:error, _} = KilnCMS.Accounts.disable_totp(user, %{code: "000000"}, actor: user)
+    end
+  end
 end

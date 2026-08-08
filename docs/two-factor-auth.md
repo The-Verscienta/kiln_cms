@@ -146,8 +146,17 @@ What an operator should know when a user reports it:
   second-factor budget is the tighter of the two.
 
   A lockout that happens *entirely* at `/editor/settings` — with no sign-in
-  attempt afterwards — still sends nothing, because the person there holds a
-  session rather than a first factor and that is different news (see #757).
+  attempt afterwards — sends its **own** mail (#757), not this one. The person
+  there holds a live session rather than a first factor, so the news is
+  different and so is the advice: "someone signed in with your password" is not
+  what happened, and changing the password matters here because it signs every
+  other session out, not because the password itself is suspect. It carries a
+  third alert budget for the same reason the second-factor one is separate from
+  the sign-in one — the three signals are strictly ordered, and the weaker must
+  never suppress the stronger.
+
+  It is also the lockout with no other symptom: a stolen session produces no
+  failed sign-ins for the owner to notice.
 - **Whitespace is not a wasted attempt.** `123 456` pasted from an authenticator
   is normalized before it is checked; recovery codes are already case- and
   separator-insensitive.

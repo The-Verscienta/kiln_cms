@@ -203,6 +203,110 @@ defmodule KilnCMS.Accounts.SignInAlert do
   # gates resolve a real record from a signed token.
   def second_factor_locked(_other), do: :ok
 
+  @doc """
+  Mail `user` that someone **using their signed-in session** is failing codes at
+  the two-factor settings forms, unless one already went out this window.
+  Always returns `:ok`.
+
+  A third sibling rather than a reuse of `second_factor_locked/1`, because what
+  happened is different in a way the copy has to carry. Reaching
+  `/editor/settings` needs a live session, not a password — so this is not
+  "someone signed in with your password", and "change your password" is not the
+  first thing to do. Someone is already inside the account and is working on the
+  second factor; the first move is to end their session.
+
+  It is also a stronger reason to alert than either sign-in case, because there
+  is no other symptom: a stolen session produces no failed sign-ins for the
+  owner to notice.
+  """
+  @spec settings_second_factor_locked(User.t()) :: :ok
+  def settings_second_factor_locked(%User{} = user) do
+    if AccountThrottle.settings_second_factor_alert_allowed?(user.id) do
+      Logger.warning(
+        "Settings second-factor budget spent for user #{user.id}: someone with a live " <>
+          "session is failing codes at the 2FA settings forms. Alerting the owner."
+      )
+
+      release_settings_alert_on_failure(user, fn -> deliver_settings_second_factor(user) end)
+    else
+      Logger.info(
+        "Suppressed a settings second-factor alert for user #{user.id}: one already sent."
+      )
+    end
+
+    :ok
+  rescue
+    error ->
+      Logger.warning("Settings second-factor alert failed: #{Exception.message(error)}")
+      :ok
+  catch
+    :exit, reason ->
+      Logger.warning("Settings second-factor alert exited: #{inspect(reason)}")
+      :ok
+
+    thrown ->
+      Logger.warning("Settings second-factor alert threw: #{inspect(thrown)}")
+      :ok
+  end
+
+  # Same reasoning as `second_factor_locked/2`'s catch-all: this runs inside an
+  # `Ash.Changeset` build, so a head-clause failure would break the changeset
+  # rather than the alert.
+  def settings_second_factor_locked(_other), do: :ok
+
+  defp release_settings_alert_on_failure(user, fun) do
+    fun.()
+  rescue
+    error ->
+      AccountThrottle.forget_settings_second_factor_alert(user.id)
+      reraise error, __STACKTRACE__
+  catch
+    kind, reason ->
+      AccountThrottle.forget_settings_second_factor_alert(user.id)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp deliver_settings_second_factor(user) do
+    site = site_name()
+
+    deliver(
+      user,
+      "Two-factor settings changes blocked on your #{site} account",
+      settings_second_factor_body(site)
+    )
+  end
+
+  # Deliberately not a variation on `second_factor_body/1`. That mail is about
+  # someone getting *in*; this one is about someone already being in. So the
+  # benign explanation stays first (the likeliest trigger is still the owner
+  # fumbling their own codes), but the "if it wasn't you" branch names a
+  # different fact and a different first action.
+  defp settings_second_factor_body(site) do
+    settings = url(~p"/editor/settings")
+    reset = url(~p"/reset")
+
+    """
+    <p>Several two-factor codes were refused on the security settings of your #{site}
+    account. Those changes are paused briefly.</p>
+    <p><strong>If that was you</strong> — turning two-factor off, regenerating your
+    recovery codes, or confirming a new authenticator — nothing is wrong. Wait a few
+    minutes and try again.</p>
+    <p><strong>If it wasn't you</strong>, this is different from a failed sign-in.
+    Those settings can only be reached from a browser that is <em>already signed in</em>
+    as you. That means someone has a live session on your account and is trying to
+    remove or re-key its second factor.</p>
+    <p>What to do, in this order:</p>
+    <ul>
+      <li><a href="#{reset}">Change your password</a>. This also signs out every other
+      session, including theirs — that is the part that matters here.</li>
+      <li>Then check your <a href="#{settings}">security settings</a>: confirm two-factor
+      is still on, and regenerate your recovery codes if you are unsure of them.</li>
+      <li>If you did not start this and cannot explain it, tell whoever administers this
+      site.</li>
+    </ul>
+    """
+  end
+
   # Give the window back if the mail never got out, so the next refusal can try
   # again rather than being told one already went.
   defp release_on_failure(user, fun) do
