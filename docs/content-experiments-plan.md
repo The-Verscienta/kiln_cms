@@ -241,6 +241,42 @@ on a counter.
   first — invariant 4 applied to a second page. A `content_view` experiment
   therefore takes *two* pages out of the CDN, not one.
 
+- `funnel_completion` — **phase 3 (#1010).** The same mechanism one level of
+  indirection out: the experiment names a funnel (#621) and converts on that
+  funnel's **final step**, resolved at delivery time. So re-ordering the funnel
+  moves the goal without anyone editing the experiment, which is the whole
+  reason it is not just `content_view` pointed at a document.
+
+  **What "completed" means here, since it is a decision and not an obvious
+  one.** It means *reached the last step, having been exposed to the
+  experiment*. It does **not** mean "walked every step in order". Kiln keeps no
+  per-visitor journey — funnel step traffic is derived from aggregate
+  `content_view_days` buckets precisely so that it does not have to — and
+  reconstructing an ordered path would need per-visitor step state in the
+  cookie, which is exactly the identifying payload #984 was built to avoid. A
+  visitor who lands on the last step directly converts. That is a real
+  limitation and it is the honest one to take.
+
+  Same costs and same guards as `content_view`: the final step leaves the shared
+  cache, and `:start` refuses a missing funnel, a funnel from another site, one
+  with no steps, one whose last step is the experimented document, or sticky
+  being off.
+
+  The funnel's final step is read from its own per-site cache
+  (`Experiments.funnel_targets/1`) rather than queried per request — this runs
+  for every running funnel experiment on **every** content page view, so a query
+  here would be a query per page view site-wide. That cache is busted on any
+  funnel or funnel-step write, so re-ordering a funnel moves the goal on the
+  next request; the TTL is a backstop, not the freshness signal.
+
+  The self-conversion guard is enforced **twice**, and that is a consequence of
+  the indirection rather than caution. `:start` refuses a funnel whose last step
+  is the experimented document, but editing the funnel afterwards can reach that
+  state and no funnel write knows an experiment exists — so delivery refuses it
+  too. Unguarded it is not a small error: the exposure is written and read back
+  on the same conn, so the impression would convert itself within one request
+  and every arm would report 100% forever.
+
 Results are a proportion comparison with a stated confidence, not a dashboard of
 knobs. No sequential testing, no peeking correction, no p-hacking surface — a
 sample-size floor below which the panel refuses to declare anything is worth more
@@ -299,11 +335,11 @@ feature becomes usable by the people it is for.
 **Phase 3 — measurement depth**
 
 The sticky-assignment cookie and the `content_view` goal on top of it — **done**
-(#984); see [`data-flows.md`](data-flows.md#sticky-assignment-cookie-984) for
-what is stored and why. Still open: funnel-completion as a goal (#1010), a
-results panel with a sample-size floor (#982), bounding conversion abuse on the
-new GET path (#1007), and surfacing an experiment that can no longer convert
-(#1008).
+(#984) and funnel-completion on top of it (#1010); see
+[`data-flows.md`](data-flows.md#sticky-assignment-cookie-984) for what is stored
+and why. Still open: a results panel with a sample-size floor (#982), bounding
+conversion abuse on the new GET path (#1007), and surfacing an experiment that
+can no longer convert (#1008).
 
 **Deliberately not planned:** per-visitor personalization rules, multi-armed
 bandits, traffic allocation ramps, and anything that needs a visitor profile.

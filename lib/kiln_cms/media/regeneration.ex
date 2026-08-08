@@ -97,13 +97,20 @@ defmodule KilnCMS.Media.Regeneration do
   # of an image whose animation is the point.
   def current?(%{content_type: "image/gif"}), do: true
 
-  def current?(%{variants: variants}) when is_map(variants) and map_size(variants) > 0 do
+  def current?(%{variants: variants} = item) when is_map(variants) and map_size(variants) > 0 do
     formats = KilnCMS.ImageProcessor.variant_formats()
 
+    # `full` is deliberately excluded: `full_present?/1` below owns it, and the
+    # two rules disagree. This sweep asks "does every label carry every format",
+    # but `build_full/2` never writes a SOURCE-format full (the original is the
+    # source-format full). So a WebP upload with `formats: [:webp, :avif]` gets
+    # a `full.avif`, which makes `full` a base label, and the sweep then demands
+    # a `full.webp` that will never exist — re-enqueuing it for ever.
     base_labels =
       variants
       |> Map.keys()
       |> Enum.map(&KilnCMS.ImageProcessor.base_label/1)
+      |> Enum.reject(&(&1 == "full"))
       |> Enum.uniq()
 
     Enum.all?(base_labels, fn label ->
@@ -113,6 +120,7 @@ defmodule KilnCMS.Media.Regeneration do
         Map.has_key?(variants, "#{label}.#{format}") or source_format?(variants, label, format)
       end)
     end)
+    |> Kernel.and(full_present?(item))
   end
 
   # No variants at all. Before #473 that was a legitimate terminal state: an
@@ -129,14 +137,51 @@ defmodule KilnCMS.Media.Regeneration do
   # `full_alternates/1` is `ImageProcessor`'s own answer to that, not a second
   # copy of the rule. (GIFs never reach here — the `content_type` clause above
   # matches first.)
-  def current?(%{variants: variants, content_type: content_type, width: width})
+  def current?(%{variants: variants, width: width} = item)
       when is_map(variants) and map_size(variants) == 0 and is_integer(width),
-      do: KilnCMS.ImageProcessor.full_alternates(content_type) == []
+      do: full_present?(item)
 
   # Unprocessed (`width` still nil: mid-flight, or a failed run) is enqueued,
   # which is the case a rollout most wants to catch.
   def current?(%{width: width}) when is_integer(width), do: true
   def current?(_item), do: false
+
+  # The `base_labels` sweep above only asks whether the labels that ALREADY
+  # exist carry every format — so an item missing the `full` label entirely
+  # passes it without ever being asked about the one write that is
+  # unconditional (#1000).
+  #
+  # `build_full/2` writes a full-size alternate whatever the source's size, so
+  # every non-GIF item should have one per configured alternate format. An item
+  # that lost only `full.webp` — the largest write, and the first to fail on
+  # ENOSPC or an encoder OOM — therefore read as current, and the missing-only
+  # run (the documented rollout default) reported `enqueued: 0` for it for ever.
+  # Since #919 that also costs the item its whole `<picture>` `<source>`.
+  #
+  # A bare key check would break the convergence this module exists to protect:
+  # a panorama past libvips' WebP dimension ceiling can never gain one, and
+  # re-decoding it every run is the standing tax the moduledoc warns about. So a
+  # format counts as satisfied when it is present OR recorded as impossible —
+  # which is what `variant_failures` is for.
+  defp full_present?(item) do
+    failures = loaded_map(Map.get(item, :variant_failures))
+    variants = loaded_map(Map.get(item, :variants))
+
+    item
+    |> Map.get(:content_type)
+    |> KilnCMS.ImageProcessor.full_alternates()
+    |> Enum.all?(fn format ->
+      Map.has_key?(variants, "full.#{format}") or Map.has_key?(failures, to_string(format))
+    end)
+  end
+
+  # `%Ash.NotLoaded{}` is a struct, so it passes both `is_map/1` and a `%{} = x`
+  # match — the two ways this would otherwise be mistaken for an empty map. Named
+  # explicitly so a future `select/2` that forgets an attribute fails visibly in
+  # a test rather than silently answering "nothing recorded".
+  defp loaded_map(%Ash.NotLoaded{}), do: %{}
+  defp loaded_map(map) when is_map(map), do: map
+  defp loaded_map(_other), do: %{}
 
   defp source_format?(variants, label, format) do
     content_type = KilnCMS.ImageProcessor.variant_content_type("x.#{format}")
@@ -173,7 +218,12 @@ defmodule KilnCMS.Media.Regeneration do
     |> after_cursor(cursor)
     |> Ash.Query.sort(id: :asc)
     |> Ash.Query.limit(@batch)
-    |> Ash.Query.select([:id, :variants, :content_type, :width])
+    # `:variant_failures` is not optional here. An UNSELECTED Ash attribute
+    # arrives as `%Ash.NotLoaded{}`, which is truthy — so a `|| %{}` fallback
+    # does not fire, `Map.has_key?/2` answers false for every format, and every
+    # recorded failure silently reads as "never recorded". That made the whole
+    # of #1000 inert on this path, which is the only path `run/2` uses.
+    |> Ash.Query.select([:id, :variants, :variant_failures, :content_type, :width])
     |> Ash.read!(authorize?: false, tenant: org_id)
   end
 

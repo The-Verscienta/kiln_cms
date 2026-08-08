@@ -166,6 +166,50 @@ defmodule KilnCMSWeb.Layouts do
     end
   end
 
+  @doc """
+  The `og:image` for this page: the page's own, else the site's branding image
+  (#560).
+
+  Three properties, each of which the issue asks for explicitly:
+
+  **The page-level chain does not move.** Delivery reads `seo_image` alone and
+  assigns it as `:og_image`; this only supplies a fallback *beneath* that, so a
+  page that sets one is byte-identical to before.
+
+  **The URL is made absolute against the REQUEST'S OWN host**
+  (`KilnCMSWeb.Tenant.base_url/1`, #557). That is why this was blocked: the only
+  base URL used to be the deployment-global `:public_base_url`, so on a tenant
+  subdomain or custom domain the tag would have advertised an image on the wrong
+  host — and a wrong absolute URL in a link preview is worse than no tag.
+
+  **It fails closed**, like `brand_or_unbranded/1` and for the same reason: a
+  missing `:current_org` key means no hook ran, and answering that with the
+  default org's branding would put another tenant's image on this page.
+  """
+  @spec social_image(map()) :: String.t() | nil
+  def social_image(assigns) do
+    assigns[:og_image] || brand_social_image(assigns)
+  end
+
+  defp brand_social_image(assigns) do
+    with true <- Map.has_key?(assigns, :current_org),
+         org when not is_nil(org) <- assigns[:current_org],
+         image when is_binary(image) and image != "" <- Branding.for_org(org).social_image_url do
+      absolute(image, org)
+    else
+      _ -> nil
+    end
+  end
+
+  # An operator may paste either a full URL or a site-relative path, and both
+  # are reasonable things to type into that field. Only the second needs a base.
+  defp absolute("http://" <> _ = url, _org), do: url
+  defp absolute("https://" <> _ = url, _org), do: url
+
+  defp absolute(path, org) do
+    KilnCMSWeb.Tenant.base_url(org) <> "/" <> String.trim_leading(path, "/")
+  end
+
   @doc "The site name for an org, resolved through the branding fallback chain."
   def brand_name(org), do: Branding.for_org(org).site_name
 

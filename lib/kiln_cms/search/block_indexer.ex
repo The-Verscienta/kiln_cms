@@ -15,6 +15,8 @@ defmodule KilnCMS.Search.BlockIndexer do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Search.VectorCache
 
+  require Logger
+
   @doc "Re-index a document's blocks. Returns `{:ok, count_embedded}`."
   @spec reindex(struct()) :: {:ok, non_neg_integer()}
   def reindex(document) do
@@ -217,24 +219,45 @@ defmodule KilnCMS.Search.BlockIndexer do
   defp embed_and_store(org_id, type, document_id, block_key, module, hash, context, text) do
     case Search.embed("#{context}\n\n#{text}") do
       {:ok, vector} ->
-        SearchIndex.upsert_block_embedding(
-          %{
-            document_type: type,
-            document_id: document_id,
-            block_key: block_key,
-            block_type: Kiln.Block.Info.name(module),
-            content_hash: hash,
-            ancestor_context: context,
-            embedding: vector,
-            embedded_at: DateTime.utc_now()
-          },
-          authorize?: false,
-          tenant: org_id
-        )
+        store(org_id, type, document_id, block_key, module, hash, context, vector)
 
+      _embed_failed ->
+        :error
+    end
+  end
+
+  # The write's result decides the status, and it did not used to. Reporting
+  # `:embedded` for a row that never landed is not a cosmetic lie: `prune_stale/3`
+  # treats the returned keys as the document's live key set, so a run whose
+  # writes all failed looked like a clean run over a document with no rows —
+  # which is exactly how `:entry` failing the `document_type` constraint stayed
+  # invisible (#1012). A failed write is an `:error` for the same reason a failed
+  # embed is: the run cannot say what this document's index should contain.
+  defp store(org_id, type, document_id, block_key, module, hash, context, vector) do
+    SearchIndex.upsert_block_embedding(
+      %{
+        document_type: type,
+        document_id: document_id,
+        block_key: block_key,
+        block_type: Kiln.Block.Info.name(module),
+        content_hash: hash,
+        ancestor_context: context,
+        embedding: vector,
+        embedded_at: DateTime.utc_now()
+      },
+      authorize?: false,
+      tenant: org_id
+    )
+    |> case do
+      {:ok, _row} ->
         :embedded
 
-      _ ->
+      {:error, error} ->
+        Logger.warning(
+          "block embedding write failed for #{type} #{document_id} #{block_key}: " <>
+            Exception.message(error)
+        )
+
         :error
     end
   end

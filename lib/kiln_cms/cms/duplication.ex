@@ -67,6 +67,7 @@ defmodule KilnCMS.CMS.Duplication do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentCopy
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.Slugs
 
   # Appended to the source title. Not localized: it lands in a stored title
   # (and, through it, the slug) that outlives the acting editor's session
@@ -86,16 +87,47 @@ defmodule KilnCMS.CMS.Duplication do
   """
   @spec duplicate!(atom() | String.t() | map(), struct() | Ash.UUID.t(), keyword()) :: struct()
   def duplicate!(kind, record_or_id, opts \\ []) do
+    {copy, _withheld} = duplicate_with_notes!(kind, record_or_id, opts)
+    copy
+  end
+
+  @doc """
+  `duplicate!/3`, plus the list of things the copy did **not** carry.
+
+  A copy is silently narrower than its source in two ways — a per-field write
+  grant drops attributes, and a block-field policy resets values the actor could
+  not have set — and the editor previously got "Duplicated as a new draft." with
+  no hint either happened (#929). The caller needs both to say so.
+  """
+  @spec duplicate_with_notes!(atom() | String.t() | map(), struct() | Ash.UUID.t(), keyword()) ::
+          {struct(), [String.t()]}
+  def duplicate_with_notes!(kind, record_or_id, opts \\ []) do
     # Read the payload here rather than trusting what the caller had loaded:
     # the content list deliberately selects a handful of columns, so its rows
     # carry no blocks at all.
     load = ContentCopy.tag_load() ++ [:content_links]
     source = ContentTypes.get_record!(kind, id(record_or_id), Keyword.put(opts, :load, load))
+    {attrs, withheld} = attrs(source, opts)
 
-    copy = ContentTypes.create!(kind, attrs(source, opts), opts)
-    clone_links(source, copy, opts)
+    # One transaction. The links used to be cloned after the create with nothing
+    # tying them together, so a failure on link 12 of 40 left a COMMITTED copy
+    # behind while the caller was told the duplicate failed and did not navigate
+    # — three clicks, three orphan drafts, each with a partial link set (#925).
+    {:ok, copy} =
+      Ash.transaction(
+        [
+          Slugs.storage_resource(
+            ContentTypes.get!(kind, KilnCMS.Accounts.org_id(Keyword.get(opts, :tenant)))
+          )
+        ],
+        fn ->
+          copy = ContentTypes.create!(kind, attrs, opts)
+          clone_links(source, copy, opts)
+          copy
+        end
+      )
 
-    copy
+    {copy, withheld}
   end
 
   @doc """
@@ -108,13 +140,20 @@ defmodule KilnCMS.CMS.Duplication do
   survives.
   """
   @spec duplicate(atom() | String.t() | map(), struct() | Ash.UUID.t(), keyword()) ::
-          {:ok, struct()} | {:error, term()}
+          {:ok, struct(), [String.t()]} | {:error, term()}
   def duplicate(kind, record_or_id, opts \\ []) do
-    {:ok, duplicate!(kind, record_or_id, opts)}
+    {copy, withheld} = duplicate_with_notes!(kind, record_or_id, opts)
+    {:ok, copy, withheld}
   rescue
-    error in [Ash.Error.Forbidden, Ash.Error.Invalid, Ash.Error.Query.NotFound] ->
+    error in [Ash.Error.Forbidden, Ash.Error.Query.NotFound] ->
       {:error, error}
 
+    # `Invalid` is NOT a refusal, and it is the class a *copy* uniquely
+    # produces: `ApplyCustomFields` re-validating an old value against today's
+    # registry, `SeoUrls` on a copied `seo_image`, `PathAliasValid`. Grouping it
+    # with the refusals meant support could not tell "you lack permission" from
+    # "a stale custom-field value is unwriteable" — the flash is identical and
+    # nothing reached the log.
     error ->
       Logger.warning("Duplicating #{inspect(kind)} content failed: #{Exception.message(error)}")
       {:error, error}
@@ -131,16 +170,29 @@ defmodule KilnCMS.CMS.Duplication do
 
   defp attrs(source, opts) do
     allowed = allowed_fields(source, opts)
+    {blocks, reset_fields} = blocks(source, allowed, opts)
 
-    source
-    |> ContentCopy.take(copied_attrs(allowed))
-    # After `take/2`: these carry regardless of the grant (see the module doc),
-    # and the title is the one attribute the copy rewrites rather than clones.
-    |> Map.merge(ContentCopy.take(source, @grant_exempt_attrs))
-    |> Map.put(:title, copy_title(source.title))
-    |> Map.put(:locale, source.locale)
-    |> Map.put(:blocks, blocks(source, allowed))
-    |> Map.put(:tag_ids, ContentCopy.tag_ids(source))
+    attrs =
+      source
+      |> ContentCopy.take(copied_attrs(allowed))
+      |> Map.merge(ContentCopy.take(source, @grant_exempt_attrs))
+      |> Map.put(:title, copy_title(source.title))
+      |> Map.put(:locale, source.locale)
+      |> Map.put(:blocks, blocks)
+      |> Map.put(:tag_ids, ContentCopy.tag_ids(source))
+
+    {attrs, withheld_notes(allowed, reset_fields)}
+  end
+
+  # What the editor is told. Attribute names the grant dropped, plus any block
+  # field the block policy reset — both are cases where the copy is narrower
+  # than the source through no fault of the source.
+  defp withheld_notes(nil, reset), do: reset
+
+  defp withheld_notes(allowed, reset) do
+    dropped = Enum.reject(copyable_attrs(), &(to_string(&1) in allowed))
+
+    Enum.map(dropped, &to_string/1) ++ reset
   end
 
   # The focus keyphrase stays with the source — see the module doc.
@@ -151,10 +203,27 @@ defmodule KilnCMS.CMS.Duplication do
   defp copied_attrs(allowed),
     do: Enum.filter(copyable_attrs(), &(to_string(&1) in allowed))
 
-  defp blocks(source, nil), do: ContentCopy.dump_blocks(source)
+  # The acting tier decides which block fields survive: a value this role could
+  # not have set is reset to its declared default rather than refused (#890).
+  defp blocks(source, nil, opts), do: ContentCopy.dump_blocks(source, role: role(opts))
 
-  defp blocks(source, allowed),
-    do: if("blocks" in allowed, do: ContentCopy.dump_blocks(source), else: [])
+  defp blocks(source, allowed, opts) do
+    if "blocks" in allowed,
+      do: ContentCopy.dump_blocks(source, role: role(opts)),
+      else: {[], ["blocks"]}
+  end
+
+  defp role(opts) do
+    case Keyword.get(opts, :actor) do
+      %{} = actor -> tier_or_nil(Scoping.effective_tier(actor, Keyword.get(opts, :tenant)))
+      _ -> nil
+    end
+  end
+
+  # `nil` means "unrestricted" to `ContentCopy` — an admin, or an actor-less
+  # internal caller, matching the policy bypass.
+  defp tier_or_nil(:admin), do: nil
+  defp tier_or_nil(tier), do: tier
 
   # `nil` means "copy everything" — no grant restriction applies. A list is the
   # attribute names the acting editor may write for this type. Effective admins

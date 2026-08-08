@@ -34,8 +34,17 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
     perform(%{job | args: Map.put(args, "org_id", KilnCMS.Accounts.default_org_id())})
   end
 
+  # `"entry"` is the storage key every dynamic content type (D17) fires under.
+  # Without this clause it fell to `:error`, and `reindex/1`'s catch-all turned
+  # that into a silent `:ok` — so a dynamic entry never got a `BlockEmbedding`
+  # row, and therefore never appeared as related content or a near-duplicate for
+  # any document, forever. Everything downstream is already generic:
+  # `BlockIndexer` keys on `Engine.document_type/1` and `Related` hydrates
+  # through `ContentTypes.get_record/3`. Sibling of the same gap in
+  # `MeilisearchWorker` (#1012), enqueued from the same `FireWorker` call.
   defp load(org_id, "page", id), do: CMS.get_page(id, authorize?: false, tenant: org_id)
   defp load(org_id, "post", id), do: CMS.get_post(id, authorize?: false, tenant: org_id)
+  defp load(org_id, "entry", id), do: CMS.get_entry(id, authorize?: false, tenant: org_id)
   defp load(_org_id, _type, _id), do: :error
 
   defp reindex({:ok, document}) do
