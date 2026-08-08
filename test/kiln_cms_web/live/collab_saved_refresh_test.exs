@@ -102,21 +102,27 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
     |> Enum.sort_by(& &1.version_inserted_at, DateTime)
   end
 
+  # How many rows this session's OWN version panel is rendering — one
+  # `toggle_compare` control per version.
+  defp version_rows(lv),
+    do: lv |> render() |> String.split(~s(phx-click="toggle_compare")) |> length()
+
+  # Asserted on the CO-EDITOR'S OWN RENDER, not on the database. An earlier
+  # version of this test counted rows with `versions/2` and then waited for
+  # "Beta" to appear anywhere in the co-editor's HTML — which `@record` alone
+  # satisfies. Removing `load_versions/1` from the refresh left it green.
   test "the co-editor's version list follows the persister's autosave", %{conn: conn} do
     page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: authed_user())
-    %{low: low, persister: persister, co_editor: co_editor} = both_present(conn, page)
+    %{persister: persister, co_editor: co_editor} = both_present(conn, page)
 
-    before = length(versions(page, low))
+    before = version_rows(co_editor)
 
     persister |> form("#page-editor", form: %{title: "Beta"}) |> render_change()
     send(persister.pid, :autosave)
     await(persister, &(&1 =~ "Saved"))
 
-    # The write really landed, so the co-editor's list is now provably behind.
-    assert length(versions(page, low)) > before
-
-    # And it catches up without the co-editor doing anything.
-    await(co_editor, &(&1 =~ "Beta"))
+    # The panel grows without the co-editor doing anything.
+    await(co_editor, fn _html -> version_rows(co_editor) > before end)
   end
 
   # The bug as #694 reported it: the modal states a conclusion, and the
@@ -142,6 +148,48 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
     refute html =~ "These two versions are identical"
   end
 
+  # THE regression this fix originally shipped, and the reason `adopt_saved/2`
+  # has a guard clause.
+  #
+  # `:autosave` carries `optimistic_lock(:lock_version)` and `do_autosave/1`
+  # builds its changeset from `@record`. Advancing that assign while this
+  # session's `@form` still holds older data handed the lock a version it
+  # accepted — and the stale form then wrote straight over the peer's save, with
+  # no conflict flash at all.
+  #
+  # Run with the collaboration prototype OFF, which is production's default
+  # (`KilnCMS.Collab.CRDT.enabled?/0`). With it on, a non-persisting session
+  # stands down instead of saving, so the lock is never reached and the bug is
+  # invisible — the config the suite happens to run under was hiding it.
+  #
+  # Both sides edit the SAME field: `AshPhoenix.Form.params/1` is touched-only,
+  # so sessions editing different fields merge harmlessly and prove nothing.
+  test "a peer's save cannot be silently clobbered by a session mid-edit", %{conn: conn} do
+    previous = Application.get_env(:kiln_cms, :collab_prototype)
+    Application.put_env(:kiln_cms, :collab_prototype, false)
+    on_exit(fn -> Application.put_env(:kiln_cms, :collab_prototype, previous) end)
+
+    editor_a = authed_user()
+    editor_b = authed_user()
+    page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: editor_a)
+
+    {:ok, lv_a, _} = conn |> log_in(editor_a) |> live(~p"/editor/content/page/#{page.id}")
+    {:ok, lv_b, _} = build_conn() |> log_in(editor_b) |> live(~p"/editor/content/page/#{page.id}")
+    await(lv_b, &(&1 =~ "2 editing"))
+
+    lv_b |> form("#page-editor", form: %{title: "From B"}) |> render_change()
+
+    lv_a |> form("#page-editor", form: %{title: "From A"}) |> render_change()
+    send(lv_a.pid, :autosave)
+    await(lv_a, &(&1 =~ "Saved"))
+
+    # B's autosave must fail the lock and say so, rather than reverting A.
+    send(lv_b.pid, :autosave)
+    await(lv_b, &(&1 =~ "changed elsewhere"))
+
+    assert CMS.get_page!(page.id, actor: editor_a).title == "From A"
+  end
+
   # The line this fix must not cross. In a collab session the co-editor's own
   # edits live in their form (and, for text, in the shared Y.Doc) — not in the
   # record that was just written. Rebuilding the form on someone else's save
@@ -154,12 +202,38 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
     |> form("#page-editor", form: %{seo_title: "Typed by the co-editor"})
     |> render_change()
 
+    before = version_rows(co_editor)
+
     persister |> form("#page-editor", form: %{title: "Beta"}) |> render_change()
     send(persister.pid, :autosave)
     await(persister, &(&1 =~ "Saved"))
-    await(co_editor, &(&1 =~ "Beta"))
+
+    # The version panel still follows — it is read-only and cannot lose
+    # anything. `@record` deliberately does NOT, because this session has an
+    # edit in flight and its next save has to keep failing the optimistic lock.
+    await(co_editor, fn _html -> version_rows(co_editor) > before end)
 
     assert render(co_editor) =~ "Typed by the co-editor"
+  end
+
+  # One person, two tabs. The first echo guard compared ACTOR ids, which made a
+  # session's own second window look like an echo and skip the refresh — so the
+  # reported symptom still reproduced for one person with the document open
+  # twice, which is at least as common as two people.
+  test "a second tab of the same user is refreshed, not treated as an echo", %{conn: conn} do
+    editor = authed_user()
+    page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: editor)
+
+    {:ok, tab_one, _} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+    {:ok, tab_two, _} =
+      build_conn() |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+    tab_one |> form("#page-editor", form: %{title: "From tab one"}) |> render_change()
+    send(tab_one.pid, :autosave)
+    await(tab_one, &(&1 =~ "Saved"))
+
+    await(tab_two, &(&1 =~ "From tab one"))
   end
 
   # Not a test of the echo guard — a solo re-read would be wasteful, not wrong,

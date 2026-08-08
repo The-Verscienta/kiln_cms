@@ -452,9 +452,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the record that was just written. Rebuilding the form here would throw away
   # whatever the person was typing, which is a worse bug than the one being
   # fixed.
-  def handle_info({:record_saved, actor_id}, socket) do
-    if actor_id == socket.assigns.actor.id do
-      # Our own echo; `assign_record/2` already ran.
+  def handle_info({:record_saved, from}, socket) do
+    if from == self() do
+      # Our own echo; `assign_record/2` already ran. Keyed on the PID, not the
+      # actor id: one person with the document open in two tabs is two sessions
+      # with two stale views, and an actor-id guard silently excluded exactly
+      # that case — the reported symptom reproduces for one person in two
+      # windows.
       {:noreply, socket}
     else
       {:noreply, refresh_saved_record(socket)}
@@ -3234,15 +3238,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Reuses the Presence editing topic every session already subscribes to, so
   # this costs no new subscription and no new fan-out.
   #
-  # Carries the writer's id and nothing else. The payload is deliberately not the
-  # record: a broadcast body would have to be authorized per recipient, and each
-  # session re-reads through `fetch!/4` with its OWN actor and tenant anyway —
-  # so a session that may no longer read the record simply keeps what it has.
+  # Carries the writing session's PID and nothing else. The payload is
+  # deliberately not the record: a broadcast body would have to be authorized per
+  # recipient, and each session re-reads through `fetch!/4` with its OWN actor
+  # and tenant anyway — so a session that may no longer read the record simply
+  # keeps what it has.
   defp broadcast_saved(socket) do
     Phoenix.PubSub.broadcast(
       KilnCMS.PubSub,
       Presence.topic(socket.assigns.kind, socket.assigns.record.id),
-      {:record_saved, socket.assigns.actor.id}
+      {:record_saved, self()}
     )
 
     socket
@@ -3250,6 +3255,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Re-read the persisted record and everything derived from it. See the
   # `{:record_saved, _}` handler for what is deliberately left alone.
+  #
+  # ## `@record` is the optimistic lock's basis, so it only moves when it is free
+  #
+  # `:autosave` carries `change optimistic_lock(:lock_version)`, and
+  # `do_autosave/1` builds its changeset from `socket.assigns.record`. Advancing
+  # that assign while `@form` still holds this session's older data hands the
+  # lock a version it will accept and then writes the stale form over the peer's
+  # save — silently, with no conflict flash. That is worse than the staleness
+  # this function exists to fix, and it bites hardest with the collaboration
+  # prototype OFF (the default), where two editors really are two independent
+  # writers.
+  #
+  # So the version list — which is read-only, and drags an open comparison with
+  # it — refreshes unconditionally, and `@record` moves only for a session that
+  # has nothing of its own in flight. A session that does keeps its old record,
+  # so its next save still hits `StaleRecord` and still surfaces the conflict.
   defp refresh_saved_record(socket) do
     reloaded =
       fetch!(
@@ -3259,16 +3280,43 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket.assigns.current_org
       )
 
+    # `@record` first, `load_versions/1` second — the latter recomputes an open
+    # comparison, and the "Current draft" side of that comparison is built from
+    # `@record`. Reversed, the modal recomputes against the record it is about to
+    # replace and goes on reporting the state it just stopped holding.
     socket
-    |> assign(:record, reloaded)
-    |> assign(:page_title, reloaded.title)
+    |> adopt_saved(reloaded)
     |> load_versions()
   rescue
     # The record went away, or this session may no longer read it. Keeping the
     # last known state is the same thing every other read failure here does, and
     # far better than crashing an editor over someone else's save.
     _error -> socket
+  catch
+    # A pool or GenServer timeout inside Ash arrives as an exit, which `rescue`
+    # does not catch — and a bystander's editor must not die because of the
+    # timing of someone else's save.
+    :exit, _reason -> socket
   end
+
+  # Adopt the persisted record, unless this session has something of its own that
+  # adopting it would put at risk: a pending autosave (`:saving`), an edit that
+  # failed validation (`:error`), an un-persisted change (`:unsaved`), or edits
+  # suppressed because another editor is the elected persister (`:synced`).
+  #
+  # A session holding any of those keeps its old record deliberately, so its next
+  # save still fails the optimistic lock and still surfaces the conflict. Its
+  # version panel refreshes either way — that is read-only and cannot lose
+  # anything.
+  defp adopt_saved(%{assigns: %{save_state: :saved}} = socket, record) do
+    socket
+    |> assign(:record, record)
+    |> assign(:page_title, record.title)
+    |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign(:slug_customized?, slug_customized?(socket))
+  end
+
+  defp adopt_saved(socket, _record), do: socket
 
   defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
 
