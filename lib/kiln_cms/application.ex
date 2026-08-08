@@ -136,7 +136,33 @@ defmodule KilnCMS.Application do
       # Needs the Repo, so it runs after the tree is up rather than alongside
       # the config-only warnings at the top of start/2.
       warn_if_multi_tenant_without_strict_host()
+      enqueue_occurrence_backfill()
       {:ok, pid}
+    end
+  end
+
+  # The "what's on" index sorts on a stored `next_occurrence_at` (#766), and
+  # nothing in the shipped feature computes a FIRST value for content that
+  # predates the column: the migration cannot (the value is the recurrence
+  # engine's output, not a function of other columns) and the hourly sweep will
+  # not, because it visits rows whose occurrence has PASSED and a NULL has
+  # passed nothing. That left an upgrade with a manual step — and a manual step
+  # nobody performs is a feature that silently does not work.
+  #
+  # Enqueued rather than run here: this is boot, and `bin/migrate && bin/server`
+  # already puts migrations in front of HTTP coming up. The job is deduplicated
+  # for a day at the database level, so a rolling deploy across replicas queues
+  # one, and it never raises — a node must not fail to start because a
+  # background nicety could not be queued.
+  #
+  # Off in `:test`: the suite runs inside rolled-back sandboxes, so a job
+  # enqueued at application boot COMMITS outside them and is then re-drained
+  # into whichever unrelated test drains next (`test_helper.exs` deletes stray
+  # `oban_jobs` at boot and warns when it does — this would make that warning
+  # fire on every run, which is how a real signal gets trained away).
+  defp enqueue_occurrence_backfill do
+    if Application.get_env(:kiln_cms, :occurrence_backfill_on_boot, true) do
+      KilnCMS.Events.BackfillWorker.enqueue()
     end
   end
 

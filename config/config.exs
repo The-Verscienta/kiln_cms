@@ -482,6 +482,18 @@ config :kiln_cms, :task_digest_cron, "0 8 * * *"
 # itself.
 config :kiln_cms, :occurrence_sweep_cron, "50 * * * *"
 
+# Whether booting enqueues the one-off occurrence backfill (#766). On, because
+# the alternative is an upgrade step a human has to remember, and the feature
+# silently does nothing until they do — the migration cannot fill
+# `next_occurrence_at` and the sweep above will not, since it visits rows whose
+# occurrence has PASSED and a NULL has passed nothing.
+#
+# Deduplicated for a day at the database level, so replicas queue one job
+# between them, and cheap when there is nothing to do: the pass writes only rows
+# whose value actually changes. Turn it off for a deployment that would rather
+# run `mix kiln.occurrences.backfill` on its own terms.
+config :kiln_cms, :occurrence_backfill_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero

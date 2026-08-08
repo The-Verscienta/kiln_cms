@@ -1,6 +1,14 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
+# No boot-time occurrence backfill (#766). Every test runs inside a rolled-back
+# sandbox, but application boot is OUTSIDE them — so an enqueue there commits a
+# real `oban_jobs` row, which `DataCase.drain_oban/0` then re-executes inside
+# whichever unrelated test drains next. `test_helper.exs` deletes stray rows and
+# warns when it does; leaving this on would make that warning fire on every run
+# and train away a signal that exists to catch real leakage.
+config :kiln_cms, :occurrence_backfill_on_boot, false
+
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.
 config :kiln_cms, KilnCMS.Mail.DnsCheck,

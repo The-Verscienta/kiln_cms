@@ -155,13 +155,26 @@ document's schedule and recurrence, and an hourly Oban sweep
 occurrence has gone by. Ordering and paging then happen in Postgres over an
 index, so an anonymous request expands no recurrences at all.
 
-### Backfilling an existing site
+### Backfilling an existing site — automatic
 
 The migration adds the column; it cannot fill it, because the value comes out of
 the recurrence engine rather than out of other columns. Neither does the sweep —
 it visits rows whose occurrence has **passed**, and a `NULL` has not passed
-anything. So on a site that had events before upgrading, the index stays empty
-until each event happens to be re-saved. Run this once:
+anything. So on a site that had events before upgrading, nothing would ever
+compute a first value.
+
+**This is handled for you.** Booting enqueues a backfill job
+(`KilnCMS.Events.BackfillWorker`), so the first deploy after upgrading fills the
+column and the index works with no upgrade step. The job is deduplicated for a
+day at the database level, so a rolling deploy across replicas queues one
+between them and a restart loop cannot re-trigger it more than daily.
+
+Because a redundant pass writes nothing, this doubles as a **repair** pass: a
+value knocked out of sync by a restore or a direct database edit is corrected on
+the next boot rather than persisting until someone notices.
+
+Set `KILN_OCCURRENCE_BACKFILL_ON_BOOT=false` to turn it off and run it yourself,
+at a time you choose:
 
 ```bash
 mix kiln.occurrences.backfill
