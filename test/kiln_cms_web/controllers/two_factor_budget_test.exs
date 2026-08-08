@@ -15,8 +15,7 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
 
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.PendingSignIn
-  alias KilnCMS.Accounts.RecoveryCodes
-  alias KilnCMS.Accounts.Totp
+  alias KilnCMS.TwoFactorFixtures
 
   @secret :crypto.strong_rand_bytes(20)
   @budget 3
@@ -41,21 +40,12 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
     :ok
   end
 
+  # The module-wide `@secret` is passed in so every account here shares it and
+  # `valid_code/0` can stay argument-free — the budget tests care about how many
+  # attempts an account gets, not about which secret they came from.
   defp enabled_user do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "budget-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin,
-      totp_secret: @secret,
-      totp_confirmed_at: DateTime.utc_now()
-    })
-  end
-
-  defp with_recovery_codes(user) do
-    codes = RecoveryCodes.generate()
-    user = Ash.Seed.update!(user, %{totp_recovery_hashes: Enum.map(codes, &RecoveryCodes.hash/1)})
-    {user, codes}
+    {user, _secret} = TwoFactorFixtures.enabled_user(secret: @secret)
+    user
   end
 
   # The state a browser is in after the first factor and before the second —
@@ -77,7 +67,7 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
 
   defp submit(conn, code), do: post(conn, ~p"/sign-in/verify", %{"code" => code})
 
-  defp valid_code, do: Totp.code_at(@secret, System.system_time(:second))
+  defp valid_code, do: TwoFactorFixtures.current_code(@secret)
 
   defp exhaust(user), do: Enum.each(1..@budget, fn _ -> verify(user, "000000") end)
 
@@ -137,7 +127,7 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
   end
 
   test "recovery codes draw on the same budget, not one of their own" do
-    {user, codes} = with_recovery_codes(enabled_user())
+    {user, codes} = TwoFactorFixtures.with_recovery_codes(enabled_user())
     on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
 
     exhaust(user)

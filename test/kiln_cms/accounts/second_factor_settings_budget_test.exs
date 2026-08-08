@@ -18,8 +18,8 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.RecoveryCodes
-  alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.User
+  alias KilnCMS.TwoFactorFixtures
 
   @secret :crypto.strong_rand_bytes(20)
   @budget 3
@@ -42,26 +42,27 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
     :ok
   end
 
+  # Recovery hashes are seeded straight in rather than through
+  # `with_recovery_codes/1`: these tests spend the budget against codes they
+  # never need to know, so the plaintext would be dead weight.
   defp enabled_user do
-    Ash.Seed.seed!(User, %{
-      email: "sfsettings-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: :admin,
-      totp_secret: @secret,
-      totp_confirmed_at: DateTime.utc_now(),
-      totp_recovery_hashes: Enum.map(RecoveryCodes.generate(), &RecoveryCodes.hash/1)
-    })
+    {user, _secret} =
+      TwoFactorFixtures.enabled_user(
+        secret: @secret,
+        totp_recovery_hashes: Enum.map(RecoveryCodes.generate(), &RecoveryCodes.hash/1)
+      )
+
+    user
   end
 
-  defp valid_code, do: Totp.code_at(@secret, System.system_time(:second))
+  defp valid_code, do: TwoFactorFixtures.current_code(@secret)
 
   defp with_pending(user) do
     pending = :crypto.strong_rand_bytes(20)
     Ash.Seed.update!(user, %{totp_pending_secret: pending})
   end
 
-  defp pending_code(user), do: Totp.code_at(user.totp_pending_secret, System.system_time(:second))
+  defp pending_code(user), do: TwoFactorFixtures.current_code(user.totp_pending_secret)
 
   defp throttled?({:error, %{errors: errors}}),
     do: Enum.any?(errors, &match?(%SecondFactorThrottled{}, &1))
@@ -86,8 +87,7 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
     pending = :crypto.strong_rand_bytes(20)
     updated = Ash.Seed.update!(user, %{totp_pending_secret: pending})
 
-    {updated,
-     %{code: Totp.code_at(pending, System.system_time(:second)), current_code: valid_code()}}
+    {updated, %{code: TwoFactorFixtures.current_code(pending), current_code: valid_code()}}
   end
 
   defp fresh_valid_attempt(_action, user), do: {user, %{code: valid_code()}}
