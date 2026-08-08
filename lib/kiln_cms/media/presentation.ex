@@ -79,13 +79,13 @@ defmodule KilnCMS.Media.Presentation do
   def srcset(item) do
     original =
       case item.width && HTMLSanitizer.safe_image_src(item.url) do
-        url when is_binary(url) -> ["#{url} #{item.width}w"]
+        url when is_binary(url) -> [{url, item.width}]
         _ -> []
       end
 
     case renderable(item, fn label, _variant -> source_format?(label) end) ++ original do
       [] -> nil
-      parts -> Enum.join(parts, ", ")
+      parts -> to_srcset(parts)
     end
   end
 
@@ -102,6 +102,31 @@ defmodule KilnCMS.Media.Presentation do
   Ordering is the whole contract of `<picture>`: a browser takes the **first**
   `<source>` whose `type` it supports, so the most efficient format has to come
   first. AVIF beats WebP beats the original.
+
+  ## A format is only offered when its ladder reaches the full width (#919)
+
+  A matching `<source>` **replaces** the `<img>`'s `srcset` outright — it does
+  not supplement it. So a format whose alternates stop short of `item.width`
+  does not merely miss the top rung; it removes the original from consideration
+  for every browser that supports that format.
+
+  `full.<format>` is what normally carries that top rung, and `write/4` drops a
+  variant it cannot encode with only a log line. A 17000×2000 panorama whose
+  `full.webp` exceeds libvips' WebP dimension limit therefore kept emitting
+  `<source type="image/webp" srcset="…thumb 400w, …medium 1024w">`, and every
+  WebP-capable browser upscaled a 1024px render of it — the exact regression
+  `full` exists to prevent.
+
+  So a format is offered only when its widest alternate reaches `item.width`.
+
+  Be clear about what suppression costs, because it is more than "the smaller
+  encoding": blocks render `sizes="(max-width: 768px) 100vw, 768px"`, so a 2x
+  display wants ~1536px, and against the `<img>` ladder
+  (`thumb 400w, medium 1024w, orig 17000w`) that selects the **original** — a
+  full-resolution download where the buggy `<source>` served a 1024px WebP.
+  It is still the right trade: it is exactly what every WebP-less browser
+  already gets, and the alternative is a visibly upscaled image. But it is a
+  bandwidth cost, not a codec-efficiency one.
   """
   @spec sources(map()) :: [%{type: String.t(), srcset: String.t()}]
   def sources(item) do
@@ -116,8 +141,24 @@ defmodule KilnCMS.Media.Presentation do
             not source_format?(label) and content_type(variant) == type
           end),
         parts != [],
-        do: %{type: type, srcset: Enum.join(parts, ", ")}
+        reaches_full_width?(item, parts),
+        do: %{type: type, srcset: to_srcset(parts)}
   end
+
+  # Whether this format's widest alternate is at least the item's intrinsic
+  # width. `full.<format>` is written at source resolution, so its presence is
+  # what normally satisfies this and its absence is what fails it.
+  #
+  # An item with no recorded width is not processed, so there is nothing to fall
+  # short of — and the `<img>` fallback has no original entry either, which
+  # makes the `<source>` no worse than what it replaces.
+  defp reaches_full_width?(%{width: width}, parts) when is_integer(width) do
+    Enum.any?(parts, fn {_url, w} -> is_integer(w) and w >= width end)
+  end
+
+  defp reaches_full_width?(_item, _parts), do: true
+
+  defp to_srcset(parts), do: Enum.map_join(parts, ", ", fn {url, w} -> "#{url} #{w}w" end)
 
   # `"<url> <width>w"` for every variant that passes `keep?`, excluding crops
   # and poster frames by their BASE label: `card.webp` is still the card crop,
@@ -127,6 +168,10 @@ defmodule KilnCMS.Media.Presentation do
   # Every url goes through `safe_image_src/1`: variants are generated
   # internally, but the original's url can come from an operator-set storage
   # prefix, and one unfiltered entry poisons the whole attribute.
+  # Returns `{url, width}` pairs rather than formatted strings: `sources/1` has
+  # to compare the widths against `item.width` before it decides whether to emit
+  # the format at all, and re-parsing them out of a joined srcset would be a
+  # second place for the shape to drift.
   defp renderable(item, keep?) do
     excluded = excluded_labels()
 
@@ -135,7 +180,7 @@ defmodule KilnCMS.Media.Presentation do
         keep?.(label, variant),
         safe = HTMLSanitizer.safe_image_src(url),
         is_binary(safe),
-        do: "#{safe} #{w}w"
+        do: {safe, w}
   end
 
   # A variant is in the source format when its key carries no format suffix —
