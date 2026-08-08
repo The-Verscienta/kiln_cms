@@ -381,6 +381,40 @@ defmodule KilnCMS.Search.BlockSearchTest do
       {:ok, rows} = SearchIndex.block_embeddings_for(:page, page.id, authorize?: false)
       assert length(rows) == 1
     end
+
+    test "publishing a dynamic-type entry enqueues block indexing too (#1012)" do
+      # `BlockEmbeddingWorker.load/3` knew page and post only, and its
+      # `reindex/1` catch-all turned the resulting `:error` into a silent `:ok`
+      # — so a dynamic entry never got a BlockEmbedding row, and therefore never
+      # surfaced as related content or a near-duplicate for anything, forever.
+      # Sibling of the Meilisearch gap, enqueued from the same FireWorker call.
+      actor = admin()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "bemb#{System.unique_integer([:positive])}", label: "Bemb"},
+          actor: actor
+        )
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(
+          definition.name,
+          %{
+            title: "Entry with blocks",
+            slug: slug(),
+            blocks: [%{type: :heading, content: "Indexed entry heading", order: 0}]
+          },
+          actor: actor
+        )
+
+      {:ok, entry} =
+        KilnCMS.CMS.ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+
+      KilnCMS.DataCase.drain_oban()
+
+      {:ok, rows} = SearchIndex.block_embeddings_for(:entry, entry.id, authorize?: false)
+      assert length(rows) == 1
+    end
   end
 
   describe "filtered recall (#998)" do
