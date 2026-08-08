@@ -205,7 +205,9 @@ which is the likeliest spreadsheet mistake and the hardest to spot afterwards.
 **Spreadsheet-safe both ways.** Values are RFC 4180 quoted, and a cell starting
 `=`, `+`, `-`, `@` is prefixed with `'` so no spreadsheet executes it as a
 formula. The reader undoes exactly that, so `=SUM(A1:A9)` survives a round trip
-unchanged while a genuine `'tis` keeps its apostrophe.
+unchanged while a genuine `'tis` keeps its apostrophe. A UTF-8 BOM — which both
+Excel and Google Sheets write — is stripped, and a quoted field that never
+closes (a truncated download) is refused rather than half-imported.
 
 Import goes through the same write path, conflict policy, dry run and report as
 every other import — so re-importing an unchanged file skips every row.

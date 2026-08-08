@@ -211,6 +211,29 @@ defmodule KilnCMS.Portability.CSVTest do
       assert Codec.parse("a,b\nc,d\n") == [["a", "b"], ["c", "d"]]
     end
 
+    # Excel and Google Sheets both write a UTF-8 BOM. Without stripping it the
+    # first header cell is "\uFEFFtitle", which the importer then rejects as an
+    # unknown column — breaking the one workflow this format exists for.
+    test "a UTF-8 BOM from a spreadsheet is stripped" do
+      assert Codec.parse("\uFEFFtitle,slug\r\nA,a\r\n") == [["title", "slug"], ["A", "a"]]
+    end
+
+    test "a spreadsheet-saved export still imports", ctx do
+      create!(ctx, %{title: "Leeds site", custom_fields: %{"city" => "Leeds"}})
+      {:ok, csv} = export_csv(ctx)
+
+      assert {:ok, [record]} = CSV.decode("\uFEFF" <> csv, ctx.name, ctx.scope)
+      assert record["title"] == "Leeds site"
+    end
+
+    # A truncated download or half-written file. Importing the surviving prefix
+    # is worse than refusing it.
+    test "an unterminated quoted field is refused, not silently truncated" do
+      assert_raise ArgumentError, ~r/never closed/, fn ->
+        Codec.parse(~s(a,"unterminated\r\nb,c\r\n))
+      end
+    end
+
     test "is the inverse of line/1 for awkward values" do
       row = ["plain", "with,comma", ~s(with "quote"), "with\nnewline", "=formula", "'tis"]
 
