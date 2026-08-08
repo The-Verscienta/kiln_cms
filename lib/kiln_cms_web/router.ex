@@ -379,6 +379,11 @@ defmodule KilnCMSWeb.Router do
       live "/editor/social", SocialLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
       live "/editor/types", TypeDefinitionLive, :index
+      # Per-site syndication policy (#719) — which types appear in this site's
+      # feeds and which carry their full body. Org-scoped for the same reason
+      # branding is: full-text syndication is a disclosure decision, and it used
+      # to live in a config file no tenant admin could reach.
+      live "/editor/feeds", FeedSettingsLive, :index
       # White-label branding for the current site (#48) — name, logo, colour.
       # Org-scoped: you brand the site you're on (switch org by host).
       live "/editor/branding", BrandingLive, :index

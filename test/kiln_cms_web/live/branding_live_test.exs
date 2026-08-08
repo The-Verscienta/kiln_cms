@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.BrandingLiveTest do
       user = authed_user(:editor)
       grant_org_admin(user, org)
 
-      {:ok, _lv, html} = org |> org_conn(conn) |> log_in(user) |> live(~p"/editor/branding")
+      {:ok, _lv, html} = conn |> org_conn(org) |> log_in(user) |> live(~p"/editor/branding")
 
       assert html =~ "Site name"
     end
@@ -60,7 +60,7 @@ defmodule KilnCMSWeb.BrandingLiveTest do
       on_exit(fn -> KilnCMS.Cache.bust_branding(other.id) end)
 
       {:ok, lv, _html} =
-        org |> org_conn(conn) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
+        conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
 
       lv
       |> form("#branding-form",
@@ -79,7 +79,7 @@ defmodule KilnCMSWeb.BrandingLiveTest do
 
     test "surfaces a validation error instead of writing", %{conn: conn, org: org} do
       {:ok, lv, _html} =
-        org |> org_conn(conn) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
+        conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/branding")
 
       html =
         lv
@@ -125,8 +125,6 @@ defmodule KilnCMSWeb.BrandingLiveTest do
                CMS.save_site_branding(%{site_name: "Nope"}, actor: user, tenant: org)
     end
   end
-
-  defp org_conn(org, conn), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
 
   defp seed_org do
     Ash.Seed.seed!(Accounts.Organization, %{

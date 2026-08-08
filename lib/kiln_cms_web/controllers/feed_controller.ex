@@ -247,10 +247,17 @@ defmodule KilnCMSWeb.FeedController do
 
   defp entries(org, descriptor, scope) do
     limit = Feeds.entry_limit()
-    types = if descriptor, do: [descriptor], else: Feeds.syndicated_types(org.id)
+    # Resolved once for the whole document (#719) and threaded down. Resolving
+    # it again for the type list would let a save landing between the two calls
+    # produce a document whose type list came from one policy and whose bodies
+    # came from another — and `cached_body/4` would then store that hybrid under
+    # a key the save had already cleared.
+    policy = Feeds.policy(org.id)
+    types = if descriptor, do: [descriptor], else: Feeds.syndicated_types(org.id, policy)
+    base_url = Tenant.base_url(org)
 
     types
-    |> Enum.flat_map(&type_entries(&1, org, scope, limit))
+    |> Enum.flat_map(&type_entries(&1, org, scope, limit, {policy, base_url}))
     # Ordered and capped on the SAME key the per-type reads selected on. Sorting
     # the merged set by `updated_at` instead would let a bulk copy-edit of fifty
     # old records evict a post published five minutes ago — silently, and
@@ -260,7 +267,7 @@ defmodule KilnCMSWeb.FeedController do
     |> Enum.take(limit)
   end
 
-  defp type_entries(descriptor, org, scope, limit) do
+  defp type_entries(descriptor, org, scope, limit, resolved) do
     descriptor
     |> ContentTypes.list!(
       authorize?: true,
@@ -281,7 +288,7 @@ defmodule KilnCMSWeb.FeedController do
         load: [:category, :tags]
       ]
     )
-    |> Enum.map(&entry(&1, descriptor, org))
+    |> Enum.map(&entry(&1, descriptor, org, resolved))
   end
 
   # Published *and* public — see the moduledoc. An `audience` other than
@@ -311,8 +318,11 @@ defmodule KilnCMSWeb.FeedController do
   defp select_fields(%{excerpt?: true}), do: @base_fields ++ [:excerpt]
   defp select_fields(_descriptor), do: @base_fields
 
-  defp entry(record, descriptor, org) do
-    base_url = Tenant.base_url(org)
+  # `base_url` arrives resolved rather than being recomputed here: this runs
+  # once per entry, and for an org with a custom domain it is a config read plus
+  # a URI parse/rebuild each time — up to `entry_limit` of them per rebuild, for
+  # a value `serialize/5` already computes once.
+  defp entry(record, descriptor, org, {policy, base_url}) do
     url = base_url <> locale_prefix(record.locale) <> public_path(record, descriptor)
     published_at = record.published_at || record.inserted_at
 
@@ -321,7 +331,7 @@ defmodule KilnCMSWeb.FeedController do
       url: url,
       title: record.title,
       summary: summary(record),
-      content: content(record, descriptor, org),
+      content: content(record, descriptor, org, policy),
       categories: categories(record),
       published_at: published_at,
       updated_at: record.updated_at
@@ -375,8 +385,8 @@ defmodule KilnCMSWeb.FeedController do
     |> Enum.find("", &(is_binary(&1) and &1 != ""))
   end
 
-  defp content(record, descriptor, org) do
-    if Feeds.full_content?(descriptor) do
+  defp content(record, descriptor, org, policy) do
+    if Feeds.full_content?(descriptor, policy) do
       rendered_html(record, descriptor, org)
     else
       nil

@@ -9,11 +9,11 @@ defmodule KilnCMS.Cache do
 
   In keeping with the project's minimal-ops goal this is in-process only (no
   Redis/Dragonfly); a shared multi-node cache is deferred until measured (D2).
-  Two keys are the exception to what that costs on a cluster —
-  `bust_code_injection/1` and `bust_branding/1` invalidate on every node via
-  `KilnCMS.Cache.ClusterBust`, because an operator deleting an executing script
-  should not have to wait out a TTL on the nodes they did not happen to hit
-  (#739).
+  A few keys are the exception to what that costs on a cluster —
+  `bust_code_injection/1`, `bust_branding/1` and `bust_feed_policy/1` invalidate
+  on every node via `KilnCMS.Cache.ClusterBust`, because an operator deleting an
+  executing script, or an admin turning off full-text syndication (#719), should
+  not have to wait out a TTL on the nodes they did not happen to hit (#739).
 
   Set `config :kiln_cms, KilnCMS.Cache, enabled: false` to bypass the cache
   (every read hits the source) without removing the supervised process.
@@ -21,6 +21,8 @@ defmodule KilnCMS.Cache do
   import Cachex.Spec, only: [hook: 1]
 
   alias KilnCMS.Cache.ClusterBust
+
+  require Logger
 
   @cache :kiln_cms_content_cache
 
@@ -183,6 +185,9 @@ defmodule KilnCMS.Cache do
       Cachex.del(@cache, type_registry_key(org_id))
       Cachex.del(@cache, calendar_types_key(org_id))
       Cachex.del(@cache, delivery_schema_key(org_id))
+      # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type
+      # write changes which types syndicate as surely as a settings save does.
+      Cachex.del(@cache, syndicated_types_key(org_id))
     end
 
     :ok
@@ -372,7 +377,16 @@ defmodule KilnCMS.Cache do
   locale feeds exist for as the only one whose feed went stale.
   """
   @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json | :ics) :: String.t()
-  def feed_key(org_id, type, format), do: "feed:#{org_id}:#{type || "all"}:#{format}"
+  def feed_key(org_id, type, format),
+    do: feed_key_prefix(org_id) <> "#{type || "all"}:#{format}"
+
+  # The one place the shape of a feed key's org segment is written. `bust_all_feeds/1`
+  # matches on it, and a hand-copied `"feed:#{org_id}:"` there would go on
+  # compiling — and silently match nothing — the day this gains a version
+  # segment or moves the id. That is the same split-brain the note above warns
+  # about for `feed_names/2` vs `FeedController.cache_scope/2`, and here it
+  # would fail in the direction that keeps serving full article bodies.
+  defp feed_key_prefix(org_id), do: "feed:#{org_id}:"
 
   @doc """
   Drop the feeds a write to `type` affects: that type's own, the site-wide ones
@@ -399,6 +413,99 @@ defmodule KilnCMS.Cache do
         Cachex.del(@cache, feed_key(org_id, name, format))
       end
     end
+
+    :ok
+  end
+
+  @doc """
+  Drop **every** cached feed document for one org, across types, scopes and
+  formats (#719).
+
+  The blunt counterpart to `bust_feeds/3`, for a write that names no record and
+  no type: a change to the org's syndication policy decides what is *in* every
+  feed body at once. It walks the keyspace rather than enumerating types,
+  because the set of types a stale key was written for is exactly what the
+  policy change may have altered — and the taxonomy scopes `bust_feeds/3`
+  deliberately leaves to the TTL are in here too.
+
+  That walk is the reason its callers run it **after** the write transaction,
+  never in an `after_action`: this is the only `Cachex.keys/1` in the codebase,
+  it materializes the whole (bounded) keyspace, and none of it should happen
+  with a Postgres transaction open. It also must not run before COMMIT for a
+  correctness reason — see `KilnCMS.CMS.Changes.BustFeedSettings`.
+
+  A failure to enumerate is logged rather than swallowed. Silently not busting
+  here means a feed keeps serving whatever the previous policy allowed, while
+  the admin is told the save succeeded.
+
+  **Node-local**, unlike `bust_feed_policy/1`. `KilnCMS.Cache.ClusterBust`
+  broadcasts a list of *keys*, and this is a prefix scan whose matching keys
+  differ per node — so making it cluster-wide needs an "intent" broadcast rather
+  than a key list. Tracked separately; the policy above is the half that decides
+  disclosure, and it does reach every node.
+  """
+  @spec bust_all_feeds(Ash.UUID.t()) :: :ok
+  def bust_all_feeds(org_id) do
+    if enabled?(), do: drop_feed_keys(org_id)
+    :ok
+  end
+
+  defp drop_feed_keys(org_id) do
+    prefix = feed_key_prefix(org_id)
+
+    case Cachex.keys(@cache) do
+      {:ok, keys} ->
+        # `is_binary/1` is load-bearing: not every cached key is a string (the
+        # point-in-time artifact reads cache under a tuple key).
+        for key <- keys, is_binary(key), String.starts_with?(key, prefix) do
+          Cachex.del(@cache, key)
+        end
+
+      other ->
+        Logger.warning("could not enumerate feed cache keys to bust: #{inspect(other)}")
+    end
+  end
+
+  @doc """
+  Cache key for a site's resolved feed syndication policy (#719) — which types
+  syndicate and which carry their full body, with the operator-level
+  `config :kiln_cms, :feeds` already folded in. Per-org: the whole point of the
+  key is that two tenants on one deployment resolve it differently.
+  """
+  @spec feed_policy_key(Ash.UUID.t()) :: String.t()
+  def feed_policy_key(org_id), do: "feed_policy:#{org_id}"
+
+  @doc """
+  Cache key for a site's resolved list of syndicating content types (#719).
+
+  Separate from `feed_policy_key/1` because it folds in the content-type
+  registry as well as the policy, so a `TypeDefinition` write invalidates it and
+  a `FeedSettings` write invalidates both. Cached for the reason
+  `calendar_types_key/1` is: `KilnCMSWeb.FeedController` resolves it *before*
+  the response cache is consulted, so an uncached answer costs a registry walk
+  on every feed request including hits and 404s.
+  """
+  @spec syndicated_types_key(Ash.UUID.t()) :: String.t()
+  def syndicated_types_key(org_id), do: "content_types:syndicated:#{org_id}"
+
+  @doc """
+  Drop a site's cached syndication policy after a settings save. Called by
+  `Changes.BustFeedSettings`, alongside `bust_all_feeds/1` — the policy decides
+  the contents of the documents, so leaving those cached would hide the save for
+  the whole TTL.
+  """
+  @spec bust_feed_policy(Ash.UUID.t()) :: :ok
+  def bust_feed_policy(org_id) do
+    # Cluster-wide (#739), for the reason code injection is: the policy decides
+    # whether a site's complete article bodies go out to every anonymous
+    # subscriber, and on a multi-node deployment an admin who turns that off
+    # would otherwise watch roughly half of all fetches keep serving full text
+    # until the TTL — with no way to tell whether the switch worked.
+    #
+    # The derived type list rides along: it is a function of the policy, so it
+    # can never outlive it.
+    if enabled?(),
+      do: ClusterBust.broadcast([feed_policy_key(org_id), syndicated_types_key(org_id)])
 
     :ok
   end

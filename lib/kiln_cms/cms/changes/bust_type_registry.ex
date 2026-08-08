@@ -19,7 +19,8 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
 
   @impl true
   def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn _changeset, record ->
+    changeset
+    |> Ash.Changeset.after_action(fn _changeset, record ->
       # The type registry, sitemap and llms.txt are all per-org (#336): bust the
       # writing type's own site so its editors/delivery see the change at once
       # (another org's cached registry is unaffected).
@@ -28,5 +29,23 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
       KilnCMS.Cache.bust_llms(record.org_id)
       {:ok, record}
     end)
+    |> Ash.Changeset.after_transaction(&bust_feeds/2)
   end
+
+  # The feed *documents* (#719). `has_published_feed` is the other half of
+  # `KilnCMS.Feeds.syndicated?/2`: turning it off stops `/recipes/feed.xml`
+  # resolving at once, but the already-built site-wide feed kept listing recipe
+  # entries until its TTL — and turning it on left the new type missing from
+  # that feed for five minutes, with nothing on either page to explain why.
+  #
+  # After the transaction, not beside the busts above, for two reasons: a bust
+  # that runs before COMMIT can be undone by a concurrent reader re-caching the
+  # pre-write answer (see `BustFeedSettings`), and `bust_all_feeds/1` walks the
+  # keyspace, which has no business happening with a Postgres transaction open.
+  defp bust_feeds(_changeset, {:ok, record} = result) do
+    KilnCMS.Cache.bust_all_feeds(record.org_id)
+    result
+  end
+
+  defp bust_feeds(_changeset, other), do: other
 end

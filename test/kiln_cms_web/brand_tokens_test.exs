@@ -46,27 +46,27 @@ defmodule KilnCMSWeb.BrandTokensTest do
     end
 
     test "emits both the light and the dark rule", %{conn: conn, org: org} do
-      html = org |> org_conn(conn) |> get(~p"/blog") |> html_response(200)
+      html = conn |> org_conn(org) |> get(~p"/blog") |> html_response(200)
 
       assert html =~ ":root{--color-primary:"
       assert html =~ ~s([data-theme="dark"]{--color-primary:)
     end
 
     test "does not HTML-escape the dark selector", %{conn: conn, org: org} do
-      html = org |> org_conn(conn) |> get(~p"/blog") |> html_response(200)
+      html = conn |> org_conn(org) |> get(~p"/blog") |> html_response(200)
 
       refute html =~ "data-theme=&quot;dark&quot;"
     end
 
     test "emits the <style> block after the stylesheet link so it wins", %{conn: conn, org: org} do
-      html = org |> org_conn(conn) |> get(~p"/blog") |> html_response(200)
+      html = conn |> org_conn(org) |> get(~p"/blog") |> html_response(200)
 
       assert :binary.match(html, "/assets/css/app.css") <
                :binary.match(html, ":root{--color-primary:")
     end
 
     test "uses the brand name in the chrome and the title suffix", %{conn: conn, org: org} do
-      html = org |> org_conn(conn) |> get(~p"/blog") |> html_response(200)
+      html = conn |> org_conn(org) |> get(~p"/blog") |> html_response(200)
 
       assert html =~ "Acme Docs"
       assert html =~ "Powered by Acme Docs."
@@ -77,7 +77,7 @@ defmodule KilnCMSWeb.BrandTokensTest do
       conn: conn,
       org: org
     } do
-      branded = org |> org_conn(conn) |> get(~p"/blog")
+      branded = conn |> org_conn(org) |> get(~p"/blog")
       stock = Phoenix.ConnTest.build_conn() |> get(~p"/blog")
 
       # Identical apart from the per-request script nonce. In particular
@@ -99,7 +99,7 @@ defmodule KilnCMSWeb.BrandTokensTest do
     test "hides the footer line entirely when switched off", %{conn: conn, org: org} do
       brand(org, %{site_name: "Acme Docs", show_attribution: false})
 
-      html = org |> org_conn(conn) |> get(~p"/blog") |> html_response(200)
+      html = conn |> org_conn(org) |> get(~p"/blog") |> html_response(200)
 
       refute html =~ "Powered by"
     end
@@ -121,8 +121,6 @@ defmodule KilnCMSWeb.BrandTokensTest do
     CMS.save_site_branding!(attrs, actor: platform_admin(), tenant: org)
     KilnCMS.Cache.bust_branding(org.id)
   end
-
-  defp org_conn(org, conn), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
 
   defp seed_org do
     Ash.Seed.seed!(Accounts.Organization, %{

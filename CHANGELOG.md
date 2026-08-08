@@ -52,6 +52,31 @@ migration, a rewritten column, a dropped config key).
   it, not every recurrence inside it. Making a single occurrence addressable in
   its own right is a different feature and is named as such in the docs.
 
+- **Feed syndication is a per-site setting** (#719). `/editor/feeds` lists every
+  content type a site has and lets an org admin say, per type, whether it appears
+  in the site's Atom and JSON feeds and whether its entries carry the rendered
+  body rather than a summary.
+
+  Both used to be `config :kiln_cms, :feeds` only, which is the wrong grain for a
+  multi-tenant install: compiled types like `post` are shared by every
+  organization on a deployment, so an operator enabling `full_content: ["post"]`
+  for one tenant's newsletter handed *every* tenant's complete articles to any
+  anonymous scraper — and no tenant admin could opt out, because the switch lived
+  in a file they cannot edit. `exclude:` inverted the same way.
+
+  The config keys still work as the operator-level default beneath a site's own
+  settings, so nothing changes for a deployment that does not open the page. An
+  empty saved list means *none*, which is deliberately not the same as never
+  having saved: that is what lets a site turn full content off while the
+  deployment default has it on. `entry_limit` stays deployment-wide — it bounds
+  server work, not a publishing choice.
+
+  "In feeds" is the switch ActivityPub already read, so taking a type out of a
+  site's feeds also stops announcing it to the fediverse; the page says so. If
+  the settings row cannot be read at all, feeds fall back to summaries only
+  rather than to the config, so a transient fault cannot re-enable full text for
+  a site that turned it off.
+
 - **Content experiments — A/B testing published content** (#499, phase 1).
   An experiment holds two or more **variants** of part of a published document —
   a headline, a CTA block — and measures which converts. `mix kiln.experiment`

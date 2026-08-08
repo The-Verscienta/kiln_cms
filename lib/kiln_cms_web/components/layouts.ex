@@ -638,6 +638,15 @@ defmodule KilnCMSWeb.Layouts do
             path: ~p"/editor/fields",
             icon: "hero-adjustments-horizontal"
           },
+          # Next to Content types, not down with Mail: what a feed carries is a
+          # statement about content types, and the "has a public index" switch
+          # this page defers to lives one item up (#719).
+          %{
+            key: :feeds,
+            label: gettext("Feeds"),
+            path: ~p"/editor/feeds",
+            icon: "hero-rss"
+          },
           %{
             key: :forms,
             label: gettext("Forms"),

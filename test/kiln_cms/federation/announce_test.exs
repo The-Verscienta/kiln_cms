@@ -159,7 +159,16 @@ defmodule KilnCMS.Federation.AnnounceTest do
 
       original = Application.get_env(:kiln_cms, :feeds, [])
       Application.put_env(:kiln_cms, :feeds, Keyword.put(original, :exclude, ["post"]))
-      on_exit(fn -> Application.put_env(:kiln_cms, :feeds, original) end)
+
+      # The resolved policy is cached per org (#719), so the config layer under
+      # it is only re-read after a bust — in production the operator config
+      # can't change without a restart, but a test changes it mid-run.
+      KilnCMS.Cache.bust_feed_policy(org_id)
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, :feeds, original)
+        KilnCMS.Cache.bust_feed_policy(org_id)
+      end)
 
       assert :ok = announce(post, "Create", org_id)
       assert [] = deliveries(org_id)
