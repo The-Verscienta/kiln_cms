@@ -100,7 +100,30 @@ defmodule KilnCMSWeb.DuplicateContentTest do
     assert copy.state == :draft
   end
 
-  test "a refused duplicate flashes instead of crashing the list", %{conn: conn} do
+  # This used to assert the opposite — that clicking Duplicate on a type the
+  # editor may not author produces an error flash. That was institutionalizing
+  # the bug (#926): the button had no business being there, and its only
+  # possible outcome was that flash. The row is now gated on the same question
+  # the create policy asks, so the button is absent.
+  test "a type the editor may not author offers no row actions", %{conn: conn} do
+    admin = authed_user(:admin)
+    source = CMS.create_page!(%{title: "Off limits", slug: slug()}, actor: admin)
+
+    scoped = authed_user(:editor)
+
+    {:ok, scoped} =
+      KilnCMS.Accounts.manage_user_access(scoped, %{editable_types: ["post"]}, actor: admin)
+
+    {:ok, lv, html} = conn |> log_in(scoped) |> live(~p"/editor")
+
+    refute has_element?(lv, "button[phx-click='duplicate'][phx-value-id='#{source.id}']")
+    # Nor the "New page" button for a type they cannot author.
+    refute html =~ "New page"
+  end
+
+  # The server side still refuses, whatever the client sends — the gating is a
+  # usability fix, not the authorization.
+  test "a duplicate posted for an unauthored type is still refused", %{conn: conn} do
     admin = authed_user(:admin)
     source = CMS.create_page!(%{title: "Off limits", slug: slug()}, actor: admin)
 
@@ -111,12 +134,8 @@ defmodule KilnCMSWeb.DuplicateContentTest do
 
     {:ok, lv, _html} = conn |> log_in(scoped) |> live(~p"/editor")
 
-    html =
-      lv
-      |> element("button[phx-click='duplicate'][phx-value-id='#{source.id}']")
-      |> render_click()
-
-    assert html =~ "Couldn&#39;t duplicate that content."
+    assert render_click(lv, "duplicate", %{"kind" => "page", "id" => source.id}) =~
+             "Couldn&#39;t duplicate that content."
   end
 
   # `kind` and `id` ride on the clicked row, so they are client input. A crafted
