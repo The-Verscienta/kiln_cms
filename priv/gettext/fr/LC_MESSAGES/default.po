@@ -1771,7 +1771,7 @@ msgstr "Options (une par ligne — champ de sélection uniquement)"
 msgid "Page %{page}"
 msgstr "Page %{page}"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:976
+#: lib/kiln_cms_web/controllers/content_controller.ex:1024
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex:7
 #, elixir-autogen, elixir-format
 msgid "Page not found"
