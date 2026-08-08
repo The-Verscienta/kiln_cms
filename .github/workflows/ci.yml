@@ -586,8 +586,37 @@ jobs:
         run: mix ash.codegen --check
 
   image:
-    name: Release image (build only)
+    name: Release image (build only, ${{ matrix.name }})
     runs-on: ubuntu-latest
+
+    # Two legs: the core image, and one with a project overlay activated (#988).
+    #
+    # The overlay leg exists because `ARG PROJECT` guards a `RUN if [ -n
+    # "$PROJECT" ]` block that the core build never enters — so half the
+    # Dockerfile shipped unexercised, in exactly the state #600 exists to close.
+    # Its failure mode is the one the Dockerfile's own comment names: the
+    # release builds green and boots, then 500s on the first request that
+    # touches a project domain.
+    #
+    # The `overlay_drift` job mirrors the same three steps in Elixir (`cp
+    # project.exs`, `cp -R priv/.`) to check schema drift. That proves the
+    # activation is *coherent*, not that the Dockerfile's copy of it runs — and
+    # the two are the same fact stated twice, so they can drift. This leg is the
+    # only thing that executes the Docker one. It also covers `priv/` merging,
+    # which nothing on the Elixir side does.
+    #
+    # Roughly doubles the job's wall time in the worst case and much less in
+    # practice: everything up to `COPY projects projects` is byte-identical
+    # between the legs, so the second build reads those layers from the shared
+    # `type=gha` cache rather than recompiling the dep tree.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            project: ""
+          - name: overlay
+            project: acupuncture
 
     # The release image is the one artifact nothing else in CI exercises, and
     # the failures it hides are total: #573 raised mix.exs's `elixir:`
@@ -644,6 +673,11 @@ jobs:
         with:
           context: .
           push: false
+          # Empty on the core leg, which is exactly the default — so that leg
+          # builds the same image it always did, and the overlay leg is the
+          # only behaviour change.
+          build-args: |
+            PROJECT=${{ matrix.project }}
           # Read the cache everywhere, WRITE it only on a push to main.
           #
           # GHA caches are ref-scoped: a PR branch reads main's scope but writes

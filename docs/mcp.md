@@ -98,8 +98,15 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 > rules are identical — prefer the merge verbs for a partial update, don't
 > combine a complete-set argument with its verbs, and don't list one id in both.
 >
-> They are **not** in the response, so a `remove_related_*` no-op is still
-> unverifiable from the result alone; read the record back if it matters (#996).
+> They come back too, as `related_links` — but **only when the call named one
+> of those arguments** (#996). A write that never mentions related links does
+> not carry them, because a document may have many and most writes do not touch
+> them.
+>
+> `related_links` is a projection: `[{"id": …, "title": …, "slug": …}]`, not the
+> related records. That is deliberate — loading the relationship would put whole
+> related posts, bodies included, into every write response, since `load` cannot
+> project.
 
 The tool set lives in the `tools` block on `KilnCMS.CMS` and the
 `config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile

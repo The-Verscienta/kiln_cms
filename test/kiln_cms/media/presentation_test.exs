@@ -83,12 +83,17 @@ defmodule KilnCMS.Media.PresentationTest do
 
   describe "sources/1" do
     test "one entry per alternate encoding, most efficient first" do
+      # Each format carries its `full.<format>` — the top rung at the item's own
+      # width. Without it the format is suppressed entirely (see below), so a
+      # fixture that omits it is testing the wrong thing.
       sources =
         item(%{
           "thumb" => variant("/uploads/t.jpg", 400, "image/jpeg"),
           "thumb.webp" => variant("/uploads/t.webp", 400, "image/webp"),
           "medium.webp" => variant("/uploads/m.webp", 1024, "image/webp"),
-          "thumb.avif" => variant("/uploads/t.avif", 400, "image/avif")
+          "full.webp" => variant("/uploads/f.webp", 1600, "image/webp"),
+          "thumb.avif" => variant("/uploads/t.avif", 400, "image/avif"),
+          "full.avif" => variant("/uploads/f.avif", 1600, "image/avif")
         })
         |> Presentation.sources()
 
@@ -97,13 +102,67 @@ defmodule KilnCMS.Media.PresentationTest do
       assert [%{type: "image/avif"}, %{type: "image/webp"} = webp] = sources
       assert webp.srcset =~ "/uploads/t.webp 400w"
       assert webp.srcset =~ "/uploads/m.webp 1024w"
+      assert webp.srcset =~ "/uploads/f.webp 1600w"
+    end
+
+    test "a format whose ladder stops short of the full width is not offered (#919)" do
+      # A matching `<source>` REPLACES the `<img>`'s srcset rather than adding
+      # to it, so a webp ladder capping at 1024 on a 1600px item does not merely
+      # lose the top rung — it takes the original out of consideration for every
+      # webp-capable browser, which then upscales 1024px. `write/4` drops a
+      # variant it cannot encode with only a log line, so this is reachable
+      # whenever `full.webp` fails (libvips' 16383px WebP dimension limit).
+      sources =
+        item(%{
+          "thumb" => variant("/uploads/t.jpg", 400, "image/jpeg"),
+          "thumb.webp" => variant("/uploads/t.webp", 400, "image/webp"),
+          "medium.webp" => variant("/uploads/m.webp", 1024, "image/webp")
+        })
+        |> Presentation.sources()
+
+      assert sources == []
+    end
+
+    test "one format can be offered while another is suppressed (#919)" do
+      # The check is per format: losing webp's top rung must not cost avif its
+      # `<source>` as well.
+      sources =
+        item(%{
+          "medium.webp" => variant("/uploads/m.webp", 1024, "image/webp"),
+          "medium.avif" => variant("/uploads/m.avif", 1024, "image/avif"),
+          "full.avif" => variant("/uploads/f.avif", 1600, "image/avif")
+        })
+        |> Presentation.sources()
+
+      assert [%{type: "image/avif", srcset: srcset}] = sources
+      assert srcset =~ "/uploads/f.avif 1600w"
+    end
+
+    test "an alternate wider than the original still counts as reaching it" do
+      # `>=`, not `==`: a variant is never upscaled past the source, but pinning
+      # equality would make an off-by-one in the recorded width suppress a
+      # perfectly good ladder.
+      assert [%{type: "image/webp"}] =
+               item(%{"full.webp" => variant("/uploads/f.webp", 1601, "image/webp")})
+               |> Presentation.sources()
+    end
+
+    test "an item with no recorded width is still offered" do
+      # Nothing to fall short of, and the `<img>` fallback carries no original
+      # entry either — so the `<source>` is no worse than what it replaces.
+      assert [%{type: "image/webp"}] =
+               item(%{"thumb.webp" => variant("/uploads/t.webp", 400, "image/webp")}, %{
+                 width: nil
+               })
+               |> Presentation.sources()
     end
 
     test "excludes crops, like srcset does" do
       [%{srcset: srcset}] =
         item(%{
           "thumb.webp" => variant("/uploads/t.webp", 400, "image/webp"),
-          "card.webp" => variant("/uploads/c.webp", 800, "image/webp")
+          "card.webp" => variant("/uploads/c.webp", 800, "image/webp"),
+          "full.webp" => variant("/uploads/f.webp", 1600, "image/webp")
         })
         |> Presentation.sources()
 

@@ -46,25 +46,27 @@ defmodule KilnCMS.CMS do
   # `category` comes along for the same reason: `category_id` is echoed back as
   # an attribute, but a uuid is not something a model can check a name against.
   #
-  # Tags and category only, and only on the `update_*` tools:
+  # The sibling links (`related_post_ids` and friends, #637) come from the same
+  # `merge_changes` macro with the same `:ignore` semantics, so their removals
+  # were just as unverifiable — closed in #996, but not by adding them here.
+  # Loading the relationship would put whole related records, bodies included,
+  # into every write response, because `load` cannot project: `AshAi.Serializer`
+  # emits `default_attributes(resource) ++ load_fields`, an append, and Ash's
+  # load of an attribute is an ensure-selected no-op — so a field list reads
+  # like a contract while the payload carries every public attribute regardless.
+  # (That is also why `tags`/`category` are written as a bare relationship list:
+  # as they behave, so a later `KilnCMS.CMS.Taxonomy` attribute cannot widen
+  # them silently under a list that claims otherwise.)
   #
-  #   * The sibling links (`related_post_ids` and friends, #637) come from the
-  #     same `merge_changes` macro with the same `:ignore` semantics, so their
-  #     removals are just as unverifiable — but loading them would put whole
-  #     related records, bodies included, into every write response. That needs
-  #     its own shape, so it is #996 rather than a line here.
-  #   * `create_*` gains nothing. On `:create`, `tag_ids` is `append_and_remove`
-  #     and hard-errors on an unknown id, and `category_id` is echoed already —
-  #     a create's links are fully determined by the request that made it.
+  # So related links go through a `related_links` CALCULATION, which serializes
+  # as its own value and therefore projects — and they are loaded only when the
+  # call actually named a related argument. `KilnCMS.CMS.McpLoads` resolves
+  # both, per call.
   #
-  # A bare relationship list, not `[tags: [:id, :name, :slug]]`: `load` cannot
-  # project. `AshAi.Serializer` emits `default_attributes(resource) ++
-  # load_fields`, an append, and Ash's load of an attribute is an
-  # ensure-selected no-op — so the field list read like a contract while the
-  # payload carried every public attribute of Tag and Category regardless.
-  # Writing it as it behaves keeps a later `KilnCMS.CMS.Taxonomy` attribute from
-  # widening this silently under a list that says otherwise.
-  @link_load [:tags, :category]
+  # `create_*` gains nothing either way. On `:create`, `tag_ids` is
+  # `append_and_remove` and hard-errors on an unknown id, and `category_id` is
+  # echoed already — a create's links are fully determined by the request that
+  # made it.
 
   # LLM-facing tools, served over the `/mcp` endpoint (see docs/mcp.md and
   # `KilnCMSWeb.Router`). Every call runs as the API-key's owning user through
@@ -113,7 +115,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_page, KilnCMS.CMS.Page, :update do
       description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint}"
-      load @link_load
+      load &KilnCMS.CMS.McpLoads.update/1
     end
 
     tool :submit_page_for_review, KilnCMS.CMS.Page, :submit_for_review do
@@ -126,7 +128,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_post, KilnCMS.CMS.Post, :update do
       description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint}"
-      load @link_load
+      load &KilnCMS.CMS.McpLoads.update/1
     end
 
     tool :submit_post_for_review, KilnCMS.CMS.Post, :submit_for_review do
@@ -139,7 +141,7 @@ defmodule KilnCMS.CMS do
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do
       description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint}"
-      load @link_load
+      load &KilnCMS.CMS.McpLoads.update/1
     end
 
     tool :submit_entry_for_review, KilnCMS.CMS.Entry, :submit_for_review do

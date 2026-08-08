@@ -679,13 +679,12 @@ defmodule KilnCMS.Portability.Import do
     _error -> nil
   end
 
-  defp org_id(opts) do
-    case Keyword.get(opts, :tenant) do
-      %{id: id} -> id
-      id when is_binary(id) -> id
-      _ -> KilnCMS.Accounts.default_org_id()
-    end
-  end
+  # `KilnCMS.Accounts.org_id/1` is the canonical normalization (#527). The private
+  # copy this replaced had the loose `%{id: id}` clause that helper exists to
+  # prevent, plus a catch-all silently falling back to the default org — so a
+  # tenant shape neither clause matched made the registry answer for the DEFAULT
+  # org while the reads ran under the caller's.
+  defp org_id(opts), do: KilnCMS.Accounts.org_id(Keyword.get(opts, :tenant))
 
   # The source's publication date, put back after the publish transition set it
   # to now. `published_at` is not in the create action's `accept` list (it is

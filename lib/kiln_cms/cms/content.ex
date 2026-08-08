@@ -2362,6 +2362,20 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
+        # The curated related links, projected to `[%{id, title, slug}]` (#996).
+        # A calculation rather than `load [related_*s: [...]]` because `load`
+        # cannot project — see `KilnCMS.CMS.Calculations.RelatedLinks`.
+        calculate :related_links,
+                  {:array, :map},
+                  {KilnCMS.CMS.Calculations.RelatedLinks, relationship: unquote(related_name)} do
+          public? true
+          # No expression, so a filter or sort would raise out of AshSql as a
+          # 500; declaring them unusable rejects at the query layer instead —
+          # same reason `word_count` does.
+          filterable? false
+          sortable? false
+        end
+
         # Full-text relevance of a row against a query — higher is more
         # relevant. Used to order the `:search` action; `query`/`locale` are the
         # same values that action filters on, so the weighted `search_vector` is

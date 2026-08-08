@@ -387,14 +387,14 @@ defmodule KilnCMS.CMS.ContentTypes do
   def list!(type, opts \\ []) do
     case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} -> CMS.list_entries!(scoped(opts, definition))
-      _compiled -> call(type, "list_#{plural(type)}!", [opts])
+      _compiled -> call(type, "list_#{plural(type, opts)}!", [opts], opts)
     end
   end
 
   def get_record!(type, id, opts \\ []) do
     case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} -> CMS.get_entry!(id, scoped(opts, definition))
-      _compiled -> call(type, "get_#{atom(type)}!", [id, opts])
+      _compiled -> call(type, "get_#{atom(type, opts)}!", [id, opts], opts)
     end
   end
 
@@ -402,7 +402,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   def get_record(type, id, opts \\ []) do
     case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} -> CMS.get_entry(id, scoped(opts, definition))
-      _compiled -> call(type, "get_#{atom(type)}", [id, opts])
+      _compiled -> call(type, "get_#{atom(type, opts)}", [id, opts], opts)
     end
   end
 
@@ -422,7 +422,12 @@ defmodule KilnCMS.CMS.ContentTypes do
         CMS.get_published_entry_by_slug!(slug, locale, definition.id, params, opts)
 
       _compiled ->
-        call(type, "get_published_#{atom(type)}_by_slug!", [slug, locale, params, opts])
+        call(
+          type,
+          "get_published_#{atom(type, opts)}_by_slug!",
+          [slug, locale, params, opts],
+          opts
+        )
     end
   end
 
@@ -435,7 +440,7 @@ defmodule KilnCMS.CMS.ContentTypes do
         CMS.get_entry_teaser_by_slug!(slug, locale, definition.id, opts)
 
       _compiled ->
-        call(type, "get_#{atom(type)}_teaser_by_slug!", [slug, locale, opts])
+        call(type, "get_#{atom(type, opts)}_teaser_by_slug!", [slug, locale, opts], opts)
     end
   end
 
@@ -451,7 +456,7 @@ defmodule KilnCMS.CMS.ContentTypes do
         CMS.get_locked_entry_by_slug!(slug, locale, definition.id, params, opts)
 
       _compiled ->
-        call(type, "get_locked_#{atom(type)}_by_slug!", [slug, locale, params, opts])
+        call(type, "get_locked_#{atom(type, opts)}_by_slug!", [slug, locale, params, opts], opts)
     end
   end
 
@@ -475,7 +480,7 @@ defmodule KilnCMS.CMS.ContentTypes do
         CMS.list_entry_translations!(slug, definition.id, params, opts)
 
       _compiled ->
-        call(type, "list_#{atom(type)}_translations!", [slug, params, opts])
+        call(type, "list_#{atom(type, opts)}_translations!", [slug, params, opts], opts)
     end
   end
 
@@ -485,23 +490,29 @@ defmodule KilnCMS.CMS.ContentTypes do
         CMS.create_entry!(Map.put(attrs, :type_definition_id, definition.id), opts)
 
       _compiled ->
-        call(type, "create_#{atom(type)}!", [attrs, opts])
+        call(type, "create_#{atom(type, opts)}!", [attrs, opts], opts)
     end
   end
 
   @doc "Generic update through the type's own code interface (primary `:update`)."
   def update(type, record, attrs, opts \\ []),
-    do: call(type, "update_#{atom(type)}", [record, attrs, opts])
+    do: call(type, "update_#{atom(type, opts)}", [record, attrs, opts], opts)
 
-  def list_versions!(type, opts \\ []), do: call(type, "list_#{atom(type)}_versions!", [opts])
+  def list_versions!(type, opts \\ []),
+    do: call(type, "list_#{atom(type, opts)}_versions!", [opts], opts)
 
   def restore_version(type, record, version_id, opts \\ []) do
-    call(type, "restore_#{atom(type)}_version", [record, %{version_id: version_id}, opts])
+    call(
+      type,
+      "restore_#{atom(type, opts)}_version",
+      [record, %{version_id: version_id}, opts],
+      opts
+    )
   end
 
   @doc "Run a workflow transition: publish, unpublish, submit, archive, or unarchive."
   def transition(type, verb, record, opts \\ []) do
-    call(type, transition_fun(atom(type), verb), [record, %{}, opts])
+    call(type, transition_fun(atom(type, opts), verb), [record, %{}, opts], opts)
   end
 
   def list_trashed!(type, opts \\ []) do
@@ -510,16 +521,18 @@ defmodule KilnCMS.CMS.ContentTypes do
         CMS.list_trashed_entries!(scoped(opts, definition))
 
       _compiled ->
-        call(type, "list_trashed_#{plural(type)}!", [opts])
+        call(type, "list_trashed_#{plural(type, opts)}!", [opts], opts)
     end
   end
 
   def restore(type, record, opts \\ []),
-    do: call(type, "restore_#{atom(type)}", [record, %{}, opts])
+    do: call(type, "restore_#{atom(type, opts)}", [record, %{}, opts], opts)
 
-  def purge(type, record, opts \\ []), do: call(type, "purge_#{atom(type)}", [record, opts])
+  def purge(type, record, opts \\ []),
+    do: call(type, "purge_#{atom(type, opts)}", [record, opts], opts)
 
-  def destroy(type, record, opts \\ []), do: call(type, "destroy_#{atom(type)}", [record, opts])
+  def destroy(type, record, opts \\ []),
+    do: call(type, "destroy_#{atom(type, opts)}", [record, opts], opts)
 
   # --- internals -------------------------------------------------------------
 
@@ -527,11 +540,17 @@ defmodule KilnCMS.CMS.ContentTypes do
   # type's domain and call it. `to_existing_atom` (not interpolation) keeps this
   # safe for request-derived types — the code interfaces are defined at compile
   # time.
-  defp call(type, fun_name, args) do
-    apply(domain_for(type), String.to_existing_atom(fun_name), args)
+  defp call(type, fun_name, args, opts) do
+    apply(domain_for(type, opts), String.to_existing_atom(fun_name), args)
   end
 
-  defp domain_for(type), do: get!(type).domain
+  # Resolved under the CALLER's org, not the default one. A dynamic type belongs
+  # to an organization, so looking it up without the tenant raised "unknown
+  # content type" for every admin-defined type outside the default org — and
+  # because `transition/4`'s only caller wrapped it in a rescue, an import under
+  # `--org staging` created every record and then silently left each one a draft
+  # while reporting it published (#972).
+  defp domain_for(type, opts), do: get!(type, org_from(opts)).domain
 
   defp transition_fun(type, "publish"), do: "publish_#{type}"
   defp transition_fun(type, "unpublish"), do: "unpublish_#{type}"
@@ -542,19 +561,22 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   # Dynamic types resolve to the generic entry tier for interface naming, so
   # convention dispatch (`publish_entry`, `list_entry_versions!`, …) just works.
-  defp atom(%{source: :dynamic}), do: :entry
-  defp atom(%{type: type}), do: type
-  defp atom(type) when is_atom(type), do: type
+  defp atom(%{source: :dynamic}, _opts), do: :entry
+  defp atom(%{type: type}, _opts), do: type
+  defp atom(type, _opts) when is_atom(type), do: type
 
-  defp atom(type) when is_binary(type) do
-    case get!(type) do
+  # Only the binary clause needs a lookup, and so only it needs the org — but
+  # that is the dynamic-type clause, which is exactly the one that was resolving
+  # against the default org.
+  defp atom(type, opts) when is_binary(type) do
+    case get!(type, org_from(opts)) do
       %{source: :dynamic} -> :entry
       ct -> ct.type
     end
   end
 
-  defp plural(type) do
-    case get!(type) do
+  defp plural(type, opts) do
+    case get!(type, org_from(opts)) do
       # The descriptor's `plural` is the human label ("Recipes"), not the
       # interface-name plural — entries share one interface set.
       %{source: :dynamic} -> "entries"
@@ -563,17 +585,12 @@ defmodule KilnCMS.CMS.ContentTypes do
   end
 
   # The request org for resolving a dynamic type (epic #336): the `:tenant` opt
-  # normalized to an `org_id` — an Organization struct (LiveView `current_org`), a
-  # raw uuid (controllers), or nil → the sole org (the single-org rollout / any
-  # tenant-less internal caller). So a dynamic type resolves under the writing
-  # site, and the default keeps every existing caller working unchanged.
-  defp org_from(opts) do
-    case Keyword.get(opts, :tenant) do
-      nil -> KilnCMS.Accounts.default_org_id()
-      %{id: id} -> id
-      id when is_binary(id) -> id
-    end
-  end
+  # normalized to an org id. `KilnCMS.Accounts.org_id/1` is that normalization —
+  # this used to restate it, including the loose `%{id: id}` clause #527 exists
+  # to prevent, which quietly accepts a `User`, a `Page` or a socket and hands
+  # its id downstream as a tenant, where it surfaces not as an error but as an
+  # empty registry.
+  defp org_from(opts), do: KilnCMS.Accounts.org_id(Keyword.get(opts, :tenant))
 
   # Scope an Entry code-interface call to one dynamic type. Internal callers
   # pass keyword `query`/`filter` opts (or none), so a keyword merge suffices.

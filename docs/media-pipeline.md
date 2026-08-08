@@ -95,6 +95,25 @@ the point:
   no `<source>` at all — its variants are already the `<img>` fallback, and
   offering them again would only drop the original from consideration.
 
+A format is offered **only when its ladder reaches the item's own width**
+(#919). The replacement semantics above cut both ways: a `<source>` whose
+alternates stop short of the original does not merely miss the top rung, it
+takes the original out of consideration for every browser supporting that
+format. `full.<format>` normally carries that rung, and a write that fails is
+dropped with only a log line — so a 17000×2000 panorama whose `full.webp`
+exceeds libvips' WebP dimension limit would otherwise keep emitting
+`<source type="image/webp" srcset="…thumb 400w, …medium 1024w">`, and every
+WebP-capable browser would upscale a 1024px render of it.
+
+Suppression is not free, and costs more than the codec: blocks render
+`sizes="(max-width: 768px) 100vw, 768px"`, so a 2x display wants ~1536px and
+picks the **original** off the `<img>` ladder — a full-resolution download where
+the buggy `<source>` served a 1024px WebP. It is still the right trade (it is
+what every WebP-less browser already gets, and the alternative is a visibly
+upscaled image), but the real remedy is making sure `full.<format>` exists.
+The check is per format, so losing WebP's top rung does not cost AVIF its
+`<source>`.
+
 Image and gallery blocks render a `<picture>` wrapping the existing `<img>`. An
 item with no alternates produces no `<source>` elements, so the markup degrades
 to exactly the `<img>` that was there before.
