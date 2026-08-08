@@ -310,7 +310,13 @@ defmodule KilnCMS.Firing.Engine do
   storage key is an implementation detail headless consumers never see.
   """
   @spec public_type(struct()) :: String.t()
-  def public_type(%{type_definition_id: id, org_id: org_id}) when not is_nil(id) do
+  # `is_binary(id)` and not `not is_nil(id)`: on a partially-selected read the
+  # attribute is `%Ash.NotLoaded{}`, which is not nil — so the old guard passed,
+  # queried with a NotLoaded struct as the id, failed, and quietly answered
+  # "entry". This is public API whose `@doc` invites a bulk caller, and the
+  # symptom was a wrong type on every dynamic document plus one failing query
+  # each, with nothing raised (#1012).
+  def public_type(%{type_definition_id: id, org_id: org_id}) when is_binary(id) do
     # The definition read is tenant-strict (#419): scope to the document's own
     # org, else the read raises and every dynamic doc silently degrades to the
     # "entry" storage key in webhooks/provenance/search.

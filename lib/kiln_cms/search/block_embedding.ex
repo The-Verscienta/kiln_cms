@@ -154,9 +154,14 @@ defmodule KilnCMS.Search.BlockEmbedding do
       public? false
     end
 
+    # `:entry` is the storage tier every dynamic content type (D17) writes under.
+    # Leaving it out did not merely skip them — `BlockIndexer.embed_and_store/8`
+    # discarded the upsert's result, so the write failed the constraint and the
+    # block was still reported `:embedded`. That is why a dynamic type having no
+    # block embeddings at all was invisible (#1012).
     attribute :document_type, :atom,
       allow_nil?: false,
-      constraints: [one_of: [:page, :post]],
+      constraints: [one_of: [:page, :post, :entry]],
       public?: true
 
     attribute :document_id, :uuid, allow_nil?: false, public?: true

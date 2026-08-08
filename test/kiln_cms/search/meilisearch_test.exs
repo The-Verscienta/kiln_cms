@@ -10,6 +10,7 @@ defmodule KilnCMS.Search.MeilisearchTest do
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Search.Meilisearch
 
   # Records every request into the owning test process so assertions can inspect
@@ -54,6 +55,15 @@ defmodule KilnCMS.Search.MeilisearchTest do
   defp slug, do: "meili-#{System.unique_integer([:positive])}"
 
   defp drain, do: KilnCMS.DataCase.drain_oban()
+
+  # Empty the stub's mailbox so a later assertion sees only what it triggered.
+  defp flush do
+    receive do
+      {:meili, _, _, _} -> flush()
+    after
+      0 -> :ok
+    end
+  end
 
   describe "config flag" do
     test "disabled by default" do
@@ -257,6 +267,98 @@ defmodule KilnCMS.Search.MeilisearchTest do
       assert doc.title == "Reopened"
     end
 
+    test "a dynamic-type entry is indexed, keyed by storage type and faceted by its own (#1012)" do
+      # Every dynamic type fires under the `entry` storage key, and `load/3` had
+      # clauses for page and post only — so publishing one issued a DELETE for a
+      # document that had never been indexed, and the whole type was invisible
+      # to the backend. Silently, which is what made it worth fixing.
+      actor = admin()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "mrecipe#{System.unique_integer([:positive])}", label: "Recipe"},
+          actor: actor
+        )
+
+      entry =
+        ContentTypes.create!(definition.name, %{title: "Braised leeks", slug: slug()},
+          actor: actor
+        )
+
+      {:ok, entry} = ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+
+      drain()
+
+      assert_received {:meili, :put, "/indexes/test_idx/documents" <> _, [doc]}
+      assert doc.title == "Braised leeks"
+
+      # The primary key is the STORAGE type, because the delete path has only
+      # `{type, id}` from the job args and must be able to compute the same key
+      # for a record that may already be gone.
+      assert doc.id == "entry_#{entry.id}"
+
+      # The facet is the consumer-facing type — `type = "recipe"` is the whole
+      # reason that attribute is filterable, and "entry" for every dynamic type
+      # answers nothing.
+      assert doc.type == definition.name
+    end
+
+    test "a gated dynamic entry is excluded like any other document" do
+      # The #1006 rule is generic, but it had never actually run against an
+      # entry, because entries never reached `published/1` at all.
+      actor = admin()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "mgated#{System.unique_integer([:positive])}", label: "Gated"},
+          actor: actor
+        )
+
+      entry =
+        ContentTypes.create!(
+          definition.name,
+          %{title: "Members entry", slug: slug(), audience: :member},
+          actor: actor
+        )
+
+      {:ok, entry} = ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+
+      drain()
+
+      refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
+      assert_received {:meili, :delete, "/indexes/test_idx/documents/entry_" <> id, _body}
+      assert id == entry.id
+    end
+
+    test "unpublishing a dynamic entry deletes it under the STORAGE key" do
+      # The delete path (`DeleteArtifacts.deindex/2`) computes its key from
+      # `Engine.document_type/1`, so it must agree with `to_document/1`'s `id`.
+      # The gated-entry test above does not exercise it — that routes through
+      # `FireWorker` picking `"delete"` — so without this, switching `deindex/2`
+      # to `public_type/1` (a natural-looking consistency fix) would issue
+      # `DELETE .../recipe_<uuid>` and strand the real document forever.
+      actor = admin()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "munpub#{System.unique_integer([:positive])}", label: "Unpub"},
+          actor: actor
+        )
+
+      entry =
+        ContentTypes.create!(definition.name, %{title: "Temp entry", slug: slug()}, actor: actor)
+
+      {:ok, entry} = ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+      drain()
+      assert_received {:meili, :put, "/indexes/test_idx/documents" <> _, [_doc]}
+
+      {:ok, _} = ContentTypes.transition(definition.name, "unpublish", entry, actor: actor)
+      drain()
+
+      assert_received {:meili, :delete, "/indexes/test_idx/documents/entry_" <> id, _body}
+      assert id == entry.id
+    end
+
     test "unpublishing deletes the document from the index" do
       actor = admin()
 
@@ -270,6 +372,55 @@ defmodule KilnCMS.Search.MeilisearchTest do
 
       assert_received {:meili, :delete, "/indexes/test_idx/documents/page_" <> rest, nil}
       assert rest == page.id
+    end
+  end
+
+  describe "mix kiln.meili.reindex" do
+    setup do
+      put_meili_env(enabled: true, client: StubClient, index: "test_idx")
+      :ok
+    end
+
+    test "enqueues every content tier, dynamic types included (#1012)" do
+      # `@sources` is the backfill's whole notion of what exists. Dropping a
+      # tier from it is silent — the task still reports "enqueued N" — which is
+      # exactly how dynamic types went unindexed in the first place.
+      actor = admin()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "mreidx#{System.unique_integer([:positive])}", label: "Reidx"},
+          actor: actor
+        )
+
+      entry =
+        ContentTypes.create!(definition.name, %{title: "Backfilled", slug: slug()}, actor: actor)
+
+      {:ok, entry} = ContentTypes.transition(definition.name, "publish", entry, actor: actor)
+
+      page =
+        CMS.create_page!(%{title: "Backfilled page", slug: slug()}, actor: actor)
+        |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+      flush()
+
+      ExUnit.CaptureIO.capture_io(fn -> Mix.Tasks.Kiln.Meili.Reindex.run([]) end)
+      drain()
+
+      indexed =
+        Stream.repeatedly(fn ->
+          receive do
+            {:meili, :put, "/indexes/test_idx/documents" <> _, [doc]} -> doc.id
+            {:meili, _, _, _} -> :other
+          after
+            0 -> nil
+          end
+        end)
+        |> Enum.take_while(&(&1 != nil))
+
+      assert "entry_#{entry.id}" in indexed
+      assert "page_#{page.id}" in indexed
     end
   end
 

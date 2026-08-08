@@ -27,9 +27,14 @@ defmodule Mix.Tasks.Kiln.Meili.Reindex do
 
   @requirements ["app.start"]
 
+  # Page, Post and every dynamic-type entry (D17). Entries are one source, not
+  # one per type: they all live in the `:entry` tier and fire under the `entry`
+  # storage key, which is the key `MeilisearchWorker.load/3` dispatches on
+  # (#1012).
   @sources [
     {KilnCMS.CMS.Page, &CMS.list_pages!/1},
-    {KilnCMS.CMS.Post, &CMS.list_posts!/1}
+    {KilnCMS.CMS.Post, &CMS.list_posts!/1},
+    {KilnCMS.CMS.Entry, &CMS.list_entries!/1}
   ]
 
   @impl Mix.Task

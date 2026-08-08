@@ -57,16 +57,25 @@ defmodule KilnCMS.Search.MeilisearchWorker do
   end
 
   # Only content that is public to an anonymous visitor belongs in the index —
-  # see `published/1`. Note the other reason this can answer `:error`: `load/3`
-  # knows page and post only, while `FireWorker.enqueue_indexing/3` enqueues an
-  # upsert for every fired type, so a dynamic-type entry (D17) also lands here
-  # and is DELETEd — harmlessly, since it was never indexed, but it is not the
-  # gating case (#1012).
+  # see `published/1`.
+  #
+  # `"entry"` is the storage key every dynamic content type (D17) fires under,
+  # not a type an editor ever names. Without this clause the fallback answered
+  # `:error` for all of them, so publishing a dynamic entry issued a DELETE for
+  # a document that had never been indexed and the whole type was invisible to
+  # the backend — silently, which is the part that made it worth fixing (#1012).
+  #
+  # The fallback still exists, and still means something: a type this worker has
+  # no clause for is not indexable, and answering `:error` removes whatever a
+  # previous version may have put there.
   defp load(org_id, "page", id),
     do: published(CMS.get_page(id, authorize?: false, tenant: org_id))
 
   defp load(org_id, "post", id),
     do: published(CMS.get_post(id, authorize?: false, tenant: org_id))
+
+  defp load(org_id, "entry", id),
+    do: published(CMS.get_entry(id, authorize?: false, tenant: org_id))
 
   defp load(_org_id, _type, _id), do: :error
 
