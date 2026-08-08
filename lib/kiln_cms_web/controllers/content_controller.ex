@@ -319,7 +319,11 @@ defmodule KilnCMSWeb.ContentController do
             tenant: org_id,
             locale: locale,
             limit: 20,
-            filters: filters
+            filters: filters,
+            # Exactly the three read below — not `content_sections/0`, which
+            # would also sweep any other registered type this page never shows
+            # (#960).
+            sections: [:posts, :pages, :entries]
           )
 
         %{posts: r.posts, pages: r.pages, entries: entry_results(r.entries)}

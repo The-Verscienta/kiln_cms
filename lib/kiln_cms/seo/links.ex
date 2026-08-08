@@ -112,7 +112,10 @@ defmodule KilnCMS.Seo.Links do
           tenant: record.org_id,
           authorize?: false,
           limit: limit * 2,
-          locale: record.locale
+          locale: record.locale,
+          # Only what `content_hits/1` reads. This used to sweep media and
+          # every taxonomy resource too and throw them away (#960).
+          sections: Search.content_sections()
         )
         |> content_hits()
         |> Enum.flat_map(&entry(&1, record.org_id))
@@ -130,11 +133,12 @@ defmodule KilnCMS.Seo.Links do
 
   # Content sections only. `global/2` also returns media, categories and tags,
   # none of which are pages you would link a paragraph to.
+  # `Map.take/2` is still here rather than a bare flat_map: the caller above
+  # asks for exactly these sections, but this stays correct if someone widens
+  # that request later, and it costs one map traversal.
   defp content_hits(sections) do
-    keys = Enum.map(ContentTypes.all(), & &1.section) ++ [:entries]
-
     sections
-    |> Map.take(keys)
+    |> Map.take(Search.content_sections())
     |> Enum.flat_map(fn {_section, hits} -> hits end)
   end
 
