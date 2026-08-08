@@ -169,11 +169,22 @@ defmodule KilnCMS.Portability.Export do
         ]
     )
   rescue
-    # A type whose read action refuses the actor contributes nothing rather
-    # than aborting the whole export — the envelope then honestly contains
-    # what this actor can see.
-    _error -> []
+    error ->
+      # A read this actor is not allowed to make contributes nothing — the
+      # envelope then honestly contains what they can see. ANY other failure
+      # aborts: `[]` makes `Stream.resource` halt, so a DB timeout at offset 400
+      # of 10,000 used to end the stream, write a 400-record file, print
+      # "Wrote N bytes" and exit 0. A truncated export that reports success is
+      # the worst failure mode this feature has.
+      if forbidden?(error), do: [], else: reraise(error, __STACKTRACE__)
   end
+
+  defp forbidden?(%Ash.Error.Forbidden{}), do: true
+
+  defp forbidden?(%{errors: errors}) when is_list(errors),
+    do: Enum.any?(errors, &match?(%Ash.Error.Forbidden.Policy{}, &1))
+
+  defp forbidden?(_other), do: false
 
   defp maybe_locale(filter, nil), do: filter
   defp maybe_locale(filter, locale), do: Keyword.put(filter, :locale, locale)
@@ -202,8 +213,12 @@ defmodule KilnCMS.Portability.Export do
       "audience" => record |> Map.get(:audience) |> to_string_or_nil(),
       "custom_fields" => Map.get(record, :custom_fields),
       "published_at" => record |> Map.get(:published_at) |> iso8601(),
-      "category" => term_slug(Map.get(record, :category)),
-      "tags" => record |> Map.get(:tags) |> term_slugs(),
+      # Slug AND name. Carrying the slug alone made the importer rebuild every
+      # term as %{name: slug}, so a fresh target org showed "how-to" and
+      # "case-studies" in its nav instead of "How To" and "Case Studies", with
+      # nothing in the envelope to recover the originals from.
+      "category" => term_ref(Map.get(record, :category)),
+      "tags" => record |> Map.get(:tags) |> term_refs(),
       "featured_image_id" => Map.get(record, :featured_image_id)
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
@@ -224,15 +239,15 @@ defmodule KilnCMS.Portability.Export do
   defp dump_blocks(record) do
     attribute = Ash.Resource.Info.attribute(record.__struct__, :blocks)
 
-    with {:ok, dumped} <-
-           Ash.Type.dump_to_embedded(attribute.type, record.blocks || [], attribute.constraints),
-         {:ok, json} <- Jason.encode(dumped) do
-      Jason.decode!(json)
-    else
-      _error -> []
-    end
-  rescue
-    _error -> []
+    # Deliberately NOT rescued to `[]`. Returning an empty list here stripped the
+    # record's whole body while `record_map/2` still emitted its title, slug and
+    # state — so the envelope looked complete, nothing appeared in any report,
+    # and importing it produced a document with a title and no content. A body
+    # that cannot be dumped is a broken export, and the caller must hear about it.
+    {:ok, dumped} =
+      Ash.Type.dump_to_embedded(attribute.type, record.blocks || [], attribute.constraints)
+
+    dumped |> Jason.encode!() |> Jason.decode!()
   end
 
   # ── Media manifest ─────────────────────────────────────────────────────────
@@ -260,8 +275,14 @@ defmodule KilnCMS.Portability.Export do
   defp block_media_ids(blocks) when is_list(blocks),
     do: Enum.flat_map(blocks, &block_media_ids/1)
 
+  # Suffix matching, not the literal key "media_id" — `Blocks.Video` declares
+  # `poster_media_id` and `captions_media_id`, and `KilnCMS.Firing.References`
+  # already reads media ids this way (it gained an explicit Gallery clause
+  # because #482 proved the naive path drops gallery media silently). Keying on
+  # one literal name left a round-tripped video pointing at the SOURCE
+  # database's uuids for its poster and caption track.
   defp block_media_ids(%{} = map) do
-    own = for {key, value} <- map, key in ["media_id", :media_id], is_binary(value), do: value
+    own = for {key, value} <- map, media_id_key?(key), is_binary(value), do: value
 
     nested =
       map
@@ -275,6 +296,15 @@ defmodule KilnCMS.Portability.Export do
   end
 
   defp block_media_ids(_other), do: []
+
+  @doc false
+  @spec media_id_key?(term()) :: boolean()
+  def media_id_key?(key) when is_atom(key), do: key |> Atom.to_string() |> media_id_key?()
+
+  def media_id_key?(key) when is_binary(key),
+    do: String.ends_with?(key, "media_id") or String.ends_with?(key, "image_id")
+
+  def media_id_key?(_other), do: false
 
   # Under the caller's own actor and tenant, like every other read here.
   #
@@ -315,11 +345,12 @@ defmodule KilnCMS.Portability.Export do
     end
   end
 
-  defp term_slug(%{slug: slug}), do: slug
-  defp term_slug(_other), do: nil
+  defp term_ref(%{slug: slug, name: name}), do: %{"slug" => slug, "name" => name}
+  defp term_ref(%{slug: slug}), do: %{"slug" => slug}
+  defp term_ref(_other), do: nil
 
-  defp term_slugs(tags) when is_list(tags), do: Enum.map(tags, & &1.slug)
-  defp term_slugs(_other), do: []
+  defp term_refs(tags) when is_list(tags), do: Enum.map(tags, &term_ref/1)
+  defp term_refs(_other), do: []
 
   defp iso8601(nil), do: nil
   defp iso8601(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

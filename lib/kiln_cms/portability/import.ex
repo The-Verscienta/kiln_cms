@@ -70,9 +70,13 @@ defmodule KilnCMS.Portability.Import do
   # is the one that MUST travel: its attribute default is `:public`, so dropping
   # it does not merely lose fidelity — it publishes a members-only document to
   # the open web.
+  # Deliberately WITHOUT `canonical_url`: it points at the SOURCE's canonical
+  # URL, never the copy's, so carrying it tells search engines the site being
+  # migrated away from is authoritative. `CMS.ContentCopy.content_attrs/0`
+  # excludes it for exactly this reason.
   @envelope_attrs ~w(
     seo_title seo_description seo_keywords seo_image
-    canonical_url path_alias audience custom_fields
+    path_alias audience custom_fields
   )
 
   @type report :: %{
@@ -149,7 +153,14 @@ defmodule KilnCMS.Portability.Import do
 
     run(
       %{
-        records: Enum.map(records, &envelope_record(&1, manifest)),
+        # A malformed element is skipped, not fatal. The per-record rescue only
+        # wraps the create, so `{"records": ["oops"]}` used to raise BadMapError
+        # here and a block whose "value" is a string raised FunctionClauseError
+        # in `rewrite_blocks/2` — either killing the task with a stacktrace after
+        # N records were already written, and losing the report of what was
+        # created. Hand-edited and third-party envelopes are the normal case.
+        records:
+          records |> Enum.map(&safe_envelope_record(&1, manifest)) |> Enum.reject(&is_nil/1),
         attachments: Enum.map(Map.values(manifest), &manifest_attachment/1)
       },
       opts
@@ -157,6 +168,19 @@ defmodule KilnCMS.Portability.Import do
   end
 
   def run_envelope(_other, _opts), do: {:error, :not_an_export_envelope}
+
+  defp safe_envelope_record(record, manifest) when is_map(record) do
+    envelope_record(record, manifest)
+  rescue
+    error ->
+      Logger.warning("Import: skipping unreadable envelope record: #{Exception.message(error)}")
+      nil
+  end
+
+  defp safe_envelope_record(other, _manifest) do
+    Logger.warning("Import: skipping envelope record that is not an object: #{inspect(other)}")
+    nil
+  end
 
   # The source database's media uuids mean nothing here, so an image block's
   # `media_id` is replaced by the manifest's URL and the id dropped — the
@@ -177,7 +201,7 @@ defmodule KilnCMS.Portability.Import do
       source_id: nil,
       author: nil,
       categories: term_list(record["category"]),
-      tags: Enum.map(List.wrap(record["tags"]), &%{name: &1, slug: &1}),
+      tags: record["tags"] |> List.wrap() |> Enum.map(&envelope_term/1) |> Enum.reject(&is_nil/1),
       featured_source_id: record["featured_image_id"],
       image_urls: image_urls(blocks),
       # The envelope's own locale wins over the run's default. Without this
@@ -216,12 +240,28 @@ defmodule KilnCMS.Portability.Import do
 
   defp resolve_manifest_urls(other, _manifest), do: other
 
+  # Every key that names a media id, not just the literal "media_id" — `Video`
+  # declares `poster_media_id` and `captions_media_id`, which used to survive
+  # the trip holding the SOURCE database's uuids.
   defp remap_media_id(map, manifest) do
-    case Map.get(map, "media_id") do
+    map
+    |> Map.keys()
+    |> Enum.filter(&KilnCMS.Portability.Export.media_id_key?/1)
+    |> Enum.reduce(map, fn key, acc -> remap_one(acc, key, manifest) end)
+  end
+
+  defp remap_one(map, key, manifest) do
+    case map[key] do
       id when is_binary(id) ->
         case Map.get(manifest, id) do
-          %{"url" => url} -> map |> Map.put("url", url) |> Map.delete("media_id")
-          _unknown -> Map.delete(map, "media_id")
+          # Only the block's own `media_id` owns the top-level `url`; a
+          # `poster_media_id` names a different asset, so its id is dropped
+          # without touching the url.
+          %{"url" => url} when key in ["media_id", :media_id] ->
+            map |> Map.put("url", url) |> Map.delete(key)
+
+          _other ->
+            Map.delete(map, key)
         end
 
       _absent ->
@@ -233,21 +273,48 @@ defmodule KilnCMS.Portability.Import do
     do: %{source_id: entry["id"], url: entry["url"], title: entry["filename"], alt: entry["alt"]}
 
   defp term_list(nil), do: []
-  defp term_list(slug) when is_binary(slug), do: [%{name: slug, slug: slug}]
-  defp term_list(_other), do: []
 
-  # Every `url` a media-bearing map in the tree points at, at any depth — the
-  # counterpart to `resolve_manifest_urls/2`. A gallery's images are as much a
-  # part of the document as a top-level image block.
+  defp term_list(term) do
+    case envelope_term(term) do
+      nil -> []
+      resolved -> [resolved]
+    end
+  end
+
+  # `%{"slug" => …, "name" => …}` is what the exporter writes now; a bare slug is
+  # an envelope from before it carried names, and is still loadable — the term
+  # just ends up named after its slug, as it always did.
+  defp envelope_term(%{"slug" => slug} = term) when is_binary(slug),
+    do: %{slug: slug, name: term["name"] || slug}
+
+  defp envelope_term(slug) when is_binary(slug), do: %{slug: slug, name: slug}
+  defp envelope_term(_other), do: nil
+
+  # Every url a MEDIA-BEARING map points at, at any depth — the counterpart to
+  # `resolve_manifest_urls/2`. A gallery's images are as much part of the
+  # document as a top-level image block.
+  #
+  # "Media-bearing" is the load-bearing word. Harvesting every `"url"` key meant
+  # `embed`, `video` and `audio` blocks (which all declare a top-level `url`)
+  # were queued for sideloading: 500 YouTube embeds became 500 outbound GETs,
+  # each buffering up to the download cap before byte-sniffing rejected it, and
+  # all 500 filled `report.media.failed` — which the report truncates at 20,
+  # burying the image failures the operator actually needed.
   defp image_urls(blocks), do: blocks |> collect_urls() |> Enum.uniq()
 
   defp collect_urls(%{} = map) when not is_struct(map) do
-    own = if is_binary(map["url"]), do: [map["url"]], else: []
+    own = if media_bearing?(map) and is_binary(map["url"]), do: [map["url"]], else: []
     own ++ Enum.flat_map(Map.values(map), &collect_urls/1)
   end
 
   defp collect_urls(list) when is_list(list), do: Enum.flat_map(list, &collect_urls/1)
   defp collect_urls(_other), do: []
+
+  # A map is media-bearing when it names a media id (an image block's own
+  # `media_id`, a gallery item's, a video's `poster_media_id`) — i.e. when it
+  # points at something that lives in the library rather than out on the web.
+  defp media_bearing?(map),
+    do: Enum.any?(Map.keys(map), &KilnCMS.Portability.Export.media_id_key?/1)
 
   # ── Taxonomy ───────────────────────────────────────────────────────────────
 
@@ -591,9 +658,15 @@ defmodule KilnCMS.Portability.Import do
         attrs
 
       resource ->
-        Map.filter(attrs, fn {key, _value} ->
-          key in [:blocks, :tag_ids] or not is_nil(Ash.Resource.Info.attribute(resource, key))
-        end)
+        # `action_inputs/2` answers the actual question — accepted attributes
+        # AND arguments. Testing `Ash.Resource.Info.attribute/2` instead was a
+        # proxy that got it wrong in both directions: `tag_ids` is an argument,
+        # not an attribute, so it needed a hardcoded escape hatch; and `state`,
+        # `published_at`, `author_id` and `lock_version` are attributes that are
+        # NOT accepted, so they passed the filter and failed the whole record
+        # with `NoSuchInput` — exactly what this function exists to prevent.
+        inputs = Ash.Resource.Info.action_inputs(resource, :create)
+        Map.filter(attrs, fn {key, _value} -> key in inputs or to_string(key) in inputs end)
     end
   end
 
@@ -621,20 +694,38 @@ defmodule KilnCMS.Portability.Import do
   # moment of import — the archive collapses into one arbitrary-ordered second,
   # and feeds and sitemaps inherit it.
   #
-  # `force_change_attribute` on the ordinary update action rather than a raw
-  # insert: still an Ash action, still policy-checked, and the extra version it
-  # mints is an honest record that the import set the date.
+  # Through the resource's own narrow `:backdate_published_at` action, NOT the
+  # primary `:update`. `:update` carries `NotifyWebhooks` and `FireArtifacts`
+  # with `only_when: :published`, plus `EnqueueEmbedding`, `EnqueueOEmbed`,
+  # `optimistic_lock` and `RecordSlugRedirect` — and this runs immediately after
+  # the publish transition, so the record is already published and every one of
+  # those fired. A 4,000-post import meant 4,000 spurious `updated` webhooks to
+  # every subscriber and a second artifact fire per record.
   defp restore_published_at(created, %{published_at: %DateTime{} = at}, opts) do
     created
-    |> Ash.Changeset.for_update(:update, %{}, scope(opts))
-    |> Ash.Changeset.force_change_attribute(:published_at, at)
+    |> Ash.Changeset.for_update(:backdate_published_at, %{published_at: at}, scope(opts))
     |> Ash.update()
     |> case do
-      {:ok, updated} -> updated
-      _error -> created
+      {:ok, updated} ->
+        updated
+
+      {:error, reason} ->
+        # Logged, not swallowed. Silently keeping the import timestamp is the
+        # exact outcome this function exists to prevent, and every other failure
+        # path in this module logs.
+        Logger.warning(
+          "Import: could not restore published_at for #{created.id}: #{inspect(reason)}"
+        )
+
+        created
     end
   rescue
-    _error -> created
+    error ->
+      Logger.warning(
+        "Import: could not restore published_at for #{created.id}: #{inspect(error)}"
+      )
+
+      created
   end
 
   defp restore_published_at(created, _record, _opts), do: created
@@ -674,29 +765,42 @@ defmodule KilnCMS.Portability.Import do
 
   defp maybe_publish(_record, created, _opts), do: created
 
-  # Point every image block at the `MediaItem` that was sideloaded for its URL.
-  # A URL that failed to import keeps its original value, so the block still
-  # renders (hotlinked) rather than becoming a broken placeholder.
+  # Re-point every media-bearing map at the `MediaItem` sideloaded for its URL —
+  # at ANY depth, matching `resolve_manifest_urls/2` and `collect_urls/1`.
+  #
+  # This used to be a shallow top-level `image` match while both its siblings
+  # recursed, so a gallery's images were downloaded and `MediaItem` rows created
+  # that no block referenced, while the block kept the SOURCE site's URL and had
+  # already had its `media_id` deleted — leaving `Gallery.media_ids/1` empty, so
+  # media-usage tracking and the delete guard saw the gallery as referencing
+  # nothing. Decommission the old site (the point of a migration) and it goes
+  # blank.
   defp rewrite_blocks(blocks, %{by_url: by_url}) when map_size(by_url) > 0 do
-    Enum.map(blocks, fn
-      %{"type" => "image", "value" => value} = block ->
-        case Map.get(by_url, value["url"]) do
-          nil ->
-            block
-
-          item ->
-            %{
-              block
-              | "value" => value |> Map.put("url", item.url) |> Map.put("media_id", item.id)
-            }
-        end
-
-      block ->
-        block
-    end)
+    rewrite_node(blocks, by_url)
   end
 
   defp rewrite_blocks(blocks, _media), do: blocks
+
+  defp rewrite_node(%{} = map, by_url) when not is_struct(map) do
+    map
+    |> repoint(by_url)
+    |> Map.new(fn {key, value} -> {key, rewrite_node(value, by_url)} end)
+  end
+
+  defp rewrite_node(list, by_url) when is_list(list),
+    do: Enum.map(list, &rewrite_node(&1, by_url))
+
+  defp rewrite_node(other, _by_url), do: other
+
+  # A map is media-bearing when it carries a `url` we actually imported. A URL
+  # that failed to import keeps its original value, so the block still renders
+  # (hotlinked) rather than becoming a broken placeholder.
+  defp repoint(map, by_url) do
+    case Map.get(by_url, map["url"]) do
+      nil -> map
+      item -> map |> Map.put("url", item.url) |> Map.put("media_id", item.id)
+    end
+  end
 
   defp featured_image_id(record, %{by_source_id: by_id}) do
     case Map.get(by_id, record[:featured_source_id]) do

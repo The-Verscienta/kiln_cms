@@ -1055,7 +1055,13 @@ defmodule KilnCMS.CMS.Content do
         ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at, :lock_version])
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
-        ignore_actions([:set_embedding, :set_published_version_id, :set_oembed_metadata])
+        ignore_actions([
+          :set_embedding,
+          :set_published_version_id,
+          :set_oembed_metadata,
+          :backdate_published_at
+        ])
+
         # No FK from version -> source, so a `:purge` can hard-delete a record
         # whose history exists. Versions of purged content are kept as audit rows.
         reference_source?(false)
@@ -1746,6 +1752,20 @@ defmodule KilnCMS.CMS.Content do
         update :set_published_version_id do
           require_atomic? false
           accept [:published_version_id]
+        end
+
+        # Internal: restore a publication date an importer carried over (#487).
+        #
+        # Its own action for the same reason `:set_published_version_id` is.
+        # `:publish` stamps `published_at` with `utc_now`, so a bulk importer has
+        # to put the source date back afterwards — and doing that through
+        # `:update` dragged the whole edit chain along: `NotifyWebhooks` and
+        # `FireArtifacts` are both `only_when: :published`, and the record IS
+        # published by then, so a 4,000-post import emitted 4,000 spurious
+        # `updated` webhooks and re-fired every artifact a second time.
+        update :backdate_published_at do
+          require_atomic? false
+          accept [:published_at]
         end
 
         # Internal: write resolved oEmbed metadata back onto the blocks (#489).
