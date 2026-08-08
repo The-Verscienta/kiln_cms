@@ -13,6 +13,7 @@ defmodule KilnCMS.Search.BlockIndexer do
   alias KilnCMS.{Blocks, Search, SearchIndex}
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing.Engine
+  alias KilnCMS.Search.VectorCache
 
   @doc "Re-index a document's blocks. Returns `{:ok, count_embedded}`."
   @spec reindex(struct()) :: {:ok, non_neg_integer()}
@@ -21,7 +22,7 @@ defmodule KilnCMS.Search.BlockIndexer do
       blocks when is_list(blocks) -> reindex_blocks(document, blocks)
       # Not loaded (a select-limited read) or NULL (the column is nullable, and
       # an import can leave it so). Both used to be harmless; they are not any
-      # more, because `prune_stale/5` would read "no blocks" as "every stored
+      # more, because `prune_stale/3` would read "no blocks" as "every stored
       # row is stale" and delete the document's whole index. Answering "nothing
       # embedded" is the only safe reading of "I cannot see the blocks".
       _unloaded_or_null -> {:ok, 0}
@@ -125,15 +126,19 @@ defmodule KilnCMS.Search.BlockIndexer do
   the whole point is to produce a vector comparable with the stored ones. A
   second spelling of `"\#{context}\\n\\n\#{text}"` here would silently place the
   anchor in a slightly different space and quietly degrade every distance.
+
+  Memoized per input by `KilnCMS.Search.VectorCache`, so editing one paragraph
+  of a long draft re-embeds that paragraph and reuses the rest — the stored path
+  gets the same reuse from `content_hash`, and this is its equivalent (#964).
   """
   @spec block_vectors(struct()) :: [[float()]]
   def block_vectors(document) do
     document
     |> embedding_inputs()
     |> Enum.flat_map(fn input ->
-      case Search.embed(input) do
-        {:ok, vector} -> [vector]
-        _error -> []
+      case VectorCache.embed(input) do
+        nil -> []
+        vector -> [vector]
       end
     end)
   end
@@ -172,7 +177,7 @@ defmodule KilnCMS.Search.BlockIndexer do
     end
   end
 
-  # Answers `{block_key | nil, status}`. The key is what `prune_stale/5` diffs
+  # Answers `{block_key | nil, status}`. The key is what `prune_stale/3` diffs
   # against the stored rows, and it is `nil` for a block that contributes no
   # text — deliberately, so a block whose body was emptied has its row deleted
   # rather than left describing what used to be there.

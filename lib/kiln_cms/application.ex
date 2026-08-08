@@ -53,6 +53,11 @@ defmodule KilnCMS.Application do
       # Host→org resolution, on its own eviction schedule and the only cache
       # that remembers a miss (#659).
       KilnCMS.Cache.Hosts,
+      # Content-addressed embedding vectors for the compute-on-demand path
+      # (#852). Its OWN instance so an editing session cannot evict the
+      # published records `Firing.Delivery` serves from during a DB outage
+      # (#964).
+      KilnCMS.Search.VectorCache,
       # Small dedicated store for in-flight WebAuthn challenges (#331) —
       # TTL-only, isolated from the content cache's busts/eviction pressure.
       # `child_spec/1` ids on the module, so two Cachex instances need explicit
