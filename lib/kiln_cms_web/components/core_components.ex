@@ -317,6 +317,123 @@ defmodule KilnCMSWeb.CoreComponents do
   defp trigram_name([false, false, false]), do: "kun · earth"
 
   @doc """
+  A modal dialog or side drawer — scrim, focus trap, Escape, close button (#693).
+
+  Five hand-rolled shells used to carry these seven invariants each — scrim,
+  `phx-hook="FocusTrap"`, `role="dialog"`, `aria-modal`, `aria-labelledby`,
+  `tabindex="-1"`, Escape — and they had already drifted apart on `z-50` vs
+  `z-40`, `bg-black/20` vs `bg-black/40`, and five different close-event names.
+  Drift in a decorative class is cosmetic; drift in `aria-labelledby` is a
+  dialog a screen reader cannot announce, and nothing renders differently when
+  that happens.
+
+  ## Escape is scoped to the dialog, not the window
+
+  Every one of those shells bound `phx-window-keydown`. Two of them could be open
+  at once — the image picker over the compare modal — and then one Escape press
+  dispatched *both* close events while two focus traps fought over focus.
+
+  Here it is `data-close-event`, handled by the `FocusTrap` hook. That indirection
+  is not a preference: LiveView's key binding reads the attribute off the **exact**
+  event target and does not walk ancestors, so a `phx-keydown` on the panel never
+  fires — this hook has just moved focus to a button inside it. A plain listener
+  in the hook gets the bubbled event from whatever descendant holds focus, and
+  since the dialogs are DOM siblings exactly one of them sees any given press:
+  the one the person is actually in. Nesting is well-defined rather than
+  accidental.
+
+  The cost of that scoping is that Escape needs focus to be *inside* the panel,
+  and `FocusTrap` currently only traps Tab — so focus can leave by other routes
+  (Safari does not focus a `<button>` on click) and Escape goes quiet until it
+  comes back. The scrim and the ✕ still close the dialog. Tracked as #1046.
+
+  ## Variants
+
+    * `:dialog` — centred, the shape a comparison or a confirmation wants.
+    * `:drawer` — full-height on the right, the shape a picker wants; it dims the
+      page it is beside rather than covering it, so the scrim is lighter.
+
+  The scrim, the trap and the ARIA wiring are not overridable, because those are
+  the reason this exists. Neither is the panel's own layout: an earlier `class`
+  attribute *replaced* those classes rather than adding to them, so a caller
+  reaching for "just a different max-width" would have silently lost
+  `flex flex-col`, `bg-base-100` and the drawer's positioning and got an
+  unpositioned transparent panel. No caller wanted it; a variant is the honest
+  way to add a new shape.
+
+      <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
+        <:title>{gettext("Choose an image")}</:title>
+        …
+      </.modal>
+  """
+  attr :id, :string, required: true, doc: "id of the dialog panel; `-title` labels it"
+  attr :on_close, :string, required: true, doc: "event pushed by Escape, the scrim and the ✕"
+  attr :variant, :atom, default: :dialog, values: [:dialog, :drawer]
+  attr :rest, :global
+
+  slot :title, required: true
+  slot :subtitle, doc: "rendered under the title, inside the labelled header"
+  slot :inner_block, required: true
+
+  def modal(assigns) do
+    assigns =
+      assigns
+      |> assign(:panel_class, panel_class(assigns.variant))
+      |> assign(:scrim_class, scrim_class(assigns.variant))
+
+    ~H"""
+    <div class="fixed inset-0 z-50">
+      <div class={["absolute inset-0", @scrim_class]} phx-click={@on_close} aria-hidden="true"></div>
+      <div
+        id={@id}
+        phx-hook="FocusTrap"
+        data-close-event={@on_close}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={"#{@id}-title"}
+        tabindex="-1"
+        class={@panel_class}
+        {@rest}
+      >
+        <div class="flex items-start justify-between gap-4 border-b border-base-content/10 p-4">
+          <div class="min-w-0">
+            <h2 id={"#{@id}-title"} class="truncate text-lg font-medium">{render_slot(@title)}</h2>
+            <div :if={@subtitle != []} class="mt-1 text-sm text-base-content/70">
+              {render_slot(@subtitle)}
+            </div>
+          </div>
+          <button
+            type="button"
+            phx-click={@on_close}
+            aria-label={gettext("Close")}
+            class="shrink-0 rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        {render_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
+
+  # A drawer sits BESIDE the page rather than over it, so its scrim only dims —
+  # the editor stays readable while you pick from the library next to it.
+  defp scrim_class(:drawer), do: "bg-black/20"
+  defp scrim_class(:dialog), do: "bg-black/40"
+
+  defp panel_class(:drawer) do
+    "drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col " <>
+      "border-l border-base-content/10 bg-base-100 shadow-xl"
+  end
+
+  defp panel_class(:dialog) do
+    "absolute inset-4 mx-auto flex max-w-4xl flex-col overflow-hidden rounded-lg " <>
+      "border border-base-content/10 bg-base-100 shadow-xl"
+  end
+
+  @doc """
   Renders a centered empty-state: an icon, a message, optional body and action.
 
   ## Examples

@@ -5706,112 +5706,89 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:multi?, match?({:gallery, _id}, assigns.index))
 
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
-      <%!-- A light scrim dims the editor without hiding it — the drawer is to the
-            side, not over everything — and clicking it closes the drawer. --%>
-      <div class="absolute inset-0 bg-black/20" phx-click="close_picker" aria-hidden="true"></div>
-      <div
-        id="image-picker-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="image-picker-title"
-        tabindex="-1"
-        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
-          <h2 id="image-picker-title" class="text-lg font-medium">{picker_title(@index)}</h2>
+    <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
+      <:title>{picker_title(@index)}</:title>
+
+      <div class="flex-1 overflow-y-auto p-4">
+        <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename, alt or caption")}
+            aria-label={gettext("Search by filename, alt text or caption")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
+
+        <p :if={@media == []} class="text-sm text-base-content/60">
+          {gettext("No media yet — upload some in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
+        </p>
+        <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+          {gettext("No media matches “%{query}”.", query: @query)}
+        </p>
+
+        <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <button
+            :for={item <- @visible}
             type="button"
-            phx-click="close_picker"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
+            phx-click={if @multi?, do: "toggle_pick", else: "pick_image"}
+            phx-value-index={pick_index(@index)}
+            phx-value-bid={pick_block_id(@index)}
+            phx-value-id={item.id}
+            phx-value-url={item.url}
+            title={item.filename}
+            aria-pressed={@multi? && to_string(picked_position(@picked, item.id) != nil)}
+            class={[
+              "group relative overflow-hidden rounded border hover:ring-2 hover:ring-primary",
+              if(picked_position(@picked, item.id),
+                do: "border-primary ring-2 ring-primary",
+                else: "border-base-content/10"
+              )
+            ]}
           >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-y-auto p-4">
-          <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
-            <input
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by filename, alt or caption")}
-              aria-label={gettext("Search by filename, alt text or caption")}
-              phx-debounce="150"
-              autocomplete="off"
-              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+            <img
+              src={item.url}
+              alt={item.alt || item.filename}
+              loading="lazy"
+              class="aspect-square w-full object-cover"
             />
-          </form>
-
-          <p :if={@media == []} class="text-sm text-base-content/60">
-            {gettext("No media yet — upload some in the")} <.link
-              navigate={~p"/media"}
-              class="underline"
-            >{gettext("media library")}</.link>.
-          </p>
-          <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
-            {gettext("No media matches “%{query}”.", query: @query)}
-          </p>
-
-          <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <button
-              :for={item <- @visible}
-              type="button"
-              phx-click={if @multi?, do: "toggle_pick", else: "pick_image"}
-              phx-value-index={pick_index(@index)}
-              phx-value-bid={pick_block_id(@index)}
-              phx-value-id={item.id}
-              phx-value-url={item.url}
-              title={item.filename}
-              aria-pressed={@multi? && to_string(picked_position(@picked, item.id) != nil)}
-              class={[
-                "group relative overflow-hidden rounded border hover:ring-2 hover:ring-primary",
-                if(picked_position(@picked, item.id),
-                  do: "border-primary ring-2 ring-primary",
-                  else: "border-base-content/10"
-                )
-              ]}
-            >
-              <img
-                src={item.url}
-                alt={item.alt || item.filename}
-                loading="lazy"
-                class="aspect-square w-full object-cover"
-              />
-              <%!-- The number, not a tick: in a multi-select whose order becomes
+            <%!-- The number, not a tick: in a multi-select whose order becomes
                     the gallery order, "which one did I click third" is the thing
                     an editor actually needs to see. --%>
-              <span
-                :if={position = picked_position(@picked, item.id)}
-                class="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-content"
-              >
-                {position}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <div
-          :if={@multi?}
-          class="flex items-center justify-between gap-3 border-t border-base-content/10 p-4"
-        >
-          <p class="text-sm text-base-content/70">
-            {ngettext("%{count} image selected", "%{count} images selected", length(@picked))}
-          </p>
-          <button
-            type="button"
-            phx-click="add_picked_images"
-            phx-value-bid={pick_block_id(@index)}
-            disabled={@picked == []}
-            class="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-content disabled:opacity-40"
-          >
-            {gettext("Add to gallery")}
+            <span
+              :if={position = picked_position(@picked, item.id)}
+              class="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-content"
+            >
+              {position}
+            </span>
           </button>
         </div>
       </div>
-    </div>
+
+      <div
+        :if={@multi?}
+        class="flex items-center justify-between gap-3 border-t border-base-content/10 p-4"
+      >
+        <p class="text-sm text-base-content/70">
+          {ngettext("%{count} image selected", "%{count} images selected", length(@picked))}
+        </p>
+        <button
+          type="button"
+          phx-click="add_picked_images"
+          phx-value-bid={pick_block_id(@index)}
+          disabled={@picked == []}
+          class="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-content disabled:opacity-40"
+        >
+          {gettext("Add to gallery")}
+        </button>
+      </div>
+    </.modal>
     """
   end
 
@@ -5830,86 +5807,60 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assigns = assign(assigns, :visible, assigns.results || assigns.files)
 
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_file_picker" phx-key="Escape">
-      <div
-        class="absolute inset-0 bg-black/20"
-        phx-click="close_file_picker"
-        aria-hidden="true"
-      >
-      </div>
-      <div
-        id="file-picker-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="file-picker-title"
-        tabindex="-1"
-        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
-          <h2 id="file-picker-title" class="text-lg font-medium">{gettext("Choose a file")}</h2>
-          <button
-            type="button"
-            phx-click="close_file_picker"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
+    <.modal id="file-picker-dialog" on_close="close_file_picker" variant={:drawer}>
+      <:title>{gettext("Choose a file")}</:title>
 
-        <div class="flex-1 overflow-y-auto p-4">
-          <form
-            :if={@files != []}
-            id="file-browser-filter"
-            phx-change="search_file_media"
-            class="mb-3"
-          >
-            <input
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by filename")}
-              aria-label={gettext("Search by filename")}
-              phx-debounce="150"
-              autocomplete="off"
-              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-            />
-          </form>
+      <div class="flex-1 overflow-y-auto p-4">
+        <form
+          :if={@files != []}
+          id="file-browser-filter"
+          phx-change="search_file_media"
+          class="mb-3"
+        >
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename")}
+            aria-label={gettext("Search by filename")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
 
-          <p :if={@files == []} class="text-sm text-base-content/60">
-            {gettext("No documents yet — upload a PDF in the")} <.link
-              navigate={~p"/media"}
-              class="underline"
-            >{gettext("media library")}</.link>.
-          </p>
-          <p :if={@files != [] and @visible == []} class="text-sm text-base-content/60">
-            {gettext("No documents match “%{query}”.", query: @query)}
-          </p>
+        <p :if={@files == []} class="text-sm text-base-content/60">
+          {gettext("No documents yet — upload a PDF in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
+        </p>
+        <p :if={@files != [] and @visible == []} class="text-sm text-base-content/60">
+          {gettext("No documents match “%{query}”.", query: @query)}
+        </p>
 
-          <ul :if={@visible != []} class="space-y-1">
-            <li :for={item <- @visible}>
-              <button
-                type="button"
-                phx-click="pick_file"
-                phx-value-id={item.id}
-                title={item.filename}
-                class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+        <ul :if={@visible != []} class="space-y-1">
+          <li :for={item <- @visible}>
+            <button
+              type="button"
+              phx-click="pick_file"
+              phx-value-id={item.id}
+              title={item.filename}
+              class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+            >
+              <.icon name="hero-document" class="size-5 shrink-0 text-base-content/60" />
+              <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+              <span
+                :if={item.audience != :public}
+                class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
               >
-                <.icon name="hero-document" class="size-5 shrink-0 text-base-content/60" />
-                <span class="min-w-0 flex-1 truncate">{item.filename}</span>
-                <span
-                  :if={item.audience != :public}
-                  class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
-                >
-                  {gettext("Gated")}
-                </span>
-              </button>
-            </li>
-          </ul>
-        </div>
+                {gettext("Gated")}
+              </span>
+            </button>
+          </li>
+        </ul>
       </div>
-    </div>
+    </.modal>
     """
   end
 
@@ -5948,81 +5899,60 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:visible, assigns.results || mounted)
 
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_av_picker" phx-key="Escape">
-      <div class="absolute inset-0 bg-black/20" phx-click="close_av_picker" aria-hidden="true"></div>
-      <div
-        id="av-picker-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="av-picker-title"
-        tabindex="-1"
-        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
-          <h2 id="av-picker-title" class="text-lg font-medium">{av_picker_title(@field)}</h2>
-          <button
-            type="button"
-            phx-click="close_av_picker"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
+    <.modal id="av-picker-dialog" on_close="close_av_picker" variant={:drawer}>
+      <:title>{av_picker_title(@field)}</:title>
 
-        <div class="flex-1 overflow-y-auto p-4">
-          <form id="av-browser-filter" phx-change="search_av_media" class="mb-3">
-            <input
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by filename")}
-              aria-label={gettext("Search by filename")}
-              phx-debounce="150"
-              autocomplete="off"
-              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-            />
-          </form>
+      <div class="flex-1 overflow-y-auto p-4">
+        <form id="av-browser-filter" phx-change="search_av_media" class="mb-3">
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename")}
+            aria-label={gettext("Search by filename")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
 
-          <p :if={@visible == [] and @query != ""} class="text-sm text-base-content/60">
-            {gettext("Nothing matches “%{query}”.", query: @query)}
-          </p>
-          <p :if={@visible == [] and @query == ""} class="text-sm text-base-content/60">
-            {av_picker_empty(@field)} <.link navigate={~p"/media"} class="underline">{gettext(
+        <p :if={@visible == [] and @query != ""} class="text-sm text-base-content/60">
+          {gettext("Nothing matches “%{query}”.", query: @query)}
+        </p>
+        <p :if={@visible == [] and @query == ""} class="text-sm text-base-content/60">
+          {av_picker_empty(@field)} <.link navigate={~p"/media"} class="underline">{gettext(
                 "media library"
               )}</.link>.
-          </p>
+        </p>
 
-          <ul :if={@visible != []} class="space-y-1">
-            <li :for={item <- @visible}>
-              <button
-                type="button"
-                phx-click="pick_av"
-                phx-value-id={item.id}
-                title={item.filename}
-                class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+        <ul :if={@visible != []} class="space-y-1">
+          <li :for={item <- @visible}>
+            <button
+              type="button"
+              phx-click="pick_av"
+              phx-value-id={item.id}
+              title={item.filename}
+              class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+            >
+              <.icon
+                name={av_item_icon(item)}
+                class="size-5 shrink-0 text-base-content/60"
+              />
+              <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+              <span :if={av_item_duration(item)} class="shrink-0 text-xs text-base-content/60">
+                {av_item_duration(item)}
+              </span>
+              <span
+                :if={Map.get(item, :audience, :public) != :public}
+                class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
               >
-                <.icon
-                  name={av_item_icon(item)}
-                  class="size-5 shrink-0 text-base-content/60"
-                />
-                <span class="min-w-0 flex-1 truncate">{item.filename}</span>
-                <span :if={av_item_duration(item)} class="shrink-0 text-xs text-base-content/60">
-                  {av_item_duration(item)}
-                </span>
-                <span
-                  :if={Map.get(item, :audience, :public) != :public}
-                  class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
-                >
-                  {gettext("Gated")}
-                </span>
-              </button>
-            </li>
-          </ul>
-        </div>
+                {gettext("Gated")}
+              </span>
+            </button>
+          </li>
+        </ul>
       </div>
-    </div>
+    </.modal>
     """
   end
 

@@ -4,8 +4,9 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   comparison (#467).
 
   The diff itself is computed in the CMS layer; everything here is presentation:
-  the modal shell, the human labels for attribute names and block types, and the
-  markup for a word-level run.
+  the human labels for attribute names and block types, and the markup for a
+  word-level run. The modal shell is `KilnCMSWeb.CoreComponents.modal/1` (#693),
+  which owns the scrim, the focus trap, Escape and the ARIA wiring.
 
   Changed prose renders as real `<del>`/`<ins>` elements rather than coloured
   spans. Colour alone doesn't survive a screen reader or a monochrome display,
@@ -16,7 +17,7 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   use Phoenix.Component
   use Gettext, backend: KilnCMSWeb.Gettext
 
-  import KilnCMSWeb.CoreComponents, only: [icon: 1]
+  import KilnCMSWeb.CoreComponents, only: [icon: 1, modal: 1]
 
   alias KilnCMS.CMS.VersionDiff
 
@@ -33,133 +34,110 @@ defmodule KilnCMSWeb.VersionDiffComponents do
 
   def version_compare(assigns) do
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_compare" phx-key="Escape">
-      <div class="absolute inset-0 bg-black/40" phx-click="close_compare" aria-hidden="true"></div>
-      <div
-        id="version-compare-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="version-compare-title"
-        tabindex="-1"
-        class="absolute inset-4 mx-auto flex max-w-4xl flex-col overflow-hidden rounded-lg border border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-start justify-between gap-4 border-b border-base-content/10 p-4">
-          <div class="min-w-0">
-            <h2 id="version-compare-title" class="text-lg font-medium">
-              {gettext("Compare versions")}
-            </h2>
-            <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-base-content/70">
-              <.side_label side={@left} />
-              <.icon name="hero-arrow-right" class="size-4 shrink-0" />
-              <.side_label side={@right} />
-            </div>
-          </div>
-          <button
-            type="button"
-            phx-click="close_compare"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
+    <.modal id="version-compare-dialog" on_close="close_compare">
+      <:title>{gettext("Compare versions")}</:title>
+      <:subtitle>
+        <div class="flex flex-wrap items-center gap-2">
+          <.side_label side={@left} />
+          <.icon name="hero-arrow-right" class="size-4 shrink-0" />
+          <.side_label side={@right} />
         </div>
+      </:subtitle>
 
-        <div class="flex-1 overflow-y-auto p-4">
-          <p :if={!@diff.changed?} class="text-sm text-base-content/60">
-            {gettext("These two versions are identical.")}
-          </p>
+      <div class="flex-1 overflow-y-auto p-4">
+        <p :if={!@diff.changed?} class="text-sm text-base-content/60">
+          {gettext("These two versions are identical.")}
+        </p>
 
-          <section :if={@diff.fields != []} class="mb-6">
-            <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
-              {gettext("Fields")}
-            </h3>
-            <ul class="space-y-3">
-              <li :for={field <- @diff.fields} class="rounded border border-base-content/10 p-3">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-sm font-medium">{field_label(field.name)}</span>
-                  <.status_pill status={field.status} />
-                  <%!-- Restore sits a few inches away in this same modal, and it
+        <section :if={@diff.fields != []} class="mb-6">
+          <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
+            {gettext("Fields")}
+          </h3>
+          <ul class="space-y-3">
+            <li :for={field <- @diff.fields} class="rounded border border-base-content/10 p-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-sm font-medium">{field_label(field.name)}</span>
+                <.status_pill status={field.status} />
+                <%!-- Restore sits a few inches away in this same modal, and it
                         moves editorial content only — workflow and attribution
                         are left as they are. Saying so here is the difference
                         between a documented rule and a silent no-op (#691). The
                         rationale is a visible line rather than a `title=`
                         tooltip: `/editor` ships as an installable PWA (#65),
                         and a phone has no hover. --%>
-                  <.pill :if={!field.restorable?} tone="bg-base-200 text-base-content/60">
-                    {gettext("Not restored")}
-                  </.pill>
-                </div>
-                <p :if={!field.restorable?} class="mt-1 text-xs text-base-content/60">
-                  {gettext(
-                    "Restoring a version reverts editorial content. Workflow state, schedule and author stay as they are."
-                  )}
-                </p>
-                <.field_body field={field} />
-              </li>
-            </ul>
-          </section>
+                <.pill :if={!field.restorable?} tone="bg-base-200 text-base-content/60">
+                  {gettext("Not restored")}
+                </.pill>
+              </div>
+              <p :if={!field.restorable?} class="mt-1 text-xs text-base-content/60">
+                {gettext(
+                  "Restoring a version reverts editorial content. Workflow state, schedule and author stay as they are."
+                )}
+              </p>
+              <.field_body field={field} />
+            </li>
+          </ul>
+        </section>
 
-          <%!-- Gated on `changed?`, not on the block list: an identical pair still
+        <%!-- Gated on `changed?`, not on the block list: an identical pair still
                 carries every block as `:unchanged`, and printing "No changes"
                 forty times under a banner saying the versions are identical is
                 noise, not context. --%>
-          <section :if={@diff.changed? && @diff.blocks != []}>
-            <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
-              {gettext("Content blocks")}
-            </h3>
-            <ol class="space-y-2">
-              <li
-                :for={block <- @diff.blocks}
-                class={[
-                  "rounded border p-3",
-                  block_border(block)
-                ]}
+        <section :if={@diff.changed? && @diff.blocks != []}>
+          <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
+            {gettext("Content blocks")}
+          </h3>
+          <ol class="space-y-2">
+            <li
+              :for={block <- @diff.blocks}
+              class={[
+                "rounded border p-3",
+                block_border(block)
+              ]}
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-sm font-medium">{block_label(block.type)}</span>
+                <.status_pill status={block.status} />
+                <.pill :if={block.moved?} tone="bg-info/20 text-info-ink">
+                  {gettext("Moved %{from} → %{to}",
+                    from: block.old_index + 1,
+                    to: block.new_index + 1
+                  )}
+                </.pill>
+              </div>
+
+              <p
+                :if={block.status == :unchanged && !block.moved?}
+                class="mt-1 text-xs text-base-content/50"
               >
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-sm font-medium">{block_label(block.type)}</span>
-                  <.status_pill status={block.status} />
-                  <.pill :if={block.moved?} tone="bg-info/20 text-info-ink">
-                    {gettext("Moved %{from} → %{to}",
-                      from: block.old_index + 1,
-                      to: block.new_index + 1
-                    )}
-                  </.pill>
-                </div>
+                {gettext("No changes")}
+              </p>
 
-                <p
-                  :if={block.status == :unchanged && !block.moved?}
-                  class="mt-1 text-xs text-base-content/50"
-                >
-                  {gettext("No changes")}
-                </p>
+              <p :if={block.inline} class="mt-2 text-sm leading-relaxed">
+                <.runs runs={block.inline} />
+              </p>
 
-                <p :if={block.inline} class="mt-2 text-sm leading-relaxed">
-                  <.runs runs={block.inline} />
-                </p>
-
-                <%!-- Rendered alongside the prose runs, not instead of them. A
+              <%!-- Rendered alongside the prose runs, not instead of them. A
                       block whose text is untouched but whose `level`, `citation`
                       or `alt` changed produces an all-`:eq` inline diff, and
                       gating this on `inline == nil` hid the only thing that
                       actually changed. `VersionDiff` drops the prose fields from
                       `fields` when it emitted runs for them. --%>
-                <dl :if={block.fields != []} class="mt-2 space-y-1 text-sm">
-                  <div :for={change <- block.fields} class="flex flex-wrap items-baseline gap-2">
-                    <dt class="text-xs uppercase tracking-wide text-base-content/50">
-                      {change.name}
-                    </dt>
-                    <dd class="flex flex-wrap items-baseline gap-2">
-                      <.value_pair old={change.old} new={change.new} />
-                    </dd>
-                  </div>
-                </dl>
-              </li>
-            </ol>
-          </section>
-        </div>
+              <dl :if={block.fields != []} class="mt-2 space-y-1 text-sm">
+                <div :for={change <- block.fields} class="flex flex-wrap items-baseline gap-2">
+                  <dt class="text-xs uppercase tracking-wide text-base-content/50">
+                    {change.name}
+                  </dt>
+                  <dd class="flex flex-wrap items-baseline gap-2">
+                    <.value_pair old={change.old} new={change.new} />
+                  </dd>
+                </div>
+              </dl>
+            </li>
+          </ol>
+        </section>
       </div>
-    </div>
+    </.modal>
     """
   end
 
