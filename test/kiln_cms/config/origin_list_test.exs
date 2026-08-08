@@ -66,19 +66,46 @@ defmodule KilnCMS.Config.OriginListTest do
       assert warning =~ "in part"
     end
 
-    test ":keep applies the rest and still names the entry" do
+    # Applies the value UNCHANGED, not "minus the bad ones". Under `:keep` the
+    # validator is a heuristic about what browsers send, and dropping an entry on
+    # a heuristic is the same outage the mode exists to prevent, arrived at
+    # quietly — the operator's only notice is on stderr, which per #634 never
+    # reaches Logger or Sentry.
+    test ":keep applies the whole value and still names the entry" do
       warning =
         capture_io(:stderr, fn ->
           assert OriginList.parse("https://a.test,bad",
                    name: "SOME_ORIGINS",
                    validator: &reject_b/1,
                    on_invalid: :keep
-                 ) == ["https://a.test"]
+                 ) == ["https://a.test", "bad"]
         end)
 
       assert warning =~ "SOME_ORIGINS"
       assert warning =~ ~s("bad")
       assert warning =~ "never match"
+      assert warning =~ "nothing was dropped"
+    end
+
+    # Checked on every call, not only on the branch where an entry happens to be
+    # invalid. Otherwise a third caller with a typo boots cleanly for as long as
+    # its values are good and raises on the day someone fat-fingers an origin.
+    test "a bad option is caught on a value that is entirely valid" do
+      assert_raise KeyError, fn ->
+        OriginList.parse("https://a.test", validator: &reject_b/1)
+      end
+
+      assert_raise CaseClauseError, fn ->
+        OriginList.parse("https://a.test",
+          name: "SOME_ORIGINS",
+          validator: &reject_b/1,
+          on_invalid: :kepe
+        )
+      end
+    end
+
+    test "no validator means no options to get wrong" do
+      assert OriginList.parse("bad") == ["bad"]
     end
 
     test "a fully valid list warns about nothing" do
@@ -105,20 +132,46 @@ defmodule KilnCMS.Config.OriginListTest do
              ]
     end
 
-    test "an origin that can never match is named, and the rest still apply" do
+    test "an origin that can never match is named, and nothing is dropped" do
+      value = "https://a.test/,https://b.test,acme.test,*,https://c.test/x"
+
       warning =
         capture_io(:stderr, fn ->
           # Every one of these is a real mistake a browser's `Origin` header can
           # never equal: a trailing slash, a path, a bare host, and a `*` mixed
-          # into a list.
-          assert CORS.parse_env("https://a.test/,https://b.test,acme.test,*,https://c.test/x") ==
-                   ["https://b.test"]
+          # into a list. Named, and left in place — see the `:keep` test above.
+          assert CORS.parse_env(value) == String.split(value, ",")
         end)
 
       assert warning =~ "CORS_ORIGINS"
       assert warning =~ ~s("https://a.test/")
       assert warning =~ ~s("acme.test")
       assert warning =~ ~s("*")
+    end
+
+    # The regression this pair guards: a validator that only accepted http(s)
+    # made every one of these "invalid", and an earlier `:keep` dropped what it
+    # warned about — so a deployment whose API is called by a browser extension
+    # or a Capacitor/Tauri webview lost ALL of its CORS on the next boot, with
+    # the only trace on stderr. An `Origin` is a serialized origin: any scheme.
+    test "a non-http scheme is a real origin, not a mistake" do
+      for good <- [
+            "chrome-extension://abcdefghijklmnop",
+            "moz-extension://a-b-c",
+            "capacitor://localhost",
+            "tauri://localhost",
+            "app://obsidian.md",
+            "http://[::1]:3000",
+            "https://xn--nicode-2ya.com"
+          ] do
+        assert CORS.valid_origin?(good), good
+      end
+    end
+
+    test "a browser-extension allowlist survives a boot untouched" do
+      value = "chrome-extension://abcdefghijklmnop,https://acme.com"
+      assert capture_io(:stderr, fn -> assert CORS.parse_env(value) end) == ""
+      assert CORS.parse_env(value) == String.split(value, ",")
     end
 
     # A `*` inside a list cannot widen CORS the way it widens a CSP — the
@@ -128,7 +181,8 @@ defmodule KilnCMS.Config.OriginListTest do
       parsed = with_stderr_muted(fn -> CORS.parse_env("https://a.test,*") end)
 
       refute parsed == :all
-      assert parsed == ["https://a.test"]
+      # `"*"` stays in the list, and is simply an entry no `Origin` equals.
+      assert parsed == ["https://a.test", "*"]
     end
 
     # `capture_io/2` returns the captured output, not the block's value, so a
@@ -144,7 +198,27 @@ defmodule KilnCMS.Config.OriginListTest do
         assert CORS.valid_origin?(good), good
       end
 
-      for bad <- ["https://acme.com/", "acme.com", "*", "null", "https://a.test/path", ""] do
+      for bad <- [
+            "https://acme.com/",
+            "acme.com",
+            "*",
+            "null",
+            "https://a.test/path",
+            "",
+            # No wildcard matching exists here, so this matches nothing at all —
+            # and it is the likeliest mistake after a trailing slash.
+            "https://*.acme.com",
+            # Browsers downcase both, and the comparison is byte equality.
+            "HTTP://ACME.COM",
+            "https://Acme.com",
+            # Browsers send punycode for an IDN.
+            "https://ünicode.com",
+            "https://acme.com;",
+            "https://acme.com?a=1",
+            "https://acme.com#x",
+            # `file://` has no host; a browser sends `Origin: null` for it.
+            "file://"
+          ] do
         refute CORS.valid_origin?(bad), bad
       end
     end

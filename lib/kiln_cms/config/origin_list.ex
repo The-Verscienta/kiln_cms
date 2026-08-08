@@ -36,11 +36,18 @@ defmodule KilnCMS.Config.OriginList do
       policy (a `;` appends CSP directives, a `*` mixed into a list grants every
       site), so a partially applied allowlist is not merely incomplete, it is
       dangerous.
-    * `:keep` — bad entries are warned about and the rest are applied.
-      `CORS_ORIGINS` wants this: an origin is compared for equality, so a
-      malformed entry can only fail to match — it cannot widen anything. Failing
-      the whole list closed on a stray typo would take a working integration
-      down to fix a nuisance.
+    * `:keep` — the value is applied unchanged and the suspect entries are named
+      on stderr. `CORS_ORIGINS` wants this: an origin is compared for equality,
+      so a malformed entry can only fail to match — it cannot widen anything.
+      Failing the whole list closed on a stray typo would take a working
+      integration down to fix a nuisance.
+
+      Note *unchanged*, not "minus the bad ones". Under `:keep` the validator is
+      a heuristic about what a browser is likely to send, and dropping an entry
+      on a heuristic reintroduces the exact failure the mode exists to avoid —
+      with the operator's only notice on stderr, which per #634 never reaches
+      Logger or Sentry. If a caller ever genuinely needs bad entries removed,
+      that is a third mode with its own name, not a quiet property of this one.
 
   What is shared either way is that the operator is told on stderr, naming the
   offending entries, rather than left with a setting that quietly isn't doing
@@ -86,6 +93,13 @@ defmodule KilnCMS.Config.OriginList do
   def parse(nil, _opts), do: []
 
   def parse(value, opts) when is_binary(value) do
+    # Checked on every call, not only on the branch where an entry turns out to
+    # be invalid. Otherwise a third caller with a typo'd `:on_invalid` boots
+    # cleanly for as long as its values happen to be good, and raises at
+    # runtime-config time on the day someone fat-fingers an origin — the worst
+    # possible moment to discover it.
+    check_opts!(opts)
+
     case String.trim(value) do
       "*" ->
         :all
@@ -102,6 +116,18 @@ defmodule KilnCMS.Config.OriginList do
     end
   end
 
+  defp check_opts!(opts) do
+    if Keyword.has_key?(opts, :validator) do
+      _name = Keyword.fetch!(opts, :name)
+
+      case Keyword.get(opts, :on_invalid, :discard_all) do
+        mode when mode in [:discard_all, :keep] -> :ok
+      end
+    else
+      :ok
+    end
+  end
+
   defp validate(entries, raw, opts) do
     case Keyword.get(opts, :validator) do
       nil -> entries
@@ -113,6 +139,7 @@ defmodule KilnCMS.Config.OriginList do
 
   defp reject_invalid(entries, invalid, raw, opts) do
     name = Keyword.fetch!(opts, :name)
+
     describe = Keyword.get(opts, :describe, "origin")
     on_invalid = Keyword.get(opts, :on_invalid, :discard_all)
     plural = if length(invalid) == 1, do: "", else: "s"
@@ -124,7 +151,8 @@ defmodule KilnCMS.Config.OriginList do
           "keeping the default (closed) rather than applying #{inspect(raw)} in part."
 
         :keep ->
-          "it will never match a request. The rest of the list is applied."
+          "and so will probably never match a request. The value is applied as " <>
+            "written — nothing was dropped."
       end
 
     hint =
@@ -139,6 +167,9 @@ defmodule KilnCMS.Config.OriginList do
       []
     )
 
-    if on_invalid == :keep, do: entries -- invalid, else: []
+    case on_invalid do
+      :keep -> entries
+      :discard_all -> []
+    end
   end
 end
