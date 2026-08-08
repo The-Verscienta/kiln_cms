@@ -36,6 +36,14 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
   deliberate: `sticky` is the difference between this goal working and silently
   not working, and finding that out from a flat results table weeks later is the
   outcome the whole module exists to prevent.
+
+  ## This check cannot hold on its own
+
+  It runs once, on the changeset that starts the experiment. Every premise it
+  rests on is revocable afterwards — the flag, the form, the document, the
+  funnel's ordering — so `KilnCMS.Experiments.Health` asks the same question of
+  a **running** experiment, live, and the surfaces report what it answers
+  (#1008). Adding a case here means adding one there.
   """
   use Ash.Resource.Validation
 

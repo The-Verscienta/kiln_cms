@@ -260,7 +260,9 @@ on a counter.
   Same costs and same guards as `content_view`: the final step leaves the shared
   cache, and `:start` refuses a missing funnel, a funnel from another site, one
   with no steps, one whose last step is the experimented document, or sticky
-  being off.
+  being off. Each of those is also re-checked at read time by
+  `Experiments.blocked_reason/1` (#1008), because editing the funnel edits the
+  goal and no funnel write knows an experiment depends on it.
 
   The funnel's final step is read from its own per-site cache
   (`Experiments.funnel_targets/1`) rather than queried per request — this runs
@@ -337,9 +339,31 @@ feature becomes usable by the people it is for.
 The sticky-assignment cookie and the `content_view` goal on top of it — **done**
 (#984) and funnel-completion on top of it (#1010); see
 [`data-flows.md`](data-flows.md#sticky-assignment-cookie-984) for what is stored
-and why. Still open: a results panel with a sample-size floor (#982), bounding
-conversion abuse on the new GET path (#1007), and surfacing an experiment that
-can no longer convert (#1008).
+and why. Surfacing an experiment that can no longer convert is **done** (#1008) — see
+below. Still open: a results panel with a sample-size floor (#982) and bounding
+conversion abuse on the new GET path (#1007).
+
+### Health: an experiment that can no longer convert (#1008)
+
+`:start` refuses an experiment whose goal can never fire, and that check cannot
+be made to hold afterwards. Every premise it rests on is revocable while the
+experiment runs: `sticky` is a config flag an operator is *invited* to gate on
+their consent mechanism, and the goal form, the goal document and the funnel's
+last step are all rows an editor can delete without ever seeing the experiment
+that depends on them.
+
+Delivery already refused to serve an arm it could not attribute, so nothing was
+being measured wrongly. The gap was that nothing **said so**: the experiment
+read `running`, impressions sat where they were, and a flat result is
+indistinguishable from a genuine null.
+
+`KilnCMS.Experiments.blocked_reason/1` is the one runtime statement of that rule
+— read live, not recorded at `:start` — and it is surfaced on the two places an
+operator looks: a `!` line under the row in `mix kiln.experiment list`, a
+`Blocked:` line **above the variant counters** in `show` (the numbers below it
+are not a result), and an admin-only strip on `/editor/overview`. When #982
+lands, the results panel is the third caller, and it should phrase its own
+sentence from the reason atom rather than print the terminal one.
 
 **Deliberately not planned:** per-visitor personalization rules, multi-armed
 bandits, traffic allocation ramps, and anything that needs a visitor profile.
