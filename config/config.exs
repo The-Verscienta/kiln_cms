@@ -209,6 +209,11 @@ config :kiln_cms, Kiln.Advisory,
     KilnCMS.Seo.Checks.Meta,
     KilnCMS.Seo.Checks.Keyphrase,
     KilnCMS.Seo.Checks.Readability,
+    # #551 parity gaps. Both are `:info`-only and English-gated: a pixel width
+    # is a model of a font Google can change, and a regex-grade passive
+    # detector has error bars that a warning would misrepresent.
+    KilnCMS.Seo.Checks.PixelWidth,
+    KilnCMS.Seo.Checks.PassiveVoice,
     Kiln.Advisory.Checks.Headings,
     Kiln.Advisory.Checks.ImageAlt,
     Kiln.Advisory.Checks.InternalLinks,
