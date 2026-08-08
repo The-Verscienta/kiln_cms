@@ -76,11 +76,38 @@ defmodule KilnCMS.Media.RegenerationTest do
       refute Regeneration.current?(media())
     end
 
-    # …but an item that WAS processed and legitimately produced nothing — a
-    # source narrower than every responsive target — must count as current, or
-    # the missing-only run re-decodes every icon in the library for ever.
-    test "a processed image too small for any variant is up to date" do
-      assert Regeneration.current?(media(%{variants: %{}, width: 150, height: 100}))
+    # #919: this used to assert the opposite. Before #473 a source narrower than
+    # every responsive target legitimately produced nothing, so declaring it
+    # current was what stopped the missing-only run re-decoding every icon for
+    # ever. `build_full/2` is unconditional on size, so a non-GIF source now
+    # yields at least one `full.<format>` — and calling it current made the
+    # documented rollout default skip it permanently. `image_processor_test.exs`
+    # asserts the same 150px input yields `["full.webp"]`; the two suites
+    # contradicted each other, and this is the side that was wrong.
+    test "a processed image too small for the responsive ladder still needs its alternates" do
+      refute Regeneration.current?(
+               media(%{variants: %{}, width: 150, height: 100, content_type: "image/jpeg"})
+             )
+    end
+
+    # The convergence guarantee the old assertion was protecting, stated where it
+    # is actually true: nothing more to add means current, whatever the size.
+    test "a processed image is up to date when no alternate is configured for it" do
+      previous = Application.get_env(:kiln_cms, :image_variants, [])
+      Application.put_env(:kiln_cms, :image_variants, Keyword.put(previous, :formats, [:webp]))
+      on_exit(fn -> Application.put_env(:kiln_cms, :image_variants, previous) end)
+
+      # A WebP source with WebP as the only configured alternate: `build_full/2`
+      # rejects the source's own format, so a run would add nothing.
+      assert Regeneration.current?(
+               media(%{
+                 variants: %{},
+                 width: 150,
+                 height: 100,
+                 content_type: "image/webp",
+                 filename: "s-#{uniq()}.webp"
+               })
+             )
     end
 
     # A GIF gets no alternates by design (its variants are flattened stills), so
