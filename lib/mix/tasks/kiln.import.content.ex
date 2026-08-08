@@ -43,7 +43,8 @@ defmodule Mix.Tasks.Kiln.Import.Content do
     limit: :integer,
     skip_media: :boolean,
     redirects: :boolean,
-    on_conflict: :string
+    on_conflict: :string,
+    drain_media: :boolean
   ]
 
   @impl Mix.Task
@@ -84,13 +85,18 @@ defmodule Mix.Tasks.Kiln.Import.Content do
           dry_run: Keyword.get(opts, :dry_run, false),
           skip_media: Keyword.get(opts, :skip_media, false),
           redirects: Keyword.get(opts, :redirects, true),
-          on_conflict: on_conflict(opts[:on_conflict])
+          on_conflict: on_conflict(opts[:on_conflict]),
+          progress: fn line -> Mix.shell().info(line) end
         ] ++
         maybe(:locale, opts[:locale]) ++ maybe(:limit, opts[:limit])
 
     case Import.run_envelope(envelope, run_opts) do
-      {:ok, report} -> CLI.print_report(report)
-      {:error, :not_an_export_envelope} -> Mix.raise("That file has no \"records\" array")
+      {:ok, report} ->
+        CLI.print_report(report)
+        CLI.maybe_drain_media(opts[:drain_media])
+
+      {:error, :not_an_export_envelope} ->
+        Mix.raise("That file has no \"records\" array")
     end
   end
 
