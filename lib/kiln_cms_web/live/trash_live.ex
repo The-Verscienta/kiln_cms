@@ -43,7 +43,21 @@ defmodule KilnCMSWeb.TrashLive do
   # Display fields plus what restore/purge's after-action hooks read (slug,
   # locale, state for cache busting / artifact cleanup) — never the heavy
   # blocks/search_text/embedding columns the trash list doesn't show.
-  @list_fields [:id, :title, :slug, :locale, :state, :archived_at, :updated_at]
+  # `:org_id` is not decoration: every hook on `:restore` needs it. It reached
+  # `Cache.key/5` as `%Ash.NotLoaded{}` and raised inside `BustContentCache`'s
+  # `after_action`, so the transaction rolled back and Restore in this very
+  # LiveView simply failed — before #1025 gave the action a second consumer of
+  # the same attribute (`FireArtifacts` puts it in the Oban args).
+  @list_fields [
+    :id,
+    :org_id,
+    :title,
+    :slug,
+    :locale,
+    :state,
+    :archived_at,
+    :updated_at
+  ]
 
   # (Re)load the first page of soft-deleted records.
   defp load_items(socket) do

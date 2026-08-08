@@ -21,12 +21,22 @@ defmodule KilnCMS.Firing.FireWorker do
       # `:org_id` in the dedup key so the same `{type, id}` in two orgs isn't
       # collapsed into one job (epic #336).
       keys: [:org_id, :type, :id],
-      # `:cancelled` is in the list so a burst of reads against an orphan row
-      # collapses into one job rather than one per read (#664). It is not what
-      # makes that drip converge — the window is 60s and the firing cache TTL is
-      # an hour — `purge_orphan/3` is. This just stops the thundering herd while
-      # the first job is still doing the purging.
-      states: [:scheduled, :available, :executing, :retryable, :suspended, :cancelled]
+      # `:cancelled` was in this list so a burst of reads against an orphan row
+      # collapsed into one job rather than one per read (#664). It is out again
+      # (#1025), because a cancelled job is a decision NOT to fire, and deduping
+      # a fresh request against it turns "we looked and there was nothing" into
+      # "we will never look again".
+      #
+      # That is the issue's own scenario: trash a published document, let any
+      # `FireWorker` run in the window (a read miss, an oEmbed resolve, the
+      # sweep, or the publish's own job arriving late) — it finds no published
+      # row, purges and cancels — then restore within 60s and the restore's
+      # enqueue collides with that cancelled row. The document comes back live
+      # with no artifacts and nothing retries.
+      #
+      # The thundering herd it guarded against is bounded anyway: `purge_orphan/3`
+      # deletes the artifacts, so the cache misses that drove the drip stop.
+      states: [:scheduled, :available, :executing, :retryable, :suspended]
     ]
 
   require Logger

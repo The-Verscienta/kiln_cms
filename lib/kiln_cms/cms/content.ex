@@ -2023,6 +2023,22 @@ defmodule KilnCMS.CMS.Content do
           accept []
           require_atomic? false
           change set_attribute(:archived_at, nil)
+
+          # Trashing is a soft delete: `:destroy` runs `DeleteArtifacts`, which
+          # purges the fired artifacts AND enqueues a Meilisearch removal — but
+          # it does not change `state`, so a trashed published document is still
+          # `:published` underneath. Restoring it therefore puts it straight back
+          # on the delivery path with no artifacts and no search entry, and
+          # nothing would rebuild them until an unrelated edit re-fired it (#1025).
+          #
+          # `only_when: :published` because restoring a trashed *draft* has
+          # nothing to rebuild — a draft never had artifacts to purge, and firing
+          # one would publish an artifact for unpublished content.
+          #
+          # Deliberately no webhook: trashing emits none either (it is not an
+          # unpublish), and a `published` event for a document subscribers were
+          # never told had gone would read as a second publish.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
         end
 
         # Permanent hard delete (bypasses archival). Used by "Empty trash" and the
