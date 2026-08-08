@@ -301,7 +301,14 @@ defmodule KilnCMS.Ask do
   defp retrieve(question, read_opts) do
     locale = Keyword.fetch!(read_opts, :locale)
     limit = Keyword.fetch!(read_opts, :limit)
-    sections = Search.global(question, read_opts ++ [highlight: true])
+    # Only the sections this reads. `/api/ask` is public and anonymous, so the
+    # sweep it triggers is the one most worth not paying for twice over — it
+    # used to run media and every taxonomy resource and discard them (#960).
+    sections =
+      Search.global(
+        question,
+        read_opts ++ [highlight: true, sections: Search.content_sections()]
+      )
 
     compiled =
       Enum.flat_map(ContentTypes.all(), fn ct ->

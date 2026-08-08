@@ -393,15 +393,23 @@ defmodule KilnCMS.Search do
   from every search surface without anything failing (#530); `searchable/0` is
   the contract, and callers that enumerate sections should read it rather than
   restate the keys.
+
+  ## `:sections`
+
+  By default every section runs. Pass `sections: [...]` to run only the ones
+  the caller will actually read — each section is a full `Ash.read!` holding a
+  DB connection, and three callers were paying for `media`, `categories`,
+  `tags` and `tag_groups` on every call and discarding them (#960).
+
+      Search.global(query, sections: Search.content_sections())
+
+  `content_sections/0` is derived, so prefer it to a literal list: it keeps
+  meaning "the content sections" when a type is registered. **Sections not
+  asked for are absent from the result**, not empty — "you did not ask" and
+  "there were no matches" are different answers, and a `KeyError` is the right
+  way to learn you asked for the wrong thing. An unrecognised key raises.
   """
-  @spec global(String.t(), keyword()) :: %{
-          required(:entries) => [struct()],
-          required(:media) => [struct()],
-          required(:categories) => [struct()],
-          required(:tags) => [struct()],
-          required(:tag_groups) => [struct()],
-          optional(atom()) => [struct()]
-        }
+  @spec global(String.t(), keyword()) :: %{optional(atom()) => [struct()]}
   def global(query, opts \\ []) when is_binary(query) do
     # `:tenant` scopes the multitenant content legs to the request's org (#336).
     read_opts = Keyword.take(opts, [:actor, :authorize?, :tenant])
@@ -460,7 +468,53 @@ defmodule KilnCMS.Search do
       ]
       |> List.flatten()
 
-    run_sections(compiled ++ fixed)
+    (compiled ++ fixed)
+    |> select_sections(Keyword.get(opts, :sections))
+    |> run_sections()
+  end
+
+  @doc """
+  The section keys that hold **content** — one per compiled type, plus
+  `:entries` for every dynamic type.
+
+  Derived rather than written out, so a caller asking for "the content
+  sections" keeps meaning that when a type is added or a plugin registers one
+  (D18). The three callers that want this all used to hardcode the equivalent
+  list and then discard the rest of the sweep.
+  """
+  @spec content_sections() :: [atom()]
+  def content_sections, do: Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.section) ++ [:entries]
+
+  # Every section is a full `Ash.read!` holding a DB connection for its
+  # duration, so a caller that reads three of them should not pay for all of
+  # them (#960). The fan-out already keys by section, so this is a filter on the
+  # thunk list rather than a restructure.
+  #
+  # #530 is why this stopped being a rounding error: the taxonomy leg became
+  # registry-driven, so the discarded cost now grows with each taxonomy resource
+  # added rather than being a fixed two queries.
+  #
+  # An unknown key RAISES rather than being ignored. Ignoring it would answer a
+  # sweep missing a section the caller asked for, with nothing failing — which
+  # is exactly how `TagGroup` came to be unfindable in search (#530). The
+  # message lists what is actually registered, because on an install with
+  # plugin-registered types that set is not something the caller can read off
+  # the source.
+  defp select_sections(sections, nil), do: sections
+
+  defp select_sections(sections, keys) do
+    wanted = MapSet.new(keys)
+    known = MapSet.new(sections, &elem(&1, 0))
+
+    case wanted |> MapSet.difference(known) |> Enum.sort() do
+      [] ->
+        Enum.filter(sections, &MapSet.member?(wanted, elem(&1, 0)))
+
+      unknown ->
+        raise ArgumentError,
+              "unknown search section(s) #{inspect(unknown)}; registered sections are " <>
+                "#{inspect(known |> Enum.sort())}"
+    end
   end
 
   # Sections are independent — no section's results affect another's — so they
