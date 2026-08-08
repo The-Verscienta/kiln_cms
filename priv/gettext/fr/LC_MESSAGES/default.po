@@ -222,6 +222,7 @@ msgstr "Tout sélectionner"
 
 #: lib/kiln_cms_web/components/layouts.ex:975
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex:23
+#: lib/kiln_cms_web/live/auth_page_title.ex:94
 #, elixir-autogen, elixir-format
 msgid "Sign in"
 msgstr "Se connecter"
@@ -229,6 +230,7 @@ msgstr "Se connecter"
 #: lib/kiln_cms_web/components/layouts.ex:367
 #: lib/kiln_cms_web/components/layouts.ex:368
 #: lib/kiln_cms_web/components/layouts.ex:976
+#: lib/kiln_cms_web/live/auth_page_title.ex:100
 #, elixir-autogen, elixir-format
 msgid "Sign out"
 msgstr "Se déconnecter"
@@ -1769,6 +1771,7 @@ msgstr "Options (une par ligne — champ de sélection uniquement)"
 msgid "Page %{page}"
 msgstr "Page %{page}"
 
+#: lib/kiln_cms_web/controllers/content_controller.ex:976
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex:7
 #, elixir-autogen, elixir-format
 msgid "Page not found"
@@ -1924,7 +1927,7 @@ msgstr "Les recherches sont journalisées anonymement — sans identifiant utili
 msgid "Select %{title}"
 msgstr "Sélectionner %{title}"
 
-#: lib/kiln_cms_web/components/layouts/root.html.heex:167
+#: lib/kiln_cms_web/components/layouts/root.html.heex:188
 #, elixir-autogen, elixir-format
 msgid "Skip to main content"
 msgstr "Aller au contenu principal"
@@ -9690,3 +9693,18 @@ msgstr "est protégé par mot de passe, ses métadonnées ne peuvent donc pas ê
 #, elixir-autogen, elixir-format
 msgid "Add some content — suggestions come from what this page says."
 msgstr "Ajoutez du contenu : les suggestions proviennent de ce que dit cette page."
+
+#: lib/kiln_cms_web/live/auth_page_title.ex:99
+#, elixir-autogen, elixir-format
+msgid "Confirm your email"
+msgstr "Confirmer votre adresse e-mail"
+
+#: lib/kiln_cms_web/live/auth_page_title.ex:95
+#, elixir-autogen, elixir-format
+msgid "Create an account"
+msgstr "Créer un compte"
+
+#: lib/kiln_cms_web/live/auth_page_title.ex:98
+#, elixir-autogen, elixir-format
+msgid "Reset your password"
+msgstr "Réinitialiser votre mot de passe"

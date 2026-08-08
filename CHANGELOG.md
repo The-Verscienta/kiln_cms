@@ -305,6 +305,14 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **The site name rendered twice in the browser tab.** The layout appended the
+  brand-name suffix whether or not there was a page title to append it to, so
+  any page that set none — the site home page, the delivery 404, and every
+  AshAuthentication page — read `Acme Docs · Acme Docs` on a white-labelled
+  site (#559). Those pages now carry their own titles, and the suffix is only
+  appended when there is one, so a page that is ever missed reads as the bare
+  brand name instead.
+
 - **`safe_href/1` accepted `/\evil.com`.** A backslash is a slash for `http(s)`
   under the WHATWG URL spec, so a link that read as a same-origin path resolved
   off-site in every browser — the `//host` escape the policy already blocked,

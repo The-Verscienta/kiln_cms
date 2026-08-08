@@ -154,11 +154,94 @@ defmodule KilnCMS.CMS.Content do
     resource = __CALLER__.module
     related_name = :"related_#{type}s"
     related_arg = :"related_#{type}_ids"
-    # Non-destructive merge verbs for the related array, mirroring the tag ones
-    # (#637): `add_related_<type>_ids` appends, `remove_related_<type>_ids`
-    # unrelates. Only on `:update`/`:autosave` — a create has nothing to merge.
-    add_related_arg = :"add_related_#{type}_ids"
-    remove_related_arg = :"remove_related_#{type}_ids"
+
+    # The mergeable relationships, as {complete-set argument, relationship}
+    # (#639). One list drives the arguments, the manage_relationship changes,
+    # `NormalizeManagedArguments` and `MergeArguments` on both `:update` and
+    # `:autosave` — eight hand-written blocks before, where a relationship added
+    # to one and missed in another is a silent asymmetry between explicit Save
+    # and autosave rather than a compile error.
+    mergeable = [{:tag_ids, :tags}, {related_arg, related_name}]
+
+    # `tag_ids` → `add_tag_ids` / `remove_tag_ids`. Derived, not spelled, so the
+    # verbs cannot drift from the argument they merge against.
+    merge_verbs = fn complete -> {:"add_#{complete}", :"remove_#{complete}"} end
+
+    # Every argument name the merge machinery owns, in declaration order.
+    merge_arg_names =
+      Enum.flat_map(mergeable, fn {complete, _rel} ->
+        {add, remove} = merge_verbs.(complete)
+        [complete, add, remove]
+      end)
+
+    # The argument trio and the three `manage_relationship` changes for one
+    # relationship. Emitted per action rather than shared, because an action's
+    # changes are its own.
+    #
+    # Non-destructive merge verbs (#521 for tags, #637 for the related array).
+    # The complete-set argument is exactly that — a whole set — so a
+    # partial-update caller (REST/GraphQL/MCP) that only knows the one link it
+    # cares about detaches every other by omission. The verbs merge against the
+    # current links instead: `add_*` relates what is listed and leaves the rest
+    # alone, `remove_*` unrelates what is listed and is a no-op for ids that
+    # aren't attached (so it stays idempotent). Combining a complete-set
+    # argument with its verbs is refused outright by `MergeArguments` rather
+    # than resolved by declaration order.
+    merge_arguments = fn ->
+      for {complete, _rel} <- mergeable do
+        {add, remove} = merge_verbs.(complete)
+
+        quote do
+          argument unquote(complete), {:array, :uuid}
+          argument unquote(add), {:array, :uuid}
+          argument unquote(remove), {:array, :uuid}
+        end
+      end
+    end
+
+    merge_changes = fn ->
+      for {complete, relationship} <- mergeable do
+        {add, remove} = merge_verbs.(complete)
+
+        quote do
+          change manage_relationship(unquote(complete), unquote(relationship),
+                   type: :append_and_remove
+                 )
+
+          change manage_relationship(unquote(add), unquote(relationship), type: :append)
+
+          # Not `type: :remove`, whose `on_no_match: :error` would turn removing
+          # an already-detached link into a failure; the rest are Ash defaults,
+          # spelled out because idempotency is the documented contract here.
+          change manage_relationship(unquote(remove), unquote(relationship),
+                   on_lookup: :ignore,
+                   on_match: :unrelate,
+                   on_no_match: :ignore,
+                   on_missing: :ignore
+                 )
+        end
+      end
+    end
+
+    merge_validations = fn ->
+      for {complete, _rel} <- mergeable do
+        {add, remove} = merge_verbs.(complete)
+
+        quote do
+          validate {KilnCMS.CMS.Validations.MergeArguments,
+                    complete: unquote(complete), add: unquote(add), remove: unquote(remove)}
+        end
+      end
+    end
+
+    # Must precede every `manage_relationship`: those changes read the argument
+    # at change-time and snapshot it onto the changeset, so a later
+    # `set_argument` would normalize nothing.
+    normalize_merge_arguments =
+      quote do
+        change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+                arguments: unquote(merge_arg_names)}
+      end
 
     # AshOban worker/scheduler module names (kept identical to hand-written ones).
     pub_worker = Module.concat([resource, Workers, PublishScheduled])
@@ -1325,64 +1408,9 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.DeriveAlias
           # Renaming a published slug leaves a 301 behind at the old URL.
           change KilnCMS.CMS.Changes.RecordSlugRedirect
-          argument :tag_ids, {:array, :uuid}
-          argument unquote(related_arg), {:array, :uuid}
-
-          # Non-destructive merge verbs (#521 for tags, #637 for the related
-          # array). The complete-set argument (`tag_ids` / `related_*_ids`) is
-          # exactly that — a whole set — so a partial-update caller
-          # (REST/GraphQL/MCP) that only knows the one link it cares about
-          # detaches every other by omission. The verbs merge against the
-          # current links instead: `add_*` relates what is listed and leaves the
-          # rest alone, `remove_*` unrelates what is listed and is a no-op for
-          # ids that aren't attached (so it stays idempotent). Combining a
-          # complete-set argument with its verbs is refused outright by
-          # `MergeArguments` rather than resolved by declaration order.
-          argument :add_tag_ids, {:array, :uuid}
-          argument :remove_tag_ids, {:array, :uuid}
-          argument unquote(add_related_arg), {:array, :uuid}
-          argument unquote(remove_related_arg), {:array, :uuid}
-
-          # Must precede every `manage_relationship` below: those changes read
-          # the argument at change-time and snapshot it onto the changeset, so
-          # a later `set_argument` would normalize nothing.
-          change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
-                  arguments: [
-                    :tag_ids,
-                    :add_tag_ids,
-                    :remove_tag_ids,
-                    unquote(related_arg),
-                    unquote(add_related_arg),
-                    unquote(remove_related_arg)
-                  ]}
-
-          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
-          change manage_relationship(:add_tag_ids, :tags, type: :append)
-
-          # Not `type: :remove`, whose `on_no_match: :error` would turn removing
-          # an already-detached link into a failure; the rest are Ash defaults,
-          # spelled out because idempotency is the documented contract here.
-          change manage_relationship(:remove_tag_ids, :tags,
-                   on_lookup: :ignore,
-                   on_match: :unrelate,
-                   on_no_match: :ignore,
-                   on_missing: :ignore
-                 )
-
-          change manage_relationship(unquote(related_arg), unquote(related_name),
-                   type: :append_and_remove
-                 )
-
-          change manage_relationship(unquote(add_related_arg), unquote(related_name),
-                   type: :append
-                 )
-
-          change manage_relationship(unquote(remove_related_arg), unquote(related_name),
-                   on_lookup: :ignore,
-                   on_match: :unrelate,
-                   on_no_match: :ignore,
-                   on_missing: :ignore
-                 )
+          unquote_splicing(merge_arguments.())
+          unquote(normalize_merge_arguments)
+          unquote_splicing(merge_changes.())
 
           # Headless block-body writes (#330) — see `:create`. Omitted argument
           # leaves the existing body untouched (a metadata-only PATCH is safe).
@@ -1403,13 +1431,7 @@ defmodule KilnCMS.CMS.Content do
           # stale. `only_when: :published` keeps draft edits/autosaves silent.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
 
-          validate {KilnCMS.CMS.Validations.MergeArguments,
-                    complete: :tag_ids, add: :add_tag_ids, remove: :remove_tag_ids}
-
-          validate {KilnCMS.CMS.Validations.MergeArguments,
-                    complete: unquote(related_arg),
-                    add: unquote(add_related_arg),
-                    remove: unquote(remove_related_arg)}
+          unquote_splicing(merge_validations.())
 
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
@@ -1470,55 +1492,10 @@ defmodule KilnCMS.CMS.Content do
           # picker grows a merge input, an action that didn't declare it would
           # fail every debounce with `NoSuchInput` while explicit Save kept
           # working. Declaring them keeps the two actions interchangeable.
-          argument :tag_ids, {:array, :uuid}
-          argument :add_tag_ids, {:array, :uuid}
-          argument :remove_tag_ids, {:array, :uuid}
-          argument unquote(related_arg), {:array, :uuid}
-          argument unquote(add_related_arg), {:array, :uuid}
-          argument unquote(remove_related_arg), {:array, :uuid}
-
-          change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
-                  arguments: [
-                    :tag_ids,
-                    :add_tag_ids,
-                    :remove_tag_ids,
-                    unquote(related_arg),
-                    unquote(add_related_arg),
-                    unquote(remove_related_arg)
-                  ]}
-
-          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
-          change manage_relationship(:add_tag_ids, :tags, type: :append)
-
-          change manage_relationship(:remove_tag_ids, :tags,
-                   on_lookup: :ignore,
-                   on_match: :unrelate,
-                   on_no_match: :ignore,
-                   on_missing: :ignore
-                 )
-
-          change manage_relationship(unquote(related_arg), unquote(related_name),
-                   type: :append_and_remove
-                 )
-
-          change manage_relationship(unquote(add_related_arg), unquote(related_name),
-                   type: :append
-                 )
-
-          change manage_relationship(unquote(remove_related_arg), unquote(related_name),
-                   on_lookup: :ignore,
-                   on_match: :unrelate,
-                   on_no_match: :ignore,
-                   on_missing: :ignore
-                 )
-
-          validate {KilnCMS.CMS.Validations.MergeArguments,
-                    complete: :tag_ids, add: :add_tag_ids, remove: :remove_tag_ids}
-
-          validate {KilnCMS.CMS.Validations.MergeArguments,
-                    complete: unquote(related_arg),
-                    add: unquote(add_related_arg),
-                    remove: unquote(remove_related_arg)}
+          unquote_splicing(merge_arguments.())
+          unquote(normalize_merge_arguments)
+          unquote_splicing(merge_changes.())
+          unquote_splicing(merge_validations.())
 
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.SetSearchText

@@ -388,6 +388,48 @@ expansion** (the same fragment twice is one query) and each expansion has a
 expand to nothing. An anonymous page render is not where you discover how many
 documents an editor chained together.
 
+Fetches are not the cost that matters, though, and on their own those two
+bounds do not hold (#917). The memo returns a cached target *without* spending
+a fetch, and inlining re-runs the expansion over that target's whole tree at
+every occurrence — so the **emitted** tree still grows as `B^(depth+1)` while
+the fetch budget counts only distinct targets. Three chained pages holding 200
+fragment blocks each spend 3 of 64 fetches and emit eight million blocks, from
+an anonymous `GET`. So the load-bearing bound is `Fragments.max_nodes/0`,
+charged against blocks produced by inlining, checked on the way in and charged
+as each inline returns. Only inlined blocks count — a legitimately long page is
+not what this bounds.
+
+### Withdrawing a fragment
+
+Unpublishing, archiving or deleting a fragment **re-fires everything that
+embeds it**. That has to be explicit, because a referrer inlines its target at
+fire time: the fragment's body is sitting inside every referrer's `:web`,
+`:json`, `:llm` and `:json_ld` artifact, and purging the fragment's own
+artifacts does nothing about those. The re-fire wave was originally wired to
+the publish path only, so a withdrawn fragment kept being served by every page
+embedding it — to anonymous callers, through feeds, static export and the
+newsletter (#917). `Changes.DeleteArtifacts` now enqueues the same wave the
+publish path does.
+
+### Point-in-time reads
+
+A historical read (`as_of`) resolves each fragment to the body its target
+carried **at that instant**, via `PointInTime.snapshot_state/4`, not to its
+current published body. Otherwise the one endpoint whose promise is "what did
+this say on…" answered with today's fragment — or with an empty body where the
+content was, if the target had since been withdrawn. A target that was not
+published then expands to nothing, exactly as an unpublished one does live.
+
+A historical read is **no more permissive** than a live one: it re-applies the
+audience filter and the dynamic-type scope against the values that were live at
+`as_of`. That is not optional — `?as_of=` reaches this path from the
+unauthenticated `:api` route, and the response is served
+`cache-control: public, max-age=300`, so skipping the audience check would let
+anyone append `?as_of=` to a public URL and have a CDN cache the body of a
+`:member` fragment embedded in it. A replayed state with no `audience` at all
+fails closed. Hard-purged targets are excluded by the same `still_exists?/3`
+check `index/4` uses, so erased content is not re-exposed through a referrer.
+
 ### Authoring
 
 The editor's fragment block is a single `<select>` of published documents —

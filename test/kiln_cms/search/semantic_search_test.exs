@@ -46,6 +46,49 @@ defmodule KilnCMS.Search.SemanticSearchTest do
 
   defp embed_all, do: KilnCMS.DataCase.drain_oban()
 
+  # Drain the embedding jobs, then prove they landed (#617).
+  #
+  # `:search_semantic` filters `not is_nil(embedding)`, so a record whose job
+  # never completed is silently absent from every semantic read — and
+  # `Oban.drain_queue/1` runs only what is *available*: a job that failed once
+  # goes `retryable` with a future `scheduled_at` and is left behind. Under load
+  # that is a plausible way for a drain to come back having embedded nothing.
+  #
+  # Checking it here is what separates the two failures #617 could not tell
+  # apart. A missing embedding fails on this line, named as a timing problem;
+  # the visibility assertions downstream are then left meaning only what they
+  # say, so a draft reaching an anonymous caller is unambiguously a policy leak
+  # — a different severity entirely.
+  defp embed_all!(records) do
+    embed_all()
+
+    for %resource{id: id} = record <- List.wrap(records) do
+      reloaded = Ash.get!(resource, id, authorize?: false)
+
+      refute is_nil(reloaded.embedding),
+             "#{inspect(resource)} #{id} (#{record.title}) has no embedding after " <>
+               "embed_all/0. The embedding job did not complete, so this run says " <>
+               "nothing about read visibility. Jobs left in the queue: " <>
+               inspect(leftover_jobs())
+
+      reloaded
+    end
+  end
+
+  # What the drain left behind, for the message above. A `retryable` row with an
+  # attempt count is the signature of a job that failed and was rescheduled out
+  # of the drain's reach; an empty list means the job never got enqueued at all,
+  # which is a different bug again.
+  defp leftover_jobs do
+    import Ecto.Query, only: [from: 2]
+
+    KilnCMS.Repo.all(
+      from(j in "oban_jobs",
+        select: %{worker: j.worker, state: j.state, attempt: j.attempt, queue: j.queue}
+      )
+    )
+  end
+
   test "ranks the nearest embedded record first" do
     admin = admin()
     alpha = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
@@ -86,11 +129,21 @@ defmodule KilnCMS.Search.SemanticSearchTest do
     draft = CMS.create_page!(%{title: "Secret", slug: slug()}, actor: admin)
     published = CMS.create_page!(%{title: "Public", slug: slug()}, actor: admin)
     published = CMS.publish_page!(published, %{}, actor: admin)
-    embed_all()
+
+    # Both must be embedded for this test to mean anything: the draft has to be
+    # *reachable* by the search for its absence to prove the policy excluded it,
+    # rather than proving only that it had no vector (#617).
+    embed_all!([draft, published])
 
     anon_ids = "Secret" |> CMS.semantic_search_pages!(authorize?: true) |> Enum.map(& &1.id)
-    refute draft.id in anon_ids
-    assert published.id in anon_ids
+
+    refute draft.id in anon_ids,
+           "an anonymous semantic search returned a DRAFT page. This is a read-policy " <>
+             "leak, not a timing flake — the embedding precondition above passed."
+
+    assert published.id in anon_ids,
+           "the published page is embedded but an anonymous semantic search did not " <>
+             "return it."
   end
 
   describe "semantic_distances/3" do
