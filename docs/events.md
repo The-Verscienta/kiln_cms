@@ -155,6 +155,35 @@ document's schedule and recurrence, and an hourly Oban sweep
 occurrence has gone by. Ordering and paging then happen in Postgres over an
 index, so an anonymous request expands no recurrences at all.
 
+### Backfilling an existing site
+
+The migration adds the column; it cannot fill it, because the value comes out of
+the recurrence engine rather than out of other columns. Neither does the sweep —
+it visits rows whose occurrence has **passed**, and a `NULL` has not passed
+anything. So on a site that had events before upgrading, the index stays empty
+until each event happens to be re-saved. Run this once:
+
+```bash
+mix kiln.occurrences.backfill
+```
+
+Or, in a release image (no Mix):
+
+```bash
+bin/kiln_cms eval 'KilnCMS.Events.Backfill.run()'
+```
+
+Idempotent, interruptible, and safe on a live site: it writes only the rows
+whose value actually changes, so a second run writes nothing. `--org <uuid>`
+scopes it to one site, `--batch <n>` sizes the pages.
+
+`--all-types` widens it beyond event-shaped types. That matters in exactly one
+case: a type that **lost** its `datetime_range` field while holding
+future-dated values. Those rows are invisible to the sweep (their value has not
+passed) and to the default pass (their type is no longer event-shaped), so
+nothing else will ever correct them. It costs a full scan of every content
+table, which is why it is not the default.
+
 Two consequences worth knowing:
 
 * **The sweep's period is the staleness window.** An event that has finished
