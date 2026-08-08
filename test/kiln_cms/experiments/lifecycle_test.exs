@@ -14,8 +14,6 @@ defmodule KilnCMS.Experiments.LifecycleTest do
   alias KilnCMS.ExperimentFixtures
   alias KilnCMS.Experiments
 
-  require Ash.Query
-
   setup do
     org_id = KilnCMS.Accounts.default_org_id()
     %{org_id: org_id, actor: admin(), document_id: Ash.UUID.generate()}
@@ -79,6 +77,31 @@ defmodule KilnCMS.Experiments.LifecycleTest do
                Experiments.start_experiment(experiment, authorize?: false, tenant: ctx.org_id)
 
       assert Exception.message(error) =~ "at least two variants"
+    end
+
+    # Nothing about a goal-less experiment looks broken from outside: traffic
+    # splits, the page loses its shared cache, impressions pile up on every arm,
+    # and the conversion column reads 0.0% forever.
+    test "refuses a form-submission goal with no goal form", ctx do
+      experiment = experiment!(ctx, %{goal_form_id: nil})
+      ExperimentFixtures.variant!(experiment, "Control", %{}, ctx.org_id, control: true)
+      ExperimentFixtures.variant!(experiment, "B", %{}, ctx.org_id, [])
+
+      assert_start_refused(experiment, ctx, "needs a goal form")
+    end
+
+    # An experiment that serves no arm at all still shows as running.
+    test "refuses weights that sum to zero", ctx do
+      experiment = experiment!(ctx)
+
+      ExperimentFixtures.variant!(experiment, "Control", %{}, ctx.org_id,
+        control: true,
+        weight: 0
+      )
+
+      ExperimentFixtures.variant!(experiment, "B", %{}, ctx.org_id, weight: 0)
+
+      assert_start_refused(experiment, ctx, "weights sum to zero")
     end
 
     # Without a baseline, "the control won" is not something the data can say.

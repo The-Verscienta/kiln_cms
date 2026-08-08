@@ -10,8 +10,8 @@ defmodule KilnCMS.Experiments do
 
   ## No visitor is tracked
 
-  Kiln has no visitor cookie and `docs/data-flows.md` promises it will not grow
-  one. So assignment splits along the two delivery surfaces:
+  Kiln has no visitor cookie by default and `docs/data-flows.md` says so. So
+  assignment splits along the two delivery surfaces:
 
     * **built-in site** — stateless. A variant is picked per request, nothing is
       stored. A visitor may see a different variant on reload, so only a
@@ -20,6 +20,12 @@ defmodule KilnCMS.Experiments do
     * **headless** — the caller passes `?variant_key=`, and the same key always
       resolves to the same variant. The caller already has a session or an
       edge-assigned bucket; they own stickiness and Kiln stores nothing.
+
+  `KilnCMS.Experiments.Sticky` (#984) is the one opt-out of that, off unless an
+  operator turns it on: a bucket cookie that keeps a visitor's arm stable, and
+  the exposure cookie the `:content_view` goal needs in order to count a
+  conversion that happens on a later page. Both are documented in
+  `docs/data-flows.md` because turning them on changes what that document says.
 
   ## What a variant may never touch
 
@@ -43,6 +49,8 @@ defmodule KilnCMS.Experiments do
   use Ash.Domain, otp_app: :kiln_cms
 
   alias KilnCMS.Experiments.Experiment
+
+  require Logger
 
   # Backstop only — `bust/1` is the freshness signal, since an editor who starts
   # an experiment expects it live on the next request.
@@ -125,7 +133,15 @@ defmodule KilnCMS.Experiments do
   rescue
     # Delivery must survive a database that cannot answer this. No experiments
     # is the safe answer: the canonical document is what gets served.
-    _error -> []
+    #
+    # Logged rather than swallowed silently, because "no experiments" and
+    # "every experiment on the site stopped serving" look identical from
+    # outside. A rolling deploy where the image is ahead of the migration hits
+    # exactly this — an `UndefinedColumn` on a column added for one goal takes
+    # every OTHER experiment down with it, and without this line nothing says so.
+    error ->
+      Logger.warning("Experiments.running/1 could not read: #{Exception.message(error)}")
+      []
   end
 
   defp config, do: Application.get_env(:kiln_cms, __MODULE__, [])

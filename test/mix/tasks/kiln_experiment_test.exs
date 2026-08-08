@@ -5,8 +5,8 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
   Until `/editor/experiments` lands this task is the **only** way to operate the
   engine, so a break here makes the feature inert in exactly the phase where it
   is the whole interface. It also carries real logic of its own — required
-  options, the refused `content_view` goal, and the state-machine calls — none
-  of which is exercised anywhere else.
+  options, the per-goal requirements, and the state-machine calls — none of
+  which is exercised anywhere else.
 
   `async: false`: the task calls `Mix.shell()` and `Mix.raise/1`, which are
   process-global.
@@ -45,6 +45,12 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
   defp name, do: "exp-#{System.unique_integer([:positive])}"
 
   defp run(args), do: capture_io(fn -> Experiment.run(args) end)
+
+  defp sticky_on do
+    original = Application.get_env(:kiln_cms, KilnCMS.Experiments, [])
+    Application.put_env(:kiln_cms, KilnCMS.Experiments, Keyword.put(original, :sticky, true))
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Experiments, original) end)
+  end
 
   defp find(org_id, name) do
     Experiments.list_experiments!(authorize?: false, tenant: org_id, load: [:variants])
@@ -93,15 +99,72 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
       assert experiment.goal_form_id == form.id
     end
 
-    test "refuses --goal content_view and says where it went", ctx do
+    test "refuses --goal content_view while sticky assignment is off", ctx do
+      doc = page(ctx.actor)
+
+      # Attributing a view on a LATER page needs to know the visitor was
+      # exposed, which on the built-in site only the sticky cookie can say
+      # (#984). Without it the experiment would run and report 0.0% forever, so
+      # the task names the switch rather than letting that happen.
+      error =
+        assert_raise Mix.Error, fn ->
+          run([
+            "create",
+            name(),
+            "--type",
+            "page",
+            "--document",
+            doc.id,
+            "--goal",
+            "content_view",
+            "--goal-type",
+            "page",
+            "--goal-document",
+            page(ctx.actor).id
+          ])
+        end
+
+      assert Exception.message(error) =~ "sticky"
+      assert Exception.message(error) =~ "ever convert"
+    end
+
+    test "creates a content_view experiment once sticky assignment is on", ctx do
+      sticky_on()
+      doc = page(ctx.actor)
+      target = page(ctx.actor)
+      experiment_name = name()
+
+      run([
+        "create",
+        experiment_name,
+        "--type",
+        "page",
+        "--document",
+        doc.id,
+        "--goal",
+        "content_view",
+        "--goal-type",
+        "page",
+        "--goal-document",
+        target.id
+      ])
+
+      experiment = find(ctx.org_id, experiment_name)
+
+      assert experiment.goal == :content_view
+      assert experiment.goal_content_type == "page"
+      assert experiment.goal_document_id == target.id
+      # No goal form: a content-view experiment does not convert on a form.
+      refute experiment.goal_form_id
+    end
+
+    test "refuses --form alongside a content_view goal instead of dropping it", ctx do
+      sticky_on()
       doc = page(ctx.actor)
       form = ExperimentFixtures.goal_form!(ctx.org_id)
 
-      # Phase 1 constrains `Experiment.goal` to `[:form_submission]`, so this
-      # would fail anyway — but as a cast error naming an enum, which tells an
-      # operator nothing. The task refuses it with the reason: attributing a
-      # view on a LATER page needs a stable visitor key the built-in site does
-      # not have (#984).
+      # Silently ignoring it would leave an operator who adapted an existing
+      # command line believing form submissions also count.
       error =
         assert_raise Mix.Error, fn ->
           run([
@@ -114,12 +177,29 @@ defmodule Mix.Tasks.Kiln.ExperimentTest do
             "--form",
             form.id,
             "--goal",
-            "content_view"
+            "content_view",
+            "--goal-type",
+            "page",
+            "--goal-document",
+            page(ctx.actor).id
           ])
         end
 
-      assert Exception.message(error) =~ "phase 3"
-      assert Exception.message(error) =~ "visitor key"
+      assert Exception.message(error) =~ "--form does not apply"
+    end
+
+    test "requires --goal-type and --goal-document for a content_view goal", ctx do
+      sticky_on()
+      doc = page(ctx.actor)
+      base = ["create", name(), "--type", "page", "--document", doc.id, "--goal", "content_view"]
+
+      assert_raise Mix.Error, ~r/--goal-type/, fn ->
+        run(base ++ ["--goal-document", page(ctx.actor).id])
+      end
+
+      assert_raise Mix.Error, ~r/--goal-document/, fn ->
+        run(base ++ ["--goal-type", "page"])
+      end
     end
 
     test "refuses an unknown goal", ctx do

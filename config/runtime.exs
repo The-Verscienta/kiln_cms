@@ -384,6 +384,32 @@ if config_env() != :test do
     config :kiln_cms, KilnCMS.Experiments, enabled: experiments?
   end
 
+  # Sticky assignment (#984). A SECOND decision, and separate from the one above
+  # on purpose: enabling experiments changes caching, enabling this puts a
+  # cookie on visitors of experimented pages. `docs/data-flows.md` states that
+  # no visitor cookie is recorded, and this is the one switch that makes that
+  # untrue — so it is not something the experiments switch should turn on as a
+  # side effect. See docs/data-flows.md#sticky-assignment-cookie-984.
+  with {:ok, sticky?} <- Env.fetch("KILN_EXPERIMENTS_STICKY") do
+    config :kiln_cms, KilnCMS.Experiments, sticky: sticky?
+  end
+
+  # Deep-merges with the two `config` calls above (`Config` merges successive
+  # calls for the same key rather than overwriting them) — see #608.
+  if sticky_days = System.get_env("KILN_EXPERIMENTS_STICKY_DAYS") do
+    case Integer.parse(String.trim(sticky_days)) do
+      {parsed, ""} when parsed > 0 ->
+        config :kiln_cms, KilnCMS.Experiments, sticky_max_age_days: parsed
+
+      _other ->
+        IO.warn(
+          "KILN_EXPERIMENTS_STICKY_DAYS must be a positive integer " <>
+            "(got #{inspect(sticky_days)}); keeping the 30-day default.",
+          []
+        )
+    end
+  end
+
   # Mount the signing key as a file instead of exporting it. The key is a
   # multi-line PKCS#1 PEM and most .env parsers (docker-compose included) do not
   # carry embedded newlines, so a file is the route .env.example already

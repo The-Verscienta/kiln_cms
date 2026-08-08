@@ -36,13 +36,14 @@ defmodule KilnCMS.ExperimentFixtures do
 
     experiment =
       Experiments.create_experiment!(
-        %{
-          name: Keyword.get(opts, :name, "exp-#{System.unique_integer([:positive])}"),
-          content_type: content_type,
-          document_id: document.id,
-          goal: Keyword.get(opts, :goal, :form_submission),
-          goal_form_id: Keyword.get_lazy(opts, :goal_form_id, fn -> goal_form!(org_id).id end)
-        },
+        Map.merge(
+          %{
+            name: Keyword.get(opts, :name, "exp-#{System.unique_integer([:positive])}"),
+            content_type: content_type,
+            document_id: document.id
+          },
+          goal_attrs(org_id, opts)
+        ),
         authorize?: false,
         tenant: org_id
       )
@@ -61,6 +62,26 @@ defmodule KilnCMS.ExperimentFixtures do
     KilnCMS.Cache.bust_experiments(org_id)
 
     {started, control, treatment}
+  end
+
+  # A content-view experiment converts on a different document and has no goal
+  # form; a form-submission one is the reverse. Building the wrong pair would be
+  # refused by `:start`, so the fixture builds whichever the goal calls for.
+  defp goal_attrs(org_id, opts) do
+    case Keyword.get(opts, :goal, :form_submission) do
+      :content_view ->
+        %{
+          goal: :content_view,
+          goal_content_type: Keyword.fetch!(opts, :goal_content_type),
+          goal_document_id: Keyword.fetch!(opts, :goal_document_id)
+        }
+
+      goal ->
+        %{
+          goal: goal,
+          goal_form_id: Keyword.get_lazy(opts, :goal_form_id, fn -> goal_form!(org_id).id end)
+        }
+    end
   end
 
   @doc """

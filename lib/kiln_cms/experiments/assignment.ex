@@ -56,6 +56,49 @@ defmodule KilnCMS.Experiments.Assignment do
     end
   end
 
+  @doc """
+  Choose a variant for a sticky **bucket** — an integer in `[0, buckets)` from
+  the visitor's cookie (#984).
+
+  Scaled proportionally rather than hashed, and that is the whole reason this
+  exists separately from `choose/2`'s keyed branch. `phash2/2` over a small
+  value space does not distribute evenly: with 100 possible buckets and a 50/50
+  split, which side of the line each bucket falls on is fixed by the hash, so
+  the arms would sit at something like 54/46 **permanently** — a systematic bias
+  that reads as a real effect and never averages out, because the same buckets
+  keep landing the same way.
+
+  The cumulative shares are compared **in bucket space** — arm `i` owns buckets
+  below `div(cumulative_weight * buckets, total)`. Scaling the bucket up into
+  weight space instead (`div(bucket * total, buckets)`) looks equivalent and is
+  not: with weights `[999, 1]` every one of the 100 bucket values lands below
+  999, so the second arm is served to **nobody** while the results table shows
+  it running. This way each arm gets its weighted share of buckets, truncated,
+  and an arm whose share is below `1/buckets` is the only one that can round to
+  nothing — which is a real limit of 100 buckets rather than a bias toward
+  whichever arm sorts first.
+  """
+  @spec choose_bucket([Variant.t()], non_neg_integer(), pos_integer()) :: choice()
+  def choose_bucket(variants, bucket, buckets)
+      when is_integer(bucket) and bucket >= 0 and is_integer(buckets) and buckets > 0 do
+    ordered = Enum.sort_by(variants, & &1.id)
+    total = Enum.sum_by(ordered, & &1.weight)
+
+    if total <= 0, do: nil, else: pick_bucket(ordered, bucket, 0, total, buckets)
+  end
+
+  def choose_bucket(_variants, _bucket, _buckets), do: nil
+
+  defp pick_bucket([variant], _bucket, _taken, _total, _buckets), do: variant
+
+  defp pick_bucket([variant | rest], bucket, taken, total, buckets) do
+    taken = taken + variant.weight
+
+    if bucket < div(taken * buckets, total),
+      do: variant,
+      else: pick_bucket(rest, bucket, taken, total, buckets)
+  end
+
   # Sorted by id first, so the same key maps to the same arm across nodes and
   # restarts — the row order a database happens to return is not a contract.
   defp pick([variant], _bucket), do: variant

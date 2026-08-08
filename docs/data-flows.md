@@ -13,9 +13,12 @@ your deployment.
 - KilnCMS is **privacy-first by default**: HTML is delivered by the LiveView app
   itself, so there is **no third-party analytics, ad, or tag-manager script** on
   any page. Content analytics are aggregate counters only — no IP, user-agent, or
-  cookie is recorded for visitors. The one visitor-side cookie that exists is
-  created only by a visitor who types a passphrase into a locked page, carries no
-  identifier, and is described under [Transport & at-rest notes](#transport--at-rest-notes).
+  cookie is recorded for visitors. Two narrow exceptions, neither of which
+  happens on an ordinary page view: a visitor who types a passphrase into a
+  locked page gets an unlock cookie carrying no identifier (see
+  [Transport & at-rest notes](#transport--at-rest-notes)), and
+  [sticky A/B assignment](#sticky-assignment-cookie-984) is an opt-in that is off
+  unless you turn it on.
 - The only personal data we store is **operator/editor account data** (email,
   optional display name, RBAC role, notification preferences) and **auth tokens**.
 - Data only leaves the system through integrations you explicitly enable
@@ -43,6 +46,9 @@ your deployment.
 | Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). |
 | Recorded 404 paths | `missed_paths` | Possibly | The unresolvable request path and its hit count — **no** IP, user agent, referrer, or actor. A path can still be incidentally identifying (`/invoices/jane-doe`), so rows are purged on retention (below). Vulnerability probing is filtered out before anything is written, and the table is hard-capped per site. See [404 capture](#404-capture-472). |
 | Funnel definitions | `funnels`, `funnel_steps` | No | Admin-authored ordered list of content items (landing → pricing → signup, #621). No visitor data, no counter table — step traffic is derived from `content_view_days` at read time. Not on a retention purge; kept until an admin deletes the funnel. |
+| Daily experiment buckets | `content_experiment_variant_days` | No | Impression and conversion counters per variant per UTC day (#499) — no visitor data. |
+| Sticky assignment bucket | **visitor's browser only** | No (see below) | **Off by default.** When enabled, a `_kiln_ab` cookie holding one integer in `0..99` — a bucket, not an identifier. Nothing server-side is keyed by it and no row is written. See [Sticky assignment](#sticky-assignment-cookie-984). |
+| A/B exposure | **visitor's browser only** | Weakly (see below) | **Off by default**, and only for a `content_view` goal. A `_kiln_ab_x` cookie holding up to 4 variant ids — which arm the visitor was shown — each removed the moment it converts. The one part of this feature with a real, if small, identifying edge; see [Sticky assignment](#sticky-assignment-cookie-984). |
 
 ## What data leaves the system
 
@@ -262,6 +268,62 @@ Document your chosen audit-retention period (e.g. "content versions are retained
 for N years for audit, then pruned") in your records-of-processing; KilnCMS does
 not impose one because it is jurisdiction- and policy-dependent.
 
+## Sticky assignment cookie (#984)
+
+Content experiments (#499) are stateless by default: a variant is drawn per
+request, nothing is stored, and no visitor is identified. That is what keeps the
+"no cookie is recorded for visitors" claim above literally true — but it also
+means a reload can show a different arm, so only a *same-page* goal
+(`:form_submission`) can be attributed honestly.
+
+**Sticky assignment** is the opt-in that trades that away:
+
+```elixir
+config :kiln_cms, KilnCMS.Experiments, sticky: true
+```
+
+| | |
+|---|---|
+| **What is stored** | `_kiln_ab` — one integer in `0..99`. And, only where a `content_view` goal is running, `_kiln_ab_x` — up to four variant ids. |
+| **Where** | The visitor's browser only. No database row, no log line, nothing server-side is keyed by either. |
+| **How long** | 30 days by default; set `sticky_max_age_days:` to shorten it. |
+| **Why** | `_kiln_ab` so a returning visitor keeps the same arm instead of re-drawing, which is what makes their behaviour across a visit comparable between arms. `_kiln_ab_x` because a conversion that happens on a *later* page can only be attributed to an arm the visitor is known to have seen. |
+| **Flags** | `http_only`, `SameSite=Lax`, `Path=/`, and — wherever the deployment's cookies are `Secure` — `Secure` plus the `__Host-` name prefix, so a sibling org's origin cannot plant one. |
+
+**It is a bucket, not an identifier.** With only 100 possible values, every value
+is shared by a large share of your visitors on any site with meaningful traffic,
+so it cannot single anybody out. It is deliberately *not* signed or encrypted: a
+signature would derive from the deployment secret and make the value unique-ish
+and opaque, which is the opposite of what a bucket wants to be. A visitor who
+edits it picks their own arm — exactly the power they already have by clearing it.
+
+**`_kiln_ab_x` is the weaker claim, and it is worth stating rather than
+glossing.** It names which arm you saw, so its value space is the set of arms of
+the running `content_view` experiments — with one such experiment it tells an
+observer nothing beyond which arm you are in, but with several the *combination*
+starts to narrow a visitor down. That is why it is capped at four entries, why an
+entry is deleted the moment it converts, and why it is written only for the one
+goal that cannot work without it. It is also the only one of the two your cookie
+notice needs to describe as more than a bucket.
+
+Both cookies are minted **only on a page that is actually under experiment**, and
+only when a visitor arrives without a valid one. An ordinary page — nearly every
+page — sets nothing, so turning the switch on does not put a marker on your whole
+site. A returning visitor's cookies are read and not re-set, so their lifetime is
+bounded rather than rolling.
+
+One operational cost, since it is easy to miss: a `content_view` experiment takes
+the **goal** page out of your CDN for its duration as well as the experimented
+page, because the conversion is counted at the origin.
+
+> **Consent is yours to decide.** KilnCMS ships this off and does not render a
+> consent banner. Whether these cookies — used solely to keep an A/B arm stable
+> and attribute its outcome — are "strictly necessary" under your regime, and
+> therefore whether you need consent before enabling them, is a judgement for
+> your DPO and not a default we can make for you. If you enable them, put **both
+> names** in your cookie notice, and gate the config on your consent mechanism if
+> your assessment says so.
+
 ## Transport & at-rest notes
 
 - **Session cookie** (`__Host-_kiln_cms_key` in production, `_kiln_cms_key` in
@@ -300,6 +362,9 @@ not impose one because it is jurisdiction- and policy-dependent.
       to policy.
 - [ ] Decided whether referrer attribution is worth enabling
       (`KILN_ANALYTICS_REFERRERS`, off by default, #619).
+- [ ] Decided whether [sticky A/B assignment](#sticky-assignment-cookie-984) is
+      worth a visitor cookie (`sticky:`, off by default, #984) — and if so,
+      whether your regime wants consent for it first.
 - [ ] Documented your content-version (PaperTrail) audit-retention period.
 - [ ] Know the two subject-rights paths: self-export (`/editor/settings`) and
       admin erasure (`anonymize_user`).

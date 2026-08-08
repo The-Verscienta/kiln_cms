@@ -6,6 +6,8 @@ defmodule Mix.Tasks.Kiln.Experiment do
       mix kiln.experiment list                          [--org-id UUID]
       mix kiln.experiment show    NAME                  [--org-id UUID]
       mix kiln.experiment create  NAME --type post --document UUID --form FORM_UUID
+      mix kiln.experiment create  NAME --type post --document UUID \\
+            --goal content_view --goal-type page --goal-document UUID
       mix kiln.experiment variant NAME --variant "Control" --control
       mix kiln.experiment variant NAME --variant "Punchier" --patch '{"fields":{"title":"..."}}'
       mix kiln.experiment start   NAME
@@ -36,6 +38,8 @@ defmodule Mix.Tasks.Kiln.Experiment do
     document: :string,
     goal: :string,
     form: :string,
+    goal_type: :string,
+    goal_document: :string,
     variant: :string,
     patch: :string,
     weight: :integer,
@@ -86,7 +90,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
         Mix.shell().info("Name:     #{experiment.name}")
         Mix.shell().info("State:    #{experiment.state}")
         Mix.shell().info("Target:   #{experiment.content_type} #{experiment.document_id}")
-        Mix.shell().info("Goal:     #{experiment.goal}")
+        Mix.shell().info("Goal:     #{goal_line(experiment)}")
         Mix.shell().info("")
 
         Enum.each(experiment.variants, &Mix.shell().info(variant_line(&1, org_id)))
@@ -108,13 +112,10 @@ defmodule Mix.Tasks.Kiln.Experiment do
 
     experiment =
       Experiments.create_experiment!(
-        %{
-          name: name,
-          content_type: type,
-          document_id: document,
-          goal: goal(opts[:goal]),
-          goal_form_id: goal_form_id(opts)
-        },
+        Map.merge(
+          %{name: name, content_type: type, document_id: document},
+          goal_attrs(opts)
+        ),
         authorize?: false,
         tenant: org_id
       )
@@ -206,24 +207,64 @@ defmodule Mix.Tasks.Kiln.Experiment do
   defp rate(impressions, conversions),
     do: "  (#{Float.round(conversions / impressions * 100, 1)}%)"
 
+  defp goal_line(%{goal: :content_view} = experiment) do
+    "content_view → #{experiment.goal_content_type} #{experiment.goal_document_id}"
+  end
+
+  defp goal_line(experiment), do: "#{experiment.goal} (form #{experiment.goal_form_id})"
+
   defp goal(nil), do: :form_submission
   defp goal("form_submission"), do: :form_submission
+  defp goal("content_view"), do: :content_view
 
-  defp goal("content_view"),
-    do:
-      Mix.raise(
-        "The content_view goal is phase 3: attributing a view on a later page " <>
-          "needs a stable visitor key, which the built-in site does not have. " <>
-          "See docs/content-experiments-plan.md."
-      )
+  defp goal(other),
+    do: Mix.raise("Unknown goal #{inspect(other)} (form_submission, content_view)")
 
-  defp goal(other), do: Mix.raise("Unknown goal #{inspect(other)} (form_submission)")
+  # An experiment whose goal cannot fire counts nothing, so each goal's
+  # requirement is refused here rather than left to be discovered from an empty
+  # results column weeks later. `:start` checks the same things again — this is
+  # the readable error, that is the real gate.
+  defp goal_attrs(opts) do
+    case goal(opts[:goal]) do
+      :content_view -> %{goal: :content_view} |> Map.merge(content_view_target(opts))
+      :form_submission -> %{goal: :form_submission, goal_form_id: goal_form_id(opts)}
+    end
+  end
 
-  # A form-submission experiment with no goal form counts nothing, so refusing
-  # here beats letting someone discover it from an empty results column.
   defp goal_form_id(opts) do
     opts[:form] ||
       Mix.raise("--form FORM_UUID is required: it is the form whose submission counts")
+  end
+
+  defp content_view_target(opts) do
+    # Refused rather than dropped: an operator adapting an existing command line
+    # keeps `--form` and adds `--goal content_view`, and would otherwise be told
+    # nothing while the flag went on the floor — leaving them believing form
+    # submissions also count for an experiment that has no goal form.
+    if opts[:form] do
+      Mix.raise(
+        "--form does not apply to a content_view goal: a content-view " <>
+          "experiment converts on a VIEW of --goal-document, not on a form."
+      )
+    end
+
+    unless KilnCMS.Experiments.Sticky.enabled?() do
+      Mix.raise(
+        "The content_view goal needs sticky assignment, which is off. " <>
+          "Set `config :kiln_cms, KilnCMS.Experiments, sticky: true` — without it " <>
+          "the site cannot tell a visitor who saw the experiment from one who did " <>
+          "not, so nothing would ever convert. See docs/data-flows.md."
+      )
+    end
+
+    %{
+      goal_content_type:
+        opts[:goal_type] ||
+          Mix.raise("--goal-type is required: the content type of the document a view converts"),
+      goal_document_id:
+        opts[:goal_document] ||
+          Mix.raise("--goal-document UUID is required: the document whose view converts")
+    }
   end
 
   defp parse_patch(nil), do: %{}
