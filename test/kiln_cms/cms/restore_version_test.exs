@@ -109,6 +109,30 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     assert restored.slug == "coalesced-slug"
   end
 
+  # The test above uses three DISJOINT fields, so it merges to the same map in
+  # either direction and cannot detect a reversed fold — confirmed by mutation:
+  # reversing the merge leaves it green. Since #692 the coalescer shares
+  # `VersionSnapshot.merge/2` with restore and point-in-time, so the direction is
+  # now one shared decision, and it belongs under a test that says so rather than
+  # only under a governance-chain assertion in another file.
+  test "a coalesced run keeps the LAST value of a field edited repeatedly" do
+    admin = admin()
+    page = CMS.create_page!(%{title: "Start", slug: slug()}, actor: admin)
+
+    page = Ash.update!(page, %{title: "First edit"}, action: :autosave, actor: admin)
+    page = Ash.update!(page, %{title: "Second edit"}, action: :autosave, actor: admin)
+    _page = Ash.update!(page, %{title: "Third edit"}, action: :autosave, actor: admin)
+
+    [coalesced] = Enum.filter(versions(page, admin), &(&1.version_action_name == :autosave))
+
+    # Newest wins. Folded the other way this is "First edit", and a restore would
+    # silently hand the editor back a draft from the start of the run.
+    assert coalesced.changes["title"] == "Third edit"
+
+    restored = CMS.restore_page_version!(page, %{version_id: coalesced.id}, actor: admin)
+    assert restored.title == "Third edit"
+  end
+
   test "rejects a version belonging to a different record" do
     admin = admin()
     page = CMS.create_page!(%{title: "Mine", slug: slug()}, actor: admin)

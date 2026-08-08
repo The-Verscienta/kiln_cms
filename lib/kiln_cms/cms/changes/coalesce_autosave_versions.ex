@@ -77,8 +77,10 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
       versions ->
         {keep, superseded} = List.pop_at(versions, -1)
 
-        merged =
-          Enum.reduce(versions, %{}, fn version, acc -> Map.merge(acc, version.changes) end)
+        # The shared fold (#692), not a third copy of `Map.merge`: the row this
+        # writes has to replay identically to the rows it is about to delete, and
+        # `VersionSnapshot` is what will do the replaying.
+        merged = KilnCMS.CMS.VersionSnapshot.merge(versions)
 
         Ash.update!(keep, %{changes: merged},
           action: :update,

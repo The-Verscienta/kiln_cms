@@ -5,6 +5,8 @@ defmodule KilnCMS.Firing.PointInTimeTest do
   alias KilnCMS.CMS
   alias KilnCMS.Firing.PointInTime
 
+  require Ash.Query
+
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "pit-#{System.unique_integer([:positive])}@example.com",
@@ -58,6 +60,76 @@ defmodule KilnCMS.Firing.PointInTimeTest do
 
     assert {:error, :not_published} =
              PointInTime.read(org, CMS.Post, post.id, :json, before_publish)
+  end
+
+  # #692. `replay/4` used to sort on `version_inserted_at` alone. Two versions
+  # written in one transaction share an instant, and `id` is a random v4 UUID, so
+  # the merge order of that pair was whatever Postgres happened to return — and
+  # this endpoint could reconstruct a different document than restore and
+  # version-compare did for the same moment. On the one API whose entire promise
+  # is "what did this say at T", two answers is the same as none.
+  #
+  # Built to be discriminating, which took some care:
+  #
+  #   * both versions change the SAME attribute. Two writes touching disjoint
+  #     keys merge to the same map in either order, so a same-instant pair with
+  #     different fields cannot detect a missing tiebreak at all.
+  #   * the LATER write is given the LOWER uuid, so `(version_inserted_at, id)`
+  #     order is the opposite of write order. That is a coin flip in the wild.
+  #   * the rows are rewritten in the opposite order again, because an UPDATE
+  #     moves a row to the end of the heap — so an untiebroken sort gets them
+  #     back in write order and answers "Third".
+  #
+  # The expected answer is therefore "Second": arbitrary, but the *same*
+  # arbitrary answer restore and compare give, which is the whole requirement.
+  test "two versions sharing an instant replay in the same order everywhere" do
+    admin = admin()
+    org = KilnCMS.Accounts.default_org_id()
+
+    post = CMS.create_post!(%{title: "First", slug: slug()}, actor: admin)
+    post = CMS.update_post!(post, %{title: "Second"}, actor: admin)
+    post = CMS.update_post!(post, %{title: "Third"}, actor: admin)
+    CMS.publish_post!(post, %{}, actor: admin)
+
+    [_create, second, third | _] = post_versions(post.id)
+    assert second.changes["title"] == "Second"
+    assert third.changes["title"] == "Third"
+
+    instant = third.version_inserted_at
+    force_version(second, instant, "ffffffff-0000-4000-8000-000000000001")
+    force_version(third, instant, "00000000-0000-4000-8000-000000000001")
+
+    as_of = DateTime.utc_now()
+
+    assert {:ok, state} = PointInTime.snapshot_state(org, CMS.Post, post.id, as_of)
+    assert state["title"] == "Second"
+
+    # The requirement itself: one document per instant, not merely a stable one.
+    assert state ==
+             KilnCMS.CMS.VersionSnapshot.at_time(CMS.Post.Version, post.id, as_of,
+               authorize?: false,
+               tenant: org
+             )
+  end
+
+  defp post_versions(source_id) do
+    CMS.Post.Version
+    |> Ash.Query.filter(version_source_id == ^source_id)
+    |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
+    |> Ash.read!(authorize?: false, tenant: KilnCMS.Accounts.default_org_id())
+  end
+
+  # Straight to the table: version rows are immutable through Ash
+  # (`KilnCMS.CMS.VersionPolicies`), and the point is to produce a row pair the
+  # normal write path cannot be asked for on demand.
+  defp force_version(version, instant, id) do
+    table = AshPostgres.DataLayer.Info.table(CMS.Post.Version)
+
+    {:ok, _} =
+      KilnCMS.Repo.query(
+        "UPDATE #{table} SET version_inserted_at = $1, id = $2 WHERE id = $3",
+        [DateTime.to_naive(instant), Ecto.UUID.dump!(id), Ecto.UUID.dump!(version.id)]
+      )
   end
 
   describe "index/4 — the collection as of a date (#338 phase 2)" do

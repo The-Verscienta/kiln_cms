@@ -9,17 +9,21 @@ defmodule KilnCMS.CMS.VersionSnapshot do
   therefore the fold of every version's `changes`, in chronological order, from
   creation up to and including it.
 
-  Two callers share it: `KilnCMS.CMS.Changes.RestoreVersion`, which writes the
-  reconstruction back onto the record, and the version-compare UI (#467), which
-  diffs two reconstructions against each other. It lives here rather than in
-  either one so a fix to the fold can't reach only half of them.
+  Three callers share it: `KilnCMS.CMS.Changes.RestoreVersion`, which writes the
+  reconstruction back onto the record; the version-compare UI (#467), which diffs
+  two reconstructions against each other; and `KilnCMS.Firing.PointInTime`, which
+  rebuilds the document a public "what did this say at T" read has to fire. It
+  lives here rather than in any one of them so a fix to the fold can't reach only
+  some of them — which is exactly what happened before #692: `PointInTime` sorted
+  on `version_inserted_at` alone, so for two versions written in one transaction
+  it could reconstruct a *different* document than restore and compare did for
+  the same instant.
 
-  > #### Not yet the only fold {: .warning}
-  >
-  > `KilnCMS.Firing.PointInTime` still carries its own copy, and
-  > `KilnCMS.CMS.Changes.CoalesceAutosaveVersions` folds a run of autosaves with
-  > the same `Map.merge`. Migrating them is tracked separately — until then a fix
-  > here reaches restore and compare only.
+  `KilnCMS.CMS.Changes.CoalesceAutosaveVersions` is the one fold that stays
+  separate, and legitimately: it merges a contiguous *run* of autosaves rather
+  than folding from genesis, and it has to keep hold of which row is which so it
+  can rewrite the newest and delete the rest. It shares `merge/2` so the merge
+  semantics still cannot drift, but not the read.
 
   ## Snapshot shape
 
@@ -133,6 +137,37 @@ defmodule KilnCMS.CMS.VersionSnapshot do
     |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
     |> Ash.read!(opts)
   end
+
+  @doc """
+  The state at `up_to`, folding everything at or before that instant.
+
+  The timestamp-cursor entry point, for a caller that has a moment rather than a
+  version — `KilnCMS.Firing.PointInTime`, which knows only when a document was
+  last published. There is no membership check to make: an instant with no
+  versions at or before it is an empty snapshot, not a caller error.
+
+  `opts` are passed to `Ash.read!/2` and must carry the tenant plus either an
+  `:actor` or `authorize?: false`.
+  """
+  @spec at_time(module(), term(), DateTime.t(), keyword()) :: t()
+  def at_time(version_module, source_id, up_to, opts) do
+    version_module |> history(source_id, up_to, opts) |> fold(%{})
+  end
+
+  @doc """
+  Merges an ascending run of versions' `changes` onto `acc`.
+
+  The fold itself, without the read. Exposed for
+  `KilnCMS.CMS.Changes.CoalesceAutosaveVersions`, which collapses a contiguous
+  run of autosaves into its newest row and so cannot use the reads above — but
+  must merge exactly the way they do, or the row it writes would replay
+  differently from the rows it deletes.
+
+  Caller-ordered: this reduces left to right and does nothing to sort. Read the
+  run in `(version_inserted_at, id)` order.
+  """
+  @spec merge([struct()], t()) :: t()
+  def merge(versions, acc \\ %{}), do: fold(versions, acc)
 
   @doc """
   Folds an ascending `history` up to and including `version`'s instant.
