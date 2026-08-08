@@ -24,7 +24,7 @@ msgid "Attempting to reconnect"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex:752
-#: lib/kiln_cms_web/controllers/content_controller.ex:275
+#: lib/kiln_cms_web/controllers/content_controller.ex:283
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
 msgid "Blog"
@@ -957,7 +957,7 @@ msgstr ""
 msgid "Return"
 msgstr ""
 
-#: lib/kiln_cms_web/components/block_components.ex:278
+#: lib/kiln_cms_web/components/block_components.ex:294
 #: lib/kiln_cms_web/live/editor_live.ex:874
 #: lib/kiln_cms_web/live/form_builder_live.ex:602
 #: lib/kiln_cms_web/live/form_builder_live.ex:789
@@ -985,7 +985,7 @@ msgstr ""
 msgid "Block editor"
 msgstr ""
 
-#: lib/kiln_cms_web/components/block_components.ex:187
+#: lib/kiln_cms_web/components/block_components.ex:190
 #, elixir-autogen, elixir-format
 msgid "Embedded media"
 msgstr ""
@@ -1689,7 +1689,7 @@ msgstr ""
 msgid "Label"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:276
+#: lib/kiln_cms_web/controllers/content_controller.ex:284
 #, elixir-autogen, elixir-format
 msgid "Latest posts."
 msgstr ""
@@ -1771,7 +1771,7 @@ msgstr ""
 msgid "Page %{page}"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:976
+#: lib/kiln_cms_web/controllers/content_controller.ex:1024
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex:7
 #, elixir-autogen, elixir-format
 msgid "Page not found"
@@ -1885,7 +1885,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex:317
 #: lib/kiln_cms_web/components/layouts.ex:403
 #: lib/kiln_cms_web/components/layouts.ex:755
-#: lib/kiln_cms_web/controllers/content_controller.ex:342
+#: lib/kiln_cms_web/controllers/content_controller.ex:350
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/analytics_live.ex:275
 #: lib/kiln_cms_web/live/analytics_live.ex:510
@@ -3997,7 +3997,7 @@ msgstr ""
 msgid "Layout"
 msgstr ""
 
-#: lib/kiln_cms_web/components/block_components.ex:263
+#: lib/kiln_cms_web/components/block_components.ex:279
 #, elixir-autogen, elixir-format
 msgid "Leave this field empty"
 msgstr ""

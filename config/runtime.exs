@@ -374,6 +374,16 @@ if config_env() != :test do
     config :kiln_cms, KilnCMS.Federation, enabled: federation?
   end
 
+  # Content experiments / A/B testing (#499). OFF by default, and the deployment
+  # gets a say because serving an experiment costs its page the SHARED CACHE: a
+  # variant render is `private, no-store`, since a CDN would otherwise cache one
+  # arm and hand it to every visitor — a 100/0 split reported as 50/50. An
+  # operator fronting Kiln with a CDN should decide that once, centrally, rather
+  # than discover it from a cache-hit graph.
+  with {:ok, experiments?} <- Env.fetch("KILN_EXPERIMENTS_ENABLED") do
+    config :kiln_cms, KilnCMS.Experiments, enabled: experiments?
+  end
+
   # Mount the signing key as a file instead of exporting it. The key is a
   # multi-line PKCS#1 PEM and most .env parsers (docker-compose included) do not
   # carry embedded newlines, so a file is the route .env.example already

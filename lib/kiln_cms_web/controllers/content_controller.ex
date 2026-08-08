@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Experiments
   alias KilnCMS.Feeds
   alias KilnCMS.I18n
   alias KilnCMSWeb.Params
@@ -107,7 +108,14 @@ defmodule KilnCMSWeb.ContentController do
       moved_permanently(conn, alias_path)
     else
       ViewTracking.track(conn, :html, type_string, payload.record.id, payload.record.org_id)
-      render_content(conn, view, payload, ct, audiences)
+
+      # A/B experiments (#499). Stateless on this surface: a variant is drawn per
+      # request and nothing is stored about the visitor. `nil` — no experiment,
+      # or the feature is off — is the overwhelmingly common case and costs one
+      # cached lookup.
+      variant = Experiments.Delivery.assign(type_string, payload.record)
+
+      render_content(conn, view, payload, ct, audiences, variant)
     end
   end
 
@@ -500,14 +508,21 @@ defmodule KilnCMSWeb.ContentController do
          template,
          %{record: record, blocks: blocks, translations: translations},
          ct,
-         audiences
+         audiences,
+         variant
        ) do
     # A render that depended on WHO asked must never be shared-cached. The public
     # headers carry `public, max-age=60, stale-while-revalidate=300`, so a CDN in
     # front would happily serve one member's gated render to every anonymous
     # visitor. ETag/304 is skipped for the same reason — a conditional hit would
     # revalidate against a body that isn't the same for everyone.
-    private? = audiences != []
+    # A variant render is private for the same reason a gated one is, and it is
+    # worth spelling out because the failure is silent: with `public, max-age=60`
+    # a CDN caches ONE variant and serves it to every visitor for the next
+    # minute. The experiment then reports a 50/50 split that never happened.
+    # `etag/1` has no variant dimension either, so a conditional request would
+    # 304 a visitor into whichever arm the cache is holding.
+    private? = audiences != [] or variant != nil
 
     conn =
       if private?,
@@ -520,7 +535,7 @@ defmodule KilnCMSWeb.ContentController do
       if not private? and delivery_fresh?(conn, record) do
         send_resp(conn, :not_modified, "")
       else
-        render_content_body(conn, template, record, blocks, translations, ct)
+        render_content_body(conn, template, record, blocks, translations, ct, variant)
       end
 
     # Delivery-render duration telemetry (#206), tagged by content type and
@@ -534,7 +549,12 @@ defmodule KilnCMSWeb.ContentController do
     result
   end
 
-  defp render_content_body(conn, template, record, blocks, translations, ct) do
+  # `record` and `blocks` stay CANONICAL through every assign below — the page
+  # title, the meta description, the canonical URL and the schema.org graph are
+  # all built from them. Only the final `render/3` sees the variant. That is
+  # invariant 3 (`KilnCMS.Experiments`): a variant changes what a human reads,
+  # never what a machine indexes.
+  defp render_content_body(conn, template, record, blocks, translations, ct, variant) do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
 
@@ -556,7 +576,35 @@ defmodule KilnCMSWeb.ContentController do
       feed_alternates(ct, org, base_url) ++ calendar_alternates(ct, org, base_url)
     )
     |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org)))
-    |> render(template, record: record, blocks: blocks)
+    |> assign(:experiment_variant, variant && variant.id)
+    |> render(template,
+      record: Experiments.Assignment.apply_to_record(record, variant),
+      blocks: variant_blocks(record, blocks, variant, org.id, conn)
+    )
+  end
+
+  # Applying the patch to the STORED blocks and re-running the pipeline, rather
+  # than patching the enriched output: the patch addresses blocks by their `_id`
+  # in typed-union terms, and everything downstream — fragment expansion, the
+  # legacy conversion, the batched media and form preloads — then sees an
+  # ordinary tree with no idea experiments exist.
+  #
+  # That re-run is not cheap (fragment expansion plus the batched media and form
+  # loads), and an experimented page is `no-store`, so nothing absorbs it. So it
+  # is skipped entirely unless the variant actually patches a block — a headline
+  # or excerpt test, which is the common case, reuses the blocks already built
+  # for the canonical payload and costs nothing extra.
+  defp variant_blocks(_record, blocks, nil, _org_id, _conn), do: blocks
+
+  defp variant_blocks(record, blocks, variant, org_id, conn) do
+    if Experiments.Assignment.patches_blocks?(variant) do
+      patched = Experiments.Assignment.apply_to_blocks(record.blocks, variant)
+
+      %{record | blocks: patched}
+      |> blocks(org_id, reader_audiences(conn))
+    else
+      blocks
+    end
   end
 
   # Feed autodiscovery (#486): the site-wide feed plus this type's own, so a

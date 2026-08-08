@@ -29,6 +29,37 @@ migration, a rewritten column, a dropped config key).
 
 ### Added
 
+- **Content experiments — A/B testing published content** (#499, phase 1).
+  An experiment holds two or more **variants** of part of a published document —
+  a headline, a CTA block — and measures which converts. `mix kiln.experiment`
+  creates, starts and concludes them; `/editor/experiments` is phase 2. Design
+  and rationale in [docs/content-experiments-plan.md](docs/content-experiments-plan.md).
+
+  **No visitor is tracked.** Kiln has no visitor cookie and `docs/data-flows.md`
+  promises it will not grow one, so assignment splits along the two surfaces:
+  the built-in site assigns statelessly (a reload may show a different arm, so a
+  same-page goal — a form submission — is what it can attribute), and headless
+  callers pass `?variant_key=`, own stickiness themselves, and get a
+  `Vary: X-Kiln-Variant-Key` response they can cache per arm.
+
+  A variant is a **sparse patch**, keyed by field name and by a block's stable
+  `_id` — so it survives block reordering, and "this one changes the CTA" stays
+  reviewable rather than being a whole-document fork to diff.
+
+  Five invariants, each with a test named after it. A variant is never fired, so
+  it cannot reach a feed or Meilisearch; it never writes the document, so it
+  cannot reach tsvector or embeddings; it is applied **after** the SEO assigns
+  and JSON-LD are built, so `<title>`, the meta description, the canonical URL
+  and the schema.org graph stay canonical; it lives on its own resource, so it
+  cuts no version and triggers no re-fire. In short: **a variant changes what a
+  human reads, never what a machine indexes.**
+
+  Off by default via `KILN_EXPERIMENTS_ENABLED`, and the deployment gets a say
+  because a page under a running experiment is served `private, no-store` — with
+  the usual `public, max-age=60` a CDN would cache one arm and hand it to every
+  visitor, which is a 100/0 split reported as 50/50. That cost is inherent to
+  server-side A/B testing and is stated rather than hidden.
+
 - **ActivityPub federation: a Kiln site as a fediverse actor** (#491, phase 1).
   A site can be followed from Mastodon, and its published content arrives in
   followers' timelines: WebFinger, an actor document, an outbox, HTTP

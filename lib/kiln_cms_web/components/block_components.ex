@@ -13,6 +13,9 @@ defmodule KilnCMSWeb.BlockComponents do
   alias KilnCMS.HTMLSanitizer
 
   attr :block, :map, required: true
+  # The experiment variant this page was rendered with (#499), threaded down so
+  # a form block can carry it back on submission. `nil` on every ordinary page.
+  attr :variant, :string, default: nil
 
   def render_block(%{block: %{type: type}} = assigns) do
     assigns = assign(assigns, :type, type)
@@ -63,7 +66,7 @@ defmodule KilnCMSWeb.BlockComponents do
                 safe as an attribute value. --%>
           <div class="kiln-columns" style={@block[:style]}>
             <div :for={col <- @block[:columns] || []} class="kiln-column space-y-2">
-              <.render_block :for={child <- col.blocks} block={child} />
+              <.render_block :for={child <- col.blocks} block={child} variant={@variant} />
             </div>
           </div>
         <% @type == "gallery" -> %>
@@ -178,7 +181,7 @@ defmodule KilnCMSWeb.BlockComponents do
           <hr class="border-base-300" />
         <% @type == "form" -> %>
           <%!-- nil form (inactive/unknown slug) renders nothing on-site. --%>
-          <.public_form :if={@block[:form]} form={@block[:form]} />
+          <.public_form :if={@block[:form]} form={@block[:form]} variant={@variant} />
         <% @type == "embed" -> %>
           <%!-- Two shapes, and only the allowlisted hosts get an iframe. --%>
           <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
@@ -235,6 +238,8 @@ defmodule KilnCMSWeb.BlockComponents do
   """
   attr :form, :map, required: true
   attr :embed, :boolean, default: false
+  # The experiment variant this page was rendered with (#499), or nil.
+  attr :variant, :string, default: nil
 
   def public_form(assigns) do
     ~H"""
@@ -255,6 +260,17 @@ defmodule KilnCMSWeb.BlockComponents do
         type="hidden"
         name={KilnCMS.Forms.rendered_at_field()}
         value={KilnCMS.Forms.rendered_at_token()}
+      />
+
+      <%!-- The A/B variant this page was rendered with (#499), so a conversion
+            is attributed to the arm the visitor actually saw. This is what lets
+            a form-submission goal work with no visitor cookie at all: the
+            assignment travels with the page rather than with the person. --%>
+      <input
+        :if={@variant}
+        type="hidden"
+        name={KilnCMS.Forms.variant_field()}
+        value={@variant}
       />
 
       <%!-- Honeypot: hidden from humans, irresistible to bots. --%>
