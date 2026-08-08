@@ -529,10 +529,11 @@ defmodule KilnCMS.Governance.ChainTest do
     end
 
     test "a never-published draft is protected the same way" do
-      # The shape the flag actually produces in the editor: `do_autosave/1` is
-      # gated on `state == :draft`, so a published page is not what autosave
-      # runs against. With no publish there is no non-autosave version to bound
-      # the run either, so the anchor is the ONLY thing holding the line.
+      # The shape the flag actually produces in the editor. `:autosave` refuses
+      # a non-draft row outright (#1015), so a published page is not what
+      # autosave runs against — and with no publish there is no non-autosave
+      # version to bound the run either, so the anchor is the ONLY thing
+      # holding the line.
       actor = admin()
 
       page =

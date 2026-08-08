@@ -35,7 +35,7 @@ defmodule KilnCMS.CMS.AutosaveDraftsOnlyTest do
   end
 
   describe "a draft" do
-    test "autosaves, including its audience", %{} do
+    test "autosaves, including its audience" do
       actor = admin()
       page = CMS.create_page!(%{title: "Draft", slug: slug()}, actor: actor)
 
@@ -90,10 +90,48 @@ defmodule KilnCMS.CMS.AutosaveDraftsOnlyTest do
       # would let this through; a `change filter` compares against the row.
       stale_draft = %{ctx.page | state: :draft}
 
+      # `optimistic_lock(:lock_version)` raises the SAME `StaleRecord` with no
+      # distinguishing payload, so without this the assertion below cannot tell
+      # the guard from the lock. Pinned rather than assumed: the setup reloads,
+      # so the struct's lock matches the row and the lock cannot be what fires.
+      assert stale_draft.lock_version ==
+               Ash.reload!(ctx.page, authorize?: false, tenant: ctx.page.org_id).lock_version
+
       assert {:error, error} = autosave(stale_draft, %{audience: :member}, ctx.actor)
       assert stale?(error)
 
       assert Ash.reload!(ctx.page, authorize?: false, tenant: ctx.page.org_id).audience == :public
+    end
+  end
+
+  describe "every other non-draft state" do
+    # The predicate is `== :draft`, not `!= :published`, and that difference is
+    # worth pinning: relaxing it to "not published" so reviewers can autosave
+    # in-review copy is a plausible-sounding future request, and it would make
+    # `:autosave` reachable on an ARCHIVED row — writing `audience` and
+    # `access_password` into content whose artifacts and search entries have
+    # already been deleted.
+    setup do
+      actor = admin()
+      %{actor: actor}
+    end
+
+    test "in_review is refused", ctx do
+      page =
+        CMS.create_page!(%{title: "Under review", slug: slug()}, actor: ctx.actor)
+        |> then(&CMS.submit_page_for_review!(&1, actor: ctx.actor))
+
+      assert {:error, error} = autosave(page, %{title: "Sneaky"}, ctx.actor)
+      assert stale?(error)
+    end
+
+    test "archived is refused", ctx do
+      page =
+        CMS.create_page!(%{title: "Archived", slug: slug()}, actor: ctx.actor)
+        |> then(&CMS.archive_page!(&1, actor: ctx.actor))
+
+      assert {:error, error} = autosave(page, %{audience: :member}, ctx.actor)
+      assert stale?(error)
     end
   end
 

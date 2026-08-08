@@ -1889,8 +1889,21 @@ defmodule KilnCMS.CMS.Content do
 
         # Sends archived content back to draft (the state-machine inverse of
         # :archive).
+        #
+        # `accept []` + `change filter` for the reasons #626 and #879 gave the
+        # other four transitions — this was the fifth and never got them. A
+        # workflow transition takes no content input, and without `accept []`
+        # this one inherited `default_accept`: all 17 attributes, `:audience`
+        # and `:blocks` among them, writable through an action that attaches no
+        # `FireArtifacts`, no `NotifyWebhooks`, no `optimistic_lock` and none of
+        # the `SlugAvailable`/`SeoUrls`/`ScheduleOrder` validations. It is not
+        # routed on JSON:API or GraphQL, but AshAdmin renders every accepted
+        # input as a form field, so unarchiving was a way to rewrite a body and
+        # an audience while recording nothing.
         update :unarchive do
           require_atomic? false
+          accept []
+          change filter(expr(^ref(:state) == :archived))
           change transition_state(:draft)
         end
 
