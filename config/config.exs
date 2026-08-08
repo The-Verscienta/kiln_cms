@@ -85,7 +85,8 @@ config :kiln_cms,
     KilnCMS.Automation,
     KilnCMS.Billing,
     KilnCMS.Federation,
-    KilnCMS.Experiments
+    KilnCMS.Experiments,
+    KilnCMS.Social
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `Verscienta.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the

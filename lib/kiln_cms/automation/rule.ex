@@ -54,6 +54,11 @@ defmodule KilnCMS.Automation.Rule do
   # accepting a value stays a click in the editor. A reaction that wrote
   # `seo_description` on a state transition would remove the primary control
   # entirely — see `KilnCMS.Seo.Generator`.
+  # `:social_post` (#497) announces a publish to the site's configured Bluesky /
+  # Mastodon accounts (`KilnCMS.Social`). Config: `"provider"` (required) and an
+  # optional `"template"`. It is the one reaction that writes somewhere the
+  # operator cannot quietly undo, which is why the machinery behind it is
+  # at-most-once rather than at-least-once.
   @action_kinds [
     :send_email,
     :broadcast,
@@ -63,7 +68,8 @@ defmodule KilnCMS.Automation.Rule do
     :flag_duplicates,
     :suggest_tags,
     :suggest_links,
-    :suggest_metadata
+    :suggest_metadata,
+    :social_post
   ]
 
   @doc "Lifecycle events a rule can trigger on."
