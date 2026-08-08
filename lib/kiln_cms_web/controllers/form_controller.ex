@@ -39,6 +39,12 @@ defmodule KilnCMSWeb.FormController do
   def embed(conn, %{"slug" => slug}) do
     conn = put_embed_csp(conn)
 
+    # The response is about to be 200 and then discarded by the browser if this
+    # is a cross-origin frame and the policy is closed. Say so once, server-side,
+    # so an operator whose embeds broke on upgrade finds out from their own logs
+    # rather than from someone else's console (#650).
+    Embed.warn_if_framing_blocked(conn)
+
     case Forms.get_active(slug, Tenant.current_org_id(conn)) do
       nil ->
         conn |> put_status(404) |> html(page(gettext("Form not found."), nil, embed: true))

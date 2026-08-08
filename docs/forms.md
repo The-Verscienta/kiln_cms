@@ -55,6 +55,20 @@ before setting `EMBED_ORIGINS` renders a blank iframe and a CSP violation in
 that site's console — the builder's Embed tab says so, and also shows the
 current allowlist so you can check a host before pasting the snippet there.
 
+**Your own logs will tell you too** (#650). A browser framing the embed page
+sends Fetch Metadata (`Sec-Fetch-Dest: iframe` with a `Sec-Fetch-Site` that is
+not `same-origin`), so when that arrives and `EMBED_ORIGINS` is unset the CMS
+logs a warning naming the variable and the parent origin. At most once an hour
+per node, so a busy embed route cannot flood the log. Note a sibling subdomain
+counts as blocked: `frame-ancestors 'self'` matches the *origin*, so
+`https://blog.acme.com` framing `https://acme.com`'s CMS needs an allowlist
+entry like any unrelated host.
+
+The warning fires only while `EMBED_ORIGINS` is **unset**. Setting it to a
+*partial* list — one parent allowed, another forgotten — leaves the forgotten
+parent just as blocked, and silent: the CMS cannot tell an omission from a
+deliberate refusal. Check the value against the list `/editor/forms` shows you.
+
 Why not leave it open? The embed page carries no ambient credentials — it is an
 anonymous public form, and a cross-site iframe never receives the `SameSite=Lax`
 session cookie — so there is no session to steal. But framing is itself the
