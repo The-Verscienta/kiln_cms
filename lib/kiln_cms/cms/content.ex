@@ -1667,10 +1667,28 @@ defmodule KilnCMS.CMS.Content do
         # versions into a single snapshot after each save — except for rows an
         # anchor has already committed to, which are immutable, so with
         # `audit_anchor_every_write` on nothing is collapsed at all (#671).
-        # Drafts only (enforced by the editor); no `updated` webhook (draft
-        # edits are silent anyway).
+        # Drafts only, and enforced HERE rather than only in the editor (#1015).
+        # It used to be a LiveView invariant — `perform_autosave/1` bails unless
+        # `draft?(socket)` — which is not the same as the action refusing. This
+        # action inherits `default_accept`, so it can write `audience`, and it
+        # carries `ApplyAccessPassword` — but it has no `FireArtifacts` and no
+        # `NotifyWebhooks`, because a draft edit is silent by design. That
+        # combination on a *published* row is the bad one: it would gate or lock
+        # a live document while firing nothing, so the artifacts, the feeds and
+        # the Meilisearch index (#1006, #496) would all keep serving the
+        # ungated version, with nothing anywhere recording that the document
+        # had changed.
+        #
+        # `change filter` and not `validate attribute_equals`: the guard has to
+        # be a compare-and-swap on the ROW, the way the workflow transitions
+        # below are. A validation reads the struct the editor loaded, so a
+        # publish landing between load and write would sail past it — which is
+        # exactly the race, not a hypothetical. A miss raises `StaleRecord`,
+        # which `ContentEditorLive` already turns into "this content changed
+        # elsewhere, reload" (#137).
         update :autosave do
           require_atomic? false
+          change filter(expr(^ref(:state) == :draft))
           change optimistic_lock(:lock_version)
           # Clearing the slug regenerates it from the title — see `:create`.
           change KilnCMS.CMS.Changes.DeriveSlug
@@ -1871,8 +1889,21 @@ defmodule KilnCMS.CMS.Content do
 
         # Sends archived content back to draft (the state-machine inverse of
         # :archive).
+        #
+        # `accept []` + `change filter` for the reasons #626 and #879 gave the
+        # other four transitions — this was the fifth and never got them. A
+        # workflow transition takes no content input, and without `accept []`
+        # this one inherited `default_accept`: all 17 attributes, `:audience`
+        # and `:blocks` among them, writable through an action that attaches no
+        # `FireArtifacts`, no `NotifyWebhooks`, no `optimistic_lock` and none of
+        # the `SlugAvailable`/`SeoUrls`/`ScheduleOrder` validations. It is not
+        # routed on JSON:API or GraphQL, but AshAdmin renders every accepted
+        # input as a form field, so unarchiving was a way to rewrite a body and
+        # an audience while recording nothing.
         update :unarchive do
           require_atomic? false
+          accept []
+          change filter(expr(^ref(:state) == :archived))
           change transition_state(:draft)
         end
 
