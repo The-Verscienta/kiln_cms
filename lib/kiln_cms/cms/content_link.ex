@@ -123,7 +123,7 @@ defmodule KilnCMS.CMS.ContentLink do
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
 
     # Optional short human label for the link (e.g. "Chief herb", "Step 2").
-    attribute :label, :string, public?: true
+    attribute :label, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     # Free-form per-link payload — the data a relation carries *about itself*
     # (dosage, role, jia-jian notes, …). Lets a data-carrying relation reuse the

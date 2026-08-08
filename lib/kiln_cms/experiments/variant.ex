@@ -128,7 +128,10 @@ defmodule KilnCMS.Experiments.Variant do
 
     attribute :experiment_id, :uuid, allow_nil?: false, public?: true
 
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Relative share of traffic. Integers rather than percentages so a split
     # never has to add up to anything.

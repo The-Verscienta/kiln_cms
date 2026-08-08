@@ -424,11 +424,18 @@ defmodule KilnCMS.EventsTest do
       # The fold width used to shrink by one per continuation, so past ~2850
       # octets no grapheme fit, the remainder stopped shrinking and the
       # recursion never returned — a hang on an anonymous GET, latched by one
-      # stored record. `title` and `seo_description` are both unbounded strings.
+      # stored record.
+      #
+      # Driven through `seo_description` rather than `title` since #542: string
+      # attributes now carry ceilings, and `title` caps at
+      # `KilnCMS.Limits.line()` — BELOW the threshold that used to hang. The
+      # `paragraph` ceiling is above it, so this is the field that still reaches
+      # the case, and the one the guard has to be written against.
+      long = String.duplicate("a", KilnCMS.Limits.paragraph())
+      assert KilnCMS.Limits.paragraph() > 2850
+
       event =
-        event!(ctx, %{"when" => %{"start" => "2026-03-15T19:00"}}, %{
-          title: String.duplicate("a", 4000)
-        })
+        event!(ctx, %{"when" => %{"start" => "2026-03-15T19:00"}}, %{seo_description: long})
 
       ics = ICS.event(event, org_id: ctx.org)
 
@@ -436,7 +443,7 @@ defmodule KilnCMS.EventsTest do
         assert byte_size(line) <= 76, "line over 75 octets: #{byte_size(line)}"
       end
 
-      assert String.replace(ics, "\r\n ", "") =~ "SUMMARY:" <> String.duplicate("a", 4000)
+      assert String.replace(ics, "\r\n ", "") =~ "DESCRIPTION:" <> long
     end
 
     test "a timed EXDATE is a DATE-TIME at the event's own time of day", ctx do

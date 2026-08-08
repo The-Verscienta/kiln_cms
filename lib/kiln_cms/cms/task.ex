@@ -213,7 +213,7 @@ defmodule KilnCMS.CMS.Task do
     attribute :content_id, :uuid, allow_nil?: false, public?: true
 
     attribute :due_on, :date, public?: true
-    attribute :note, :string, public?: true
+    attribute :note, :string, public?: true, constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # Whether publishing this task's content completes it (#818).
     #

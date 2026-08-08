@@ -140,10 +140,25 @@ defmodule KilnCMS.CMS.Menu do
 
     # The stable machine name a front end addresses ("main", "footer"). Shared
     # across locale variants — that is what pairs them.
-    attribute :key, :string, allow_nil?: false, public?: true
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :locale, :string, allow_nil?: false, default: "en", public?: true
-    attribute :description, :string, public?: true
+    attribute :key, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :locale, :string,
+      allow_nil?: false,
+      default: "en",
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     timestamps()
   end

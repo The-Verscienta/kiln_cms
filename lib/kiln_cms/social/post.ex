@@ -173,11 +173,11 @@ defmodule KilnCMS.Social.Post do
     # What was sent, kept verbatim: when an operator asks why a post reads the
     # way it does, the answer should not require re-deriving it from a template
     # and a since-edited document.
-    attribute :text, :string, public?: true
-    attribute :url, :string, public?: true
+    attribute :text, :string, public?: true, constraints: [max_length: KilnCMS.Limits.paragraph()]
+    attribute :url, :string, public?: true, constraints: [max_length: KilnCMS.Limits.url()]
 
     attribute :remote_id, :string, public?: true
-    attribute :remote_url, :string, public?: true
+    attribute :remote_url, :string, public?: true, constraints: [max_length: KilnCMS.Limits.url()]
     attribute :error, :string, public?: true
     attribute :posted_at, :utc_datetime_usec, public?: true
 

@@ -125,24 +125,38 @@ defmodule KilnCMS.CMS.Form do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # The public handle: POST /forms/<slug>, GET /api/forms/<slug>.
-    attribute :slug, :string, allow_nil?: false, public?: true
+    attribute :slug, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
-    attribute :description, :string, public?: true
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # Inactive forms 404 publicly and reject submissions.
     attribute :active, :boolean, allow_nil?: false, default: true, public?: true
 
     # Shown (or returned) after a successful submission.
-    attribute :success_message, :string, public?: true
+    attribute :success_message, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # When set, each submission is mailed here (via the :mail queue).
-    attribute :notify_email, :string, public?: true
+    attribute :notify_email, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Submit-button text; nil falls back to the translated "Submit".
-    attribute :submit_label, :string, public?: true
+    attribute :submit_label, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # The autoresponder (#468, docs/form-builder-plan.md phase 6): a
     # confirmation email sent to the *submitter*, not the admin — separate
@@ -159,8 +173,13 @@ defmodule KilnCMS.CMS.Form do
     # fields plus `[form-name]`, validated by
     # `KilnCMS.CMS.Validations.FormAutoresponderTokens`. Required (non-blank)
     # only while `autoresponder_enabled` is true.
-    attribute :autoresponder_subject, :string, public?: true
-    attribute :autoresponder_body, :string, public?: true
+    attribute :autoresponder_subject, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :autoresponder_body, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     timestamps()
   end

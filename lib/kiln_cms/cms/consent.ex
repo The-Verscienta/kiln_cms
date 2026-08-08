@@ -115,11 +115,11 @@ defmodule KilnCMS.CMS.Consent do
 
     # Pointer to the authorization record (ticket id / URL / document ref) —
     # NEVER the sensitive consent document itself.
-    attribute :reference, :string, public?: true
+    attribute :reference, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     # Who granted / approved (name or role).
-    attribute :grantor, :string, public?: true
-    attribute :note, :string, public?: true
+    attribute :grantor, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
+    attribute :note, :string, public?: true, constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     attribute :granted_at, :utc_datetime_usec do
       allow_nil? false

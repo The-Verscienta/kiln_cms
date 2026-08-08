@@ -93,8 +93,14 @@ defmodule KilnCMS.Accounts.Role do
       public? true
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :description, :string, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # The three grant axes, same shapes and semantics as their
     # User/OrgMembership counterparts (empty = no restriction on that axis).

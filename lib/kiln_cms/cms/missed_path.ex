@@ -204,8 +204,16 @@ defmodule KilnCMS.CMS.MissedPath do
     # locale prefix already stripped (`Plugs.SetLocale` runs before the router),
     # no query string, no trailing slash — so a row can be handed straight to
     # the redirect form.
-    attribute :path, :string, allow_nil?: false, public?: true
-    attribute :locale, :string, allow_nil?: false, default: "en", public?: true
+    attribute :path, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
+
+    attribute :locale, :string,
+      allow_nil?: false,
+      default: "en",
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     attribute :count, :integer, default: 1, allow_nil?: false, public?: true
 

@@ -115,7 +115,10 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
     attribute :content_type, :string, allow_nil?: false, public?: true
     attribute :content_id, :uuid, allow_nil?: false, public?: true
 
-    attribute :subject, :string, allow_nil?: false, public?: true
+    attribute :subject, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     attribute :status, :atom do
       constraints one_of: [:pending, :sending, :sent, :failed]
