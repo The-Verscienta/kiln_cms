@@ -185,7 +185,7 @@ defmodule KilnCMSWeb.ReleaseLive do
   # --- events ----------------------------------------------------------------
 
   @impl true
-  def handle_event("create", %{"release" => params}, socket) do
+  def handle_event("create", %{"release" => params}, socket) when is_map(params) do
     attrs = %{
       name: String.trim(params["name"] || ""),
       description: blank_to_nil(params["description"])
@@ -206,7 +206,8 @@ defmodule KilnCMSWeb.ReleaseLive do
     end
   end
 
-  def handle_event("schedule", %{"schedule" => %{"scheduled_at" => value}}, socket) do
+  def handle_event("schedule", %{"schedule" => %{"scheduled_at" => value}}, socket)
+      when is_binary(value) do
     case parse_datetime(value) do
       {:ok, at} ->
         socket.assigns.release
@@ -267,7 +268,7 @@ defmodule KilnCMSWeb.ReleaseLive do
     end
   end
 
-  def handle_event("remove_item", %{"id" => id}, socket) do
+  def handle_event("remove_item", %{"id" => id}, socket) when is_binary(id) do
     opts = act(socket)
 
     with {:ok, item} <- CMS.get_release_item(id, opts),
@@ -329,14 +330,16 @@ defmodule KilnCMSWeb.ReleaseLive do
 
   defp blank_to_nil(_value), do: nil
 
+  # Only ever reached with a binary: the `"schedule"` head guards the shape now
+  # (#764), so the non-binary clause this used to carry was dead code. The
+  # `:error` branch below is still live — it is what an unparseable *string*
+  # takes, which is a different thing from an unparseable shape.
   defp parse_datetime(value) when is_binary(value) do
     case DateTime.from_iso8601(String.replace(value, " ", "T")) do
       {:ok, datetime, _offset} -> {:ok, datetime}
       _ -> :error
     end
   end
-
-  defp parse_datetime(_value), do: :error
 
   defp stamp(nil), do: "—"
   defp stamp(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")

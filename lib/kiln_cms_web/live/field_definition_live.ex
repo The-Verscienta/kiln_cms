@@ -50,12 +50,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # --- create ----------------------------------------------------------------
 
   @impl true
-  def handle_event("validate", %{"field_definition" => params}, socket) do
+  def handle_event("validate", %{"field_definition" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, normalize(params)))}
   end
 
-  def handle_event("create", %{"field_definition" => params}, socket) do
+  def handle_event("create", %{"field_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: normalize(params)) do
       {:ok, _definition} ->
         {:noreply,
@@ -71,7 +71,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # --- inline edit -----------------------------------------------------------
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -81,7 +81,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"field_definition" => params}, socket) do
+  def handle_event("validate_edit", %{"field_definition" => params}, socket)
+      when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params))
@@ -90,7 +91,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"field_definition" => params}, socket) do
+  def handle_event("save_edit", %{"field_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
       {:ok, _definition} ->
         {:noreply,
@@ -101,7 +102,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 

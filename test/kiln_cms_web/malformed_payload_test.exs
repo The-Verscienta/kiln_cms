@@ -129,6 +129,59 @@ defmodule KilnCMSWeb.MalformedPayloadTest do
         assert render(view) =~ "<", "#{path} died on an unhandled event"
       end
     end
+
+    # The long tail #894 left open: handlers that *match* a wrong-shaped payload
+    # and then raise in the body. The catch-all can't help those — only a head
+    # guard can, and these are the sites that got one.
+    #
+    # `Phoenix.LiveViewTest` does NOT stringify a view-targeted payload
+    # (`client_proxy.ex` stringifies with `& &1`, the identity fun), so the
+    # integers, `nil`s and booleans below reach `handle_event/3` unconverted.
+    # That is what makes these genuine rather than a test of `to_string/1`.
+    @malformed [
+      # #894 spot-checked these four as still raising. `mint` reached
+      # `String.trim/1`, `send_test` the same, `delete` an Ash primary key, and
+      # `new` a `create!/4` bang.
+      {"/editor/api-keys", "mint", %{"user_id" => 1, "name" => "x", "days" => "30"}},
+      {"/editor/api-keys", "mint", %{"user_id" => "u", "name" => nil, "days" => true}},
+      {"/editor/mail", "send_test", %{"test" => %{"to" => ["a@b.test"]}}},
+      {"/editor/mail", "send_test", %{"test" => %{"to" => nil}}},
+      {"/editor/taxonomy", "delete", %{"type" => 1, "id" => nil}},
+      {"/editor/taxonomy", "delete", %{"type" => "tag", "id" => ["x"]}},
+      {"/editor", "new", %{"kind" => true}},
+      {"/editor", "new", %{"kind" => ["post"]}},
+
+      # A spread over the rest of the sweep, one per shape the client can pick.
+      {"/editor/api-keys", "revoke", %{"id" => 1}},
+      {"/editor/mail", "save_server_ip", %{"settings" => %{"server_ip" => 25}}},
+      {"/editor/taxonomy", "edit", %{"type" => true, "id" => %{"a" => "1"}}},
+      {"/editor", "filter", %{"status" => 1}},
+      {"/editor", "duplicate", %{"kind" => "post", "id" => 7}},
+      {"/editor/team", "add_member", %{"member" => %{"email" => 1}}},
+      {"/editor/team", "edit_role", %{"id" => nil}},
+      {"/editor/settings", "confirm_totp", %{"code" => 123_456}},
+      {"/editor/webhooks", "ping", %{"id" => 1}},
+      {"/editor/redirects", "create", %{"redirect" => ["x"]}},
+      {"/editor/menus", "reorder_items", %{"parent_id" => nil, "order" => "not-a-list"}},
+
+      # A form-params key the client sent as something other than a map. The
+      # `is_map` half of the sweep: `AshPhoenix.Form.validate/2` and the
+      # hand-rolled `to_form(params, as: :x)` readers both assume a map.
+      {"/editor/settings", "save_password", %{"user" => "not-a-map"}},
+      {"/editor/webhooks", "validate", %{"webhook" => ["a"]}},
+      {"/editor/team", "create_role", %{"role" => 1}}
+    ]
+
+    test "a wrong-shaped payload at a guarded site is ignored, not raised", %{conn: conn} do
+      for {path, event, payload} <- @malformed do
+        {:ok, view, _html} = live(conn, path)
+
+        render_hook(view, event, payload)
+
+        assert render(view) =~ "<",
+               "#{path} died on #{event} with #{inspect(payload)}"
+      end
+    end
   end
 
   describe "the catch-all does not shadow real handlers" do
@@ -143,6 +196,31 @@ defmodule KilnCMSWeb.MalformedPayloadTest do
       render_click(view, "search", %{"q" => "somethingveryunlikely"})
 
       assert_patched(view, "/editor?q=somethingveryunlikely")
+    end
+
+    # The same worry, aimed at the guards rather than at the catch-all — and
+    # this is the one the sweep needs, because an over-strict guard fails
+    # exactly the way the bug did: silently, through the catch-all. `mint`
+    # guards three variables at once, so it is the sharpest control.
+    #
+    # This is not hypothetical. Writing the sweep, `is_binary(value)` on
+    # `InContextEditLive`'s `"update_block"` was wrong — the rich-text region
+    # pushes a TipTap *document*, a map — and the only signal was one existing
+    # test going red. Without a positive assertion a guarded handler that never
+    # fires looks exactly like a guarded handler that works.
+    test "a well-formed mint still mints", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/editor/api-keys")
+
+      user = authed_user(:editor)
+
+      html =
+        render_hook(view, "mint", %{
+          "user_id" => user.id,
+          "name" => "a real key",
+          "days" => "30"
+        })
+
+      assert html =~ "copy it now"
     end
 
     # The structural half of the same worry. `@before_compile` hooks fire in
@@ -181,5 +259,133 @@ defmodule KilnCMSWeb.MalformedPayloadTest do
                "shadow or be shadowed by the malformed-event catch-all: " <>
                inspect(offenders)
     end
+  end
+
+  describe "every payload-binding handler states its shape" do
+    # The acceptance criterion #764 asked for: a mechanism, so the *next*
+    # handler inherits this rather than joining a list someone has to re-derive.
+    #
+    # The behavioural tests above can only cover the handlers they name — there
+    # are ~200 payload-binding clauses across 32 views, most of them needing
+    # seeded records and a specific role to reach. This reads the source
+    # instead and asserts the structural property those tests sample: a clause
+    # that binds a value out of a client payload says what shape it expects.
+    #
+    # A guard is what turns "matches, then raises in the body" into "does not
+    # match" — which is the only thing the catch-all can then absorb.
+
+    # Clauses that bind a payload value and deliberately carry no guard,
+    # because the value's every consumer is already total. Keyed by event name
+    # and file, with the reason, so removing the reason fails the test.
+    @unguarded %{
+      {"preview_live.ex", "cursor"} => "clamp/1 is total: is_number or 0.0",
+      {"token_preview_live.ex", "cursor"} => "clamp/1 is total: is_number or 0.0"
+    }
+
+    test "no handler binds a client value without saying what shape it expects" do
+      offenders =
+        "lib/kiln_cms_web/live/**/*.ex"
+        |> Path.wildcard()
+        |> Enum.flat_map(&unguarded_clauses/1)
+        |> Enum.reject(fn {file, _line, event, _missing} ->
+          Map.has_key?(@unguarded, {Path.basename(file), event})
+        end)
+
+      assert offenders == [],
+             """
+             These handle_event/3 clauses bind a value out of a client-chosen
+             payload without a guard on the head (#764). A wrong shape reaches
+             the body, where String./Integer.parse/Ash and friends raise — the
+             catch-all cannot help, because the clause matched.
+
+             Add `when is_binary(x)` (or is_map / is_list / is_number — whichever
+             the body actually needs), or, if every consumer of the value is
+             already total, add an entry to @unguarded with the reason.
+
+             #{Enum.map_join(offenders, "\n", fn {f, l, e, missing} -> "  #{f}:#{l} #{e} — unguarded: #{Enum.join(missing, ", ")}" end)}
+             """
+    end
+  end
+
+  # {file, line, event, [unguarded var]} for each handle_event/3 clause that
+  # binds a payload value the head's guard never mentions.
+  defp unguarded_clauses(file) do
+    {_ast, found} =
+      file
+      |> File.read!()
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk([], fn
+        {:def, meta, [head, _body]} = node, acc ->
+          case offender(file, meta[:line], head) do
+            nil -> {node, acc}
+            found -> {node, [found | acc]}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reverse(found)
+  end
+
+  defp offender(file, line, head) do
+    with {event, binds, guarded} <- clause_shape(head),
+         [_ | _] = missing <- Enum.reject(binds, &(&1 in guarded)) do
+      {file, line, event, missing}
+    else
+      _not_an_offender -> nil
+    end
+  end
+
+  # {event_name, bound_vars, guarded_vars} or nil if this isn't a
+  # handle_event/3 clause that binds anything out of the payload.
+  defp clause_shape({:when, _meta, [inner, guard]}) do
+    case clause_shape(inner) do
+      nil -> nil
+      {event, binds, _} -> {event, binds, guard_vars(guard)}
+    end
+  end
+
+  defp clause_shape({:handle_event, _meta, [event, payload, _socket]}) do
+    case payload_binds(payload) do
+      [] -> nil
+      binds -> {event_name(event), binds, []}
+    end
+  end
+
+  defp clause_shape(_other), do: nil
+
+  defp event_name(name) when is_binary(name), do: name
+  defp event_name(other), do: Macro.to_string(other)
+
+  # Variables bound to a key of the payload map, at any nesting depth.
+  # `_`-prefixed bindings are discards and constrain nothing, so they need no
+  # guard.
+  defp payload_binds({:%{}, _meta, pairs}) do
+    Enum.flat_map(pairs, fn
+      {_key, {var, _m, ctx}} when is_atom(var) and is_atom(ctx) ->
+        if String.starts_with?(to_string(var), "_"), do: [], else: [var]
+
+      {_key, nested} ->
+        payload_binds(nested)
+
+      _other ->
+        []
+    end)
+  end
+
+  defp payload_binds({:=, _meta, [left, right]}),
+    do: payload_binds(left) ++ payload_binds(right)
+
+  defp payload_binds(_other), do: []
+
+  defp guard_vars(guard) do
+    {_ast, vars} =
+      Macro.prewalk(guard, [], fn
+        {var, _m, ctx} = node, acc when is_atom(var) and is_atom(ctx) -> {node, [var | acc]}
+        node, acc -> {node, acc}
+      end)
+
+    vars
   end
 end

@@ -28,11 +28,11 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
   # --- create ----------------------------------------------------------------
 
   @impl true
-  def handle_event("validate", %{"type_definition" => params}, socket) do
+  def handle_event("validate", %{"type_definition" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
-  def handle_event("create", %{"type_definition" => params}, socket) do
+  def handle_event("create", %{"type_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, _definition} ->
         {:noreply,
@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   # --- inline edit -------------------------------------------------------------
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -58,7 +58,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"type_definition" => params}, socket) do
+  def handle_event("validate_edit", %{"type_definition" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, params)
@@ -67,7 +67,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"type_definition" => params}, socket) do
+  def handle_event("save_edit", %{"type_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: params) do
       {:ok, _definition} ->
         {:noreply,
@@ -80,7 +80,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   # --- archive / restore -------------------------------------------------------
 
-  def handle_event("archive", %{"id" => id}, socket) do
+  def handle_event("archive", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -95,7 +95,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
     {:noreply, assign(socket, :edit, nil)}
   end
 
-  def handle_event("restore", %{"id" => id}, socket) do
+  def handle_event("restore", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 

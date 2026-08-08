@@ -40,12 +40,12 @@ defmodule KilnCMSWeb.NewsletterLive do
   # --- segments --------------------------------------------------------------
 
   @impl true
-  def handle_event("validate_segment", %{"segment" => params}, socket) do
+  def handle_event("validate_segment", %{"segment" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :segment_form, AshPhoenix.Form.validate(socket.assigns.segment_form, params))}
   end
 
-  def handle_event("create_segment", %{"segment" => params}, socket) do
+  def handle_event("create_segment", %{"segment" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.segment_form, params: params) do
       {:ok, _segment} ->
         {:noreply,
@@ -59,7 +59,7 @@ defmodule KilnCMSWeb.NewsletterLive do
     end
   end
 
-  def handle_event("delete_segment", %{"id" => id}, socket) do
+  def handle_event("delete_segment", %{"id" => id}, socket) when is_binary(id) do
     org = socket.assigns.current_org
 
     socket =
@@ -75,7 +75,8 @@ defmodule KilnCMSWeb.NewsletterLive do
 
   # --- subscribers -----------------------------------------------------------
 
-  def handle_event("validate_subscriber", %{"subscriber" => params}, socket) do
+  def handle_event("validate_subscriber", %{"subscriber" => params}, socket)
+      when is_map(params) do
     {:noreply,
      assign(
        socket,
@@ -84,7 +85,7 @@ defmodule KilnCMSWeb.NewsletterLive do
      )}
   end
 
-  def handle_event("add_subscriber", %{"subscriber" => params}, socket) do
+  def handle_event("add_subscriber", %{"subscriber" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.subscriber_form, params: params) do
       {:ok, _subscriber} ->
         {:noreply,
@@ -101,7 +102,7 @@ defmodule KilnCMSWeb.NewsletterLive do
     end
   end
 
-  def handle_event("confirm_subscriber", %{"id" => id}, socket) do
+  def handle_event("confirm_subscriber", %{"id" => id}, socket) when is_binary(id) do
     org = socket.assigns.current_org
 
     socket =
@@ -117,7 +118,7 @@ defmodule KilnCMSWeb.NewsletterLive do
     {:noreply, socket}
   end
 
-  def handle_event("remove_subscriber", %{"id" => id}, socket) do
+  def handle_event("remove_subscriber", %{"id" => id}, socket) when is_binary(id) do
     org = socket.assigns.current_org
 
     socket =
@@ -134,7 +135,7 @@ defmodule KilnCMSWeb.NewsletterLive do
 
   # --- send ------------------------------------------------------------------
 
-  def handle_event("send", %{"send" => params}, socket) do
+  def handle_event("send", %{"send" => params}, socket) when is_map(params) do
     post = Enum.find(socket.assigns.posts, &(&1.id == params["post_id"]))
     segment_id = presence(params["segment_id"])
     subject = presence(params["subject"])

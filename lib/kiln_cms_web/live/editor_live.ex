@@ -156,7 +156,7 @@ defmodule KilnCMSWeb.EditorLive do
   defp type_value(%{type: type}), do: to_string(type)
 
   @impl true
-  def handle_event("new", %{"kind" => kind}, socket) do
+  def handle_event("new", %{"kind" => kind}, socket) when is_binary(kind) do
     attrs = %{
       title: "Untitled #{kind}",
       # NOT `System.unique_integer/1` (#834): that counter resets on every VM
@@ -177,7 +177,7 @@ defmodule KilnCMSWeb.EditorLive do
   # One form drives both selects, so a change to either arrives with the full
   # filter state. The `type` select isn't rendered on a single-type site, hence
   # the fallback to the active assign rather than a bare fetch.
-  def handle_event("filter", %{"status" => status} = params, socket) do
+  def handle_event("filter", %{"status" => status} = params, socket) when is_binary(status) do
     type = Map.get(params, "type", socket.assigns.type)
     {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query, type))}
   end
@@ -243,7 +243,7 @@ defmodule KilnCMSWeb.EditorLive do
         %{"release_id" => release_id, "release_action" => action},
         socket
       )
-      when action in ~w(publish unpublish) do
+      when action in ~w(publish unpublish) and is_binary(release_id) do
     opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
 
     {added, skipped} =
@@ -319,7 +319,8 @@ defmodule KilnCMSWeb.EditorLive do
 
   # Clone a row into a new draft and land the editor in it (#471) — the same
   # verb the content editor's own Duplicate button runs.
-  def handle_event("duplicate", %{"kind" => kind, "id" => id}, socket) do
+  def handle_event("duplicate", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
     %{actor: actor, current_org: org} = socket.assigns
 
     # `kind`/`id` come off the clicked row, so they are client input: pass them

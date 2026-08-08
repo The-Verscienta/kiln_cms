@@ -30,7 +30,7 @@ defmodule KilnCMSWeb.FormLive do
   end
 
   @impl true
-  def handle_event("create_form", %{"form" => params}, socket) do
+  def handle_event("create_form", %{"form" => params}, socket) when is_map(params) do
     case CMS.create_form(params, actor_opts(socket)) do
       {:ok, form} ->
         {:noreply,
@@ -45,7 +45,7 @@ defmodule KilnCMSWeb.FormLive do
 
   # A full copy — settings and fields — created inactive so the duplicate
   # doesn't instantly render publicly under its new slug.
-  def handle_event("duplicate_form", %{"id" => id}, socket) do
+  def handle_event("duplicate_form", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
     with {:ok, form} <- CMS.get_form(id, opts),
@@ -91,7 +91,7 @@ defmodule KilnCMSWeb.FormLive do
     end
   end
 
-  def handle_event("delete_form", %{"id" => id}, socket) do
+  def handle_event("delete_form", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
     with {:ok, form} <- CMS.get_form(id, opts),

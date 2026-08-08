@@ -37,11 +37,11 @@ defmodule KilnCMSWeb.CodeInjectionLive do
   end
 
   @impl true
-  def handle_event("validate", %{"injection" => params}, socket) do
+  def handle_event("validate", %{"injection" => params}, socket) when is_map(params) do
     {:noreply, assign(socket, :form, to_form(params, as: :injection))}
   end
 
-  def handle_event("save", %{"injection" => params}, socket) do
+  def handle_event("save", %{"injection" => params}, socket) when is_map(params) do
     case CMS.save_site_code_injection(attrs(params),
            actor: socket.assigns.current_user,
            tenant: socket.assigns.current_org

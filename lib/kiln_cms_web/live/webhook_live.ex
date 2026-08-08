@@ -39,12 +39,12 @@ defmodule KilnCMSWeb.WebhookLive do
   # --- create ----------------------------------------------------------------
 
   @impl true
-  def handle_event("validate", %{"webhook" => params}, socket) do
+  def handle_event("validate", %{"webhook" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, normalize(params)))}
   end
 
-  def handle_event("create", %{"webhook" => params}, socket) do
+  def handle_event("create", %{"webhook" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: normalize(params)) do
       {:ok, _endpoint} ->
         {:noreply,
@@ -60,7 +60,7 @@ defmodule KilnCMSWeb.WebhookLive do
 
   # --- inline edit -----------------------------------------------------------
 
-  def handle_event("edit", %{"id" => id}, socket) do
+  def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
@@ -70,7 +70,7 @@ defmodule KilnCMSWeb.WebhookLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"webhook" => params}, socket) do
+  def handle_event("validate_edit", %{"webhook" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params))
@@ -79,7 +79,7 @@ defmodule KilnCMSWeb.WebhookLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"webhook" => params}, socket) do
+  def handle_event("save_edit", %{"webhook" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
       {:ok, _endpoint} ->
         {:noreply,
@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.WebhookLive do
 
   # --- quick actions ---------------------------------------------------------
 
-  def handle_event("toggle_active", %{"id" => id}, socket) do
+  def handle_event("toggle_active", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -113,7 +113,7 @@ defmodule KilnCMSWeb.WebhookLive do
 
   # Send a test "ping" delivery to one endpoint (works while disabled too, so
   # a receiver can be verified before enabling).
-  def handle_event("ping", %{"id" => id}, socket) do
+  def handle_event("ping", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -133,7 +133,7 @@ defmodule KilnCMSWeb.WebhookLive do
   end
 
   # Replay a delivery as a fresh ledger row.
-  def handle_event("redeliver", %{"id" => id}, socket) do
+  def handle_event("redeliver", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     socket =
@@ -149,7 +149,7 @@ defmodule KilnCMSWeb.WebhookLive do
     {:noreply, socket}
   end
 
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
     actor = socket.assigns.actor
 
     org = socket.assigns.current_org

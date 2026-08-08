@@ -169,7 +169,8 @@ defmodule KilnCMSWeb.TaxonomyLive do
   # the time it is clicked (another admin deleted it, or the tab has been open a
   # while), and raising here takes the LiveView down — discarding whatever is
   # half-typed into all three create forms along with it.
-  def handle_event("edit", %{"type" => type, "id" => id}, socket) do
+  def handle_event("edit", %{"type" => type, "id" => id}, socket)
+      when is_binary(type) and is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
@@ -192,7 +193,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"taxonomy" => params}, socket) do
+  def handle_event("validate_edit", %{"taxonomy" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize_types(params))
@@ -201,7 +202,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
     {:noreply, assign(socket, :edit, edit)}
   end
 
-  def handle_event("save_edit", %{"taxonomy" => params}, socket) do
+  def handle_event("save_edit", %{"taxonomy" => params}, socket) when is_map(params) do
     params = params |> with_slug() |> normalize_types()
 
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: params) do
@@ -216,7 +217,8 @@ defmodule KilnCMSWeb.TaxonomyLive do
 
   # --- delete (admin only) ---------------------------------------------------
 
-  def handle_event("delete", %{"type" => type, "id" => id}, socket) do
+  def handle_event("delete", %{"type" => type, "id" => id}, socket)
+      when is_binary(type) and is_binary(id) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 

@@ -35,7 +35,8 @@ defmodule KilnCMSWeb.TranslationsLive do
         "create_translation",
         %{"kind" => kind, "id" => id, "locale" => locale},
         socket
-      ) do
+      )
+      when is_binary(kind) and is_binary(id) and is_binary(locale) do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
     source = ContentTypes.get_record!(kind, id, actor: actor, tenant: org)

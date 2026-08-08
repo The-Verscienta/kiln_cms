@@ -57,9 +57,15 @@ defmodule KilnCMSWeb.MalformedEvent do
   ## What this does not do
 
   It cannot rescue a handler that *matches* and then raises inside its body.
-  That is what the head guards are for, and the ones this ships alongside are
-  listed in the #764 PR; the rest of the enumeration in that issue is still
-  open work.
+  That is what the head guards are for, and they are now on every clause that
+  binds a value out of a client payload — `KilnCMSWeb.MalformedPayloadTest`
+  reads the LiveView sources and fails on one that doesn't, so a new handler
+  either states its shape or names itself as an exemption with a reason.
+
+  A guard is a claim about the shape, so getting it *wrong* fails the same
+  silent way the bug did: through this catch-all. That is why the same test
+  keeps positive assertions next to the negative ones — a handler that never
+  fires and a handler that works look identical from here.
   """
   require Logger
 

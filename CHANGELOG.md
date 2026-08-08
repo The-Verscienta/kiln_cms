@@ -305,6 +305,26 @@ migration, a rewritten column, a dropped config key).
 
 ### Fixed
 
+- **A client-chosen payload shape no longer crashes any editor LiveView**
+  (#764, completing the sweep #894 started). A `handle_event/3` payload is
+  arbitrary client JSON, so `%{"id" => id}` constrains the key and never the
+  value — `String.trim/1`, `Integer.parse/1` and an Ash primary key all have no
+  clause for a list, a map, an integer or `nil` and raise. #894 shipped the
+  mechanism (head guards plus a catch-all appended to every Kiln LiveView) and
+  guarded a first handful; the remaining ~200 payload-binding clauses across 32
+  views now guard too, as does `/media?id[]=1` — the last of the URL-reachable
+  reads, which put a list where a primary key goes.
+
+  A guard is a claim about the shape, and three of them were wrong the first
+  time: the inline editor's `"update_block"` takes a TipTap *document* as well
+  as a string, and the block editor's `"reorder"` takes a list. Those are now
+  stated rather than assumed, and a list is refused where it used to be written
+  into a block body without normalisation.
+
+  `KilnCMSWeb.MalformedPayloadTest` keeps it that way: it reads the LiveView
+  sources and fails on a handler that binds a client value without saying what
+  shape it expects, so the next one inherits this rather than joining a list.
+
 - **The site name rendered twice in the browser tab.** The layout appended the
   brand-name suffix whether or not there was a page title to append it to, so
   any page that set none — the site home page, the delivery 404, and every

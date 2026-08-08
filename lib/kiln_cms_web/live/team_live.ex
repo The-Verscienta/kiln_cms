@@ -47,7 +47,8 @@ defmodule KilnCMSWeb.TeamLive do
   # --- members ---------------------------------------------------------------
 
   @impl true
-  def handle_event("add_member", %{"member" => %{"email" => email} = params}, socket) do
+  def handle_event("add_member", %{"member" => %{"email" => email} = params}, socket)
+      when is_binary(email) do
     %{actor: actor, current_org: org} = socket.assigns
 
     with {:ok, user} <- find_user(email, actor),
@@ -77,7 +78,7 @@ defmodule KilnCMSWeb.TeamLive do
     end
   end
 
-  def handle_event("remove_member", %{"id" => id}, socket) do
+  def handle_event("remove_member", %{"id" => id}, socket) when is_binary(id) do
     %{actor: actor} = socket.assigns
 
     socket =
@@ -91,7 +92,7 @@ defmodule KilnCMSWeb.TeamLive do
     {:noreply, assign(socket, :member_edit, nil)}
   end
 
-  def handle_event("edit_member", %{"id" => id}, socket) do
+  def handle_event("edit_member", %{"id" => id}, socket) when is_binary(id) do
     case get_membership(socket, id) do
       {:ok, membership} ->
         form =
@@ -109,7 +110,7 @@ defmodule KilnCMSWeb.TeamLive do
   def handle_event("cancel_member_edit", _params, socket),
     do: {:noreply, assign(socket, :member_edit, nil)}
 
-  def handle_event("save_member", %{"member" => params}, socket) do
+  def handle_event("save_member", %{"member" => params}, socket) when is_map(params) do
     handle_submit(
       socket,
       socket.assigns.member_edit.form,
@@ -121,7 +122,7 @@ defmodule KilnCMSWeb.TeamLive do
 
   # --- roles -----------------------------------------------------------------
 
-  def handle_event("create_role", %{"role" => params}, socket) do
+  def handle_event("create_role", %{"role" => params}, socket) when is_map(params) do
     params = Map.put(params, "org_id", socket.assigns.current_org.id)
 
     handle_submit(
@@ -136,7 +137,7 @@ defmodule KilnCMSWeb.TeamLive do
     )
   end
 
-  def handle_event("edit_role", %{"id" => id}, socket) do
+  def handle_event("edit_role", %{"id" => id}, socket) when is_binary(id) do
     case Accounts.get_role(id, actor: socket.assigns.actor) do
       {:ok, role} ->
         form =
@@ -154,7 +155,7 @@ defmodule KilnCMSWeb.TeamLive do
   def handle_event("cancel_role_edit", _params, socket),
     do: {:noreply, assign(socket, :role_edit, nil)}
 
-  def handle_event("save_role", %{"role" => params}, socket) do
+  def handle_event("save_role", %{"role" => params}, socket) when is_map(params) do
     handle_submit(
       socket,
       socket.assigns.role_edit.form,
@@ -164,7 +165,7 @@ defmodule KilnCMSWeb.TeamLive do
     )
   end
 
-  def handle_event("delete_role", %{"id" => id}, socket) do
+  def handle_event("delete_role", %{"id" => id}, socket) when is_binary(id) do
     %{actor: actor} = socket.assigns
 
     socket =

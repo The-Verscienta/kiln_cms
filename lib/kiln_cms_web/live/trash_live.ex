@@ -92,7 +92,8 @@ defmodule KilnCMSWeb.TrashLive do
   defp editable_types(org_id), do: ContentTypes.all_for_org(org_id)
 
   @impl true
-  def handle_event("restore", %{"kind" => kind, "id" => id}, socket) do
+  def handle_event("restore", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
     actor = socket.assigns.actor
 
     case find_item(socket.assigns.items, kind, id) do
@@ -112,7 +113,8 @@ defmodule KilnCMSWeb.TrashLive do
 
   # Permanently delete a single trashed item (#167). Guarded by a data-confirm on
   # the button; the destroy itself is admin-only at the resource policy.
-  def handle_event("purge", %{"kind" => kind, "id" => id}, socket) do
+  def handle_event("purge", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
     actor = socket.assigns.actor
 
     case find_item(socket.assigns.items, kind, id) do
