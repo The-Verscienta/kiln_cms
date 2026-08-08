@@ -565,7 +565,10 @@ defmodule KilnCMS.CMS.RelationshipsTest do
   # arguments in two different orders, which is the same drift one step short of
   # a missing one.
   describe "the merge machinery is generated, not hand-written (#639)" do
-    @content_resources [KilnCMS.CMS.Page, KilnCMS.CMS.Post]
+    # `Entry` too, and it is the one that matters most: it backs every
+    # admin-defined content type, so a shape that drifts there drifts for types
+    # nobody wrote a test for.
+    @content_resources [KilnCMS.CMS.Page, KilnCMS.CMS.Post, KilnCMS.CMS.Entry]
 
     defp merge_arguments(resource, action) do
       resource
@@ -602,6 +605,23 @@ defmodule KilnCMS.CMS.RelationshipsTest do
       for resource <- @content_resources do
         assert merge_arguments(resource, :update) == merge_arguments(resource, :autosave),
                "#{inspect(resource)}: :update and :autosave disagree on merge arguments"
+      end
+    end
+
+    # `:create` takes the complete-set arguments but none of the verbs — there
+    # are no existing links to merge against. What it must NOT do is miss a
+    # relationship the other two accept: a headless create passing `author_ids`
+    # would fail with `NoSuchInput` while the equivalent update succeeded.
+    test ":create accepts every complete-set argument, and no verbs" do
+      for resource <- @content_resources do
+        completes =
+          resource
+          |> merge_arguments(:update)
+          |> Enum.reject(&(to_string(&1) =~ ~r/^(add|remove)_/))
+
+        assert merge_arguments(resource, :create) == completes,
+               "#{inspect(resource)}: :create's merge arguments are not the complete-set " <>
+                 "half of :update's"
       end
     end
 

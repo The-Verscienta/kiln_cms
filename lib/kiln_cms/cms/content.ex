@@ -223,6 +223,39 @@ defmodule KilnCMS.CMS.Content do
       end
     end
 
+    # `:create`'s half of the same list: the complete-set argument and its
+    # `manage_relationship`, with no verbs — a create has no existing links to
+    # merge against, so the complete set is unambiguously the whole set (#521).
+    #
+    # Driven off `mergeable` all the same (#639). Hand-writing it left a second
+    # source of truth: a relationship added to the list gained the argument on
+    # `:update` and `:autosave` and silently did not on `:create`, so a headless
+    # create passing it failed with `NoSuchInput` while the equivalent update
+    # succeeded — the same drift class, one action over.
+    create_merge_arguments = fn ->
+      for {complete, _rel} <- mergeable do
+        quote do
+          argument unquote(complete), {:array, :uuid}
+        end
+      end
+    end
+
+    create_merge_changes = fn ->
+      for {complete, relationship} <- mergeable do
+        quote do
+          change manage_relationship(unquote(complete), unquote(relationship),
+                   type: :append_and_remove
+                 )
+        end
+      end
+    end
+
+    normalize_create_merge_arguments =
+      quote do
+        change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+                arguments: unquote(Enum.map(mergeable, &elem(&1, 0)))}
+      end
+
     merge_validations = fn ->
       for {complete, _rel} <- mergeable do
         {add, remove} = merge_verbs.(complete)
@@ -1374,17 +1407,9 @@ defmodule KilnCMS.CMS.Content do
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
           # No merge verbs here: a create has no existing links to merge against,
           # so `tag_ids` is unambiguously the whole set (#521).
-          argument :tag_ids, {:array, :uuid}
-          argument unquote(related_arg), {:array, :uuid}
-
-          change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
-                  arguments: [:tag_ids, unquote(related_arg)]}
-
-          change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
-
-          change manage_relationship(unquote(related_arg), unquote(related_name),
-                   type: :append_and_remove
-                 )
+          unquote_splicing(create_merge_arguments.())
+          unquote(normalize_create_merge_arguments)
+          unquote_splicing(create_merge_changes.())
 
           # Headless block-body writes (#330): the `blocks` union isn't public on
           # the auto API, so accept the body as a public array of block maps and
