@@ -291,14 +291,16 @@ defmodule KilnCMSWeb.ContentEditorCompareTest do
   end
 
   # #712. The labels used to be a second copy of `field_order/0` — the same
-  # nineteen names in the same order, independently maintained. The gate below
-  # caught a *missing* label; nothing caught the ordering, so a name added to the
-  # labels but not to `field_order/0` sorted alphabetically into the "rest"
-  # bucket instead of where its author meant it.
+  # nineteen names in the same order, independently maintained.
   #
-  # One list drives both now, and the drift is a compile error in both
-  # directions. This asserts the relationship the build enforces, so the reason
-  # for it survives in something readable.
+  # The gate below already caught a *missing* label, at test time. What nothing
+  # caught was the other direction: a label for a name no longer in
+  # `field_order/0` stayed as a dead clause indefinitely, and the two lists could
+  # drift out of the same order with nothing to say so.
+  #
+  # One list drives both now, and either drift is a compile error. This asserts
+  # the relationship the build enforces, so the reason for it survives in
+  # something readable.
   test "the labels are the ordered fields, in that order" do
     assert KilnCMSWeb.VersionDiffComponents.labelled_fields() ==
              KilnCMS.CMS.VersionFields.field_order()

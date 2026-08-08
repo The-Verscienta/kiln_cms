@@ -303,8 +303,7 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   # The labels, keyed rather than ordered (#712). Display order is
   # `KilnCMS.CMS.VersionFields.field_order/0`'s business and is not restated
   # here: the same nineteen names in the same order used to live in both places,
-  # independently ordered, so an attribute added to one and not the other sorted
-  # into the alphabetical "rest" bucket instead of where its author meant it.
+  # independently maintained, with nothing to notice when they stopped agreeing.
   @labels %{
     title: "Title",
     slug: "Slug",
