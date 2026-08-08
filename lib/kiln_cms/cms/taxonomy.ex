@@ -250,6 +250,32 @@ defmodule KilnCMS.CMS.Taxonomy do
         end
       end
 
+      validations do
+        # A slug is a URL component by definition, and this one is used as one
+        # in several places that each have to remember to encode it: the feed
+        # cache key and advertised `<id>` (#1044 came out of a real collision
+        # there — two different URLs folded onto one cache key and served each
+        # other's document to anonymous readers for the TTL), the tag calendar
+        # route, the delivery index's `?category=` filter, the taxonomy editor's
+        # own links. Encoding at each site is the belt; this is the braces, and
+        # it is the one that fails loudly.
+        #
+        # Same charset as `TypeDefinition.path_segment`, minus underscores: a
+        # taxonomy slug is generated from a name and has always been
+        # hyphen-separated in practice.
+        validate match(:slug, ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/) do
+          # Only when the slug is being written. Without this, `Match` reads the
+          # attribute's *current* value on every update, so a row stored before
+          # this rule existed could no longer be edited at all — renaming a
+          # category, or moving a tag between groups, would fail on a slug field
+          # nobody touched, and the only way out would be to change a live
+          # public URL. Declining to migrate legacy rows and then freezing them
+          # is the worst of both.
+          where changing(:slug)
+          message "must be lowercase letters, digits and single hyphens between them"
+        end
+      end
+
       policies do
         # Read-scoped API keys can never write taxonomy, and no key may
         # hard-delete it — BEFORE the admin bypass, so a key on an admin account

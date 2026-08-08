@@ -395,12 +395,27 @@ defmodule KilnCMSWeb.TaxonomyLive do
 
   # Fill a blank slug from the name so editors only have to type a label. An
   # explicit slug always wins.
+  #
+  # `slugify/1` filters to ASCII, so a name written entirely in a non-Latin
+  # script ("北京", "Привет") slugifies to `""` — and since #1044 that is a
+  # rejected write rather than a silently empty slug, which would leave a
+  # Chinese- or Russian-language site unable to add a category at all without
+  # an editor inventing a Latin slug by hand. Content already solves this:
+  # `Slugs.ensure_unique/2` falls back to a random suffix. Same answer here,
+  # and an editor who wants a meaningful slug can still type one.
   defp with_slug(params) do
     name = Map.get(params, "name", "")
 
     case String.trim(Map.get(params, "slug", "")) do
-      "" -> Map.put(params, "slug", KilnCMS.Slug.slugify(name))
+      "" -> Map.put(params, "slug", derived_slug(name))
       _slug -> params
+    end
+  end
+
+  defp derived_slug(name) do
+    case KilnCMS.Slug.slugify(name) do
+      "" -> KilnCMS.Slug.random_suffix()
+      slug -> slug
     end
   end
 

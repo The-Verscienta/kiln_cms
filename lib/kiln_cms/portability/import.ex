@@ -456,9 +456,20 @@ defmodule KilnCMS.Portability.Import do
   # A WXR `<category>` can carry a name with no `nicename`. Slugifying the name
   # is what WordPress itself would have stored, and without it the term is
   # unmatchable and the record loses it.
+  #
+  # An explicit slug is re-slugified when it is not a shape Kiln accepts (#1044).
+  # WordPress and Kiln do not agree on what a slug may contain: `sanitize_title`
+  # keeps underscores, and `KilnCMS.Portability.WXR` deliberately percent-decodes
+  # a non-ASCII `nicename` (`%d0%bf…` → `при`). Taking those verbatim would fail
+  # the taxonomy validation — and `resolve_terms/4` maps a failed term create to
+  # `:failed` and then drops it with no counter and no report entry, so a
+  # Cyrillic or Japanese blog would import with every category silently missing
+  # and a success report. Falling back to the slugified name is what the
+  # no-`nicename` branch already does; this just stops trusting a slug we cannot
+  # store.
   defp normalize_term(%{name: name, slug: slug}) do
-    case slug || slugify(name) do
-      resolved when is_binary(resolved) and resolved != "" ->
+    case usable_slug(slug) || usable_slug(slugify(name)) || generated_slug(name) do
+      resolved when is_binary(resolved) ->
         %{name: presence(name) || resolved, slug: resolved}
 
       _unusable ->
@@ -467,6 +478,32 @@ defmodule KilnCMS.Portability.Import do
   end
 
   defp normalize_term(_other), do: nil
+
+  # Mirrors `KilnCMS.CMS.Taxonomy`'s validation. Deliberately duplicated rather
+  # than reached for across the boundary: this decides whether to *rewrite* an
+  # imported value, which is an import policy, not the resource's rule.
+  defp usable_slug(slug) when is_binary(slug) do
+    if Regex.match?(~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/, slug), do: slug
+  end
+
+  defp usable_slug(_slug), do: nil
+
+  # Last resort, and it only fires for a term whose name has no ASCII letters or
+  # digits at all — a category written entirely in Cyrillic, Japanese or Greek,
+  # where `slugify/1` leaves nothing behind. A machine slug with the real name
+  # beside it is worth more than a dropped term: the name is what an editor
+  # sees, and they can rename the slug afterwards. Returns nil for a term with
+  # no name either, which is genuinely nothing to import.
+  #
+  # Derived from the name, NOT random: `normalize_term/1` runs twice per import
+  # — once in `collect_terms/2` to create the term, once in `term_ids/2` to look
+  # its id back up by slug — so a random value would create the category and
+  # then fail to attach it to the record that named it.
+  defp generated_slug(name) do
+    if presence(name) do
+      "term-" <> (name |> :erlang.phash2() |> Integer.to_string(36) |> String.downcase())
+    end
+  end
 
   defp resolve_terms(kind, terms, dry_run?, opts) do
     Enum.reduce(terms, {%{}, 0}, fn term, {acc, created} ->
