@@ -63,15 +63,16 @@ defmodule KilnCMS.Experiments.Sticky do
   experiment. Counting a conversion off the bucket alone would count people who
   never encountered the test.
 
-  So a second cookie, `_kiln_ab_x`, records exposure — and only for experiments
-  whose goal is `:content_view`, since nothing else needs it. It holds up to
+  So a second cookie, `_kiln_ab_x`, records exposure — and only for the goals
+  that convert on a later page (`:content_view` and `:funnel_completion`), since
+  nothing else needs it. It holds up to
   #{@max_exposures} variant ids, and an id is **removed the moment it
   converts**, so one exposure counts once and the cookie shrinks back to nothing
   on its own.
 
   This one is closer to an identifier than the bucket is, and the honest
   statement of the cost is: its value space is the set of arms of the running
-  content-view experiments, so with one such experiment it distinguishes nothing
+  later-page experiments, so with one such experiment it distinguishes nothing
   beyond which arm you are in, and with several the *combination* starts to
   narrow a visitor down. That is what the small cap and the shared lifetime are
   for. Nothing server-side is keyed by it either — it is read, a counter is

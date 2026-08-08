@@ -63,6 +63,13 @@ defmodule KilnCMS.Analytics.FunnelStep do
   end
 
   # Multi-tenancy (epic #336): a step belongs to the same site as its funnel.
+  changes do
+    # A `:funnel_completion` experiment converts on this funnel's LAST step, and
+    # delivery reads that from a cache (#1010).
+    change KilnCMS.Analytics.Changes.BustFunnelTargets,
+      on: [:create, :update, :destroy]
+  end
+
   multitenancy do
     strategy :attribute
     attribute :org_id

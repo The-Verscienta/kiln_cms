@@ -125,6 +125,61 @@ defmodule KilnCMS.Experiments do
   @spec bust(Ash.UUID.t()) :: :ok
   defdelegate bust(org_id), to: KilnCMS.Cache, as: :bust_experiments
 
+  @doc """
+  The `(content_type, document_id)` a `:funnel_completion` experiment converts
+  on — its funnel's **final step** — or `nil` (#1010).
+
+  Read from a per-site cache, not the database. `Delivery.goal_document?/3`
+  calls this for every running funnel experiment on **every** content page view,
+  so a query here would be a query per page view site-wide — the same cost
+  `running/1` exists to avoid, on the same path.
+
+  Busted alongside the running set, and additionally on any funnel or funnel-step
+  write (`KilnCMS.Analytics`), so re-ordering a funnel moves the goal on the next
+  request rather than within the TTL. That immediacy is the feature: the whole
+  reason this goal names a funnel instead of a document is that editing the
+  funnel edits the goal.
+  """
+  @spec funnel_target(Experiment.t()) :: {String.t(), Ash.UUID.t()} | nil
+  def funnel_target(%{goal: :funnel_completion, goal_funnel_id: id, org_id: org_id})
+      when is_binary(id) do
+    Map.get(funnel_targets(org_id), id)
+  end
+
+  def funnel_target(_experiment), do: nil
+
+  @doc "Every funnel's final step for a site, as `%{funnel_id => {type, id}}`. Cached."
+  @spec funnel_targets(Ash.UUID.t()) :: %{optional(Ash.UUID.t()) => {String.t(), Ash.UUID.t()}}
+  def funnel_targets(org_id) do
+    KilnCMS.Cache.fetch(KilnCMS.Cache.funnel_targets_key(org_id), @cache_ttl, fn ->
+      load_funnel_targets(org_id)
+    end)
+  end
+
+  # One read for the whole site rather than one per experiment: funnels are few
+  # and the delivery path wants a map lookup, not a join.
+  defp load_funnel_targets(org_id) do
+    KilnCMS.Analytics.list_funnels!(
+      query: [load: :steps],
+      authorize?: false,
+      tenant: org_id
+    )
+    |> Enum.flat_map(fn funnel ->
+      case List.last(funnel.steps || []) do
+        nil -> []
+        last -> [{funnel.id, {last.content_type, last.content_id}}]
+      end
+    end)
+    |> Map.new()
+  rescue
+    # Same posture and the same reason as `load_running/1`: delivery survives a
+    # database that cannot answer, and it says so — "no funnel targets" and
+    # "every funnel experiment stopped converting" look identical from outside.
+    error ->
+      Logger.warning("Experiments.funnel_targets/1 could not read: #{Exception.message(error)}")
+      %{}
+  end
+
   defp load_running(org_id) do
     Experiment
     |> Ash.Query.for_read(:running)

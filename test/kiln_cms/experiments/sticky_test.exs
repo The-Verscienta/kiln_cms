@@ -532,6 +532,146 @@ defmodule KilnCMS.Experiments.StickyTest do
     end
   end
 
+  describe "the funnel_completion goal (#1010)" do
+    setup do
+      ExperimentFixtures.enable!()
+      put_experiments(sticky: true)
+      actor = admin()
+      landing = published_page(actor)
+      middle = published_page(actor)
+      last = published_page(actor)
+
+      funnel = ExperimentFixtures.funnel_ending_at(middle, last, landing.org_id)
+
+      {experiment, control, treatment} =
+        ExperimentFixtures.pinned!(
+          landing,
+          "page",
+          %{"fields" => %{"title" => @variant_headline}},
+          goal: :funnel_completion,
+          goal_funnel_id: funnel.id
+        )
+
+      %{
+        landing: landing,
+        middle: middle,
+        last: last,
+        funnel: funnel,
+        experiment: experiment,
+        control: control,
+        treatment: treatment
+      }
+    end
+
+    test "converting means reaching the funnel's LAST step", ctx do
+      conn =
+        build_conn()
+        |> put_req_cookie(Sticky.exposure_cookie(), ctx.treatment.id)
+        |> get("/#{ctx.last.slug}")
+
+      assert html_response(conn, 200)
+      assert conversions(ctx, ctx.treatment.id) == 1
+
+      # And the exposure is spent, so a reload cannot convert twice.
+      assert %{max_age: 0} = Map.fetch!(conn.resp_cookies, Sticky.exposure_cookie())
+    end
+
+    test "the landing page mints the exposure a funnel goal needs", ctx do
+      # Every other test here injects the cookie by hand, so without this,
+      # reverting `count_exposure`'s guard to `:content_view` only would leave
+      # them all green while a funnel experiment never minted `_kiln_ab_x` at
+      # all and could therefore never convert.
+      conn = get(build_conn(), "/#{ctx.landing.slug}")
+
+      assert html_response(conn, 200) =~ @variant_headline
+      assert %{value: value} = Map.fetch!(conn.resp_cookies, Sticky.exposure_cookie())
+      assert value == ctx.treatment.id
+    end
+
+    test "a headless caller is never served a funnel_completion arm", ctx do
+      # Same reason as `content_view`: a `variant_key` says which arm a caller
+      # would be in, never that they fetched the experimented document, so
+      # serving one books impressions on a denominator no conversion can reach.
+      assert KilnCMS.Experiments.Delivery.assign_keyed("page", ctx.landing, "caller-1") == nil
+      assert impressions(ctx, ctx.treatment.id) == 0
+    end
+
+    test "a funnel edited to end on the experimented document stops converting", ctx do
+      # `:start` refuses this, but the feature's whole point is that editing the
+      # funnel moves the goal — so an editor can reach the refused state
+      # afterwards and nothing about a funnel write knows an experiment exists.
+      # Unguarded, the impression converts itself within the same request and
+      # every arm reports 100% forever.
+      KilnCMS.Analytics.create_funnel_step!(
+        %{
+          funnel_id: ctx.funnel.id,
+          content_type: "page",
+          content_id: ctx.landing.id,
+          position: 9
+        },
+        authorize?: false,
+        tenant: ctx.landing.org_id
+      )
+
+      conn = get(build_conn(), "/#{ctx.landing.slug}")
+
+      assert html_response(conn, 200) =~ @variant_headline
+      assert conversions(ctx, ctx.treatment.id) == 0
+    end
+
+    test "an intermediate step does not convert", ctx do
+      # The honest limit of this goal, asserted rather than left implied: Kiln
+      # keeps no per-visitor journey, so "completed" means "reached the end",
+      # not "walked every step in order".
+      build_conn()
+      |> put_req_cookie(Sticky.exposure_cookie(), ctx.treatment.id)
+      |> get("/#{ctx.middle.slug}")
+      |> html_response(200)
+
+      assert conversions(ctx, ctx.treatment.id) == 0
+    end
+
+    test "the goal follows the funnel when its last step changes", ctx do
+      # The reason this is not just `content_view` pointed at a document: the
+      # experiment names a funnel, so re-ordering the funnel moves the goal
+      # without anyone editing the experiment.
+      newest = published_page(admin())
+
+      KilnCMS.Analytics.create_funnel_step!(
+        %{funnel_id: ctx.funnel.id, content_type: "page", content_id: newest.id, position: 9},
+        authorize?: false,
+        tenant: ctx.landing.org_id
+      )
+
+      build_conn()
+      |> put_req_cookie(Sticky.exposure_cookie(), ctx.treatment.id)
+      |> get("/#{ctx.last.slug}")
+      |> html_response(200)
+
+      assert conversions(ctx, ctx.treatment.id) == 0
+
+      build_conn()
+      |> put_req_cookie(Sticky.exposure_cookie(), ctx.treatment.id)
+      |> get("/#{newest.slug}")
+      |> html_response(200)
+
+      assert conversions(ctx, ctx.treatment.id) == 1
+    end
+
+    test "the funnel's last step leaves the shared cache", ctx do
+      # Same cost as `content_view`: the conversion is counted at the origin, so
+      # a CDN holding that page swallows every conversion after the first.
+      conn = get(build_conn(), "/#{ctx.last.slug}")
+
+      assert ["private, no-store"] = get_resp_header(conn, "cache-control")
+
+      # The middle step is untouched — this costs two pages their CDN, not the
+      # whole funnel.
+      plain = get(build_conn(), "/#{ctx.middle.slug}")
+      assert ["public, max-age=" <> _] = get_resp_header(plain, "cache-control")
+    end
+  end
+
   describe "the exposure list itself" do
     setup do
       put_experiments(sticky: true)
@@ -649,6 +789,43 @@ defmodule KilnCMS.Experiments.StickyTest do
       assert Exception.message(error) =~ "target document"
     end
 
+    test "a funnel goal is refused with no funnel, an unknown funnel, or an empty one", ctx do
+      put_experiments(sticky: true)
+      org_id = ctx.landing.org_id
+
+      assert {:error, e} = start_funnel(ctx, nil)
+      assert Exception.message(e) =~ "needs a funnel"
+
+      assert {:error, e} = start_funnel(ctx, Ash.UUID.generate())
+      assert Exception.message(e) =~ "no funnel"
+
+      empty =
+        KilnCMS.Analytics.create_funnel!(
+          %{name: "Empty", slug: "empty-#{System.unique_integer([:positive])}"},
+          authorize?: false,
+          tenant: org_id
+        )
+
+      assert {:error, e} = start_funnel(ctx, empty.id)
+      assert Exception.message(e) =~ "no steps"
+    end
+
+    test "a funnel goal is refused when the funnel ends on the experimented document", ctx do
+      put_experiments(sticky: true)
+      funnel = ExperimentFixtures.funnel_ending_at(ctx.target, ctx.landing, ctx.landing.org_id)
+
+      assert {:error, e} = start_funnel(ctx, funnel.id)
+      assert Exception.message(e) =~ "last step is the experimented document"
+    end
+
+    test "a funnel goal is refused while sticky assignment is off", ctx do
+      refute Sticky.enabled?()
+      funnel = ExperimentFixtures.funnel_ending_at(ctx.landing, ctx.target, ctx.landing.org_id)
+
+      assert {:error, e} = start_funnel(ctx, funnel.id)
+      assert Exception.message(e) =~ "sticky"
+    end
+
     test "is refused when the target type is not a content type on this site", ctx do
       # The plural-URL-segment typo. Nothing about the resulting experiment
       # looks wrong — it serves, it splits, it books impressions — it just
@@ -709,6 +886,28 @@ defmodule KilnCMS.Experiments.StickyTest do
 
   defp impressions(ctx, variant_id), do: counter(ctx, variant_id, :impressions)
   defp conversions(ctx, variant_id), do: counter(ctx, variant_id, :conversions)
+
+  defp start_funnel(ctx, funnel_id) do
+    org_id = ctx.landing.org_id
+
+    experiment =
+      KilnCMS.Experiments.create_experiment!(
+        %{
+          name: "fc-#{System.unique_integer([:positive])}",
+          content_type: "page",
+          document_id: ctx.landing.id,
+          goal: :funnel_completion,
+          goal_funnel_id: funnel_id
+        },
+        authorize?: false,
+        tenant: org_id
+      )
+
+    ExperimentFixtures.variant!(experiment, "Control", %{}, org_id, control: true)
+    ExperimentFixtures.variant!(experiment, "Treatment", %{}, org_id, [])
+
+    KilnCMS.Experiments.start_experiment(experiment, authorize?: false, tenant: org_id)
+  end
 
   defp counter(ctx, variant_id, field) do
     KilnCMS.Experiments.VariantDay
