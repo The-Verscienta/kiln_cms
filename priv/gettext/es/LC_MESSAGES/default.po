@@ -9940,4 +9940,4 @@ msgstr "Ver"
 #: lib/kiln_cms_web/live/editor_live.ex:315
 #, elixir-autogen, elixir-format
 msgid "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}."
-msgstr ""
+msgstr "Duplicado como nuevo borrador. No se copiaron, porque tu rol no puede establecerlos: %{fields}."
