@@ -403,6 +403,53 @@ defmodule KilnCMS.Cache do
     :ok
   end
 
+  @doc """
+  Drop **every** cached feed document for one org, across types, scopes and
+  formats (#719).
+
+  The blunt counterpart to `bust_feeds/3`, for a write that names no record and
+  no type: a change to the org's syndication policy decides what is *in* every
+  feed body at once. It walks the keyspace rather than enumerating types,
+  because the set of types a stale key was written for is exactly what the
+  policy change may have altered — and the taxonomy scopes `bust_feeds/3`
+  deliberately leaves to the TTL are in here too, since this runs on a rare
+  admin save rather than inside a publish transaction.
+  """
+  @spec bust_all_feeds(Ash.UUID.t()) :: :ok
+  def bust_all_feeds(org_id) do
+    prefix = "feed:#{org_id}:"
+
+    with true <- enabled?(),
+         {:ok, keys} <- Cachex.keys(@cache) do
+      for key <- keys, is_binary(key), String.starts_with?(key, prefix) do
+        Cachex.del(@cache, key)
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
+  Cache key for a site's resolved feed syndication policy (#719) — which types
+  syndicate and which carry their full body, with the operator-level
+  `config :kiln_cms, :feeds` already folded in. Per-org: the whole point of the
+  key is that two tenants on one deployment resolve it differently.
+  """
+  @spec feed_policy_key(Ash.UUID.t()) :: String.t()
+  def feed_policy_key(org_id), do: "feed_policy:#{org_id}"
+
+  @doc """
+  Drop a site's cached syndication policy after a settings save. Called by
+  `Changes.BustFeedSettings`, alongside `bust_all_feeds/1` — the policy decides
+  the contents of the documents, so leaving those cached would hide the save for
+  the whole TTL.
+  """
+  @spec bust_feed_policy(Ash.UUID.t()) :: :ok
+  def bust_feed_policy(org_id) do
+    if enabled?(), do: Cachex.del(@cache, feed_policy_key(org_id))
+    :ok
+  end
+
   # `nil` (site-wide) and the type, each in the default locale and — when the
   # record was written in another — that locale too. The segment mirrors
   # `KilnCMSWeb.FeedController.cache_scope/2` exactly; the two have to agree or

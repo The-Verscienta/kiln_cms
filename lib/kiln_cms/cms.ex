@@ -564,6 +564,14 @@ defmodule KilnCMS.CMS do
       define :reset_form_spam_settings, action: :destroy
     end
 
+    # Per-org syndication policy (#719): which types appear in this site's feeds
+    # and which carry their full body. Resolved through `KilnCMS.Feeds`.
+    resource KilnCMS.CMS.FeedSettings do
+      define :list_feed_settings, action: :read
+      define :save_feed_settings, action: :save
+      define :reset_feed_settings, action: :destroy
+    end
+
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).
     resource KilnCMS.CMS.Category do
       define :list_categories, action: :read

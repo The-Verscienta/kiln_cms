@@ -248,9 +248,12 @@ defmodule KilnCMSWeb.FeedController do
   defp entries(org, descriptor, scope) do
     limit = Feeds.entry_limit()
     types = if descriptor, do: [descriptor], else: Feeds.syndicated_types(org.id)
+    # Resolved once for the whole document (#719) — `full_content?/2` is asked
+    # per entry, and this is the anonymous delivery path.
+    policy = Feeds.policy(org.id)
 
     types
-    |> Enum.flat_map(&type_entries(&1, org, scope, limit))
+    |> Enum.flat_map(&type_entries(&1, org, scope, limit, policy))
     # Ordered and capped on the SAME key the per-type reads selected on. Sorting
     # the merged set by `updated_at` instead would let a bulk copy-edit of fifty
     # old records evict a post published five minutes ago — silently, and
@@ -260,7 +263,7 @@ defmodule KilnCMSWeb.FeedController do
     |> Enum.take(limit)
   end
 
-  defp type_entries(descriptor, org, scope, limit) do
+  defp type_entries(descriptor, org, scope, limit, policy) do
     descriptor
     |> ContentTypes.list!(
       authorize?: true,
@@ -281,7 +284,7 @@ defmodule KilnCMSWeb.FeedController do
         load: [:category, :tags]
       ]
     )
-    |> Enum.map(&entry(&1, descriptor, org))
+    |> Enum.map(&entry(&1, descriptor, org, policy))
   end
 
   # Published *and* public — see the moduledoc. An `audience` other than
@@ -311,7 +314,7 @@ defmodule KilnCMSWeb.FeedController do
   defp select_fields(%{excerpt?: true}), do: @base_fields ++ [:excerpt]
   defp select_fields(_descriptor), do: @base_fields
 
-  defp entry(record, descriptor, org) do
+  defp entry(record, descriptor, org, policy) do
     base_url = Tenant.base_url(org)
     url = base_url <> locale_prefix(record.locale) <> public_path(record, descriptor)
     published_at = record.published_at || record.inserted_at
@@ -321,7 +324,7 @@ defmodule KilnCMSWeb.FeedController do
       url: url,
       title: record.title,
       summary: summary(record),
-      content: content(record, descriptor, org),
+      content: content(record, descriptor, org, policy),
       categories: categories(record),
       published_at: published_at,
       updated_at: record.updated_at
@@ -375,8 +378,8 @@ defmodule KilnCMSWeb.FeedController do
     |> Enum.find("", &(is_binary(&1) and &1 != ""))
   end
 
-  defp content(record, descriptor, org) do
-    if Feeds.full_content?(descriptor) do
+  defp content(record, descriptor, org, policy) do
+    if Feeds.full_content?(descriptor, policy) do
       rendered_html(record, descriptor, org)
     else
       nil

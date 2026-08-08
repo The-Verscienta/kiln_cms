@@ -20,7 +20,21 @@ defmodule KilnCMSWeb.FeedControllerTest do
     :ok
   end
 
-  defp put_config(opts), do: Application.put_env(:kiln_cms, :feeds, opts)
+  # The resolved policy is cached per org (#719), so a config change mid-test
+  # would otherwise be invisible for the whole TTL — the same clear the setup
+  # block does, which is what these tests already rely on between them.
+  defp put_config(opts) do
+    Application.put_env(:kiln_cms, :feeds, opts)
+    Cache.bust_published()
+  end
+
+  # This site's own settings row, the layer above the config.
+  defp save_settings(attrs) do
+    CMS.save_feed_settings!(attrs,
+      actor: admin(),
+      tenant: KilnCMS.Accounts.default_org_id()
+    )
+  end
 
   # Through the real actions, so publish hooks (firing, cache busting) run.
   # `Ash.Seed.seed!` writes the row directly and skips all of them.
@@ -198,6 +212,81 @@ defmodule KilnCMSWeb.FeedControllerTest do
 
       assert body =~ "<summary type=\"html\">#{post.excerpt}</summary>"
       assert body =~ "</feed>"
+    end
+  end
+
+  describe "per-site syndication settings (#719)" do
+    test "a site's own full-content choice overrides the deployment config", %{conn: conn} do
+      # The config says summaries; this site says full text. Before #719 the
+      # config was the only voice, and it was one voice for every tenant.
+      put_config(full_content: [])
+      save_settings(%{full_content_types: ["post"]})
+      real_published_post("Body text here")
+
+      body = response(get(conn, ~p"/feed.xml"), 200)
+
+      assert body =~ "<content type=\"html\">"
+      assert body =~ "Body text here"
+    end
+
+    test "a site that says NO full content beats a config that turns it on", %{conn: conn} do
+      # The scenario in the issue: an operator enabled `full_content: ["post"]`
+      # for tenant A's newsletter, and B — which shares the compiled `post`
+      # type — was handing complete articles to every anonymous scraper with no
+      # way to opt out. An empty saved list is that opt-out, and it must not
+      # collapse back into "unset".
+      put_config(full_content: ["post"])
+      save_settings(%{full_content_types: []})
+      post = real_published_post("Body text here")
+
+      body = response(get(conn, ~p"/feed.xml"), 200)
+
+      refute body =~ "<content type=\"html\">"
+      refute body =~ "Body text here"
+      assert body =~ "<summary type=\"html\">#{post.excerpt}</summary>"
+    end
+
+    test "a site's own exclusion removes that type's feed route", %{conn: conn} do
+      save_settings(%{excluded_types: ["post"]})
+      post = published_post()
+
+      assert response(get(conn, ~p"/blog/feed.xml"), 404)
+      refute response(get(conn, ~p"/feed.xml"), 200) =~ post.slug
+    end
+
+    test "a site may syndicate a type the operator excluded deployment-wide", %{conn: conn} do
+      put_config(exclude: ["post"])
+      save_settings(%{excluded_types: []})
+      post = published_post()
+
+      assert response(get(conn, ~p"/blog/feed.xml"), 200) =~ post.slug
+    end
+
+    test "saving settings drops the cached feed rather than waiting out the TTL", %{conn: conn} do
+      put_config(full_content: ["post"])
+      post = real_published_post("Body text here")
+
+      assert response(get(conn, ~p"/feed.xml"), 200) =~ "Body text here"
+
+      # No cache bust of our own: the settings write must do it. Without that,
+      # an admin turning full text OFF watches the feed keep handing out whole
+      # articles for five more minutes with no way to tell whether it worked.
+      save_settings(%{full_content_types: []})
+
+      body = response(get(conn, ~p"/feed.xml"), 200)
+
+      refute body =~ "Body text here"
+      assert body =~ "<summary type=\"html\">#{post.excerpt}</summary>"
+    end
+
+    test "an excluded type stops being advertised on a delivery page", %{conn: conn} do
+      save_settings(%{excluded_types: ["post"]})
+      post = published_post()
+
+      html = response(get(conn, ~p"/blog/#{post.slug}"), 200)
+
+      assert html =~ ~s(href="http://localhost:4000/feed.xml")
+      refute html =~ ~s(href="http://localhost:4000/blog/feed.xml")
     end
   end
 

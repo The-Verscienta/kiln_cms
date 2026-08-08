@@ -918,28 +918,34 @@ defmodule KilnCMSWeb.ContentController do
   # article they can read — and the locale feeds exist precisely so that reader
   # has one. Same reason the paths come from `FeedController`: the advertised URL
   # and the routed one cannot drift.
+  # Whether this type syndicates and whether *anything* does are the same
+  # question about the same site's policy (#719), so they are answered from one
+  # resolved list rather than two lookups that could disagree.
   defp feed_alternates(ct, org, base_url, locale) do
+    case Feeds.syndicated_types(org.id) do
+      [] -> []
+      syndicated -> feed_alternates(ct, org, base_url, locale, syndicated)
+    end
+  end
+
+  defp feed_alternates(ct, org, base_url, locale, syndicated) do
     site = KilnCMS.Branding.for_org(org.id).site_name
     scope = %{locale: locale, taxonomy: nil}
 
     types =
-      if Feeds.syndicated?(ct) do
+      if Enum.any?(syndicated, &(&1.type == ct.type)) do
         [{nil, site}, {ct, "#{site} — #{ct.label}"}]
       else
         [{nil, site}]
       end
 
-    if Feeds.syndicated_types(org.id) == [] do
-      []
-    else
-      for {descriptor, title} <- types,
-          {format, mime} <- [{:atom, "application/atom+xml"}, {:json, "application/feed+json"}] do
-        %{
-          type: mime,
-          title: title,
-          href: base_url <> KilnCMSWeb.FeedController.scoped_path(descriptor, scope, format)
-        }
-      end
+    for {descriptor, title} <- types,
+        {format, mime} <- [{:atom, "application/atom+xml"}, {:json, "application/feed+json"}] do
+      %{
+        type: mime,
+        title: title,
+        href: base_url <> KilnCMSWeb.FeedController.scoped_path(descriptor, scope, format)
+      }
     end
   end
 

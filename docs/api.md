@@ -484,9 +484,21 @@ type that is the per-type "Has a public index of published entries" checkbox in
 index for is not one whose records should be enumerable. Compiled types (Page,
 Post) have public indexes by definition.
 
-On top of that, an operator can drop a type deployment-wide, and choose which
-types syndicate their full body. Full-text is opt-in because it hands the whole
-article to everything subscribed:
+**The rest of the policy is per-site (#719).** `/editor/feeds` lists every
+content type the site has with two switches each — whether it appears in the
+site's feeds at all, and whether its entries carry the rendered body rather than
+a summary. Both are org admin-only, and both are scoped to the site you are on.
+
+Full content is opt-in because it hands the whole article to everything
+subscribed: with it on, every anonymous reader, aggregator and scraper fetching
+the feed receives the complete rendered body of every published entry of that
+type. That is a publishing decision a site makes for itself, which is why it
+cannot live in a config file only a deployment operator can edit — a compiled
+type like `post` is shared by every organization on a deployment, so one
+tenant's newsletter would otherwise have opted in all of them.
+
+Underneath sits the operator default, used by any site that has not saved its
+own settings:
 
 ```elixir
 config :kiln_cms, :feeds,
@@ -495,8 +507,14 @@ config :kiln_cms, :feeds,
   entry_limit: 50           # newest N records per feed (capped at 200)
 ```
 
-These two are deployment-wide, not per-organization — the wrong grain for a
-multi-tenant install, tracked separately.
+A site that has never saved follows this config; saving replaces both lists for
+that site, and **Use the operator defaults** on the page drops them and goes
+back to following it. An empty saved list means *none*, which is not the same as
+never having said anything — that distinction is what lets a site turn full
+content off while the deployment default has it on.
+
+`entry_limit` stays deployment-wide, and deliberately: it bounds the work a feed
+request costs the server rather than expressing a publishing choice.
 
 ### Segments and locales (#720)
 
