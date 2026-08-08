@@ -329,6 +329,16 @@ if cron = System.get_env("KILN_TASK_DIGEST_CRON") do
   config :kiln_cms, :task_digest_cron, cron
 end
 
+# ## Events: the "what's on" index (#766)
+#
+# When the occurrence sweep runs. The interval is how stale the listing may be —
+# an event that has finished keeps its place until the next run — so shorten it
+# on a site whose events turn over during the day, and set `false` (or drive
+# `KilnCMS.Events.Sweep.run/0` from your own scheduler) to turn it off.
+if cron = System.get_env("KILN_OCCURRENCE_SWEEP_CRON") do
+  config :kiln_cms, :occurrence_sweep_cron, cron
+end
+
 if user_agent = System.get_env("KILN_LINK_CHECK_USER_AGENT") do
   config :kiln_cms, KilnCMS.Links.External, user_agent: user_agent
 end

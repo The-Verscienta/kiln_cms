@@ -714,6 +714,15 @@ defmodule KilnCMSWeb.Router do
     get "/:plural/tags/:tag/calendar.ics", CalendarController, :tag
     get "/:plural/:slug/calendar.ics", CalendarController, :show
 
+    # The JSON "what's on" index (#766) — the machine-readable twin of the HTML
+    # one at `/<plural>`, which needs no route of its own because `/:slug` in the
+    # delivery scope already owns single-segment paths (see
+    # `ContentController.show_page/2`). Two segments, like `calendar.ics`, so it
+    # cannot be shadowed by — or shadow — a document whose slug ends in `.json`.
+    # Under `:probe` with the feeds and calendars for the same reason: an
+    # unauthenticated fetch that reads published rows.
+    get "/:plural/index.json", EventIndexController, :index
+
     # Web app manifest for the installable editor PWA (#65). Per-org, so it's a
     # controller rather than a `priv/static` file. Unauthenticated by necessity
     # (the browser fetches it as a page subresource) and cheap — a cached

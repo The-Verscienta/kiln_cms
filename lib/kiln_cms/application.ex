@@ -166,7 +166,9 @@ defmodule KilnCMS.Application do
     {:link_check_cron, KilnCMS.Links.SweepWorker, "KILN_LINK_CHECK_CRON",
      "outbound links will NOT be checked on a schedule. See #474."},
     {:task_digest_cron, KilnCMS.Notifications.TaskDigestWorker, "KILN_TASK_DIGEST_CRON",
-     "task due-soon/overdue digests will NOT be sent on a schedule. See #501."}
+     "task due-soon/overdue digests will NOT be sent on a schedule. See #501."},
+    {:occurrence_sweep_cron, KilnCMS.Events.SweepWorker, "KILN_OCCURRENCE_SWEEP_CRON",
+     "finished events will stay at the top of the \"what's on\" index. See #766."}
   ]
 
   # `false` (or nil) on any key leaves that entry out, for a deployment driving
