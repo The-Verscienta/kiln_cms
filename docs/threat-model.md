@@ -707,19 +707,25 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    rendered content quietly loses the value.
 
    The binding applies only when the client demonstrably round-trips ids, and
-   that gate is forced rather than chosen: **nested child ids cannot be read
-   back.** `blocks` is not `public?`, GraphQL carries `hide_inputs: [:blocks]`,
-   and the fired artifact exposes `_id` rather than `id`. A headless
-   `block_tree` client has no way to learn a child's id, and `restore_version`
-   accepts nothing but a `version_id`, so versions captured before the editor
-   stamped children restore id-less by construction. Demanding an id back from
-   those callers would refuse them permanently while naming a remedy neither
-   could perform.
+   that gate is forced rather than chosen: `blocks` is not `public?` and GraphQL
+   carries `hide_inputs: [:blocks]`, so most callers cannot read a child's id,
+   and `restore_version` accepts nothing but a `version_id` — versions captured
+   before the editor stamped children restore id-less by construction. Demanding
+   an id back from those callers would refuse them permanently while naming a
+   remedy neither could perform.
 
-   *Residual:* a caller willing to drop **every** nested id is still governed by
-   the count alone, so the re-target survives there. Closing it needs nested
-   child ids a client can read — the same missing primitive as the id-reuse
-   residual below, one level down.
+   **Published content is now round-trippable** (#954). The fired `:json`
+   artifact names each block's id `_id`, nested children included, and the write
+   path accepts that spelling — so a headless client editing published content
+   can read the artifact, send it back, and get the binding. Before, that
+   arrived id-less (fresh ids minted, `_id` stored as a junk key nothing read),
+   so the one available route to round-tripping silently did not work.
+
+   *Residual:* a **draft** has no readable block surface at all, so a headless
+   client editing one still cannot produce ids, and a caller willing to drop
+   every id is governed by the count alone. Closing that needs a draft-readable
+   block-tree surface — a genuine API addition rather than a fix, tracked in
+   #954.
 
    *Residual, all about **which block an id names** rather than what a field may
    hold:* an editor can still reuse the id of another block **of the same type**
