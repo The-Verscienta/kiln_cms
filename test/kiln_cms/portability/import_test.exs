@@ -329,7 +329,12 @@ defmodule KilnCMS.Portability.ImportTest do
       post = posts(actor) |> find("seo")
       assert post.seo_title == "The SEO title"
       assert post.seo_description == "A description"
-      assert post.canonical_url == "https://example.com/seo"
+
+      # canonical_url deliberately does NOT travel: it names the SOURCE's
+      # canonical URL, so carrying it tells search engines the site being
+      # migrated away from is authoritative. ContentCopy excludes it for the
+      # same reason.
+      assert post.canonical_url == nil
     end
 
     # `:publish` stamps `utc_now`, so without a restore a decade of archives
@@ -386,6 +391,26 @@ defmodule KilnCMS.Portability.ImportTest do
   end
 
   describe "envelope import" do
+    test "a malformed envelope element is skipped, not fatal", %{actor: actor} do
+      envelope = %{
+        "records" => [
+          "oops",
+          %{"type" => "post", "title" => "Fine", "slug" => "fine"},
+          %{
+            "type" => "post",
+            "title" => "Bad block",
+            "slug" => "bad",
+            "blocks" => [%{"type" => "image", "value" => "not-a-map"}]
+          }
+        ]
+      }
+
+      {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+
+      assert Enum.any?(report.created, &(&1.slug == "fine"))
+      assert posts(actor) |> find("fine")
+    end
+
     test "a JSON envelope goes through the same write path", %{actor: actor} do
       envelope = %{
         "kiln_export" => %{"version" => 1},

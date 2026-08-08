@@ -65,7 +65,8 @@ defmodule KilnCMS.Media.Ingest do
           actor: term(),
           tenant: term(),
           alt: String.t() | nil,
-          caption: String.t() | nil
+          caption: String.t() | nil,
+          max_bytes: pos_integer()
         ]
 
   @doc """
@@ -77,11 +78,16 @@ defmodule KilnCMS.Media.Ingest do
 
   Returns the created `MediaItem`. On any failure the stored blob is removed
   again, so a failed ingest leaves no orphan in the bucket.
+
+  `:max_bytes` overrides the per-kind cap. It exists because the caps are the
+  *upload UI's* limits, and not every caller is an upload: the Unsplash import
+  fetches a full-resolution original (routinely 10-20 MB) that no editor can
+  shrink, and it had no cap at all before this pipeline was shared.
   """
   @spec store_file(Path.t(), String.t(), opts()) :: {:ok, struct()} | {:error, term()}
   def store_file(path, filename, opts \\ []) when is_binary(path) and is_binary(filename) do
     with {:ok, kind} <- classify(path),
-         :ok <- check_size(path, cap_for(kind)) do
+         :ok <- check_size(path, Keyword.get(opts, :max_bytes) || cap_for(kind)) do
       persist(path, kind, filename, opts)
     end
   end
@@ -147,7 +153,8 @@ defmodule KilnCMS.Media.Ingest do
       {:error, reason} ->
         Logger.warning(
           "Media #{item.id} stored but derivation was not queued: #{inspect(reason)}. " <>
-            "Re-queue with mix kiln.media.reprocess."
+            "Re-queue images with mix kiln.media.regenerate_variants; an A/V item " <>
+            "has no bulk recovery path and must be re-uploaded."
         )
 
         :ok

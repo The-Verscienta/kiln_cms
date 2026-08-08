@@ -446,9 +446,13 @@ defmodule KilnCMSWeb.MediaLive do
     with {:ok, path} <- Unsplash.download(photo) do
       try do
         # No extension: `Ingest` appends the one it sniffs from the bytes.
+        # No per-kind cap: this is a full-resolution original the editor cannot
+        # resize, and the pre-extraction Unsplash path applied no cap at all.
+        # `Unsplash.download/1` is the only source, so the bytes are ours.
         Ingest.store_file(path, "unsplash-#{photo.id}",
           actor: actor,
           tenant: org,
+          max_bytes: Ingest.max_upload_size(),
           alt: photo.alt,
           caption: Unsplash.attribution(photo)
         )

@@ -144,19 +144,38 @@ defmodule KilnCMS.Blocks.Html do
   # ── Parsing ────────────────────────────────────────────────────────────────
 
   defp parse(html, opts) do
-    html
-    |> strip_gutenberg_comments()
-    |> expand_captions()
-    |> expand_embed_shortcodes()
-    |> strip_shortcodes()
-    |> maybe_autop(Keyword.get(opts, :autop, true))
-    |> Floki.parse_fragment()
-    |> case do
-      {:ok, nodes} -> nodes
-      # A fragment Floki cannot parse is not worth failing an import over —
-      # the text is still recoverable, and losing formatting beats losing the
-      # post. `parse_document` is far more forgiving (it repairs the tree).
-      {:error, _reason} -> html |> Floki.parse_document() |> elem(1) |> List.wrap()
+    # `<pre>` is set aside BEFORE the shortcode passes, not just before autop.
+    # A code sample is the one place `[...]` is content rather than markup, and
+    # stripping shortcodes first turned `arr[0] = list[idx]` into `arr = list`.
+    {shielded, pres} = protect_pre(html)
+
+    prepared =
+      shielded
+      |> strip_gutenberg_comments()
+      |> expand_captions()
+      |> expand_embed_shortcodes()
+      |> strip_shortcodes()
+      |> maybe_autop(Keyword.get(opts, :autop, true))
+      |> restore_pre(pres)
+
+    case Floki.parse_fragment(prepared) do
+      {:ok, nodes} ->
+        nodes
+
+      # A fragment Floki cannot parse is not worth failing an import over — the
+      # text is still recoverable, and losing formatting beats losing the post.
+      # `parse_document` is far more forgiving (it repairs the tree). Note this
+      # re-parses the PREPARED string, not the raw argument: falling back to the
+      # original would hand the caller a body with Gutenberg delimiters intact,
+      # literal `[gallery ids="1,2"]` text, and no autop — the worst output for
+      # exactly the documents this branch exists to salvage.
+      {:error, _reason} ->
+        case Floki.parse_document(prepared) do
+          {:ok, nodes} -> List.wrap(nodes)
+          # `parse_document` returns `{:error, binary}`; `elem(1)` on that put
+          # the parser's own message into the post body as prose.
+          {:error, _message} -> []
+        end
     end
   end
 
@@ -166,32 +185,12 @@ defmodule KilnCMS.Blocks.Html do
   defp strip_gutenberg_comments(html),
     do: String.replace(html, ~r{<!--\s*/?wp:.*?-->}s, "")
 
-  # A shortcode body longer than this is not a shortcode body — it is an
-  # unmatched opener with the rest of the post behind it. Compiled here rather
-  # than written as a `~r{}` sigil because the `{0,n}` quantifier collides with
-  # the sigil's own brace delimiters.
-  @caption_re Regex.compile!(
-                "\\[caption[^\\]]*\\](.{0,20000}?)\\[/caption\\]",
-                "s"
-              )
-  @paired_shortcode_re Regex.compile!(
-                         "\\[(\\w[\\w-]*)[^\\]]*\\](.{0,20000}?)\\[/\\1\\]",
-                         "s"
-                       )
-
   # `[caption id="…" width="…"]<img …/>Some caption[/caption]` — the caption is
   # bare text after the image, which would otherwise be parsed as a sibling
   # text node and land in the following paragraph. Rewrite to the `<figure>`
   # the same markup means today.
   defp expand_captions(html) do
-    if String.contains?(html, "[/caption]"),
-      do: do_expand_captions(html),
-      else: html
-  end
-
-  # Bounded for the same reason as `strip_paired_shortcodes/1`.
-  defp do_expand_captions(html) do
-    Regex.replace(@caption_re, html, fn _full, inner ->
+    unwrap_paired(html, "caption", fn inner ->
       case Regex.run(~r{(<img[^>]*>|<a[^>]*>.*?</a>)(.*)}s, inner) do
         [_, media, caption] ->
           "<figure>#{media}<figcaption>#{String.trim(caption)}</figcaption></figure>"
@@ -203,45 +202,113 @@ defmodule KilnCMS.Blocks.Html do
   end
 
   # `[embed]https://…[/embed]` and `[video src="…"]` carry a URL a reader would
-  # otherwise lose entirely. Promote to an anchor on its own line; the
-  # top-level split turns a lone embeddable link into an `embed` block.
+  # otherwise lose entirely. Promote to an anchor on its own line; the top-level
+  # split turns a lone embeddable link into an `embed` block.
   defp expand_embed_shortcodes(html) do
     html
-    |> String.replace(
-      ~r{\[embed[^\]]*\]\s*(\S+?)\s*\[/embed\]}s,
-      "\n\n<a href=\"\\1\">\\1</a>\n\n"
-    )
+    |> unwrap_paired("embed", fn inner ->
+      case String.trim(inner) do
+        "" -> ""
+        url -> "\n\n<a href=\"#{escape_attr(url)}\">#{escape_attr(url)}</a>\n\n"
+      end
+    end)
     |> String.replace(
       ~r{\[(?:video|audio)[^\]]*\bsrc=["']([^"']+)["'][^\]]*\]},
-      "\n\n<a href=\"\\1\">\\1</a>\n\n"
+      fn full ->
+        case Regex.run(~r{\bsrc=["']([^"']+)["']}, full) do
+          [_, url] -> "\n\n<a href=\"#{escape_attr(url)}\">#{escape_attr(url)}</a>\n\n"
+          _ -> ""
+        end
+      end
     )
   end
+
+  # A capture out of `content:encoded` goes into an HTML attribute here, so it
+  # is escaped rather than spliced. `String.replace/3`'s `\\1` inserts raw, and
+  # `[embed]https://a"onerror=x[/embed]` then forged a sibling attribute.
+  defp escape_attr(value),
+    do:
+      value
+      |> String.replace("&", "&amp;")
+      |> String.replace(~s("), "&quot;")
+      |> String.replace("<", "&lt;")
+      |> String.replace(">", "&gt;")
 
   # Everything else. Left in place these render as literal `[gallery ids="1,2"]`
   # text mid-paragraph, which is worse than absent: it looks like content.
-  # Paired shortcodes keep their inner content, self-closing ones just go.
   #
-  # The paired pass is BOUNDED (`{0,@shortcode_span}?`) and skipped entirely
-  # when the document has no closing tag. A backreference defeats any literal
-  # prefilter, so an unbounded lazy `(.*?)` rescans to end-of-input for every
-  # opener that never closes — and `[gallery ids="1,2"]` (the normal
-  # self-closing form) and `[1]`-style footnote markers are exactly that.
-  # Measured before the bound: 256 KB of such markers took 68 seconds, and a
-  # 5 MB body — well within one WordPress post — extrapolated to hours, spent
-  # before a single record was written.
+  # Only tokens that are ACTUALLY shortcodes are touched: a known WordPress name,
+  # or a token carrying `name=value` attributes. `[1]`, `[i]`, `arr[0]` and
+  # `list[idx]` are prose or code and are left exactly as written — the previous
+  # blanket `\[/?\w[\w-]*[^\]]*\]` deleted all of them.
+  #
+  # Pairing is done by literal scanning rather than a backreferenced regex. A
+  # backreference defeats every literal prefilter, so the lazy inner group
+  # rescanned for each opener; bounding it to 20k only traded quadratic for
+  # linear-with-a-20,000x-constant (measured: 1 MB of `[1]` markers = 42 s).
+  @wp_shortcodes ~w(
+    caption gallery embed audio video playlist wp_caption
+    contact-form-7 vc_row vc_column su_note su_box su_button
+  )
+
   defp strip_shortcodes(html) do
     html
-    |> strip_paired_shortcodes()
-    |> String.replace(~r{\[/?\w[\w-]*[^\]]*\]}, "")
+    |> unwrap_all_paired()
+    |> String.replace(~r{\[/?([\w-]+)((?:[^\]]*)?)\]}, fn token ->
+      if shortcode?(token), do: "", else: token
+    end)
   end
 
-  defp strip_paired_shortcodes(html) do
-    if String.contains?(html, "[/"),
-      do: String.replace(html, paired_shortcode_regex(), "\\2"),
+  # `[name ...]…[/name]` for every closer present, innermost-first, keeping the
+  # inner content. Linear in the number of closers.
+  defp unwrap_all_paired(html) do
+    ~r{\[/([\w-]+)\]}
+    |> Regex.scan(html, capture: :all_but_first)
+    |> List.flatten()
+    |> Enum.uniq()
+    # A token with a matching closer IS a shortcode, whatever its name.
+    |> Enum.reduce(html, fn name, acc -> unwrap_paired(acc, name, & &1) end)
+  end
+
+  # Replace each `[name…]inner[/name]` with `fun.(inner)`, found by literal
+  # search rather than backtracking.
+  defp unwrap_paired(html, name, fun) do
+    closer = "[/" <> name <> "]"
+
+    if String.contains?(html, closer),
+      do: do_unwrap(html, name, closer, fun, ""),
       else: html
   end
 
-  defp paired_shortcode_regex, do: @paired_shortcode_re
+  defp do_unwrap(rest, name, closer, fun, acc) do
+    with [before, after_open] <- split_opener(rest, name),
+         [inner, tail] <- String.split(after_open, closer, parts: 2) do
+      do_unwrap(tail, name, closer, fun, acc <> before <> fun.(inner))
+    else
+      _ -> acc <> rest
+    end
+  end
+
+  # Split at the next `[name` opener, returning {text_before, text_after_the_]}.
+  defp split_opener(html, name) do
+    case Regex.run(~r{\[#{Regex.escape(name)}(?:\s[^\]]*)?\]}, html, return: :index) do
+      [{start, len}] ->
+        [
+          binary_part(html, 0, start),
+          binary_part(html, start + len, byte_size(html) - start - len)
+        ]
+
+      _ ->
+        :none
+    end
+  end
+
+  defp shortcode?(token) do
+    case Regex.run(~r{^\[/?([\w-]+)(.*)\]$}s, token) do
+      [_, name, rest] -> name in @wp_shortcodes or String.contains?(rest, "=")
+      _ -> false
+    end
+  end
 
   defp maybe_autop(html, false), do: html
   defp maybe_autop(html, _true), do: autop(html)
@@ -765,21 +832,15 @@ defmodule KilnCMS.Blocks.Html do
   defp blank_text?({:comment, _}), do: true
   defp blank_text?(_other), do: false
 
-  defp embeddable?(nil), do: false
-
-  defp embeddable?(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
-        # Deliberately narrow: the same two providers the embed block's own URL
-        # sanitizer will accept. Anything else stays a link in the prose, which
-        # is lossless — an embed block would blank an unrecognised URL on save.
-        String.contains?(host, "youtube.com") or String.contains?(host, "youtu.be") or
-          String.contains?(host, "vimeo.com")
-
-      _ ->
-        false
-    end
-  end
+  # The renderer's own question, not a restatement of it. `HTMLSanitizer` decides
+  # which URLs can actually become a player (exact host membership plus a valid
+  # id shape); a substring test on the host accepted `youtube.com.example.net`,
+  # `notyoutube.com`, and playlist/channel URLs with no video id. Because
+  # `link_only_paragraph/2` REPLACES the anchor when this fires, a mismatch
+  # deleted the author's visible link and produced an embed that renders an
+  # empty <figure>. Leaving it as prose is lossless; guessing is not.
+  defp embeddable?(url) when is_binary(url),
+    do: not is_nil(KilnCMS.HTMLSanitizer.safe_embed_url(url))
 
   defp embeddable?(_other), do: false
 

@@ -80,12 +80,15 @@ defmodule KilnCMS.Portability.ExportTest do
       assert post["type"] == "post"
     end
 
-    test "references travel by slug, not by uuid", %{actor: actor} do
+    # Slug AND display name. A uuid is meaningless in the target database, but
+    # the slug alone made the importer rebuild every term as %{name: slug}, so a
+    # fresh org's nav read "how-to" instead of "How To".
+    test "references travel by slug and name, not by uuid", %{actor: actor} do
       {:ok, envelope} = Export.run([:post], actor: actor)
       post = record(envelope, "exportable")
 
-      assert post["category"] == "news"
-      assert post["tags"] == ["guides"]
+      assert post["category"] == %{"slug" => "news", "name" => "News"}
+      assert post["tags"] == [%{"slug" => "guides", "name" => "Guides"}]
     end
 
     test "blocks are dumped in the shape a create action accepts", %{actor: actor} do
