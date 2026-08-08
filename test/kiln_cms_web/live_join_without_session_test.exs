@@ -82,26 +82,52 @@ defmodule KilnCMSWeb.LiveJoinWithoutSessionTest do
     end
   end
 
-  test "a join whose transport resolved no session is refused, not crashed", %{conn: conn} do
-    path = "/editor"
+  defp join_live(conn, path, connect_info) do
     {id, session} = scrape_token(conn, path)
 
-    # `session: nil` is what the transport hands the channel when the cookie is
-    # absent or the CSRF token fails — not a value invented here.
     {:ok, socket} =
       Phoenix.ChannelTest.connect(Phoenix.LiveView.Socket, %{},
-        connect_info: %{uri: URI.parse("http://localhost#{path}"), session: nil}
+        connect_info: Map.put(connect_info, :uri, URI.parse("http://localhost#{path}"))
       )
 
-    result =
-      subscribe_and_join(socket, "lv:" <> id, %{
-        "session" => session,
-        "url" => "http://localhost#{path}"
-      })
+    subscribe_and_join(socket, "lv:" <> id, %{
+      "session" => session,
+      "url" => "http://localhost#{path}"
+    })
+  end
 
-    # The orderly refusal, not `** (BadMapError) expected a map, got: nil`.
-    # `reason: "stale"` is what a real client reloads on, so the user's tab
-    # recovers through the router instead of the server filing a crash report.
-    assert result == {:error, %{reason: "stale"}}
+  test "a join whose transport resolved no session is refused, not crashed", %{conn: conn} do
+    # `config/test.exs` pins the level at `:warning`, and the clause under test
+    # logs at `:debug` — without this the assertion below sees nothing.
+    level = Logger.level()
+    Logger.configure(level: :debug)
+    on_exit(fn -> Logger.configure(level: level) end)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        # `session: nil` is what the transport hands the channel when the cookie
+        # is absent or the CSRF token fails — not a value invented here.
+        result = join_live(conn, "/editor", %{session: nil})
+
+        # The orderly refusal, not `** (BadMapError) expected a map, got: nil`.
+        # `reason: "stale"` is what a real client reloads on, so the user's tab
+        # recovers through the router instead of the server filing a crash
+        # report.
+        assert result == {:error, %{reason: "stale"}}
+      end)
+
+    # And this is why the tuple above means anything. `{:error, %{reason:
+    # "stale"}}` is what FOUR clauses return — `session: nil`, a token that fails
+    # `verify_session`, an `authorize_session` failure, and a join carrying no
+    # session param at all — so on its own it cannot tell "refused for the right
+    # reason" from "the credential we scraped was never valid". An endpoint salt
+    # change, a `static` token becoming required, or a layout tweak that made
+    # `scrape_token`'s regex bind the wrong container would all leave the
+    # assertion green while proving nothing, which is precisely the regression
+    # this file exists to catch.
+    #
+    # The nil clause is the only one of the four that logs, and what it logs is
+    # unmistakable.
+    assert log =~ "LiveView session was misconfigured"
   end
 end
