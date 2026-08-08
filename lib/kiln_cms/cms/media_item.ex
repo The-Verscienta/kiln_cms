@@ -114,6 +114,10 @@ defmodule KilnCMS.CMS.MediaItem do
     :height,
     :duration_seconds,
     :variants,
+    # Written only by `Media.VariantWorker` alongside `variants` (#1000). Not
+    # `public?`, so it is writable-by-the-pipeline without being part of the
+    # headless surface.
+    :variant_failures,
     :alt,
     :caption,
     :decorative,
@@ -360,6 +364,21 @@ defmodule KilnCMS.CMS.MediaItem do
     # Generated responsive variants, keyed by label:
     # %{"thumb" => %{"key" => ..., "url" => ..., "width" => ..., "height" => ...}}
     attribute :variants, :map, default: %{}, public?: true
+
+    # Full-size alternates this source cannot be encoded to — `%{"webp" =>
+    # "image too large"}` (#1000). Written by `KilnCMS.Media.VariantWorker` from
+    # what `ImageProcessor.process/3` reports, and read by
+    # `KilnCMS.Media.Regeneration.current?/1` so a missing-only run can tell
+    # "not written yet" (re-enqueue it) from "will never be written" (leave it
+    # alone). Without that distinction one of the two has to be wrong: either an
+    # item that lost its top rung is never repaired, or an un-encodable panorama
+    # is re-decoded on every run for ever.
+    #
+    # `public?: false` — it names an internal encoder limit, and `variants` is
+    # public, so a headless consumer iterating one must not find the other's
+    # failures mixed in. No length constraint: it is written by the pipeline
+    # from a fixed set of format names, never from user input (#542).
+    attribute :variant_failures, :map, default: %{}, public?: false
 
     attribute :alt, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
