@@ -143,7 +143,7 @@ defmodule KilnCMS.Analytics do
   ## Complementary suppression, and why a per-category threshold is not enough
 
   Every classified arrival writes exactly one referrer hit alongside its view
-  (`KilnCMSWeb.ViewTracking.record/4`), so these categories sum to the item's
+  (`KilnCMSWeb.ViewTracking`'s private `record/4`), so these categories sum to the item's
   own view total — which is shown, exactly, right next to them. If exactly one
   category is naturally below the threshold, its value is fully determined by
   subtracting the other four *exact* values from that total. Publishing `"< n"`
