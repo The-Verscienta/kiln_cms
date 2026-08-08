@@ -476,6 +476,26 @@ Allowed origins come from the `CORS_ORIGINS` env var, resolved at runtime:
 | `*`                                    | Echo any origin (dev default).                     |
 | `https://a.example,https://b.example`  | Allowlist of exact origins (comma-separated).      |
 
+Entries are matched by **exact equality** against the browser's `Origin` header,
+which is always `scheme://host[:port]` — no trailing slash, no path, downcased,
+punycode for an IDN. An entry in any other shape can never match, so the CMS
+warns on stderr at boot naming it (#651). It **applies the value unchanged**:
+the check is a heuristic about what browsers send, and dropping an entry on a
+heuristic would be the outage the warning is meant to prevent, arrived at
+quietly.
+
+The common mistakes are a trailing slash (`https://acme.com/`), a bare host
+(`acme.com`), `https://*.acme.com` — there is no wildcard matching here, so it
+grants nothing — an uppercase host, and a `*` mixed into a list, which unlike in
+`EMBED_ORIGINS` cannot widen anything for the same reason.
+
+**Any scheme is legitimate.** An `Origin` is a serialized origin, so
+`chrome-extension://…`, `moz-extension://…`, `capacitor://localhost`,
+`tauri://localhost` and `app://…` are all real allowlist entries and none of
+them warns. `null` does warn: browsers send it for sandboxed iframes, `file://`
+and some redirects, so allowlisting it grants all of those at once — it is kept
+if you mean it.
+
 Preflight `OPTIONS` requests are answered ahead of routing and are **not**
 counted against the caller's rate-limit budget. Browser/HTML routes are
 unaffected — CORS applies to the API paths only.
