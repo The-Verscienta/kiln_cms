@@ -59,9 +59,25 @@ the other way. Frontends rebuilding Kiln's grouped tag UI filter
 
 Every content-type search read also has a **published-only twin** at
 `…/search/published`, `…/semantic-search/published` and
-`…/autocomplete/published` — same query surface, with `state == :published`
-filtered server-side. Delivery sites calling with a bearer key should use
-these; see "Search & autocomplete" below.
+`…/autocomplete/published` — same query surface, restricted server-side to what
+an **anonymous** visitor could read: published, `audience: :public`, and not
+passphrase-locked. Delivery sites calling with a bearer key should use these;
+see "Search & autocomplete" below.
+
+That is a stronger filter than the read policy, and deliberately so. A bearer key
+authorizes as the account that minted it, and an admin account bypasses the
+audience and passphrase checks entirely — so on the **base** routes an
+admin-minted delivery key enumerates member-only and locked documents (title,
+slug, excerpt, SEO fields; `blocks` is not public on any read action). The twins
+cannot be widened by any credential (#297, #1013).
+
+The hybrid `GET /api/search` holds the same line — it is actorless, so it always
+answers as an anonymous visitor.
+
+`GET /api/json/<plural>/published` deliberately does **not**: an index is a
+discovery surface, and the rendered blog index publishes an audience-gated
+post's title and excerpt to anonymous visitors with a "Members" badge, so that
+metadata is already public. It pins `state` only.
 
 ## Filtering
 
@@ -250,10 +266,15 @@ and `tag_ids[]`.
 
 The base search routes go through the read policy: anonymous callers match
 published content only, but a **bearer-keyed** caller matches whatever its
-minting account can see — with an editor/admin key that includes drafts, and
-the optional `state` facet is merely a request the caller must remember to
-make. Each search read therefore has a published-only twin whose
-`state == :published` filter is applied **server-side** (#297):
+minting account can see. With an editor/admin key that includes drafts — and,
+because an admin bypasses the audience and passphrase policies outright, also
+audience-gated and passphrase-locked bodies. The optional `state` facet is
+merely a request the caller must remember to make, and it does not narrow the
+other two axes at all.
+
+Each search read therefore has a published-only twin whose filter is applied
+**server-side** and matches exactly what an anonymous visitor could read —
+`state == :published`, `audience == :public`, and no passphrase (#297, #1013):
 
 ```
 GET /api/json/posts/search/published?query=elixir&locale=en
@@ -263,7 +284,9 @@ GET /api/json/posts/autocomplete/published?prefix=eli
 
 They take the same params minus `state` (the twins have no such argument — the
 filter cannot be widened) and keep the same relevance/distance ordering and
-pagination.
+pagination. **A delivery key minted by an admin is the case that matters**: on
+the base routes it reads gated and locked content; on the twins it reads
+neither.
 Delivery sites should use these — the search counterpart of reading
 `/…/published` instead of the plain index. See
 [headless-consumer-guide.md](headless-consumer-guide.md) → "Delivery sites: an

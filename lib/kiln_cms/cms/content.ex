@@ -328,6 +328,16 @@ defmodule KilnCMS.CMS.Content do
         # Public delivery: published content, newest first. Universal (#300):
         # every type — not just the blog — needs a server-side published-only
         # index a keyed delivery caller can't widen to drafts (#297).
+        #
+        # `state` only, and NOT the fuller "anonymous can read this" rule the
+        # search twins pin (#1013). An index is a discovery surface, and gated
+        # metadata is public here by deliberate design: `blog_index/2` reads
+        # this action with `authorize?: false` and renders an audience-gated
+        # post with a "Members" badge rather than hiding it, so its title and
+        # excerpt are already public to an anonymous visitor. Narrowing this to
+        # `audience == :public` would take the paywall teaser off the blog
+        # index. `blocks` is not a public attribute on any read action, so no
+        # body rides along either way.
         read :published do
           filter expr(^ref(:state) == :published)
 
@@ -938,15 +948,38 @@ defmodule KilnCMS.CMS.Content do
     # search counterpart of the plain index vs `:published`. The read policy
     # alone doesn't protect delivery consumers here: a bearer API key
     # authorizes as the account that minted it, so with an editor/admin key
-    # the base actions silently match drafts. The twins cannot be widened by
-    # any credential, and they drop the `state` facet argument (dead weight
-    # against the pinned filter). Both flavors come from one template so
-    # their query surfaces can't drift.
+    # the base actions silently match drafts — and, until #1013, gated and
+    # locked rows too. The twins cannot be widened by any credential, and they
+    # drop the `state` facet argument (dead weight against the pinned filter).
+    # Both flavors come from one template so their query surfaces can't drift.
     join_and = fn clauses ->
       Enum.reduce(clauses, fn clause, acc -> quote(do: unquote(acc) and unquote(clause)) end)
     end
 
-    pinned_state = quote(do: ^ref(:state) == :published)
+    # The pinned filter is the whole "an anonymous visitor could read this" rule,
+    # not just `state` (#1013). It used to pin state alone, which made the twins
+    # exactly as leaky as the base actions for the caller they exist to protect:
+    # an API key authorizes as the account that minted it, the `OrgAdmin` bypass
+    # above authorizes that account for everything, and the twins then returned
+    # audience-gated and passphrase-locked rows to a front end holding a
+    # delivery key. `docs/api.md` already promised the opposite for locked
+    # documents ("absent from every discovery surface … keyword and semantic
+    # search").
+    #
+    # What leaked here is metadata — title, slug, excerpt, SEO — since `blocks`
+    # is not a public attribute on any read action. `GET /api/search` was the
+    # one that leaked body text, through its `highlight` calc over
+    # `search_text`; that endpoint is now actorless (#1013).
+    #
+    # Deliberately the same three clauses as
+    # `KilnCMS.CMS.Audiences.public_to_anonymous?/1` (#1006) — that function is
+    # the in-memory statement of this rule; these are the SQL one, and the two
+    # cannot share code. If one changes, change the other.
+    pinned_state =
+      quote do
+        ^ref(:state) == :published and ^ref(:audience) == :public and
+          is_nil(^ref(:access_password_hash))
+      end
 
     # The optional facets shared by keyword + semantic search — category,
     # author, tags (content carrying any of them), custom fields, and (base

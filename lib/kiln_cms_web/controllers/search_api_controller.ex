@@ -5,8 +5,22 @@ defmodule KilnCMSWeb.SearchApiController do
   reranked when enabled), which no single Ash action can express, so it ships
   as a thin controller over `KilnCMS.Search.global/2`.
 
-  Anonymous requests see published content only (the read policies); a bearer
-  token widens visibility like every other headless surface. Sections mirror
+  **Actorless, deliberately** (#1013). This is a delivery surface, and it used
+  to pass `conn.assigns[:current_user]` so "a bearer token widens visibility
+  like every other headless surface". That is a trap here rather than a
+  feature: a key authorizes as the account that minted it, the `OrgAdmin`
+  policy bypass authorizes that account past the audience grant *and* the
+  passphrase check, and this endpoint returns a `highlight` snippet built from
+  `search_text` — so an admin-minted delivery key got a `<mark>`-ed extract of
+  every member-only and passphrase-locked document's body. Editors searching
+  their own drafts have the JSON:API base routes for that
+  (`/api/json/<plural>/search`); this one answers as an anonymous visitor, the
+  way the rendered site's search (`ContentController.search/2`) and `/api/ask`
+  already do.
+
+  Search, not indexing: `read :published` keeps returning gated rows on purpose,
+  because the blog index badges them rather than hiding them. Search is where
+  the body text is, which is why the two differ. Sections mirror
   `global/2` — one per compiled content type, keyed by its plural
   (`pages`/`posts`/… for the core, plus any project-registered types), and
   `entries` plus one per taxonomy resource — `categories`/`tags`/`tag_groups`
@@ -49,7 +63,10 @@ defmodule KilnCMSWeb.SearchApiController do
 
   defp search(conn, query, locale, limit, params) do
     read_opts = [
-      actor: conn.assigns[:current_user],
+      # No `actor:` — see the moduledoc. `authorize?: true` with no actor is
+      # what pins this to the anonymous read policy, and `read_opts` is handed
+      # verbatim to `Search.facets/2` and `Search.suggest/2` below, so the same
+      # rule covers the facet counts and the "did you mean" title.
       authorize?: true,
       # Scope search to the request's org (#336); resolved from the host by the
       # SetTenant plug. Content sections are isolated per site.
