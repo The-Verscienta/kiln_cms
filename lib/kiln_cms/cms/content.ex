@@ -396,7 +396,8 @@ defmodule KilnCMS.CMS.Content do
             # compiled types expose, over the shared entry tier. All are
             # policy/state-filtered, so anonymous callers see published rows only.
             queries do
-              # `hide_inputs [:audiences]` is a SECURITY control, not tidiness:
+              # `hide_inputs [:audiences, :unlocks]` is a SECURITY control, not
+              # tidiness:
               # AshGraphql auto-exposes public action arguments, so without it an
               # anonymous client could send
               # `entryBySlug(audiences: [MEMBER]) { blocks }` and walk straight
@@ -407,11 +408,11 @@ defmodule KilnCMS.CMS.Content do
               # a code interface at all.)
               get :entry_by_slug, :public_by_slug do
                 identity false
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               list :entry_translations, :published_translations do
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               # The published index (newest first), across all dynamic types —
@@ -526,16 +527,21 @@ defmodule KilnCMS.CMS.Content do
               # are state-filtered, so anonymous callers only ever see published rows.
               # `identity false` exposes the action's own slug/locale arguments
               # instead of the default `id` lookup.
-              # `hide_inputs [:audiences]` — see the dynamic tier: the delivery
-              # `audiences` argument must never reach the GraphQL schema, or an
-              # anonymous client could request gated content directly.
+              # `hide_inputs [:audiences, :unlocks]` — see the dynamic tier: both
+              # delivery-widening arguments must stay off the GraphQL schema, or
+              # an anonymous client could ask for gated (or passphrase-locked,
+              # #496) content directly. `unlocks` takes fingerprints that are
+              # never rendered anywhere, so this is defence in depth rather than
+              # a live hole — but it is the same class of hole the `audiences`
+              # control was built for, and a new delivery argument that skips it
+              # is exactly how the next one gets missed.
               get unquote(:"#{type}_by_slug"), :public_by_slug do
                 identity false
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               list unquote(:"#{type}_translations"), :published_translations do
-                hide_inputs [:audiences]
+                hide_inputs [:audiences, :unlocks]
               end
 
               # The published index (newest first).
@@ -689,6 +695,12 @@ defmodule KilnCMS.CMS.Content do
         if(excerpt?, do: [:excerpt], else: []) ++
         if(dynamic?, do: [:type_definition_id], else: [])
 
+    # The locked-page projection (#496): everything the teaser carries, plus the
+    # stored hash the unlock endpoint verifies against and the fingerprint it
+    # mints a grant from. Still WITHOUT `:blocks` — a lock page describes a
+    # document it is refusing to serve, so the body must not be fetched for it.
+    locked_fields = teaser_fields ++ [:access_password_hash, :password_fingerprint]
+
     public_reads =
       if dynamic? do
         quote do
@@ -706,9 +718,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
                        ^ref(:type_definition_id) == ^arg(:type_definition_id)
                    )
@@ -722,9 +748,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug) and
                        ^ref(:type_definition_id) == ^arg(:type_definition_id)
                    )
@@ -747,6 +787,45 @@ defmodule KilnCMS.CMS.Content do
 
             prepare build(select: unquote(teaser_fields))
           end
+
+          # Locate a LOCKED published document (#496) in order to render its
+          # passphrase form, or to verify a submitted passphrase.
+          #
+          # It takes `:audiences` for a reason that is easy to miss: the lock is
+          # ANDed with the audience axis, so this read must only match a document
+          # the reader would otherwise be entitled to. Without that clause a
+          # locked members-only post would prompt an anonymous visitor for a
+          # passphrase that, once entered, still left them at the paywall — and
+          # the delivery funnel tries the lock page before the paywall, so the
+          # paywall would never render at all. Consumed with
+          # `authorize?: false` like the other delivery reads, so this filter is
+          # the sole boundary — note it *requires* a passphrase to be set, so it
+          # can never stand in for `:public_by_slug` and never returns a row an
+          # unlocked visitor was already entitled to read.
+          #
+          # The projection is the teaser's (no `:blocks`) plus the hash: the
+          # whole point of a lock page is to describe a document without
+          # serving it.
+          read :locked_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+            argument :type_definition_id, :uuid, allow_nil?: false
+
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
+            filter expr(
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       not is_nil(^ref(:access_password_hash)) and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
+                       ^ref(:type_definition_id) == ^arg(:type_definition_id)
+                   )
+
+            prepare build(select: unquote(locked_fields))
+          end
         end
       else
         quote do
@@ -761,9 +840,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
                    )
           end
@@ -777,9 +870,23 @@ defmodule KilnCMS.CMS.Content do
               default: [],
               constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
 
+            # Unlock grants (#496) this request carries — fingerprints of
+            # passphrases the caller has already proved, never a raw passphrase
+            # and never client-authored: the controller only ever passes values
+            # it read out of a signed cookie or a signed token.
+            #
+            # Matching the fingerprint HERE rather than in the controller is the
+            # point: rotating the passphrase changes the hash, which changes the
+            # fingerprint, so every outstanding grant stops selecting the row at
+            # the moment of rotation. Default `[]` keeps every existing caller
+            # locked out of locked content, which is the safe direction.
+            argument :unlocks, {:array, :string}, default: []
+
             filter expr(
                      ^ref(:state) == :published and
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       (is_nil(^ref(:access_password_hash)) or
+                          ^ref(:password_fingerprint) in ^arg(:unlocks)) and
                        ^ref(:slug) == ^arg(:slug)
                    )
           end
@@ -799,6 +906,28 @@ defmodule KilnCMS.CMS.Content do
                    )
 
             prepare build(select: unquote(teaser_fields))
+          end
+
+          # Locate a LOCKED published document (#496) — see the dynamic tier
+          # above for why the filter requires a passphrase and the projection
+          # excludes the block tree.
+          read :locked_by_slug do
+            get? true
+            argument :slug, :string, allow_nil?: false
+            argument :locale, :string, allow_nil?: false
+
+            argument :audiences, {:array, :atom},
+              default: [],
+              constraints: [items: [one_of: KilnCMS.CMS.Audiences.all()]]
+
+            filter expr(
+                     ^ref(:state) == :published and
+                       (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
+                       not is_nil(^ref(:access_password_hash)) and
+                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
+                   )
+
+            prepare build(select: unquote(locked_fields))
           end
         end
       end
@@ -1168,7 +1297,19 @@ defmodule KilnCMS.CMS.Content do
         # `org_id` to satisfy the inherited multitenancy. The version inherits
         # `global?: true` too, so tenant-less writes still work.
         attributes_as_attributes([:org_id])
-        ignore_attributes([:inserted_at, :updated_at, :embedding, :embedded_at, :lock_version])
+        # `access_password_hash`/`password_fingerprint` are ignored (#496) so a
+        # bcrypt hash never lands in version history, where it would outlive
+        # every rotation and be readable by anyone who can read versions.
+        ignore_attributes([
+          :inserted_at,
+          :updated_at,
+          :embedding,
+          :embedded_at,
+          :lock_version,
+          :access_password_hash,
+          :password_fingerprint
+        ])
+
         # Background embedding writes aren't editorial changes — keep the
         # `:set_embedding` action out of the version history.
         ignore_actions([
@@ -1420,6 +1561,15 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
+
+          # Shared-passphrase lock (#496). Two arguments rather than one because
+          # blank must mean "unchanged", not "clear" — see
+          # `Changes.ApplyAccessPassword`. `access_password` is sensitive so it
+          # never shows up in a logged changeset.
+          argument :access_password, :string, sensitive?: true
+          argument :remove_access_password, :boolean, default: false
+          change KilnCMS.CMS.Changes.ApplyAccessPassword
+
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -1451,6 +1601,14 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
+
+          # Shared-passphrase lock (#496). Two arguments rather than one because
+          # blank must mean "unchanged", not "clear" — see
+          # `Changes.ApplyAccessPassword`. `access_password` is sensitive so it
+          # never shows up in a logged changeset.
+          argument :access_password, :string, sensitive?: true
+          argument :remove_access_password, :boolean, default: false
+          change KilnCMS.CMS.Changes.ApplyAccessPassword
 
           # Edits to already-published content fire a `<type>.updated` webhook;
           # `only_when: :published` keeps draft edits and autosaves silent.
@@ -1532,6 +1690,15 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
+
+          # Shared-passphrase lock (#496). Two arguments rather than one because
+          # blank must mean "unchanged", not "clear" — see
+          # `Changes.ApplyAccessPassword`. `access_password` is sensitive so it
+          # never shows up in a logged changeset.
+          argument :access_password, :string, sensitive?: true
+          argument :remove_access_password, :boolean, default: false
+          change KilnCMS.CMS.Changes.ApplyAccessPassword
+
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
@@ -1899,6 +2066,31 @@ defmodule KilnCMS.CMS.Content do
           authorize_if KilnCMS.CMS.Checks.InAudience
         end
 
+        # Passphrase-locked content (#496) is invisible to every authorized
+        # read. A SEPARATE policy block, because Ash ANDs policies and ORs the
+        # checks within one: folding this into the block above would have made
+        # the lock an alternative grant, so an `InAudience` reader would have
+        # read a locked document without the passphrase. The issue asks for the
+        # opposite — a lock applies "regardless of audience".
+        #
+        # This one block is what keeps locked content out of the sitemap, the
+        # feeds, `llms.txt`, the calendar, ActivityPub, keyword/semantic search
+        # and related-content. Every one of those reads actorless with
+        # `authorize?: true`, so none of them needs (or gets) its own filter —
+        # and a surface added later inherits the exclusion instead of having to
+        # remember it.
+        #
+        # Delivery is the deliberate exception: `:public_by_slug` and friends run
+        # `authorize?: false`, so their own filters carry the unlock grant.
+        # Editors still see everything through `ReadableContentType` (and admins
+        # through the bypass above); a *restricted* editor reading an
+        # out-of-scope type reads it as a consumer does, which here means they
+        # need the passphrase too.
+        policy action_type(:read) do
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
+          authorize_if expr(is_nil(^ref(:access_password_hash)))
+        end
+
         # Authoring and workflow transitions are reserved for editors (and admins
         # via the bypass above). Every state-machine action is an update action.
         # Granular RBAC (#332): an editor may author only the content types in
@@ -1990,6 +2182,29 @@ defmodule KilnCMS.CMS.Content do
           default :public
           allow_nil? false
           public? true
+        end
+
+        # Shared-passphrase lock for PUBLISHED content (#496). Independent of
+        # `audience` and composed by AND: a locked record inside a gated
+        # audience needs both. `nil` (the default) means unlocked, which is
+        # what every existing row is.
+        #
+        # Never public on any API and never in a delivery projection — the only
+        # reads that select it are the unlock endpoints, which need it to verify
+        # a submitted passphrase. See `KilnCMS.CMS.ContentPassword` for why the
+        # fingerprint exists alongside it.
+        attribute :access_password_hash, :string do
+          public? false
+          sensitive? true
+        end
+
+        # `sha256(access_password_hash)` — what an unlock grant names. Kept as a
+        # stored column rather than computed per request so the delivery read
+        # can match it **in the filter**: that makes passphrase rotation
+        # invalidate every outstanding grant structurally, instead of relying on
+        # a controller check.
+        attribute :password_fingerprint, :string do
+          public? false
         end
 
         # Admin-UI-defined custom fields (decision D4 — schema stays compile-time,

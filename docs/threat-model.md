@@ -541,7 +541,30 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    **Remainder:** the allowlist is deployment-global while forms are org-scoped,
    so on a multi-org instance an origin added for one org may frame every org's
    forms. Tracked in #648.
-2. **Unknown `Host` headers resolve to the default organization — unless
+2. **Passphrase-locked content is weak by construction (#496).** A shared secret
+   typed into a public form is not access control in the sense the rest of this
+   document uses the phrase: there is no per-reader identity, so no audit trail
+   and no way to revoke one reader; the passphrase is chosen by an editor for
+   convenience and is therefore short and guessable far more often than a
+   password is; anyone who has it can pass it on, and you will not know.
+
+   The mitigations are bounding, not eliminating. Guessing is bounded by a tight
+   dedicated rate-limit bucket (`:unlock`, 10/min per IP, separate from `:auth`
+   precisely because there is no account to lock out instead). Grants expire in
+   12 hours and die the moment the passphrase is rotated, because a grant names
+   a fingerprint of the stored hash rather than the document. The stored value
+   is a bcrypt hash, excluded from version history so it does not outlive
+   rotation. The headless unlock endpoint answers identically for a wrong
+   passphrase and for an unlocked document, so it cannot enumerate what is
+   locked. (The built-in site's does not need to: a plain GET there already
+   shows a lock page or the document.)
+
+   **Audiences remain the real access-control axis**, and the two compose by AND:
+   a locked document in a gated audience needs both. Point operators at
+   [api.md](api.md#password-protected-content) before they use this for anything
+   that would matter if it leaked.
+
+3. **Unknown `Host` headers resolve to the default organization — unless
    `TENANT_STRICT_HOST` is set.** #563 added the control; it ships **off**, so
    an existing deployment is exactly as exposed as before until an operator
    turns it on. Do that on any multi-tenant deployment: an unresolvable `Host`

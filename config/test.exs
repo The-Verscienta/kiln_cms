@@ -120,6 +120,11 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     # unrelated file (#724).
     register: {200, :timer.minutes(1)},
     delivery: {1_000_000, :timer.minutes(1)},
+    # Same reason again (#496): the lock suite posts a dozen passphrases from
+    # 127.0.0.1 in one window, and the shipped 10/min would 429 whichever test
+    # happened to run last. `RateLimit.default_limits/0` still pins the real
+    # number, so the threat model stays asserted.
+    unlock: {200, :timer.minutes(1)},
     gql: {1_000_000, :timer.minutes(1)},
     probe: {1_000_000, :timer.minutes(1)}
   }

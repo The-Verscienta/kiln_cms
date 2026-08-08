@@ -114,6 +114,30 @@ defmodule KilnCMS.Search.MeilisearchTest do
       assert doc.title == "Indexed"
     end
 
+    test "a passphrase-locked document is deleted, not indexed (#496)" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(%{title: "Confidential", slug: slug(), blocks: []}, actor: actor)
+        |> then(&CMS.publish_page!(&1, actor: actor))
+
+      drain()
+      assert_received {:meili, :put, "/indexes/test_idx/documents" <> _, [_doc]}
+
+      page
+      |> Ash.reload!(authorize?: false, tenant: page.org_id)
+      |> CMS.update_page!(%{access_password: "shared secret"}, actor: actor)
+
+      drain()
+
+      # Meilisearch has no audience or grant facet and its queries are anonymous,
+      # so anything indexed is readable by everyone. Locking previously-indexed
+      # content therefore has to REMOVE it, not merely stop refreshing it.
+      assert_received {:meili, :delete, "/indexes/test_idx/documents/page_" <> id, _body}
+      assert id == page.id
+      refute_received {:meili, :put, "/indexes/test_idx/documents" <> _, _}
+    end
+
     test "unpublishing deletes the document from the index" do
       actor = admin()
 

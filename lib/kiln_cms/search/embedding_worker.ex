@@ -41,6 +41,13 @@ defmodule KilnCMS.Search.EmbeddingWorker do
 
   defp embed(resource, org_id, id) do
     case Ash.get(resource, id, authorize?: false, tenant: org_id) do
+      # A passphrase-locked document (#496) is not embedded, and any vector it
+      # already had is cleared — locking content that was previously indexed has
+      # to *remove* it, not just stop refreshing it. Checked before the
+      # `search_text` clause so a locked document with text can't fall into it.
+      {:ok, %{access_password_hash: hash} = record} when not is_nil(hash) ->
+        write_embedding(record, org_id, nil)
+
       {:ok, %{search_text: text} = record} when is_binary(text) and text != "" ->
         write_embedding(record, org_id, text)
 
@@ -53,6 +60,8 @@ defmodule KilnCMS.Search.EmbeddingWorker do
     end
   end
 
+  defp write_embedding(record, _org_id, nil), do: clear_embedding(record)
+
   defp write_embedding(record, org_id, text) do
     with {:ok, vector} <- Search.embed_document(text),
          {:ok, _record} <-
@@ -63,6 +72,21 @@ defmodule KilnCMS.Search.EmbeddingWorker do
            )
            |> Ash.update() do
       :ok
+    end
+  end
+
+  defp clear_embedding(%{embedding: nil}), do: :ok
+
+  defp clear_embedding(record) do
+    record
+    |> Ash.Changeset.for_update(:set_embedding, %{embedding: nil},
+      authorize?: false,
+      tenant: record.org_id
+    )
+    |> Ash.update()
+    |> case do
+      {:ok, _record} -> :ok
+      _error -> :ok
     end
   end
 end

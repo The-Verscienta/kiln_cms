@@ -288,6 +288,59 @@ curl -s 'http://localhost:4000/api/json/posts?filter[state]=draft' \
   -H 'authorization: Bearer <token>'
 ```
 
+## Password-protected content
+
+An editor can put a **shared passphrase** on a published document (#496) — the
+WordPress "password protected post" analogue, for a client proposal or an
+early-access page. It is deliberately **weak** access control: one secret, no
+per-reader identity, no revocation but rotation, no audit trail. Use
+**audiences** ([memberships.md](memberships.md)) when you need real access
+control; this exists for convenience.
+
+A locked document answers **401** instead of 200:
+
+```jsonc
+{"errors": [{"status": "401", "code": "password_required",
+             "detail": "This content is protected. POST the passphrase to …"}]}
+```
+
+Exchange the passphrase for a grant token, then present the token on reads:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:4000/api/content/page/proposal/unlock \
+  -H 'content-type: application/json' \
+  -d '{"passphrase": "shared secret"}' | jq -r .token)
+
+curl -s http://localhost:4000/api/content/page/proposal \
+  -H "x-kiln-unlock: $TOKEN"
+```
+
+`?unlock=<token>` works too, for callers that cannot set headers (a static build
+step, for instance).
+
+Notes that matter in practice:
+
+- **The token expires in 12 hours and dies on rotation.** It names a fingerprint
+  of the passphrase, not the document — so the moment an editor changes the
+  passphrase, every outstanding token stops working. `expires_in` comes back
+  with the token.
+- **A token is document-scoped.** Two documents sharing a passphrase still have
+  different fingerprints, so a token for one will not read the other.
+- **Unlocked responses are `private, no-store` and carry no `ETag`.** The body
+  is a function of your grant rather than of the URL, so it must not be
+  shared-cached. Budget for that: a locked document is not a CDN-friendly one.
+- **A wrong passphrase and an unlocked document answer identically** (`401`
+  `invalid_passphrase` from the unlock endpoint), so it cannot be used to
+  enumerate which documents are locked.
+- **Locked documents are absent from every discovery surface** — the sitemap,
+  feeds, `llms.txt`, keyword and semantic search, related content, and any
+  configured Meilisearch index. If a document is locked, the only way to reach
+  it is to know its URL *and* its passphrase.
+
+The unlock endpoint has its own tight rate-limit bucket (see
+[Rate limits](#rate-limits)) — it is the guessing surface for a shared secret,
+and there is no account to lock out instead.
+
 ## Locale discovery
 
 `GET /api/locales` returns the site's configured content locales and the
@@ -550,6 +603,7 @@ Over the limit returns **429** with a `retry-after` header.
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 20 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
+| `unlock` | `POST /api/content/:type/:slug/unlock` (and the built-in site's lock form) | 10 requests / minute |
 
 ## Error responses
 

@@ -54,13 +54,17 @@ defmodule KilnCMS.Firing.Delivery do
 
   Returns `{:ok, record}` (DB-free on a cache hit), `:not_found`, or
   `:unavailable` when the database is down and the record isn't cached.
+
+  `unlocks` are passphrase grants (#496) the caller has proved. A request that
+  carries any of them skips the cache outright: the cached shape is what an
+  anonymous caller may read, and one keyed only on `{org, type, slug, locale}`
+  cannot also hold a locked body without eventually serving it to someone who
+  proved nothing.
   """
-  @spec published(Ash.UUID.t(), atom() | String.t(), String.t(), String.t()) ::
+  @spec published(Ash.UUID.t(), atom() | String.t(), String.t(), String.t(), [String.t()]) ::
           {:ok, struct()} | :not_found | :unavailable
-  def published(org_id, type, slug, locale) do
-    KilnCMS.Cache.fetch_published(org_id, to_string(type), slug, locale, fn ->
-      ContentTypes.get_published_by_slug(type, slug, locale, authorize?: false, tenant: org_id)
-    end)
+  def published(org_id, type, slug, locale, unlocks \\ []) do
+    resolve(org_id, type, slug, locale, unlocks)
     |> case do
       nil -> :not_found
       record -> {:ok, record}
@@ -86,6 +90,47 @@ defmodule KilnCMS.Firing.Delivery do
 
           :not_found
       end
+  end
+
+  defp resolve(org_id, type, slug, locale, []) do
+    KilnCMS.Cache.fetch_published(org_id, to_string(type), slug, locale, fn ->
+      read_published(org_id, type, slug, locale, [])
+    end)
+  end
+
+  defp resolve(org_id, type, slug, locale, unlocks),
+    do: read_published(org_id, type, slug, locale, unlocks)
+
+  defp read_published(org_id, type, slug, locale, unlocks) do
+    ContentTypes.get_published_by_slug(type, slug, locale,
+      unlocks: unlocks,
+      authorize?: false,
+      tenant: org_id
+    )
+  end
+
+  @doc """
+  Resolve a document that exists, is published, and is passphrase-locked (#496)
+  — the lookup behind a `401 password_required`.
+
+  Never cached and never carrying a block tree: the projection is the lock
+  read's, so this can describe a document without being able to serve it. The
+  caller uses it only to decide between "no such content" and "prove you know
+  the passphrase".
+  """
+  @spec locked(Ash.UUID.t(), atom() | String.t(), String.t(), String.t()) ::
+          {:ok, struct()} | :not_found
+  def locked(org_id, type, slug, locale) do
+    case ContentTypes.get_locked_by_slug(type, slug, locale,
+           not_found_error?: false,
+           authorize?: false,
+           tenant: org_id
+         ) do
+      nil -> :not_found
+      record -> {:ok, record}
+    end
+  rescue
+    _ -> :not_found
   end
 
   @doc """

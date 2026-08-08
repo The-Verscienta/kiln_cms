@@ -170,6 +170,9 @@ defmodule KilnCMS.CMS do
       define :list_page_translations, action: :published_translations, args: [:slug]
       # Paywall projection (#337 Phase 2) — never carries the block tree.
       define :get_page_teaser_by_slug, action: :teaser_by_slug, args: [:slug, :locale]
+      # Lock projection (#496) — the passphrase form's counterpart; carries the
+      # stored hash to verify against, never the block tree.
+      define :get_locked_page_by_slug, action: :locked_by_slug, args: [:slug, :locale]
       define :list_published_pages, action: :published
       define :search_pages, action: :search, args: [:query]
       define :semantic_search_pages, action: :search_semantic, args: [:query]
@@ -204,6 +207,9 @@ defmodule KilnCMS.CMS do
       define :list_post_translations, action: :published_translations, args: [:slug]
       # Paywall projection (#337 Phase 2) — never carries the block tree.
       define :get_post_teaser_by_slug, action: :teaser_by_slug, args: [:slug, :locale]
+      # Lock projection (#496) — the passphrase form's counterpart; carries the
+      # stored hash to verify against, never the block tree.
+      define :get_locked_post_by_slug, action: :locked_by_slug, args: [:slug, :locale]
       define :list_published_posts, action: :published
       define :search_posts, action: :search, args: [:query]
       define :semantic_search_posts, action: :search_semantic, args: [:query]
@@ -250,6 +256,11 @@ defmodule KilnCMS.CMS do
       # Paywall projection (#337 Phase 2) — never carries the block tree.
       define :get_entry_teaser_by_slug,
         action: :teaser_by_slug,
+        args: [:slug, :locale, :type_definition_id]
+
+      # Lock projection (#496) — see the compiled tiers.
+      define :get_locked_entry_by_slug,
+        action: :locked_by_slug,
         args: [:slug, :locale, :type_definition_id]
 
       define :list_published_entries, action: :published
