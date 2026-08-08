@@ -184,5 +184,5 @@ Phase-1 slice:
   intelligence reactions, all of which deliver by email and nothing else.
 
   Rules written before this validation existed are not re-checked, and
-  `AshAdmin` writes the attribute directly, so the executor keeps its own
+  AshAdmin writes the attribute directly, so the executor keeps its own
   guards. Per-action structured form fields are still a UI refinement.
