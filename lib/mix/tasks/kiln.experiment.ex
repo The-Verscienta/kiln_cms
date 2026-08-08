@@ -8,6 +8,8 @@ defmodule Mix.Tasks.Kiln.Experiment do
       mix kiln.experiment create  NAME --type post --document UUID --form FORM_UUID
       mix kiln.experiment create  NAME --type post --document UUID \\
             --goal content_view --goal-type page --goal-document UUID
+      mix kiln.experiment create  NAME --type post --document UUID \\
+            --goal funnel_completion --goal-funnel UUID_OR_SLUG
       mix kiln.experiment variant NAME --variant "Control" --control
       mix kiln.experiment variant NAME --variant "Punchier" --patch '{"fields":{"title":"..."}}'
       mix kiln.experiment start   NAME
@@ -40,6 +42,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
     form: :string,
     goal_type: :string,
     goal_document: :string,
+    goal_funnel: :string,
     variant: :string,
     patch: :string,
     weight: :integer,
@@ -114,7 +117,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
       Experiments.create_experiment!(
         Map.merge(
           %{name: name, content_type: type, document_id: document},
-          goal_attrs(opts)
+          goal_attrs(opts, org_id)
         ),
         authorize?: false,
         tenant: org_id
@@ -207,6 +210,10 @@ defmodule Mix.Tasks.Kiln.Experiment do
   defp rate(impressions, conversions),
     do: "  (#{Float.round(conversions / impressions * 100, 1)}%)"
 
+  defp goal_line(%{goal: :funnel_completion} = experiment) do
+    "funnel_completion → funnel #{experiment.goal_funnel_id}"
+  end
+
   defp goal_line(%{goal: :content_view} = experiment) do
     "content_view → #{experiment.goal_content_type} #{experiment.goal_document_id}"
   end
@@ -216,24 +223,90 @@ defmodule Mix.Tasks.Kiln.Experiment do
   defp goal(nil), do: :form_submission
   defp goal("form_submission"), do: :form_submission
   defp goal("content_view"), do: :content_view
+  defp goal("funnel_completion"), do: :funnel_completion
 
   defp goal(other),
-    do: Mix.raise("Unknown goal #{inspect(other)} (form_submission, content_view)")
+    do:
+      Mix.raise(
+        "Unknown goal #{inspect(other)} " <>
+          "(form_submission, content_view, funnel_completion)"
+      )
 
   # An experiment whose goal cannot fire counts nothing, so each goal's
   # requirement is refused here rather than left to be discovered from an empty
   # results column weeks later. `:start` checks the same things again — this is
   # the readable error, that is the real gate.
-  defp goal_attrs(opts) do
+  defp goal_attrs(opts, org_id) do
     case goal(opts[:goal]) do
-      :content_view -> %{goal: :content_view} |> Map.merge(content_view_target(opts))
-      :form_submission -> %{goal: :form_submission, goal_form_id: goal_form_id(opts)}
+      :content_view ->
+        %{goal: :content_view} |> Map.merge(content_view_target(opts))
+
+      :funnel_completion ->
+        refuse_unused(opts, [:form, :goal_type, :goal_document], "a funnel_completion goal")
+        %{goal: :funnel_completion, goal_funnel_id: goal_funnel_id(opts, org_id)}
+
+      :form_submission ->
+        %{goal: :form_submission, goal_form_id: goal_form_id(opts)}
+    end
+  end
+
+  # Refused rather than dropped, for the reason `content_view_target/1` refuses
+  # `--form`: an operator adapting an existing command line would otherwise be
+  # told nothing while the flag went on the floor.
+  defp refuse_unused(opts, keys, goal_label) do
+    case Enum.filter(keys, &Keyword.has_key?(opts, &1)) do
+      [] ->
+        :ok
+
+      given ->
+        flags = Enum.map_join(given, ", ", &"--#{String.replace(to_string(&1), "_", "-")}")
+        Mix.raise("#{flags} does not apply to #{goal_label}.")
     end
   end
 
   defp goal_form_id(opts) do
     opts[:form] ||
       Mix.raise("--form FORM_UUID is required: it is the form whose submission counts")
+  end
+
+  # Accepts a uuid or a slug, because a slug is what an operator has in front of
+  # them in `/editor/funnels` and a uuid is what the experiment stores.
+  defp goal_funnel_id(opts, org_id) do
+    given =
+      opts[:goal_funnel] ||
+        Mix.raise("--goal-funnel UUID_OR_SLUG is required: the funnel whose completion converts")
+
+    require_sticky!()
+
+    case Ecto.UUID.cast(given) do
+      {:ok, id} -> id
+      :error -> funnel_id_from_slug(given, org_id)
+    end
+  end
+
+  # `tenant:` is not optional here: `Funnel` is `strategy :attribute` and, under
+  # the strict-tenancy build that production uses, a tenant-less read raises.
+  # Without it the advertised slug path never worked at all — and on a
+  # non-strict build it worked worse, listing every org's funnels so a slug
+  # collision handed back another site's id.
+  defp funnel_id_from_slug(slug, org_id) do
+    KilnCMS.Analytics.list_funnels!(authorize?: false, tenant: org_id)
+    |> Enum.find(&(&1.slug == slug))
+    |> case do
+      nil -> Mix.raise("No funnel with id or slug #{inspect(slug)} on this site.")
+      funnel -> funnel.id
+    end
+  end
+
+  defp require_sticky! do
+    unless KilnCMS.Experiments.Sticky.enabled?() do
+      Mix.raise(
+        "A later-page goal needs sticky assignment, which is off. " <>
+          "Set `config :kiln_cms, KilnCMS.Experiments, sticky: true` — without it " <>
+          "the site cannot tell a visitor who saw the experiment from one who did " <>
+          "not, so nothing would ever convert. See docs/data-flows.md."
+      )
+    end
   end
 
   defp content_view_target(opts) do
@@ -248,14 +321,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
       )
     end
 
-    unless KilnCMS.Experiments.Sticky.enabled?() do
-      Mix.raise(
-        "The content_view goal needs sticky assignment, which is off. " <>
-          "Set `config :kiln_cms, KilnCMS.Experiments, sticky: true` — without it " <>
-          "the site cannot tell a visitor who saw the experiment from one who did " <>
-          "not, so nothing would ever convert. See docs/data-flows.md."
-      )
-    end
+    require_sticky!()
 
     %{
       goal_content_type:

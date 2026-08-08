@@ -259,6 +259,24 @@ defmodule KilnCMS.Cache do
   @spec experiments_key(Ash.UUID.t()) :: String.t()
   def experiments_key(org_id), do: "experiments:running:#{org_id}"
 
+  @doc """
+  Cache key for a site's funnel targets — each funnel's final step (#1010).
+
+  Separate from `experiments_key/1` because the two are invalidated by different
+  writes: a funnel edit must move a `:funnel_completion` goal without touching
+  the experiment, which is the whole point of naming a funnel rather than a
+  document.
+  """
+  @spec funnel_targets_key(Ash.UUID.t()) :: String.t()
+  def funnel_targets_key(org_id), do: "experiments:funnel_targets:#{org_id}"
+
+  @doc "Drop a site's cached funnel targets. Called from every funnel/step write."
+  @spec bust_funnel_targets(Ash.UUID.t()) :: :ok
+  def bust_funnel_targets(org_id) do
+    if enabled?(), do: Cachex.del(@cache, funnel_targets_key(org_id))
+    :ok
+  end
+
   @doc "Cache key for a site's configured social accounts (#497)."
   @spec social_accounts_key(Ash.UUID.t()) :: String.t()
   def social_accounts_key(org_id), do: "social:accounts:#{org_id}"
@@ -322,16 +340,28 @@ defmodule KilnCMS.Cache do
   like every other aggregate key here.
 
   The calendar routes (#480) narrow `type` further — `"gigs/tag/jazz"` for a
-  tag-scoped calendar — which `bust_feeds/2` deliberately does not enumerate:
-  it drops the keys anyone is actually subscribed to and lets the TTL reclaim
-  the rest.
+  tag-scoped calendar — and the segment feeds (#720) do the same:
+  `"post/category/news"`, `"post/tag/jazz"`, `"post/locale/fr"`.
+
+  `bust_feeds/3` does not enumerate the **taxonomy** ones, and that is not an
+  omission: computing which of them a record belongs to needs that record's tags
+  and category, and the bust runs in an `after_action` — a relationship load
+  there is a database read inside the publish transaction, which can abort it and
+  lose the publish outright (#660). So it drops the keys anyone is actually
+  subscribed to, immediately, and lets the five-minute TTL reclaim the segments.
+
+  The **locale** is not in that bargain, and treating it as though it were was a
+  bug: `record.locale` is a plain attribute already on the struct the bust
+  receives, so it costs no read, no query and no transaction risk. Without it a
+  French publish never invalidated `/fr/feed.xml` — leaving the one reader the
+  locale feeds exist for as the only one whose feed went stale.
   """
   @spec feed_key(Ash.UUID.t(), String.t() | nil, :atom | :json | :ics) :: String.t()
   def feed_key(org_id, type, format), do: "feed:#{org_id}:#{type || "all"}:#{format}"
 
   @doc """
-  Drop the feeds a write to `type` affects: that type's own, and the site-wide
-  ones it appears in.
+  Drop the feeds a write to `type` affects: that type's own, the site-wide ones
+  it appears in, and — when `locale` is given — the same two for that locale.
 
   Takes the type rather than enumerating every syndicated type, for the reason
   `bust/3` does: the caller knows which record changed, and a dynamic type's
@@ -339,11 +369,15 @@ defmodule KilnCMS.Cache do
   syndication leaves its own stale key behind, which the TTL reclaims — the
   site-wide feeds, which are the ones anyone is actually subscribed to, drop
   immediately.
+
+  `locale` is the written record's own, and defaults to `nil` for a caller that
+  has no locale axis (the calendars). Passing the default locale is harmless: its
+  feeds are keyed without a locale segment, so the two spellings collapse.
   """
-  @spec bust_feeds(Ash.UUID.t(), String.t() | atom() | nil) :: :ok
-  def bust_feeds(org_id, type) do
+  @spec bust_feeds(Ash.UUID.t(), String.t() | atom() | nil, String.t() | nil) :: :ok
+  def bust_feeds(org_id, type, locale \\ nil) do
     if enabled?() do
-      for name <- Enum.uniq([nil, type && to_string(type)]),
+      for name <- feed_names(type, locale),
           # `:ics` rides along (#480): a published event must appear in a
           # subscribed calendar on the same hook that refreshes the feeds.
           format <- [:atom, :json, :ics] do
@@ -353,6 +387,30 @@ defmodule KilnCMS.Cache do
 
     :ok
   end
+
+  # `nil` (site-wide) and the type, each in the default locale and — when the
+  # record was written in another — that locale too. The segment mirrors
+  # `KilnCMSWeb.FeedController.cache_scope/2` exactly; the two have to agree or
+  # this drops keys nothing reads.
+  defp feed_names(type, locale) do
+    scopes = Enum.uniq([nil, type && to_string(type)])
+
+    scopes ++ Enum.reject(Enum.map(scopes, &localized(&1, locale)), &is_nil/1)
+  end
+
+  # `nil` for the default locale, or for a caller with no locale axis at all —
+  # those feeds are keyed without a locale segment, so the two spellings are one
+  # key and the `Enum.uniq` above collapses them.
+  defp localized(scope, locale) when is_binary(locale) do
+    if locale == KilnCMS.I18n.default_locale() do
+      nil
+    else
+      segment = "locale/" <> URI.encode(locale, &URI.char_unreserved?/1)
+      if scope, do: "#{scope}/#{segment}", else: segment
+    end
+  end
+
+  defp localized(_scope, _locale), do: nil
 
   @doc """
   Drop all cached published content. The blunt fallback for writes whose blast

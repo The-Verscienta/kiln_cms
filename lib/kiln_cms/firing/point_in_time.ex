@@ -301,12 +301,23 @@ defmodule KilnCMS.Firing.PointInTime do
 
   # Reconstruct the full attribute state at `up_to` by merging every version's
   # `changes` in chronological order (`:changes_only` tracking).
+  #
+  # `KilnCMS.CMS.VersionSnapshot` owns that fold, and this used to carry its own
+  # copy — sorted on `version_inserted_at` alone, with no tiebreak (#692). Two
+  # versions written in one transaction share an instant, so their merge order
+  # was whatever Postgres happened to return, and this endpoint could reconstruct
+  # a *different* document than restore and version-compare did for the same
+  # moment. On the one API whose whole promise is "what did this say at T", two
+  # answers is the same as none.
+  #
+  # The file already knew timestamps aren't unique: `last_transition/4` tiebreaks
+  # on `id`, and `title_slug_at/3`'s raw SQL orders `version_inserted_at ASC, id
+  # ASC`. Only the Elixir fold missed it.
   defp replay(version_module, id, up_to, org_id) do
-    version_module
-    |> Ash.Query.filter(version_source_id == ^id and version_inserted_at <= ^up_to)
-    |> Ash.Query.sort(version_inserted_at: :asc)
-    |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Enum.reduce(%{}, fn version, acc -> Map.merge(acc, version.changes) end)
+    KilnCMS.CMS.VersionSnapshot.at_time(version_module, id, up_to,
+      authorize?: false,
+      tenant: org_id
+    )
   end
 
   # A fireable document struct of `resource` from the replayed (string-keyed)

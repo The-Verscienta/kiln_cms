@@ -46,7 +46,12 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
     # one is a missed notification rather than a slow crawl.
     Cache.bust_sitemap(org_id)
     Cache.bust_llms(org_id)
-    Cache.bust_feeds(org_id, type)
+    # The record's own locale rides along (#720): a French publish has to drop
+    # `/fr/feed.xml` as well as the default-locale ones. `locale` is a plain
+    # attribute already on the struct, so this costs no read — which is exactly
+    # why it does not fall under the "cannot load relationships in an
+    # after_action" rule that keeps the taxonomy segments out.
+    Cache.bust_feeds(org_id, type, Map.get(record, :locale))
   end
 
   # The cache key's type segment. Compiled types use their type atom; entries

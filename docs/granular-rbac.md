@@ -83,7 +83,15 @@ scope `editable_types` alongside it.
 `field_grants` (user + membership, same membership-wins resolution) maps a
 content-type name to the attribute names an editor may **change** on existing
 documents of that type — `%{"post" => ["title", "blocks"]}`. No entry for a
-type means no per-field restriction. Enforced by one generic change,
+type means no per-field restriction.
+
+An **admin-defined (dynamic) type is named by its own name**, not by `entry` —
+`%{"recipe" => ["title"]}` binds recipes and nothing else (#927). This differs
+from `editable_types`, which still groups every dynamic type under `entry`; the
+two axes are resolved by different code, and only the field axis is per-type
+today. Note the failure mode this fixed: a key that resolves to nothing reads as
+*no restriction*, so a grant naming a type the resolver could not match failed
+**open** rather than closed. Enforced by one generic change,
 `KilnCMS.CMS.Changes.EnforceFieldGrants`, on every update action in the
 Content macro (not Ash `field_policies`, which gate reads — write-gating
 inspects the changeset).
@@ -158,5 +166,6 @@ touching their other sites.
 
 ## Later phases
 
-- **Per-dynamic-type** scoping (today all dynamic types share the `entry` key).
+- **Per-dynamic-type `editable_types`** (that axis still groups every dynamic
+  type under the `entry` key; `field_grants` became per-type in #927).
 - Strict tenancy (`global?: false`) — #419 PRs 2–3.

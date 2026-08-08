@@ -433,6 +433,38 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, assign(socket, :cursors, cursors)}
   end
 
+  # Another editor of this item persisted a write (#694).
+  #
+  # In a collaborative session only the elected persister autosaves — everyone
+  # else stands down, so their `assign_record/2` never runs again and their
+  # `@record` and `@versions` stay at whatever they were on mount. The version
+  # list silently stopped growing, and #467 turned that into a confidently wrong
+  # statement: pick the creation version against **Current draft** and the modal
+  # says "These two versions are identical" while the live document says
+  # otherwise. That is exactly the wrong-document diff the compare path refuses
+  # to show everywhere else.
+  #
+  # Only the read-only views derived from the SAVED record are refreshed —
+  # `@record`, the title, and the version list (which drags an open comparison
+  # along with it through `refresh_compare/2`). Not the form, the block children
+  # or the rich-text bodies: those are this session's own in-flight edits, and in
+  # a collab session the text among them lives in the shared Y.Doc rather than in
+  # the record that was just written. Rebuilding the form here would throw away
+  # whatever the person was typing, which is a worse bug than the one being
+  # fixed.
+  def handle_info({:record_saved, from}, socket) do
+    if from == self() do
+      # Our own echo; `assign_record/2` already ran. Keyed on the PID, not the
+      # actor id: one person with the document open in two tabs is two sessions
+      # with two stale views, and an actor-id guard silently excluded exactly
+      # that case — the reported symptom reproduces for one person in two
+      # windows.
+      {:noreply, socket}
+    else
+      {:noreply, refresh_saved_record(socket)}
+    end
+  end
+
   # Debounced draft autosave fired by the timer scheduled in `validate`.
   def handle_info(:autosave, socket), do: {:noreply, perform_autosave(socket)}
 
@@ -2441,6 +2473,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:noreply,
          socket
          |> assign_record(reloaded)
+         |> broadcast_saved()
          |> assign(:save_state, :saved)
          |> put_flash(:info, gettext("Saved."))}
 
@@ -2507,10 +2540,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
     case KilnCMS.CMS.Duplication.duplicate(kind, record, actor: actor, tenant: record.org_id) do
-      {:ok, copy} ->
+      {:ok, copy, []} ->
         {:noreply,
          socket
          |> put_flash(:info, gettext("Duplicated as a new draft."))
+         |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
+
+      # Some of the source did not travel — a field grant dropped attributes, or
+      # the block policy reset values this editor could not have set. Saying so
+      # is the difference between "duplication is broken" and "your role cannot
+      # copy those fields" (#929).
+      {:ok, copy, withheld} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           gettext(
+             "Duplicated as a new draft. Not copied, because your role cannot set them: %{fields}.",
+             fields: Enum.join(withheld, ", ")
+           )
+         )
          |> push_navigate(to: ~p"/editor/content/#{kind}/#{copy.id}")}
 
       {:error, _reason} ->
@@ -2566,6 +2615,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:noreply,
          socket
          |> assign_record(record)
+         |> broadcast_saved()
          |> reset_editors()
          |> assign(:save_state, :saved)
          # Restore can be fired from inside the compare modal; the diff it was
@@ -2834,6 +2884,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket
         |> cancel_autosave_timer()
         |> assign_record(record)
+        |> broadcast_saved()
         |> assign(:save_state, :saved)
         |> put_flash(:info, gettext("Updated to %{state}.", state: state_label(record.state)))
 
@@ -2948,7 +2999,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         reloaded =
           fetch!(socket.assigns.kind, record.id, socket.assigns.actor, socket.assigns.current_org)
 
-        socket |> assign_record(reloaded) |> assign(:save_state, :saved)
+        socket |> assign_record(reloaded) |> broadcast_saved() |> assign(:save_state, :saved)
 
       {:error, form} ->
         handle_autosave_error(socket, form)
@@ -3182,6 +3233,90 @@ defmodule KilnCMSWeb.ContentEditorLive do
        }}
     )
   end
+
+  # Tell the other editors of this item that the record on disk moved (#694).
+  # Reuses the Presence editing topic every session already subscribes to, so
+  # this costs no new subscription and no new fan-out.
+  #
+  # Carries the writing session's PID and nothing else. The payload is
+  # deliberately not the record: a broadcast body would have to be authorized per
+  # recipient, and each session re-reads through `fetch!/4` with its OWN actor
+  # and tenant anyway — so a session that may no longer read the record simply
+  # keeps what it has.
+  defp broadcast_saved(socket) do
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      Presence.topic(socket.assigns.kind, socket.assigns.record.id),
+      {:record_saved, self()}
+    )
+
+    socket
+  end
+
+  # Re-read the persisted record and everything derived from it. See the
+  # `{:record_saved, _}` handler for what is deliberately left alone.
+  #
+  # ## `@record` is the optimistic lock's basis, so it only moves when it is free
+  #
+  # `:autosave` carries `change optimistic_lock(:lock_version)`, and
+  # `do_autosave/1` builds its changeset from `socket.assigns.record`. Advancing
+  # that assign while `@form` still holds this session's older data hands the
+  # lock a version it will accept and then writes the stale form over the peer's
+  # save — silently, with no conflict flash. That is worse than the staleness
+  # this function exists to fix, and it bites hardest with the collaboration
+  # prototype OFF (the default), where two editors really are two independent
+  # writers.
+  #
+  # So the version list — which is read-only, and drags an open comparison with
+  # it — refreshes unconditionally, and `@record` moves only for a session that
+  # has nothing of its own in flight. A session that does keeps its old record,
+  # so its next save still hits `StaleRecord` and still surfaces the conflict.
+  defp refresh_saved_record(socket) do
+    reloaded =
+      fetch!(
+        socket.assigns.kind,
+        socket.assigns.record.id,
+        socket.assigns.actor,
+        socket.assigns.current_org
+      )
+
+    # `@record` first, `load_versions/1` second — the latter recomputes an open
+    # comparison, and the "Current draft" side of that comparison is built from
+    # `@record`. Reversed, the modal recomputes against the record it is about to
+    # replace and goes on reporting the state it just stopped holding.
+    socket
+    |> adopt_saved(reloaded)
+    |> load_versions()
+  rescue
+    # The record went away, or this session may no longer read it. Keeping the
+    # last known state is the same thing every other read failure here does, and
+    # far better than crashing an editor over someone else's save.
+    _error -> socket
+  catch
+    # A pool or GenServer timeout inside Ash arrives as an exit, which `rescue`
+    # does not catch — and a bystander's editor must not die because of the
+    # timing of someone else's save.
+    :exit, _reason -> socket
+  end
+
+  # Adopt the persisted record, unless this session has something of its own that
+  # adopting it would put at risk: a pending autosave (`:saving`), an edit that
+  # failed validation (`:error`), an un-persisted change (`:unsaved`), or edits
+  # suppressed because another editor is the elected persister (`:synced`).
+  #
+  # A session holding any of those keeps its old record deliberately, so its next
+  # save still fails the optimistic lock and still surfaces the conflict. Its
+  # version panel refreshes either way — that is read-only and cannot lose
+  # anything.
+  defp adopt_saved(%{assigns: %{save_state: :saved}} = socket, record) do
+    socket
+    |> assign(:record, record)
+    |> assign(:page_title, record.title)
+    |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    |> assign(:slug_customized?, slug_customized?(socket))
+  end
+
+  defp adopt_saved(socket, _record), do: socket
 
   defp put_color(%{} = cursor), do: Map.put(cursor, :color, color_for(cursor.id))
 
@@ -5690,112 +5825,89 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:multi?, match?({:gallery, _id}, assigns.index))
 
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_picker" phx-key="Escape">
-      <%!-- A light scrim dims the editor without hiding it — the drawer is to the
-            side, not over everything — and clicking it closes the drawer. --%>
-      <div class="absolute inset-0 bg-black/20" phx-click="close_picker" aria-hidden="true"></div>
-      <div
-        id="image-picker-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="image-picker-title"
-        tabindex="-1"
-        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
-          <h2 id="image-picker-title" class="text-lg font-medium">{picker_title(@index)}</h2>
+    <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
+      <:title>{picker_title(@index)}</:title>
+
+      <div class="flex-1 overflow-y-auto p-4">
+        <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename, alt or caption")}
+            aria-label={gettext("Search by filename, alt text or caption")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
+
+        <p :if={@media == []} class="text-sm text-base-content/60">
+          {gettext("No media yet — upload some in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
+        </p>
+        <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
+          {gettext("No media matches “%{query}”.", query: @query)}
+        </p>
+
+        <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <button
+            :for={item <- @visible}
             type="button"
-            phx-click="close_picker"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
+            phx-click={if @multi?, do: "toggle_pick", else: "pick_image"}
+            phx-value-index={pick_index(@index)}
+            phx-value-bid={pick_block_id(@index)}
+            phx-value-id={item.id}
+            phx-value-url={item.url}
+            title={item.filename}
+            aria-pressed={@multi? && to_string(picked_position(@picked, item.id) != nil)}
+            class={[
+              "group relative overflow-hidden rounded border hover:ring-2 hover:ring-primary",
+              if(picked_position(@picked, item.id),
+                do: "border-primary ring-2 ring-primary",
+                else: "border-base-content/10"
+              )
+            ]}
           >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-y-auto p-4">
-          <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
-            <input
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by filename, alt or caption")}
-              aria-label={gettext("Search by filename, alt text or caption")}
-              phx-debounce="150"
-              autocomplete="off"
-              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+            <img
+              src={item.url}
+              alt={item.alt || item.filename}
+              loading="lazy"
+              class="aspect-square w-full object-cover"
             />
-          </form>
-
-          <p :if={@media == []} class="text-sm text-base-content/60">
-            {gettext("No media yet — upload some in the")} <.link
-              navigate={~p"/media"}
-              class="underline"
-            >{gettext("media library")}</.link>.
-          </p>
-          <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
-            {gettext("No media matches “%{query}”.", query: @query)}
-          </p>
-
-          <div :if={@visible != []} class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <button
-              :for={item <- @visible}
-              type="button"
-              phx-click={if @multi?, do: "toggle_pick", else: "pick_image"}
-              phx-value-index={pick_index(@index)}
-              phx-value-bid={pick_block_id(@index)}
-              phx-value-id={item.id}
-              phx-value-url={item.url}
-              title={item.filename}
-              aria-pressed={@multi? && to_string(picked_position(@picked, item.id) != nil)}
-              class={[
-                "group relative overflow-hidden rounded border hover:ring-2 hover:ring-primary",
-                if(picked_position(@picked, item.id),
-                  do: "border-primary ring-2 ring-primary",
-                  else: "border-base-content/10"
-                )
-              ]}
-            >
-              <img
-                src={item.url}
-                alt={item.alt || item.filename}
-                loading="lazy"
-                class="aspect-square w-full object-cover"
-              />
-              <%!-- The number, not a tick: in a multi-select whose order becomes
+            <%!-- The number, not a tick: in a multi-select whose order becomes
                     the gallery order, "which one did I click third" is the thing
                     an editor actually needs to see. --%>
-              <span
-                :if={position = picked_position(@picked, item.id)}
-                class="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-content"
-              >
-                {position}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <div
-          :if={@multi?}
-          class="flex items-center justify-between gap-3 border-t border-base-content/10 p-4"
-        >
-          <p class="text-sm text-base-content/70">
-            {ngettext("%{count} image selected", "%{count} images selected", length(@picked))}
-          </p>
-          <button
-            type="button"
-            phx-click="add_picked_images"
-            phx-value-bid={pick_block_id(@index)}
-            disabled={@picked == []}
-            class="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-content disabled:opacity-40"
-          >
-            {gettext("Add to gallery")}
+            <span
+              :if={position = picked_position(@picked, item.id)}
+              class="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-content"
+            >
+              {position}
+            </span>
           </button>
         </div>
       </div>
-    </div>
+
+      <div
+        :if={@multi?}
+        class="flex items-center justify-between gap-3 border-t border-base-content/10 p-4"
+      >
+        <p class="text-sm text-base-content/70">
+          {ngettext("%{count} image selected", "%{count} images selected", length(@picked))}
+        </p>
+        <button
+          type="button"
+          phx-click="add_picked_images"
+          phx-value-bid={pick_block_id(@index)}
+          disabled={@picked == []}
+          class="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-content disabled:opacity-40"
+        >
+          {gettext("Add to gallery")}
+        </button>
+      </div>
+    </.modal>
     """
   end
 
@@ -5814,86 +5926,60 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assigns = assign(assigns, :visible, assigns.results || assigns.files)
 
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_file_picker" phx-key="Escape">
-      <div
-        class="absolute inset-0 bg-black/20"
-        phx-click="close_file_picker"
-        aria-hidden="true"
-      >
-      </div>
-      <div
-        id="file-picker-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="file-picker-title"
-        tabindex="-1"
-        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
-          <h2 id="file-picker-title" class="text-lg font-medium">{gettext("Choose a file")}</h2>
-          <button
-            type="button"
-            phx-click="close_file_picker"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
+    <.modal id="file-picker-dialog" on_close="close_file_picker" variant={:drawer}>
+      <:title>{gettext("Choose a file")}</:title>
 
-        <div class="flex-1 overflow-y-auto p-4">
-          <form
-            :if={@files != []}
-            id="file-browser-filter"
-            phx-change="search_file_media"
-            class="mb-3"
-          >
-            <input
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by filename")}
-              aria-label={gettext("Search by filename")}
-              phx-debounce="150"
-              autocomplete="off"
-              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-            />
-          </form>
+      <div class="flex-1 overflow-y-auto p-4">
+        <form
+          :if={@files != []}
+          id="file-browser-filter"
+          phx-change="search_file_media"
+          class="mb-3"
+        >
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename")}
+            aria-label={gettext("Search by filename")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
 
-          <p :if={@files == []} class="text-sm text-base-content/60">
-            {gettext("No documents yet — upload a PDF in the")} <.link
-              navigate={~p"/media"}
-              class="underline"
-            >{gettext("media library")}</.link>.
-          </p>
-          <p :if={@files != [] and @visible == []} class="text-sm text-base-content/60">
-            {gettext("No documents match “%{query}”.", query: @query)}
-          </p>
+        <p :if={@files == []} class="text-sm text-base-content/60">
+          {gettext("No documents yet — upload a PDF in the")} <.link
+            navigate={~p"/media"}
+            class="underline"
+          >{gettext("media library")}</.link>.
+        </p>
+        <p :if={@files != [] and @visible == []} class="text-sm text-base-content/60">
+          {gettext("No documents match “%{query}”.", query: @query)}
+        </p>
 
-          <ul :if={@visible != []} class="space-y-1">
-            <li :for={item <- @visible}>
-              <button
-                type="button"
-                phx-click="pick_file"
-                phx-value-id={item.id}
-                title={item.filename}
-                class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+        <ul :if={@visible != []} class="space-y-1">
+          <li :for={item <- @visible}>
+            <button
+              type="button"
+              phx-click="pick_file"
+              phx-value-id={item.id}
+              title={item.filename}
+              class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+            >
+              <.icon name="hero-document" class="size-5 shrink-0 text-base-content/60" />
+              <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+              <span
+                :if={item.audience != :public}
+                class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
               >
-                <.icon name="hero-document" class="size-5 shrink-0 text-base-content/60" />
-                <span class="min-w-0 flex-1 truncate">{item.filename}</span>
-                <span
-                  :if={item.audience != :public}
-                  class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
-                >
-                  {gettext("Gated")}
-                </span>
-              </button>
-            </li>
-          </ul>
-        </div>
+                {gettext("Gated")}
+              </span>
+            </button>
+          </li>
+        </ul>
       </div>
-    </div>
+    </.modal>
     """
   end
 
@@ -5932,81 +6018,60 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:visible, assigns.results || mounted)
 
     ~H"""
-    <div class="fixed inset-0 z-50" phx-window-keydown="close_av_picker" phx-key="Escape">
-      <div class="absolute inset-0 bg-black/20" phx-click="close_av_picker" aria-hidden="true"></div>
-      <div
-        id="av-picker-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="av-picker-title"
-        tabindex="-1"
-        class="drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-base-content/10 bg-base-100 shadow-xl"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-base-content/10 p-4">
-          <h2 id="av-picker-title" class="text-lg font-medium">{av_picker_title(@field)}</h2>
-          <button
-            type="button"
-            phx-click="close_av_picker"
-            aria-label={gettext("Close")}
-            class="rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
+    <.modal id="av-picker-dialog" on_close="close_av_picker" variant={:drawer}>
+      <:title>{av_picker_title(@field)}</:title>
 
-        <div class="flex-1 overflow-y-auto p-4">
-          <form id="av-browser-filter" phx-change="search_av_media" class="mb-3">
-            <input
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by filename")}
-              aria-label={gettext("Search by filename")}
-              phx-debounce="150"
-              autocomplete="off"
-              class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
-            />
-          </form>
+      <div class="flex-1 overflow-y-auto p-4">
+        <form id="av-browser-filter" phx-change="search_av_media" class="mb-3">
+          <input
+            type="text"
+            name="q"
+            value={@query}
+            placeholder={gettext("Search by filename")}
+            aria-label={gettext("Search by filename")}
+            phx-debounce="150"
+            autocomplete="off"
+            class="w-full rounded border border-base-content/20 bg-transparent px-3 py-1.5 text-sm"
+          />
+        </form>
 
-          <p :if={@visible == [] and @query != ""} class="text-sm text-base-content/60">
-            {gettext("Nothing matches “%{query}”.", query: @query)}
-          </p>
-          <p :if={@visible == [] and @query == ""} class="text-sm text-base-content/60">
-            {av_picker_empty(@field)} <.link navigate={~p"/media"} class="underline">{gettext(
+        <p :if={@visible == [] and @query != ""} class="text-sm text-base-content/60">
+          {gettext("Nothing matches “%{query}”.", query: @query)}
+        </p>
+        <p :if={@visible == [] and @query == ""} class="text-sm text-base-content/60">
+          {av_picker_empty(@field)} <.link navigate={~p"/media"} class="underline">{gettext(
                 "media library"
               )}</.link>.
-          </p>
+        </p>
 
-          <ul :if={@visible != []} class="space-y-1">
-            <li :for={item <- @visible}>
-              <button
-                type="button"
-                phx-click="pick_av"
-                phx-value-id={item.id}
-                title={item.filename}
-                class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+        <ul :if={@visible != []} class="space-y-1">
+          <li :for={item <- @visible}>
+            <button
+              type="button"
+              phx-click="pick_av"
+              phx-value-id={item.id}
+              title={item.filename}
+              class="flex w-full items-center gap-2 rounded border border-base-content/10 px-3 py-2 text-left text-sm hover:border-primary hover:bg-base-200"
+            >
+              <.icon
+                name={av_item_icon(item)}
+                class="size-5 shrink-0 text-base-content/60"
+              />
+              <span class="min-w-0 flex-1 truncate">{item.filename}</span>
+              <span :if={av_item_duration(item)} class="shrink-0 text-xs text-base-content/60">
+                {av_item_duration(item)}
+              </span>
+              <span
+                :if={Map.get(item, :audience, :public) != :public}
+                class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
               >
-                <.icon
-                  name={av_item_icon(item)}
-                  class="size-5 shrink-0 text-base-content/60"
-                />
-                <span class="min-w-0 flex-1 truncate">{item.filename}</span>
-                <span :if={av_item_duration(item)} class="shrink-0 text-xs text-base-content/60">
-                  {av_item_duration(item)}
-                </span>
-                <span
-                  :if={Map.get(item, :audience, :public) != :public}
-                  class="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
-                >
-                  {gettext("Gated")}
-                </span>
-              </button>
-            </li>
-          </ul>
-        </div>
+                {gettext("Gated")}
+              </span>
+            </button>
+          </li>
+        </ul>
       </div>
-    </div>
+    </.modal>
     """
   end
 
@@ -7116,14 +7181,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
               <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Edit on page")}
             </.link>
             <%!-- Duplicate into a new draft (#471). The copy is made from the
-                  saved row, so say so when the buffer is dirty. --%>
+                  SAVED row, which is the part worth warning about — and the
+                  warning has to cover two different reasons the saved row is not
+                  what is on screen. A dirty buffer is your own unsaved work; a
+                  conflict means the saved row is somebody ELSE's save, so the
+                  copy would be of content you have never seen (#928). --%>
             <button
               type="button"
               phx-click="duplicate"
-              data-confirm={
-                @save_state != :saved &&
-                  gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
-              }
+              data-confirm={duplicate_confirm(@save_state, @conflict)}
               class="btn btn-sm btn-default"
             >
               <.icon name="hero-document-duplicate" class="mr-1 size-4" />{gettext("Duplicate")}
@@ -8703,4 +8769,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
     </button>
     """
   end
+
+  # Two reasons the saved row differs from what is on screen, and they need
+  # different words: unsaved work is yours to lose, a conflict is someone else's
+  # save you have not read.
+  defp duplicate_confirm(_save_state, true),
+    do:
+      gettext(
+        "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
+      )
+
+  defp duplicate_confirm(save_state, _conflict) when save_state != :saved,
+    do: gettext("Unsaved changes won't be copied. Duplicate the last saved version?")
+
+  defp duplicate_confirm(_save_state, _conflict), do: false
 end

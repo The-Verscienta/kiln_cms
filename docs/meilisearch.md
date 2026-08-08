@@ -42,13 +42,14 @@ HTTP is delegated to a swappable `KilnCMS.Search.Meilisearch.Client` behaviour
 
 ## Document shape
 
-One flat document per published Page/Post, keyed `"<type>_<id>"`:
+One flat document per published Page, Post or dynamic-type entry, keyed
+`"<storage type>_<id>"`:
 
 | field          | source                  | role                          |
 |----------------|-------------------------|-------------------------------|
-| `id`           | `"<type>_<uuid>"`       | primary key                   |
+| `id`           | `"<storage type>_<uuid>"` | primary key                 |
 | `org_id`       | record's org            | filterable, forced on every query (#336) |
-| `type`         | `page` / `post`         | filterable                    |
+| `type`         | `page` / `post` / the dynamic type's name | filterable   |
 | `record_id`    | record id               | hydrate back to Ash           |
 | `title`        | `title`                 | searchable                    |
 | `excerpt`      | `excerpt` (if present)  | searchable                    |
@@ -89,16 +90,40 @@ policy an admin identity bypasses.
 > `mix kiln.meili.reindex` re-enqueues every published document, and each gated
 > one is removed on the way through — run it once.
 
-Two things that are also *not* in the index, for reasons that have nothing to do
-with access control:
+**Experiment variants** are also absent, for a reason that has nothing to do with
+access control: a variant is never fired at all (invariant 1,
+[`content-experiments-plan.md`](content-experiments-plan.md)).
 
-- **Dynamic content types (D17).** `MeilisearchWorker.load/3` knows `page` and
-  `post` only, and `mix kiln.meili.reindex` enumerates the same two. Publishing a
-  dynamic-type entry with the backend on issues a harmless `DELETE` for a
-  document that was never there. Tracked as #1012 — if you rely on dynamic types,
-  this backend does not cover them yet.
-- **Experiment variants**, because a variant is never fired at all (invariant 1,
-  [`content-experiments-plan.md`](content-experiments-plan.md)).
+Dynamic content types (D17) **are** indexed, as of #1012 — see below for the one
+thing worth knowing about how they are keyed.
+
+### Dynamic types are keyed one way and faceted another (#1012)
+
+Every dynamic content type fires under the **storage key** `entry`, and the
+delete path has only `{type, id}` from the job args — it cannot resolve anything
+from a record that may already be gone. So the primary key stays
+`entry_<uuid>`, because upsert and delete both have to be able to compute it.
+
+The `type` **facet** is the consumer-facing name (`recipe`), not `entry`. A front
+end filtering `type = "recipe"` is the whole reason that attribute is
+filterable, and answering `entry` for every dynamic type answers nothing. The
+two differ on purpose; don't "fix" one to match the other — making the *key*
+match the facet would leave every unpublish issuing `DELETE .../recipe_<uuid>`
+for a document stored under `entry_<uuid>`, permanently.
+
+**Hydrating a dynamic hit.** `record_id` round-trips through `CMS.get_entry/2`
+(or `ContentTypes.get_record("entry", id, …)`), not a `get_<type>` — there is no
+generated read action per dynamic type. The facet tells you what it *is*; the
+storage tier tells you how to fetch it.
+
+**If you archive a type definition**, its published entries survive (that is the
+documented behaviour: "the type disappears from the registry but its entries and
+history survive"), and `Engine.public_type/1` then falls back to `entry`. Their
+index documents are neither removed nor re-keyed — the primary key does not
+change — but each one's `type` facet flips to `entry` the next time that
+document is fired. So the index can briefly hold a mix of `recipe` and `entry`
+for one type, and no single filter value returns the whole set until
+`mix kiln.meili.reindex` flips them together. Run it after archiving a type.
 
 ## Enabling
 

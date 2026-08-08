@@ -1236,29 +1236,10 @@ defmodule KilnCMSWeb.MediaLive do
   # an alt-text / caption editor (accessibility + SEO).
   defp media_detail(assigns) do
     ~H"""
-    <div class="fixed inset-0 z-40" phx-window-keydown="close" phx-key="Escape">
-      <div class="absolute inset-0 bg-black/40" phx-click="close" aria-hidden="true"></div>
-      <div
-        id="media-detail-dialog"
-        phx-hook="FocusTrap"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="media-detail-title"
-        tabindex="-1"
-        class="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-xl"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <h2 id="media-detail-title" class="truncate text-lg font-medium">{@item.filename}</h2>
-          <button
-            type="button"
-            phx-click="close"
-            aria-label={gettext("Close")}
-            class="text-base-content/70 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
+    <.modal id="media-detail-dialog" on_close="close" variant={:drawer}>
+      <:title>{@item.filename}</:title>
 
+      <div class="flex-1 overflow-y-auto p-6">
         <%!-- Raster images get the focal-point editor: click (or focus and use
              arrow keys) to move the point crops center on. Non-images keep a
              plain preview.
@@ -1488,7 +1469,7 @@ defmodule KilnCMSWeb.MediaLive do
           </p>
         </div>
       </div>
-    </div>
+    </.modal>
     """
   end
 

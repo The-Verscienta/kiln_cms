@@ -72,7 +72,8 @@ defmodule KilnCMS.Experiments.Experiment do
       :goal,
       :goal_form_id,
       :goal_content_type,
-      :goal_document_id
+      :goal_document_id,
+      :goal_funnel_id
     ]
 
     create :create do
@@ -175,14 +176,14 @@ defmodule KilnCMS.Experiments.Experiment do
 
     attribute :document_id, :uuid, allow_nil?: false, public?: true
 
-    # `:content_view` attributes a view of a *different* document as the
-    # conversion, so it can only work where the site can tell a visitor who was
-    # exposed to the experiment from one who was not. On the built-in site that
-    # is the opt-in sticky cookie (#984) and nothing else, which is why
-    # `Validations.GoalConfigured` refuses to start such an experiment while
+    # `:content_view` and `:funnel_completion` both attribute something that
+    # happens on a *later* page, so they only work where the site can tell a
+    # visitor who was exposed to the experiment from one who was not. On the
+    # built-in site that is the opt-in sticky cookie (#984) and nothing else,
+    # which is why `Validations.GoalConfigured` refuses to start either while
     # `sticky` is off rather than letting it report 0.0% forever.
     attribute :goal, :atom do
-      constraints one_of: [:form_submission, :content_view]
+      constraints one_of: [:form_submission, :content_view, :funnel_completion]
       default :form_submission
       allow_nil? false
       public? true
@@ -196,6 +197,12 @@ defmodule KilnCMS.Experiments.Experiment do
     # the same reason: a dynamic content type (D17) has no resource to key on.
     attribute :goal_content_type, :string, public?: true
     attribute :goal_document_id, :uuid, public?: true
+
+    # The funnel whose completion converts, for a `:funnel_completion` goal
+    # (#1010). Not a `belongs_to`: `Experiments` and `Analytics` are separate
+    # domains, and the delivery path resolves the funnel's final step through a
+    # cached read rather than a join.
+    attribute :goal_funnel_id, :uuid, public?: true
 
     attribute :winner_variant_id, :uuid, writable?: false, public?: true
 

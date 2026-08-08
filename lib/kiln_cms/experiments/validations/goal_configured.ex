@@ -21,9 +21,14 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
       on — because without a bucket cookie the built-in site has no way to know
       the visitor was ever exposed. See `KilnCMS.Experiments.Sticky`.
 
-  A `:content_view` experiment also takes the **goal** page out of the shared
-  cache for its duration (the conversion is counted at the origin), so it costs
-  two pages their CDN rather than one. That is a real cost but not a reason to
+    * `:funnel_completion` — the same, one level of indirection out (#1010). The
+      target is not named directly but derived: it is the funnel's **final
+      step**. So the funnel has to exist on this site, have at least one step,
+      and not end on the experimented document.
+
+  Either later-page goal also takes the **goal** page out of the shared cache for
+  its duration (the conversion is counted at the origin), so it costs two pages
+  their CDN rather than one. That is a real cost but not a reason to
   refuse — it is the operator's to weigh, and it is written down in
   `docs/content-experiments-plan.md`.
 
@@ -40,7 +45,102 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
   def validate(changeset, _opts, context) do
     case Ash.Changeset.get_attribute(changeset, :goal) do
       :content_view -> content_view(changeset, context)
+      :funnel_completion -> funnel_completion(changeset, context)
       _form_submission -> form_submission(changeset)
+    end
+  end
+
+  # A funnel goal converts on the funnel's FINAL step, so every way the funnel
+  # can fail to name one is a way the experiment reports 0.0% forever: no
+  # funnel, a funnel on another site, one with no steps, or one whose last step
+  # is the experimented document itself.
+  #
+  # Not checked: that the funnel is `active`. That flag governs whether the
+  # funnel *report* is shown, and an operator hiding a report should not
+  # silently stop an experiment mid-flight — `Delivery` resolves the steps
+  # regardless.
+  defp funnel_completion(changeset, context) do
+    with {:ok, funnel} <- funnel(changeset, context),
+         :ok <- funnel_has_steps(funnel),
+         :ok <- funnel_ends_elsewhere(changeset, funnel),
+         :ok <- funnel_target_exists(funnel, context) do
+      sticky_on()
+    end
+  end
+
+  defp funnel(changeset, context) do
+    case Ash.Changeset.get_attribute(changeset, :goal_funnel_id) do
+      nil ->
+        {:error,
+         field: :goal_funnel_id,
+         message: "a funnel-completion experiment needs a funnel before it can start"}
+
+      id ->
+        case KilnCMS.Analytics.get_funnel(id,
+               authorize?: false,
+               tenant: context.tenant,
+               load: [:steps]
+             ) do
+          {:ok, funnel} ->
+            {:ok, funnel}
+
+          _missing ->
+            {:error, field: :goal_funnel_id, message: "no funnel #{inspect(id)} on this site"}
+        end
+    end
+  end
+
+  defp funnel_has_steps(%{steps: [_ | _]}), do: :ok
+
+  defp funnel_has_steps(_funnel) do
+    {:error,
+     field: :goal_funnel_id, message: "that funnel has no steps, so nothing can complete it"}
+  end
+
+  # `FunnelStep` is FK-less by design — "a step whose content has since been
+  # deleted resolves to zero traffic" — which is fine for a report and fatal for
+  # a goal. A funnel ending on a deleted or never-published document starts
+  # cleanly and converts nothing, which is the failure this module exists to
+  # refuse, so the last step is resolved the same way `content_view`'s target is.
+  defp funnel_target_exists(funnel, context) do
+    last = List.last(funnel.steps)
+
+    case KilnCMS.CMS.ContentTypes.get_record(last.content_type, last.content_id,
+           authorize?: false,
+           tenant: context.tenant
+         ) do
+      {:ok, _record} ->
+        :ok
+
+      _missing ->
+        {:error,
+         field: :goal_funnel_id,
+         message:
+           "that funnel's last step (#{last.content_type} #{last.content_id}) " <>
+             "is not a document on this site, so nothing can complete it"}
+    end
+  rescue
+    _error ->
+      {:error,
+       field: :goal_funnel_id,
+       message: "that funnel's last step could not be resolved to a document"}
+  end
+
+  defp funnel_ends_elsewhere(changeset, funnel) do
+    last = List.last(funnel.steps)
+
+    same? =
+      last.content_type == Ash.Changeset.get_attribute(changeset, :content_type) and
+        last.content_id == Ash.Changeset.get_attribute(changeset, :document_id)
+
+    if same? do
+      {:error,
+       field: :goal_funnel_id,
+       message:
+         "that funnel's last step is the experimented document itself — " <>
+           "every impression would convert on the view that created it"}
+    else
+      :ok
     end
   end
 
@@ -125,7 +225,7 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
       {:error,
        field: :goal,
        message:
-         "a content-view goal needs sticky assignment, which is off: " <>
+         "a later-page goal needs sticky assignment, which is off: " <>
            "set `config :kiln_cms, KilnCMS.Experiments, sticky: true`. " <>
            "Without it the site cannot tell a visitor who saw the experiment " <>
            "from one who did not, and nothing would ever convert"}

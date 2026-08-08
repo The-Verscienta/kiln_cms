@@ -690,6 +690,20 @@ defmodule KilnCMSWeb.Router do
     get "/:plural/feed.xml", FeedController, :type
     get "/:plural/feed.json", FeedController, :type_json
 
+    # Segment feeds (#720). A `<category>` element is only useful if there is a
+    # feed narrow enough to act on, so a type's feed also comes scoped to one
+    # category or one tag. `/tags/` matches the calendar's tag route, which the
+    # delivery site already links.
+    #
+    # `/<locale>/feed.xml` needs no route of its own: `KilnCMSWeb.Plugs.SetLocale`
+    # strips a supported-locale prefix before the router runs, so it arrives here
+    # as plain `/feed.xml` with the locale on the conn — the same mechanism that
+    # serves every other delivery URL in every locale off one set of routes.
+    get "/:plural/category/:slug/feed.xml", FeedController, :category
+    get "/:plural/category/:slug/feed.json", FeedController, :category_json
+    get "/:plural/tags/:tag/feed.xml", FeedController, :tag
+    get "/:plural/tags/:tag/feed.json", FeedController, :tag_json
+
     # iCalendar for event-shaped types (#480). Same `:plural` wildcard and the
     # same reason: which types have a calendar is data (a type carrying a
     # `datetime_range` field), not a compile-time fact. The document route is

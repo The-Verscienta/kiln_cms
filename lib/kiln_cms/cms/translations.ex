@@ -93,13 +93,34 @@ defmodule KilnCMS.CMS.Translations do
     record =
       ContentTypes.get_record!(kind, record.id, Keyword.put(opts, :load, ContentCopy.tag_load()))
 
+    # Same role-aware reset as duplication: a block field this actor could not
+    # have set is reset to its declared default rather than refused. Without it
+    # an editor translating a page whose `quote` block has `featured: true` got
+    # an error they could do nothing about — `EnforceBlockFieldPolicy` runs on
+    # create, where there is no stored tree to diff against, so every admin-set
+    # value trips it (#890).
+    {blocks, _withheld} = ContentCopy.dump_blocks(record, role: role(opts))
+
     attrs =
       record
       |> ContentCopy.take(@copied_attrs)
       |> Map.put(:locale, target_locale)
-      |> Map.put(:blocks, ContentCopy.dump_blocks(record))
+      |> Map.put(:blocks, blocks)
       |> Map.put(:tag_ids, ContentCopy.tag_ids(record))
 
     ContentTypes.create!(kind, attrs, opts)
+  end
+
+  defp role(opts) do
+    case Keyword.get(opts, :actor) do
+      %{} = actor ->
+        case KilnCMS.Accounts.Scoping.effective_tier(actor, Keyword.get(opts, :tenant)) do
+          :admin -> nil
+          tier -> tier
+        end
+
+      _ ->
+        nil
+    end
   end
 end

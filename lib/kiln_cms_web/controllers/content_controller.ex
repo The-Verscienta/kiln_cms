@@ -785,7 +785,8 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:locale_links, locale_links(ct, translations, record.locale, base_url))
     |> assign(
       :feeds,
-      feed_alternates(ct, org, base_url) ++ calendar_alternates(ct, org, base_url)
+      feed_alternates(ct, org, base_url, record.locale) ++
+        calendar_alternates(ct, org, base_url)
     )
     |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org)))
     |> assign(:experiment_variant, variant && variant.id)
@@ -825,10 +826,16 @@ defmodule KilnCMSWeb.ContentController do
   # URL and the routed one cannot drift. A type that doesn't syndicate
   # advertises only the site-wide feed; if nothing syndicates, nothing is
   # advertised at all.
-  defp feed_alternates(ct, org, base_url) do
+  # Advertised in the locale of the page being read (#720). A French reader on a
+  # French article was being pointed at the default-locale feed, which carries no
+  # article they can read — and the locale feeds exist precisely so that reader
+  # has one. Same reason the paths come from `FeedController`: the advertised URL
+  # and the routed one cannot drift.
+  defp feed_alternates(ct, org, base_url, locale) do
     site = KilnCMS.Branding.for_org(org.id).site_name
+    scope = %{locale: locale, taxonomy: nil}
 
-    scopes =
+    types =
       if Feeds.syndicated?(ct) do
         [{nil, site}, {ct, "#{site} — #{ct.label}"}]
       else
@@ -838,12 +845,12 @@ defmodule KilnCMSWeb.ContentController do
     if Feeds.syndicated_types(org.id) == [] do
       []
     else
-      for {scope, title} <- scopes,
+      for {descriptor, title} <- types,
           {format, mime} <- [{:atom, "application/atom+xml"}, {:json, "application/feed+json"}] do
         %{
           type: mime,
           title: title,
-          href: base_url <> KilnCMSWeb.FeedController.feed_path(scope, format)
+          href: base_url <> KilnCMSWeb.FeedController.scoped_path(descriptor, scope, format)
         }
       end
     end

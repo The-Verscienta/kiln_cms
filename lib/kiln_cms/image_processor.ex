@@ -272,7 +272,13 @@ defmodule KilnCMS.ImageProcessor do
   temp files.
   """
   @spec process(Path.t(), String.t(), focal()) ::
-          {:ok, %{width: pos_integer, height: pos_integer, variants: [variant]}}
+          {:ok,
+           %{
+             width: pos_integer,
+             height: pos_integer,
+             variants: [variant],
+             failed_full: [atom()]
+           }}
           | {:error, term}
   def process(path, ext, focal \\ %{x: 0.5, y: 0.5}) do
     with {:ok, image} <- Image.open(path),
@@ -283,12 +289,19 @@ defmodule KilnCMS.ImageProcessor do
       width = Image.width(image)
       height = Image.height(image)
 
+      {full, failed} = build_full(image, ext)
+
       variants =
         build_variants(image, width, ext) ++
           build_crops(image, width, height, focal, ext) ++
-          build_full(image, ext)
+          full
 
-      {:ok, %{width: width, height: height, variants: variants}}
+      # `failed` is the full-size alternates this source CANNOT be encoded to —
+      # a panorama past libvips' WebP dimension ceiling, or a format whose
+      # encoder is missing from the build. Reported rather than only logged
+      # (#1000) so `Regeneration.current?/1` can tell "not written yet" from
+      # "will never be written", and stop re-enqueuing the second one for ever.
+      {:ok, %{width: width, height: height, variants: variants, failed_full: failed}}
     else
       {:error, reason} -> {:error, reason}
     end
@@ -400,20 +413,25 @@ defmodule KilnCMS.ImageProcessor do
     # `<source srcset>` of every page showing that image.
     case strip(image) do
       {:ok, stripped} -> alternates(stripped, source)
-      _unreadable -> []
+      # Unreadable is not "will never encode" — it is this run failing. Report no
+      # failures so the item stays repairable by a later run.
+      _unreadable -> {[], []}
     end
   end
 
-  defp alternates(_image, :gif), do: []
+  defp alternates(_image, :gif), do: {[], []}
 
   defp alternates(image, source) do
     variant_formats()
     |> Enum.reject(&(&1 == source))
     |> Enum.map(fn format ->
       {extension, _type} = Map.fetch!(@format_info, format)
-      write(image, "full.#{format}", format, extension)
+      {format, write(image, "full.#{format}", format, extension)}
     end)
-    |> Enum.reject(&is_nil/1)
+    |> Enum.split_with(fn {_format, written} -> written end)
+    |> then(fn {ok, failed} ->
+      {Enum.map(ok, &elem(&1, 1)), Enum.map(failed, &elem(&1, 0))}
+    end)
   end
 
   defp clamp(value, low, high), do: value |> max(low) |> min(high)
