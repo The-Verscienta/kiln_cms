@@ -421,6 +421,37 @@ defmodule KilnCMS.CMS.BlockFieldPolicyTest do
       assert Exception.message(error) =~ "same id"
     end
 
+    test "a client that round-trips the artifact gets the binding (#954)" do
+      # The point of accepting `_id`: the fired `:json` artifact is the only
+      # surface a headless client can read a nested child's id from, so "read
+      # the artifact, send it back" is the only way it can round-trip ids — and
+      # doing so must actually engage #865's binding rather than looking id-less.
+      admin = user(:admin)
+      a = Ash.UUID.generate()
+
+      {:ok, page} =
+        create_page(admin, [
+          columns_children([
+            quote_block(%{"id" => a, "featured" => true, "text" => "A"}),
+            quote_block(%{"id" => Ash.UUID.generate(), "text" => "B"})
+          ])
+        ])
+
+      # Exactly what the artifact hands back — `_id`, not `id`.
+      as_artifact =
+        columns_children([
+          %{"_type" => "quote", "_id" => a, "featured" => false, "text" => "A"},
+          %{"_type" => "quote", "_id" => Ash.UUID.generate(), "featured" => true, "text" => "B"}
+        ])
+
+      assert {:error, error} =
+               CMS.update_page(page, %{block_tree: [as_artifact]}, actor: user(:editor))
+
+      # Bound, not merely counted: the count is unchanged, so only the binding
+      # sees this.
+      assert Exception.message(error) =~ "cannot move or clear"
+    end
+
     test "a wholly id-less re-target is still allowed (accepted residual, #865)" do
       # Pinned so the limit is deliberate rather than discovered. Nested child
       # ids cannot be READ back — `blocks` is not `public?` and the fired

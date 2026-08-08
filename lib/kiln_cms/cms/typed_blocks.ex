@@ -94,8 +94,38 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   def to_union_input(value) do
     case typed_attrs(value) do
-      {nil, _attrs} -> value
-      {name, attrs} -> attrs |> Map.put("_type", name) |> sanitize_attrs() |> drop_nils()
+      {nil, _attrs} ->
+        value
+
+      {name, attrs} ->
+        attrs |> Map.put("_type", name) |> adopt_artifact_id() |> sanitize_attrs() |> drop_nils()
+    end
+  end
+
+  @doc false
+  # The fired `:json` artifact names a block's id `_id`, not `id`
+  # (`KilnCMS.Blocks.render/2`), because blocks are `_type`-tagged maps that
+  # otherwise drop identity. That is the only surface on which a headless client
+  # can read a block's id at all — `blocks` is not `public?`, and GraphQL and
+  # JSON:API both hide it.
+  #
+  # So the one way such a client can round-trip ids is to read the artifact and
+  # send it back, and that did not work: the write path reads `id`, so every
+  # block arrived id-less (fresh ids minted, judged as new) while `_id` was
+  # carried into storage as a junk key nothing reads (#954).
+  #
+  # Accepting it closes the loop for published content, at both levels — a
+  # nested child's `_id` is emitted the same way, since `Columns` renders its
+  # children through the same function.
+  #
+  # An explicit `id` wins: a client that knows the real name means it.
+  defp adopt_artifact_id(%{} = attrs) do
+    case {Map.get(attrs, "id"), Map.pop(attrs, "_id")} do
+      {nil, {artifact_id, rest}} when is_binary(artifact_id) and artifact_id != "" ->
+        Map.put(rest, "id", artifact_id)
+
+      {_present, {_artifact_id, rest}} ->
+        rest
     end
   end
 
@@ -282,12 +312,19 @@ defmodule KilnCMS.CMS.TypedBlocks do
           [
             attrs
             |> Map.put("_type", "columns")
+            |> adopt_artifact_id()
             |> sanitize_columns_block(depth + 1)
             |> drop_nils()
           ]
 
         {name, attrs} ->
-          [attrs |> Map.put("_type", name) |> sanitize_attrs() |> drop_nils()]
+          [
+            attrs
+            |> Map.put("_type", name)
+            |> adopt_artifact_id()
+            |> sanitize_attrs()
+            |> drop_nils()
+          ]
       end
     end)
   end
