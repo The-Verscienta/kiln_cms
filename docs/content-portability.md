@@ -102,9 +102,31 @@ revisions. WXR carries some of them; none map onto anything here without an
 editorial decision a mix task should not be making silently. The imported
 record is the current version, and its history starts at the import.
 
-Authors are read from the file and reported, but content is created under the
-`--actor` you name. Mapping WordPress logins to Kiln users is a decision, not a
-default.
+### Authors
+
+Every author in the file is listed in the report — login, display name and
+email — with a marker showing whether it resolved to a Kiln user:
+
+```
+Authors (1 mapped, 1 unmapped):
+  -> jo "Jo Example" <jo@old.example.com>
+   ~ sam "Sam" <sam@old.example.com>
+```
+
+Resolution order:
+
+1. `--author-map login=kiln@email` (repeatable, and it also accepts the source
+   *email* on the left)
+2. otherwise the source author's own email, matched against a Kiln user — right
+   far more often than not when both systems served the same people
+
+An author that resolves to nobody is **not** an error: the record is attributed
+to `--actor`, exactly as before. It is reported so you can decide whether that
+matters before the content is live.
+
+The create always runs under `--actor`, so an import can never mint content a
+mapped author was not allowed to create; only the attribution moves afterwards,
+through a narrow action that fires no webhooks.
 
 ## The portable JSON envelope
 

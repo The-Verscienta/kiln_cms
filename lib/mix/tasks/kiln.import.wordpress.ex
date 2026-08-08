@@ -26,6 +26,10 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
       --skip-media       do not sideload images (blocks keep the source URLs)
       --no-redirects     do not create redirects from old permalinks
       --on-conflict      skip (default) | error
+      --author-map       login=kiln@email, repeatable — attribute imported
+                         content to the Kiln user who wrote it. Unmapped authors
+                         are matched on their own email, then fall back to
+                         --actor; every author is listed in the report.
       --drain-media      run the queued image-variant jobs before exiting, for a
                          one-off container where nothing else consumes the queue
 
@@ -53,7 +57,8 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
     limit: :integer,
     skip_media: :boolean,
     redirects: :boolean,
-    on_conflict: :string
+    on_conflict: :string,
+    author_map: :keep
   ]
 
   @impl Mix.Task
@@ -113,7 +118,8 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
       skip_media: Keyword.get(opts, :skip_media, false),
       redirects: Keyword.get(opts, :redirects, true),
       locale: Keyword.get(opts, :locale, "en"),
-      on_conflict: on_conflict(opts[:on_conflict])
+      on_conflict: on_conflict(opts[:on_conflict]),
+      author_map: opts |> Keyword.get_values(:author_map) |> KilnCMS.Portability.CLI.author_map!()
     ]
     |> maybe_put(:limit, opts[:limit])
   end

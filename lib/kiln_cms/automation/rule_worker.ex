@@ -14,6 +14,10 @@ defmodule KilnCMS.Automation.RuleWorker do
     * `:invalidate_cache` — bust the record's content cache (+ sitemap/llms).
     * `:reindex` — re-fire the record (refreshes artifacts + search indexes) via
       `KilnCMS.Firing.FireWorker`.
+    * `:social_post` — announce the publish on the site's Bluesky / Mastodon
+      accounts (#497; `config` `"provider"` required, `"template"` optional).
+      **At most once** per {rule, account, document, publish}, and never
+      retried on an ambiguous outcome — see `KilnCMS.Social`.
     * `:newsletter` — send the published document to subscribers via
       `KilnCMS.Newsletter` (#376; `config` `"segment_id"`/`"subject"`, both
       optional). Deduped per {rule, content, publish revision}.
@@ -160,6 +164,31 @@ defmodule KilnCMS.Automation.RuleWorker do
     intelligence(rule, event, payload, &metadata_findings/2)
   end
 
+  # "On publish → announce it" (#497). Loads the live record (the payload is a
+  # serialized snapshot) and hands it to `KilnCMS.Social.Announcer`, which claims
+  # a ledger row before it posts and refuses gated, locked and non-default-locale
+  # documents.
+  #
+  # Every outcome that is not a transient read failure returns `:ok`. This job
+  # must not retry: Oban retrying a post whose response was lost is exactly how
+  # one announcement becomes two, and the ledger already records the ambiguity
+  # for a human. `{:error, _}` is reserved for "we never got as far as trying".
+  defp run(%{action: :social_post, config: config, org_id: org_id, id: rule_id}, event, payload) do
+    with type when is_binary(type) <- event_type(event),
+         id when is_binary(id) <- payload["id"],
+         provider when not is_nil(provider) <- social_provider(config),
+         true <- KilnCMS.Social.configured?(org_id),
+         storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
+         {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id) do
+      announce_to(record, provider, org_id, rule_id, config["template"])
+    else
+      # A transient read failure (a DB blip) is worth retrying — nothing was
+      # posted, so a retry cannot duplicate anything.
+      {:error, error} -> {:error, error}
+      _ -> :ok
+    end
+  end
+
   defp run(%{action: :reindex, org_id: org_id}, event, payload) do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
@@ -174,6 +203,39 @@ defmodule KilnCMS.Automation.RuleWorker do
       _ -> :ok
     end
   end
+
+  defp announce_to(record, provider, org_id, rule_id, template) do
+    KilnCMS.Social.accounts_for_provider!(provider, authorize?: false, tenant: org_id)
+    |> Enum.each(fn account ->
+      case KilnCMS.Social.Announcer.announce(record, account,
+             automation_rule_id: rule_id,
+             template: template
+           ) do
+        {:ok, _post} ->
+          :ok
+
+        # The claim was already taken — a re-delivered job or a re-fire wave.
+        # This is the guarantee working, not a failure.
+        {:error, :already_announced} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Social announce failed for #{account.provider} " <>
+              "#{record.__struct__}/#{record.id}: #{inspect(reason)}"
+          )
+      end
+    end)
+  end
+
+  # The rule names its provider as a string; only the ones with an
+  # implementation are accepted, and an unknown value is dropped rather than
+  # turned into an atom.
+  defp social_provider(%{"provider" => provider}) when is_binary(provider) do
+    Enum.find(KilnCMS.Social.Account.providers(), &(to_string(&1) == provider))
+  end
+
+  defp social_provider(_config), do: nil
 
   # Content is modeled per-locale, and every locale variant's publish emits its
   # own event — without this guard one article published in three languages

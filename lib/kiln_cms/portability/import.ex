@@ -86,6 +86,7 @@ defmodule KilnCMS.Portability.Import do
           media: map(),
           taxonomy: map(),
           redirects: map(),
+          authors: map(),
           dry_run: boolean()
         }
 
@@ -109,6 +110,7 @@ defmodule KilnCMS.Portability.Import do
     records = parsed |> Map.get(:records, []) |> apply_limit(opts[:limit])
 
     taxonomy = import_taxonomy(records, dry_run?, opts)
+    authors = resolve_authors(parsed, opts)
 
     # Decide what each record WOULD become before fetching a single byte. A
     # resumed run then re-downloads nothing for the records it already imported
@@ -120,7 +122,8 @@ defmodule KilnCMS.Portability.Import do
 
     media = import_media(parsed, fresh, dry_run?, opts)
 
-    {results, redirects} = import_records(decided, taxonomy, media, dry_run?, opts)
+    {results, redirects} =
+      import_records(decided, taxonomy, media, dry_run?, Keyword.put(opts, :authors, authors))
 
     {:ok,
      %{
@@ -130,8 +133,107 @@ defmodule KilnCMS.Portability.Import do
        failed: Enum.filter(results, &(&1.outcome == :failed)),
        taxonomy: taxonomy.report,
        media: media.report,
-       redirects: redirects
+       redirects: redirects,
+       authors: authors.report
      }}
+  end
+
+  # ── Authors ────────────────────────────────────────────────────────────────
+
+  @doc """
+  Resolve the source's authors to Kiln users.
+
+  `:author_map` is an explicit `%{"source_login_or_email" => "kiln@email"}`;
+  anything it does not name falls back to matching the source author's own email
+  against a Kiln user, which is right far more often than not for a migration
+  between two systems the same people used.
+
+  An author that resolves to nobody is not an error — the record is created
+  under the operator's `--actor`, exactly as before. It IS reported, because an
+  operator who cannot see who went unmapped cannot decide whether to care.
+  """
+  @spec resolve_authors(map(), keyword()) :: map()
+  def resolve_authors(parsed, opts) do
+    explicit =
+      opts |> Keyword.get(:author_map, %{}) |> Map.new(fn {k, v} -> {down(k), down(v)} end)
+
+    source_authors = Map.get(parsed, :authors, [])
+
+    resolved =
+      source_authors
+      |> Enum.map(&{&1, lookup_user(&1, explicit, opts)})
+      |> Enum.reject(fn {_author, user} -> is_nil(user) end)
+      |> Enum.flat_map(fn {author, user} ->
+        # Keyed by BOTH, because an item names its author by `dc:creator`
+        # (the login) while a mapping is usually written by email.
+        [{down(author.login), user.id}, {down(author.email), user.id}]
+      end)
+      |> Enum.reject(fn {key, _id} -> key in [nil, ""] end)
+      |> Map.new()
+
+    mapped_logins =
+      source_authors |> Enum.map(& &1.login) |> Enum.filter(&Map.has_key?(resolved, down(&1)))
+
+    %{
+      by_key: resolved,
+      report: %{
+        found: source_authors |> Enum.map(&author_line/1),
+        mapped: mapped_logins,
+        unmapped: source_authors |> Enum.map(& &1.login) |> Kernel.--(mapped_logins)
+      }
+    }
+  end
+
+  defp author_line(%{login: login, name: name, email: email}),
+    do: %{login: login, name: name, email: email}
+
+  defp lookup_user(author, explicit, opts) do
+    email =
+      Map.get(explicit, down(author.login)) || Map.get(explicit, down(author.email)) ||
+        down(author.email)
+
+    if email in [nil, ""], do: nil, else: user_by_email(email, opts)
+  end
+
+  defp user_by_email(email, opts) do
+    KilnCMS.Accounts.list_users!(
+      Keyword.take(opts, [:actor]) ++ [query: [filter: [email: email], limit: 1]]
+    )
+    |> List.first()
+  rescue
+    _error -> nil
+  end
+
+  defp down(nil), do: nil
+  defp down(value), do: value |> to_string() |> String.downcase() |> String.trim()
+
+  # The byline belongs to whoever wrote it on the old site, not to whoever ran
+  # the import. Applied after the create (which stamps the operator via
+  # `relate_actor`) through the resource's own narrow `:reassign_author` action,
+  # so it carries none of `:update`'s webhook/artifact side effects.
+  defp reassign_author(created, record, opts) do
+    with author when is_binary(author) <- record[:author],
+         %{by_key: by_key} <- Keyword.get(opts, :authors),
+         user_id when is_binary(user_id) <- Map.get(by_key, down(author)),
+         false <- user_id == Map.get(created, :author_id) do
+      created
+      |> Ash.Changeset.for_update(:reassign_author, %{author_id: user_id}, scope(opts))
+      |> Ash.update()
+      |> case do
+        {:ok, updated} ->
+          updated
+
+        {:error, reason} ->
+          Logger.warning("Import: could not attribute #{created.id}: #{inspect(reason)}")
+          created
+      end
+    else
+      _ -> created
+    end
+  rescue
+    error ->
+      Logger.warning("Import: could not attribute #{created.id}: #{inspect(error)}")
+      created
   end
 
   defp apply_limit(records, nil), do: records
@@ -705,7 +807,11 @@ defmodule KilnCMS.Portability.Import do
 
     case create_via_action(record.kind, attrs, opts) do
       {:ok, created} ->
-        created = record |> maybe_publish(created, opts) |> restore_published_at(record, opts)
+        created =
+          record
+          |> maybe_publish(created, opts)
+          |> restore_published_at(record, opts)
+          |> reassign_author(record, opts)
 
         {:created, created,
          %{
