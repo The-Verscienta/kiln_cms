@@ -154,7 +154,10 @@ defmodule KilnCMS.CMS.MenuItem do
       public? false
     end
 
-    attribute :label, :string, allow_nil?: false, public?: true
+    attribute :label, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Sibling order within a parent (or within the menu's root, for `parent_id`
     # nil). Ties break on label so an unordered import still reads sensibly.
@@ -173,7 +176,7 @@ defmodule KilnCMS.CMS.MenuItem do
     attribute :target_id, :uuid, public?: true
 
     # For `:url` — sanitized on write (`Changes.SanitizeMenuItemLink`).
-    attribute :url, :string, public?: true
+    attribute :url, :string, public?: true, constraints: [max_length: KilnCMS.Limits.url()]
 
     attribute :open_in_new_tab, :boolean, allow_nil?: false, default: false, public?: true
 

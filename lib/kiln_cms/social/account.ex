@@ -123,13 +123,17 @@ defmodule KilnCMS.Social.Account do
 
     # Bluesky: the account handle (`example.bsky.social`). Mastodon: display
     # only — the token identifies the account there.
-    attribute :handle, :string, public?: true
+    attribute :handle, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     # Mastodon only: the instance origin. Operator-supplied, so every request
     # to it goes through `KilnCMS.SafeFetch` rather than a bare HTTP client —
     # otherwise this column is a server-side request forgery primitive with an
     # admin-facing form attached to it.
-    attribute :instance_url, :string, public?: true
+    attribute :instance_url, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
 
     attribute :credential_encrypted, :binary do
       writable? false

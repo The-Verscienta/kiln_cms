@@ -120,18 +120,26 @@ defmodule KilnCMS.CMS.SiteBranding do
       public? false
     end
 
-    attribute :site_name, :string, public?: true
+    attribute :site_name, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     # A relative path, or an absolute https:// URL on a host the CSP `img-src`
     # permits — see `KilnCMS.CMS.Validations.BrandTokens`.
-    attribute :logo_url, :string, public?: true
-    attribute :favicon_url, :string, public?: true
-    attribute :social_image_url, :string, public?: true
+    attribute :logo_url, :string, public?: true, constraints: [max_length: KilnCMS.Limits.url()]
+
+    attribute :favicon_url, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
+
+    attribute :social_image_url, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
 
     # Normalized lowercase `#rrggbb`. Every emitted CSS token is re-derived from
     # the parsed channels by `KilnCMS.Branding.Color`, so no user-supplied byte
     # ever reaches the stylesheet.
-    attribute :brand_color, :string, public?: true
+    attribute :brand_color, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     # Whether the public footer keeps the "Powered by" attribution. True by
     # default, so an unconfigured site is unchanged.

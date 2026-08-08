@@ -137,8 +137,15 @@ defmodule KilnCMS.CMS.FormField do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :label, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :label, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     attribute :field_type, :atom do
       constraints one_of: @field_types
@@ -149,15 +156,23 @@ defmodule KilnCMS.CMS.FormField do
 
     attribute :required, :boolean, allow_nil?: false, default: false, public?: true
     attribute :options, {:array, :string}, allow_nil?: false, default: [], public?: true
-    attribute :help_text, :string, public?: true
+
+    attribute :help_text, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
+
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
 
-    attribute :placeholder, :string, public?: true
+    attribute :placeholder, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Pre-filled value: the input's initial value ("true" pre-checks a boolean,
     # a select pre-picks the matching option). Stored as text; submission-time
     # coercion in `KilnCMS.Forms` applies to whatever value comes back.
-    attribute :default_value, :string, public?: true
+    attribute :default_value, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Display width on the public form's 6-column grid.
     attribute :width, :atom do

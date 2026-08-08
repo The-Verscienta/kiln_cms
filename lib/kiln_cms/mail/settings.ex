@@ -109,7 +109,9 @@ defmodule KilnCMS.Mail.Settings do
       writable? false
     end
 
-    attribute :dkim_selector, :string, public?: true
+    attribute :dkim_selector, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     attribute :dkim_key_provider, :atom do
       allow_nil? false

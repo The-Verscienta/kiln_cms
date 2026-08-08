@@ -319,7 +319,9 @@ defmodule KilnCMS.CMS.Content do
     excerpt_attribute =
       if excerpt? do
         quote do
-          attribute :excerpt, :string, public?: true
+          attribute :excerpt, :string,
+            public?: true,
+            constraints: [max_length: KilnCMS.Limits.paragraph()]
         end
       end
 
@@ -2185,8 +2187,15 @@ defmodule KilnCMS.CMS.Content do
           public? false
         end
 
-        attribute :title, :string, allow_nil?: false, public?: true
-        attribute :slug, :string, allow_nil?: false, public?: true
+        attribute :title, :string,
+          allow_nil?: false,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :slug, :string,
+          allow_nil?: false,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.identifier()]
 
         unquote(excerpt_attribute)
 
@@ -2204,21 +2213,41 @@ defmodule KilnCMS.CMS.Content do
           public? false
         end
 
-        attribute :seo_title, :string, public?: true
-        attribute :seo_description, :string, public?: true
+        attribute :seo_title, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :seo_description, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.paragraph()]
+
         # Comma-separated keyphrases; the first is the focus keyphrase and
         # drives slug auto-derivation (Yoast-style: slug = focus keyphrase).
-        attribute :seo_keywords, :string, public?: true
+        attribute :seo_keywords, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
 
         # Optional multi-segment path alias (#485): when set, the record's
         # canonical public URL (`/acupuncture/needle/size/14mm`) — the flat
         # `/<prefix>/<slug>` URL 301s to it. The slug stays the single-segment
         # internal handle. Validated by `Validations.PathAliasValid`.
-        attribute :path_alias, :string, public?: true
+        attribute :path_alias, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.url()]
+
         # og:image URL and rel=canonical for SEO/social.
-        attribute :seo_image, :string, public?: true
-        attribute :canonical_url, :string, public?: true
-        attribute :locale, :string, default: "en", public?: true
+        attribute :seo_image, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.url()]
+
+        attribute :canonical_url, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.url()]
+
+        attribute :locale, :string,
+          default: "en",
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.identifier()]
 
         # Consumer-facing access tier (KilnCMS.CMS.Audiences). `:public` (the
         # default) keeps a published record world-readable; any other audience

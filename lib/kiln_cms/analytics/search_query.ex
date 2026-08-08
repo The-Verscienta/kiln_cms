@@ -136,8 +136,17 @@ defmodule KilnCMS.Analytics.SearchQuery do
       public? false
     end
 
-    attribute :query, :string, allow_nil?: false, public?: true
-    attribute :locale, :string, allow_nil?: false, default: "en", public?: true
+    attribute :query, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :locale, :string,
+      allow_nil?: false,
+      default: "en",
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
     attribute :count, :integer, default: 1, allow_nil?: false, public?: true
     attribute :result_count, :integer, public?: true
     attribute :last_searched_at, :utc_datetime_usec, public?: true

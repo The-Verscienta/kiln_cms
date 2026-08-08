@@ -211,7 +211,7 @@ defmodule KilnCMS.Newsletter.Subscriber do
     end
 
     attribute :email, :ci_string, allow_nil?: false, public?: true
-    attribute :name, :string, public?: true
+    attribute :name, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
 
     attribute :status, :atom do
       constraints one_of: [:pending, :confirmed, :unsubscribed]

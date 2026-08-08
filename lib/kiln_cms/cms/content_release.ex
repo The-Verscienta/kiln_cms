@@ -434,8 +434,14 @@ defmodule KilnCMS.CMS.ContentRelease do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :description, :string, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :description, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.paragraph()]
 
     # The go-live moment. `nil` means "manual trigger only" — the issue's
     # "target datetime *or* manual trigger". A time already in the past simply

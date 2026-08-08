@@ -160,7 +160,10 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       public? false
     end
 
-    attribute :url, :string, allow_nil?: false, public?: true
+    attribute :url, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.url()]
 
     # Subscribed event names; defaults to the published-content lifecycle only
     # (`default_events/0`) — draft-carrying review events are explicit opt-in.

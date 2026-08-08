@@ -125,17 +125,23 @@ defmodule KilnCMS.Accounts.Organization do
   attributes do
     uuid_primary_key :id
 
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # The subdomain label (`acme` → `acme.example.com`) — the primary tenant
     # key. Unique across the install.
-    attribute :slug, :string, allow_nil?: false, public?: true
+    attribute :slug, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
 
     # Optional vanity host (`www.acme.com`). Unique when set; nil for orgs
     # served only on their subdomain.
     attribute :custom_domain, :string do
       public? true
-      constraints match: @custom_domain_regex
+      constraints match: @custom_domain_regex, max_length: KilnCMS.Limits.identifier()
     end
 
     attribute :status, :atom do

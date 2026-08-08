@@ -83,8 +83,16 @@ defmodule KilnCMS.Analytics.Funnel do
       public? false
     end
 
-    attribute :name, :string, allow_nil?: false, public?: true
-    attribute :slug, :string, allow_nil?: false, public?: true
+    attribute :name, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :slug, :string,
+      allow_nil?: false,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.identifier()]
+
     attribute :active, :boolean, allow_nil?: false, default: true, public?: true
 
     timestamps()
