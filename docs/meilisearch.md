@@ -79,9 +79,10 @@ denormalized `search_text`) would be anonymously searchable.
 
 Kiln's own Postgres search has no equivalent exposure **to an anonymous caller**:
 `search` / `search_published` are policy-gated, so gated content is excluded by
-the same read policy that keeps it out of feeds and the sitemap. (The
-`_published` twins pin `state` and not `audience`, so an over-scoped API key is a
-separate question — #1013.)
+the same read policy that keeps it out of feeds and the sitemap. An over-scoped
+API key does not get past it either: since #1013 the `_published` read twins and
+`GET /api/search` pin the anonymous rule server-side rather than leaning on a
+policy an admin identity bypasses.
 
 > **If you enabled this backend before this rule landed**, documents that were
 > already gated and have not been republished since are still in the index.

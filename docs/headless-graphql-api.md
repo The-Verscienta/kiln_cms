@@ -55,7 +55,7 @@ from its singular type name. For `post`:
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
 | `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
-| `searchPublishedPosts` | `:search_published` | as `searchPosts`, minus `state` | published-only full-text matches — `state == :published` pinned server-side (#297) |
+| `searchPublishedPosts` | `:search_published` | as `searchPosts`, minus `state` | published-only full-text matches — the anonymous rule (published, `audience: :public`, unlocked) pinned server-side (#297, #1013) |
 | `semanticSearchPublishedPosts` | `:search_semantic_published` | as `semanticSearchPosts`, minus `state` | published-only semantic matches |
 | `autocompletePublishedPosts` | `:autocomplete_published` | `prefix: String!`, `locale` | published-only title suggestions |
 
