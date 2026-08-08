@@ -312,6 +312,12 @@ defmodule KilnCMS.Application do
   # incident. Counted at boot, not per request: this runs once, and a
   # single-org install stays silent.
   #
+  # Boot is the WEAKEST of the three places this is checked, and deliberately
+  # not the only one: it already happened by the time someone creates the second
+  # org, and may not happen again for months (#660).
+  # `KilnCMSWeb.Tenant.strict_host_gap?/0` is the shared predicate; org creation
+  # and `/editor/system` ask it too.
+  #
   # Logger (not stderr like the config providers) so it reaches Sentry and
   # whatever ships the container's logs — see #634.
   defp warn_if_multi_tenant_without_strict_host do

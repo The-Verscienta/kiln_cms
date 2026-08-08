@@ -243,6 +243,45 @@ defmodule KilnCMSWeb.Tenant do
   def strict_host?, do: Application.get_env(:kiln_cms, :tenant_strict_host, false)
 
   @doc """
+  Whether this deployment is multi-tenant *and* still serving the default org to
+  unrecognized hosts (#660).
+
+  `TENANT_STRICT_HOST` is off by default, and that is right for the single-host
+  install the fallback exists for: with one org, "an unknown Host is served the
+  default org" describes the only org there is. The moment a second one is
+  created it becomes a live misconfiguration — an unrecognized Host, an IP, or
+  an attacker-supplied header is served *another tenant's* content, branding and
+  analytics.
+
+  Nothing about that moment is loud. `KilnCMS.Application` checks it at boot, but
+  boot happened before the second org existed and may not happen again for
+  months; #563 shipped a CHANGELOG note, which helps only an operator reading it
+  at the right time. So the same predicate also runs where the decision is made
+  (creating the org) and where an operator goes to look (`/editor/system`).
+
+  Total by construction. One caller renders a page, one runs inside an
+  organization's create transaction, and one runs during boot; a predicate that
+  raised in any of them would turn an advisory into a worse failure than the one
+  it describes. So a database that is not up yet, or a config value that is not a
+  boolean, answers `false` — the same as "nothing to warn about". A failed read
+  is not evidence of a misconfiguration either way.
+  """
+  @spec strict_host_gap?() :: boolean()
+  def strict_host_gap? do
+    Application.get_env(:kiln_cms, :multitenancy_enabled, false) == true and
+      strict_host?() != true and multiple_orgs?()
+  end
+
+  defp multiple_orgs? do
+    case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
+      {:ok, n} when n > 1 -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  @doc """
   Resolve the organization for a request host.
 
   `{:ok, org}` for a host that matches an org (subdomain, custom domain, or the
