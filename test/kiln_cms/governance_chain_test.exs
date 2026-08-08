@@ -210,6 +210,17 @@ defmodule KilnCMS.Governance.ChainTest do
     })
   end
 
+  # Write a signature onto an already-seeded version row. Seeding bypasses the
+  # `SignVersion` change (that is the point — a seeded row models one that did
+  # not come through the write path), so the tests that need a signature put one
+  # there explicitly.
+  defp sign_version!(version, signature, key_id) do
+    KilnCMS.Repo.update_all(
+      from(v in "pages_versions", where: v.id == type(^version.id, :binary_id)),
+      set: [chain_signature: signature, chain_key_id: key_id]
+    )
+  end
+
   test "publishing mints a signed anchor and the chain verifies" do
     page = published_page(admin())
 
@@ -767,16 +778,14 @@ defmodule KilnCMS.Governance.ChainTest do
       capture_log(fn -> :ok = Chain.anchor(page) end)
       now = Chain.latest_anchor("page", page.id, page.org_id)
 
-      # Nothing sorts after the boundary, so the new anchor must cover exactly
-      # what the old one did. Resuming by `OFFSET version_count` instead skips
-      # the back-dated row — the very row it means to fold — and folds the
-      # boundary row a second time, minting a hash over a sequence that never
-      # existed and a count one too high.
+      # PR #669 got this as far as "not double-folded": the row was skipped and
+      # the anchor was at least honest about it. #598 finishes the job — the
+      # assigned fold order means a late row is in no anchor's list, so this
+      # anchor FOLDS it, at the tail, where it cannot displace anything the
+      # previous anchor committed to.
       refute now.id == before.id
-      assert now.version_count == before.version_count
-      assert now.chain_hash == before.chain_hash
-      assert now.last_version_id == before.last_version_id
-      assert now.last_version_at == before.last_version_at
+      assert now.version_count == before.version_count + 1
+      refute now.chain_hash == before.chain_hash
     end
 
     test "a row appended after the boundary is still folded in" do
@@ -808,7 +817,8 @@ defmodule KilnCMS.Governance.ChainTest do
       capture_log(fn -> :ok = Chain.anchor(page) end)
 
       now = Chain.latest_anchor("page", page.id, page.org_id)
-      assert now.version_count == before.version_count + 1
+      # Both rows, since #598: the one after the boundary AND the late one.
+      assert now.version_count == before.version_count + 2
       refute now.last_version_id == before.last_version_id
     end
 
@@ -825,44 +835,120 @@ defmodule KilnCMS.Governance.ChainTest do
       capture_log(fn -> :ok = Chain.anchor(page) end)
       now = Chain.latest_anchor("page", page.id, page.org_id)
 
-      if after_id.id > before.last_version_id do
-        assert now.version_count == before.version_count + 1
-        assert now.last_version_id == after_id.id
-      else
-        assert now.version_count == before.version_count
-        assert now.last_version_id == before.last_version_id
-      end
+      # Since #598 the tiebreak no longer decides WHETHER the row is folded —
+      # a row in no anchor's list is folded either way. It still decides where
+      # it sorts within the tail, and therefore which id the boundary lands on.
+      assert now.version_count == before.version_count + 1
+
+      if after_id.id > before.last_version_id,
+        do: assert(now.last_version_id == after_id.id),
+        else: assert(now.last_version_id in [after_id.id, before.last_version_id])
     end
 
-    test "minting says so out loud instead of leaving it for a later audit" do
+    test "a folded late row is no longer reported as skew" do
       page = published_page(admin())
       backdated_version!(page)
 
       log = capture_log(fn -> :ok = Chain.anchor(page) end)
 
-      assert log =~ "History chain skew"
-      assert log =~ page.id
-      # The count is the actionable part of the message; the prose around it is
-      # not, so pin the number rather than only the wording.
-      assert log =~ "1 version row(s)"
+      # The skew warning was PR #669's consolation prize: it could not fold the
+      # row, so it said so. #598 folds it, and warning about a condition that has
+      # just been repaired is noise an operator learns to ignore.
+      refute log =~ "History chain skew"
+      assert Chain.latest_anchor("page", page.id, page.org_id).version_count == 3
     end
 
-    # The earlier anchor committed to an order the table no longer holds, so it
-    # can never reproduce — unfixable by any resume strategy, and the verdict
-    # stays red. What it must not be is a bare "hash mismatch" an operator
-    # cannot tell apart from doctored content.
-    test "verification names the rows that appeared inside the anchored range" do
+    # #598 assigned the fold order, and this is the contract that replaced the
+    # old one. A row appearing inside the anchored range no longer breaks the
+    # recomputed prefix — it is in no anchor's list, so it sorts to the tail and
+    # every earlier anchor still reproduces. What decides the verdict now is the
+    # ROW'S OWN SIGNATURE, and the three answers are genuinely different.
+    #
+    # An unsigned row is the one that used to read `{:tampered, …}` for no
+    # reason: clock skew produced exactly this shape. It must not fail, and it
+    # must not silently pass either.
+    test "an unsigned row inside the anchored range is flagged, not failed" do
       page = published_page(admin())
       backdated_version!(page)
 
-      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
-      assert reason =~ "1 version row(s) sort inside the anchored range"
+      assert Chain.verify(Page, "page", page.id, page.org_id) == :unverifiable
 
       # `verify_loaded/4` answers from a loaded list rather than a count query.
       # The two must agree, or the trail and `mix kiln.audit.verify` report
-      # different reasons for the same document.
+      # different things about the same document.
       trail = KilnCMS.Governance.trail("page", page.id, page.org_id)
-      assert {:tampered, ^reason} = trail.chain
+      assert trail.chain == :unverifiable
+    end
+
+    # The detection the assigned order would otherwise have cost. A row somebody
+    # inserted into the table carries no signature this deployment's key
+    # produces, and that is unambiguous evidence.
+    test "a row carrying a signature that does not verify is tampering" do
+      page = published_page(admin())
+      version = backdated_version!(page)
+
+      # A syntactically valid signature over the WRONG payload — what a splice
+      # looks like if whoever wrote it also tried to forge the column.
+      {bogus, key_id} =
+        KilnCMS.Governance.VersionSignature.sign(%{
+          org_id: page.org_id,
+          resource_type: "page",
+          source_id: page.id,
+          version_id: Ash.UUID.generate(),
+          version_inserted_at: version.version_inserted_at
+        })
+
+      sign_version!(version, bogus, key_id)
+
+      assert {:tampered, reason} = Chain.verify(Page, "page", page.id, page.org_id)
+      assert reason =~ "did not come from this system"
+    end
+
+    # The end-to-end shape of the bug, driven through `Chain.anchor/1` rather
+    # than through a hand-set verdict: publish, have a row arrive below the
+    # boundary, anchor again. Before #598 the second anchor could not repair it
+    # and the document stayed red forever — "re-anchor → still tampered,
+    # permanently", reproduced 10/10 in the original review.
+    test "re-anchoring folds a late row at the tail and clears the verdict" do
+      page = published_page(admin())
+      version = backdated_version!(page)
+
+      {signature, key_id} =
+        KilnCMS.Governance.VersionSignature.sign(
+          KilnCMS.Governance.VersionSignature.identity(version, "page")
+        )
+
+      sign_version!(version, signature, key_id)
+
+      # The next anchor folds it — at the tail, where it cannot displace
+      # anything an earlier anchor committed to.
+      capture_log(fn -> :ok = Chain.anchor(page) end)
+
+      assert Chain.verify(Page, "page", page.id, page.org_id) == :verified
+
+      head = Chain.latest_anchor("page", page.id, page.org_id)
+      assert version.id in head.folded_version_ids
+      # And the count now describes the same set the hash does, which is the
+      # `unanchored_tail/2` over-reporting #670 folds in.
+      assert head.version_count == length(Chain.versions_asc(Page, page.id, page.org_id))
+    end
+
+    # And the actual #598 fix: a row that genuinely arrived late, signed by this
+    # system at the moment it was written, is folded at the tail by the next
+    # anchor and the document stays verified. This is the case that used to read
+    # permanently tampered with nothing wrong.
+    test "a validly signed late row leaves the chain verified" do
+      page = published_page(admin())
+      version = backdated_version!(page)
+
+      {signature, key_id} =
+        KilnCMS.Governance.VersionSignature.sign(
+          KilnCMS.Governance.VersionSignature.identity(version, "page")
+        )
+
+      sign_version!(version, signature, key_id)
+
+      assert Chain.verify(Page, "page", page.id, page.org_id) == :verified
     end
 
     # The counts the closure defers can themselves fail — the realistic case is

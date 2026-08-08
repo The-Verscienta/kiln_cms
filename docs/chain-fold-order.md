@@ -163,20 +163,37 @@ anchored range:
 
 ### Existing history
 
-Every anchor written before this has an empty `folded_version_ids`, so a
-migration backfills it from the order those anchors were actually folded in —
-`(version_inserted_at, id)`, the old implicit order — which is what makes them
-keep reproducing.
+Compatibility is by **construction, not by migration**. A chain with any
+pre-#598 anchor falls back wholesale to the timestamp order, because mixing the
+two would put an old anchor's versions (which are in no list) *after* a newer
+anchor's recorded ids — reordering them, and breaking the verification this
+exists to protect.
 
-**A document that is already reading falsely-tampered stays that way.** The
-backfill writes today's order, and today's order is precisely what the broken
-anchor cannot reproduce. The original order is not recoverable; nothing here can
-invent it. This change stops the bug happening again — it does not retroactively
-repair a document it already happened to, and the docs should not imply it does.
+So an existing document behaves exactly as it does today, and documents anchored
+from here on get the fix. No backfill, and no data migration over every version
+row.
+
+**A document already reading falsely-tampered stays that way.** Its anchor
+committed to an order the table no longer holds, and that order is not
+recoverable — nothing here can invent it. This stops the bug happening again; it
+does not repair a document it already happened to.
+
+### Cost
+
+`mint/3` gains one indexed `COUNT` per anchored write, to notice that a row
+arrived below the boundary. The expensive path — re-reading the document's
+versions to find what no anchor folded — runs only when that count says
+something is missing, which is rare. `verify/4` pays nothing extra: it already
+holds the anchor list and passes it down.
 
 ## What this does not fix
 
-A splice on a deployment with no signing key is flagged, not failed — see the
-table. An operator who needs the stronger property configures a key; there is no
-way to give it to them without one, and pretending otherwise would be worse than
-the false positives this replaces.
+A splice on a deployment with **no signing key** is flagged, not failed — see the
+table above. An operator who needs the stronger property configures a key. There
+is no way to give it to them without one, and pretending otherwise would be worse
+than the false positives this replaces.
+
+An **unsigned row inside the anchored range** floors the verdict to
+`:unverifiable` rather than failing it, on every deployment. That is deliberate:
+version rows written before this shipped carry no signature, and reading those as
+tampering would turn an upgrade into a fleet-wide red alert.

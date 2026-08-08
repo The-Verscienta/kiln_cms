@@ -214,6 +214,7 @@ defmodule KilnCMS.Governance.Chain do
 
   alias KilnCMS.CMS
   alias KilnCMS.Governance.Checkpoint
+  alias KilnCMS.Governance.VersionSignature
   alias KilnCMS.Provenance.Canonical
   alias KilnCMS.Provenance.Signer
   alias KilnCMS.Repo
@@ -548,7 +549,11 @@ defmodule KilnCMS.Governance.Chain do
     scope = %{resource: record.__struct__, source_id: record.id, org_id: record.org_id}
     previous = latest_anchor(type, record.id, record.org_id)
     {seed, base_count} = seed(previous)
-    fresh = versions(scope.resource, scope.source_id, :all, scope.org_id, resume_at(previous))
+
+    fresh =
+      scope.resource
+      |> versions(scope.source_id, :all, scope.org_id, resume_at(previous))
+      |> with_late_arrivals(scope, type, previous, base_count)
 
     # Nothing new to cover: a second anchor over the identical prefix would say
     # nothing. Publishes opt out — theirs carries `published_version_id`.
@@ -584,17 +589,14 @@ defmodule KilnCMS.Governance.Chain do
 
       {signature, key_id} =
         sign(
-          anchor_payload_v6(
-            type,
-            record.id,
-            computed,
-            previous,
-            prev_digest,
-            boundary,
-            sequence,
-            attribution,
-            folded_ids
-          )
+          anchor_payload_v6(type, record.id, computed, %{
+            prev: previous,
+            prev_digest: prev_digest,
+            boundary: boundary,
+            sequence: sequence,
+            attribution: attribution,
+            folded_version_ids: folded_ids
+          })
         )
 
       CMS.create_history_anchor!(
@@ -621,6 +623,40 @@ defmodule KilnCMS.Governance.Chain do
       )
 
       :ok
+    end
+  end
+
+  # The boundary resume finds everything written AFTER the previous anchor. It
+  # cannot find a row that became visible late — that row sorts below the
+  # boundary, which is the whole #598 bug — so without this the assigned fold
+  # order would leave it permanently unanchored: verify tolerates it (it is in
+  # no list) and no anchor ever folds it.
+  #
+  # Detected by counting, not by scanning: if the covered set plus what the
+  # resume found is the whole version table, nothing is missing and the hot path
+  # pays one indexed COUNT. `anchor_every_write` runs this per save, so the
+  # O(versions) re-read is confined to the branch where skew actually happened,
+  # which is rare and already loud (`warn_on_skew/4`).
+  #
+  # Only for chains that record their order. Without one there is no way to ask
+  # "which rows were folded", and the pre-#598 behaviour is what those chains
+  # keep — see `versions_asc/4`.
+  defp with_late_arrivals(fresh, scope, type, previous, base_count) do
+    anchors = previous && anchors(type, scope.source_id, scope.org_id)
+
+    with ids when ids != [] <- recorded_order(anchors || []),
+         total when total > base_count + length(fresh) <- count_versions(scope) do
+      listed = MapSet.new(ids)
+
+      # Everything the chain has not folded, in timestamp order. Deterministic,
+      # and it necessarily contains `fresh` — so this replaces rather than
+      # extends it, and a late row lands wherever the timestamps put it WITHIN
+      # this tail, never inside a range an earlier anchor already committed to.
+      scope.resource
+      |> versions(scope.source_id, :all, scope.org_id)
+      |> Enum.reject(&MapSet.member?(listed, &1.id))
+    else
+      _ -> fresh
     end
   end
 
@@ -748,7 +784,8 @@ defmodule KilnCMS.Governance.Chain do
         compute(resource, source_id, org_id, anchor.version_count, all),
         type,
         source_id,
-        covered_by_query(scope, anchor)
+        covered_by_query(scope, anchor),
+        unlisted(resource, source_id, org_id, all, type)
       )
       # ONE floor over both, not two chained calls. `floor_to/2` sets the verdict
       # rather than lowering it, so `|> floor_to(attested) |> floor_to(witnessed)`
@@ -1235,7 +1272,8 @@ defmodule KilnCMS.Governance.Chain do
         fold_loaded(versions, anchor.version_count),
         type,
         source_id,
-        covered_loaded(versions, anchor)
+        covered_loaded(versions, anchor),
+        unlisted_loaded(versions, all, type)
       )
       # ONE floor over both, not two chained calls. `floor_to/2` sets the verdict
       # rather than lowering it, so `|> floor_to(attested) |> floor_to(witnessed)`
@@ -1255,10 +1293,20 @@ defmodule KilnCMS.Governance.Chain do
   def unanchored_tail(_versions, nil), do: 0
   def unanchored_tail(versions, anchor), do: max(length(versions) - anchor.version_count, 0)
 
-  defp verdict(anchor, computed, type, source_id, covered) do
+  defp verdict(anchor, computed, type, source_id, covered, unlisted \\ []) do
     cond do
       computed.version_count < anchor.version_count ->
         {:tampered, "anchored versions are missing"}
+
+      # A version row that no anchor folded, on a chain that records its fold
+      # order (#598/#670). Assigning the order made this NOT break the recomputed
+      # prefix any more — a late row simply sorts to the tail — which is the
+      # false-`{:tampered, …}` fix and, on its own, a hole where splice detection
+      # used to be. The row's own signature is what closes it.
+      spliced?(unlisted) ->
+        {:tampered,
+         "#{Enum.count(unlisted, &(&1.verdict == :invalid))} version row(s) carry a signature " <>
+           "that does not verify - they did not come from this system"}
 
       computed.chain_hash != anchor.chain_hash ->
         {:tampered, mismatch_reason(anchor, covered)}
@@ -1284,8 +1332,87 @@ defmodule KilnCMS.Governance.Chain do
         :unsigned
 
       true ->
-        signature_verdict(anchor, type, source_id)
+        signature_verdict(anchor, type, source_id) |> floor_to(unlisted_floor(unlisted))
     end
+  end
+
+  # Any unlisted row whose signature FAILED against a key we hold. Not one that
+  # is merely unsigned: on a deployment with no provenance key every row is
+  # unsigned, and reading that as tampering would make the chain useless exactly
+  # where it is least able to judge.
+  defp spliced?(unlisted), do: Enum.any?(unlisted, &(&1.verdict == :invalid))
+
+  # An unlisted row we cannot judge floors the verdict rather than failing it.
+  # The honest answer on an unsigned deployment is "a row is here that no anchor
+  # folded, and this chain cannot prove where it came from" — which is weaker
+  # than `:verified` and stronger than a false accusation.
+  defp unlisted_floor([]), do: :ok
+
+  defp unlisted_floor(unlisted) do
+    if Enum.any?(unlisted, &(&1.verdict == :unknown)), do: :unverifiable, else: :ok
+  end
+
+  # Version rows that no anchor folded AND that sort inside the anchored range,
+  # each with its signature judged.
+  #
+  # Both halves matter. Unlisted alone is not suspicious: everything written
+  # since the last anchor is unlisted, and that is the ordinary unanchored tail,
+  # not an anomaly. What wants explaining is a row that is unlisted and yet sits
+  # at or before the boundary the head anchor committed to — a row that should
+  # have been folded and was not.
+  #
+  # `[]` unless the chain records its fold order: without one there is no such
+  # thing as an unlisted row, every version is accounted for by position, and
+  # this whole question is the one the recorded order replaced.
+  defp unlisted(resource, source_id, org_id, anchors, type) do
+    with [head | _] <- anchors,
+         ids when ids != [] <- recorded_order(anchors),
+         {at, boundary_id} <- boundary_of(head) do
+      listed = MapSet.new(ids)
+
+      resource
+      |> versions(source_id, :all, org_id)
+      |> Enum.reject(&MapSet.member?(listed, &1.id))
+      |> Enum.filter(&at_or_before?(&1, at, boundary_id))
+      |> Enum.map(&judge_version(&1, type))
+    else
+      _ -> []
+    end
+  end
+
+  # The loaded-list twin of `unlisted/5` — same question, no query. `verify/4`
+  # and `verify_loaded/4` must reach the SAME verdict or the governance trail and
+  # `mix kiln.audit.verify` report different things about one document.
+  defp unlisted_loaded(versions, anchors, type) do
+    with [head | _] <- anchors,
+         ids when ids != [] <- recorded_order(anchors),
+         {at, boundary_id} <- boundary_of(head) do
+      listed = MapSet.new(ids)
+
+      versions
+      |> Enum.reject(&MapSet.member?(listed, &1.id))
+      |> Enum.filter(&at_or_before?(&1, at, boundary_id))
+      |> Enum.map(&judge_version(&1, type))
+    else
+      _ -> []
+    end
+  end
+
+  # `Map.get/2` rather than dot access: the signature columns come from the
+  # shared `paper_trail` mixin, and a hand-built version struct (the suite's
+  # `CountlessVersions`, a fixture from before the columns existed) has neither.
+  # Absent reads as unsigned, which is the honest answer for a row that carries
+  # no signature at all.
+  defp judge_version(version, type) do
+    %{
+      id: version.id,
+      verdict:
+        VersionSignature.verify(
+          VersionSignature.identity(version, type),
+          Map.get(version, :chain_signature),
+          Map.get(version, :chain_key_id)
+        )
+    }
   end
 
   defp attribution_rewritten?(%{attribution_hash: nil}, _computed), do: false
@@ -1395,17 +1522,14 @@ defmodule KilnCMS.Governance.Chain do
     boundary = %{id: anchor.last_version_id, at: anchor.last_version_at}
 
     v6 =
-      anchor_payload_v6(
-        type,
-        source_id,
-        computed,
-        prev,
-        anchor.prev_anchor_digest,
-        boundary,
-        anchor.sequence,
-        anchor.attribution_hash,
-        anchor.folded_version_ids
-      )
+      anchor_payload_v6(type, source_id, computed, %{
+        prev: prev,
+        prev_digest: anchor.prev_anchor_digest,
+        boundary: boundary,
+        sequence: anchor.sequence,
+        attribution: anchor.attribution_hash,
+        folded_version_ids: anchor.folded_version_ids
+      })
 
     v5 =
       anchor_payload_v5(
@@ -1808,30 +1932,24 @@ defmodule KilnCMS.Governance.Chain do
   # `history_anchors` can rewrite a side table too, and an unsigned record of
   # "what order we folded in" is worth nothing against the threat this feature
   # exists for.
-  defp anchor_payload_v6(
-         type,
-         source_id,
-         computed,
-         prev,
-         prev_digest,
-         boundary,
-         sequence,
-         attr,
-         folded_ids
-       ) do
+  # One map rather than nine positional arguments: the v5 shape was already at
+  # the limit, and adding the fold order to a positional list is how two call
+  # sites end up passing `attr` and `folded_ids` the other way round — a
+  # transposition that would silently sign the wrong bytes.
+  defp anchor_payload_v6(type, source_id, computed, fields) do
     Canonical.encode(%{
       "v" => 6,
       "type" => type,
       "source_id" => source_id,
       "chain_hash" => computed.chain_hash,
-      "attribution_hash" => attr,
+      "attribution_hash" => fields.attribution,
       "version_count" => computed.version_count,
-      "prev_anchor_id" => prev && prev.id,
-      "prev_anchor_digest" => prev_digest,
-      "last_version_id" => boundary.id,
-      "last_version_at" => boundary.at && DateTime.to_iso8601(boundary.at),
-      "sequence" => sequence,
-      "folded_version_ids" => folded_ids
+      "prev_anchor_id" => fields.prev && fields.prev.id,
+      "prev_anchor_digest" => fields.prev_digest,
+      "last_version_id" => fields.boundary.id,
+      "last_version_at" => fields.boundary.at && DateTime.to_iso8601(fields.boundary.at),
+      "sequence" => fields.sequence,
+      "folded_version_ids" => fields.folded_version_ids
     })
   end
 
