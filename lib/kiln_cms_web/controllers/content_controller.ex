@@ -20,11 +20,12 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.Feeds
   alias KilnCMS.I18n
   alias KilnCMSWeb.ContentLock
+  alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
 
-  def show_page(conn, %{"slug" => slug}) do
+  def show_page(conn, %{"slug" => slug} = params) do
     locale = locale(conn)
     ct = ContentTypes.get(:page)
     org_id = current_org_id(conn)
@@ -43,7 +44,17 @@ defmodule KilnCMSWeb.ContentController do
            payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
-        follow_redirect_or_404(conn, "/" <> slug, ct)
+        # A single segment that names no page may still name an event-shaped
+        # type's index (#766) — `/gigs` for a type served at `/gigs/<slug>`.
+        #
+        # LAST in the funnel, after the page, the alias, the redirect table, the
+        # lock page and the teaser, and only ahead of the 404 itself. That order
+        # is the whole safety argument: this can only turn a 404 into an index,
+        # never take a URL away from something that already answers there — a
+        # `path_alias` of `/gigs` on some record, say, which nothing forbids.
+        # It also leaves an operator a way to replace the generated listing with
+        # a hand-built page at the same address.
+        follow_redirect_or_404(conn, "/" <> slug, ct, fn -> event_index(conn, slug, params) end)
 
       payload ->
         serve(conn, :show_page, "page", payload, ct, audiences)
@@ -159,11 +170,18 @@ defmodule KilnCMSWeb.ContentController do
   # paywall to a visitor who isn't a member and the passphrase form to one who
   # is, which is the AND the two axes are supposed to compose to. The other order
   # would have shown every member a paywall they had already paid past.
-  defp follow_redirect_or_404(conn, path, ct \\ nil) do
+  #
+  # `fallback` is one last thing to try before the 404 — the event index (#766)
+  # is the only caller that passes one. It sits at the very end deliberately:
+  # a generated listing must never outrank a record that actually resolves at
+  # the same URL, and putting it here means the ordering is stated once, in the
+  # funnel, rather than inferred from which branch called what.
+  defp follow_redirect_or_404(conn, path, ct \\ nil, fallback \\ fn -> nil end) do
     serve_alias(conn, path) ||
       case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
         nil ->
-          serve_lock(conn, path, ct) || serve_teaser(conn, path, ct) || not_found(conn, path)
+          serve_lock(conn, path, ct) || serve_teaser(conn, path, ct) || fallback.() ||
+            not_found(conn, path)
 
         %{to: to} ->
           moved_permanently(conn, to)
@@ -474,6 +492,75 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:locale_links, blog_locale_links(locale, KilnCMSWeb.Tenant.base_url(org)))
     |> assign(:json_ld, json_ld_script(StructuredData.blog(posts, org)))
     |> render(:blog_index, posts: posts, page: page, has_prev?: page > 0, has_next?: more?)
+  end
+
+  # The occurrence-sorted index for an event-shaped type (#766) — "what's on,
+  # soonest first" at `/<plural>`, the HTML twin of
+  # `KilnCMSWeb.EventIndexController`. `nil` when the segment names no such type,
+  # which is what lets `show_page/2` try this and fall through.
+  #
+  # Not a route of its own: `/:slug` already owns single-segment delivery, and a
+  # second route competing for it would have decided the page-vs-index
+  # precedence in the router, where it is invisible. Here it is one branch, in
+  # order, with the reason next to it.
+  #
+  # No `Cache.fetch`: `from`/`until`/`page` are caller-chosen, so a cache key
+  # built from them is unbounded — see `EventIndexController`'s moduledoc. The
+  # response's own `max-age` is what absorbs repeats.
+  defp event_index(conn, segment, params) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+
+    case EventIndex.type_for(org.id, segment) do
+      nil -> nil
+      descriptor -> render_event_index(conn, org, descriptor, params)
+    end
+  end
+
+  defp render_event_index(conn, org, descriptor, params) do
+    locale = locale(conn)
+    {from, until} = EventIndex.window(params)
+    page = EventIndex.page(params)
+
+    %{entries: entries, more?: more?} =
+      EventIndex.fetch(descriptor, org, from: from, until: until, locale: locale, page: page)
+
+    base = EventIndex.index_path(descriptor)
+
+    conn
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
+    |> assign(:locale, locale)
+    |> assign(:page_title, descriptor.label)
+    |> assign(:meta_description, gettext("What's on, soonest first."))
+    |> assign(:locale_links, index_locale_links(locale, base, KilnCMSWeb.Tenant.base_url(org)))
+    |> render(:event_index,
+      entries: entries,
+      label: descriptor.label,
+      base_path: base,
+      # The window rides into the pagination links, or page 2 of a filtered
+      # listing quietly drops the filter and shows something else entirely.
+      window: window_params(params),
+      page: page,
+      has_prev?: page > 0,
+      has_next?: more?
+    )
+  end
+
+  # Only the bounds the caller actually sent, so an unfiltered index's "next"
+  # link stays the bare `?page=2` it was before.
+  defp window_params(params) do
+    for key <- ["from", "until"],
+        value = Params.string(params, key, ""),
+        String.trim(value) != "",
+        do: {key, value}
+  end
+
+  # Language-switcher links to a type's index in each supported locale.
+  defp index_locale_links(current, base, base_url) do
+    for locale <- I18n.locales() do
+      prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
+      %{locale: locale, href: "#{base_url}#{prefix}#{base}", current: locale == current}
+    end
   end
 
   # Public on-site search (#149). Anonymous, so the read policy returns published

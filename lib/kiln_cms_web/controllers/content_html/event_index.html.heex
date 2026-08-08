@@ -1,0 +1,64 @@
+<Layouts.public locale_links={@locale_links} locale={@locale} current_org={@current_org}>
+  <h1 class="text-3xl font-bold tracking-tight">{@label}</h1>
+
+  <p :if={@entries == []} class="mt-6 text-base-content/60">
+    {gettext("Nothing coming up.")}
+  </p>
+
+  <ul class="mt-8 space-y-8">
+    <li :for={entry <- @entries}>
+      <a href={KilnCMS.I18n.localized_path(@locale, entry.path)} class="group block">
+        <p class="text-sm font-medium text-base-content/70">
+          <%!--
+            The machine-readable value is the UTC instant; the visible text is
+            the same moment in the event's OWN zone, which is what the date
+            means (see KilnCMS.CMS.FieldTypes.DatetimeRange).
+          --%>
+          <time datetime={DateTime.to_iso8601(entry.starts_at)}>
+            {occurrence_on(entry)}
+          </time>
+        </p>
+        <h2 class="mt-1 text-xl font-semibold group-hover:underline">
+          {entry.title}
+          <%!--
+            A recurring document is listed at its NEXT date, which is one of
+            many — saying so is the difference between "this is when it is" and
+            "this is when it is next".
+          --%>
+          <.badge :if={entry.recurring?} variant="neutral">
+            {gettext("Repeats")}
+          </.badge>
+        </h2>
+        <p :if={entry.summary != ""} class="mt-2 text-base-content/70">{entry.summary}</p>
+      </a>
+    </li>
+  </ul>
+
+  <nav
+    :if={@has_prev? || @has_next?}
+    class="mt-12 flex items-center justify-between text-sm"
+    aria-label={gettext("Pagination")}
+  >
+    <a
+      :if={@has_prev?}
+      href={KilnCMS.I18n.localized_path(@locale, page_href(@base_path, @window, @page))}
+      class="hover:underline"
+      rel="prev"
+    >
+      {gettext("← Sooner")}
+    </a>
+    <span :if={!@has_prev?}></span>
+    <span class="text-base-content/70" aria-current="page">
+      {gettext("Page %{page}", page: @page + 1)}
+    </span>
+    <a
+      :if={@has_next?}
+      href={KilnCMS.I18n.localized_path(@locale, page_href(@base_path, @window, @page + 2))}
+      class="hover:underline"
+      rel="next"
+    >
+      {gettext("Later →")}
+    </a>
+    <span :if={!@has_next?}></span>
+  </nav>
+</Layouts.public>

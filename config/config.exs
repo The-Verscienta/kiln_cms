@@ -458,6 +458,16 @@ config :kiln_cms, :link_check_cron, "20 4 * * *"
 # schedule for a deployment that drives its own equivalent.
 config :kiln_cms, :task_digest_cron, "0 8 * * *"
 
+# When the occurrence sweep advances `next_occurrence_at` (#766). HOURLY, and
+# that period IS the feature's staleness window: the "what's on" index sorts on
+# a stored value, so an event that finished stays at the top of the listing
+# until the next run. Offset to :50 so it doesn't share a minute with anything
+# above. Cheap to leave scheduled everywhere — a site with no event-shaped
+# content does one indexed probe per content type and matches nothing. `false`
+# disables the schedule for a deployment that drives `KilnCMS.Events.Sweep.run/0`
+# itself.
+config :kiln_cms, :occurrence_sweep_cron, "50 * * * *"
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero

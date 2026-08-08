@@ -217,12 +217,19 @@ defmodule KilnCMSWeb.CalendarController do
         # give. A calendar carrying every translation shows a subscriber the
         # same gig three times.
         filter: filter(tag),
-        # Newest first, then capped. NOT "soonest occurrence first": the next
-        # occurrence of a recurring event is a function of `now()`, so it is not
-        # a column anything can sort on, and expanding every candidate to sort
-        # in memory would mean reading the whole archive on an anonymous route.
-        # Ordering inside a VCALENDAR is not significant anyway — a client sorts
-        # by date itself (see #766 for the JSON index, where it does matter).
+        # Newest first, then capped — NOT "soonest occurrence first", and that
+        # is still right here. Ordering inside a VCALENDAR is not significant: a
+        # client sorts by date itself, so `published_at` costs a subscriber
+        # nothing and keeps this read on the same key the cap applies to.
+        #
+        # Where the order DOES matter — an HTML or JSON listing, consumed in the
+        # order it is served — #766 shipped the answer: a materialized
+        # `next_occurrence_at`, an index on it, and a sweep that advances it.
+        # See `KilnCMS.Events.Index`, which also explains why that column is not
+        # what this route should sort on: a calendar is capped at
+        # `Feeds.entry_limit/0` *documents*, and taking the soonest N would
+        # quietly turn a subscription into a rolling window that drops a
+        # subscriber's past events every time a new one is published.
         sort: [published_at: :desc],
         limit: limit,
         select: select_fields(descriptor)

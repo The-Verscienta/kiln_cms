@@ -44,11 +44,12 @@ defmodule KilnCMS.CMS.ContentTypes do
   # (#486): the feed routes are `/:plural/feed.xml`, declared before the delivery
   # scope, so a record whose slug is `feed.xml` would be permanently shadowed by
   # its own type's feed — the silent-shadowing failure `Validations.SlugAvailable`
-  # exists to prevent.
+  # exists to prevent. `calendar.ics` (#480) and `index.json` (#766) are the same
+  # shape: two-segment delivery routes declared ahead of `/:type/:slug`.
   @reserved_path_segments ~w(account admin api auth billing blog calendar.ics
-                             content dev editor feed.json feed.xml gql locale
-                             mailbox media membership playground preview register
-                             reset search sign_in swaggerui up)
+                             content dev editor feed.json feed.xml gql index.json
+                             locale mailbox media membership playground preview
+                             register reset search sign_in swaggerui up)
 
   @doc "The Ash domains scanned for content types (default `[KilnCMS.CMS]`)."
   @spec content_domains() :: [module()]

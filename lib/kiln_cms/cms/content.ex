@@ -1355,11 +1355,18 @@ defmodule KilnCMS.CMS.Content do
         # `access_password_hash`/`password_fingerprint` are ignored (#496) so a
         # bcrypt hash never lands in version history, where it would outlive
         # every rotation and be readable by anyone who can read versions.
+        #
+        # `next_occurrence_at` is ignored (#766) for the reason `embedding` is:
+        # it is derived from `custom_fields`, which IS versioned, so a version
+        # carrying it would show a redundant field in every diff of an event —
+        # and one that moves on its own, since the sweep advances it without any
+        # editorial change at all.
         ignore_attributes([
           :inserted_at,
           :updated_at,
           :embedding,
           :embedded_at,
+          :next_occurrence_at,
           :lock_version,
           :access_password_hash,
           :password_fingerprint
@@ -1371,6 +1378,7 @@ defmodule KilnCMS.CMS.Content do
           :set_embedding,
           :set_published_version_id,
           :set_oembed_metadata,
+          :set_next_occurrence,
           :backdate_published_at,
           :reassign_author
         ])
@@ -1550,6 +1558,25 @@ defmodule KilnCMS.CMS.Content do
           index [:slug, :locale],
             name: unquote("#{table}_slug_locale_lookup_index"),
             all_tenants?: true
+
+          # The "what's on" delivery index (#766): `WHERE org_id = ? AND
+          # next_occurrence_at >= ?` ordered ascending. Codegen prepends the
+          # tenant column on a multitenant resource, so the created index is
+          # `(org_id, next_occurrence_at)` — which is exactly the seek this
+          # needs, leading column equality then a range on the sort key.
+          #
+          # ASCENDING is the point. A btree IS ascending-nulls-last, so this
+          # ordering is servable by a plain index; `DESC NULLS LAST` is servable
+          # by none (see the repo's Postgres notes), and it would have needed an
+          # expression index of its own. "Soonest first" is ascending, and the
+          # window's lower bound drops the NULL rows before ordering ever comes
+          # up, so the sort has no nulls to place.
+          #
+          # Partial, because nearly every row is NULL: a site with one event
+          # type and forty thousand pages indexes the events, not the pages.
+          index [:next_occurrence_at],
+            name: unquote("#{table}_next_occurrence_index"),
+            where: "next_occurrence_at IS NOT NULL"
         end
       end
 
@@ -1614,6 +1641,9 @@ defmodule KilnCMS.CMS.Content do
           argument :block_tree, {:array, :map}
           change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
+          # AFTER `ApplyCustomFields`: the schedule this reads is the coerced
+          # value that changeset writes, not the editor's raw parts (#766).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
@@ -1654,6 +1684,8 @@ defmodule KilnCMS.CMS.Content do
           argument :block_tree, {:array, :map}
           change KilnCMS.CMS.Changes.ApplyBlocksInput
           change KilnCMS.CMS.Changes.ApplyCustomFields
+          # AFTER `ApplyCustomFields` — see `:create` (#766).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
@@ -1761,6 +1793,8 @@ defmodule KilnCMS.CMS.Content do
           unquote_splicing(merge_validations.())
 
           change KilnCMS.CMS.Changes.ApplyCustomFields
+          # AFTER `ApplyCustomFields` — see `:create` (#766).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
@@ -1895,6 +1929,11 @@ defmodule KilnCMS.CMS.Content do
           # registration order, so `SetSearchText` sees the reverted document and
           # not the one being replaced.
           change KilnCMS.CMS.Changes.RecordSlugRedirect
+          # `next_occurrence_at` is derived from `custom_fields`, and a restore
+          # can revert the schedule — so it moves with the rest of the derived
+          # values rather than being left pointing at the replaced document's
+          # dates (#766, and the same argument #691 made for `search_text`).
+          change KilnCMS.CMS.Changes.SetNextOccurrence
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
@@ -2074,6 +2113,28 @@ defmodule KilnCMS.CMS.Content do
           # just moved anyway. What would have been a real problem is the
           # *version*, the *webhook* and the *lock*, and this action carries
           # none of those.
+        end
+
+        # Internal: advance the materialized "what's on" sort key once an
+        # occurrence has gone by (#766), written by `KilnCMS.Events.Sweep`.
+        #
+        # Its own action for the reasons `:set_embedding` and
+        # `:set_oembed_metadata` are, and more sharply: this one fires on a
+        # SCHEDULE, over rows nobody touched. Through `:update` a nightly sweep
+        # of a venue's back catalogue would cut a history version per event
+        # attributed to nobody, emit an `updated` webhook per event to every
+        # subscriber, re-fire every artifact, and bump `lock_version` — turning
+        # an open editor's next save into a `StaleRecord` because a gig finished.
+        #
+        # Excluded from PaperTrail (see `ignore_actions`), and nothing is busted:
+        # the delivery index is not response-cached, and its `cache-control`
+        # window is shorter than the sweep's period.
+        update :set_next_occurrence do
+          require_atomic? false
+          # Nullable on purpose — an event whose series has ended advances to
+          # "nothing coming up", and that is a write of `nil`, not a skip.
+          argument :next_occurrence_at, :utc_datetime_usec, allow_nil?: true
+          change set_attribute(:next_occurrence_at, arg(:next_occurrence_at))
         end
       end
 
@@ -2347,6 +2408,16 @@ defmodule KilnCMS.CMS.Content do
           allow_nil? false
           public? true
         end
+
+        # Denormalized "when is this on next", maintained by
+        # `Changes.SetNextOccurrence` on write and `KilnCMS.Events.Sweep` on a
+        # schedule; `nil` for the overwhelming majority of records, which carry
+        # no schedule at all. `KilnCMS.Events.Index` is the argument for storing
+        # it and for what `nil` means. Internal, like `search_text`: the sort is
+        # applied server-side by the delivery routes, and a public attribute
+        # would put a derived timestamp on every type's API surface — including
+        # every type that will never have an event in it.
+        attribute :next_occurrence_at, :utc_datetime_usec, public?: false
 
         attribute :published_at, :utc_datetime_usec, public?: true
 

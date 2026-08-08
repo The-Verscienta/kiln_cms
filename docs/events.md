@@ -121,6 +121,57 @@ type — DATE for an all-day event, DATE-TIME at the event's local time otherwis
 A date-only `EXDATE` on a 19:00 event matches no occurrence, which is the
 classic way a cancelled date comes back.
 
+## What's on: the occurrence-sorted index
+
+| Path | What it carries |
+| --- | --- |
+| `/<plural>` | one type's upcoming events as HTML, soonest first |
+| `/<plural>/index.json` | the same list as JSON |
+
+Same filter as the calendars — published, `audience: :public`, unlocked, one
+locale — and the same reason for it. Both accept:
+
+| Parameter | Meaning |
+| --- | --- |
+| `?from=` | window start; a date (`2026-09-01`) or a full ISO-8601 instant |
+| `?until=` | window end, inclusive by date |
+| `?page=` | 1-based page number |
+
+A bare date is read as a **local** day in the deployment's event timezone, not a
+UTC one — `?until=2026-09-30` means through the end of the 30th where the events
+are, which for a site east of Greenwich is not the same thing.
+
+`?from=` is clamped forward to the start of the current local day; the JSON
+response echoes the window that was actually applied. Nothing earlier is stored,
+so a request for last year would otherwise answer with this year's events while
+appearing to have searched.
+
+### How the ordering works, and what it cannot do
+
+"Next occurrence" is a function of `now()`, so it is not something `sort:` can
+reach. Kiln stores it: `next_occurrence_at` is written on every save from the
+document's schedule and recurrence, and an hourly Oban sweep
+(`KILN_OCCURRENCE_SWEEP_CRON`, default `50 * * * *`) advances rows whose
+occurrence has gone by. Ordering and paging then happen in Postgres over an
+index, so an anonymous request expands no recurrences at all.
+
+Two consequences worth knowing:
+
+* **The sweep's period is the staleness window.** An event that has finished
+  keeps its place in the listing until the next run. Shorten the cron on a site
+  whose events turn over during the day.
+* **Only the next occurrence is stored.** A window that starts in the future
+  selects documents whose *next* date falls inside it, not every recurrence
+  inside it — so a weekly gig happening tomorrow does not appear under
+  `?from=` next month, even though it recurs into that month. Listing individual
+  occurrences as addressable items is a different feature (an occurrence table),
+  and deliberately not this one.
+
+A page whose slug is a type's URL segment wins over the generated index at that
+address, so an operator can replace the listing with a hand-built one.
+`Validations.SlugAvailable` normally refuses that collision outright; the
+precedence matters for a type given the segment of a page that already exists.
+
 ## Structured data
 
 A type declaring one of the schema.org Event types (`Event`, `MusicEvent`,
@@ -138,10 +189,10 @@ produces an Event with no dates. The type is what an operator says it is.
 
 ## What is not here yet
 
-An occurrence-sorted, paginated delivery index ("what's on, soonest first") is
-tracked in [#766](https://github.com/The-Verscienta/kiln_cms/issues/766).
-"Next occurrence" is a function of `now()`, so it is not a column anything can
-sort on — it needs either a materialized next-occurrence
-value with a sweep to keep it fresh, or a SQL-side expansion. Today's ordering
-inside a calendar is by publish date, which a calendar client re-sorts by date
-itself.
+**A single occurrence is not addressable.** "The 14 March instance of a weekly
+gig" has no URL of its own, cannot be cancelled independently of the rule that
+generates it (only skipped, via `EXDATE`), and cannot carry its own venue or
+price. That needs an occurrence table — one row per expanded occurrence inside a
+rolling horizon — which is a bigger thing than the sort key
+[#766](https://github.com/The-Verscienta/kiln_cms/issues/766) shipped and was
+deliberately not built alongside it.

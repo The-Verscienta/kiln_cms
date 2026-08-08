@@ -24,7 +24,7 @@ msgid "Attempting to reconnect"
 msgstr "Tentative de reconnexion"
 
 #: lib/kiln_cms_web/components/layouts.ex:802
-#: lib/kiln_cms_web/controllers/content_controller.ex:472
+#: lib/kiln_cms_web/controllers/content_controller.ex:490
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:2
 #, elixir-autogen, elixir-format
 msgid "Blog"
@@ -1693,7 +1693,7 @@ msgstr "JSON:API"
 msgid "Label"
 msgstr "Libellé"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:473
+#: lib/kiln_cms_web/controllers/content_controller.ex:491
 #, elixir-autogen, elixir-format
 msgid "Latest posts."
 msgstr "Derniers articles."
@@ -1771,11 +1771,12 @@ msgid "Options (one per line — select only)"
 msgstr "Options (une par ligne — champ de sélection uniquement)"
 
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:51
+#: lib/kiln_cms_web/controllers/content_html/event_index.html.heex:52
 #, elixir-autogen, elixir-format
 msgid "Page %{page}"
 msgstr "Page %{page}"
 
-#: lib/kiln_cms_web/controllers/content_controller.ex:1243
+#: lib/kiln_cms_web/controllers/content_controller.ex:1330
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex:7
 #, elixir-autogen, elixir-format
 msgid "Page not found"
@@ -1788,6 +1789,7 @@ msgid "Pages"
 msgstr "Pages"
 
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex:39
+#: lib/kiln_cms_web/controllers/content_html/event_index.html.heex:40
 #, elixir-autogen, elixir-format
 msgid "Pagination"
 msgstr "Pagination"
@@ -1890,7 +1892,7 @@ msgstr "Enregistrement…"
 #: lib/kiln_cms_web/components/layouts.ex:361
 #: lib/kiln_cms_web/components/layouts.ex:447
 #: lib/kiln_cms_web/components/layouts.ex:805
-#: lib/kiln_cms_web/controllers/content_controller.ex:543
+#: lib/kiln_cms_web/controllers/content_controller.ex:630
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex:2
 #: lib/kiln_cms_web/live/analytics_live.ex:275
 #: lib/kiln_cms_web/live/analytics_live.ex:510
@@ -9962,3 +9964,28 @@ msgstr "Dupliqué comme nouveau brouillon. Non copiés, car votre rôle ne peut 
 #, elixir-autogen, elixir-format
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
 msgstr "Quelqu'un d'autre a enregistré cette page. La duplication copiera sa version, pas ce que vous voyez. Continuer ?"
+
+#: lib/kiln_cms_web/controllers/content_html/event_index.html.heex:60
+#, elixir-autogen, elixir-format
+msgid "Later →"
+msgstr "Plus tard →"
+
+#: lib/kiln_cms_web/controllers/content_html/event_index.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "Nothing coming up."
+msgstr "Rien à venir."
+
+#: lib/kiln_cms_web/controllers/content_html/event_index.html.heex:29
+#, elixir-autogen, elixir-format
+msgid "Repeats"
+msgstr "Récurrent"
+
+#: lib/kiln_cms_web/controllers/content_controller.ex:534
+#, elixir-autogen, elixir-format
+msgid "What's on, soonest first."
+msgstr "À l'affiche, du plus proche au plus lointain."
+
+#: lib/kiln_cms_web/controllers/content_html/event_index.html.heex:48
+#, elixir-autogen, elixir-format
+msgid "← Sooner"
+msgstr "← Plus tôt"

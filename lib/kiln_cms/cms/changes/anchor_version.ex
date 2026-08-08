@@ -35,7 +35,16 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
   # so there is no version to fold — and without this entry every resolve pays
   # the anchor query set and, on a document with no prior anchor, mints one
   # attributed to `actor_id: nil`.
-  @versionless_actions [:set_embedding, :set_published_version_id, :set_oembed_metadata]
+  # `:set_next_occurrence` (#766) is here for the same reason: PaperTrail
+  # ignores it, so there is no version to fold — and it fires on a SCHEDULE over
+  # rows nobody touched, so without this entry an hourly sweep would mint an
+  # anchor per finished event, each attributed to `actor_id: nil`.
+  @versionless_actions [
+    :set_embedding,
+    :set_published_version_id,
+    :set_oembed_metadata,
+    :set_next_occurrence
+  ]
 
   @impl true
   def change(changeset, _opts, context) do
