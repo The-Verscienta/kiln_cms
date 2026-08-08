@@ -181,6 +181,51 @@ defmodule KilnCMS.CMS.ContentTypes do
   def reserved_path_segments, do: @reserved_path_segments
 
   @doc """
+  The grant/registry key for a **record or changeset** — the dynamic type's own
+  name for an `Entry`, and the compiled type's name otherwise.
+
+  `type_name/1` takes a resource *module*, which is all a compiled type needs.
+  Every admin-defined type shares one module (`KilnCMS.CMS.Entry`), so asking
+  the module yields `"entry"` for all of them — and a per-type key resolved that
+  way silently collapses. That is not merely a lost lookup: `Scoping.field_grant/3`
+  reads `nil` as **no restriction**, so a grant of `{"recipe": ["title"]}` was
+  the opposite of what the admin configured (#927).
+
+  Falls back to `type_name/1` when the record names no dynamic type, so a caller
+  can use this unconditionally.
+  """
+  @spec type_name_for(struct() | Ash.Changeset.t()) :: String.t() | nil
+  def type_name_for(%Ash.Changeset{} = changeset) do
+    dynamic_name(
+      changeset.resource,
+      Ash.Changeset.get_attribute(changeset, :type_definition_id),
+      changeset.tenant || Ash.Changeset.get_attribute(changeset, :org_id)
+    )
+  end
+
+  def type_name_for(%resource{} = record),
+    do: dynamic_name(resource, Map.get(record, :type_definition_id), Map.get(record, :org_id))
+
+  def type_name_for(_other), do: nil
+
+  defp dynamic_name(resource, nil, _org), do: type_name(resource)
+
+  defp dynamic_name(resource, definition_id, org) do
+    org
+    |> dynamic_all()
+    |> Enum.find(&(&1.definition.id == definition_id))
+    |> case do
+      %{type: name} -> name
+      # An id the registry does not know (a type deleted mid-request, or a
+      # cache that has not caught up) falls back rather than raising — the
+      # caller then sees the generic key, which is what it saw before.
+      nil -> type_name(resource)
+    end
+  rescue
+    _error -> type_name(resource)
+  end
+
+  @doc """
   The public content-type name for a resource module, or `nil` for resources
   outside the content macro. The single authority the RBAC scope checks
   compare against (granular RBAC #332) — one place to change when the
