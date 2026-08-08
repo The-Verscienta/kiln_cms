@@ -342,17 +342,26 @@ defmodule KilnCMSWeb.CoreComponents do
   the one the person is actually in. Nesting is well-defined rather than
   accidental.
 
+  The cost of that scoping is that Escape needs focus to be *inside* the panel,
+  and `FocusTrap` currently only traps Tab — so focus can leave by other routes
+  (Safari does not focus a `<button>` on click) and Escape goes quiet until it
+  comes back. The scrim and the ✕ still close the dialog. Tracked as #1046.
+
   ## Variants
 
     * `:dialog` — centred, the shape a comparison or a confirmation wants.
     * `:drawer` — full-height on the right, the shape a picker wants; it dims the
       page it is beside rather than covering it, so the scrim is lighter.
 
-  `class` overrides the panel's own classes when a caller needs a different size;
-  the scrim, the trap and the ARIA wiring are not overridable, because those are
-  the reason this exists.
+  The scrim, the trap and the ARIA wiring are not overridable, because those are
+  the reason this exists. Neither is the panel's own layout: an earlier `class`
+  attribute *replaced* those classes rather than adding to them, so a caller
+  reaching for "just a different max-width" would have silently lost
+  `flex flex-col`, `bg-base-100` and the drawer's positioning and got an
+  unpositioned transparent panel. No caller wanted it; a variant is the honest
+  way to add a new shape.
 
-      <.modal id="image-picker" on_close="close_picker" variant={:drawer}>
+      <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
         <:title>{gettext("Choose an image")}</:title>
         …
       </.modal>
@@ -360,7 +369,6 @@ defmodule KilnCMSWeb.CoreComponents do
   attr :id, :string, required: true, doc: "id of the dialog panel; `-title` labels it"
   attr :on_close, :string, required: true, doc: "event pushed by Escape, the scrim and the ✕"
   attr :variant, :atom, default: :dialog, values: [:dialog, :drawer]
-  attr :class, :any, default: nil, doc: "replaces the panel's layout classes"
   attr :rest, :global
 
   slot :title, required: true
@@ -370,7 +378,7 @@ defmodule KilnCMSWeb.CoreComponents do
   def modal(assigns) do
     assigns =
       assigns
-      |> assign_new(:panel_class, fn -> assigns.class || panel_class(assigns.variant) end)
+      |> assign(:panel_class, panel_class(assigns.variant))
       |> assign(:scrim_class, scrim_class(assigns.variant))
 
     ~H"""

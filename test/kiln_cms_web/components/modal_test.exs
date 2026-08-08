@@ -58,15 +58,23 @@ defmodule KilnCMSWeb.ModalTest do
       assert html =~ ~s(id="compare-dialog-title")
     end
 
-    # One event name, reaching all three ways out. Two of the old copies used a
-    # different name on the scrim than the caller expected, which is a dialog
-    # that cannot be dismissed by clicking beside it.
+    # One event name, reaching all three ways out — each asserted where it has to
+    # BE, not merely counted. A `String.split |> length` check here passed with
+    # `phx-click` deleted from the ✕ entirely: the count survives any refactor
+    # that preserves the number of occurrences, and it only worked at all because
+    # the chosen event name was not a substring of the surrounding markup (the
+    # real media drawer uses `"close"`, which occurs inside `data-close-event`).
     test "Escape, the scrim and the close button all push the same event" do
-      html = dialog(on_close: "close_compare")
+      doc = Floki.parse_fragment!(dialog(on_close: "close_compare"))
 
-      # data-close-event (Escape, via the hook), the scrim's phx-click, and the
-      # button's phx-click — three occurrences, so four segments.
-      assert html |> String.split("close_compare") |> length() == 4
+      # Escape, via the FocusTrap hook.
+      assert [_] = Floki.find(doc, ~s([role="dialog"][data-close-event="close_compare"]))
+
+      # Clicking beside the dialog.
+      assert [_] = Floki.find(doc, ~s([aria-hidden="true"][phx-click="close_compare"]))
+
+      # The ✕.
+      assert [_] = Floki.find(doc, ~s(button[aria-label="Close"][phx-click="close_compare"]))
     end
   end
 
